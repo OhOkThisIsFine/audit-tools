@@ -197,6 +197,147 @@ function sortRosterMostCapableFirst(
   return [...roster].sort((a, b) => compareTier(b.rank, a.rank));
 }
 
+/**
+ * The host-pool construction preamble shared by `scheduleWave` and
+ * `buildConfirmedPools` — single-sourced so the two cannot drift on how they
+ * resolve the provider/model identity, the host concurrency limit, the
+ * capability window, the learned quota entries, the quota source, and the
+ * per-rank host-model pools. Both consumers were maintaining a byte-identical
+ * copy of this block; a change to (say) the quota-key segment had to be made in
+ * both places or the dispatcher and the rolling driver would size pools
+ * differently. Returns the resolved identity/limits AND the built primary pools.
+ */
+interface HostPoolPreambleInput {
+  sessionConfig: SessionConfig | null;
+  providerName?: ResolvedProviderName;
+  hostModel?: string | null;
+  hostMaxConcurrent?: number | null;
+  hostContextTokens?: number | null;
+  hostOutputTokens?: number | null;
+  hostModels?: HostModelRosterEntry[] | null;
+  hostModelId?: string | null;
+  env?: NodeJS.ProcessEnv;
+  /** Optional retained host-session source (the rolling driver threads its own). */
+  hostSession?: HostSessionQuotaSource;
+}
+
+interface HostPoolPreamble {
+  sessionConfig: SessionConfig;
+  providerName: ResolvedProviderName;
+  hostModel: string | null;
+  quotaModelKeySegment: string | null;
+  roster: HostModelRosterEntry[] | null;
+  hostLimit: HostConcurrencyLimit | null;
+  hostContextTokens: number | null;
+  hostOutputTokens: number | null;
+  hostCapabilityLimits: DiscoveredRateLimitsInput | null;
+  quotaEntries: Record<string, QuotaStateEntry>;
+  quotaSource: ReturnType<typeof buildQuotaSource>;
+  primaryPools: CapacityPool[];
+}
+
+async function buildHostPoolPreamble(
+  input: HostPoolPreambleInput,
+): Promise<HostPoolPreamble> {
+  const sessionConfig = input.sessionConfig ?? {};
+  const providerName =
+    input.providerName ??
+    (sessionConfig as { provider?: ResolvedProviderName }).provider ??
+    "claude-code";
+  const hostModel =
+    input.hostModel ??
+    (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota
+      ?.host_model ??
+    null;
+  // Quota-key identity: resolved model name, else the host's opaque id, else
+  // null → `provider/*`. Per-roster-rank `model_id` overrides per pool below.
+  const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
+  const roster = input.hostModels?.length
+    ? sortRosterMostCapableFirst(input.hostModels)
+    : null;
+
+  const hostLimit = resolveHostConcurrencyLimit({
+    hostMaxConcurrent: input.hostMaxConcurrent,
+    sessionConfig,
+    env: input.env,
+  });
+
+  // The capability handshake: the host reported its dispatch model's real
+  // context/output window this session (the roster's most capable entry under
+  // the multi-rank handshake). Carried into the pool's discoveredLimits so the
+  // shared discovered_capability rung sizes the budget to the real window
+  // instead of the conservative 32k floor. RPM/TPM stay null and fill from the
+  // learned quota state.
+  const hostContextTokens = input.hostContextTokens ?? roster?.[0]?.context_tokens ?? null;
+  const hostOutputTokens = input.hostOutputTokens ?? roster?.[0]?.output_tokens ?? null;
+  const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
+    hostContextTokens != null || hostOutputTokens != null
+      ? { context_tokens: hostContextTokens, output_tokens: hostOutputTokens }
+      : null;
+
+  let quotaEntries: Record<string, QuotaStateEntry> = {};
+  try {
+    const state = await readQuotaState();
+    quotaEntries = state.entries;
+  } catch (err) {
+    process.stderr.write(
+      `[waveScheduler] readQuotaState failed; degrading to no learned quota entry. ${
+        err instanceof Error ? err.message : String(err)
+      }\n`,
+    );
+  }
+
+  // The proactive quota snapshot (Claude OAuth source, then learned) so the
+  // scheduler can throttle/cooldown from live remaining quota — mirrors
+  // audit-code's buildDispatchPool. PREPEND the host-session source keyed on
+  // this host pool's own (provider, model) key — first-class PRE-WALL source
+  // (graduated remaining_pct → LOW/CRITICAL throttle before a 429), gating on the
+  // exact key so it never masks the proactive/learned sources.
+  const quotaSource = buildQuotaSource({
+    halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
+      ?.empirical_half_life_hours,
+    hostSession:
+      input.hostSession ??
+      new HostSessionQuotaSource({
+        providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
+      }),
+  });
+
+  // One capacity pool per reported roster rank (most capable first), each with
+  // its own discovered window and quota key; a single pool for the scalar/absent
+  // handshake. Built via the shared host-pool-from-roster core so the pool shape
+  // + account-keyed pool ids can't drift across the two consumers.
+  const primaryPools = await buildHostModelPools({
+    providerName,
+    hostModel,
+    hostConcurrencyLimit: hostLimit,
+    quotaSource,
+    quotaEntries,
+    roster,
+    resolve: (entry) => ({
+      poolKey: buildProviderModelKey(providerName, entry?.model_id ?? quotaModelKeySegment),
+      discoveredLimits: entry
+        ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
+        : hostCapabilityLimits,
+    }),
+  });
+
+  return {
+    sessionConfig,
+    providerName,
+    hostModel,
+    quotaModelKeySegment,
+    roster,
+    hostLimit,
+    hostContextTokens,
+    hostOutputTokens,
+    hostCapabilityLimits,
+    quotaEntries,
+    quotaSource,
+    primaryPools,
+  };
+}
+
 export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveScheduleResult> {
   const sessionConfig = input.sessionConfig ?? {};
   const providerName = input.providerName ?? (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
@@ -222,13 +363,6 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
   // learned quota state.
   const hostContextTokens = input.hostContextTokens ?? roster?.[0]?.context_tokens ?? null;
   const hostOutputTokens = input.hostOutputTokens ?? roster?.[0]?.output_tokens ?? null;
-  const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
-    hostContextTokens != null || hostOutputTokens != null
-      ? {
-          context_tokens: hostContextTokens,
-          output_tokens: hostOutputTokens,
-        }
-      : null;
 
   const quota = (sessionConfig as { quota?: { enabled?: boolean } }).quota;
   if (!quota || quota.enabled === false) {
@@ -260,49 +394,19 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     };
   }
 
-  let quotaEntries: Record<string, QuotaStateEntry> = {};
-  try {
-    const state = await readQuotaState();
-    quotaEntries = state.entries;
-  } catch (err) {
-    process.stderr.write(`[waveScheduler] readQuotaState failed; falling back to default wave size. ${err instanceof Error ? err.message : String(err)}\n`);
-  }
-
-  // The proactive quota snapshot (Claude OAuth source, then learned) so the
-  // scheduler can throttle/cooldown from live remaining quota — mirrors
-  // audit-code's buildDispatchPool. Cached per key, so one probe per burst.
-  // PREPEND the host-session source keyed on this host pool's own (provider,
-  // model) key — first-class PRE-WALL source (graduated remaining_pct →
-  // LOW/CRITICAL throttle before a 429), gating on the exact key so it never masks
-  // the proactive/learned sources. Mirrors audit-code's buildDispatchPool.
-  const quotaSource = buildQuotaSource({
-    halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
-      ?.empirical_half_life_hours,
-    hostSession: new HostSessionQuotaSource({
-      providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
-    }),
-  });
-
-  // One capacity pool per reported roster rank (most capable first), each with its
-  // own discovered window and quota key; a single pool for the scalar/absent
-  // handshake. Built via the shared host-pool-from-roster core (same as
-  // buildConfirmedPools) so the pool shape + account-keyed pool ids can't drift.
-  const pools = await buildHostModelPools({
-    providerName,
-    hostModel,
-    hostConcurrencyLimit: hostLimit,
-    quotaSource,
-    quotaEntries,
-    roster,
-    resolve: (entry) => ({
-      poolKey: buildProviderModelKey(providerName, entry?.model_id ?? quotaModelKeySegment),
-      discoveredLimits: entry
-        ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
-        : hostCapabilityLimits,
-    }),
+  const preamble = await buildHostPoolPreamble({
+    sessionConfig: input.sessionConfig,
+    providerName: input.providerName,
+    hostModel: input.hostModel,
+    hostMaxConcurrent: input.hostMaxConcurrent,
+    hostContextTokens: input.hostContextTokens,
+    hostOutputTokens: input.hostOutputTokens,
+    hostModels: input.hostModels,
+    hostModelId: input.hostModelId,
+    env: input.env,
   });
   const capacity = computeDispatchCapacity({
-    pools,
+    pools: preamble.primaryPools,
     sessionConfig,
     pendingItemTokens: normalizeSlotTokens(input.estimatedSlotTokens, input.itemCount),
   });
@@ -339,62 +443,19 @@ export async function buildConfirmedPools(input: {
    */
   hostSession?: HostSessionQuotaSource;
 }): Promise<CapacityPool[]> {
-  const sessionConfig = input.sessionConfig ?? {};
-  const providerName =
-    (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
-  const hostModel =
-    (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota
-      ?.host_model ?? null;
-  const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
-  const roster = input.hostModels?.length
-    ? sortRosterMostCapableFirst(input.hostModels)
-    : null;
-  const hostLimit = resolveHostConcurrencyLimit({
-    hostMaxConcurrent: input.hostMaxConcurrent,
-    sessionConfig,
-    env: input.env,
-  });
-  const hostContextTokens = input.hostContextTokens ?? roster?.[0]?.context_tokens ?? null;
-  const hostOutputTokens = input.hostOutputTokens ?? roster?.[0]?.output_tokens ?? null;
-  const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
-    hostContextTokens != null || hostOutputTokens != null
-      ? { context_tokens: hostContextTokens, output_tokens: hostOutputTokens }
-      : null;
-
-  let quotaEntries: Record<string, QuotaStateEntry> = {};
-  try {
-    const state = await readQuotaState();
-    quotaEntries = state.entries;
-  } catch {
-    // Non-fatal: a missing/locked quota state degrades to no learned entry.
-  }
-
-  const quotaSource = buildQuotaSource({
-    halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
-      ?.empirical_half_life_hours,
-    hostSession:
-      input.hostSession ??
-      new HostSessionQuotaSource({
-        providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
-      }),
-  });
-
-  // Host-model pools via the shared host-pool-from-roster core (identical shape across
-  // audit + remediate). The per-tool part is just the key + the roster/capability limits.
-  const primaryPools: CapacityPool[] = await buildHostModelPools({
-    providerName,
-    hostModel,
-    hostConcurrencyLimit: hostLimit,
-    quotaSource,
-    quotaEntries,
-    roster,
-    resolve: (entry) => ({
-      poolKey: buildProviderModelKey(providerName, entry?.model_id ?? quotaModelKeySegment),
-      discoveredLimits: entry
-        ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
-        : hostCapabilityLimits,
-    }),
-  });
+  // Resolve identity/limits and build the per-rank host-model pools via the
+  // SAME preamble `scheduleWave` uses — the two no longer keep parallel copies.
+  const { sessionConfig, providerName, quotaSource, quotaEntries, primaryPools } =
+    await buildHostPoolPreamble({
+      sessionConfig: input.sessionConfig,
+      hostMaxConcurrent: input.hostMaxConcurrent,
+      hostContextTokens: input.hostContextTokens,
+      hostOutputTokens: input.hostOutputTokens,
+      hostModels: input.hostModels,
+      hostModelId: input.hostModelId,
+      env: input.env,
+      hostSession: input.hostSession,
+    });
 
   // Every configured dispatchable backend source (any non-IDE source: NIM/vLLM API,
   // a CLI pool, …) becomes a CapacityPool alongside the primary, so the scheduler's
@@ -1893,6 +1954,18 @@ function markTerminal(item: { started_at?: string; completed_at?: string }): voi
   item.completed_at = now;
 }
 
+/**
+ * Load a worker's already-written implement result, distinguishing an ABSENT
+ * file (the worker hasn't run yet → re-dispatch from scratch) from a PRESENT but
+ * INVALID one (the worker ran but emitted malformed/unparseable JSON or a result
+ * that fails the contract). A bare `catch → undefined` conflated the two: a
+ * written-but-invalid file looked identical to "never produced", so the merge
+ * loop silently `continue`d past the block (the missing-file branch never fires
+ * because the file DOES exist) and the node could neither converge nor surface
+ * the corruption. We now archive the invalid file (so a clean re-dispatch can
+ * write a fresh one) and report it loudly, returning `undefined` only for the
+ * genuinely-absent case.
+ */
 async function tryLoadExistingImplementResult(
   resultPath: string,
 ): Promise<ImplementWorkerResult | undefined> {
@@ -1901,7 +1974,15 @@ async function tryLoadExistingImplementResult(
     const result = await readJsonFile<unknown>(resultPath);
     assertImplementWorkerResult(result, resultPath);
     return result;
-  } catch {
+  } catch (err) {
+    // Present but invalid: do NOT treat it as absent (which would let the block
+    // be silently dropped from the merge). Archive the corrupt file and surface
+    // the reason so a clean re-dispatch produces a valid result.
+    process.stderr.write(
+      `[remediate-code] dispatch: existing implement result ${resultPath} is present but ` +
+        `invalid (${err instanceof Error ? err.message : String(err)}); archiving and re-dispatching\n`,
+    );
+    await archiveIncompleteImplementResult(resultPath);
     return undefined;
   }
 }
@@ -2307,31 +2388,51 @@ allowed in addition to the file access above.
 // ---------------------------------------------------------------------------
 
 /**
- * Canonical set of infra files whose modification can break the live dispatcher
- * while the run is in progress. Paths are repo-relative forward-slash strings.
+ * The live dispatch/orchestration modules whose modification can break the
+ * running engine mid-run. Derived from the REAL post-A12 source layout
+ * (`src/remediate/...`) — this module IS one of them (`steps/dispatch.ts`), so
+ * the list is anchored to the actual files on disk, not a hand-typed monorepo
+ * path that drifts when the tree is reorganised (the pre-A12
+ * `packages/remediate-code/...` list silently matched NOTHING after the
+ * collapse, so every infra block rendered as non-infra). Each entry is the
+ * module's path relative to the `src/remediate` area, forward-slash form.
  */
-const INFRA_FILE_PATHS = new Set([
-  "packages/remediate-code/src/steps/nextStep.ts",
-  "packages/remediate-code/src/steps/dispatch.ts",
-  "packages/remediate-code/src/state/store.ts",
-  "packages/remediate-code/src/steps/contractPipeline.ts",
-  "packages/remediate-code/src/steps/waveScheduler.ts",
-  "packages/remediate-code/src/steps/stepWriter.ts",
-]);
+const INFRA_MODULE_SUBPATHS = [
+  "steps/nextStep.ts",
+  "steps/dispatch.ts",
+  "state/store.ts",
+  "steps/contractPipeline.ts",
+  "steps/stepWriter.ts",
+] as const;
 
 /**
- * Returns true when any path in `writePaths` matches the set of infra files
- * (normalised to repo-relative forward-slash strings). Used to gate the
- * live-surface verification section in the implement prompt.
+ * The infra module sub-paths anchored under `src/remediate/` — the canonical
+ * repo-relative form for the current (post-A12) single-package layout. A write
+ * path matches when its normalised (forward-slash) form ends with one of these
+ * segments, so an absolute worktree path
+ * (`.../worktrees/foo/src/remediate/steps/dispatch.ts`), a repo-relative path
+ * (`src/remediate/steps/dispatch.ts`), or a Windows backslash path all match,
+ * while a same-basename file in another area (`src/audit/steps/dispatch.ts`)
+ * does not.
+ */
+const INFRA_FILE_SEGMENTS: readonly string[] = INFRA_MODULE_SUBPATHS.map(
+  (sub) => `src/remediate/${sub}`,
+);
+
+/**
+ * Returns true when any path in `writePaths` is one of the live infra modules.
+ * Paths are normalised to forward-slash form (win32 backslash → `/`) and matched
+ * by trailing repo-relative segment so absolute/worktree/relative spellings all
+ * resolve identically. Used to gate the live-surface verification section in the
+ * implement prompt.
  */
 export function isInfraModifyingBlock(writePaths: string[]): boolean {
   for (const p of writePaths) {
     const normalized = p.replace(/\\/g, "/");
-    if (INFRA_FILE_PATHS.has(normalized)) return true;
-    // Also match if the path ends with the infra file's relative segment,
-    // e.g. an absolute path like /abs/root/packages/remediate-code/src/steps/dispatch.ts
-    for (const infraPath of INFRA_FILE_PATHS) {
-      if (normalized.endsWith("/" + infraPath)) return true;
+    for (const segment of INFRA_FILE_SEGMENTS) {
+      if (normalized === segment || normalized.endsWith("/" + segment)) {
+        return true;
+      }
     }
   }
   return false;
