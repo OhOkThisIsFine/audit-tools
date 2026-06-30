@@ -3,6 +3,18 @@ import { dirname } from "node:path";
 import type { RunLogger } from "../observability/runLog.js";
 
 export const STALE_LOCK_MS = 30_000;
+
+/**
+ * Injectable monotonic-ish clock for the lock. Defaults to {@link Date.now}; tests
+ * pass a controllable stub so staleness / timeout windows are exercised
+ * deterministically without sleeping real wall-clock time. Every time read inside
+ * the lock — owner-token minting, staleness comparison, deadline, backoff clamp —
+ * routes through the `now` carried on the active options, so a single injected clock
+ * governs the whole acquisition. `STALE_LOCK_MS` is unchanged (a duration, not a
+ * clock) and stays exported.
+ */
+export type Clock = () => number;
+const defaultClock: Clock = Date.now;
 // Lock-acquire retry uses exponential backoff (initial → doubling → max) rather
 // than a fixed poll, so a long contention window costs far fewer wakeups. The
 // sleep is always clamped to the time left so backoff never overshoots timeoutMs.
@@ -18,18 +30,18 @@ export class FileLockTimeoutError extends Error {
   }
 }
 
-function generateOwnerToken(): string {
-  return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+function generateOwnerToken(now: Clock = defaultClock): string {
+  return `${process.pid}-${now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 // Returns the owner token of a stale lock (older than STALE_LOCK_MS), or null
 // when the lock is fresh or already gone. Returning the token lets stale removal
 // reuse a token-checked delete, so a lock concurrently re-created with a
 // different token is never clobbered.
-async function readStaleLockToken(lockPath: string): Promise<string | null> {
+async function readStaleLockToken(lockPath: string, now: Clock): Promise<string | null> {
   try {
     const info = await stat(lockPath);
-    if (Date.now() - info.mtimeMs <= STALE_LOCK_MS) return null;
+    if (now() - info.mtimeMs <= STALE_LOCK_MS) return null;
     return await readFile(lockPath, "utf8");
   } catch {
     return null;
@@ -74,10 +86,10 @@ async function bestEffortUnlink(path: string): Promise<void> {
 // reclaimed, mirroring the main lock's staleness recovery. The claim is always
 // removed in a finally on the happy path so it lives only for the brief
 // token-check + unlink window.
-async function stealStaleLock(lockPath: string, staleToken: string): Promise<void> {
+async function stealStaleLock(lockPath: string, staleToken: string, now: Clock): Promise<void> {
   const claimPath = `${lockPath}${STEAL_CLAIM_SUFFIX}`;
   try {
-    await writeFile(claimPath, generateOwnerToken(), { flag: "wx" });
+    await writeFile(claimPath, generateOwnerToken(now), { flag: "wx" });
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EEXIST") {
@@ -87,7 +99,7 @@ async function stealStaleLock(lockPath: string, staleToken: string): Promise<voi
       // loop retry the ordinary acquire path.
       try {
         const claimInfo = await stat(claimPath);
-        if (Date.now() - claimInfo.mtimeMs > STALE_LOCK_MS) {
+        if (now() - claimInfo.mtimeMs > STALE_LOCK_MS) {
           await bestEffortUnlink(claimPath);
         }
       } catch {
@@ -114,13 +126,21 @@ async function stealStaleLock(lockPath: string, staleToken: string): Promise<voi
   }
 }
 
+/** Optional seams for the lock — currently just the injectable {@link Clock}. */
+export interface LockOptions {
+  /** Clock used for all time reads in this acquisition. Defaults to {@link Date.now}. */
+  now?: Clock;
+}
+
 export async function acquireLock(
   lockPath: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
   logger?: RunLogger,
+  options: LockOptions = {},
 ): Promise<string> {
-  const token = generateOwnerToken();
-  const deadline = Date.now() + timeoutMs;
+  const now = options.now ?? defaultClock;
+  const token = generateOwnerToken(now);
+  const deadline = now() + timeoutMs;
   let lastStaleCheckAt = 0;
   let retryInterval = RETRY_INTERVAL_INITIAL_MS;
 
@@ -145,22 +165,22 @@ export async function acquireLock(
 
     // Check the deadline BEFORE any stale-check IO (stat/readFile) or sleep, so a
     // slow filesystem cannot push the actual return time past timeoutMs.
-    if (Date.now() >= deadline) {
+    if (now() >= deadline) {
       logger?.event({ kind: "error", note: "lock_timeout", lock_path: lockPath, timeout_ms: timeoutMs } as never);
       throw new FileLockTimeoutError(lockPath);
     }
 
-    const now = Date.now();
-    if (now - lastStaleCheckAt >= STALE_CHECK_INTERVAL_MS) {
-      lastStaleCheckAt = now;
-      const staleToken = await readStaleLockToken(lockPath);
+    const checkAt = now();
+    if (checkAt - lastStaleCheckAt >= STALE_CHECK_INTERVAL_MS) {
+      lastStaleCheckAt = checkAt;
+      const staleToken = await readStaleLockToken(lockPath, now);
       if (staleToken !== null) {
         // Steal the exact stale lock we observed via a lease-style, mutually
         // exclusive claim (see stealStaleLock). Only the single claim winner ever
         // unlinks, and only while the lock still carries this stale token — so a
         // fresh lock another holder created in the gap is never clobbered, and two
         // concurrent stealers can never both end up holding the lock.
-        await stealStaleLock(lockPath, staleToken);
+        await stealStaleLock(lockPath, staleToken, now);
         logger?.event({ kind: "step", note: "stale_lock_removed", lock_path: lockPath } as never);
         // Progress was made (a slot may have opened); retry promptly and reset
         // the backoff window.
@@ -171,7 +191,7 @@ export async function acquireLock(
 
     // Exponential backoff, clamped to the time left so we never sleep past the
     // deadline. Doubles each idle cycle up to RETRY_INTERVAL_MAX_MS.
-    const sleepMs = Math.min(retryInterval, Math.max(0, deadline - Date.now()));
+    const sleepMs = Math.min(retryInterval, Math.max(0, deadline - now()));
     await new Promise<void>((r) => setTimeout(r, sleepMs));
     retryInterval = Math.min(retryInterval * 2, RETRY_INTERVAL_MAX_MS);
   }
@@ -196,8 +216,9 @@ export async function withFileLock<T>(
   fn: () => Promise<T>,
   timeoutMs?: number,
   logger?: RunLogger,
+  options: LockOptions = {},
 ): Promise<T> {
-  const token = await acquireLock(lockPath, timeoutMs, logger);
+  const token = await acquireLock(lockPath, timeoutMs, logger, options);
   let hasFnError = false;
   try {
     return await fn();

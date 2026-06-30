@@ -82,11 +82,16 @@ export function withSourceConfig(
  * pool-shape + quota-probe core both orchestrators' host-pool builders use, so the
  * CapacityPool shape can't drift between them. The per-tool parts (the pool key and
  * the discovered-limits computation) are resolved by the caller and passed in.
+ *
+ * `hostModel` is DERIVED from `poolKey` (never accepted as a separate scalar) so the
+ * pool is correct-by-construction: `pool.hostModel === parseProviderModelKey(pool.id).model`
+ * always holds. A roster builds one pool per rank with a distinct per-rank model in
+ * the key; passing a single scalar host model alongside would mis-stamp every
+ * non-primary pool, which is the leak this seam closes. See {@link buildHostModelPools}.
  */
 export async function buildHostModelPool(params: {
   poolKey: string;
   providerName: ResolvedProviderName;
-  hostModel: string | null;
   rank?: DispatchModelTier;
   hostConcurrencyLimit: HostConcurrencyLimit | null;
   quotaStateEntry: QuotaStateEntry | null;
@@ -99,7 +104,7 @@ export async function buildHostModelPool(params: {
   return {
     id: params.poolKey,
     providerName: params.providerName,
-    hostModel: params.hostModel,
+    hostModel: parseProviderModelKey(params.poolKey).model,
     ...(params.rank ? { rank: params.rank } : {}),
     hostConcurrencyLimit: params.hostConcurrencyLimit,
     quotaStateEntry: params.quotaStateEntry ?? null,
@@ -153,7 +158,6 @@ export async function buildHostModelPools(params: {
       return buildHostModelPool({
         poolKey,
         providerName: params.providerName,
-        hostModel: params.hostModel,
         rank: entry?.rank,
         hostConcurrencyLimit: params.hostConcurrencyLimit,
         quotaStateEntry: params.quotaEntries[poolKey] ?? null,
@@ -208,6 +212,12 @@ export async function buildSourcePool(params: {
   return {
     id: poolKey,
     providerName: source.provider,
+    // Both the pool key (via dispatchableSourceId) and hostModel are derived from
+    // THIS one source, so they cannot leak apart: for a provider-shaped key the model
+    // segment is exactly `source.model ?? source.endpoint`; an explicit-`id` source is
+    // launched from `source.{endpoint,model,parameters}` (not from a recovered key), so
+    // its hostModel stays the source's own declared model rather than a parse of a
+    // non-provider-shaped id. The single-source derivation is the invariant here.
     hostModel: source.model ?? null,
     hostConcurrencyLimit: null,
     quotaStateEntry: quotaEntries[poolKey] ?? null,
