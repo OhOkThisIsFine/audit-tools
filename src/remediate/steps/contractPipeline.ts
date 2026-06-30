@@ -20,7 +20,7 @@
  * non-converging judge can never oscillate forever.
  */
 import { existsSync } from "node:fs";
-import { mkdir, rename } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   writeJsonFile,
@@ -98,6 +98,7 @@ import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
   CONTRACT_PIPELINE_PHASE_ORDER,
+  PHASE_TO_ARTIFACT,
 } from "./contractPipelinePrompts.js";
 import {
   CONTRACT_PIPELINE_VALIDATORS,
@@ -123,24 +124,9 @@ import type { RemediationStepKind } from "./types.js";
 import { intakePaths } from "../intake.js";
 
 // ── Phase → artifact name mapping ─────────────────────────────────────────────
-
-const PHASE_TO_ARTIFACT: Record<string, ContractPipelineArtifactName> = {
-  goal_normalization: "goal_spec",
-  context_collection: "context_bundle",
-  decomposition: "module_decomposition",
-  module_contract_drafting: "module_contracts",
-  seam_reconciliation: "seam_reconciliation_report",
-  contract_finalization: "finalized_module_contracts",
-  critique: "conceptual_design_critique",
-  obligation_ledger: "obligation_ledger",
-  cyclic_seam_resolution: "cyclic_seam_resolution",
-  test_validator_plan: "test_validator_plan",
-  assessment: "contract_assessment_report",
-  critic: "counterexample",
-  judge: "judge_report",
-  implementation_planning: "implementation_dag",
-  closing: "verification_report",
-};
+// PHASE_TO_ARTIFACT is single-sourced in contractPipelinePrompts.ts (it also
+// derives CONTRACT_PIPELINE_PHASE_ORDER from the same object). Imported here so
+// the phase set lives in exactly one place.
 
 /** Producing phase per artifact, for re-emitting a step after failed validation. */
 const ARTIFACT_TO_PHASE: Partial<Record<ContractPipelineArtifactName, string>> = {
@@ -444,8 +430,24 @@ export async function archiveContractArtifact(
  * the prior output was archived, so the worker must Write a fresh complete
  * artifact at the ORIGINAL path — never Edit the previous (now-archived) file.
  */
-export function rejectionRewriteInstruction(archivedPath: string | undefined): string {
-  const where = archivedPath ? `\`${archivedPath}\`` : "the contract history directory";
+export function rejectionRewriteInstruction(
+  archived: { archivedPath?: string; originalFree?: boolean } | string | undefined,
+): string {
+  // Back-compat: a bare path argument behaves as a successful (originalFree) archive.
+  const outcome =
+    typeof archived === "string" || archived === undefined
+      ? { archivedPath: archived, originalFree: true }
+      : archived;
+  const where = outcome.archivedPath
+    ? `\`${outcome.archivedPath}\``
+    : "the contract history directory";
+  if (outcome.originalFree === false) {
+    // Honor archiveContractArtifact's originalFree signal: the history move failed,
+    // so the rejected file is STILL at its original path. Tell the host to
+    // overwrite it in place — a fresh Write that replaces the stale content is the
+    // only way the re-emit lands (the path is not free).
+    return `\n\n> The previous output could not be archived and REMAINS at its original path; overwrite it with a fresh complete artifact (a full Write that replaces the file) — do NOT Edit incrementally.`;
+  }
   return `\n\n> Prior output archived to ${where}; Write a fresh complete artifact at its original path — do NOT Edit the previous file.`;
 }
 
@@ -1350,29 +1352,24 @@ function mergeModuleShards(
 // ── Step builder ──────────────────────────────────────────────────────────────
 
 /**
- * Build and write the next contract-pipeline step.
- * Returns null when the pipeline is complete and the extracted plan is ready.
+ * Resolve the adversarial-depth dial for a run (extracted from
+ * buildNextContractPipelineStep for testability; behavior-preserving).
+ *
+ * The depth derives from the intake risk signal (the slice-2 shared signal).
+ * Escalate-on-evidence (optimistic-start): the run begins at the cheap intake
+ * tier; once decomposition reveals the work's actual shape, the tier is raised
+ * for THIS and every subsequent next-step. The raise is idempotent + convergent
+ * (escalateRiskSignal no-ops once the tier already covers the evidence), and the
+ * signal is rewritten only on a real raise. Absent signal ⇒ undefined ⇒ the
+ * renderer applies its fail-safe full depth (floor is `light`, never off).
  */
-export async function buildNextContractPipelineStep(
-  options: ContractPipelineStepOptions,
-): Promise<RemediationStep | null> {
-  const { root, artifactsDir, runId, sourcePaths } = options;
-  const cpDir = contractPipelineDir(artifactsDir);
-  const paths = intakePaths(artifactsDir);
-
-  // Adversarial-depth dial (T1 slice 3): derive the depth for the critique /
-  // critic phases from the intake risk signal (the slice-2 shared signal — its
-  // first behavioral consumer). Absent signal ⇒ undefined ⇒ full (fail-safe
-  // toward more scrutiny, handled in the renderer). Floor is `light`, never off.
+async function resolveAdversarialDepth(
+  artifactsDir: string,
+): Promise<{
+  riskSignal: Awaited<ReturnType<typeof readIntakeRiskSignal>>;
+  adversarialDepth: AdversarialDepth | undefined;
+}> {
   let riskSignal = await readIntakeRiskSignal(artifactsDir);
-
-  // Escalate-on-evidence (T1 slice 4 — optimistic-start). The run begins at the
-  // cheap intake tier; once decomposition reveals the work's actual shape (a
-  // cross-module seam, a risk subsystem the intake affected-file list missed),
-  // raise the tier so the adversarial-depth dial below tightens in THIS and every
-  // subsequent next-step. Idempotent + convergent: escalateRiskSignal no-ops once
-  // the tier already covers the evidence, so the signal is rewritten only on a
-  // real raise and never re-appends a duplicate rationale.
   if (riskSignal) {
     const modules = await readDecomposedModules(artifactsDir);
     if (modules.length > 0) {
@@ -1389,10 +1386,29 @@ export async function buildNextContractPipelineStep(
       }
     }
   }
+  return {
+    riskSignal,
+    adversarialDepth: riskSignal ? adversarialDepthForTier(riskSignal.tier) : undefined,
+  };
+}
 
-  const adversarialDepth: AdversarialDepth | undefined = riskSignal
-    ? adversarialDepthForTier(riskSignal.tier)
-    : undefined;
+/**
+ * Build and write the next contract-pipeline step.
+ * Returns null when the pipeline is complete and the extracted plan is ready.
+ */
+export async function buildNextContractPipelineStep(
+  options: ContractPipelineStepOptions,
+): Promise<RemediationStep | null> {
+  const { root, artifactsDir, runId, sourcePaths } = options;
+  const cpDir = contractPipelineDir(artifactsDir);
+  const paths = intakePaths(artifactsDir);
+
+  // Adversarial-depth dial (T1 slices 3/4): derive the depth for the critique /
+  // critic phases from the intake risk signal, escalating on decomposition
+  // evidence. Extracted to resolveAdversarialDepth (behavior-preserving). The
+  // (possibly raised) riskSignal is also consumed by the granularity-collapse
+  // gate below, so it is returned alongside the depth.
+  const { riskSignal, adversarialDepth } = await resolveAdversarialDepth(artifactsDir);
 
   // Detect the path-A seed file: present only for structured_audit runs.
   const seedPath = pathASeedFilePath(artifactsDir);
@@ -1693,7 +1709,7 @@ The orchestrator verifies every module shard is present, merges them into \`${PH
 The previous \`${first.name}\` output failed validation and was archived. Fix every issue below in the rewritten output:
 
 ${formatValidationIssues(first.issues)}
-${rejectionRewriteInstruction(archived.archivedPath)}`,
+${rejectionRewriteInstruction(archived)}`,
     );
   }
 
@@ -1764,7 +1780,7 @@ Every contract-pipeline artifact must share the same goal_id. The following mism
 ${goalIdErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
 
 Rewrite the output so its goal_id matches the goal_id established in goal_spec.json.
-${rejectionRewriteInstruction(archived.archivedPath)}`,
+${rejectionRewriteInstruction(archived)}`,
       );
     }
   }
@@ -2049,7 +2065,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan wi
 The previous implementation_dag was rejected and archived due to referential integrity violations. Fix every issue below:
 
 ${integrityErrors.map((i) => `- [${i.path}] ${i.message}`).join("\n")}
-${rejectionRewriteInstruction(archived.archivedPath)}`,
+${rejectionRewriteInstruction(archived)}`,
       );
     }
 
@@ -2088,7 +2104,7 @@ Report this to the user and stop. The contract pipeline cannot promote an untrac
 The previous implementation_dag was rejected and archived. Every node must trace to at least one obligation from the obligation ledger or one judge-accepted counterexample:
 
 ${traceability.violations.map((v) => `- ${v}`).join("\n")}
-${rejectionRewriteInstruction(archived.archivedPath)}`,
+${rejectionRewriteInstruction(archived)}`,
       );
     }
 
@@ -2135,7 +2151,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan th
 The previous implementation_dag (and/or upstream contract artifacts) failed the fail-closed contract-obligation gates. Fix every issue below before the plan can be promoted:
 
 ${obligationGate.violations.map((v) => `- ${v}`).join("\n")}
-${rejectionRewriteInstruction(archived.archivedPath)}`,
+${rejectionRewriteInstruction(archived)}`,
       );
     }
 
@@ -2148,6 +2164,13 @@ ${rejectionRewriteInstruction(archived.archivedPath)}`,
     //     same dag_regenerations cap). Fail-closed only on an unreadable tree.
     const citationGate = await evaluatePromotedPlanCitationGrounding(artifactsDir, root);
     if (citationGate) {
+      // Grounding failed: the plan was promoted to extracted-plan.json BEFORE this
+      // gate ran, so the ungrounded marker is now on disk. Remove it before any
+      // return — otherwise a subsequent next-step reads the promoted plan via
+      // readExtractedPlanIfPresent and hands it straight to handlePendingExtractedPlan,
+      // bypassing the re-emit and completing the pipeline on hallucinated citations.
+      // No pipelineComplete unless the promoted plan grounds.
+      await rm(intakePaths(artifactsDir).extractedPlan, { force: true });
       const repairState = await readRepairState(artifactsDir);
       if (repairState.dag_regenerations.length >= MAX_DAG_REGENERATION_ATTEMPTS) {
         return writeCurrentStep({
@@ -2196,7 +2219,7 @@ Report this to the user and stop. The contract pipeline cannot promote a plan wh
 The previous implementation_dag produced findings that cite components not present in the working tree. Every cited path or symbol must point at something real:
 
 ${citationGate.violations.map((v) => `- ${v}`).join("\n")}
-${rejectionRewriteInstruction(archived.archivedPath)}`,
+${rejectionRewriteInstruction(archived)}`,
       );
     }
 

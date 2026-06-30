@@ -496,24 +496,36 @@ A \`status: "ok"\` result means the structure is valid; otherwise fix the report
   return { prompt, outputPath, role };
 }
 
-/** Return the dependency order for pipeline phase progression. */
-export const CONTRACT_PIPELINE_PHASE_ORDER: string[] = [
-  "goal_normalization",
-  "context_collection",
-  "decomposition",
-  "module_contract_drafting",
-  "seam_reconciliation",
-  "contract_finalization",
-  "critique",
-  "obligation_ledger",
-  "cyclic_seam_resolution",
-  "test_validator_plan",
-  "assessment",
-  "critic",
-  "judge",
-  "implementation_planning",
-  "closing",
-];
+/**
+ * Phase → artifact name mapping. SINGLE SOURCE OF TRUTH for both the phase set
+ * and the phase progression order (object insertion order is the dependency
+ * order). `CONTRACT_PIPELINE_PHASE_ORDER` and contractPipeline.ts's
+ * `ARTIFACT_TO_PHASE` both derive from this — never re-list the phases.
+ */
+export const PHASE_TO_ARTIFACT: Record<string, ContractPipelineArtifactName> = {
+  goal_normalization: "goal_spec",
+  context_collection: "context_bundle",
+  decomposition: "module_decomposition",
+  module_contract_drafting: "module_contracts",
+  seam_reconciliation: "seam_reconciliation_report",
+  contract_finalization: "finalized_module_contracts",
+  critique: "conceptual_design_critique",
+  obligation_ledger: "obligation_ledger",
+  cyclic_seam_resolution: "cyclic_seam_resolution",
+  test_validator_plan: "test_validator_plan",
+  assessment: "contract_assessment_report",
+  critic: "counterexample",
+  judge: "judge_report",
+  implementation_planning: "implementation_dag",
+  closing: "verification_report",
+};
+
+/**
+ * Dependency order for pipeline phase progression — derived from
+ * PHASE_TO_ARTIFACT's insertion order so the phase list lives in exactly one
+ * place (single-source; no drift between the mapping and the order).
+ */
+export const CONTRACT_PIPELINE_PHASE_ORDER: string[] = Object.keys(PHASE_TO_ARTIFACT);
 
 // ── Repair prompt ─────────────────────────────────────────────────────────────
 

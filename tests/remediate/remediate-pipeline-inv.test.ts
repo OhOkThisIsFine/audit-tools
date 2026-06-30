@@ -343,6 +343,9 @@ describe("INV-remediate-pipeline-02: parallel_safe = (depends_on.length === 0) a
           description: "Applies fix A.",
           satisfies_obligations: ["O-1"],
           addresses_counterexamples: [],
+          // Cite a real tracked path so the M-B3 citation gate (promotion backstop)
+          // grounds this finding and the promoted plan is not removed.
+          output_files: ["src/remediate/intake.ts"],
           depends_on: ["N-002"],
           verification_obligation_ids: [],
           targeted_commands: [],
@@ -354,6 +357,7 @@ describe("INV-remediate-pipeline-02: parallel_safe = (depends_on.length === 0) a
           description: "Applies fix B.",
           satisfies_obligations: ["O-1"],
           addresses_counterexamples: [],
+          output_files: ["src/remediate/intake.ts"],
           depends_on: [],
           verification_obligation_ids: [],
           targeted_commands: [],
