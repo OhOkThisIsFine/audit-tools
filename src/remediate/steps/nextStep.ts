@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -643,6 +643,14 @@ export interface DriveRollingDispatchOptions {
   scopeForBlock?: (block: RemediationBlock) => string[];
   /** Repo root for canonical path identity (INV-SOO-09). Defaults to cwd. */
   root?: string;
+  /**
+   * The retained host-session source (SAME instance fed into `buildConfirmedPools`).
+   * Wired into the dispatcher's `recordRateLimit` (write) + `isPacketEscalated`
+   * (read) hooks so a same-packet account wall accrues the bounded re-limit count
+   * and, past the bound, strands instead of livelocking. Omit to leave INV-QD-07
+   * transient re-route behaviour unchanged (no escalation).
+   */
+  hostSession?: HostSessionQuotaSource;
 }
 
 export interface DriveRollingDispatchResult {
@@ -726,6 +734,7 @@ export async function driveRollingDispatch(
           complexity: 0.5,
         }),
       );
+      const hostSession = options.hostSession;
       const dispatcher = createRollingDispatcher<{ block_id: string }>({
         confirmedPools: options.confirmedPools,
         sessionConfig: options.sessionConfig,
@@ -733,6 +742,20 @@ export async function driveRollingDispatch(
           const block = blockByPacketId.get(packet.payload.block_id)!;
           return options.dispatchNode(block, slot);
         },
+        // Host-session escalation: feed recordLimit (write) at the rate_limited
+        // observation point and read isEscalated (strand-not-requeue). The SAME
+        // instance sized the pools, so the bounded re-limit count is account-wide.
+        ...(hostSession
+          ? {
+              recordRateLimit: (packet, result) =>
+                hostSession.recordLimit(
+                  result.rateLimit?.channel ?? "error",
+                  result.rateLimit?.text ?? "",
+                  packet.id,
+                ),
+              isPacketEscalated: (packetId) => hostSession.isEscalated(packetId),
+            }
+          : {}),
       });
       dispatcher.enqueue(packets);
       levelResults.push(...(await dispatcher.run()));
@@ -927,6 +950,41 @@ export async function driveRollingImplementDispatch(
       .map((i) => [i.block_id, i.prompt_path]),
   );
 
+  // The RETAINED host-session source: threaded through pool sizing AND the
+  // dispatcher's escalation hooks so the bounded re-limit chain (recordLimit →
+  // escalate → strand → quota_escalation friction) is fed end-to-end. Its
+  // onEscalation routes to the single step-boundary friction chokepoint with this
+  // driver's artifactsDir/runId, so a bounded account-wall escalation surfaces as
+  // reviewable friction instead of only a stderr line.
+  const providerName =
+    (options.sessionConfig as { provider?: ResolvedProviderName } | undefined)?.provider ??
+    "claude-code";
+  const hostSessionModelKey = buildProviderModelKey(
+    providerName,
+    (options.sessionConfig as { block_quota?: { host_model?: string | null } } | undefined)
+      ?.block_quota?.host_model ??
+      options.waveOptions?.hostModelId ??
+      null,
+  );
+  const hostSession = new HostSessionQuotaSource({
+    providerModelKey: hostSessionModelKey,
+    onEscalation: (escalation) => {
+      void captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "quota_escalation",
+          discriminator: escalation.packet_id,
+          note: escalation.reason,
+          severity: "high",
+          category: "trap",
+          area: "dispatch/quota",
+        },
+        "remediate-code",
+      );
+    },
+  });
+
   // Confirmed pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
   const confirmedPools = await buildConfirmedPools({
     sessionConfig: options.sessionConfig,
@@ -935,6 +993,7 @@ export async function driveRollingImplementDispatch(
     hostOutputTokens: options.waveOptions?.hostOutputTokens,
     hostModels: options.waveOptions?.hostModels,
     hostModelId: options.waveOptions?.hostModelId,
+    hostSession,
   });
 
   // The live per-node worker: the configured provider, launched with the node's
@@ -1039,6 +1098,7 @@ export async function driveRollingImplementDispatch(
     rebuildSharedBetweenLevels: options.rebuildSharedBetweenLevels,
     quotaStateDir: artifactsDir,
     root,
+    hostSession,
     scopeForBlock: (block) =>
       writePathsByBlock.get(block.block_id) ?? block.touched_files ?? [],
   });

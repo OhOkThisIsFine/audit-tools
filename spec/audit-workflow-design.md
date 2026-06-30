@@ -290,7 +290,7 @@ host_delegation wrapper and executor registration.
 
 ---
 
-## Cross-tool alignment (added 2026-06-10)
+## Cross-tool alignment
 
 The remediation walkthrough produced a companion design
 ([`remediation-workflow-design.md`](remediation-workflow-design.md)). Items
@@ -317,7 +317,7 @@ shared between the two tools — implement once, in `audit-tools/shared`:
 
 ---
 
-## Hardening decisions (adversarial review, 2026-06-10)
+## Hardening decisions
 
 Surfaced while planning the implementation of this redesign through independent
 critic→judge rounds. Audit-relevant items (the remediation companion carries the

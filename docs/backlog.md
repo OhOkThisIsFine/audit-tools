@@ -7,16 +7,22 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Friction detection — M-QUOTA escalation event still unwired.** Step-boundary auto-capture
-  (`stepBoundaryCapture.ts`) + named emitters + per-event reconciliation triage are in place, but the
-  bounded-escalation friction event never fires: `HostSessionQuotaSource.recordLimit` has **zero production
-  callers** (only unit tests), so the `recordLimit → escalate → strand → quota_escalation friction` chain is
-  unwired end-to-end — `isEscalated` is always false, the strand guard never fires, no event to capture. Fix:
-  thread the SAME `HostSessionQuotaSource` instance through `buildConfirmedPools → driveRollingDispatch →
-  createRollingDispatcher`, call `recordLimit(packet.id, …)` at the `rate_limited` observation point in
-  `createRollingDispatcher.handleResult`, derive `isPacketEscalated` from it, route `onEscalation` to the
-  chokepoint with the driver's artifactsDir/runId. Gated on a live rate-limited multi-worker run; fits the
-  dispatch capability-tiered driver track (owns the same instance-threading). [[meta-audit-friction-must-be-tool-enforced]]
+- **Friction detection — M-QUOTA escalation chain WIRED (remediate); live validation still env-bound.**
+  The `recordLimit → escalate → strand → quota_escalation friction` chain is now fed end-to-end on the named
+  remediate driver path. `createRollingDispatcher` gained a generic `recordRateLimit` write hook (fired at the
+  `rate_limited` observation point BEFORE the `isPacketEscalated` read) plus a `rateLimit:{channel,text}` field on
+  `RollingDispatchResult` carrying the worker ERROR/STATUS evidence (populated by `providerNodeDispatch`).
+  `driveRollingImplementDispatch` constructs ONE retained `HostSessionQuotaSource` (onEscalation →
+  `captureStepBoundaryFriction(quota_escalation)` with the driver's artifactsDir/runId) and threads the SAME
+  instance through `buildConfirmedPools` (pool sizing) AND `driveRollingDispatch → createRollingDispatcher`
+  (recordRateLimit + isPacketEscalated). Deterministic wiring unit-tested in `tests/shared/rollingDispatch.test.mjs`
+  (same-packet account wall escalates past the bound → early strand before pools exhaust → onEscalation fires).
+  **Still open (env-bound):** (1) live validation on a real rate-limited multi-worker run; (2) the A-8 hybrid path
+  (`HybridSpillCoordinator`, ~nextStep.ts:1881) drives via the coordinator not `driveRollingDispatch`, so its
+  anonymous host-session source is unfed — wire the same escalation route there once the live run validates the
+  primary path; (3) audit-side parity (`src/audit/orchestrator/rollingDispatch.ts` `runRollingDispatch` +
+  `quotaPool.ts`) — the shared primitive now supports the hooks, audit just needs to thread a retained source.
+  Fits the dispatch capability-tiered driver track. [[meta-audit-friction-must-be-tool-enforced]]
 - **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Workers returned packet-style task_ids instead of the assigned `deepening:finding:*`, so merge-and-ingest never matched results to tasks and looped. The prompt-side fix (explicit task_id binding in `buildTaskSections`) is in place but **needs live validation** — can't be verified without a real deepening-capable run. Recovery until validated: quarantine orphan pending `deepening:*` tasks to let synthesis run.
 
 - **Dead-code gate — adopt a vetted whole-codebase unused-export tool (knip).** Failure class to kill: a fully

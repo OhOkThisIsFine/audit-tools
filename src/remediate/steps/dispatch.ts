@@ -330,6 +330,14 @@ export async function buildConfirmedPools(input: {
   hostModels?: HostModelRosterEntry[] | null;
   hostModelId?: string | null;
   env?: NodeJS.ProcessEnv;
+  /**
+   * The host-session source the rolling driver RETAINS to feed `recordLimit` and
+   * read `isPacketEscalated`. Passed in (not constructed anonymously here) so the
+   * driver threads the SAME instance through pool sizing AND the dispatcher's
+   * write/read escalation hooks — otherwise the bounded-escalation chain is unfed.
+   * Omit on the proactive-sizing-only paths; one is constructed internally.
+   */
+  hostSession?: HostSessionQuotaSource;
 }): Promise<CapacityPool[]> {
   const sessionConfig = input.sessionConfig ?? {};
   const providerName =
@@ -364,9 +372,11 @@ export async function buildConfirmedPools(input: {
   const quotaSource = buildQuotaSource({
     halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
       ?.empirical_half_life_hours,
-    hostSession: new HostSessionQuotaSource({
-      providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
-    }),
+    hostSession:
+      input.hostSession ??
+      new HostSessionQuotaSource({
+        providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
+      }),
   });
 
   // Host-model pools via the shared host-pool-from-roster core (identical shape across
