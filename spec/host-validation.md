@@ -14,11 +14,13 @@ no-drift guard does not see that, so a human runs these rows at release. A faile
 row becomes a backlog item.
 
 Codex is a headless CLI, so its live `/audit-code` dispatch is automated instead
-of listed here — see the `RUN_CODEX_E2E=1`-gated e2e in
-`tests/audit/a7.test.mjs`. Run it at release with a live Codex backend present:
+of listed here — see the `RUN_PROVIDER_MATRIX_E2E=1`-gated provider-matrix e2e in
+`tests/audit/provider-matrix-dispatch-e2e.test.mjs` (supersedes the former
+per-provider `RUN_CODEX_E2E=1` gate). Run it at release with a live Codex
+backend present:
 
 ```
-RUN_CODEX_E2E=1 node --import tsx/esm --test tests/audit/a7.test.mjs
+RUN_PROVIDER_MATRIX_E2E=1 node --import tsx/esm --test tests/audit/provider-matrix-dispatch-e2e.test.mjs
 ```
 
 ## How to run a row
