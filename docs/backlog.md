@@ -20,14 +20,18 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   from "real failure" — quota death should be a retryable pause, not a node failure. (Ethan, 2026-06-30.)
   Relates to [[claude-quota-credential-resolution]] / [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
 
-- **Node verify `targeted_commands` ran the WHOLE suite → concurrent-worktree hermeticity flake.**
-  CP-NODE-4's fix was correct (worker green: check clean + phase-close 41/41) but accept-node verify FAILED on
-  `tests/remediate/postinstall.test.ts` ENOENT — that test passes 10/10 standalone on main. Root cause: the
-  implementation-DAG `targeted_commands` I authored were broad (`npx vitest run tests/remediate` = the entire
-  suite) and 4 worktrees ran it concurrently, racing on the shared `.test-home-postinstall` temp path. Two
-  fixes: (a) node verify should be scoped to the node's OWN touched test files, not the whole suite; (b) the
-  DAG-planning step should reject/repair an over-broad `targeted_commands` that runs unrelated tests (the host
-  shouldn't be able to author a verify command that flakes under the tool's own concurrency). (2026-06-30.)
+- **Node verify scope guard — FIXED in tooling (2026-06-30).** Was: a node's host/DAG-authored
+  `targeted_commands` could run the WHOLE suite (`npx vitest run tests/remediate`), which accept-node executed
+  as an *additional* verify alongside the scoped derive — re-entering the full suite in a per-node worktree.
+  That caused both (a) the cross-node deadlock (a source node's verify fails on a stale test owned by a
+  DIFFERENT node) and (b) a concurrent-worktree hermeticity flake (`postinstall.test.ts` ENOENT racing the
+  shared `.test-home-postinstall` temp path; passes 10/10 standalone). FIX: `isWholeSuiteTestCommand` in
+  `src/remediate/steps/dispatch.ts` — `buildFreeVerifyCommands` now drops any test-runner invocation whose
+  target is a directory/whole-suite rather than a concrete `.test.<ext>` file, on BOTH the accept-node gate
+  and the worker-prompt render (one helper, both paths). The scoped derive already covers the node's own
+  touched tests, so nothing is lost. Tests: `dispatch-evidence-and-writescope.test.ts` →
+  `isWholeSuiteTestCommand`. With scoped verify + the tool's sequential accept-node (each next worktree off
+  the accumulating main), the separate-source/test-node deadlock cannot recur. [[decomposition-colocate-source-and-tests]]
 
 - **Intake input-selection is silent + stale-prone — present candidate remediation docs w/ timestamps, don't short-circuit.**
   Hit 2026-06-30: a no-arg `remediate-code next-step` short-circuited to `present_report` off a **Jun-26**

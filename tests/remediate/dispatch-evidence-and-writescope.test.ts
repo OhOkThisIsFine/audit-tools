@@ -32,6 +32,7 @@ import {
   prepareImplementDispatch,
   buildImplementModelHint,
   isBuildFreeVerifyCommand,
+  isWholeSuiteTestCommand,
   normalizeNodeTestCommand,
   writeScopeViolations,
   enforceWriteScope,
@@ -251,6 +252,43 @@ describe("isBuildFreeVerifyCommand", () => {
     expect(isBuildFreeVerifyCommand("tsc --build")).toBe(false);
     expect(isBuildFreeVerifyCommand("tsc -p tsconfig.json")).toBe(false);
     expect(isBuildFreeVerifyCommand("")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isWholeSuiteTestCommand — scope guard against whole-suite/directory verifies
+// (the structural deadlock proven 2026-06-30: a per-node verify that runs the
+// whole suite fails on a stale test owned by a different node).
+// ---------------------------------------------------------------------------
+
+describe("isWholeSuiteTestCommand", () => {
+  it("flags whole-directory / whole-suite test runs", () => {
+    expect(isWholeSuiteTestCommand("npx vitest run tests/remediate")).toBe(true);
+    expect(isWholeSuiteTestCommand("vitest run tests/audit")).toBe(true);
+    expect(isWholeSuiteTestCommand("npx vitest run")).toBe(true);
+    expect(isWholeSuiteTestCommand("vitest")).toBe(true);
+    expect(isWholeSuiteTestCommand("node --test tests/audit/")).toBe(true);
+    expect(isWholeSuiteTestCommand("node --import tsx/esm --test tests/shared")).toBe(true);
+  });
+
+  it("keeps file-scoped test runs (a concrete .test.<ext> target)", () => {
+    expect(isWholeSuiteTestCommand("npx vitest run tests/remediate/foo.test.ts")).toBe(false);
+    expect(isWholeSuiteTestCommand("vitest run tests/remediate/foo.test.ts")).toBe(false);
+    expect(isWholeSuiteTestCommand("node --test tests/audit/bar.test.mjs")).toBe(false);
+    expect(isWholeSuiteTestCommand("node --import tsx/esm --test tests/audit/bar.test.mjs")).toBe(false);
+  });
+
+  it("does not flag non-test commands", () => {
+    expect(isWholeSuiteTestCommand("npm run check")).toBe(false);
+    expect(isWholeSuiteTestCommand("grep -c '/packages/' .gitignore")).toBe(false);
+    expect(isWholeSuiteTestCommand("node scripts/whatever.mjs")).toBe(false);
+  });
+
+  it("a whole-suite command is build-free but must still be dropped from per-node verify", () => {
+    // It passes the build-free gate (so the prior filter let it through)...
+    expect(isBuildFreeVerifyCommand("npx vitest run tests/remediate")).toBe(true);
+    // ...but the scope guard catches it.
+    expect(isWholeSuiteTestCommand("npx vitest run tests/remediate")).toBe(true);
   });
 });
 

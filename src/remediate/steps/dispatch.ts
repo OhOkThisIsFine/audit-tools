@@ -1866,15 +1866,49 @@ export function normalizeNodeTestCommand(cmd: string): string {
 }
 
 /**
+ * True when `cmd` is a test-runner invocation whose target is a whole directory
+ * or the entire suite rather than specific test files — e.g. `npx vitest run
+ * tests/remediate`, `vitest run` (no path), `node --test tests/audit/`. Such a
+ * command, run as an *additional* per-node verify alongside the scoped derive,
+ * re-enters the FULL suite inside a per-node worktree. That is the structural
+ * deadlock proven 2026-06-30: a source node's whole-suite verify fails on a
+ * stale test owned by a DIFFERENT node, and concurrent worktrees race shared
+ * test temp dirs. The derived verify already runs this node's OWN touched
+ * tests, so a host/DAG-authored whole-suite command adds only risk — the tool
+ * drops it rather than relying on the author to scope it (enforce-in-tooling,
+ * never host discretion). A command naming at least one concrete `.test.<ext>`
+ * file is scoped and kept.
+ */
+export function isWholeSuiteTestCommand(cmd: string): boolean {
+  const c = cmd.trim();
+  const isVitest = /\bvitest\b\s+run\b/.test(c) || /\bvitest\b(?!\s+run)/.test(c);
+  const isNodeTest = /^node\b/.test(c) && /\s--test\b/.test(c);
+  if (!isVitest && !isNodeTest) return false;
+  // Tokenise; a concrete test file makes it scoped. Anything that is a runner
+  // with no concrete test-file target (bare runner, or a directory/glob target)
+  // is whole-suite.
+  const namesConcreteTestFile = /(^|\s)[^\s]*\.test\.(ts|tsx|mjs|cjs|js)(\s|$)/.test(c);
+  return !namesConcreteTestFile;
+}
+
+/**
  * Filter a node's `targeted_commands` to the build-free subset for the per-node
  * verify section. Build-prepending or build commands are dropped (the host runs
- * the build centrally) rather than emitted into the prompt. Surviving
- * `node --test` commands are normalized to carry the tsx loader.
+ * the build centrally) rather than emitted into the prompt. Whole-suite /
+ * whole-directory test runs are dropped too — they re-enter the full suite in a
+ * per-node worktree and re-create the cross-node verify deadlock (the scoped
+ * derive already covers this node's own tests). Surviving `node --test`
+ * commands are normalized to carry the tsx loader.
  */
 function buildFreeVerifyCommands(commands: string[] | undefined): string[] {
   if (!Array.isArray(commands)) return [];
   return commands
-    .filter((c) => typeof c === "string" && isBuildFreeVerifyCommand(c))
+    .filter(
+      (c) =>
+        typeof c === "string" &&
+        isBuildFreeVerifyCommand(c) &&
+        !isWholeSuiteTestCommand(c),
+    )
     .map(normalizeNodeTestCommand);
 }
 
