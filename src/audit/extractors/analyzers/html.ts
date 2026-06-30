@@ -12,8 +12,10 @@ const HTML_RESOURCE_EDGE_CONFIDENCE = 0.96;
 const MAX_HTML_SOURCE_BYTES = 512 * 1024;
 const HTML_EXTENSIONS = [".html", ".htm"] as const;
 
-// tag → the attribute carrying its resource reference.
-const RESOURCE_ATTRIBUTE: Record<string, string> = {
+// tag → the attribute carrying its resource reference. Single-sourced here and
+// consumed by the regex floor (browserExtension.ts) so both the tree-sitter
+// analyzer and the floor track the same tag→attribute relationships.
+export const HTML_RESOURCE_ATTRIBUTE: Record<string, string> = {
   script: "src",
   link: "href",
   img: "src",
@@ -46,7 +48,7 @@ function collectFileEdges(
   for (const tag of root.descendantsOfType("start_tag")) {
     const tagName = tag.descendantsOfType("tag_name")[0]?.text?.toLowerCase();
     if (!tagName) continue;
-    const attribute = RESOURCE_ATTRIBUTE[tagName];
+    const attribute = HTML_RESOURCE_ATTRIBUTE[tagName];
     if (!attribute) continue;
     const url = attributeValue(tag, attribute);
     if (!url) continue;

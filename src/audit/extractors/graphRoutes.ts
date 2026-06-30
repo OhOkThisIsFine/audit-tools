@@ -285,8 +285,11 @@ function routePathFromSegments(segments: string[]): string | undefined {
   const routeSegments = segments
     .map(nextRouteSegment)
     .filter((segment): segment is string => segment !== undefined);
+  // An empty segment list (after dropping route groups / non-path segments) is the
+  // root route — e.g. App Router `app/route.ts` maps to `/`. Returning undefined
+  // here would silently drop the root route.
   if (routeSegments.length === 0) {
-    return undefined;
+    return normalizeRoutePath("");
   }
   return normalizeRoutePath(routeSegments.join("/"));
 }
