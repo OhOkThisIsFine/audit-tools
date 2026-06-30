@@ -41,6 +41,28 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
+- **Dead-code / unused-export as an ACQUIRED audit analyzer (knip), graph-cross-checked, advisory-lead to the
+  subauditor — resolves the deferred dead-code track.** Layer the tested-but-unwired / unused-export signal onto the
+  audit engine's *other* mechanical resources so the orchestrator + subauditors consume it for TARGET repos (not just
+  our own CI gate). Design of record:
+  (1) **Acquire, don't bundle.** knip is an ecosystem-native JS/TS tool → a registry entry + normalizing adapter in the
+  acquisition engine (`src/audit/extractors/analyzers/`), run ephemerally for JS/TS targets, degrade-to-empty
+  elsewhere. Findings rejoin at the SAME seam as semgrep/eslint/gitleaks (`buildExternalAnalyzerFollowupTasks →
+  mergeFindings`). Fits own-vs-acquire; enriches the shared finding contract, never forks planning.
+  (2) **Cross-check against the engine's own graph — this is the whole point.** Production-mode knip has REAL false
+  positives: it can't trace dispatch-table / re-export-alias / dynamic wiring (proven this sprint —
+  `runPlanPhase`/`resolveFreshSessionProviderName` flag as unused but are live). The engine's language-neutral
+  `graph_bundle` (calls/import edges) is exactly the substrate that closes that blind spot, and knip brings the
+  full-file-universe + entrypoint provenance the bare graph-edge query lacked (the original deferral reason in
+  [[graph-signals-thin-substrate-extraction-persist]]). knip ∪ engine-graph is the complete picture neither has alone:
+  reconcile knip's "unused export" against the graph's in/out-degree + entrypoint set before surfacing.
+  (3) **Advisory lead, LLM adjudicates — never a confirmed finding dumped in.** Because of (2)'s false positives, a
+  reconciled candidate goes to the maintainability/dead-code lens subauditor as a *verification lead* ("knip says
+  unused; graph shows N callers via <edge kind> — confirm truly-dead or refute as dynamic/entrypoint"), same adapter
+  discipline as the other acquired tools. This is the LLM-in-the-loop seam, not a mechanical verdict. The same
+  reconcile-then-adjudicate shape applies to ts-prune / other ecosystems' equivalents.
+  Subsumes the deferred general dead-code track. (Ethan, 2026-06-30.)
+  [[deterministic-analyzers-own-vs-acquire]] [[graph-signals-thin-substrate-extraction-persist]]
 - **Precise `calls`/import edges via pure-JS `web-tree-sitter` (WASM) — candidate, deferred.** Our graph extraction
   (`src/audit/extractors/graph.ts`) resolves imports/calls by **regex**, which is approximate. A real AST pass would
   give precise `calls` edges. The OS-agnostic, no-native-build way (fits our two-tier dep policy + everything-agnostic
@@ -235,3 +257,12 @@ Standing gotchas worth keeping for any agent (strong or weak):
 - **Async typecheck hook = stale-dist false alarm** after a shared-source edit (it runs `tsc` before the
   central rebuild); the authoritative gate is `npm run check` after `npm run build`.
 - **`t.mock.module` is unusable** under the tsx/esm loader → use a dependency-injection seam instead.
+- **Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.** A
+  delegated "delete N dead symbols + their tests" sweep (2026-06-30) spawned a deletion agent that itself spawned 3
+  grandchild agents, all editing overlapping test files concurrently — they raced the parent's verification AND the
+  main session's hand-fixes (file-modified-since-read churn, a half-reverted symbol re-applied after a `git checkout`,
+  one agent bailed mid-task, one hit a weekly limit). Net: hours of reconciliation (re-reverts, a meta-guard fix,
+  cascade-dead cleanup) for what one serial pass would have done cleanly. Rule: for a broad mechanical sweep over a
+  shared file set, run it as ONE serial agent (or partition by NON-overlapping files), never an uncoordinated fan-out;
+  and never hand-edit the same files while a background agent is live on them — wait for genuine quiescence (poll
+  mtimes) or a completion signal first.
