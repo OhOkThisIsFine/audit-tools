@@ -433,12 +433,15 @@ test("ingest-results accepts a directory of batch result files and next-step sti
     const allResults = await buildSyntheticResults(tasks, root);
     const batchDir = join(root, "audit-results-batch");
     await mkdir(batchDir, { recursive: true });
+    // Batch files must use the canonical "<stem>_<12-hex>.json" result naming
+    // so they are admitted by the canonical-filename filter (stray sidecars are
+    // ignored). The 12-hex digest stands in for a real artifact digest.
     await writeFile(
-      join(batchDir, "result-01.json"),
+      join(batchDir, "result-01_0123456789ab.json"),
       JSON.stringify(allResults.slice(0, Math.ceil(allResults.length / 2)), null, 2),
     );
     await writeFile(
-      join(batchDir, "result-02.json"),
+      join(batchDir, "result-02_cdef01234567.json"),
       JSON.stringify(allResults.slice(Math.ceil(allResults.length / 2)), null, 2),
     );
     await disableNarrative(artifactsDir);
