@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
+import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
+import type { RemediationStepKind } from "../../src/remediate/steps/types.js";
 import {
   createNextStepHarness,
   makePlanningState,
@@ -246,7 +248,7 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await writeFile(
       join(implResultDir, "implement-B-001.result.json"),
       JSON.stringify({
-        contract_version: "remediate-code-worker-result/v1alpha1",
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
         item_results: [
           { finding_id: "F-001", status: "resolved", evidence: ["applied fix a"] },
@@ -377,10 +379,16 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     expect(completedState.step_count).toBe(6);
   });
 
-  it("state_transition step_kind is not in the types union", async () => {
-    const filePath = join(__dirname, "../../src/remediate/steps/types.ts");
-    const content = await readFile(filePath, "utf8");
-    expect(content).not.toContain("state_transition");
+  it("state_transition is not a member of the RemediationStepKind union (type-level surface, not source text)", () => {
+    // Replaces the former source-text grep with an assertion against the exported
+    // type surface: "state_transition" must NOT be assignable to RemediationStepKind.
+    // `Exclude<X, X> = never`, so if the literal were a member, NotAStepKind would
+    // be `never` and `true satisfies NotAStepKind` would fail to compile.
+    type NotAStepKind = Exclude<"state_transition", RemediationStepKind> extends never
+      ? false
+      : true;
+    const stateTransitionIsExcluded = true satisfies NotAStepKind;
+    expect(stateTransitionIsExcluded).toBe(true);
   });
 
   it("emits confirm_intent step when intent_checkpoint.json is absent", async () => {
