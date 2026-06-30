@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const LANGUAGE_MAP_FILE = path.join(
   __dirname,
-  "../src/extractors/languageMap.generated.ts",
+  "../../src/audit/extractors/languageMap.generated.ts",
 );
 
 function generateLanguageMap() {
@@ -79,7 +79,7 @@ function updateFile(map, conflictCount, t0) {
 
   const content =
     `// AUTO-GENERATED FILE — DO NOT EDIT BY HAND.\n` +
-    `// Regenerate with: npm run update-languages  (scripts/update-languages.mjs)\n` +
+    `// Regenerate with: npm run update-languages  (scripts/audit/update-languages.mjs)\n` +
     `// Source data: linguist-languages, conflict rubric programming > markup > prose > data.\n\n` +
     `${startMarker}\n` +
     `export const LANGUAGE_BY_EXTENSION: Record<string, string> = ${mapString};\n` +

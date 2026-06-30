@@ -8,5 +8,6 @@
   "project": ["src/**/*.ts!"],
   "ignore": ["dist/**"],
   "ignoreBinaries": ["gitleaks"],
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "include": ["exports", "types", "nsExports", "nsTypes"]
 }
