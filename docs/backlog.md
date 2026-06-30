@@ -19,14 +19,21 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   dispatch capability-tiered driver track (owns the same instance-threading). [[meta-audit-friction-must-be-tool-enforced]]
 - **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Workers returned packet-style task_ids instead of the assigned `deepening:finding:*`, so merge-and-ingest never matched results to tasks and looped. The prompt-side fix (explicit task_id binding in `buildTaskSections`) is in place but **needs live validation** — can't be verified without a real deepening-capable run. Recovery until validated: quarantine orphan pending `deepening:*` tasks to let synthesis run.
 
-- **Unwired-but-tested extractor is invisible dead code (friction, 2026-06-27).** F6 git-history mining shipped with
-  a full extractor + 27 passing unit tests but was NEVER called by an executor — green tests + green build, yet the
-  feature did nothing in a real run (caught only by reading the executor). Unit tests at the seam don't prove the seam
-  is *invoked*. Enforceable direction: a mechanical guard that flags an exported extractor entry-point
-  (`build*`/`mine*Artifact` in `src/audit/extractors/`) with zero non-test importers — an instance of the deferred
-  dead-code detection (knip/ts-prune territory, see *own-vs-acquire* / [[graph-signals-thin-substrate-extraction-persist]]).
-  Until then: when adding an extractor, the wiring into `runStructureExecutor` (or its executor) is part of "done", not a
-  follow-up.
+- **Dead-code gate — adopt a vetted whole-codebase unused-export tool (knip).** Failure class to kill: a fully
+  unit-tested exported symbol that is never wired into any production code path — green tests + green build, yet it does
+  nothing in a real run (first hit: a git-history extractor, fully tested but never called by any executor; the seam
+  unit tests proved the functions work in isolation, not that they are *invoked*). The desired end-state is NOT a narrow
+  hand-rolled guard scoped to one module family and keyed off a name pattern — that re-solves one corner of a general
+  problem, is regex-approximate (misses re-exports / dynamic imports — the exact silent-miss the two-tier dependency
+  policy warns against), and rots as new code uses other names. Instead: adopt a vetted, pure-JS, maintained dead-code
+  detector (knip) as a **build-gate check over our own source**, failing the gate on any exported symbol with zero
+  non-test consumers anywhere — adapters, providers, extractors, helpers alike — with an explicit allow-list for genuine
+  public-API / entry-point exports. This is a dev/CI gate on audit-tools' own TypeScript source (same category as the
+  tsc / vitest gates we already run on ourselves); it does NOT bear on the product's language-neutrality, which
+  constrains only what the audit *engine* assumes about *target* codebases. Subsumes the deferred general dead-code
+  track. One-time cost: clean up the existing unused exports the first run surfaces + curate the allow-list. Until
+  landed, wiring a new export into its production path is part of "done", not a follow-up.
+  [[deterministic-analyzers-own-vs-acquire]]
 
 ## Forward tracks
 
