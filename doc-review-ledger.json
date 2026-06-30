@@ -1,302 +1,304 @@
 {
   "_meta": {
-    "note": "Run 8 — all run-7 open items resolved (AF-1/D-5/D-6/D-7); applied 3 commits (backlog: 4 shipped entries deleted + N-4 dead ref; spec: N-1 stale cross-ref); 5 new items escalated (D-8/D-9/D-10/D-11/N-2); removed AGENTS.audit.md/AGENTS.remediate.md zombie entries; added spec/self-scaling-pipeline-design.md and .audit-tools/remediation-report.md.",
-    "mainHeadAtRunStart": "baa7362",
-    "mainHeadAfterApply": "f2c956a",
-    "runDate": "2026-06-27"
+    "note": "Run 9 — D-8/D-9/D-10/D-11/N-2 resolved; applied 3 commits (backlog-remediation-design D7 marker; HANDOFF T6 item 17; spec/host-validation.md Codex e2e instruction); 3 new items escalated (N-3/N-4/MISSED-B).",
+    "mainHeadAtRunStart": "bfe15b9",
+    "mainHeadAfterApply": "752eab0",
+    "runDate": "2026-06-30"
   },
   "CLAUDE.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "AGENTS.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "AF-1 resolved: AGENTS.audit.md + AGENTS.remediate.md consolidated into this file (25ecc7b); no 'remediator-lambda' present. Reviewed clean."
+    "note": "AF-1 resolved (run 8): AGENTS.audit.md + AGENTS.remediate.md consolidated. Reviewed clean."
   },
   "README.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "docs/HANDOFF.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
-    "openItems": ["D-10"],
-    "note": "D-5/D-6 resolved: no version string, no Last-landed/Previously-shipped sections. Restructured as T1-T6 ordered roadmap. D-10 escalated: roadmap scope conflicts with immediate-next-only philosophy."
+    "openItems": ["N-4"],
+    "note": "Run 9: removed stale 'gated Codex e2e' from T6 item 17 (fb337af). D-10 resolved: guidelines explicitly sanction T1-T6 roadmap ('NOT immediate-next-only'). N-4 escalated: 10+ 'Prior lap' narration entries = changelog creep."
   },
   "docs/backlog.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
-    "openItems": ["D-11"],
-    "note": "Run 8: deleted B-1 (self-scaling COMPLETE), B-2 (fail-loud FIXED), B-3 (convergence SHIPPED), B-4 (Remediator auto-phasing T3 COMPLETE), N-4 (dead .audit-tools/phase-status-investigation.md ref). D-11 escalated: 4 open parent entries have shipped sub-bullets containing 'Still open:' open-remainder specs that need editorial judgment to move up before trimming."
+    "openItems": [],
+    "note": "Run 9: D-11 resolved — ec693b2 disambiguation cleanup removed all 'Still open:' sub-bullet forms. Clean open-work set."
   },
   "docs/glossary-ids.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
     "note": "INV-SOO, INV-PHASE-01, INV-RS-09 all verified present in source."
   },
   "docs/quota-dispatch-design.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
     "note": "Cross-reference to ../spec/cross-provider-quota-matrix.md verified valid."
   },
   "docs/documentation-philosophy.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "D-7 resolved: line 27 home table now correctly describes spec/ as home for design/research specs. Reviewed clean."
+    "note": "Reviewed clean. Home table correctly describes spec/ as design-spec home."
   },
   "docs/backlog-remediation-design.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "Design spec with seam contracts and verified invariants. No current-state/changelog creep."
+    "note": "Run 9: D7 shipped marker removed (ed64fad); DO_NOT_TOKEN_WRAP_NOTE confirmed absent from src/. Remaining rows verified vs code."
   },
   "docs/end-of-sprint-report-template.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
     "note": "Pure template structure. No code anchors."
   },
   "docs/audit-pkg/operator-guide.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "docs/audit-pkg/contracts.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "docs/audit-pkg/development.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "docs/audit-pkg/product.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "docs/audit-pkg/release.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/audit-workflow-design.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["N-3"],
+    "note": "N-3 escalated: two section headers embed date stamps ('Cross-tool alignment (added 2026-06-10)' and 'Hardening decisions (adversarial review, 2026-06-10)'). Status-noise in a timeless design doc. Awaiting approval to strip the parentheticals."
   },
   "spec/contract-authoring-determinism-design.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
-    "openItems": ["N-2"],
-    "note": "N-1 fixed this run: companion-doc cross-ref docs/remediation-workflow-design.md → spec/remediation-workflow-design.md. N-2 escalated: '>  **Status:** durable design strategy' preamble — type declaration or status-noise?"
+    "openItems": [],
+    "note": "N-2 resolved (run 9): 'Grounded in 2026-06-14' text absent from preamble (lines 2-4 clean). Only 2026-06-14 occurrence is line 39 substantive design content. Adversary refuted; direct check confirmed."
   },
   "spec/cross-provider-quota-matrix.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
     "note": "External API claims; not verifiable from local code. No code-anchored issues."
   },
   "spec/host-validation.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "status": "reviewed",
+    "openItems": [],
+    "note": "Run 9: updated Codex e2e run instruction (752eab0) — RUN_CODEX_E2E=1/a7.test.mjs → RUN_PROVIDER_MATRIX_E2E=1/provider-matrix-dispatch-e2e.test.mjs. Missed by reviewer; caught by adversary."
+  },
+  "spec/remediation-workflow-design.md": {
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
-  "spec/remediation-workflow-design.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+  "spec/self-scaling-pipeline-design.md": {
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "N-1 cross-ref pointing to this file fixed in companion doc (contract-authoring-determinism-design.md)."
-  },
-  "spec/self-scaling-pipeline-design.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
-    "status": "reviewed",
-    "openItems": ["D-8"],
-    "note": "New to ledger (was on main at baa7362 but not tracked). Clean concept doc: two dials (adversarial depth + phase granularity), one shared signal, optimistic-start+escalate-on-evidence. No dated status noise. D-8 escalated: not in guidelines canonical manifest (spec/ is soft-reviewed only, not hard-gated)."
+    "note": "D-8 resolved (run 9): spec/**/*.md is a named scope row in guidelines; no manifest registration needed. Clean concept doc."
   },
   "spec/audit/state-machine.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/audit/audit-goals.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/audit/dependency-map.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/audit/artifact-contract.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/audit/entrypoint-contract.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/audit/executor-catalog.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/audit/orchestration-policy.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "spec/remediate/remediation-goals.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".audit-tools/remediation-report.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
-    "status": "reviewed",
-    "openItems": ["D-9"],
-    "note": "Run artifact tracked in git (re-included via .gitignore in f301acc). Current-state content; not a concept doc. D-9 escalated: should this be excluded from doc-review scope, treated as a handoff-type doc, or untracked?"
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "status": "excluded",
+    "openItems": [],
+    "note": "D-9 resolved (run 9): guidelines §Scope 'excluded' row explicitly lists this file as 'runtime run-artifact — tracked but never reviewed.' Not a review target."
   },
   "skills/audit-code/SKILL.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "skills/audit-code/audit-code.prompt.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "skills/remediate-code/SKILL.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "skills/remediate-code/remediate-code.prompt.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".agent/skills/audit-code/SKILL.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".agent/skills/remediate-code/SKILL.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".github/agents/auditor.agent.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".github/prompts/audit-code.prompt.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".github/copilot-instructions.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".claude/skills/disambiguate-backlog/SKILL.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   ".claude/skills/ship/SKILL.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "examples/README.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "src/audit/README.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["MISSED-B"],
+    "note": "MISSED-B escalated (run 9, caught by adversary): stale scaffold placeholder ('Implementation code will live here. Suggested early modules: ingestion, extractors, ...') — src/audit/ now has full implementation. Proposal: delete or replace with accurate module index."
   },
   "src/audit/adapters/README.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "templates/AGENTS.remediate-code.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "tests/audit/fixtures/simple-app/README.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   },
   "tests/remediate/remediation-report.md": {
-    "lastCheckedCommit": "f2c956a",
-    "lastCheckedAt": "2026-06-27T08:45:00Z",
+    "lastCheckedCommit": "752eab0",
+    "lastCheckedAt": "2026-06-30T08:30:00Z",
     "status": "reviewed",
     "openItems": []
   }
