@@ -7,6 +7,40 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Quota-aware dispatch did NOT prevent a 5-hour session-limit wall mid-implementation (2026-06-30).**
+  During the audit-full-sweep remediation, the rolling implement phase fanned out 4 concurrent node-worker
+  subagents; 3 of 4 (CP-NODE-1/2/3) died mid-run with `You've hit your session limit · resets 1:50pm` — the
+  account-wide 5-hour rolling cap. The whole point of the quota subsystem (per-model+provider sliding window,
+  proactive escalation/spill) is to SEE the depleting 5-hour budget and pace/pause/spill BEFORE the wall, not
+  let N workers burn into it and fail. Gaps to fix: (1) the 5-hour **session/rolling-window** limit for the
+  host Claude provider is not modeled as a quota source the dispatcher reads — only RPM/TPM are; (2) no
+  proactive pre-dispatch check "will spawning K workers exceed remaining session budget?" → should reduce
+  concurrency or pause-until-reset instead of dispatching into failure; (3) dead-on-quota workers leave their
+  worktrees with partial/no edits and no result file, so the rolling session can't distinguish "quota-killed"
+  from "real failure" — quota death should be a retryable pause, not a node failure. (Ethan, 2026-06-30.)
+  Relates to [[claude-quota-credential-resolution]] / [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
+
+- **Node verify `targeted_commands` ran the WHOLE suite → concurrent-worktree hermeticity flake.**
+  CP-NODE-4's fix was correct (worker green: check clean + phase-close 41/41) but accept-node verify FAILED on
+  `tests/remediate/postinstall.test.ts` ENOENT — that test passes 10/10 standalone on main. Root cause: the
+  implementation-DAG `targeted_commands` I authored were broad (`npx vitest run tests/remediate` = the entire
+  suite) and 4 worktrees ran it concurrently, racing on the shared `.test-home-postinstall` temp path. Two
+  fixes: (a) node verify should be scoped to the node's OWN touched test files, not the whole suite; (b) the
+  DAG-planning step should reject/repair an over-broad `targeted_commands` that runs unrelated tests (the host
+  shouldn't be able to author a verify command that flakes under the tool's own concurrency). (2026-06-30.)
+
+- **Intake input-selection is silent + stale-prone — present candidate remediation docs w/ timestamps, don't short-circuit.**
+  Hit 2026-06-30: a no-arg `remediate-code next-step` short-circuited to `present_report` off a **Jun-26**
+  `remediation-report.md` (unrelated CP-NODE findings) even though a fresh `audit-findings.json`/`audit-report.md`
+  had just been regenerated (today). The stale-report-redelivery guard (memory: fixed 0.28.11) did NOT cover the
+  no-state + leftover-report + no-`--input` case. Host had to manually archive the stale deliverables + pass an
+  explicit absolute `--input` to force fresh intake. Tool-enforcement fix (Ethan, 2026-06-30): intake must enumerate
+  the *candidate* remediation source documents it can see (`.audit-tools/audit-report.md`, `audit-findings.json`,
+  any prior `remediation-report.md`, conversation guidance) **with mtimes + provenance + freshness-vs-prior-run**,
+  and surface them to the orchestrator/user to pick — never silently auto-bind the first/old report. Freshness rule:
+  a `remediation-report.md` older than the promoted `audit-findings.json` is stale and must NOT short-circuit a run
+  to `present_report`. (Generalizes [[stale-remediation-report-complete-redelivery-trap]] beyond the fixed path.)
+
 - **Friction detection — M-QUOTA escalation chain WIRED (remediate); live validation still env-bound.**
   The `recordLimit → escalate → strand → quota_escalation friction` chain is now fed end-to-end on the named
   remediate driver path. `createRollingDispatcher` gained a generic `recordRateLimit` write hook (fired at the
@@ -24,6 +58,8 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   `quotaPool.ts`) — the shared primitive now supports the hooks, audit just needs to thread a retained source.
   Fits the dispatch capability-tiered driver track. [[meta-audit-friction-must-be-tool-enforced]]
 - **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Workers returned packet-style task_ids instead of the assigned `deepening:finding:*`, so merge-and-ingest never matched results to tasks and looped. The prompt-side fix (explicit task_id binding in `buildTaskSections`) is in place but **needs live validation** — can't be verified without a real deepening-capable run. Recovery until validated: quarantine orphan pending `deepening:*` tasks to let synthesis run.
+- **Selective-deepening loop #2 — steward result idempotency_key collision (CONFIRMED 2026-06-30, live).** Distinct from the task_id-mismatch loop above. `idempotencyKey` (`src/audit/orchestrator/ledger.ts:133-150`) keys steward/lens-verification results on `{unit_id,lens,pass_id}` only — NOT `task_id` (`attempt` ignored for non-redispatch, `splitDiscriminatorFromTaskId` empty for non-file-split). Each ingest round selective-deepening regenerates the steward task under a NEW `deepening:steward:*` id (id hashes the growing source-result set), but its clean result collides with the prior round's steward idempotency slot → dropped as replay at `ledger.ts:182` → `updateAuditTaskStatuses` never marks the new task complete → it stays `pending` → `next-step` re-emits the identical packet forever. Finding-followups don't loop (coordinates persist). **Fix (in tooling):** incorporate `task_id` into the `result_content_discriminator` for steward/lens-verification/deepening results so distinct deepening TASKS get distinct ledger records (preserve INV-2 replay-no-op for same-task_id replays); update ledger tests (INV-2/fail-2/N-IDEMPOTENCY). Full diagnosis: `.audit-tools/audit/deepening-loop-diagnosis.md`. Quick unblock (NOT the fix): mark stuck `deepening:steward:*` complete in `audit_tasks.json`. [[meta-audit-friction-must-be-tool-enforced]]
+  - **TRAP CONFIRMED 2026-06-30 (live):** host-side unblock attempts do NOT work and actively corrupt gitignored run-state. Marking `status:complete` in `audit_tasks.json` is ignored (next-step regenerates the deepening tasks in-memory each call). Writing `partial_completion_terminal.stranded_ids` onto `active-dispatch.json` is overwritten by the next dispatch emission. Appending clean results to `audit_results.jsonl` with unique idempotency keys DID clear `audit_tasks_completed`, but the content-hash change cascaded `planning_artifacts` stale (it's hashed on `audit_tasks.json`+`coverage_matrix.json` per `state.ts:228-250`), and a subsequent next-step regeneration TRUNCATED `audit_tasks.json` to 2 entries — landing on the `planning_executor` no-progress guard with no clean path to synthesis. Findings ledger stayed intact (493 results / 204 raw findings). **Lesson: there is NO host-side unblock for this loop — the fix MUST be the idempotency-discriminator code change, then a clean re-run.** A recovery affordance the tool SHOULD expose: a supported `--force-synthesis` / partial-coverage escape that resyncs `artifact_metadata` and drives synthesis from the intact ledger without hand-editing artifacts.
 
 - **Dead-code gate — SHIPPED (knip default-mode); production-mode tested-but-unwired sweep is a manual track.**
   `npm run check:deadcode` (`knip --include exports,types,nsExports,nsTypes`, in `verify:release`) fails the build on
