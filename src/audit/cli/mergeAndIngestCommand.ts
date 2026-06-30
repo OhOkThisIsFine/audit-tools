@@ -1,9 +1,9 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { captureStepBoundaryFriction, isFileMissingError, mapWithConcurrency, normalizeRepoPath, readJsonFile, writeJsonFile } from "audit-tools/shared";
+import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
-import { validateAuditResults, defaultFindingLensFromResult } from "../validation/auditResults.js";
+import { validateAuditResults, defaultFindingLensFromResult, emitCoverageLineCountFriction } from "../validation/auditResults.js";
 import { verifyFindingGrounding } from "../validation/quoteGrounding.js";
 import {
   ANCHOR_GROUNDING_CONCURRENCY,
@@ -412,32 +412,15 @@ export async function validateAndCollectResults(
     );
     // Surface the deliberately-downgraded total_lines!=actual mismatch as
     // step-boundary friction at the ingest locus (the validator stays pure and
-    // only RETURNS the 'warning'; it never emits). Retain the warning here —
-    // it does not gate ingest — and route it through the single chokepoint so a
-    // run accrues this gameable-coverage signal for triage. Best-effort: the
-    // capture itself swallows every failure, so it can never break ingest.
+    // only RETURNS the 'warning'; it never emits). The warning does not gate
+    // ingest — route it through the single shared chokepoint so the policy
+    // matches the worker-run locus exactly and cannot drift.
     if (frictionContext) {
-      for (const issue of issues) {
-        if (issue.severity !== "warning" ||
-            !issue.field.startsWith("file_coverage[") ||
-            !issue.field.endsWith("].total_lines")) {
-          continue;
-        }
-        const coveragePath = normalizeRepoPath(issue.path ?? issue.field);
-        await captureStepBoundaryFriction(
-          frictionContext.artifactsDir,
-          frictionContext.runId,
-          {
-            eventType: "coverage_total_lines_mismatch",
-            discriminator: `${issue.result_index}:${coveragePath}`,
-            category: "trap",
-            severity: "low",
-            area: "audit result ingest",
-            note: issue.message,
-          },
-          "audit-code",
-        );
-      }
+      await emitCoverageLineCountFriction(
+        frictionContext.artifactsDir,
+        frictionContext.runId,
+        issues,
+      );
     }
     if (resultErrors.length === 0) {
       passing.push(obj as AuditResult);

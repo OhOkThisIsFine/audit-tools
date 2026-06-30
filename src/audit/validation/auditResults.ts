@@ -1,8 +1,10 @@
 import type { AuditResult, AuditTask, Finding } from "../types.js";
 import {
+  captureStepBoundaryFriction,
   describeValue,
   formatValidationIssues,
   isRecord,
+  normalizeRepoPath,
   VALID_LENSES,
   VALID_SEVERITIES,
   VALID_CONFIDENCES,
@@ -1005,6 +1007,52 @@ export function validateAuditResults(
   }
 
   return issues;
+}
+
+/**
+ * True when an issue is the deliberately-downgraded `total_lines` != actual
+ * coverage-stat mismatch (a `file_coverage[i].total_lines` warning). Single
+ * source of the predicate so every ingest locus classifies it identically.
+ */
+export function isCoverageTotalLinesMismatch(issue: AuditResultIssue): boolean {
+  return (
+    issue.severity === "warning" &&
+    issue.field.startsWith("file_coverage[") &&
+    issue.field.endsWith("].total_lines")
+  );
+}
+
+/**
+ * Route every `total_lines` != actual coverage-stat mismatch through the single
+ * friction chokepoint. The validator stays pure and only RETURNS the warnings;
+ * THIS is the one policy that turns them into a `coverage_total_lines_mismatch`
+ * step-boundary friction event, shared by every ingest locus (merge-and-ingest,
+ * worker-run) so the policy can't drift between them. Best-effort:
+ * captureStepBoundaryFriction swallows every failure, so it can never break
+ * ingest. Does NOT gate ingest — the warning is non-fatal.
+ */
+export async function emitCoverageLineCountFriction(
+  artifactsDir: string,
+  runId: string,
+  issues: AuditResultIssue[],
+): Promise<void> {
+  for (const issue of issues) {
+    if (!isCoverageTotalLinesMismatch(issue)) continue;
+    const coveragePath = normalizeRepoPath(issue.path ?? issue.field);
+    await captureStepBoundaryFriction(
+      artifactsDir,
+      runId,
+      {
+        eventType: "coverage_total_lines_mismatch",
+        discriminator: `${issue.result_index}:${coveragePath}`,
+        category: "trap",
+        severity: "low",
+        area: "audit result ingest",
+        note: issue.message,
+      },
+      "audit-code",
+    );
+  }
 }
 
 export function formatAuditResultIssues(issues: AuditResultIssue[]): string {
