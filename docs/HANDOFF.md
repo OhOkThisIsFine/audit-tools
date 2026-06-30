@@ -9,11 +9,12 @@
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). `main ==
   audit-tools/main`, clean tree.
-- **Last published: v0.30.48** (headless-codex Windows spawn fixes: codex `--skip-git-repo-check` +
-  `windowsVerbatimArguments` cmd.exe shim — also fixed the opencode provider). Most recent lap (test-only,
-  no publish): collapsed per-provider live-dispatch e2es into ONE
-  `tests/audit/provider-matrix-dispatch-e2e.test.mjs` (gate `RUN_PROVIDER_MATRIX_E2E=1`, candidate set from
-  `discoverProviders`); codex + NIM verified live, opencode skipped. Full gate green (2071/2-skip).
+- **Last published: v0.30.48.** Most recent lap (in tree, ship-pending): (1) **M-QUOTA escalation chain wired
+  end-to-end** on the remediate driver path (`recordLimit→escalate→strand→quota_escalation friction`) — shared
+  `createRollingDispatcher` gained `recordRateLimit`/`rateLimit` hooks; `driveRollingImplementDispatch` threads one
+  retained `HostSessionQuotaSource`. Live multi-worker validation still env-bound. (2) **knip dead-code gate
+  adopted** (`check:deadcode` in `verify:release`, default-mode) + 35 dead exports deleted; production-mode
+  manual sweep removed ~28 more tested-but-unwired symbols. (3) doc-review items N-3/N-4/MISSED-B actioned.
 - Per-lap shipped detail is not narrated here (that's changelog creep — see git log). This doc is the
   **open-work roadmap** only: current state above, sequenced open items below.
 
