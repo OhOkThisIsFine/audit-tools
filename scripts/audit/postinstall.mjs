@@ -304,22 +304,27 @@ for (const install of installs) {
 
 // Install OpenCode global command and MCP via merged config
 const opencodeGlobalConfig = join(homedir(), '.config', 'opencode', 'opencode.json');
-try {
-  if (!sharedOpenCodePermissions) {
-    throw new Error(
-      'audit-tools/shared is unavailable (build the shared workspace first); skipping OpenCode config deployment',
-    );
-  }
-  const action = installMergedJson(opencodeGlobalConfig, (existing) =>
-    mergeOpenCodeGlobalConfig(existing),
+if (!sharedOpenCodePermissions) {
+  // Expected when audit-tools/shared isn't built yet — notably during `npm ci`
+  // in CI, where postinstall runs before the shared build step. This is a SKIP,
+  // not a failure: counting it would trip the `failed > 0` exit-1 guard below and
+  // break `npm ci`. Genuine OpenCode write errors are still counted as failures.
+  console.warn(
+    'audit-code: audit-tools/shared is unavailable (build the shared workspace first); skipping OpenCode config deployment',
   );
-  console.log(`audit-code: ${action} global OpenCode config in ${opencodeGlobalConfig}`);
-  succeeded++;
-} catch (err) {
-  console.warn(`audit-code: could not install global OpenCode config (${err.message})`);
-  console.warn(`  To install manually, add the mcp.auditor and command["audit-code"] entries to:`);
-  console.warn(`    ${opencodeGlobalConfig}`);
-  failed++;
+} else {
+  try {
+    const action = installMergedJson(opencodeGlobalConfig, (existing) =>
+      mergeOpenCodeGlobalConfig(existing),
+    );
+    console.log(`audit-code: ${action} global OpenCode config in ${opencodeGlobalConfig}`);
+    succeeded++;
+  } catch (err) {
+    console.warn(`audit-code: could not install global OpenCode config (${err.message})`);
+    console.warn(`  To install manually, add the mcp.auditor and command["audit-code"] entries to:`);
+    console.warn(`    ${opencodeGlobalConfig}`);
+    failed++;
+  }
 }
 
 // Install Antigravity plugin (global skill for Gemini IDE / Antigravity Hub)
