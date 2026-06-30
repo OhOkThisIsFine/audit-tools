@@ -8,19 +8,20 @@
 ## Live state
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here).
-- **SHIP-PENDING (2026-06-30): dogfooded full-sweep remediation of the 186-finding self-audit landed on
-  `main` (17 commits ahead of `audit-tools/main`, NOT yet pushed/published).** 15 module nodes resolved
-  incl. all 7 HIGH fixes (citation-grounding marker, stale INFRA_FILE_PATHS, roster model routing,
-  merge-to-base cleanup, flag-validation-order, stale test fixtures, fragile madge test). Combined tree
-  green: build+check, remediate vitest 2093/0, audit node:test 2487/0. Deliverables:
-  `.audit-tools/remediation-{outcomes.json,report.md}`. **Immediate next: Ethan to review + decide
-  push/release** (he flagged quota-awareness as the follow-up to fix first).
-- **3 NEW tool-enforcement gaps this run (docs/backlog.md → Open bugs):** (1) quota-aware dispatch didn't
-  model the host 5-hour session window → 4 workers walled mid-run; (2) per-node verify `targeted_commands`
-  ran the whole suite → cross-node deadlock + Windows flake; (3) intake silently bound a stale prior
-  remediation-report instead of presenting timestamped candidates. Plus durable design lesson:
-  [[decomposition-colocate-source-and-tests]] — a node must own its source AND the tests pinning it.
-- **Last published: v0.30.48.** Most recent lap (in tree, ship-pending): (1) **M-QUOTA escalation chain wired
+- **PUBLISHED v0.30.51 (2026-06-30):** dogfooded full-sweep remediation of the 186-finding self-audit (15
+  module nodes, all 7 HIGH fixes — citation-grounding marker, stale INFRA_FILE_PATHS, roster model routing,
+  merge-to-base cleanup, flag-validation-order, stale fixtures, fragile madge test) shipped via combined
+  reconciliation. Suites green (remediate 2093/0, audit 2487/0). PLUS the **per-node verify scope guard**
+  (`isWholeSuiteTestCommand`) — the tooling fix for the cross-node deadlock. Deliverables:
+  `.audit-tools/remediation-{outcomes.json,report.md}`.
+- **Immediate next — quota-aware dispatch must model the host 5-hr session window** (Ethan's flagged
+  follow-up): 4 concurrent workers walled the account limit mid-run with no proactive pacing. Needs the
+  session/rolling window as a quota source + pre-dispatch "K workers vs remaining session budget" check +
+  quota-death-as-retryable-pause. Detail in `docs/backlog.md` → Open bugs. (Ties to the dispatch
+  capability-tiered driver track + [[claude-quota-credential-resolution]].)
+- **Also open (docs/backlog.md → Open bugs):** intake must present timestamped candidate docs instead of
+  silently binding a stale remediation-report. (The per-node verify-scope gap is now FIXED in tooling.)
+- **Last published: v0.30.51.** Most recent lap (in tree, ship-pending): (1) **M-QUOTA escalation chain wired
   end-to-end** on the remediate driver path (`recordLimit→escalate→strand→quota_escalation friction`) — shared
   `createRollingDispatcher` gained `recordRateLimit`/`rateLimit` hooks; `driveRollingImplementDispatch` threads one
   retained `HostSessionQuotaSource`. Live multi-worker validation still env-bound. (2) **knip dead-code gate
