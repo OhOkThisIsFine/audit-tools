@@ -101,7 +101,7 @@ are surfaced as FYI context in this stop, never silently dropped.
 - The intake summary is validated — `ready: true` with empty `goals` and no
   `affected_files` is rejected and the synthesis step re-emitted with the
   validation errors (same pattern as contract-pipeline ingestion).
-- Clarification answers are validated before `applyClarificationResolution`
+- Clarification answers are validated before `applyPlanClarificationResolution`
   consumes them (non-answers / malformed files re-emit the question step).
 - Blocking `open_questions` actually block: `isIntakeReady` gates every path into
   planning (the structured seed and extraction included).
@@ -135,7 +135,7 @@ The contract pipeline is the planning engine for **both** input paths, and its
 design phase is a multi-agent seam negotiation rather than a single
 self-consistent author.
 
-### Both paths run the pipeline
+### Both paths run the pipeline — except the lean fast-path exception
 
 - **Path A (structured `audit-findings.json`)** seeds `goal_normalization` with
   the findings ("remediate these N findings under this checkpoint") and
@@ -149,6 +149,18 @@ Rationale: a fast path that implements findings "because the auditor said so",
 with no obligations, no seam contracts, and no traceability, cannot support
 confident parallel implementation. Routing both paths through the pipeline closes
 that gap.
+
+**Exception, superseding this section:** [`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md)
+is the newer design-of-record and specs a bounded lean fast path
+(`src/remediate/steps/leanFastPath.ts`) that lets a qualifying Path-A run (small,
+grounded, high-confidence, non-systemic finding set) skip the adversarial
+contract-design loop while still rejoining the normal plan→implement→close
+machinery (deterministic grounding, block derivation, file-hash integrity,
+verify-before-merge) — it does not skip traceability or verification, only the
+expensive negotiation phases. That doc also flags the fast path as worth
+re-examining ("too trusting"). Treat this section's "both paths run the [full]
+pipeline" as the default; the lean fast path is the sanctioned, narrowly-scoped
+exception, not a contradiction of the rationale above.
 
 ### Multi-agent seam negotiation
 
@@ -323,8 +335,10 @@ grants) scoped to the node's package.
 - **`halt` routes through close.** Halt sets `closing` so a partial report is
   produced for work already done; the report marks the run user-halted.
 - **Retry budget by failure class.** Environment/infra failures (worktree setup,
-  provider quota, tool crash) retry cheaply on a separate budget; contract/test
-  failures use the `MAX_AUTO_RETRIES`-capped path.
+  provider quota, tool crash) retry cheaply on a separate budget
+  (`MAX_AUTO_RETRIES_INFRA`); contract/test failures use the tighter
+  `MAX_AUTO_RETRIES_CONTRACT`-capped path — two distinct constants, not one
+  shared budget.
 - **Report the resolution outcome.** After consuming a triage resolution, the next
   step's prompt summarizes what was retried/ignored/unblocked.
 

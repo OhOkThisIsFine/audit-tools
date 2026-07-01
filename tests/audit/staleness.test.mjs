@@ -795,41 +795,29 @@ test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json ups
   const mdPath = join(here, "../../spec/audit/dependency-map.md");
   const md = readFileSync(mdPath, "utf8");
 
-  // Parse the declarative map: each `### \`<artifact>\`` heading opens a section;
-  // the bullets under its `Downstream:` line name the artifacts that depend on
-  // it. Build { upstream -> Set(downstream) }, restricted to bullets that are
-  // backticked artifact filenames (prose bullets like "future ..." are ignored).
-  const mdDependents = {};
-  let currentUpstream = null;
-  let inDownstream = false;
+  // Parse the declarative map: each `| \`<artifact>\` | \`dep\`, \`dep\`, ... |`
+  // table row (under the "Depends on" tables) names the artifact's upstream
+  // dependencies directly — the same direction as ARTIFACT_DEPENDS_ON_MAP, so
+  // no inversion is needed. Build { artifact -> Set(dependsOn) }.
+  const mdDependsOn = {};
+  const rowPattern = /^\|\s*`([^`]+)`\s*\|\s*(.+?)\s*\|$/;
   for (const rawLine of md.split(/\r?\n/)) {
     const line = rawLine.trim();
-    const heading = line.match(/^###\s+`([^`]+)`\s*$/);
-    if (heading) {
-      currentUpstream = heading[1];
-      inDownstream = false;
-      continue;
-    }
-    if (/^Downstream:\s*$/.test(line)) {
-      inDownstream = true;
-      continue;
-    }
-    if (inDownstream && currentUpstream) {
-      const bullet = line.match(/^-\s+`([^`]+)`\s*$/);
-      if (bullet) {
-        (mdDependents[currentUpstream] ??= new Set()).add(bullet[1]);
-      } else if (line.length > 0 && !line.startsWith("-")) {
-        // A non-bullet, non-empty line ends the Downstream block.
-        inDownstream = false;
-      }
+    const row = line.match(rowPattern);
+    if (!row) continue;
+    const [, artifact, depsCell] = row;
+    const deps = [...depsCell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    if (deps.length > 0) {
+      const set = (mdDependsOn[artifact] ??= new Set());
+      for (const dep of deps) set.add(dep);
     }
   }
 
-  // Derive the upstreams that list git_history.json as a downstream, per the .md.
-  const mdGitHistoryUpstreams = Object.entries(mdDependents)
-    .filter(([, downstream]) => downstream.has("git_history.json"))
-    .map(([upstream]) => upstream)
-    .sort();
+  // git_history.json's own "Depends on" row already names its upstreams
+  // directly — no inversion needed with this table's direction.
+  const mdGitHistoryUpstreams = [
+    ...(mdDependsOn["git_history.json"] ?? []),
+  ].sort();
 
   const tsGitHistoryUpstreams = [
     ...ARTIFACT_DEPENDS_ON_MAP["git_history.json"],
@@ -850,12 +838,12 @@ test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json ups
     "dependency-map.md and ARTIFACT_DEPENDS_ON_MAP must agree literally on git_history.json's upstream edges",
   );
 
-  // And the .md actually carries the git_history.json downstream bullet under
-  // BOTH upstreams (guards a regression that drops one direction of the edge).
+  // And the .md's git_history.json row actually carries BOTH upstreams (guards
+  // a regression that drops one edge while leaving the other).
   for (const upstream of tsGitHistoryUpstreams) {
     assert.ok(
-      mdDependents[upstream]?.has("git_history.json"),
-      `dependency-map.md must list git_history.json downstream of ${upstream}`,
+      mdDependsOn["git_history.json"]?.has(upstream),
+      `dependency-map.md must list ${upstream} as a git_history.json dependency`,
     );
   }
 });

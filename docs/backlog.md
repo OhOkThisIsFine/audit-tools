@@ -87,43 +87,33 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
-- **Spec-doc rewrite pass — three top-level design docs + three audit-contract docs have systemic drift
-  (2026-07-01 doc-review, R10-D7/D9/D10/D11).** Two deeper independent passes (structural spot-check +
-  a 169-tool-call prose-level pass) both confirm this is prose/contract drift across many small claims,
-  not a handful of narrow swaps — recommend one dedicated rewrite/verification session covering all six
-  files together, sourced directly from the named real-code anchors below:
+- **Spec-doc rewrite pass — SHIPPED (2026-07-02).** All six flagged docs rewritten against real source:
   1. `spec/audit/dependency-map.md`, `spec/audit/artifact-contract.md`, `spec/audit/executor-catalog.md`
-     — phantom filenames throughout (`synthesis_report.json`, `merged_findings.json`,
-     `root_cause_clusters.json`, `audit_results.json` for `.jsonl`), missing real artifacts
-     (`audit-findings.json`, `audit-report.md`, `synthesis-narrative.json`, `tooling_manifest.json`,
-     `intent_checkpoint.json`, `audit_plan_metrics.json`, `task_affinity_graph.json`,
-     `syntax_resolution_status.json`); `executor-catalog.md` is missing over half the real 21-entry
-     registry and splits several executors that were folded into `intake_executor`/`planning_executor`.
-     Source from `src/audit/orchestrator/dependencyMap.ts` (`ARTIFACT_DEPENDS_ON_MAP`),
-     `src/audit/orchestrator/executors.ts` (`EXECUTOR_REGISTRY`), `src/audit/io/artifacts.ts`
-     (`ARTIFACT_DEFINITIONS`).
-  2. `spec/contract-authoring-determinism-design.md` — 6 of 8 strategies (S1,S3-S7) + 3 of 4 S8 sub-fixes
-     already shipped (commits `d5fb1ab`,`2229f73`,`3b39377`,`94a2c33`,`3ebd4f0`) but the doc still frames
-     them as proposed/future work; S7's citation is also wrong (`orchestrator/fileAnchors.ts` mischaracterized
-     — the real grounding chokepoint is `cli/mergeAndIngestCommand.ts`, uncited). Only S8's "Gate it"
-     (auto-complete-empty gating) is genuinely still open.
-  3. `spec/audit-workflow-design.md` — Gate 1 (provider confirmation) described as interactive but is a
-     silent deterministic auto-complete; provider-quota-query/confirmation-display functions have zero
-     call sites; "provider pool informs lens recommendations" unwired; a systemic "workers emit findings
-     inline" claim recurs in 3 places but the real mechanism is a file write (inline-emit was tried and
-     reverted per a code comment — it silently dropped results); `buildCacheablePrompt` has zero callers;
-     planning's "frozen after one always-on LLM estimate review" step doesn't exist; "blast radius" absent
-     from real risk-estimate factors; edge-kind weight ordering wrong; "remediation does not re-ask" Gate 1
-     claim is false (remediate-code has zero code paths reading the shared provider-confirmation artifact).
-  4. `spec/remediation-workflow-design.md` — "both paths run the pipeline" is misleading:
-     `src/remediate/steps/leanFastPath.ts` lets qualifying Path-A runs skip the full
-     `CONTRACT_PIPELINE_PHASE_ORDER` entirely (independently confirmed by `spec/self-scaling-pipeline-design.md`,
-     which calls this fast path "too trusting"); `risk_preview`/`impl_preview_acknowledged.json` don't exist;
-     `synthesize_intake` isn't a real pass name; `applyClarificationResolution` should be
-     `applyPlanClarificationResolution`; `MAX_AUTO_RETRIES` is actually split into `_CONTRACT`/`_INFRA`.
-  Also smaller, contained items to fold into the same pass: `spec/audit/entrypoint-contract.md`'s
-  execution-summary shape was fixed 2026-07-01 (matched to real `AdvanceAuditResult`) — verify it stays
-  accurate if `advanceTypes.ts` changes before this pass runs.
+     — rewritten to the real 31-entry `ARTIFACT_DEFINITIONS`, the real `ARTIFACT_DEPENDS_ON_MAP` (canonical
+     upstream direction, matching the source table's own keying), and the real 21-entry
+     `EXECUTOR_REGISTRY` (incl. noting `friction_capture_executor` is unreachable and `agent` is a legacy
+     placeholder). Two invariant tests (`staleness.test.mjs` F1 inv-6, `git-history-mining.test.mjs` F6
+     fail-10) parsed the doc's old per-artifact `### \`x\`` / `Downstream:` bullet format — updated their
+     parsers to the new upstream-direction table format, same assertions.
+  2. `spec/contract-authoring-determinism-design.md` — S1,S3-S7 marked SHIPPED with real citations; S7's
+     wrong `fileAnchors.ts` citation replaced with the real chokepoints
+     (`mergeAndIngestCommand.ts`/`designFindingGrounding.ts`); S8 3/4 sub-fixes marked shipped, "Gate it"
+     confirmed still open (`runDesignReviewAutoComplete`, `structureExecutors.ts:227`, no empty-findings
+     guard).
+  3. `spec/audit-workflow-design.md` — this doc is explicitly a target-design doc, not a status log (own
+     preamble disclaims shipped/unshipped tracking), so only genuine design-record errors were fixed, not
+     "not yet built" gaps: the "workers emit findings inline; skill writes to disk" claim (3 locations) was
+     corrected to the real, deliberately-chosen write-to-disk mechanism (inline-emit was tried and reverted
+     — it silently dropped results, per a code comment in `packetPrompt.ts`). The other 8 flagged items
+     (Gate 1 interactivity, provider-pool→lens wiring, `buildCacheablePrompt`, etc.) are legitimate
+     not-yet-built target content, left as-is per the doc's own policy.
+  4. `spec/remediation-workflow-design.md` — same target-design policy. Added a cross-reference noting
+     `spec/self-scaling-pipeline-design.md` supersedes the "both paths run the [full] pipeline" section
+     with the sanctioned lean-fast-path exception (`leanFastPath.ts`); corrected two wrong citations
+     (`applyClarificationResolution` → `applyPlanClarificationResolution`;
+     `MAX_AUTO_RETRIES` → `MAX_AUTO_RETRIES_CONTRACT`/`_INFRA`). `risk_preview`/`impl_preview_acknowledged.json`
+     left as legitimate not-yet-built target content.
+  Full suites green (audit + remediate, 2103+/0 remediate; audit node:test all green), `check` clean.
 
 - **remediate-code installer/generator for `.agent/skills/remediate-code/SKILL.md` parity with audit-code
   (2026-07-01 doc-review, R10-D12).** `.agent/skills/remediate-code/SKILL.md` is byte-identical to
