@@ -8,6 +8,14 @@
 ## Live state
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here).
+- **PUBLISHED v0.30.55 (2026-07-01):** selective-deepening loop #2 fix — `buildResultContentDiscriminator`
+  folds `task_id` into the `deepening`/`steward` branch (`src/shared/contentKey.ts`), so each selective-
+  deepening round's regenerated task gets a distinct idempotency_key instead of colliding with the prior
+  round's (INV-2 replay-no-op preserved for genuine same-task_id replays). Call sites: `ledger.ts`
+  `stampLedgerKeys`, `resultBaseline.ts` `deriveLiveResultKeys`. New tests in `content-key-seam.test.mjs` +
+  `ledger.test.mjs`. Suites green (audit 3368/0, remediate 2103/0). CI run 28498744350; both global bins
+  reinstalled. **Remaining (env-bound):** live-validate on a real deepening-capable run — the fix can't be
+  exercised by unit tests alone. Backlog entry updated to reflect fixed-but-unvalidated status.
 - **PUBLISHED v0.30.54 (2026-07-01):** intake stale-report-redelivery fix — a bare `remediate-code next-step`
   no longer silently re-presents a leftover `remediation-report.md` when a fresher default-discovered audit
   doc (`audit-findings.json`/`audit-report.md`) exists; `isDefaultCandidateFresherThanReport`
@@ -33,14 +41,10 @@
   `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`; endpoint-shape finding in memory
   [[claude-usage-endpoint-body-shape]]. **Remaining (env-bound):** live validation on a real rate-limited
   multi-worker run (cold-start slope + resume path).
-- **Selective-deepening loop #2 fix — SHIPPED to main, publish-pending.** `buildResultContentDiscriminator`
-  now folds `task_id` into the `deepening`/`steward` branch (`src/shared/contentKey.ts`), so each selective-
-  deepening round's regenerated task gets a distinct idempotency_key instead of colliding with the prior
-  round's (INV-2 replay-no-op preserved for genuine same-task_id replays). Call sites: `ledger.ts`
-  `stampLedgerKeys`, `resultBaseline.ts` `deriveLiveResultKeys`. New tests in `content-key-seam.test.mjs` +
-  `ledger.test.mjs`. Suites green (audit 3368/0, remediate 2103/0). **Immediate next:** publish (patch bump),
-  reinstall global bins, then live-validate on a real deepening-capable run — the fix can't be exercised by
-  unit tests alone. Detail: `docs/backlog.md` → "Selective-deepening loop #2".
+- **Immediate next:** no code work queued. Nightly/live validation of the two selective-deepening loop fixes
+  (task_id-mismatch loop + idempotency_key-collision loop, both code-complete) needs an actual deepening-
+  capable run — env-bound, not a host-actionable next step. Otherwise proceed to the next T4/T5 item in the
+  ordering below.
 - Per-lap shipped detail is not narrated here (that's changelog creep — see git log). This doc is the
   **open-work roadmap** only: current state above, sequenced open items below.
 
