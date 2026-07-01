@@ -54,6 +54,15 @@ export interface QuotaStateEntry {
   cooldown_until: string | null;
   last_429_at: string | null;
   consecutive_429_count?: number;
+  /**
+   * Learned tokens→percent slope (EWMA) for the token-budget gate, keyed PER
+   * WINDOW LABEL (e.g. "session", "weekly"). `slope = Δtokens / Δpercent` where
+   * percent = remaining_pct*100. Windows scale on different denominators, so
+   * each learns its own slope; the gate multiplies the right slope by that
+   * window's remaining percent to get its token budget and takes the MIN across
+   * a pool's own windows. Absent until observed (cold start).
+   */
+  tokens_per_pct?: Record<string, number>;
 }
 
 export interface QuotaState {
@@ -70,9 +79,8 @@ export interface QuotaState {
 export const WaveBindingCapSchema = z.enum([
   "rpm",
   "tpm",
+  "token_budget",
   "learned",
-  "fallback",
-  "first_contact",
   "cooldown",
   "host_concurrency",
   "none",

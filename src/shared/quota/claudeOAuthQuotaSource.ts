@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { QuotaUsageSnapshot } from "./quotaSource.js";
+import type { QuotaUsageSnapshot, QuotaWindow } from "./quotaSource.js";
 import { withFileLock } from "./fileLock.js";
 import {
   BaseHttpQuotaSource,
@@ -334,6 +334,7 @@ export function mapUsageToSnapshot(
   if (body == null || typeof body !== "object") return null;
   const binding = pickBindingWindow(body, model);
   if (binding == null) return null;
+  const windows = collectWindows(body, model);
   return {
     // (100 - util)/100 (not 1 - util/100) so integer percents stay exact: 20/100 === 0.2.
     remaining_pct: clampFraction((100 - binding.utilization) / 100),
@@ -342,7 +343,57 @@ export function mapUsageToSnapshot(
     tokens_remaining: null,
     captured_at: new Date(nowMs).toISOString(),
     source: "claude-oauth",
+    ...(windows.length > 0 ? { windows } : {}),
   };
+}
+
+/**
+ * Enumerate the per-window remaining budgets with agnostic labels: the top-level
+ * `five_hour`→"session" / `seven_day`→"weekly" windows, plus any model-scoped
+ * `limits[]` entry keyed by its own group/kind (falling back to a stable
+ * synthetic label). Each window's own utilization becomes its own
+ * `remaining_pct`, so the token-budget gate can learn a distinct tokens→percent
+ * slope per window. Labels are never provider/model identities (INV-QD-04);
+ * degrade-safe (empty on a malformed payload).
+ */
+function collectWindows(body: UsageResponse, model: string | null): QuotaWindow[] {
+  const out: QuotaWindow[] = [];
+  const seen = new Set<string>();
+  // The Claude body reports the SAME window twice — once as a top-level
+  // `five_hour`/`seven_day` block and again as a `limits[]` entry with the
+  // matching group/kind. Emit ONE window per label (top-level wins, pushed
+  // first); a later entry for an already-seen label is skipped.
+  const pushWindow = (label: string, utilization: unknown, resets_at: string | null): void => {
+    if (typeof utilization !== "number") return;
+    if (seen.has(label)) return;
+    seen.add(label);
+    out.push({
+      label,
+      remaining_pct: clampFraction((100 - utilization) / 100),
+      reset_at: resets_at ?? null,
+    });
+  };
+  if (body.five_hour) pushWindow("session", body.five_hour.utilization, body.five_hour.resets_at ?? null);
+  if (body.seven_day) pushWindow("weekly", body.seven_day.utilization, body.seven_day.resets_at ?? null);
+  let syntheticIndex = 0;
+  for (const lim of Array.isArray(body.limits) ? body.limits : []) {
+    if (typeof lim?.percent !== "number") continue;
+    if (!limitAppliesToModel(lim, model)) continue;
+    const label = limitLabel(lim, syntheticIndex);
+    syntheticIndex++;
+    pushWindow(label, lim.percent, lim.resets_at ?? null);
+  }
+  return out;
+}
+
+/**
+ * Agnostic label for a `limits[]` window: its declared `group`/`kind` when the
+ * payload carries one, else a stable synthetic `limit_<n>`. Never a model name.
+ */
+function limitLabel(lim: UsageLimitEntry, index: number): string {
+  const declared = (lim as { group?: unknown; kind?: unknown }).group ?? (lim as { kind?: unknown }).kind;
+  if (typeof declared === "string" && declared.trim().length > 0) return declared;
+  return `limit_${index}`;
 }
 
 interface BindingWindow {

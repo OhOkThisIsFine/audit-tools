@@ -119,15 +119,16 @@ test("scheduleWave first-contact cap does not fire when discoveredLimits provide
   assert.equal(schedule.max_concurrent, 22);
 });
 
-test("scheduleWave first-contact cap applies with custom value", () => {
+test("scheduleWave leaves an unconfigured provider uncapped (no cold-start floor)", () => {
   const schedule = scheduleWave({
     providerName: "opencode",
-    sessionConfig: { quota: { first_contact_concurrency: 5 } },
+    sessionConfig: {},
     hostModel: null,
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.max_concurrent, 5);
+  assert.equal(schedule.max_concurrent, 22);
+  assert.equal(schedule.binding_cap, "none");
 });
 
 // ── File-backed I/O functions ────────────────────────────────────────────────

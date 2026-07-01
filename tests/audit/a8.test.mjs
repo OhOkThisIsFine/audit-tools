@@ -122,8 +122,15 @@ test("A8: two-loop single-assignment — exactly one claimant across a shared re
 test("A8: healthy-before-degraded split — degraded pool's share stays smaller", async () => {
   const store = settledStore();
   const reg = fakeRegistry();
-  const healthy = pool("pool/healthy", { quotaSourceSnapshot: snapshot(0.95) });
-  const degraded = pool("pool/degraded", { quotaSourceSnapshot: snapshot(0.02) });
+  // Differentiation now comes from the remaining token budget (the removed
+  // remaining_pct halving cliff no longer applies): ample budget carries the bulk,
+  // a small budget stays smaller.
+  const healthy = pool("pool/healthy", {
+    quotaSourceSnapshot: { ...snapshot(0.95), tokens_remaining: 1_000_000 },
+  });
+  const degraded = pool("pool/degraded", {
+    quotaSourceSnapshot: { ...snapshot(0.02), tokens_remaining: 1500 },
+  });
   const coord = new HybridSpillCoordinator({
     pools: [healthy, degraded],
     sessionConfig: SESSION,

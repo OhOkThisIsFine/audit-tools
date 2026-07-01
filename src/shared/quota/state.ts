@@ -137,6 +137,87 @@ export function computeRampUpConcurrency(
   return maxSafe;
 }
 
+// EWMA weight for a new tokens_per_pct observation folded into the running
+// slope. 0.3 = responsive but not jumpy; a run flipping between windows still
+// converges each window's own slope within a few observations.
+export const TOKENS_PER_PCT_EWMA_ALPHA = 0.3;
+// Minimum meaningful Δpercent (percent = remaining_pct*100) before we trust a
+// slope sample. Below this the denominator is noise (rounding / a snapshot that
+// barely moved) and Δtokens/Δpercent explodes — skip it.
+export const MIN_SLOPE_DELTA_PERCENT = 0.5;
+
+/**
+ * Fold one tokens→percent slope observation into a window's learned EWMA slope,
+ * returning the updated map (pure — never mutates the input). Given a prior and
+ * new remaining_pct (0–1 fractions) for the SAME window label plus the tokens
+ * dispatched between the two readings, computes `slope = Δtokens / Δpercent`
+ * (percent = remaining_pct*100) and blends it into the label's EWMA.
+ *
+ * Degrade-safe: returns the prior map unchanged when Δpercent is not meaningfully
+ * positive (≥ {@link MIN_SLOPE_DELTA_PERCENT}), when tokens are non-positive, or
+ * when any input is non-finite. Never throws.
+ */
+export function foldTokensPerPctObservation(
+  prior: Record<string, number> | undefined,
+  windowLabel: string,
+  priorRemainingPct: number,
+  newRemainingPct: number,
+  tokensDispatched: number,
+): Record<string, number> {
+  const base = prior ?? {};
+  if (
+    !Number.isFinite(priorRemainingPct) ||
+    !Number.isFinite(newRemainingPct) ||
+    !Number.isFinite(tokensDispatched) ||
+    tokensDispatched <= 0
+  ) {
+    return base;
+  }
+  // Percent DROP as quota is consumed: prior − new, on the 0–100 scale.
+  const deltaPercent = (priorRemainingPct - newRemainingPct) * 100;
+  if (deltaPercent < MIN_SLOPE_DELTA_PERCENT) return base;
+  const sampleSlope = tokensDispatched / deltaPercent;
+  if (!Number.isFinite(sampleSlope) || sampleSlope <= 0) return base;
+  const previous = base[windowLabel];
+  const blended =
+    typeof previous === "number" && Number.isFinite(previous) && previous > 0
+      ? previous * (1 - TOKENS_PER_PCT_EWMA_ALPHA) + sampleSlope * TOKENS_PER_PCT_EWMA_ALPHA
+      : sampleSlope;
+  return { ...base, [windowLabel]: blended };
+}
+
+/**
+ * Persist a folded tokens_per_pct observation for a pool's quota-state entry,
+ * under the shared quota-state file lock. Reads the current entry (or a blank
+ * one), folds the observation via {@link foldTokensPerPctObservation}, and writes
+ * back. Degrade-safe: a missing/unreadable state file falls to a blank entry;
+ * an observation that doesn't move the slope leaves the file untouched-in-value.
+ */
+export async function recordTokensPerPctObservation(
+  providerModelKey: string,
+  windowLabel: string,
+  priorRemainingPct: number,
+  newRemainingPct: number,
+  tokensDispatched: number,
+): Promise<void> {
+  const lockPath = getQuotaStatePath() + ".lock";
+  await withFileLock(lockPath, async () => {
+    const state = await readQuotaState();
+    const entry = state.entries[providerModelKey] ?? blankEntry();
+    const updated = foldTokensPerPctObservation(
+      entry.tokens_per_pct,
+      windowLabel,
+      priorRemainingPct,
+      newRemainingPct,
+      tokensDispatched,
+    );
+    entry.tokens_per_pct = updated;
+    entry.updated_at = new Date().toISOString();
+    state.entries[providerModelKey] = entry;
+    await writeQuotaState(state);
+  });
+}
+
 function blankEntry(): QuotaStateEntry {
   return { updated_at: new Date().toISOString(), buckets: {}, cooldown_until: null, last_429_at: null };
 }

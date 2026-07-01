@@ -92,7 +92,7 @@ test("INV-shared-quota-02: pools with no host limits are fully independent — n
     sessionConfig: {},
     pendingItemTokens: new Array(20).fill(1_000),
   });
-  // No global limit: each pool fans out to DEFAULT_AGENT_HOST_CONCURRENCY independently.
+  // No global limit and no invented floor: each pool fans out independently.
   assert.ok(capacity.total_slots > 1, "pools with no host limit must fan out, not serialize");
 });
 

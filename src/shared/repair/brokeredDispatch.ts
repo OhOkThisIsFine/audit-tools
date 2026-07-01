@@ -151,12 +151,11 @@ export function classifyCapableHost(input: {
   quotaStateEntry?: QuotaStateEntry | null;
 }): boolean {
   // Cold-start floor comes from the single classifier struct (CE-005) — there is
-  // no separable floor constant to re-derive it from.
-  const floor = Math.max(
-    1,
-    input.sessionConfig.quota?.first_contact_concurrency ??
-      classifyProvider(input.providerName).concurrencyFloor,
-  );
+  // no separable floor constant to re-derive it from. (The former
+  // `quota.first_contact_concurrency` override was removed with the invented
+  // scheduler caps; concurrency is now governed by the host limit + token-budget
+  // gate, and this floor serves only the capable-vs-cold host classification.)
+  const floor = Math.max(1, classifyProvider(input.providerName).concurrencyFloor);
   const reported = input.hostConcurrencyLimit?.active_subagents ?? null;
   if (reported != null && reported > floor) return true;
   // Learned evidence (any recorded safe bucket) lifts the host off the floor.

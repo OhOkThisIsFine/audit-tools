@@ -169,11 +169,14 @@ describe("A-8 HybridSpillCoordinator", () => {
     const store = settledStore();
     const reg = fakeRegistry();
     const healthy = pool("pool/healthy", {
-      quotaSourceSnapshot: snapshot(0.95),
+      // Ample remaining token budget → carries the bulk of the frontier.
+      quotaSourceSnapshot: { ...snapshot(0.95), tokens_remaining: 1_000_000 },
     });
     const degraded = pool("pool/degraded", {
-      // remaining_pct below the LOW band → halved wave in the shared fold.
-      quotaSourceSnapshot: snapshot(0.02),
+      // A small remaining token budget → the token-budget gate keeps its share
+      // strictly smaller (the differentiation now comes from the budget, not the
+      // removed remaining_pct halving cliff).
+      quotaSourceSnapshot: { ...snapshot(0.02), tokens_remaining: 1500 },
     });
     const coord = new HybridSpillCoordinator({
       pools: [healthy, degraded],

@@ -108,7 +108,6 @@ test("scheduleWave caps wave size by RPM limit", () => {
           "anthropic/claude-sonnet-4-6": { requests_per_minute: 10 },
         },
         safety_margin: 0.8,
-        unknown_hosted_concurrency: 100,
       },
     },
     hostModel: "anthropic/claude-sonnet-4-6",
@@ -127,7 +126,6 @@ test("scheduleWave caps wave size by TPM limit using per-slot estimates", () => 
           "test/model": { input_tokens_per_minute: 10_000 },
         },
         safety_margin: 1.0,
-        unknown_hosted_concurrency: 100,
       },
     },
     hostModel: "test/model",
@@ -147,7 +145,6 @@ test("scheduleWave per-slot TPM allows more slots when they fit budget", () => {
           "test/model": { input_tokens_per_minute: 20_000 },
         },
         safety_margin: 1.0,
-        unknown_hosted_concurrency: 100,
       },
     },
     hostModel: "test/model",
@@ -179,7 +176,6 @@ test("scheduleWave caps wave size by TPM limit", () => {
           "test/model": { input_tokens_per_minute: 10_000 },
         },
         safety_margin: 1.0,
-        unknown_hosted_concurrency: 100,
       },
     },
     hostModel: "test/model",
@@ -274,31 +270,10 @@ test("scheduleWave: a reported host limit never raises waves above a known RPM c
   assert.equal(schedule.max_concurrent, 3);
 });
 
-test("scheduleWave clamps unknown hosted providers to configured fallback concurrency", () => {
-  const schedule = scheduleWave({
-    providerName: "claude-code",
-    sessionConfig: { quota: { unknown_hosted_concurrency: 3 } },
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: null,
-  });
-  assert.equal(schedule.max_concurrent, 3);
-
-  const belowCap = scheduleWave({
-    providerName: "claude-code",
-    sessionConfig: { quota: { unknown_hosted_concurrency: 10 } },
-    hostModel: null,
-    requestedConcurrency: 4,
-    quotaStateEntry: null,
-  });
-  assert.equal(belowCap.max_concurrent, 4);
-});
-
-test("scheduleWave defaults agent-host providers to parallel dispatch, not serial", () => {
-  // claude-code with no learned state, no host-reported cap, and no explicit
-  // unknown_hosted_concurrency. It delegates to a host that fans out subagents
-  // in parallel, so the fallback must default to a parallel wave (the old
-  // default of 1 forced pathological 95-deep serial dispatch).
+test("scheduleWave invents NO ceiling for an unconfigured provider (no host limit, no rpm/tpm, no budget)", () => {
+  // New model (token-budget gate): the former invented unknown-hosted / cold-start
+  // fallback caps are gone. With no learned state, no host-reported cap, no RPM/TPM,
+  // and no live quota snapshot, concurrency is governed ONLY by the requested wave.
   const wide = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {},
@@ -306,19 +281,10 @@ test("scheduleWave defaults agent-host providers to parallel dispatch, not seria
     requestedConcurrency: 96,
     quotaStateEntry: null,
   });
-  assert.equal(wide.max_concurrent, 8);
+  assert.equal(wide.max_concurrent, 96);
+  assert.equal(wide.binding_cap, "none");
 
-  // The requested concurrency still caps it when smaller than the default.
-  const narrow = scheduleWave({
-    providerName: "claude-code",
-    sessionConfig: {},
-    hostModel: null,
-    requestedConcurrency: 3,
-    quotaStateEntry: null,
-  });
-  assert.equal(narrow.max_concurrent, 3);
-
-  // A genuinely unknown (non-agent-host) provider stays conservative at 1.
+  // A genuinely unknown (non-agent-host) provider is ALSO uncapped now — no floor.
   const unknown = scheduleWave({
     providerName: "subprocess-template",
     sessionConfig: {},
@@ -326,7 +292,8 @@ test("scheduleWave defaults agent-host providers to parallel dispatch, not seria
     requestedConcurrency: 96,
     quotaStateEntry: null,
   });
-  assert.equal(unknown.max_concurrent, 1);
+  assert.equal(unknown.max_concurrent, 96);
+  assert.equal(unknown.binding_cap, "none");
 });
 
 test("resolveHostModel: explicit -> config -> env -> null", () => {
@@ -372,41 +339,26 @@ test("resolveHostModel: explicit -> config -> env -> null", () => {
   );
 });
 
-test("scheduleWave clamps unknown local providers to configured fallback concurrency", () => {
-  const schedule = scheduleWave({
-    providerName: "local-subprocess",
-    sessionConfig: { quota: { unknown_local_concurrency: 5 } },
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: null,
-  });
-  assert.equal(schedule.max_concurrent, 5);
-
-  const belowCap = scheduleWave({
-    providerName: "local-subprocess",
-    sessionConfig: { quota: { unknown_local_concurrency: 10 } },
-    hostModel: null,
-    requestedConcurrency: 4,
-    quotaStateEntry: null,
-  });
-  assert.equal(belowCap.max_concurrent, 4);
+test("scheduleWave invents NO ceiling for an unconfigured local provider", () => {
+  // No fallback / cold-start cap anymore: an unconfigured local provider with no
+  // learned state and no rate limits dispatches the full requested wave.
+  for (const providerName of ["opencode", "local-subprocess"]) {
+    const schedule = scheduleWave({
+      providerName,
+      sessionConfig: {},
+      hostModel: null,
+      requestedConcurrency: 22,
+      quotaStateEntry: null,
+    });
+    assert.equal(schedule.max_concurrent, 22, `expected uncapped wave for ${providerName}`);
+    assert.equal(schedule.binding_cap, "none");
+  }
 });
 
-test("scheduleWave respects unlimited local concurrency without clamping", () => {
+test("scheduleWave still applies host limit for an unconfigured local provider", () => {
   const schedule = scheduleWave({
     providerName: "local-subprocess",
-    sessionConfig: { quota: { unknown_local_concurrency: "unlimited" } },
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: null,
-  });
-  assert.equal(schedule.max_concurrent, 22);
-});
-
-test("scheduleWave still applies host limit when local concurrency is unlimited", () => {
-  const schedule = scheduleWave({
-    providerName: "local-subprocess",
-    sessionConfig: { quota: { unknown_local_concurrency: "unlimited" } },
+    sessionConfig: {},
     hostModel: null,
     requestedConcurrency: 22,
     quotaStateEntry: null,
@@ -419,20 +371,7 @@ test("scheduleWave still applies host limit when local concurrency is unlimited"
   assert.equal(schedule.max_concurrent, 8);
 });
 
-test("scheduleWave applies first-contact cap for unconfigured local providers", () => {
-  for (const providerName of ["opencode", "local-subprocess"]) {
-    const schedule = scheduleWave({
-      providerName,
-      sessionConfig: {},
-      hostModel: null,
-      requestedConcurrency: 22,
-      quotaStateEntry: null,
-    });
-    assert.equal(schedule.max_concurrent, 3, `expected first-contact cap for ${providerName}`);
-  }
-});
-
-test("scheduleWave bypasses first-contact cap when discovered limits exist", () => {
+test("scheduleWave dispatches the full wave when discovered limits are generous", () => {
   const schedule = scheduleWave({
     providerName: "opencode",
     sessionConfig: {},
@@ -459,17 +398,6 @@ test("scheduleWave bypasses first-contact cap when quota state exists", () => {
     }),
   });
   assert.equal(schedule.max_concurrent, 6); // ramp-up: 5 succeeded + 1
-});
-
-test("scheduleWave uses full local concurrency when unknown_local_concurrency is unlimited", () => {
-  const schedule = scheduleWave({
-    providerName: "opencode",
-    sessionConfig: { quota: { unknown_local_concurrency: "unlimited" } },
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: null,
-  });
-  assert.equal(schedule.max_concurrent, 22);
 });
 
 test("scheduleWave respects learned concurrency cap (ramp-up disabled)", () => {
@@ -703,7 +631,6 @@ test("scheduleWave reports binding_cap='rpm' when the RPM limit binds", () => {
       quota: {
         models: { "anthropic/claude-sonnet-4-6": { requests_per_minute: 10 } },
         safety_margin: 0.8,
-        unknown_hosted_concurrency: 100,
       },
     },
     hostModel: "anthropic/claude-sonnet-4-6",
@@ -720,7 +647,6 @@ test("scheduleWave reports binding_cap='tpm' when the TPM limit binds", () => {
       quota: {
         models: { "test/model": { input_tokens_per_minute: 10_000 } },
         safety_margin: 1.0,
-        unknown_hosted_concurrency: 100,
       },
     },
     hostModel: "test/model",
@@ -747,28 +673,45 @@ test("scheduleWave reports binding_cap='learned' when the learned cap binds", ()
   assert.equal(schedule.binding_cap, "learned");
 });
 
-test("scheduleWave reports binding_cap='first_contact' for an unconfigured local provider", () => {
-  const schedule = scheduleWave({
-    providerName: "local-subprocess",
-    sessionConfig: {},
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: null,
-  });
-  assert.equal(schedule.max_concurrent, 3);
-  assert.equal(schedule.binding_cap, "first_contact");
-});
-
-test("scheduleWave reports binding_cap='fallback' when the configured fallback binds", () => {
+test("scheduleWave reports binding_cap='token_budget' when a small learned budget binds", () => {
+  // A pool near a window wall with a learned slope: the token budget caps the wave
+  // below the requested size and attributes token_budget.
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { unknown_hosted_concurrency: 3 } },
+    sessionConfig: { quota: { safety_margin: 1 } },
     hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: null,
+    requestedConcurrency: 10,
+    quotaStateEntry: makeEntry(
+      {
+        "1": { success_weight: 5, failure_weight: 0 },
+        "2": { success_weight: 5, failure_weight: 0 },
+        "3": { success_weight: 5, failure_weight: 0 },
+        "4": { success_weight: 5, failure_weight: 0 },
+        "5": { success_weight: 5, failure_weight: 0 },
+        "6": { success_weight: 5, failure_weight: 0 },
+        "7": { success_weight: 5, failure_weight: 0 },
+        "8": { success_weight: 5, failure_weight: 0 },
+        "9": { success_weight: 5, failure_weight: 0 },
+        "10": { success_weight: 5, failure_weight: 0 },
+      },
+      // 100 tokens per percent; window at 40% remaining (well above the near-wall
+      // floor) → budget = 40*100 = 4000.
+      { tokens_per_pct: { session: 100 } },
+    ),
+    // Each slot ~2000 tokens → only 2 fit in 4000.
+    estimatedSlotTokens: [2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000],
+    quotaSourceSnapshot: {
+      remaining_pct: 0.4,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null,
+      captured_at: new Date().toISOString(),
+      source: "test",
+      windows: [{ label: "session", remaining_pct: 0.4, reset_at: null }],
+    },
   });
-  assert.equal(schedule.max_concurrent, 3);
-  assert.equal(schedule.binding_cap, "fallback");
+  assert.equal(schedule.binding_cap, "token_budget");
+  assert.ok(schedule.max_concurrent < 10, `expected budget to cap below 10, got ${schedule.max_concurrent}`);
 });
 
 test("scheduleWave reports binding_cap='cooldown' during an active cooldown", () => {
@@ -800,11 +743,9 @@ test("scheduleWave reports binding_cap='host_concurrency' when the host limit bi
   assert.equal(schedule.binding_cap, "host_concurrency");
 });
 
-test("F4 inv-3: a capable host resolved via resolveHostActiveSubagentLimit is OFF the first_contact floor; an unknown host is ON it", () => {
-  // Capable host: F4's own handshake (resolveHostActiveSubagentLimit, NOT F3's
-  // descriptor) yields a reported active-subagent ceiling. That host gets
-  // agent-host concurrency and must NOT be clamped to the cold-start
-  // first_contact floor.
+test("F4 inv-3: a reported host limit binds; with no handshake signal nothing invents a floor", () => {
+  // Capable host: F4's own handshake (resolveHostActiveSubagentLimit) yields a
+  // reported active-subagent ceiling — that host limit binds.
   const capableLimit = resolveHostActiveSubagentLimit({
     sessionConfig: { quota: { host_active_subagent_limit: 8 } },
     env: {},
@@ -819,10 +760,10 @@ test("F4 inv-3: a capable host resolved via resolveHostActiveSubagentLimit is OF
     hostConcurrencyLimit: capableLimit,
   });
   assert.equal(capable.max_concurrent, 8);
-  assert.notEqual(capable.binding_cap, "first_contact");
+  assert.equal(capable.binding_cap, "host_concurrency");
 
-  // Unknown host: no handshake signal at all → resolveHostActiveSubagentLimit
-  // returns null and the conservative first_contact floor binds.
+  // No handshake signal → resolveHostActiveSubagentLimit returns null and, with
+  // no learned/rpm/tpm/budget signal, the wave is uncapped (no invented floor).
   const unknownLimit = resolveHostActiveSubagentLimit({
     sessionConfig: { quota: {} },
     env: {},
@@ -836,7 +777,8 @@ test("F4 inv-3: a capable host resolved via resolveHostActiveSubagentLimit is OF
     quotaStateEntry: null,
     hostConcurrencyLimit: unknownLimit,
   });
-  assert.equal(unknown.binding_cap, "first_contact");
+  assert.equal(unknown.binding_cap, "none");
+  assert.equal(unknown.max_concurrent, 96);
 });
 
 test("scheduleWave reports binding_cap='none' when nothing reduces the requested wave", () => {

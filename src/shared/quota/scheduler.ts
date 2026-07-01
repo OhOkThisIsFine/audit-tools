@@ -137,6 +137,13 @@ export interface ScheduleWaveOptions {
   quotaSourceSnapshot?: QuotaUsageSnapshot | null;
   /** RPM/TPM discovered from provider queries or response header extraction. */
   discoveredLimits?: DiscoveredRateLimitsInput | null;
+  /**
+   * Tokens already in flight against THIS pool (sum of estimated tokens for
+   * dispatched-but-not-yet-completed packets). Added to the wave's projected slot
+   * tokens when checking the token-budget gate so concurrent dispatch never
+   * over-subscribes the remaining window. Defaults to 0.
+   */
+  inFlightTokens?: number;
 }
 
 // Named quota tuning defaults (previously inline magic literals). Centralised
@@ -148,23 +155,24 @@ export const DEFAULT_SAFETY_MARGIN = 0.8;
 /** Half-life (hours) for decaying learned concurrency evidence. */
 export const DEFAULT_EMPIRICAL_HALF_LIFE_HOURS = 24;
 /**
- * Conservative cold-start ceiling applied on first contact with an unconfigured
- * provider. Private to this module: it is NOT a separable public export — the
- * resolved cold-start / agent-host floor is surfaced ONLY via the
- * {@link classifyProvider} struct's `concurrencyFloor`
- * (INV-BROKER-CLASSIFY-SINGLE-SOURCE / CE-005), so a call site cannot re-derive
- * a floor from a standalone constant.
+ * Reference cold-start floor for the capable-vs-cold host CLASSIFICATION (no
+ * longer a scheduler wave cap — the token-budget gate replaced the invented
+ * caps). Private to this module: NOT a separable public export — the resolved
+ * cold-start / agent-host floor is surfaced ONLY via the {@link classifyProvider}
+ * struct's `concurrencyFloor` (INV-BROKER-CLASSIFY-SINGLE-SOURCE / CE-005), so a
+ * call site cannot re-derive a floor from a standalone constant.
  */
 const COLD_START_CONCURRENCY = 3;
 
 /**
  * Parallel cold-start floor for a capable agent host that fans out to fresh
  * subagent sessions (each with its own context window). Private — surfaced only
- * through {@link classifyProvider}'s `concurrencyFloor`. Collapsing such a host
- * to serial dispatch (1) is pathological for the conversation-first flow, so the
- * floor is lifted when nothing else constrains concurrency. The host's own
- * reported cap still binds at dispatch time, and an explicit
- * `quota.unknown_hosted_concurrency` still overrides it.
+ * through {@link classifyProvider}'s `concurrencyFloor`. This floor is NO LONGER a
+ * scheduler wave-sizing cap (the invented cold-start/fallback caps were removed in
+ * favour of the token-budget gate); it survives solely as the reference point for
+ * the capable-vs-cold host CLASSIFICATION in `classifyCapableHost`
+ * (brokeredDispatch): a host reporting a ceiling above this floor, or learned
+ * evidence above it, is "capable".
  */
 const AGENT_HOST_CONCURRENCY = 8;
 
@@ -319,55 +327,135 @@ export function selectDispatchDriver(
 }
 
 /**
- * Real-time quota-source `remaining_pct` thresholds. At/under CRITICAL we throttle
- * to a single request; at/under LOW we halve the wave.
+ * Real-time quota-source `remaining_pct` thresholds retained for consumers that
+ * classify a pool's health from its live snapshot (e.g. the rolling engine's
+ * proactive cross-pool spill, INV-QD-14). These are NO LONGER wave-sizing
+ * cliffs: the scheduler sizes the wave against the learned token BUDGET gate
+ * ({@link deriveTokenBudget}), not a fixed remaining_pct step function.
  */
 export const QUOTA_REMAINING_PCT_CRITICAL = 0.1;
 export const QUOTA_REMAINING_PCT_LOW = 0.3;
-/** Multiplier applied to the wave when remaining quota is in the LOW band. */
-const QUOTA_LOW_WAVE_MULTIPLIER = 0.5;
 
-interface QuotaSourceAdjustmentResult {
-  waveSize: number;
-  bindingCap: WaveBindingCap;
-  cooldownUntil: string | null;
+/**
+ * Cold-start per-window calibration batch: with no learned tokens_per_pct slope
+ * for a window and no absolute tokens_remaining, admit at most this many slots so
+ * the run can OBSERVE Δutilization and seed the slope. This is a BOOTSTRAP, not a
+ * permanent cap — once even one slope sample lands, the learned budget governs.
+ */
+export const TOKEN_BUDGET_COLD_START_SLOTS = 2;
+
+/**
+ * Derive a single window's remaining token budget, in learned/absolute priority:
+ *  1. absolute `tokens_remaining` when the window reports one;
+ *  2. else the learned `tokens_per_pct[label]` × remaining_pct × 100;
+ *  3. else `null` (cold start — the caller applies the calibration bootstrap).
+ */
+function deriveWindowTokenBudget(
+  windowLabel: string,
+  remainingPct: number | null | undefined,
+  tokensRemaining: number | null | undefined,
+  learnedSlopes: Record<string, number> | undefined,
+): number | null {
+  if (typeof tokensRemaining === "number" && Number.isFinite(tokensRemaining)) {
+    return Math.max(0, tokensRemaining);
+  }
+  // A window reported as fully consumed (remaining fraction 0) has a KNOWN budget
+  // of 0 for ANY positive slope — 0 × slope = 0 — so it is knowable even with no
+  // learned slope. This is NOT the removed 0.1 cliff: it fires only at genuine
+  // emptiness (a HostSessionQuotaSource hard-limit reading, or an exhausted
+  // absolute count), and lets the gate throttle + persist a cooldown so a later
+  // transiently-null snapshot cannot re-expand a walled pool (anti-flap).
+  if (remainingPct != null && Number.isFinite(remainingPct) && remainingPct <= 0) {
+    return 0;
+  }
+  const slope = learnedSlopes?.[windowLabel];
+  if (
+    typeof slope === "number" &&
+    Number.isFinite(slope) &&
+    slope > 0 &&
+    remainingPct != null &&
+    Number.isFinite(remainingPct)
+  ) {
+    return Math.max(0, remainingPct * 100 * slope);
+  }
+  return null;
+}
+
+interface TokenBudgetResolution {
+  /** Remaining token budget across the pool's own windows (MIN), or null cold-start. */
+  budget: number | null;
+  /** True when at least one window is in calibration (no absolute + no learned slope). */
+  calibrating: boolean;
+  /**
+   * Earliest reset among windows whose budget is GENUINELY 0 (fully consumed), so
+   * the gate can persist a cooldown and not flap. Null unless a window is empty.
+   */
+  exhaustedResetAt: string | null;
 }
 
 /**
- * Apply a real-time quota-source snapshot to the current wave size. The snapshot
- * is the strongest live signal: when quota is near-exhausted we throttle to 1 and
- * record the reset time as a cooldown; when it is low (but not critical) we halve
- * the wave.
- *
- * Returns the adjusted wave size, binding cap, and cooldown timestamp. When no
- * adjustment is needed the inputs are returned unchanged.
+ * Resolve the pool's remaining token budget from its snapshot, reducing across
+ * the pool's OWN windows with MIN (the binding window governs). Uses the
+ * per-window breakdown when present, else the flat top-level snapshot as a
+ * single implicit window. Per-window: absolute → learned-slope → cold-start.
  */
-function applyQuotaSourceAdjustment(
-  waveSize: number,
-  bindingCap: WaveBindingCap,
-  cooldownUntil: string | null,
-  quotaSourceSnapshot: QuotaUsageSnapshot,
-): QuotaSourceAdjustmentResult {
-  if (
-    quotaSourceSnapshot.remaining_pct != null &&
-    quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_CRITICAL
-  ) {
-    return {
-      waveSize: 1,
-      bindingCap: waveSize > 1 ? "cooldown" : bindingCap,
-      cooldownUntil: quotaSourceSnapshot.reset_at ?? cooldownUntil,
-    };
+function deriveTokenBudget(
+  snapshot: QuotaUsageSnapshot,
+  learnedSlopes: Record<string, number> | undefined,
+): TokenBudgetResolution {
+  interface BudgetWindow {
+    label: string;
+    remaining_pct: number | null;
+    tokens_remaining: number | null;
+    reset_at: string | null;
   }
-  if (
-    quotaSourceSnapshot.remaining_pct != null &&
-    quotaSourceSnapshot.remaining_pct < QUOTA_REMAINING_PCT_LOW
-  ) {
-    const reduced = Math.max(1, Math.floor(waveSize * QUOTA_LOW_WAVE_MULTIPLIER));
-    if (reduced < waveSize) {
-      return { waveSize: reduced, bindingCap: "cooldown", cooldownUntil };
+  const windows: BudgetWindow[] =
+    snapshot.windows && snapshot.windows.length > 0
+      ? snapshot.windows.map((w) => ({
+          label: w.label,
+          remaining_pct: w.remaining_pct,
+          tokens_remaining: w.tokens_remaining ?? null,
+          reset_at: w.reset_at,
+        }))
+      : [
+          {
+            label: "default",
+            remaining_pct: snapshot.remaining_pct,
+            tokens_remaining: snapshot.tokens_remaining,
+            reset_at: snapshot.reset_at,
+          },
+        ];
+
+  let budget: number | null = null;
+  let calibrating = false;
+  let exhaustedResetAt: string | null = null;
+
+  for (const w of windows) {
+    const windowBudget = deriveWindowTokenBudget(
+      w.label,
+      w.remaining_pct,
+      w.tokens_remaining,
+      learnedSlopes,
+    );
+    if (windowBudget == null) {
+      calibrating = true;
+      continue;
     }
+    // A near-empty window needs no special-case cliff: its own budget
+    // (remaining_pct × slope, or an absolute tokens_remaining) is already tiny,
+    // so the MIN reduction and the K-clamp below throttle it naturally. A
+    // GENUINELY empty window (budget 0) additionally records its reset so the gate
+    // can persist a cooldown (anti-flap).
+    if (windowBudget === 0 && w.reset_at != null) {
+      const reset: string = w.reset_at;
+      if (exhaustedResetAt == null || reset < exhaustedResetAt) {
+        exhaustedResetAt = reset;
+      }
+    }
+    budget = budget == null ? windowBudget : Math.min(budget, windowBudget);
   }
-  return { waveSize, bindingCap, cooldownUntil };
+
+  return { budget, calibrating, exhaustedResetAt };
 }
 
 function sumTopN(sorted: number[], n: number): number {
@@ -377,25 +465,23 @@ function sumTopN(sorted: number[], n: number): number {
 }
 
 /**
- * Compute the wave size after applying the RPM cap, the TPM cap, and exactly one
- * of the learned-limit / unknown-provider-fallback caps — but BEFORE the
- * real-time quota-source adjustment and the host-concurrency ceiling, both of
- * which the caller applies. Pure: it never mutates an outer variable, so each
- * cap is a single `Math.min` at the end of its branch rather than a scattered
- * sequence of reassignments.
+ * Compute the wave size after applying the RPM cap, the TPM cap, and the
+ * learned-limit cap — but BEFORE the token-budget gate and the host-concurrency
+ * ceiling, both of which `scheduleWave` applies. Pure: it never mutates an outer
+ * variable, so each cap is a single `Math.min` at the end of its branch.
  *
- * The host-concurrency limit is deliberately NOT considered here: when the host
- * reports its active-subagent capacity it is enforced as a hard ceiling by
- * `applyHostConcurrencyLimit()` at the call site, so the only effect inside this
- * function is that a reported host limit suppresses the conservative
- * unknown-provider fallback (which exists solely as a no-signal default).
+ * The host-concurrency limit and the token-budget gate are deliberately NOT
+ * considered here — they are the only two things allowed to constrain
+ * concurrency beyond real provider RPM/TPM/learned limits, and both are applied
+ * by `scheduleWave`. With no learned history, no RPM/TPM, no host limit, and no
+ * token budget signal, this function invents NO ceiling.
  */
 /**
  * Result of the uncapped wave-size computation. `binding_cap` records which of
- * the RPM / TPM / learned / fallback / first-contact caps last reduced the
- * value (or "none" if nothing did), so the caller can attribute the decision.
- * The cooldown and host-concurrency caps are applied by `scheduleWave` itself
- * and folded into the final `binding_cap` there.
+ * the RPM / TPM / learned caps last reduced the value (or "none" if nothing did),
+ * so the caller can attribute the decision. The cooldown, token-budget, and
+ * host-concurrency caps are applied by `scheduleWave` itself and folded into the
+ * final `binding_cap` there.
  */
 interface UncappedWaveSize {
   size: number;
@@ -409,8 +495,6 @@ interface ComputeUncappedWaveSizeInput {
   avgTokens: number;
   slotsSorted: number[] | null;
   quotaStateEntry: QuotaStateEntry | null;
-  hostConcurrencyLimit: HostConcurrencyLimit | null;
-  providerName: ResolvedProviderName;
   quota: QuotaConfig;
   halfLifeHours: number;
 }
@@ -423,8 +507,6 @@ function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedW
     avgTokens,
     slotsSorted,
     quotaStateEntry,
-    hostConcurrencyLimit,
-    providerName,
     quota,
     halfLifeHours,
   } = input;
@@ -462,6 +544,11 @@ function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedW
     }
   }
 
+  // Learned concurrency cap (from recorded safe/failure buckets). With no learned
+  // history there is NO invented ceiling here: concurrency is governed solely by
+  // real provider limits (RPM/TPM above), the host-reported subagent ceiling
+  // (applied at the call site), and the token-budget gate (applied by
+  // scheduleWave). An unconfigured provider with no signals stays uncapped.
   if (quotaStateEntry) {
     const rampUp = quota.ramp_up_enabled !== false;
     const cap = rampUp
@@ -471,53 +558,8 @@ function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedW
       current = cap;
       bindingCap = "learned";
     }
-    return { size: current, binding_cap: bindingCap };
-  } else if (hostConcurrencyLimit !== null) {
-    // The host explicitly reported its active-subagent capacity. That is a real
-    // concurrency signal, so it supersedes the conservative unknown-provider
-    // fallback. The reported limit is enforced as the hard ceiling by
-    // applyHostConcurrencyLimit() at the call site, so nothing is capped here.
-    return { size: current, binding_cap: bindingCap };
-  } else {
-    const classification = classifyProvider(providerName);
-    const agentHostFloor = isCapableAgentHost(providerName)
-      ? classification.concurrencyFloor
-      : 1;
-    const fallbackCap =
-      classification.hostClass === "local"
-        ? quota.unknown_local_concurrency
-        : (quota.unknown_hosted_concurrency ?? agentHostFloor);
-    if (fallbackCap === "unlimited") {
-      // no cap — "unlimited" intentionally skips clamping
-    } else if (typeof fallbackCap === "number" && Number.isFinite(fallbackCap)) {
-      const cap = Math.max(1, Math.floor(fallbackCap));
-      if (cap < current) {
-        current = cap;
-        bindingCap = "fallback";
-      }
-    }
-
-    // First-contact cap: when no learned history, no configured fallback, AND
-    // no RPM/TPM limits from any source, apply a conservative ceiling.
-    // This triggers only for unconfigured local providers (fallbackCap is
-    // undefined). Hosted providers default to 1 via unknown_hosted_concurrency,
-    // and "unlimited" is an explicit opt-out.
-    if (
-      fallbackCap == null &&
-      limits.requests_per_minute == null &&
-      limits.input_tokens_per_minute == null
-    ) {
-      const firstContactCap = Math.max(
-        1,
-        quota.first_contact_concurrency ?? classification.concurrencyFloor,
-      );
-      if (firstContactCap < current) {
-        current = firstContactCap;
-        bindingCap = "first_contact";
-      }
-    }
-    return { size: current, binding_cap: bindingCap };
   }
+  return { size: current, binding_cap: bindingCap };
 }
 
 export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
@@ -531,6 +573,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     hostConcurrencyLimit = null,
     quotaSourceSnapshot = null,
     discoveredLimits = null,
+    inFlightTokens = 0,
   } = options;
   // Descending sort so sumTopN picks the largest slots
   const slotsSorted = estimatedSlotTokens
@@ -596,8 +639,8 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   }
 
   // During an active cooldown we throttle to a single request and skip all cap
-  // logic; otherwise apply RPM/TPM and learned/fallback caps. The host-concurrency
-  // ceiling is enforced uniformly below by applyHostConcurrencyLimit().
+  // logic; otherwise apply RPM/TPM and learned caps. The token-budget gate and
+  // host-concurrency ceiling are applied below.
   let waveSize = requestedConcurrency;
   let bindingCap: WaveBindingCap = "none";
   if (cooldownUntil) {
@@ -611,8 +654,6 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       avgTokens,
       slotsSorted,
       quotaStateEntry,
-      hostConcurrencyLimit,
-      providerName,
       quota,
       halfLifeHours,
     });
@@ -620,14 +661,54 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     bindingCap = uncapped.binding_cap;
   }
 
-  // Apply real-time quota source data if available (strongest live signal).
+  // Token-budget gate (the everything-agnostic live cap). When a live snapshot is
+  // present and no cooldown is active, cap concurrency to the largest K whose
+  // top-K slot tokens plus the pool's in-flight tokens fit the pool's remaining
+  // token budget (MIN across the pool's own windows), safety-scaled. A window
+  // that is (near) exhausted forces cooldown to its reset_at. A cold-start window
+  // (no absolute tokens, no learned slope) admits a small calibration batch so
+  // the run can observe Δutilization and seed the slope.
   if (quotaSourceSnapshot && !cooldownUntil) {
-    ({ waveSize, bindingCap, cooldownUntil } = applyQuotaSourceAdjustment(
-      waveSize,
-      bindingCap,
-      cooldownUntil,
+    const { budget, calibrating, exhaustedResetAt } = deriveTokenBudget(
       quotaSourceSnapshot,
-    ));
+      quotaStateEntry?.tokens_per_pct,
+    );
+    if (budget === 0) {
+      // A genuinely empty window (remaining fraction 0 / absolute count 0):
+      // throttle to 1 and persist a cooldown to its reset so a later transiently
+      // -null snapshot cannot re-expand the walled pool (anti-flap, CE-010).
+      const beforeBudget = waveSize;
+      waveSize = 1;
+      cooldownUntil = exhaustedResetAt ?? quotaSourceSnapshot.reset_at ?? cooldownUntil;
+      if (cooldownUntil) bindingCap = "cooldown";
+      else if (beforeBudget > 1) bindingCap = "token_budget";
+    } else if (budget != null) {
+      const budgetTokens = budget * safetyMargin;
+      let k = waveSize;
+      if (slotsSorted && slotsSorted.length > 0) {
+        while (k > 1 && sumTopN(slotsSorted, k) + inFlightTokens > budgetTokens) k--;
+      } else if (avgTokens > 0) {
+        k = Math.max(1, Math.floor((budgetTokens - inFlightTokens) / avgTokens));
+      }
+      // If another of the pool's own windows is still cold (no absolute + no
+      // learned slope), that window can't be budgeted yet — clamp to the
+      // per-window cold-start batch too so a healthy window's budget can't
+      // over-dispatch an un-calibrated one (MIN across the pool's windows).
+      if (calibrating) k = Math.min(k, TOKEN_BUDGET_COLD_START_SLOTS);
+      k = Math.max(1, k);
+      if (k < waveSize) {
+        waveSize = k;
+        bindingCap = "token_budget";
+      }
+    } else if (calibrating) {
+      // Cold start: no window has an absolute or learned budget. Admit a small
+      // bounded batch to observe Δutilization and seed the slope — a bootstrap,
+      // not a permanent ceiling.
+      if (TOKEN_BUDGET_COLD_START_SLOTS < waveSize) {
+        waveSize = TOKEN_BUDGET_COLD_START_SLOTS;
+        bindingCap = "token_budget";
+      }
+    }
   }
 
   const beforeHostCap = waveSize;

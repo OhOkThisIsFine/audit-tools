@@ -155,14 +155,20 @@ describe("scheduleWave (quota module)", () => {
     expect(result.max_concurrent).toBe(3);
   });
 
-  it("throttles when quota source shows <10% remaining", () => {
+  it("throttles to 1 when a window is genuinely exhausted (remaining 0)", () => {
+    // The removed 0.1/0.3 cliff bands no longer throttle a merely-low window —
+    // concurrency is governed by the learned token budget. Only a GENUINELY empty
+    // window (remaining fraction 0, a hard-limit reading) is a known-zero budget
+    // that throttles to 1 (0 × any slope = 0). A nonzero-but-low reading with no
+    // learned slope instead admits the small cold-start calibration batch (covered
+    // by the token-budget cold-start tests).
     const result = scheduleWave({
       providerName: "claude-code",
       sessionConfig: baseConfig,
       hostModel: null,
       requestedConcurrency: 10,
       quotaSourceSnapshot: {
-        remaining_pct: 0.05,
+        remaining_pct: 0,
         reset_at: null,
         requests_remaining: null,
         tokens_remaining: null,
@@ -173,7 +179,7 @@ describe("scheduleWave (quota module)", () => {
     expect(result.max_concurrent).toBe(1);
   });
 
-  it("halves when quota source shows <30% remaining", () => {
+  it("does NOT halve a low-but-nonzero window (cliffs removed; budget governs)", () => {
     const entry = makeEntry({
       buckets: {
         "1": { success_weight: 5, failure_weight: 0 },
@@ -222,36 +228,33 @@ describe("scheduleWave (quota module)", () => {
     expect(result.max_concurrent).toBeLessThan(10);
   });
 
-  it("defaults agent-host providers to parallel dispatch, unknown providers to 1", () => {
-    // claude-code fans out to parallel subagents, so an unknown model must not
-    // collapse to serial (1) — it defaults to the agent-host parallel fallback.
+  it("invents no ceiling for any provider with no host/rate/budget signal", () => {
+    // The former agent-host / unknown fallback caps are gone: with no learned
+    // state, no host limit, no RPM/TPM, and no live snapshot, both an agent host
+    // and a genuinely unknown provider dispatch the full requested wave.
     const agentHost = scheduleWave({
       providerName: "claude-code",
       sessionConfig: baseConfig,
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(agentHost.max_concurrent).toBe(
-      classifyProvider("claude-code").concurrencyFloor,
-    );
+    expect(agentHost.max_concurrent).toBe(10);
+    expect(agentHost.binding_cap).toBe("none");
 
-    // A genuinely unknown (non-agent-host) provider stays conservative at 1.
     const unknown = scheduleWave({
       providerName: "subprocess-template",
       sessionConfig: baseConfig,
       hostModel: null,
       requestedConcurrency: 10,
     });
-    expect(unknown.max_concurrent).toBe(1);
+    expect(unknown.max_concurrent).toBe(10);
+    expect(unknown.binding_cap).toBe("none");
   });
 
-  it("allows unlimited for local provider", () => {
+  it("dispatches the full requested wave for a local provider with no signal", () => {
     const result = scheduleWave({
       providerName: "local-subprocess",
-      sessionConfig: {
-        ...baseConfig,
-        quota: { enabled: true, unknown_local_concurrency: "unlimited" },
-      },
+      sessionConfig: { ...baseConfig, quota: { enabled: true } },
       hostModel: null,
       requestedConcurrency: 10,
     });
@@ -453,17 +456,20 @@ describe("M5 dispatch broker — classifyProvider single struct (inv-1, inv-7, C
     expect("agentHostFallbackConcurrency" in shared).toBe(false);
   });
 
-  it("source reads the floor off the struct, never a separable constant (no second cold-start table)", () => {
-    // The only public floor surface is the struct; the scheduler's fallback wave
-    // for a no-signal capable agent host equals that struct floor.
+  it("the struct floor survives only as a classification reference, not a scheduler wave cap", () => {
+    // The only public floor surface is still the struct (for classifyCapableHost),
+    // but the scheduler no longer clamps a no-signal wave to it — the invented
+    // cold-start/fallback caps were removed in favour of the token-budget gate.
     const floor = classifyProvider("claude-code").concurrencyFloor;
+    expect(typeof floor).toBe("number");
     const result = scheduleWave({
       providerName: "claude-code",
       sessionConfig: baseConfig,
       hostModel: null,
       requestedConcurrency: 50,
     });
-    expect(result.max_concurrent).toBe(floor);
+    expect(result.max_concurrent).toBe(50);
+    expect(result.binding_cap).toBe("none");
   });
 });
 
