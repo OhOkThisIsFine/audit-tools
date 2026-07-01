@@ -296,12 +296,92 @@ const knipCandidate: ExternalAnalyzerCandidate = {
   parse: parseKnip,
 };
 
+/** Deterministic per-process output directory for jscpd's JSON reporter. */
+function jscpdReportDir(): string {
+  return join(tmpdir(), `audit-tools-jscpd-${process.pid}`);
+}
+
+/**
+ * jscpd's `--reporters json` writes `jscpd-report.json` inside the directory
+ * passed to `--output` (its own naming, not configurable) — this is that path
+ * for the per-process output directory above.
+ */
+function jscpdReportPath(): string {
+  return join(jscpdReportDir(), "jscpd-report.json");
+}
+
+/**
+ * Parse jscpd's JSON reporter output (`{ duplicates: [{ firstFile, secondFile,
+ * fragment, lines, ... }] }`) into the engine's generic item shape. Degrades to
+ * [] on malformed/empty/missing-'duplicates' input. Never calls
+ * normalizeGenericExternalResults — that seam belongs to the audit/adapters
+ * normalization path, not to a candidate's own parse function (same as
+ * parseKnip/parseEslint/parseSemgrep above).
+ */
+function parseJscpd(report: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(report || "{}");
+  } catch {
+    return [];
+  }
+  const duplicates =
+    payload && typeof payload === "object" && Array.isArray((payload as { duplicates?: unknown }).duplicates)
+      ? ((payload as { duplicates: Record<string, unknown>[] }).duplicates)
+      : [];
+  return duplicates
+    .filter((d): d is Record<string, unknown> => Boolean(d) && typeof d === "object")
+    .map((d) => {
+      const firstFile = (d.firstFile ?? {}) as Record<string, unknown>;
+      const secondFile = (d.secondFile ?? {}) as Record<string, unknown>;
+      const path = typeof firstFile.name === "string" ? firstFile.name : "";
+      const startLoc = (firstFile.startLoc ?? {}) as Record<string, unknown>;
+      const endLoc = (firstFile.endLoc ?? {}) as Record<string, unknown>;
+      const startLine = typeof startLoc.line === "number" ? startLoc.line : undefined;
+      const endLine = typeof endLoc.line === "number" ? endLoc.line : undefined;
+      const otherPath = typeof secondFile.name === "string" ? secondFile.name : "";
+      const lines = typeof d.lines === "number" ? d.lines : undefined;
+      return {
+        id: `jscpd:${path}:${startLine ?? 0}:${otherPath}`,
+        category: "maintainability",
+        severity: "low",
+        path,
+        line_start: startLine,
+        line_end: endLine,
+        summary: `jscpd: duplicate code block (${lines ?? "?"} lines) shared with ${otherPath || "another file"}`,
+        rule: "jscpd-duplicate",
+      };
+    });
+}
+
+const jscpdCandidate: ExternalAnalyzerCandidate = {
+  id: "jscpd",
+  runner: "npx",
+  spec: "jscpd@4",
+  // CONSENT-GATED: heavier full-repo duplication scan; unverified lead, same
+  // tier as eslint/semgrep/knip.
+  defaultRun: false,
+  detect: (root) => detectNodeEcosystem(root),
+  buildArgv: (prefix, root) => [
+    ...prefix,
+    "--reporters",
+    "json",
+    "--output",
+    jscpdReportDir(),
+    "--silent",
+    root,
+  ],
+  reportFile: () => jscpdReportPath(),
+  parse: parseJscpd,
+};
+
 /** The curated external analyzer candidate set. gitleaks is the default member. */
 export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   gitleaksCandidate,
   semgrepCandidate,
   eslintCandidate,
   knipCandidate,
+  jscpdCandidate,
 ];
 
 export {
@@ -312,4 +392,6 @@ export {
   eslintCandidate,
   parseGitleaks,
   GITLEAKS_VERSION,
+  jscpdCandidate,
+  parseJscpd,
 };

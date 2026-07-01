@@ -1,36 +1,281 @@
 {
-  "schema_version": "remediate-code-outcomes/v1alpha1",
-  "run_id": "audit-full-sweep-20260630",
-  "completed_at": "2026-06-30",
-  "source": ".audit-tools/audit-report.md (186 verified-real findings)",
-  "strategy": "Contract-pipeline plan (15 disjoint module nodes) implemented in isolated worktrees; per-node isolated verify deadlocked (source nodes vs separate test nodes + whole-suite verify), so finalized via COMBINED RECONCILIATION (operator-chosen): each node committed, all commits cherry-picked onto one integration branch, full suite run once on the union.",
-  "verification": {
-    "build": "pass",
-    "typecheck": "pass",
-    "remediate_vitest": "2093 passed / 0 failed / 2 skipped",
-    "audit_node_test": "2487 passed / 0 failed",
-    "true_green": "run with CLAUDECODE unset"
+  "contract_version": "remediate-code-outcomes/v1alpha1",
+  "total": 3,
+  "by_outcome": {
+    "resolved": 2,
+    "verified_no_change": 1,
+    "inappropriate": 0,
+    "ignored": 0,
+    "blocked": 0
   },
-  "nodes": [
-    { "id": "CP-NODE-1", "module": "remediate-nextstep", "status": "resolved", "summary": "input_conflict prompt names remediation-outcomes.json; lens/severity prose + provider accessor single-sourced; behavior-preserving extraction of final-gate cluster to finalGate.ts with equivalence test." },
-    { "id": "CP-NODE-2", "module": "remediate-dispatch", "status": "resolved", "summary": "INFRA_FILE_PATHS replaced with src/remediate/-derived matcher (win32-normalized) so isInfraModifyingBlock is live again (HIGH); invalid result files archived not swallowed; pool-construction preamble single-sourced." },
-    { "id": "CP-NODE-3", "module": "remediate-contract-pipeline", "status": "resolved", "summary": "ungrounded extracted-plan marker removed on citation-grounding failure (HIGH security); archive originalFree honored; DAG edge referential validation; lean-verdict schema_version; phase-list single-sourced; resolveAdversarialDepth extracted. 2 of 7 sub-claims rejected as not-a-bug (document validator never existed; moduleSlug already single-sourced)." },
-    { "id": "CP-NODE-4", "module": "remediate-close", "status": "resolved", "summary": "fullyGreen now means genuinely-completed close; skipped non-none merge-to-base no longer deletes artifacts (HIGH); none/no-op green path preserved." },
-    { "id": "CP-NODE-5", "module": "shared-dispatch-quota", "status": "resolved", "summary": "roster pool hostModel derived from poolKey at the single construction seam (HIGH model-routing) — all dispatch drivers correct-by-construction; fileLock injectable clock seam added (STALE_LOCK_MS unchanged)." },
-    { "id": "CP-NODE-6", "module": "shared-providers", "status": "resolved", "summary": "self-spawn-blocked providers carry a machine-readable flag and are excluded from the confirmed pool by default; commandExists/self-spawn/PATH guard single-sourced (new providerPathGuard.ts) with injectable detection hook; provider_done telemetry vocab added." },
-    { "id": "CP-NODE-7", "module": "shared-io", "status": "resolved", "summary": "sanitizeRunId replaced with injective _xx byte-escape encoding so distinct runIds map to distinct friction paths (collision fixed); import surface + idempotent capture preserved." },
-    { "id": "CP-NODE-8", "module": "audit-cli", "status": "resolved", "summary": "flag mutual-exclusion validated BEFORE destructive cleanupStaleArtifactsDir (HIGH); batch ingest admits only canonical result filenames; validate-result grounds against configured repo_root not cwd; line-count failure policy single-sourced." },
-    { "id": "CP-NODE-9", "module": "audit-extractors", "status": "resolved", "summary": "App Router empty-segment route normalized to '/' so app/route.ts yields root route; HTML_RESOURCE_ATTRIBUTE single-sourced (exported from analyzers/html.ts, duplicate deleted from browserExtension.ts) with drift guard." },
-    { "id": "CP-NODE-10", "module": "audit-orchestrator", "status": "resolved", "summary": "auto-fix formatters scoped to eligible disposition files not '.' (write-scope); win32 shim basename classification; strategy_summary gated on AUDIT_CODE_VERBOSE; 3 dead taskBuilder functions deleted. rekeyDriftedResults guard already present." },
-    { "id": "CP-NODE-11", "module": "audit-contracts-validation", "status": "resolved", "summary": "worker line-range end>=start refinement (schema regenerated, drift-guarded); discovered-limit field set single-sourced incl. context_tokens/output_tokens. Secondary ungrounded sub-claims (permission-bypass surfacing, normalizer drops, coverage lookup, DesignAssessment) left per verify-before-fix." },
-    { "id": "CP-NODE-12", "module": "scripts-config-deploy", "status": "resolved", "summary": "update-languages.mjs target path fixed to repo src/audit/extractors; CI path filters include package.json + workflow; audit postinstall exits non-zero on missing required asset; knip dead-code gate single-sourced. 2 claims rejected (smoke already captures one response; opencode MCP calls not actually removed)." },
-    { "id": "CP-NODE-13", "module": "tests-remediate", "status": "resolved", "summary": "stale packages/remediate-code/ fixtures re-pinned to src/remediate/; version literals -> exported constants; source-text drift sentinels -> type-level/exported-surface assertions." },
-    { "id": "CP-NODE-14", "module": "tests-audit", "status": "resolved", "summary": "fragile npx-madge guard replaced with in-process cycle detector; magic-11 -> LENSES.length; recursive single-decl walk -> import LENS_KEYWORD_MAP/VALID_LENSES; STALE_LOCK_MS imported not scraped." },
-    { "id": "CP-NODE-15", "module": "tests-shared", "status": "resolved", "summary": "fileLock tests driven via injected clock seam; copied threshold literals -> imported STALE_LOCK_MS; shared fileLock test-support module; obligation-engine imports source not dist." }
+  "by_lens": {
+    "security": {
+      "verified_no_change": 1,
+      "resolved": 2
+    }
+  },
+  "started_at": "2026-07-01T19:10:17.035Z",
+  "completed_at": "2026-07-01T19:19:05.531Z",
+  "duration_ms": 152580,
+  "outcomes": [
+    {
+      "finding_id": "CP-NODE-1",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "verified_no_change",
+      "rework_count": 0,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "started_at": "2026-07-01T19:16:32.951Z",
+      "completed_at": "2026-07-01T19:16:32.951Z",
+      "duration_ms": 0,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-contract",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-1",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-2",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-3",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-4",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-5",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-6",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-7",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-8",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-inv-9",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-fail-1",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-fail-2",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-fail-3",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-fail-4",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-fail-5",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-fail-6",
+          "Satisfies contract obligation: OBL-knip-graph-context-in-prompt-fail-7",
+          "Verifies contract obligation: OBL-knip-graph-context-in-prompt-inv-1",
+          "Verifies contract obligation: OBL-knip-graph-context-in-prompt-inv-3",
+          "Verifies contract obligation: OBL-knip-graph-context-in-prompt-inv-5",
+          "Verifies contract obligation: OBL-knip-graph-context-in-prompt-inv-6",
+          "Verifies contract obligation: OBL-knip-graph-context-in-prompt-inv-7",
+          "Verifies contract obligation: OBL-knip-graph-context-in-prompt-inv-8",
+          "Addresses accepted counterexample: CE-011"
+        ],
+        "id": "CP-NODE-1",
+        "title": "Render graph-context section in renderWorkerPrompt for external_analyzer_signal-tagged tasks",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "In src/audit/prompts/renderWorkerPrompt.ts, add a readGraphBundleForPrompt helper that reads graph_bundle.json via withFsRetry(() => readFile(path, 'utf8')) (never readJsonFile/readOptionalJsonFile), JSON.parse's it, and validates with GraphBundleSchema.strict().parse, all inside one try/catch degrading to undefined on any failure (ENOENT, malformed JSON, schema-invalid, or exhausted transient fs error). When task.pending_audit_tasks_path resolves an AuditTask carrying the current file_paths tagged 'external_analyzer_signal' and a graph bundle loads successfully, call collectGraphEdges(graphBundle) then buildPacketGraphContext(task.file_paths, flatEdges, graphBundle), map the camelCase result to the snake_case shape (entrypoints, key_edges, boundary_files, quality) mirroring reviewPackets.ts's buildPacket() rename, omit the quality field when task.file_paths.length <= 1, and append the rendered section as the last entries pushed into `lines` before `return lines.join('\\n')` in both the agent and non-agent branches, after all existing trailing blocks. Use normalizeGraphPath for all path matching. No changes to src/shared/types/graph.ts or src/audit/orchestrator/nextStep.ts.",
+        "concrete_change": "In src/audit/prompts/renderWorkerPrompt.ts, add a readGraphBundleForPrompt helper that reads graph_bundle.json via withFsRetry(() => readFile(path, 'utf8')) (never readJsonFile/readOptionalJsonFile), JSON.parse's it, and validates with GraphBundleSchema.strict().parse, all inside one try/catch degrading to undefined on any failure (ENOENT, malformed JSON, schema-invalid, or exhausted transient fs error). When task.pending_audit_tasks_path resolves an AuditTask carrying the current file_paths tagged 'external_analyzer_signal' and a graph bundle loads successfully, call collectGraphEdges(graphBundle) then buildPacketGraphContext(task.file_paths, flatEdges, graphBundle), map the camelCase result to the snake_case shape (entrypoints, key_edges, boundary_files, quality) mirroring reviewPackets.ts's buildPacket() rename, omit the quality field when task.file_paths.length <= 1, and append the rendered section as the last entries pushed into `lines` before `return lines.join('\\n')` in both the agent and non-agent branches, after all existing trailing blocks. Use normalizeGraphPath for all path matching. No changes to src/shared/types/graph.ts or src/audit/orchestrator/nextStep.ts.",
+        "contract_goal_id": "remaining-backlog-2026-07-01",
+        "contract_obligation_ids": [
+          "OBL-knip-graph-context-in-prompt-contract",
+          "OBL-knip-graph-context-in-prompt-inv-1",
+          "OBL-knip-graph-context-in-prompt-inv-2",
+          "OBL-knip-graph-context-in-prompt-inv-3",
+          "OBL-knip-graph-context-in-prompt-inv-4",
+          "OBL-knip-graph-context-in-prompt-inv-5",
+          "OBL-knip-graph-context-in-prompt-inv-6",
+          "OBL-knip-graph-context-in-prompt-inv-7",
+          "OBL-knip-graph-context-in-prompt-inv-8",
+          "OBL-knip-graph-context-in-prompt-inv-9",
+          "OBL-knip-graph-context-in-prompt-fail-1",
+          "OBL-knip-graph-context-in-prompt-fail-2",
+          "OBL-knip-graph-context-in-prompt-fail-3",
+          "OBL-knip-graph-context-in-prompt-fail-4",
+          "OBL-knip-graph-context-in-prompt-fail-5",
+          "OBL-knip-graph-context-in-prompt-fail-6",
+          "OBL-knip-graph-context-in-prompt-fail-7"
+        ],
+        "verification_obligation_ids": [
+          "OBL-knip-graph-context-in-prompt-inv-1",
+          "OBL-knip-graph-context-in-prompt-inv-3",
+          "OBL-knip-graph-context-in-prompt-inv-5",
+          "OBL-knip-graph-context-in-prompt-inv-6",
+          "OBL-knip-graph-context-in-prompt-inv-7",
+          "OBL-knip-graph-context-in-prompt-inv-8"
+        ],
+        "addresses_counterexamples": [
+          "CE-011"
+        ],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npm run test:single -- tests/audit/render-worker-prompt.test.mjs"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-1",
+      "block_dependencies": [],
+      "final_status": "fixed"
+    },
+    {
+      "finding_id": "CP-NODE-2",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "resolved",
+      "rework_count": 0,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "started_at": "2026-07-01T19:16:33.013Z",
+      "completed_at": "2026-07-01T19:16:33.013Z",
+      "duration_ms": 0,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-contract",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-inv-1",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-inv-2",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-inv-3",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-inv-4",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-inv-5",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-fail-1",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-fail-2",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-fail-3",
+          "Satisfies contract obligation: OBL-analyzer-registry-proof-tool-fail-4",
+          "Verifies contract obligation: OBL-analyzer-registry-proof-tool-inv-1",
+          "Verifies contract obligation: OBL-analyzer-registry-proof-tool-inv-2",
+          "Verifies contract obligation: OBL-analyzer-registry-proof-tool-inv-3",
+          "Verifies contract obligation: OBL-analyzer-registry-proof-tool-inv-4",
+          "Verifies contract obligation: OBL-analyzer-registry-proof-tool-inv-5"
+        ],
+        "id": "CP-NODE-2",
+        "title": "Register jscpd as a new external analyzer candidate",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "In src/audit/extractors/analyzers/candidates.ts, append a new jscpdCandidate: ExternalAnalyzerCandidate (id 'jscpd', runner 'npx', spec pinned to a jscpd major version, defaultRun: false, detect: detectNodeEcosystem, buildArgv producing JSON-reporter output to a deterministic per-process report path) after the existing four entries, and add parseJscpd alongside parseKnip/parseEslint/parseSemgrep that parses jscpd's raw JSON reporter output into the same generic finding-item array shape those parsers return, degrading to [] on malformed/empty/missing-'duplicates' input, and never itself calling normalizeGenericExternalResults. Append jscpdCandidate to EXTERNAL_ANALYZER_CANDIDATES (order-preserving) and re-export jscpdCandidate/parseJscpd. Do not modify acquisitionEngine.ts and do not add a production src/audit/adapters/jscpd.ts. Cross-run concurrent-edit sequencing risk to candidates.ts (OBL-analyzer-registry-proof-tool-fail-4) is out of scope for this run's diff -- no other in-flight module touches this file, confirmed by the module contract's own side_effects note.",
+        "concrete_change": "In src/audit/extractors/analyzers/candidates.ts, append a new jscpdCandidate: ExternalAnalyzerCandidate (id 'jscpd', runner 'npx', spec pinned to a jscpd major version, defaultRun: false, detect: detectNodeEcosystem, buildArgv producing JSON-reporter output to a deterministic per-process report path) after the existing four entries, and add parseJscpd alongside parseKnip/parseEslint/parseSemgrep that parses jscpd's raw JSON reporter output into the same generic finding-item array shape those parsers return, degrading to [] on malformed/empty/missing-'duplicates' input, and never itself calling normalizeGenericExternalResults. Append jscpdCandidate to EXTERNAL_ANALYZER_CANDIDATES (order-preserving) and re-export jscpdCandidate/parseJscpd. Do not modify acquisitionEngine.ts and do not add a production src/audit/adapters/jscpd.ts. Cross-run concurrent-edit sequencing risk to candidates.ts (OBL-analyzer-registry-proof-tool-fail-4) is out of scope for this run's diff -- no other in-flight module touches this file, confirmed by the module contract's own side_effects note.",
+        "contract_goal_id": "remaining-backlog-2026-07-01",
+        "contract_obligation_ids": [
+          "OBL-analyzer-registry-proof-tool-contract",
+          "OBL-analyzer-registry-proof-tool-inv-1",
+          "OBL-analyzer-registry-proof-tool-inv-2",
+          "OBL-analyzer-registry-proof-tool-inv-3",
+          "OBL-analyzer-registry-proof-tool-inv-4",
+          "OBL-analyzer-registry-proof-tool-inv-5",
+          "OBL-analyzer-registry-proof-tool-fail-1",
+          "OBL-analyzer-registry-proof-tool-fail-2",
+          "OBL-analyzer-registry-proof-tool-fail-3",
+          "OBL-analyzer-registry-proof-tool-fail-4"
+        ],
+        "verification_obligation_ids": [
+          "OBL-analyzer-registry-proof-tool-inv-1",
+          "OBL-analyzer-registry-proof-tool-inv-2",
+          "OBL-analyzer-registry-proof-tool-inv-3",
+          "OBL-analyzer-registry-proof-tool-inv-4",
+          "OBL-analyzer-registry-proof-tool-inv-5"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npm run test:single -- tests/audit/analyzer-candidates.test.mjs"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-2",
+      "block_dependencies": [],
+      "final_status": "fixed"
+    },
+    {
+      "finding_id": "CP-NODE-3",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "resolved",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "started_at": "2026-07-01T19:16:33.069Z",
+      "completed_at": "2026-07-01T19:19:05.531Z",
+      "duration_ms": 152462,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-consent-gate-for-proposed-analyzers-contract",
+          "Satisfies contract obligation: OBL-consent-gate-for-proposed-analyzers-inv-1",
+          "Satisfies contract obligation: OBL-consent-gate-for-proposed-analyzers-inv-2",
+          "Satisfies contract obligation: OBL-consent-gate-for-proposed-analyzers-inv-3",
+          "Satisfies contract obligation: OBL-consent-gate-for-proposed-analyzers-inv-4",
+          "Satisfies contract obligation: OBL-consent-gate-for-proposed-analyzers-fail-1",
+          "Satisfies contract obligation: OBL-consent-gate-for-proposed-analyzers-fail-2",
+          "Verifies contract obligation: OBL-consent-gate-for-proposed-analyzers-inv-1"
+        ],
+        "id": "CP-NODE-3",
+        "title": "Record consent-gate-for-proposed-analyzers confirmation and defer the LLM-proposal-channel gap to the backlog",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "No source change. Add a docs/backlog.md entry under 'Open bugs / frictions' recording: (1) admitSpawn already gates every defaultRun:false candidate (including CP-NODE-2's jscpd) behind a non-empty consentToken -- confirmed, no gap; (2) there is no runtime path for an LLM to propose a brand-new analyzer id beyond the static EXTERNAL_ANALYZER_CANDIDATES array -- explicitly out of scope this round, tracked as a forward item; (3) the latent (not exercised) hazard that SessionConfig's persisted schema does not structurally strip external_acquisition.consent_token, should a future proposal-channel writer ever touch that field.",
+        "concrete_change": "No source change. Add a docs/backlog.md entry under 'Open bugs / frictions' recording: (1) admitSpawn already gates every defaultRun:false candidate (including CP-NODE-2's jscpd) behind a non-empty consentToken -- confirmed, no gap; (2) there is no runtime path for an LLM to propose a brand-new analyzer id beyond the static EXTERNAL_ANALYZER_CANDIDATES array -- explicitly out of scope this round, tracked as a forward item; (3) the latent (not exercised) hazard that SessionConfig's persisted schema does not structurally strip external_acquisition.consent_token, should a future proposal-channel writer ever touch that field.",
+        "contract_goal_id": "remaining-backlog-2026-07-01",
+        "contract_obligation_ids": [
+          "OBL-consent-gate-for-proposed-analyzers-contract",
+          "OBL-consent-gate-for-proposed-analyzers-inv-1",
+          "OBL-consent-gate-for-proposed-analyzers-inv-2",
+          "OBL-consent-gate-for-proposed-analyzers-inv-3",
+          "OBL-consent-gate-for-proposed-analyzers-inv-4",
+          "OBL-consent-gate-for-proposed-analyzers-fail-1",
+          "OBL-consent-gate-for-proposed-analyzers-fail-2"
+        ],
+        "verification_obligation_ids": [
+          "OBL-consent-gate-for-proposed-analyzers-inv-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-3",
+      "block_dependencies": [],
+      "final_status": "fixed"
+    }
   ],
-  "reconciliation_fixes": [
-    "tests/audit/audit-dispatch-observability.test.mjs — set AUDIT_CODE_VERBOSE so the now-gated strategy_summary line emits.",
-    "tests/audit/audit-code-completion.test.mjs — batch fixture renamed to canonical <stem>_<12hex>.json so node-8's stricter filter admits it."
-  ],
-  "notes": "Several findings were adversarially verified false at implementation (workers applied verify-before-fix): document-vs-implement validator, already-single-sourced moduleSlug, opencode MCP-removal, and a cluster of ungrounded audit-contracts sub-claims — these are recorded as verified-already-correct, not silently dropped."
+  "ended_at": "2026-07-01T19:19:09.453Z",
+  "step_count": 6,
+  "combined_test_result": {
+    "passed": true,
+    "duration_ms": 0
+  },
+  "closing_result": {
+    "action": "none",
+    "status": "skipped",
+    "commands": []
+  },
+  "plan_coverage": {
+    "contract_version": "remediate-code-coverage/v1alpha1",
+    "plan_id": "remaining-backlog-2026-07-01",
+    "source_finding_count": 3,
+    "planned_count": 3,
+    "folded_count": 0,
+    "dropped_count": 0,
+    "checkpoint_dropped_count": 0,
+    "phantom_dropped_count": 0,
+    "declined_review_count": 0,
+    "entries": [
+      {
+        "finding_id": "CP-NODE-1",
+        "title": "Render graph-context section in renderWorkerPrompt for external_analyzer_signal-tagged tasks",
+        "disposition": "planned",
+        "block_id": "CP-BLOCK-CP-NODE-1"
+      },
+      {
+        "finding_id": "CP-NODE-2",
+        "title": "Register jscpd as a new external analyzer candidate",
+        "disposition": "planned",
+        "block_id": "CP-BLOCK-CP-NODE-2"
+      },
+      {
+        "finding_id": "CP-NODE-3",
+        "title": "Record consent-gate-for-proposed-analyzers confirmation and defer the LLM-proposal-channel gap to the backlog",
+        "disposition": "planned",
+        "block_id": "CP-BLOCK-CP-NODE-3"
+      }
+    ]
+  }
 }
