@@ -26,7 +26,6 @@
     "remediate-code.mjs",
     "dispatch/**",
     "schemas/**",
-    "templates/**",
     "skills/**",
     "scripts/postinstall.mjs",
     "scripts/audit/postinstall.mjs",

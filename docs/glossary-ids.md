@@ -18,7 +18,7 @@ The grep that backs the guard recognises these family shapes:
 | Family | Shape | Meaning |
 |---|---|---|
 | `INV-` | `INV-<AREA>-<NN>` | **Invariant** — a named correctness property the tooling must always uphold. `<AREA>` scopes it (see below). |
-| `CE-` | `CE-<NNN>` | **Counterexample** — a judge-accepted adversarial case the contract pipeline must defend against; the paired invariant must make it impossible. |
+| `CE-` | `CE-<NNN>` | **Counterexample** — a judge-accepted adversarial case the contract pipeline must defend against; the paired invariant must make it impossible. **Not globally unique** — this guard only scans `src/**/*.ts`; `docs/backlog-remediation-design.md` runs its own independent `CE-*`/`FC-*` id family for a different design-history purpose, and a bare `CE-NNN` can also appear as an unrelated local counter in source comments (e.g. `stepBoundaryCapture.ts`, `scheduler.ts`, `clauseInterpreter.ts`). Always resolve a `CE-*` id from its own document/file, never assume cross-document uniqueness. |
 | `N-` | `N-<phase><NN>` | **Node id** in a remediation/redesign plan DAG (e.g. the redesign `N-R*`/`N-S*` nodes, the self-audit `N-X*`/`N-CE*` nodes). A node is a bounded unit of planned work. |
 | `SEAM-` | `SEAM-<NAME>` | **Multi-agent seam contract** — a hand-off boundary between independently-run agents (or between dispatch and merge) whose contract both sides must honour. |
 | `OBS-` / `ARC-` / `COR-` / `MNT-` / `TST-` / `REL-` / `CFG-` / `DAT-` | `<LENS>-<hash>` | **Auditor finding id** — a finding emitted by `audit-code`, keyed by lens prefix + a short content hash (see `findingIdentitySignature`). Stable across re-audits of the same defect. |

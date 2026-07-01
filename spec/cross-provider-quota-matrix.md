@@ -11,10 +11,9 @@
 Each backend gets the best achievable `QuotaSource` feeding the shared contract:
 `queryCurrentUsage(providerModelKey) → QuotaUsageSnapshot { remaining_pct (0–1 fraction),
 reset_at, … }`. Signal preference, always: **proactive endpoint > reactive headers on a
-completion > reactive dated-limit error > local consumption estimate**. The scheduler consumes
-`remaining_pct` per pool for health classification; wave-sizing/throttling before a 429 is governed
-by the learned token-budget gate (see `dispatch-token-budget-gate.md`), not a fixed 0.1/0.3 step
-function.
+completion > reactive dated-limit error > local consumption estimate**. How that signal governs
+concurrency is [`dispatch-token-budget-gate.md`](dispatch-token-budget-gate.md)'s concern, not this
+matrix's.
 
 ## Summary
 

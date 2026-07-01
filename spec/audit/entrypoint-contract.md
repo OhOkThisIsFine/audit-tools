@@ -55,16 +55,19 @@ Each invocation must return a structured execution summary with at least:
 
 ## Execution summary shape
 
-Conceptually, the response should look like:
+The real return type is `AdvanceAuditResult` (`src/audit/orchestrator/advanceTypes.ts`):
 
-- `status`: `active` | `blocked` | `complete`
-- `selected_obligation`: string
-- `selected_executor`: string
+- `audit_state`: `AuditState` — nested object; carries `status` (`active` | `blocked` | `complete`) and
+  optional `blockers`: string[] internally, not as top-level fields
+- `selected_obligation`: string | null
+- `selected_executor`: string | null
+- `progress_made`: boolean
 - `artifacts_written`: string[]
-- `artifacts_marked_stale`: string[]
 - `progress_summary`: string
-- `blockers`: string[]
 - `next_likely_step`: string | null
+- `updated_bundle`: `ArtifactBundle`
+
+There is no `artifacts_marked_stale` field.
 
 ## Bounded-step guarantee
 
