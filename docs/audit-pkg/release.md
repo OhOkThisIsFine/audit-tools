@@ -43,7 +43,7 @@ The workflow:
 
 - requests `id-token: write` for npm OIDC exchange
 - pins Node `22.14.0`
-- upgrades npm to `>=11.5.1`
+- pins npm to `11.5.1`
 - runs `npm run verify:release`
 - previews the packed tarball with `npm pack --dry-run`
 - publishes with public access and provenance
