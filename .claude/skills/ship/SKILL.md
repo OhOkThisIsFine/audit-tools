@@ -27,9 +27,12 @@ Remote `audit-tools`, branch `main` (not origin, not master).
 ## 3. Publish (single package)
 
 - Repo root, CLAUDECODE unset: `env -u CLAUDECODE npm run release:patch:publish` (or `:minor:` / `:major:`).
-  `scripts/release-and-publish.mjs` front-loads `verify:release` (check + test + 4 smokes), bumps, tags `vX.Y.Z`,
-  pushes, creates the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`), then waits for the
-  CI run + npm propagation. **Trusted publishing is configured + working** — no tokens, no local bootstrap.
+  `scripts/release-and-publish.mjs` runs a fast local pre-tag gate (`npm run check` only — the full `verify:release`
+  already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
+  the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`, which runs the full `verify:release`
+  chain — check + check:deadcode + check:doc-manifest + test + verify:hosts + the two `smoke:*` scripts — before
+  publish), then waits for the CI run + npm propagation. **Trusted publishing is configured + working** — no
+  tokens, no local bootstrap.
 - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.
 - The smokes pack ONE tarball; Windows-flaky on temp-dir EPERM/EBUSY — re-run a smoke before calling it a regression.
 - Local Windows-green ≠ Linux-CI-green — the release CI run is the real signal.
