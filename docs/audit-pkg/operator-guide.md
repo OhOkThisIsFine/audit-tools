@@ -150,8 +150,11 @@ Supported providers:
 - `auto`
 - `subprocess-template`
 - `claude-code`
+- `codex`
 - `opencode`
+- `openai-compatible`
 - `vscode-task`
+- `antigravity`
 
 `local-subprocess` is the safest fallback default. `auto` is explicit opt-in.
 External providers are compatibility bridges, not the intended default review
