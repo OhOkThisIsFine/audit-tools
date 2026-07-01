@@ -22,6 +22,7 @@ export type RemediationStepKind =
   | "dispatch_implement"
   | "dispatch_implement_rolling"
   | "implement_rolling_sequential"
+  | "quota_paused"
   | "collect_triage"
   | "close_run"
   | "present_report"

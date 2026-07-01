@@ -45,8 +45,9 @@ import {
   readQuotaState,
   recordTokensPerPctObservation,
 } from "../quota/state.js";
-import { buildEmptyPoolTerminal } from "../quota/capacity.js";
+import { buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "../quota/capacity.js";
 import type { WorkerOutputChannel } from "../quota/errorParsing.js";
+import { detectRateLimitError, computeCooldownUntil } from "../quota/errorParsing.js";
 import { tierRank } from "./tierRank.js";
 
 // ---------------------------------------------------------------------------
@@ -88,7 +89,21 @@ export interface RollingDispatchResult<TPacket> {
    * limit string — that path keeps the normal transient re-route, never an
    * account-wall escalation).
    */
-  rateLimit?: { channel: WorkerOutputChannel; text: string };
+  rateLimit?: {
+    channel: WorkerOutputChannel;
+    text: string;
+    /**
+     * ISO reset instant parsed from `text` when the limit stated a wall-clock
+     * reset (a host *session* limit, e.g. "resets 1:50pm"). Set by the engine at
+     * the rate_limited observation point (never by the provider): it records a
+     * POOL-level pause until this instant, so the rolling loop skips that pool
+     * rather than thrashing it, and — when it is the only surviving pool — strands
+     * the remaining work as a retryable `quota_paused` terminal. Absent for a
+     * bare transient 429 with no parseable reset (that keeps the INV-QD-07
+     * cooldown-and-retry behaviour).
+     */
+    reset_at?: string;
+  };
 }
 
 /** Identity of the provider/model pool selected for a dispatch. */
@@ -120,6 +135,16 @@ export interface RollingDispatchState<TPacket> {
    * elsewhere or shrinks the active set toward empty).
    */
   exhaustedPoolIds: Set<string>;
+  /**
+   * Pool id → epoch-ms of a host session-limit reset ("resets 1:50pm"-style
+   * wall). A pool here is PAUSED-until-reset: `selectProvider` skips it while
+   * `now < resetAtMs` (pause-honor, no thrash), and when every remaining item's
+   * pool is paused with nothing in flight the run STRANDS them as a retryable
+   * `quota_paused` terminal (piece D). Distinct from `exhaustedPoolIds` (a bare
+   * transient 429 without a parseable reset): a paused pool carries the reset that
+   * makes the strand retryable and drives the terminal's `earliest_reset_at`.
+   */
+  pausedPoolResetAt: Map<string, number>;
   /**
    * Packet ids that could not be dispatched because every pool was exhausted.
    * Surfaced via {@link RollingDispatcher.getTerminal} as an `empty_pool`
@@ -324,13 +349,24 @@ export function selectProvider<TPacket>(
   quotaStateEntries: Record<string, QuotaStateEntry>,
   sessionConfig: SessionConfig,
   exhaustedPoolIds: ReadonlySet<string> = new Set(),
+  pausedPoolResetAt: ReadonlyMap<string, number> = new Map(),
+  now: number = Date.now(),
 ): ProviderSlot | null {
   const complexity = scorePacketComplexity(packet);
   const highComplexity = complexity >= 0.5;
 
+  // Pause-honor (piece D): a pool paused until a stated host session-limit reset
+  // is skipped while `now < resetAt` — the rolling loop must NOT re-dispatch into
+  // a paused pool (no thrash). Once its reset passes it becomes eligible again
+  // (near-reset in-process resume), unlike the monotonic `exhaustedPoolIds`.
+  const isPausedNow = (poolId: string): boolean => {
+    const resetAt = pausedPoolResetAt.get(poolId);
+    return resetAt != null && now < resetAt;
+  };
+
   // Capability ordering: high-complexity → descending rank, low-complexity → ascending.
   const sorted = [...confirmedPools]
-    .filter((p) => !exhaustedPoolIds.has(p.id))
+    .filter((p) => !exhaustedPoolIds.has(p.id) && !isPausedNow(p.id))
     .sort((a, b) => {
       const diff = poolCapabilityRank(b) - poolCapabilityRank(a);
       return highComplexity ? diff : -diff;
@@ -416,6 +452,7 @@ export function createRollingDispatcher<TPacket>(
     inFlight: new Map(),
     completedIds: new Set(),
     exhaustedPoolIds: new Set(),
+    pausedPoolResetAt: new Map(),
     strandedIds: new Set(),
   };
 
@@ -610,7 +647,35 @@ export function createRollingDispatcher<TPacket>(
     // re-selects a pool still within headroom. The packet is therefore neither
     // marked completed nor recorded as a result — it remains live work.
     if (result.outcome === "rate_limited") {
-      state.exhaustedPoolIds.add(providerSlot.poolId);
+      // Host session-limit pause (piece D): when the worker's ERROR/STATUS
+      // channel carried a session-limit string with a parseable wall-clock reset
+      // (e.g. "You've hit your session limit · resets 1:50pm"), record a
+      // POOL-level pause until that reset and DO NOT permanently exhaust the pool
+      // — a near reset lets the same process re-dispatch after it passes, and the
+      // reset feeds the retryable `quota_paused` terminal. A bare transient 429
+      // (no reset) keeps the monotonic INV-QD-07 exhausted-pool re-route.
+      const limitText = result.rateLimit?.text;
+      const detection = limitText ? detectRateLimitError(limitText) : null;
+      const resetAtMs =
+        detection && detection.retryAfterMs != null
+          ? Date.parse(computeCooldownUntil(detection.retryAfterMs))
+          : null;
+      if (resetAtMs != null && Number.isFinite(resetAtMs)) {
+        // Stamp the parsed reset back onto the result so the consumer (and the
+        // terminal) can surface it, then pause the pool until then.
+        result.rateLimit = {
+          ...result.rateLimit!,
+          reset_at: new Date(resetAtMs).toISOString(),
+        };
+        const prior = state.pausedPoolResetAt.get(providerSlot.poolId);
+        // Keep the LATEST reset if the pool re-limits with a farther wall.
+        state.pausedPoolResetAt.set(
+          providerSlot.poolId,
+          prior != null ? Math.max(prior, resetAtMs) : resetAtMs,
+        );
+      } else {
+        state.exhaustedPoolIds.add(providerSlot.poolId);
+      }
       // Feed the host-session source FIRST (write side): a channel-isolated
       // recordLimit accrues the same-packet bounded re-limit count and may escalate
       // this packet — which the isPacketEscalated read below then observes in the
@@ -685,6 +750,35 @@ export function createRollingDispatcher<TPacket>(
     return confirmedPools.every((p) => state.exhaustedPoolIds.has(p.id));
   }
 
+  /**
+   * True when NO pool can currently accept because every pool is either
+   * permanently exhausted (bare 429) OR paused until a future session-limit reset
+   * (piece D). Waiting the short transient tick cannot help — the remaining work
+   * is stranded: `quota_paused` when at least one blocker is a reset pause (so the
+   * strand stays retryable), else `empty_pool`.
+   */
+  function noPoolCanAcceptNow(now: number): boolean {
+    return confirmedPools.every(
+      (p) =>
+        state.exhaustedPoolIds.has(p.id) ||
+        (state.pausedPoolResetAt.get(p.id) ?? -Infinity) > now,
+    );
+  }
+
+  /**
+   * Earliest reset epoch-ms across all currently-paused pools (piece D), or null
+   * when none is paused. Drives the `quota_paused` terminal's `earliest_reset_at`
+   * and tells a resuming step how long to wait.
+   */
+  function earliestPausedResetMs(now: number): number | null {
+    let earliest: number | null = null;
+    for (const resetAt of state.pausedPoolResetAt.values()) {
+      if (resetAt <= now) continue;
+      if (earliest == null || resetAt < earliest) earliest = resetAt;
+    }
+    return earliest;
+  }
+
   /** Move every still-pending packet into the stranded set and clear the queue. */
   function strandPending(): void {
     for (const packet of state.pendingQueue) {
@@ -711,6 +805,8 @@ export function createRollingDispatcher<TPacket>(
           quotaStateCache.entries,
           sessionConfig,
           state.exhaustedPoolIds,
+          state.pausedPoolResetAt,
+          Date.now(),
         );
 
         if (slot === null) continue;
@@ -733,7 +829,13 @@ export function createRollingDispatcher<TPacket>(
       //    surface an empty_pool terminal (INV-QD-07 / SEAM-rolling-stranding).
       //  - Otherwise this is a transient quota cooldown; yield briefly and retry.
       if (state.inFlight.size === 0 && dispatched === 0 && state.pendingQueue.length > 0) {
-        if (allPoolsExhausted()) {
+        // No pool can accept right now: every pool is exhausted (bare 429) or
+        // paused until a future session-limit reset (piece D). Waiting the short
+        // transient tick cannot help — strand the remainder and return so a later
+        // step redispatches after the reset (NO in-process multi-hour sleep). The
+        // terminal reason is chosen in getTerminal(): `quota_paused` (retryable)
+        // when a reset pause is the blocker, else `empty_pool`.
+        if (noPoolCanAcceptNow(Date.now())) {
           strandPending();
           break;
         }
@@ -768,6 +870,17 @@ export function createRollingDispatcher<TPacket>(
 
   function getTerminal(): PartialCompletionTerminal | null {
     if (state.strandedIds.size === 0) return null;
+    // Piece D: if any pool is paused until a session-limit reset, the strand is a
+    // RETRYABLE `quota_paused` terminal carrying the earliest reset — the consumer
+    // keeps the stranded items pending and a later step redispatches them clean.
+    // Otherwise it is the pre-existing non-retryable `empty_pool` terminal.
+    const earliest = earliestPausedResetMs(Date.now());
+    if (earliest != null) {
+      return buildQuotaPausedTerminal(
+        [...state.strandedIds],
+        new Date(earliest).toISOString(),
+      );
+    }
     return buildEmptyPoolTerminal([...state.strandedIds]);
   }
 

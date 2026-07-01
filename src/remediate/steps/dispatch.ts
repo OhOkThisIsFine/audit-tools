@@ -1411,8 +1411,19 @@ export async function acceptNodeWorktree(
   let verifyPassed = false;
   let merged = false;
 
+  if (workerOutcome === "rate_limited") {
+    // Piece D — quota-death worktree preservation: a worker that died on a host
+    // session-limit is a RETRYABLE pause, not a failure. Leave its worktree INTACT
+    // (do NOT removeWorktree) so nothing is destroyed during the pause; the node
+    // redoes clean on resume (the re-entry `resetNodeWorktreeAndBranch` handles the
+    // clean redo). Nothing to land now — return the outcome so the rolling engine
+    // records the pause + strands the node pending.
+    return { outcome: workerOutcome, verifyPassed, merged };
+  }
+
   if (workerOutcome !== "success") {
-    // Worker failed / rate-limited: nothing to land; drop the worktree, preserve outcome.
+    // Real worker failure (error / timeout): nothing to land; drop the worktree so
+    // the main tree is never dirtied by an unverified change, preserve the outcome.
     removeWorktree(root, wt);
     return { outcome: workerOutcome, verifyPassed, merged };
   }
@@ -3493,6 +3504,18 @@ async function mergeImplementResultsIntoState(
   }
   const dir = runDir(options.artifactsDir, runId, "implement");
 
+  // Piece D — quota-paused strand set: block_ids stranded by a `quota_paused`
+  // partial-completion terminal (their worker rate-limited on a host session
+  // limit). Their result files are legitimately absent, but they are a RETRYABLE
+  // pause, NOT a failure — a later step redispatches them clean (worktrees were
+  // preserved). The merge must therefore LEAVE their items pending instead of
+  // marking them blocked on the missing result. Only the quota_paused reason is
+  // treated this way; `empty_pool` nodes are genuine failures and block as before.
+  const quotaPausedStrandedBlocks =
+    state.partial_completion_terminal?.reason === "quota_paused"
+      ? new Set(state.partial_completion_terminal.stranded_ids)
+      : new Set<string>();
+
   // DC-5 verify gate: load the obligation_ledger + test_validator_plan once so a
   // resolved finding that covers a behavior-CHANGE obligation can be re-blocked
   // when its test specs are only one polarity (a positive without a scoped
@@ -3566,6 +3589,13 @@ async function mergeImplementResultsIntoState(
 
   for (const item of itemsToMerge) {
     if (!existsSync(item.result_path)) {
+      // Piece D: a node stranded by a quota_paused terminal has no result file
+      // because its worker paused on a host session limit — leave its items
+      // PENDING so a later step (after the reset) redispatches them clean; never
+      // mark them blocked here.
+      if (item.block_id && quotaPausedStrandedBlocks.has(item.block_id)) {
+        continue;
+      }
       console.warn(`Missing implement worker result: ${item.result_path} — marking items blocked.`);
       const block = item.block_id
         ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
