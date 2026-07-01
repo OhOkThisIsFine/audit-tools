@@ -69,8 +69,10 @@ that conforms to one contract:
     queryCurrentUsage(providerModelKey) → QuotaUsageSnapshot { remaining_pct (0–1), reset_at, … }
 
 Signal preference, always: **proactive endpoint > reactive headers on a completion >
-reactive dated-limit (429) error > local consumption estimate**. The scheduler consumes
-`remaining_pct` (throttle bands 0.1 / 0.3) to slow/cool-down *before* a hard 429.
+reactive dated-limit (429) error > local consumption estimate**. How that signal turns
+into a concurrency decision — the token-budget dispatch gate — is a separate mechanism
+documented in [`dispatch-token-budget-gate.md`](../spec/dispatch-token-budget-gate.md);
+this doc stays scoped to *who tracks which quota*, not how concurrency is throttled.
 
 `buildQuotaSource` registers ALL known proactive sources in one composite, but this is
 NOT "track everything" — it is the opposite. Each source **gates on the provider name**

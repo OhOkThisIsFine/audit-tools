@@ -35,29 +35,22 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   instance through `buildConfirmedPools` (pool sizing) AND `driveRollingDispatch → createRollingDispatcher`
   (recordRateLimit + isPacketEscalated). Deterministic wiring unit-tested in `tests/shared/rollingDispatch.test.mjs`
   (same-packet account wall escalates past the bound → early strand before pools exhaust → onEscalation fires).
-  **Still open (env-bound):** (1) live validation on a real rate-limited multi-worker run; (2) the A-8 hybrid path
-  (`HybridSpillCoordinator`, ~nextStep.ts:1881) drives via the coordinator not `driveRollingDispatch`, so its
-  anonymous host-session source is unfed — wire the same escalation route there once the live run validates the
-  primary path; (3) audit-side parity (`src/audit/orchestrator/rollingDispatch.ts` `runRollingDispatch` +
-  `quotaPool.ts`) — the shared primitive now supports the hooks, audit just needs to thread a retained source.
+  **Still open (env-bound):** (1) live validation on a real rate-limited multi-worker run; (2) audit-side parity
+  (`src/audit/orchestrator/rollingDispatch.ts` `runRollingDispatch` + `quotaPool.ts`) — the shared primitive now
+  supports the hooks, audit just needs to thread a retained source.
+  **Done-as-designed, not deferred:** the A-8 hybrid path (`HybridSpillCoordinator`, `nextStep.ts` ~1765-1790)
+  intentionally does NOT route through `onEscalation` — it has its own already-working bounded rate-limited/settle
+  mechanism (DC-4), so its `HostSessionQuotaSource` only feeds `buildConfirmedPools` sizing by design, confirmed
+  by an in-code comment. No follow-up needed here.
   Fits the dispatch capability-tiered driver track. [[meta-audit-friction-must-be-tool-enforced]]
 - **Selective-deepening tasks never converge — packet result task_id ≠ assigned `deepening:*` id.** Workers returned packet-style task_ids instead of the assigned `deepening:finding:*`, so merge-and-ingest never matched results to tasks and looped. The prompt-side fix (explicit task_id binding in `buildTaskSections`) is in place but **needs live validation** — can't be verified without a real deepening-capable run. Recovery until validated: quarantine orphan pending `deepening:*` tasks to let synthesis run.
 - **Selective-deepening loop #2 — steward result idempotency_key collision — ✅ FIXED (2026-07-01, not yet live-validated).** Distinct from the task_id-mismatch loop above. `idempotencyKey` collapsed every selective-deepening round of a `{unit_id,lens,pass_id}` coordinate onto the bare `'deepening'`/`'steward'` discriminator, so a regenerated round's clean result was dropped as a replay at `ledger.ts:182` and the loop never converged. Fixed by folding `task_id` into `buildResultContentDiscriminator`'s `deepening`/`steward` branch (`src/shared/contentKey.ts`) — each round's distinct task_id now yields a distinct discriminator (⇒ distinct idempotencyKey, persists), while a genuine same-task_id replay still reproduces the same discriminator (⇒ INV-2 no-op preserved). Call sites updated: `ledger.ts` `stampLedgerKeys`, `resultBaseline.ts` `deriveLiveResultKeys`. New tests: `content-key-seam.test.mjs` (deepening/steward round-vs-replay), `ledger.test.mjs` (two distinct-task_id rounds both persist; same-task_id replay still no-ops). Full suites green (audit 3368/0, remediate 2103/0). **Remaining:** live validation on a real deepening-capable run (can't be exercised by unit tests alone). Full diagnosis: `.audit-tools/audit/deepening-loop-diagnosis.md` (gitignored, local only).
   - **TRAP (historical, confirmed 2026-06-30 pre-fix — still relevant if this class of bug regresses):** host-side unblock attempts do NOT work and actively corrupt gitignored run-state. Marking `status:complete` in `audit_tasks.json` is ignored (next-step regenerates deepening tasks in-memory each call); writing `partial_completion_terminal.stranded_ids` is overwritten by the next dispatch emission; appending clean results with unique idempotency keys DID clear the obligation but cascaded `planning_artifacts` stale and a subsequent regeneration truncated `audit_tasks.json`. **Lesson: there is NO host-side unblock for this class of loop — the fix must be the idempotency-discriminator code change (now shipped), then a clean re-run.** A recovery affordance the tool SHOULD still expose: a supported `--force-synthesis` / partial-coverage escape that resyncs `artifact_metadata` and drives synthesis from the intact ledger without hand-editing artifacts.
 
-- **Dead-code gate — SHIPPED (knip default-mode); production-mode tested-but-unwired sweep is a manual track.**
-  `npm run check:deadcode` (`knip --include exports,types,nsExports,nsTypes`, in `verify:release`) fails the build on
-  any exported symbol with **zero consumers anywhere — including tests** (`knip.json`, `ignoreExportsUsedInFile:true`,
-  entries = the real TS roots `src/audit/index.ts` + `src/remediate/index.ts` since the `.mjs` bins shell out to
-  `dist/`). Wiring a new export into its production path is now part of "done". First run deleted 35 truly-dead symbols.
-  **Why default-mode, not the literal "zero non-test consumers":** knip `--production` (which would catch the
-  tested-but-unwired class directly) has REAL false positives — it can't trace dispatch-table / re-export-alias / dynamic
-  wiring, so live functions like `runPlanPhase` / `resolveFreshSessionProviderName` flag as unused. It is therefore NOT
-  gate-able. The tested-but-unwired class (the original git-history-extractor failure) is instead worked as a periodic
-  **manual audit**: `knip --production` → filter to symbols with zero *grep-detectable* production callers (grep DOES
-  find the dispatch/alias cases knip misses, so a grep-zero is a reliable dead signal) → delete symbol + orphaned tests.
-  One such sweep ran this sprint (candidates manifested, ~26 confirmed dead + deleted). Re-run when worthwhile.
-  [[deterministic-analyzers-own-vs-acquire]]
+- **Dead-code gate — SHIPPED (knip default-mode).** Rule + rationale now in `CLAUDE.md` → Conventions &
+  invariants ("Dead-code release gate — default-mode knip, not `--production`"). One manual
+  `--production` tested-but-unwired sweep ran 2026-06-27 (~26 confirmed dead + deleted); re-run when
+  worthwhile. [[deterministic-analyzers-own-vs-acquire]]
 
 - **remediate-code: stale unfinished run silently hijacks a fresh `--guidance-file`/`--input` call.**
   2026-07-01: a `next-step --guidance-file <new-scope>` call on a repo with an old unfinished run
@@ -93,6 +86,54 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   that channel: strip or redact `consent_token` before any such persistence.
 
 ## Forward tracks
+
+- **Spec-doc rewrite pass — three top-level design docs + three audit-contract docs have systemic drift
+  (2026-07-01 doc-review, R10-D7/D9/D10/D11).** Two deeper independent passes (structural spot-check +
+  a 169-tool-call prose-level pass) both confirm this is prose/contract drift across many small claims,
+  not a handful of narrow swaps — recommend one dedicated rewrite/verification session covering all six
+  files together, sourced directly from the named real-code anchors below:
+  1. `spec/audit/dependency-map.md`, `spec/audit/artifact-contract.md`, `spec/audit/executor-catalog.md`
+     — phantom filenames throughout (`synthesis_report.json`, `merged_findings.json`,
+     `root_cause_clusters.json`, `audit_results.json` for `.jsonl`), missing real artifacts
+     (`audit-findings.json`, `audit-report.md`, `synthesis-narrative.json`, `tooling_manifest.json`,
+     `intent_checkpoint.json`, `audit_plan_metrics.json`, `task_affinity_graph.json`,
+     `syntax_resolution_status.json`); `executor-catalog.md` is missing over half the real 21-entry
+     registry and splits several executors that were folded into `intake_executor`/`planning_executor`.
+     Source from `src/audit/orchestrator/dependencyMap.ts` (`ARTIFACT_DEPENDS_ON_MAP`),
+     `src/audit/orchestrator/executors.ts` (`EXECUTOR_REGISTRY`), `src/audit/io/artifacts.ts`
+     (`ARTIFACT_DEFINITIONS`).
+  2. `spec/contract-authoring-determinism-design.md` — 6 of 8 strategies (S1,S3-S7) + 3 of 4 S8 sub-fixes
+     already shipped (commits `d5fb1ab`,`2229f73`,`3b39377`,`94a2c33`,`3ebd4f0`) but the doc still frames
+     them as proposed/future work; S7's citation is also wrong (`orchestrator/fileAnchors.ts` mischaracterized
+     — the real grounding chokepoint is `cli/mergeAndIngestCommand.ts`, uncited). Only S8's "Gate it"
+     (auto-complete-empty gating) is genuinely still open.
+  3. `spec/audit-workflow-design.md` — Gate 1 (provider confirmation) described as interactive but is a
+     silent deterministic auto-complete; provider-quota-query/confirmation-display functions have zero
+     call sites; "provider pool informs lens recommendations" unwired; a systemic "workers emit findings
+     inline" claim recurs in 3 places but the real mechanism is a file write (inline-emit was tried and
+     reverted per a code comment — it silently dropped results); `buildCacheablePrompt` has zero callers;
+     planning's "frozen after one always-on LLM estimate review" step doesn't exist; "blast radius" absent
+     from real risk-estimate factors; edge-kind weight ordering wrong; "remediation does not re-ask" Gate 1
+     claim is false (remediate-code has zero code paths reading the shared provider-confirmation artifact).
+  4. `spec/remediation-workflow-design.md` — "both paths run the pipeline" is misleading:
+     `src/remediate/steps/leanFastPath.ts` lets qualifying Path-A runs skip the full
+     `CONTRACT_PIPELINE_PHASE_ORDER` entirely (independently confirmed by `spec/self-scaling-pipeline-design.md`,
+     which calls this fast path "too trusting"); `risk_preview`/`impl_preview_acknowledged.json` don't exist;
+     `synthesize_intake` isn't a real pass name; `applyClarificationResolution` should be
+     `applyPlanClarificationResolution`; `MAX_AUTO_RETRIES` is actually split into `_CONTRACT`/`_INFRA`.
+  Also smaller, contained items to fold into the same pass: `spec/audit/entrypoint-contract.md`'s
+  execution-summary shape was fixed 2026-07-01 (matched to real `AdvanceAuditResult`) — verify it stays
+  accurate if `advanceTypes.ts` changes before this pass runs.
+
+- **remediate-code installer/generator for `.agent/skills/remediate-code/SKILL.md` parity with audit-code
+  (2026-07-01 doc-review, R10-D12).** `.agent/skills/remediate-code/SKILL.md` is byte-identical to
+  `skills/remediate-code/SKILL.md` today by coincidence only — nothing generates or enforces sync for it,
+  unlike audit-code's real multi-host installer (`wrapper/audit-code-wrapper-install-hosts.mjs`, ~1200
+  lines: per-host asset rendering for codex/opencode/vscode/antigravity/copilot, verify checks, install
+  manifest, isolated-verify test harness). Extending that pattern to remediate-code is a substantial build,
+  not a quick fix — scope it as its own session using `audit-code-wrapper-install-hosts.mjs` as the
+  reference implementation. Until then the duplication is harmless but silent-drift-prone; a manual sync
+  check is the interim mitigation.
 
 - **Dead-code / unused-export as an ACQUIRED audit analyzer (knip) — slice 3 (graph cross-check) open.**
   Slices 1+2 (knip candidate/parser grounded against `node_modules/knip/dist/reporters/json.js`'s real

@@ -4,15 +4,24 @@ Everything-agnostic. Governs concurrency for a **heterogeneous dispatch pool** (
 CLIs / API backends), not Claude-specifically. Claude is the highest-priority backend today but never
 a special case in the mechanism.
 
+This doc covers *how concurrency is gated given a quota reading*. For *who tracks which quota and
+why*, see [`docs/quota-dispatch-design.md`](../docs/quota-dispatch-design.md) — the model this gate
+consumes.
+
 ## The rule (Ethan, 2026-06-30)
-Concurrency is limited by ONLY two things:
+Concurrency is governed by two named things, plus one learned ramp cap folded under "token budget":
 1. **IDE/provider subagent allowance** — a hard ceiling ONLY when a host actually reports one
    (`CapacityPool.hostConcurrencyLimit`). Most IDEs report none → no ceiling from here.
 2. **Token budget** — real provider RPM/TPM (per-minute rate) when discovered, PLUS the **window
-   budget**: in-flight + next-task estimated tokens must fit the remaining window budget.
+   budget** (in-flight + next-task estimated tokens must fit the remaining window budget), PLUS a
+   learned ramp-up/cooldown cap (`scheduleWave`'s `computeRampUpConcurrency`/`computeMaxSafeConcurrency`)
+   that paces how fast concurrency climbs from a cold start — not a separate invented ceiling, but part
+   of how the token budget is spent safely over time.
 
-Everything else the scheduler currently invents is deleted: the `first_contact` floor (~3/8), the
-`fallback` `unknown_*_concurrency` caps, and the `applyQuotaSourceAdjustment` 0.1/0.3 cliffs.
+The invented caps the scheduler used to apply are deleted: the `first_contact` floor (~3/8), the
+`fallback` `unknown_*_concurrency` caps, and the `applyQuotaSourceAdjustment` 0.1/0.3 *behavior* (slow/
+cool-down before a hard 429). The 0.1/0.3 constants themselves still exist in `scheduler.ts`, repurposed
+as health classifiers rather than throttle triggers.
 
 ## Provider-neutral substrate
 Every quota source already normalizes to `QuotaUsageSnapshot { remaining_pct (0–1), reset_at,

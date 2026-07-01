@@ -64,7 +64,7 @@ Tests use `node:test` / `node:assert`. Subtests must be `await t.test(...)` (Nod
 
 ```bash
 npm test
-npm run build && npx vitest run tests/remediate/next-step.test.ts
+npm run build && npx vitest run tests/remediate/next-step-*.test.ts
 npm run verify:release
 npm run fixtures:auditor-contract        # regenerate test fixture
 node remediate-code.mjs next-step --input report.md   # dev wrapper (auto-rebuilds)
@@ -94,9 +94,9 @@ Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is i
 
 **Artifacts** (`.audit-tools/audit/`): `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `coverage_matrix.json`, `audit_tasks.json`, `task_affinity_graph.json`, `audit_results.jsonl`, `runtime_validation_report.json`, `audit-findings.json`, `synthesis-narrative.json`. Review packets: partitioned JIT at dispatch, never persisted. Staleness: explicit dependency DAG (`spec/audit/dependency-map.md`, `src/audit/orchestrator/staleness.ts`, `src/audit/orchestrator/artifactMetadata.ts`).
 
-**Entrypoint:** `audit-code.mjs` → `audit-code-wrapper-lib.mjs`. Conversation-first: `audit-code next-step` writes `.audit-tools/audit/steps/current-step.json` + `current-prompt.md`.
+**Entrypoint:** `audit-code.mjs` → `wrapper/audit-code-wrapper-lib.mjs`. Conversation-first: `audit-code next-step` writes `.audit-tools/audit/steps/current-step.json` + `current-prompt.md`.
 
-**Providers** (`src/audit/providers/`): `claude-code`, `codex`, `opencode`, `openai-compatible`, `subprocess-template`, `vscode-task`, `antigravity`, `local-subprocess`. Auto-resolved (`src/audit/providers/index.ts`); implement `FreshSessionProvider` from shared. `codex` is headless CLI auto-detected like `claude-code`; `antigravity` is agentic-IDE backend routed through a configured command/task template. `openai-compatible` is NOT a CLI — it's a single-shot, API-driven worker (the `llm write` pattern as a provider): it POSTs the node prompt to any OpenAI-compatible `/chat/completions` endpoint (NVIDIA NIM / vLLM / LM Studio / …), applies the returned `{files,result}` into the node's worktree, and writes the result. Endpoint/model/key are operator-supplied in session config (`openai_compatible.{base_url,model,api_key_env}`) — never hardcoded — so it's a portable, always-available background dispatch pool, and the backend the in-process rolling engine drives for headless autonomy.
+**Providers** (`src/shared/providers/`, thin per-orchestrator wrapper at `src/audit/providers/`): `claude-code`, `codex`, `opencode`, `openai-compatible`, `subprocess-template`, `vscode-task`, `antigravity`, `local-subprocess`. Auto-resolved (`src/shared/providers/providerFactory.ts`); implement `FreshSessionProvider` from shared. `codex` is headless CLI auto-detected like `claude-code`; `antigravity` is agentic-IDE backend routed through a configured command/task template. `openai-compatible` is NOT a CLI — it's a single-shot, API-driven worker (the `llm write` pattern as a provider): it POSTs the node prompt to any OpenAI-compatible `/chat/completions` endpoint (NVIDIA NIM / vLLM / LM Studio / …), applies the returned `{files,result}` into the node's worktree, and writes the result. Endpoint/model/key are operator-supplied in session config (`openai_compatible.{base_url,model,api_key_env}`) — never hardcoded — so it's a portable, always-available background dispatch pool, and the backend the in-process rolling engine drives for headless autonomy.
 
 **Schemas** (`schemas/`): `AuditResult` contract (`schemas/audit_result.schema.json`) — `task_id`, `unit_id`, `pass_id`, `lens` must match assigned task; `file_coverage[].total_lines` must match actual line counts.
 
@@ -126,7 +126,7 @@ pending → planning → implementing → closing → complete
 
 **State persistence** (`src/remediate/state/store.ts`): file-backed `RemediationState`, atomic temp-then-rename writes, guarded by the shared `withFileLock` (`audit-tools/shared/quota/fileLock`: exponential 50ms→500ms backoff, token-checked 30s stale-lock cleanup). The lock is single-sourced — `store.ts` adds no backoff/retry logic of its own.
 
-**Core types** (`src/remediate/state/types.ts`): `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `TestSpec`, `VerificationResult`, `CoverageLedger`. `src/remediate/dedup/crossLensDedup.ts` deduplicates across lenses; `src/remediate/intake.ts` orchestrates source manifest, summary, clarification resolution.
+**Core types** (`src/remediate/state/types.ts`): `Finding`, `RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `RemediationItemState`, `CoverageLedger`. `TestSpec` lives in `src/shared/types/contractPipeline.ts`. `src/remediate/dedup/crossLensDedup.ts` deduplicates across lenses; `src/remediate/intake.ts` orchestrates source manifest, summary, clarification resolution.
 
 **Artifact layout:**
 ```
@@ -181,6 +181,18 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 - **Headroom over opentoken (2026-06-11).** Host MCP swapped in at user scope; orchestrator swap rides redesign as library-mode npm `headroom-ai` step (deletes `wrapForOpenToken` et al.).
 - **Token estimates stay local and deterministic (2026-06-11).** Never API-call token counting in planning/dispatch. No tokenizer dep — shared `estimateTokensFromBytes` primitive is the standard. Learned RPM/TPM limits authoritative; headroom proxy stats supply measured usage.
 - **Two-tier dependency policy — import vetted libs for correctness-sensitive parsing/schema/lock; own only tiny domain bits (2026-06-17, A5).** A format whose grammar we don't fully own (TOML, YAML, lockfiles, schema validation) is *correctness-sensitive*: a hand-rolled scanner silently drops what it doesn't understand (e.g. the TOML line scanner missed inline-table / dotted-key / quoted forms → dropped dependency-graph edges). Import a vetted, pure-JS, well-maintained parser there (`smol-toml`, `yaml`) — pure-JS so OS-agnostic, no native build. Keep hand-rolled only for *tiny, fully-owned* domain bits (e.g. our `.audit-tools` path tokens, the work-block id grammar). When importing: wrap the parser so malformed input degrades to empty (the graph/extractors never throw on a bad manifest), and single-source the parse + safe accessors in one module.
+- **Dead-code release gate — default-mode knip, not `--production` (2026-06-27).** `npm run check:deadcode`
+  (`knip --include exports,types,nsExports,nsTypes`, wired into `verify:release`) fails the build on any
+  exported symbol with zero consumers anywhere, including tests. This gates our own source tree at release
+  time — distinct from knip's separate use as an *acquired product analyzer* audit-code runs against
+  repos it audits (`src/audit/extractors/analyzers/candidates.ts`). Default-mode, not the literal
+  `--production` zero-non-test-consumers check, because `--production` has real false positives here — it
+  can't trace dispatch-table / re-export-alias / dynamic wiring, so live functions like `runPlanPhase` /
+  `resolveFreshSessionProviderName` flag as unused and it isn't gate-able. The tested-but-unwired class
+  (code exercised only by its own tests, never wired into a real call path) is instead worked as a
+  periodic **manual audit**: `knip --production` → filter to symbols with zero *grep-detectable*
+  production callers (grep finds the dispatch/alias cases knip misses, so a grep-zero is a reliable dead
+  signal) → delete symbol + orphaned tests. Re-run when worthwhile, not on a schedule.
 
 ## Known friction & deferred fixes
 
