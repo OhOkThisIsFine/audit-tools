@@ -54,8 +54,8 @@ test("single pool, no host ceiling: a parallel agent host fans out instead of se
     sessionConfig: {},
     pendingItemTokens: new Array(20).fill(1000),
   });
-  // claude-code with no learned history and no host cap defaults to parallel
-  // dispatch (DEFAULT_AGENT_HOST_CONCURRENCY = 8), never 1.
+  // claude-code with no learned history and no host cap invents no floor and no
+  // ceiling — it fans out across the pending work rather than serializing to 1.
   assert.ok(capacity.total_slots > 1, `expected parallel dispatch, got ${capacity.total_slots}`);
 });
 

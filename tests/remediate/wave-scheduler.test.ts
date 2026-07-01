@@ -547,7 +547,7 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
     expect(
       classifyCapableHost({
         providerName: "antigravity",
-        sessionConfig: { quota: { first_contact_concurrency: 3 } } as any,
+        sessionConfig: {} as any,
         hostConcurrencyLimit: { active_subagents: 3, source: "session_config" } as any,
         quotaStateEntry: null,
       }),
@@ -706,12 +706,13 @@ describe("F4 inv-5 — critical snapshot throttles to 1 and persists cooldown (C
       slots: Array.from({ length: 6 }, (_, i) => slot(`n${i}`, 500)),
     };
 
-    // Decision 1: a real-time snapshot below CRITICAL (remaining_pct < 0.1) must
-    // throttle the wave to exactly 1 and surface the snapshot's reset_at cooldown.
+    // Decision 1: a GENUINELY exhausted window (remaining fraction 0 — the removed
+    // 0.1 cliff no longer applies; only a known-empty window throttles) must
+    // collapse the wave to exactly 1 and surface the snapshot's reset_at cooldown.
     const critical = broker.broker({
       ...args,
       quotaSourceSnapshot: {
-        remaining_pct: 0.05,
+        remaining_pct: 0,
         reset_at: future,
         captured_at: new Date().toISOString(),
         source: "test",
@@ -1144,12 +1145,16 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
       // No hostConcurrencyLimit, no quotaStateEntry → pure first contact.
     });
 
-    // It is NOT classified capable and its wave never escapes above the floor —
-    // an unknown first-contact host stays conservatively sized.
+    // It is NOT classified capable (no reported ceiling, no learned evidence) —
+    // the capability CLASSIFICATION still keys off the struct floor. But the wave
+    // is no longer clamped to that floor: the invented cold-start cap was removed,
+    // so with no host/rate/budget signal the wave is uncapped (over-budget slots
+    // are still refused by the separate context-budget gate, hence >= 1).
     expect(decision.capableHost).toBe(false);
-    expect(decision.schedule.max_concurrent).toBeLessThanOrEqual(FLOOR);
+    expect(decision.schedule.binding_cap).toBe("none");
+    expect(decision.schedule.max_concurrent).toBeGreaterThanOrEqual(1);
     // F4's own capability classifier agrees: no reported ceiling, no learned
-    // evidence → stays at the floor.
+    // evidence → not capable (still classified off the struct floor).
     expect(
       classifyCapableHost({
         providerName: "antigravity",
@@ -1393,13 +1398,14 @@ describe("F4 fail-6 [CP-NODE-54]: critical snapshot persists cooldown_until so a
       } as any,
     };
 
-    // Decision 1: a below-CRITICAL snapshot (remaining_pct < 0.1) throttles the
+    // Decision 1: a GENUINELY exhausted snapshot (remaining fraction 0 — the
+    // removed 0.1 cliff no longer throttles a merely-low window) collapses the
     // capable host's wave to exactly 1 and surfaces the snapshot's reset_at as the
     // cooldown — which the broker must PERSIST within this same decision.
     const critical = broker.broker({
       ...args,
       quotaSourceSnapshot: {
-        remaining_pct: 0.05,
+        remaining_pct: 0,
         reset_at: future,
         captured_at: new Date().toISOString(),
         source: "test",

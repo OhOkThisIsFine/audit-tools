@@ -13,6 +13,8 @@ const {
   computeRampUpConcurrency,
   computeMaxSafeConcurrency,
   MAX_BUCKET_LEVEL,
+  foldTokensPerPctObservation,
+  recordTokensPerPctObservation,
 } = await import("../../src/shared/quota/state.ts");
 
 async function withTempStateDir(fn) {
@@ -512,4 +514,42 @@ test("MNT-ba639774: computeMaxSafeConcurrency default scan ceiling tracks MAX_BU
     5,
     "an explicit maxToCheck must override the default ceiling",
   );
+});
+
+// ── Token-budget slope learning (tokens_per_pct) ────────────────────────────
+
+test("foldTokensPerPctObservation seeds a new window slope from the first sample", () => {
+  // 5000 tokens over a 5-percent drop (0.50 → 0.45) → slope 1000 tokens/percent.
+  const updated = foldTokensPerPctObservation(undefined, "session", 0.5, 0.45, 5000);
+  assert.ok(Math.abs(updated.session - 1000) < 1, `expected ~1000, got ${updated.session}`);
+});
+
+test("foldTokensPerPctObservation blends into the prior EWMA and learns per label", () => {
+  const prior = { session: 1000, weekly: 40 };
+  // New session sample: 3000 tokens over 0.10 → 0.05 (5 percent) → 600/pct sample.
+  const updated = foldTokensPerPctObservation(prior, "session", 0.1, 0.05, 3000);
+  // EWMA(alpha 0.3): 1000*0.7 + 600*0.3 = 880. weekly untouched.
+  assert.ok(Math.abs(updated.session - 880) < 1, `expected ~880, got ${updated.session}`);
+  assert.equal(updated.weekly, 40);
+});
+
+test("foldTokensPerPctObservation ignores a below-threshold or non-positive delta (degrade-safe)", () => {
+  const prior = { session: 1000 };
+  // Δpercent = 0.3 (< 0.5 floor) → unchanged.
+  assert.deepEqual(foldTokensPerPctObservation(prior, "session", 0.5, 0.497, 5000), prior);
+  // Non-positive tokens → unchanged.
+  assert.deepEqual(foldTokensPerPctObservation(prior, "session", 0.5, 0.4, 0), prior);
+  // Percent went UP (no consumption) → unchanged.
+  assert.deepEqual(foldTokensPerPctObservation(prior, "session", 0.4, 0.5, 5000), prior);
+});
+
+test("recordTokensPerPctObservation persists a per-window slope to quota-state", async () => {
+  await withTempStateDir(async () => {
+    await recordTokensPerPctObservation("prov/model", "weekly", 0.2, 0.1, 2000);
+    const state = await readQuotaState();
+    const entry = state.entries["prov/model"];
+    assert.ok(entry, "entry created");
+    // 2000 tokens / (0.2-0.1)*100 = 10 percent → 200 tokens/pct.
+    assert.ok(Math.abs(entry.tokens_per_pct.weekly - 200) < 1e-9);
+  });
 });

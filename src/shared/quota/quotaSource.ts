@@ -1,5 +1,24 @@
 import { z } from "zod";
 
+/**
+ * One quota WINDOW's remaining budget. A provider may expose several windows
+ * that scale on DIFFERENT denominators (e.g. Claude's 5-hour `session` vs 7-day
+ * `weekly`; Codex's primary vs secondary). The same N tokens is a large percent
+ * of a small window and a tiny percent of a big one, so tokens→percent slope is
+ * learned per (pool, window-label) and the pool's budget is the MIN across
+ * windows. `label` is an AGNOSTIC string ("session","weekly",…) — never a
+ * provider/model identity — so any source can add its own windows.
+ */
+export const QuotaWindowSchema = z
+  .object({
+    label: z.string(),
+    remaining_pct: z.number().nullable(),
+    reset_at: z.string().nullable(),
+    tokens_remaining: z.number().int().nullable().optional(),
+  })
+  .strict();
+export type QuotaWindow = z.infer<typeof QuotaWindowSchema>;
+
 export const QuotaUsageSnapshotSchema = z
   .object({
     remaining_pct: z.number().nullable(),
@@ -8,6 +27,13 @@ export const QuotaUsageSnapshotSchema = z
     tokens_remaining: z.number().int().nullable(),
     captured_at: z.string(),
     source: z.string(),
+    /**
+     * Per-window breakdown when the provider exposes multiple quota windows that
+     * scale differently. Top-level `remaining_pct`/`reset_at` remain the MIN
+     * (binding) window for consumers that want one number. Absent for
+     * single-window providers.
+     */
+    windows: z.array(QuotaWindowSchema).optional(),
   })
   .strict();
 export type QuotaUsageSnapshot = z.infer<typeof QuotaUsageSnapshotSchema>;

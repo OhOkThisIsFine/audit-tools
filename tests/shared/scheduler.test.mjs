@@ -90,47 +90,37 @@ test("learned cap: scheduleWave uses quotaStateEntry when provided", () => {
   assert.equal(schedule.binding_cap, "learned");
 });
 
-test("fallback cap: scheduleWave applies unknown_hosted_concurrency when no learned history", () => {
+test("no invented cap: scheduleWave leaves the wave uncapped with no learned/host/rate/budget signal", () => {
+  // The former unknown_hosted / cold-start fallback caps are gone. With no
+  // learned history, no host limit, no RPM/TPM, and no live snapshot, nothing
+  // invents a ceiling — concurrency is the requested wave (token-budget model).
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 0.8,
-        empirical_half_life_hours: 24,
-        unknown_hosted_concurrency: 2,
-      },
+      quota: { enabled: true, safety_margin: 0.8, empirical_half_life_hours: 24 },
     },
     hostModel: null,
     requestedConcurrency: 20,
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 2, "max_concurrent should be capped by fallback");
-  assert.equal(schedule.binding_cap, "fallback");
+  assert.equal(schedule.max_concurrent, 20, "wave should be uncapped");
+  assert.equal(schedule.binding_cap, "none");
 });
 
-test("first_contact cap: scheduleWave applies first_contact_concurrency for unconfigured local provider", () => {
-  // A local provider with no learned history, no RPM/TPM limits, no fallback
-  // (unknown_local_concurrency undefined) should hit the first-contact ceiling.
+test("no invented cap: an unconfigured local provider is also uncapped", () => {
   const schedule = scheduleWave({
     providerName: "local-subprocess",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 0.8,
-        empirical_half_life_hours: 24,
-        first_contact_concurrency: 2,
-        // unknown_local_concurrency intentionally absent
-      },
+      quota: { enabled: true, safety_margin: 0.8, empirical_half_life_hours: 24 },
     },
     hostModel: null,
     requestedConcurrency: 20,
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 2, "max_concurrent should be capped by first_contact");
-  assert.equal(schedule.binding_cap, "first_contact");
+  assert.equal(schedule.max_concurrent, 20);
+  assert.equal(schedule.binding_cap, "none");
 });
 
 // ── Discovered-capability context window (N5a) ───────────────────────────────

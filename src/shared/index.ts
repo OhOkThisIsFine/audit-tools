@@ -717,10 +717,11 @@ export {
 export type {
   QuotaSource,
   QuotaUsageSnapshot,
+  QuotaWindow,
   QuotaProbeResult,
   QuotaProbeStatus,
 } from "./quota/quotaSource.js";
-export { QuotaUsageSnapshotSchema, probeQuotaSource } from "./quota/quotaSource.js";
+export { QuotaUsageSnapshotSchema, QuotaWindowSchema, probeQuotaSource } from "./quota/quotaSource.js";
 export {
   resolveLimits,
   hostClassFor,
@@ -740,6 +741,8 @@ export {
   computeMaxSafeConcurrency,
   recordWaveOutcome,
   clearBucketFailureEvidence,
+  foldTokensPerPctObservation,
+  recordTokensPerPctObservation,
   decayWeight,
   applyDecayToEntry,
   computeBackoffCooldownMs,
