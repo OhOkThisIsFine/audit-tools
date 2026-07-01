@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile, utimes } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
@@ -155,6 +155,37 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     const step = await decideNextStep({ root: REPO_DIR });
 
     expect(step.step_kind).toBe("present_report");
+  });
+
+  it("a freshly-regenerated audit doc newer than a leftover report is not silently redelivered", async () => {
+    // task backlog: intake must not short-circuit to present_report over a STALE
+    // report when a default-discovered audit doc (audit-findings.json) postdates
+    // it — that's a fresh audit run, not evidence the old remediation is "the"
+    // answer. Explicit utimes so mtime ordering is deterministic regardless of
+    // filesystem timestamp resolution.
+    await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
+    const reportPath = join(REPO_DIR, ".audit-tools", "remediation-report.md");
+    await writeFile(reportPath, "# Stale prior run\n", "utf8");
+    const older = new Date(Date.now() - 60_000);
+    await utimes(reportPath, older, older);
+
+    const findingsPath = join(REPO_DIR, ".audit-tools", "audit-findings.json");
+    await writeFile(
+      findingsPath,
+      JSON.stringify({
+        schema_version: "audit-findings/v1alpha1",
+        summary: { total_findings: 0 },
+        findings: [],
+        work_blocks: [],
+      }),
+      "utf8",
+    );
+    const newer = new Date();
+    await utimes(findingsPath, newer, newer);
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).not.toBe("present_report");
   });
 
   it("new --input against an in-progress run emits input_conflict instead of silently resuming", async () => {
