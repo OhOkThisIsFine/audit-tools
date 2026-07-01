@@ -1,305 +1,365 @@
 {
   "_meta": {
-    "note": "Run 9 — D-8/D-9/D-10/D-11/N-2 resolved; applied 3 commits (backlog-remediation-design D7 marker; HANDOFF T6 item 17; spec/host-validation.md Codex e2e instruction); 3 new items escalated (N-3/N-4/MISSED-B).",
+    "note": "Run 10 — N-3/N-4/MISSED-B (from run 9) confirmed resolved on main. Applied 12 commits (contracts.md/operator-guide.md/release.md schema+provider+version fixes; glossary-ids.md id/site fixes; backlog.md shipped-entry removals+trim; HANDOFF.md stale-claim clears; src/audit/README.md module-index fixes; ship/SKILL.md gate-claim fix; dispatch-token-budget-gate.md+cross-provider-quota-matrix.md mechanism fixes; audit-goals.md+remediation-goals.md fixes). 16 design-decision items + 4 instruction-file edits + 2 condensation observations escalated (see doc-review-findings.md).",
     "mainHeadAtRunStart": "bfe15b9",
-    "mainHeadAfterApply": "752eab0",
-    "runDate": "2026-06-30"
+    "mainHeadAfterApply": "42f03cb",
+    "runDate": "2026-07-01"
   },
   "CLAUDE.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-CLAUDE-1", "R10-CLAUDE-2", "R10-CLAUDE-3", "R10-CLAUDE-4"],
+    "note": "Run 10: 4 stale-factual-fixes found (entrypoint path, providers dir misattribution, VerificationResult/TestSpec drift, nonexistent test file). Instruction-file — escalate-only."
   },
   "AGENTS.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "AF-1 resolved (run 8): AGENTS.audit.md + AGENTS.remediate.md consolidated. Reviewed clean."
+    "note": "Run 10: 25 lines reviewed, all paths verified. Clean."
   },
   "README.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: 271 lines reviewed, CLI surface/artifact paths verified. Clean."
   },
   "docs/HANDOFF.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": ["N-4"],
-    "note": "Run 9: removed stale 'gated Codex e2e' from T6 item 17 (fb337af). D-10 resolved: guidelines explicitly sanction T1-T6 roadmap ('NOT immediate-next-only'). N-4 escalated: 10+ 'Prior lap' narration entries = changelog creep."
+    "openItems": ["R10-D4"],
+    "note": "Run 10: fixed 'not yet committed/published' and T2#5 'DESCOPED' stale claims (cea9945). R10-D4 escalated: 4 consecutive PUBLISHED-vX.Y.Z status bullets = changelog creep, in tension with the doc's own footer."
   },
   "docs/backlog.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": [],
-    "note": "Run 9: D-11 resolved — ec693b2 disambiguation cleanup removed all 'Still open:' sub-bullet forms. Clean open-work set."
+    "openItems": ["R10-D5", "R10-D6"],
+    "note": "Run 10: deleted 3 shipped entries + trimmed knip entry (2fefdea). R10-D5: M-QUOTA entry's sub-item 2 framing needs confirmation before trim. R10-D6: durable knip-gate rationale should move to CLAUDE.md."
   },
   "docs/glossary-ids.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "INV-SOO, INV-PHASE-01, INV-RS-09 all verified present in source."
+    "note": "Run 10: fixed INV-O3 casing, CE-005 (wrong site, removed), CE-206 (wrong site, redirected), SEAM-ACL-* (wrong site, corrected) (8da5b90). All other 25+ rows verified present, correctly sited."
   },
   "docs/quota-dispatch-design.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": [],
-    "note": "Cross-reference to ../spec/cross-provider-quota-matrix.md verified valid."
+    "openItems": ["R10-D1", "R10-C1"],
+    "note": "Run 10: §4's 0.1/0.3 throttle-band claim is superseded by the shipped token-budget gate; zero cross-reference to spec/dispatch-token-budget-gate.md. Escalated — real mechanism replacement, not a narrow fix."
   },
   "docs/documentation-philosophy.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "Reviewed clean. Home table correctly describes spec/ as design-spec home."
+    "note": "Run 10: reviewed clean."
   },
   "docs/backlog-remediation-design.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": [],
-    "note": "Run 9: D7 shipped marker removed (ed64fad); DO_NOT_TOKEN_WRAP_NOTE confirmed absent from src/. Remaining rows verified vs code."
+    "openItems": ["R10-D3"],
+    "note": "Run 10: direct factual claims verified clean. R10-D3 escalated: its CE-*/FC-* id family collides 3-way with docs/glossary-ids.md's CE-* family AND source-code CE-005/CE-206 comments — not caught by the src/-only id-glossary guard test."
   },
   "docs/end-of-sprint-report-template.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "Pure template structure. No code anchors."
+    "note": "Run 10: pure template, no code anchors. Clean."
   },
   "docs/audit-pkg/operator-guide.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: fixed supported-providers list (added codex/openai-compatible/antigravity) (35a961b). Rest of file (CLI commands, cleanup semantics) verified clean."
   },
   "docs/audit-pkg/contracts.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: fixed stale schema list + synthesis_report.json phantom artifact (6bec6d2). Envelope/step-contract/dispatch-packet claims verified clean."
   },
   "docs/audit-pkg/development.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: build/test commands, architecture steps verified against package.json/code. Clean."
   },
   "docs/audit-pkg/product.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: reviewed clean."
   },
   "docs/audit-pkg/release.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: fixed npm version wording (exact pin, not floor) (d6f41f1). Node pin, verify:release composition, CI matrix, trusted-publisher config all verified clean."
   },
   "spec/audit-workflow-design.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": ["N-3"],
-    "note": "N-3 escalated: two section headers embed date stamps ('Cross-tool alignment (added 2026-06-10)' and 'Hardening decisions (adversarial review, 2026-06-10)'). Status-noise in a timeless design doc. Awaiting approval to strip the parentheticals."
+    "openItems": ["R10-D10"],
+    "note": "Run 10: N-3 (date-stamped headers) confirmed resolved. A deep independent pass found real prose-level drift the lighter spot-check missed (Gate 1 not interactive, unwired provider-pool/lens wiring, systemic 'emit inline' claim wrong in 3 places, prompt-caching claims unwired, planning-review-step/blast-radius/edge-weight-ordering drift). Escalated as a rewrite-pass recommendation, not narrow fixes."
   },
   "spec/contract-authoring-determinism-design.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": [],
-    "note": "N-2 resolved (run 9): 'Grounded in 2026-06-14' text absent from preamble (lines 2-4 clean). Only 2026-06-14 occurrence is line 39 substantive design content. Adversary refuted; direct check confirmed."
+    "openItems": ["R10-D9"],
+    "note": "Run 10: severely stale — 6 of 8 strategies (S1,S3,S4,S5,S6,S7) + 3 of 4 S8 sub-fixes have shipped but the doc's 'Current reality' framing still describes them as proposed. Escalated as the highest-priority rewrite-pass item this run."
   },
   "spec/cross-provider-quota-matrix.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": [],
-    "note": "External API claims; not verifiable from local code. No code-anchored issues."
+    "openItems": ["R10-C2"],
+    "note": "Run 10: fixed superseded 0.1/0.3 throttle-before-429 claim (a043a55). R10-C2: low-stakes condensation observation vs spec/dispatch-token-budget-gate.md (duplicate mechanism coverage)."
   },
   "spec/host-validation.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "Run 9: updated Codex e2e run instruction (752eab0) — RUN_CODEX_E2E=1/a7.test.mjs → RUN_PROVIDER_MATRIX_E2E=1/provider-matrix-dispatch-e2e.test.mjs. Missed by reviewer; caught by adversary."
+    "note": "Run 10: RUN_PROVIDER_MATRIX_E2E=1 command + supersedes-RUN_CODEX_E2E claim re-verified against tests/audit/provider-matrix-dispatch-e2e.test.mjs. Clean."
   },
   "spec/remediation-workflow-design.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D11"],
+    "note": "Run 10: structural claims (state machine, dispatch/waveScheduler inlining) clean on light pass, but a deeper independent pass found 'both paths run the pipeline' is misleading (leanFastPath.ts still bypasses it) plus several nonexistent/wrong symbol names. Escalated as a rewrite-pass recommendation."
   },
   "spec/self-scaling-pipeline-design.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
     "openItems": [],
-    "note": "D-8 resolved (run 9): spec/**/*.md is a named scope row in guidelines; no manifest registration needed. Clean concept doc."
+    "note": "Run 10: genuinely still-aspirational; leanFastPath.ts full-skip critique still matches code; partial Dial B/slice-1 progress is expected living-doc drift, not staleness. Clean."
   },
   "spec/audit/state-machine.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: top-level states match AuditTopLevelStatusSchema. Clean (deliberately abstract, no falsifiable executor-list claim)."
   },
   "spec/audit/audit-goals.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: qualified cleanup-on-completion claim — cleanupStaleArtifactsDir is CLI-invoked, not auto-triggered on completion (1f3406a)."
   },
   "spec/audit/dependency-map.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D7"],
+    "note": "Run 10: systemic drift confirmed by reviewer+adversary — phantom artifact filenames throughout, real DAG nodes missing. Part of R10-D7's coordinated 3-file rewrite recommendation."
   },
   "spec/audit/artifact-contract.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D7"],
+    "note": "Run 10: same phantom-artifact drift as dependency-map.md. Part of R10-D7."
   },
   "spec/audit/entrypoint-contract.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D8"],
+    "note": "Run 10: 'Conceptually...' hedged return-shape has a phantom field (artifacts_marked_stale) and 2 fields that are actually nested, not top-level. Escalated — doc hedges as aspirational, needs Ethan's call on whether to update."
   },
   "spec/audit/executor-catalog.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D7"],
+    "note": "Run 10: total drift — every executor wrong-shaped or nonexistent, majority of real 21-entry EXECUTOR_REGISTRY missing from doc. Part of R10-D7."
   },
   "spec/audit/orchestration-policy.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: generic policy prose, no falsifiable filename/executor claims. Clean."
+  },
+  "spec/dispatch-token-budget-gate.md": {
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
+    "status": "reviewed",
+    "openItems": ["R10-D2"],
+    "note": "New file (added commit 9c43217, first reviewed this run). Fixed upcoming_tokens shape + quota-death worktree-mechanism name (2b552c2). R10-D2: two wording-nuance questions ('deleted' vs 'repurposed' cliffs; 'ONLY two things' omits a third ramp-up/cooldown mechanism)."
   },
   "spec/remediate/remediation-goals.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: fixed per-item state list + schema list (42f03cb). Closing-action enum, e2e_command detection, completion/resume semantics all verified clean."
   },
   ".audit-tools/remediation-report.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "excluded",
     "openItems": [],
-    "note": "D-9 resolved (run 9): guidelines §Scope 'excluded' row explicitly lists this file as 'runtime run-artifact — tracked but never reviewed.' Not a review target."
+    "note": "Guidelines §Scope 'excluded' row: runtime run-artifact, tracked but never reviewed."
+  },
+  ".audit-tools/audit-report.md": {
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
+    "status": "reviewed",
+    "openItems": ["R10-D16"],
+    "note": "New file (added commit b20c85c alongside remediation-report.md), first reviewed this run. Not in the guidelines' excluded row despite being structurally parallel to remediation-report.md (both listed side-by-side in CLAUDE.md's Artifact layout) — and scripts/check-doc-manifest.mjs only scopes docs/*.md, so this gap is invisible to the mechanical gate. Escalated (guidelines file is excluded from its own review, so this must go to Ethan)."
+  },
+  "docs/reviews/churn-context-enforce-pass-2026-06-27.md": {
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
+    "status": "excluded",
+    "openItems": [],
+    "note": "Guidelines §Scope 'excluded' row: dated review-pass artifact. Sanity-checked this run — file exists, backlog.md still links to it, rationale holds."
+  },
+  "docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md": {
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
+    "status": "excluded",
+    "openItems": [],
+    "note": "Guidelines §Scope 'excluded' row: dated diagnosis artifact. Sanity-checked this run — spec/dispatch-token-budget-gate.md's 'The rule (Ethan, 2026-06-30)' section is near-verbatim the durable extraction of this diagnosis's root-cause finding; rationale holds."
   },
   "skills/audit-code/SKILL.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: CLI flags/provider names re-verified against src/audit/cli/args.ts. Clean."
   },
   "skills/audit-code/audit-code.prompt.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: scope_summary.json fields, dispatch_summary shape re-verified. Clean."
   },
   "skills/remediate-code/SKILL.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: ensure/install/next-step commands re-verified. Clean."
   },
   "skills/remediate-code/remediate-code.prompt.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: host-capability flags re-verified against src/remediate/index.ts. Clean."
   },
   ".agent/skills/audit-code/SKILL.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: confirmed generated (wrapper/audit-code-wrapper-install-hosts.mjs), byte-identical to a fresh dry-run install. Clean, self-maintaining."
   },
   ".agent/skills/remediate-code/SKILL.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D12"],
+    "note": "Run 10: byte-identical to skills/remediate-code/SKILL.md but unlike its audit-code sibling, NOT generated by any installer — no mechanism enforces sync. Escalated as a design question (intentional manual mirror vs. needs a generator vs. delete)."
   },
   ".github/agents/auditor.agent.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: confirmed generated asset, byte-identical to fresh install-dry-run output. Clean."
   },
   ".github/prompts/audit-code.prompt.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: confirmed generated asset, byte-identical to fresh install-dry-run output. Clean."
   },
   ".github/copilot-instructions.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: managed block confirmed generated + byte-identical; surrounding hand-authored content unchanged. Clean."
   },
   ".claude/skills/disambiguate-backlog/SKILL.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: file paths + reflection shape re-verified against src/shared/agentReflections.ts. Clean."
   },
   ".claude/skills/ship/SKILL.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: fixed release-and-publish.mjs local-gate claim (06a67ef). Rest of skill verified clean."
   },
   "examples/README.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D13"],
+    "note": "Run 10: 'example review packets' wishlist item is structurally unfulfillable (CLAUDE.md: review packets never persisted); real session-config/ subdir (9 files) undocumented. Escalated."
   },
   "src/audit/README.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": ["MISSED-B"],
-    "note": "MISSED-B escalated (run 9, caught by adversary): stale scaffold placeholder ('Implementation code will live here. Suggested early modules: ingestion, extractors, ...') — src/audit/ now has full implementation. Proposal: delete or replace with accurate module index."
+    "openItems": [],
+    "note": "Run 10: MISSED-B (run 9) confirmed resolved, but adapters/ gitleaks claim + providers/ module-index overclaim had drifted stale again. Fixed this run (fd9c527)."
   },
   "src/audit/adapters/README.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: aspirational scaffold wording not contradicted by code (superset match). Clean."
   },
   "templates/AGENTS.remediate-code.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D14"],
+    "note": "Run 10: orphaned — no code reads templates/ at all; AGENTS.md's own hand-authored block has drifted from this template. Escalated (delete vs. wire into a real installer)."
   },
   "tests/audit/fixtures/simple-app/README.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": [],
+    "note": "Run 10: description matches actual fixture usage. Clean."
   },
   "tests/remediate/remediation-report.md": {
-    "lastCheckedCommit": "752eab0",
-    "lastCheckedAt": "2026-06-30T08:30:00Z",
+    "lastCheckedCommit": "42f03cb",
+    "lastCheckedAt": "2026-07-01T08:45:00Z",
     "status": "reviewed",
-    "openItems": []
+    "openItems": ["R10-D15"],
+    "note": "Run 10: unused stray fixture — no test references this path; content predates the current renderer's ## Review section. Escalated (delete vs. regenerate)."
   }
 }
