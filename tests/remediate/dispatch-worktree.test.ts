@@ -552,6 +552,57 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
     expect(headHas(repo, "friction/emit.ts")).toBe(true);
   });
 
+  it("PRESERVES the worktree on a rate_limited worker (piece D quota pause) — never removeWorktree", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const wt = makeWorktree(repo, "RL1");
+    // An uncommitted edit sits in the worktree — nothing is committed/merged, but
+    // the worktree must survive the pause so the node redoes clean on resume.
+    writeFileSync(join(wt, "wip.ts"), "export const wip = 1;\n");
+    expect(existsSync(wt)).toBe(true);
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "RL1",
+      worktreeRoot: wt,
+      scope: { allBlockScopes: [] },
+      branch: worktreeBranchForBlock("RL1", RID),
+      workerOutcome: "rate_limited",
+      targetedCommands: [],
+      writePaths: [],
+    });
+    // Outcome is preserved; nothing landed; worktree still on disk (NOT removed).
+    expect(res.outcome).toBe("rate_limited");
+    expect(res.merged).toBe(false);
+    expect(existsSync(wt)).toBe(true);
+    expect(existsSync(join(wt, "wip.ts"))).toBe(true);
+  });
+
+  it("REMOVES the worktree on a real error/timeout worker (unchanged failure path)", async () => {
+    for (const outcome of ["error", "timeout"] as const) {
+      const { repo, ok } = initRepo();
+      if (!ok) continue;
+      const wt = makeWorktree(repo, `FAIL-${outcome}`);
+      writeFileSync(join(wt, "wip.ts"), "export const wip = 1;\n");
+      expect(existsSync(wt)).toBe(true);
+      const res = await acceptNodeWorktree({
+        root: repo,
+        runId: RID,
+        blockId: `FAIL-${outcome}`,
+        worktreeRoot: wt,
+        scope: { allBlockScopes: [] },
+        branch: worktreeBranchForBlock(`FAIL-${outcome}`, RID),
+        workerOutcome: outcome,
+        targetedCommands: [],
+        writePaths: [],
+      });
+      expect(res.outcome).toBe(outcome);
+      expect(res.merged).toBe(false);
+      // Real failure → worktree dropped so the main tree is never dirtied.
+      expect(existsSync(wt)).toBe(false);
+    }
+  });
+
   it("FAILS LOUDLY for a NEW generated-artifact (non-source) file under write scope, naming the file", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;

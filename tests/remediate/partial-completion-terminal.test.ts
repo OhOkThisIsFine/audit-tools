@@ -205,6 +205,42 @@ describe("N-CE301: partial_completion_terminal on RemediationState", () => {
     expect(f2?.final_status).toBe("failed");
   });
 
+  it("piece D — a quota_paused terminal keeps stranded items PENDING (never blocked) and emits a resumable quota_paused step", async () => {
+    const store = new StateStore(ARTIFACTS_DIR);
+    const resetAt = new Date(Date.now() + 3600_000).toISOString();
+    const terminal: PartialCompletionTerminal = {
+      reason: "quota_paused",
+      stranded_ids: ["B-001", "B-002"],
+      earliest_reset_at: resetAt,
+    };
+    const state = makeImplementingState(terminal);
+    await store.saveState(state);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      hostCanDispatchSubagents: false,
+    });
+
+    // Resumable pause step — NOT present_report (which would mean the run closed).
+    expect(step.step_kind).toBe("quota_paused");
+    expect(step.status).toBe("ready");
+
+    // Items stay PENDING (retryable); nothing blocked by the terminal; the
+    // terminal itself is cleared so the resuming step starts fresh.
+    const after = await store.loadState();
+    const items = after?.items ?? {};
+    expect(items["F-001"]?.status).toBe("pending");
+    expect(items["F-002"]?.status).toBe("pending");
+    const blockedByTerminal = Object.values(items).filter(
+      (it) => it.status === "blocked",
+    );
+    expect(blockedByTerminal).toHaveLength(0);
+    expect(after?.partial_completion_terminal).toBeUndefined();
+  });
+
   it("without partial_completion_terminal, normal documenting flow applies (no regression)", async () => {
     const store = new StateStore(ARTIFACTS_DIR);
     const state = makeImplementingState(undefined);
@@ -249,7 +285,7 @@ describe("N-CE301: partial_completion_terminal on RemediationState", () => {
 
 // ── audit-tools/shared exports ─────────────────────────────────────────────
 
-import { detectLivelock, buildEmptyPoolTerminal } from "audit-tools/shared";
+import { detectLivelock, buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "audit-tools/shared";
 
 describe("N-CE301: PartialCompletionTerminal exported from audit-tools/shared", () => {
   it("PartialCompletionTerminal and PartialCompletionReason are importable as functions", () => {
@@ -273,6 +309,20 @@ describe("N-CE301: PartialCompletionTerminal exported from audit-tools/shared", 
     const result = buildEmptyPoolTerminal(["A", "B"]);
     expect(result.reason).toBe("empty_pool");
     expect(result.stranded_ids).toEqual(["A", "B"]);
+  });
+
+  it("buildQuotaPausedTerminal returns quota_paused terminal with ids + earliest_reset_at", () => {
+    const resetAt = "2026-07-01T12:00:00.000Z";
+    const result = buildQuotaPausedTerminal(["A", "B"], resetAt);
+    expect(result.reason).toBe("quota_paused");
+    expect(result.stranded_ids).toEqual(["A", "B"]);
+    expect(result.earliest_reset_at).toBe(resetAt);
+  });
+
+  it("buildQuotaPausedTerminal omits earliest_reset_at when null", () => {
+    const result = buildQuotaPausedTerminal(["A"], null);
+    expect(result.reason).toBe("quota_paused");
+    expect(result.earliest_reset_at).toBeUndefined();
   });
 
   it("detectLivelock returns null when pendingIds is empty", () => {

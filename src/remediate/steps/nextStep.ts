@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -686,6 +686,14 @@ export interface DriveRollingDispatchResult {
   }>;
   /** Number of inter-level shared rebuilds performed (== levels.length - 1 when >1 level). */
   rebuilds: number;
+  /**
+   * The rolling engine's partial-completion terminal, if any wave stranded work
+   * (piece D `quota_paused`, or the pre-existing `empty_pool`). Aggregated across
+   * waves as the EARLIEST-reset terminal so the consumer can keep the stranded
+   * nodes pending (quota_paused) or block them (empty_pool). Absent when every
+   * packet completed.
+   */
+  terminal?: PartialCompletionTerminal;
 }
 
 /**
@@ -784,11 +792,46 @@ export async function driveRollingDispatch(
       });
       dispatcher.enqueue(packets);
       levelResults.push(...(await dispatcher.run()));
+      // Piece D: surface the wave's partial-completion terminal (quota_paused /
+      // empty_pool). Aggregate across waves keeping the EARLIEST-reset quota_paused
+      // terminal (a paused wave is retryable and should resume soonest); union the
+      // stranded ids so a later step re-dispatches all of them. An empty_pool
+      // terminal only stands when no quota_paused terminal was seen.
+      out.terminal = mergePartialTerminals(out.terminal, dispatcher.getTerminal());
     }
     out.levels.push({ blockIds: level.map((b) => b.block_id), results: levelResults });
   }
 
   return out;
+}
+
+/**
+ * Fold a newly-observed partial-completion terminal into the run's aggregate
+ * (piece D). Prefers `quota_paused` (retryable) over `empty_pool`; among
+ * quota_paused terminals keeps the EARLIEST `earliest_reset_at`; always unions the
+ * stranded ids so no stranded node is lost across waves.
+ */
+function mergePartialTerminals(
+  prior: PartialCompletionTerminal | undefined,
+  next: PartialCompletionTerminal | null,
+): PartialCompletionTerminal | undefined {
+  if (!next) return prior;
+  if (!prior) return next;
+  const strandedIds = [...new Set([...prior.stranded_ids, ...next.stranded_ids])];
+  const priorPaused = prior.reason === "quota_paused";
+  const nextPaused = next.reason === "quota_paused";
+  if (priorPaused || nextPaused) {
+    const resets = [prior.earliest_reset_at, next.earliest_reset_at].filter(
+      (r): r is string => typeof r === "string",
+    );
+    const earliest = resets.length > 0 ? resets.sort()[0]! : undefined;
+    return {
+      reason: "quota_paused",
+      stranded_ids: strandedIds,
+      ...(earliest ? { earliest_reset_at: earliest } : {}),
+    };
+  }
+  return { reason: prior.reason, stranded_ids: strandedIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -1114,7 +1157,7 @@ export async function driveRollingImplementDispatch(
   const writePathsByBlock = new Map(
     allBlockScopes.map((s) => [s.block_id, s.write_paths]),
   );
-  await driveRollingDispatch(levels, {
+  const driven = await driveRollingDispatch(levels, {
     confirmedPools,
     sessionConfig: options.sessionConfig ?? {},
     dispatchNode: dispatchNodeWithWorktree,
@@ -1125,6 +1168,20 @@ export async function driveRollingImplementDispatch(
     scopeForBlock: (block) =>
       writePathsByBlock.get(block.block_id) ?? block.touched_files ?? [],
   });
+
+  // Piece D — persist the rolling engine's partial-completion terminal onto state
+  // BEFORE the merge, so the merge can SKIP-block the quota_paused stranded nodes
+  // (their worker rate-limited → no result file, but they must stay PENDING for a
+  // later step to redispatch clean — the worktrees were PRESERVED by
+  // acceptNodeWorktree). An `empty_pool` terminal does not affect the merge (its
+  // nodes are genuine failures); the `partial_terminal` obligation blocks them.
+  if (driven.terminal) {
+    const pre = await new StateStore(artifactsDir).loadState();
+    if (pre) {
+      pre.partial_completion_terminal = driven.terminal;
+      await new StateStore(artifactsDir).saveState(pre);
+    }
+  }
 
   // Deterministic merge: same path the wave flow uses (tolerant remap, write-scope
   // gate against each verified branch, lost-update detection). Worktrees are
@@ -1966,6 +2023,49 @@ Then run:
         "Stop after all implementation results have been merged and next-step has been run.",
       artifactPaths: { dispatch_plan: planPath, dispatch_quota: implQuotaPath },
     }) };
+}
+
+/**
+ * Piece D — the quota-paused resumable step. The rolling engine stranded one or
+ * more nodes because every eligible provider pool hit a host session limit and is
+ * paused until its stated reset. The stranded nodes stay PENDING (their worktrees
+ * were preserved), so re-running next-step at/after `resetAt` redispatches them
+ * clean. Emitted (not blocked) so the run is resumable, never a failure.
+ */
+async function buildQuotaPausedStep(params: {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+  strandedIds: string[];
+  resetAt: string | null;
+}): Promise<RemediationStep> {
+  const { root, artifactsDir, runId, strandedIds, resetAt } = params;
+  const nextCommand = loaderCommand("next-step");
+  const resetLine = resetAt
+    ? `The earliest provider reset is \`${resetAt}\`. Wait until then, then run:`
+    : `Wait for the provider session limit to reset, then run:`;
+  return writeCurrentStep({
+    stepKind: "quota_paused",
+    status: "ready",
+    runId,
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# Remediation paused — provider session limit
+
+Every eligible provider pool hit a host session limit and is paused until its
+stated reset. ${strandedIds.length} node(s) are stranded and remain PENDING —
+their worktrees were preserved, so they will redispatch clean on resume. Nothing
+was blocked or failed; this is a resumable pause.
+
+${resetLine}
+
+\`${nextCommand}\`
+`,
+    allowedCommands: [nextCommand],
+    stopCondition:
+      "Stop and wait for the provider reset. Re-running next-step resumes the stranded nodes.",
+  });
 }
 
 // --- Per-state handlers -----------------------------------------------------
@@ -4314,6 +4414,28 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         const s = requireState(state);
         const terminal = s.partial_completion_terminal;
         if (!terminal) return { kind: "transition", state: s };
+        // Piece D — quota_paused is a RETRYABLE pause, NOT a failure. The stranded
+        // nodes stay PENDING (their worktrees were preserved), nothing is blocked,
+        // and the close transition is NOT forced. EMIT a paused step (terminating
+        // this advance loop) that tells the host to re-run next-step at/after the
+        // stated reset, when the pool's session limit has cleared and the stranded
+        // nodes redispatch clean. Clearing the terminal here (before the emit) so
+        // the resuming step starts fresh; the pending nodes are the durable signal.
+        if (terminal.reason === "quota_paused") {
+          const resetAt = terminal.earliest_reset_at ?? null;
+          delete s.partial_completion_terminal;
+          await store.saveState(s);
+          return {
+            kind: "emit",
+            step: await buildQuotaPausedStep({
+              root,
+              artifactsDir,
+              runId: stateRunId(s),
+              strandedIds: terminal.stranded_ids ?? [],
+              resetAt,
+            }),
+          };
+        }
         const strandedSet = new Set(terminal.stranded_ids ?? []);
         for (const it of Object.values(s.items ?? {})) {
           if (isTerminalStatus(it.status)) continue;
