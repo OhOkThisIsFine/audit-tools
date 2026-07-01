@@ -8,11 +8,11 @@ field descriptions.
 
 Important schemas live under `schemas/`, including:
 
-- `audit-code-v1alpha1.schema.json`
 - `audit_result.schema.json`
+- `audit_results.schema.json`
 - `audit_task.schema.json`
-- `audit_plan_metrics.schema.json`
-- `graph_bundle.schema.json`
+- `finding.schema.json`
+- `lens.schema.json`
 - `runtime_validation_update.example.json` in `examples/`
 
 ## Execution envelope (`advance-audit`)
@@ -71,7 +71,9 @@ The backend stores resumable artifacts under `.audit-tools/audit/`, including:
 - `audit_results.jsonl`
 - `runtime_validation_tasks.json`
 - `runtime_validation_report.json`
-- `synthesis_report.json`
+- `audit-findings.json`
+- `audit-report.md`
+- `synthesis-narrative.json`
 
 Consumers should treat these as versioned JSON artifacts and validate them with
 `audit-code validate` rather than inferring state from filenames alone.
@@ -109,8 +111,7 @@ contracts. It changes the worker-facing unit of work.
 Packets are partitioned just-in-time at dispatch (never persisted); planning
 artifacts are shaped by:
 
-- `schemas/audit_plan_metrics.schema.json`
-- `examples/audit_plan_metrics.example.json`
+- `examples/audit_plan_metrics.example.json` (no dedicated JSON Schema exists for this artifact yet)
 
 Normal packet flow:
 
