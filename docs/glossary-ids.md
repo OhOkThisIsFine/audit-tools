@@ -56,7 +56,7 @@ A handful of invariants predate the two-letter area scheme and are still cited u
 | `INV-X06` | Partial-completion terminal hook — undispatchable/blocked work routes the run to close instead of looping forever. | `src/remediate/state/store.ts`, `src/remediate/steps/nextStep.ts` |
 | `INV-O1` | Foundations module O1 (friction-capture) — best-effort no-op-safe `captureFrictionEvent` sink + mandatory blocking triage whose satisfaction set is auto-captured events UNION surfaced reflections. | `src/shared/friction/captureFrictionEvent.ts`, `src/shared/friction/triage.ts` |
 | `INV-O2` | Foundations module O2 (append-only ledger + lock) — instance-keyed idempotent append, identityKey-grouping re-association, `withFileLock` critical section, version-keyed bounded intent-checkpoint gate. | `src/audit/orchestrator/ledger.ts`, `src/audit/orchestrator/intentCheckpointGate.ts`, `src/audit/orchestrator/resultBaseline.ts` |
-| `INV-O3` | Foundations module O3 (emit-validate-repair seam) — cheapest-first monotonic coercion→bounded-patch→re-dispatch, one canonical validator, lock-short. | `src/shared/repair/emitValidateRepair.ts` |
+| `INV-o3` | Foundations module O3 (emit-validate-repair seam) — cheapest-first monotonic coercion→bounded-patch→re-dispatch, one canonical validator, lock-short. | `src/shared/repair/emitValidateRepair.ts` |
 
 Treat the single-letter `INV-<letter><NN>` spelling as the redesign-node form of an invariant; new
 invariants should use the two-letter area scheme above.
@@ -67,15 +67,14 @@ invariants should use the two-letter area scheme above.
 |---|---|---|
 | `CE-001` / `CE-002` | A design/assessment claim the adversarial critic falsifies; the pipeline emits a counterexample envelope. | `src/remediate/steps/contractPipelinePrompts.ts` |
 | `CE-003` / `CE-205` | Indefinite stall: after `LIVELOCK_PAUSE_LIMIT` consecutive paused passes with zero net new capacity the rolling engine must terminate, not spin. | `src/shared/rolling/pausedState.ts` |
-| `CE-005` | Grounding must be a *total* function — an absent/undefined grounding verdict resolves to "ungrounded → verify", never silently passes. | `src/shared/validation/findingGrounding.ts` |
-| `CE-206` | Companion livelock counterexample to `CE-205` (paused-state re-discovery must make progress or stop). | `src/shared/rolling/pausedState.ts` |
+| `CE-206` | Total-encoding-failure check too coarse — a single unencodable clause must not block every other, independently-encodable clause in a compound intent. | `src/shared/intent/clauseInterpreter.ts` |
 
 ## SEAM-* seam contracts
 
 | Id | Contract | Site |
 |---|---|---|
 | `SEAM-rolling-stranding` | When all quota pools are exhausted, waiting cannot help: strand the remainder and surface an `empty_pool` terminal rather than blocking forever. | `src/shared/dispatch/rollingDispatch.ts` |
-| `SEAM-ACL-*` | Allowlisted-command / env seam — host-signalling env (`CLAUDECODE`, `CLAUDE_CODE_*`) is stripped by the shared owner before a runtime command runs. | `src/shared/tooling/exec.ts` |
+| `SEAM-ACL-*` | Allowlisted-command / env seam — host-signalling env (`CLAUDECODE`, `CLAUDE_CODE_*`) is stripped by the shared owner (`src/shared/tooling/exec.ts`) before a runtime command runs. | `src/audit/orchestrator/runtimeCommand.ts` |
 | `SEAM-RSD-*` | Rolling single-tree dispatch hand-off — state mutation is committed atomically under the single held lock (paired with `INV-RSD`). | `src/remediate/steps/dispatch.ts` |
 
 ## N-* plan nodes (load-bearing references in code)
