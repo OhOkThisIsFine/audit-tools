@@ -8,6 +8,8 @@
 ## Live state
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here).
+- **PUBLISHED v0.30.53 (2026-06-30):** the **token-budget dispatch gate** (A+B+C+D — see the bullet below and
+  `spec/dispatch-token-budget-gate.md`). CI run 28488590041; both global bins reinstalled.
 - **PUBLISHED v0.30.51 (2026-06-30):** dogfooded full-sweep remediation of the 186-finding self-audit (15
   module nodes, all 7 HIGH fixes — citation-grounding marker, stale INFRA_FILE_PATHS, roster model routing,
   merge-to-base cleanup, flag-validation-order, stale fixtures, fragile madge test) shipped via combined
@@ -25,12 +27,6 @@
   multi-worker run (cold-start slope + resume path).
 - **Immediate next (docs/backlog.md → Open bugs):** intake must present timestamped candidate docs instead of
   silently binding a stale remediation-report.
-- **Last published: v0.30.51.** Most recent lap (in tree, ship-pending): (1) **M-QUOTA escalation chain wired
-  end-to-end** on the remediate driver path (`recordLimit→escalate→strand→quota_escalation friction`) — shared
-  `createRollingDispatcher` gained `recordRateLimit`/`rateLimit` hooks; `driveRollingImplementDispatch` threads one
-  retained `HostSessionQuotaSource`. Live multi-worker validation still env-bound. (2) **knip dead-code gate
-  adopted** (`check:deadcode` in `verify:release`, default-mode) + 35 dead exports deleted; production-mode
-  manual sweep removed ~28 more tested-but-unwired symbols. (3) doc-review items N-3/N-4/MISSED-B actioned.
 - Per-lap shipped detail is not narrated here (that's changelog creep — see git log). This doc is the
   **open-work roadmap** only: current state above, sequenced open items below.
 
