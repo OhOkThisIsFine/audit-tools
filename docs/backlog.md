@@ -38,17 +38,17 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   `isWholeSuiteTestCommand`. With scoped verify + the tool's sequential accept-node (each next worktree off
   the accumulating main), the separate-source/test-node deadlock cannot recur. [[decomposition-colocate-source-and-tests]]
 
-- **Intake input-selection is silent + stale-prone — present candidate remediation docs w/ timestamps, don't short-circuit.**
-  Hit 2026-06-30: a no-arg `remediate-code next-step` short-circuited to `present_report` off a **Jun-26**
-  `remediation-report.md` (unrelated CP-NODE findings) even though a fresh `audit-findings.json`/`audit-report.md`
-  had just been regenerated (today). The stale-report-redelivery guard (memory: fixed 0.28.11) did NOT cover the
-  no-state + leftover-report + no-`--input` case. Host had to manually archive the stale deliverables + pass an
-  explicit absolute `--input` to force fresh intake. Tool-enforcement fix (Ethan, 2026-06-30): intake must enumerate
-  the *candidate* remediation source documents it can see (`.audit-tools/audit-report.md`, `audit-findings.json`,
-  any prior `remediation-report.md`, conversation guidance) **with mtimes + provenance + freshness-vs-prior-run**,
-  and surface them to the orchestrator/user to pick — never silently auto-bind the first/old report. Freshness rule:
-  a `remediation-report.md` older than the promoted `audit-findings.json` is stale and must NOT short-circuit a run
-  to `present_report`. (Generalizes [[stale-remediation-report-complete-redelivery-trap]] beyond the fixed path.)
+- **Intake input-selection stale-redelivery — FIXED in tooling (v0.30.54, 2026-06-30/07-01).** Was: a no-arg
+  `remediate-code next-step` short-circuited to `present_report` off a leftover `remediation-report.md` even when a
+  fresh `audit-findings.json`/`audit-report.md` had just been regenerated. The `complete_redelivery` guard (memory:
+  fixed 0.28.11) only checked in-progress-intake signals (conversation-start / extracted-plan / host-confirmed
+  summary), never the default-discovered audit doc's freshness. FIX: `isDefaultCandidateFresherThanReport`
+  (`src/remediate/steps/nextStep.ts`) compares the best default-discovered candidate's mtime against the leftover
+  report's mtime and folds into the `freshIntent` check — a newer audit doc now falls through to `pending_intake`,
+  which already surfaces the discovered file (path/type/mtime/finding-count) via the existing
+  `confirm_auto_discovered_input` gate for host confirmation, so no separate candidate-listing UI was needed. Test:
+  `tests/remediate/next-step-lifecycle.test.ts` → "a freshly-regenerated audit doc newer than a leftover report is
+  not silently redelivered". (Generalizes [[stale-remediation-report-complete-redelivery-trap]] beyond the fixed path.)
 
 - **Friction detection — M-QUOTA escalation chain WIRED (remediate); live validation still env-bound.**
   The `recordLimit → escalate → strand → quota_escalation friction` chain is now fed end-to-end on the named
