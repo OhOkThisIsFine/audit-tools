@@ -67,3 +67,31 @@ test("appendResultsToLedger — dedupes replays within a single batch", () => {
   const ledger = appendResultsToLedger([], [baseResult(), baseResult()]);
   assert.equal(ledger.length, 1);
 });
+
+test("appendResultsToLedger — two deepening rounds at the same coordinate under DISTINCT task_ids both persist (confirmed live 2026-06-30 collision)", () => {
+  // Selective-deepening re-mints the steward task under a fresh task_id each
+  // round (taskIdFor hashes the growing source-result set), but every round
+  // shares the same {unit_id, lens, pass_id}. Before folding task_id into the
+  // discriminator, both rounds' clean results collapsed to the bare
+  // 'deepening' discriminator and round 2 was silently dropped as a replay.
+  const round1 = baseResult({ task_id: "deepening:steward:round1hash" });
+  const round2 = baseResult({ task_id: "deepening:steward:round2hash" });
+  const ledger = appendResultsToLedger([], [round1, round2]);
+  assert.equal(ledger.length, 2, "round 2 is not dropped as a replay of round 1");
+  assert.equal(ledger[0].identity_key, ledger[1].identity_key, "same identity coordinate");
+  assert.notEqual(ledger[0].idempotency_key, ledger[1].idempotency_key);
+});
+
+test("appendResultsToLedger — a genuine replay of the SAME deepening task_id still no-ops (INV-2 preserved)", () => {
+  const first = appendResultsToLedger(
+    [],
+    [baseResult({ task_id: "deepening:steward:round1hash" })],
+  );
+  assert.equal(first.length, 1);
+  const replayed = appendResultsToLedger(
+    first,
+    [baseResult({ task_id: "deepening:steward:round1hash" })],
+  );
+  assert.equal(replayed.length, 1, "same-task_id replay did not append a duplicate");
+  assert.equal(replayed[0].instance_id, first[0].instance_id);
+});

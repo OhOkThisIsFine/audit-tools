@@ -67,7 +67,10 @@ test("(c) same coordinate, different discriminator: same identityKey, different 
     result_content_discriminator: buildResultContentDiscriminator({ source: "base" }),
   });
   const inputDeepen = makeInput({
-    result_content_discriminator: buildResultContentDiscriminator({ source: "deepening" }),
+    result_content_discriminator: buildResultContentDiscriminator({
+      source: "deepening",
+      task_id: "deepening:steward:abc123",
+    }),
   });
 
   assert.equal(identityKey(inputBase), identityKey(inputDeepen));
@@ -165,8 +168,14 @@ test("relating invariant (inv-7): equal contentKey ⟹ equal idempotencyKey ⟹ 
 
 test("buildResultContentDiscriminator is tool-owned: enum sources + attempt-keyed redispatch (fail-3)", () => {
   assert.equal(buildResultContentDiscriminator({ source: "base" }), "base");
-  assert.equal(buildResultContentDiscriminator({ source: "deepening" }), "deepening");
-  assert.equal(buildResultContentDiscriminator({ source: "steward" }), "steward");
+  assert.equal(
+    buildResultContentDiscriminator({ source: "deepening", task_id: "deepening:clean:aaa" }),
+    "deepening:deepening:clean:aaa",
+  );
+  assert.equal(
+    buildResultContentDiscriminator({ source: "steward", task_id: "deepening:steward:bbb" }),
+    "steward:deepening:steward:bbb",
+  );
 
   const r1 = buildResultContentDiscriminator({ source: "redispatch", attempt: 1 });
   const r2 = buildResultContentDiscriminator({ source: "redispatch", attempt: 2 });
@@ -175,11 +184,41 @@ test("buildResultContentDiscriminator is tool-owned: enum sources + attempt-keye
   assert.throws(() => buildResultContentDiscriminator({ source: "redispatch" }));
   assert.throws(() => buildResultContentDiscriminator({ source: "redispatch", attempt: 0 }));
   assert.throws(() => buildResultContentDiscriminator({ source: "bogus" }));
+  // Deepening/steward without a task_id would collide across rounds — refuse (fail-3).
+  assert.throws(() => buildResultContentDiscriminator({ source: "deepening" }));
+  assert.throws(() => buildResultContentDiscriminator({ source: "steward", task_id: "" }));
 
   // Two redispatch attempts at one coordinate get distinct idempotencyKeys.
   const ikA1 = idempotencyKey(makeInput({ result_content_discriminator: r1 }));
   const ikA2 = idempotencyKey(makeInput({ result_content_discriminator: r2 }));
   assert.notEqual(ikA1, ikA2);
+});
+
+test("deepening/steward: distinct task_id per round → distinct idempotencyKey; same task_id replays idempotent (confirmed live 2026-06-30)", () => {
+  const round1 = buildResultContentDiscriminator({
+    source: "deepening",
+    task_id: "deepening:steward:round1hash",
+  });
+  const round2 = buildResultContentDiscriminator({
+    source: "deepening",
+    task_id: "deepening:steward:round2hash",
+  });
+  assert.notEqual(round1, round2, "each regenerated deepening round gets a distinct discriminator");
+
+  const ikRound1 = idempotencyKey(makeInput({ result_content_discriminator: round1 }));
+  const ikRound2 = idempotencyKey(makeInput({ result_content_discriminator: round2 }));
+  assert.notEqual(ikRound1, ikRound2, "round 2's clean result no longer no-ops against round 1's ledger slot");
+
+  const replay = buildResultContentDiscriminator({
+    source: "deepening",
+    task_id: "deepening:steward:round1hash",
+  });
+  assert.equal(round1, replay, "a genuine replay of the SAME task_id reproduces the same discriminator");
+  assert.equal(
+    idempotencyKey(makeInput({ result_content_discriminator: round1 })),
+    idempotencyKey(makeInput({ result_content_discriminator: replay })),
+    "INV-2 replay-no-op preserved for same-task_id replays",
+  );
 });
 
 test("newInstanceId mints a distinct id per record (fail-2: ledger keyed by instance, not identity)", () => {

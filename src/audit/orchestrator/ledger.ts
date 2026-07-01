@@ -140,6 +140,9 @@ export function stampLedgerKeys(result: AuditResult): AuditResult {
         source: emitSourceFor(result),
         // Only consulted for `redispatch`; ignored for base/deepening/steward.
         attempt: result.attempt,
+        // Only consulted for `deepening`/`steward` (each round's task_id is
+        // distinct — see the seam's doc comment); ignored otherwise.
+        task_id: result.task_id,
         // File-split sibling discriminator (N-IDEMPOTENCY): empty for a lone task
         // ⇒ byte-identical legacy key; non-empty ⇒ siblings get distinct keys.
         split_discriminator: splitDiscriminatorFromTaskId(
