@@ -8,6 +8,14 @@
 ## Live state
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here).
+- **PUBLISHED v0.30.54 (2026-07-01):** intake stale-report-redelivery fix — a bare `remediate-code next-step`
+  no longer silently re-presents a leftover `remediation-report.md` when a fresher default-discovered audit
+  doc (`audit-findings.json`/`audit-report.md`) exists; `isDefaultCandidateFresherThanReport`
+  (`src/remediate/steps/nextStep.ts`) folds an mtime check into `complete_redelivery`'s `freshIntent` gate, so
+  the run falls through to `pending_intake` → the existing `confirm_auto_discovered_input` gate (which already
+  surfaces path/type/mtime/finding-count for host confirmation). CI run 28496906825; both global bins
+  reinstalled. Also added `.headroom/` to `.gitignore` (untracked local proxy state dir, was blocking the
+  release clean-tree guard). Backlog entry closed.
 - **PUBLISHED v0.30.53 (2026-06-30):** the **token-budget dispatch gate** (A+B+C+D — see the bullet below and
   `spec/dispatch-token-budget-gate.md`). CI run 28488590041; both global bins reinstalled.
 - **PUBLISHED v0.30.51 (2026-06-30):** dogfooded full-sweep remediation of the 186-finding self-audit (15
@@ -25,8 +33,12 @@
   `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`; endpoint-shape finding in memory
   [[claude-usage-endpoint-body-shape]]. **Remaining (env-bound):** live validation on a real rate-limited
   multi-worker run (cold-start slope + resume path).
-- **Immediate next (docs/backlog.md → Open bugs):** intake must present timestamped candidate docs instead of
-  silently binding a stale remediation-report.
+- **Immediate next (docs/backlog.md → Open bugs):** selective-deepening loop #2 — steward result
+  `idempotency_key` collision (confirmed live, 2026-06-30). Fix is concrete and non-env-bound: incorporate
+  `task_id` into `result_content_discriminator` for steward/lens-verification/deepening results so distinct
+  deepening tasks get distinct ledger records (preserve INV-2 replay-no-op for same-task_id replays); update
+  ledger tests. Full diagnosis: `.audit-tools/audit/deepening-loop-diagnosis.md`. **No host-side unblock exists**
+  for a stuck run — the code fix must land first, then a clean re-run.
 - Per-lap shipped detail is not narrated here (that's changelog creep — see git log). This doc is the
   **open-work roadmap** only: current state above, sequenced open items below.
 
