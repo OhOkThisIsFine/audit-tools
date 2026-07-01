@@ -770,9 +770,10 @@ test("F6 fail-10 [CP-NODE-95]: git_history.json upstream-dep set matches F1 regi
   );
 
   // 2) Co-commit boundary: the spec dep-map (F1's human-render of the same
-  //    registration) lists git_history.json as downstream of BOTH upstreams.
-  //    Producer + registration co-located => spec and literal agree; a
-  //    separate-commit half-registration desyncs them and trips this.
+  //    registration) lists git_history.json's "Depends on" table row as
+  //    carrying BOTH upstreams. Producer + registration co-located => spec and
+  //    literal agree; a separate-commit half-registration desyncs them and
+  //    trips this.
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const specPath = join(
     __dirname,
@@ -783,16 +784,14 @@ test("F6 fail-10 [CP-NODE-95]: git_history.json upstream-dep set matches F1 regi
     "dependency-map.md",
   );
   const spec = await readFile(specPath, "utf8");
-  const sections = spec.split(/^### /m);
+  const rowPattern = /^\|\s*`git_history\.json`\s*\|\s*(.+?)\s*\|$/m;
+  const row = spec.match(rowPattern);
+  assert.ok(row, "spec dep-map has a Depends-on table row for git_history.json");
+  const specDeps = [...row[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
   for (const upstream of expectedUpstream) {
-    const section = sections.find((s) => s.startsWith(`\`${upstream}\``));
     assert.ok(
-      section,
-      `spec dep-map has a section for upstream ${upstream}`,
-    );
-    assert.ok(
-      section.includes("`git_history.json`"),
-      `spec dep-map lists git_history.json as downstream of ${upstream} (co-registered, not half-registered)`,
+      specDeps.includes(upstream),
+      `spec dep-map lists ${upstream} as a git_history.json dependency (co-registered, not half-registered)`,
     );
   }
 });

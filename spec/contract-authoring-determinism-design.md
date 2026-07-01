@@ -24,42 +24,49 @@ models burn tokens. Shrink that surface to "write one good invariant sentence / 
 both succeed — the weak model because the structure it could break is gone, the strong model
 because it stops re-emitting boilerplate.
 
-## 1. Current reality (grounded)
+## 1. Current reality (2026-07-02, re-grounded)
 
-- **All 13 contract artifacts are 100% LLM-authored.** The backend's role is render-prompt →
-  ingest payload → validate → envelope → re-emit-on-failure. The only artifacts any code *generates*
-  are the `cyclic_seam_resolution` no-cycles fast path, the post-pipeline `extracted-plan`, and the
-  intake `finding-enumeration` (the lone deterministic upstream extraction). Refs:
-  `steps/contractPipeline.ts` (`PHASE_TO_ARTIFACT`, `ingestContractArtifacts`),
-  `steps/contractPipelinePrompts.ts` (`renderContractPipelinePrompt`).
-- **The derivable artifacts are hand-authored anyway.** `obligation_ledger` (one obligation per
-  invariant + per seam), `test_validator_plan` (one spec per obligation), and the
-  `implementation_dag` skeleton (one node per obligation/counterexample + edges from `depends_on`)
-  are pure functions of their upstream artifact — but no deriver exists; the prompt just *tells the
-  model* "derive deterministically." In the 2026-06-14 run these were the largest hand-written
-  artifacts (an 86-entry ledger and an 86-entry test plan, **each authored twice** because of a
-  repair round).
-- **The mapping rules already exist — as validators.** `validatePairedObligations`,
-  `validateDesignSpecGates` (Gate 3 invariant↔obligation), `validateImplementationDAGIntegrity`
-  (bidirectional coverage), `deriveNodeModelTier` already encode the exact mapping a deriver needs.
-  We are *checking* a transform we could simply *apply*. (`validation/contractPipelineGates.ts`.)
-- **Validation is ingest-time only; there is no write-time guard.** The worker writes a bare
-  payload with only prose schema guidance and finds out it was malformed on the *next* `next-step`.
-  A weak model has no fast feedback loop.
-- **Repair is a full LLM rewrite of the target + a full LLM re-author of everything downstream.**
-  A judge `needs_repair` → "Rewrite the complete, corrected artifact (not a diff)"; the new
-  content-hash then marks all downstream artifacts stale and the loop **re-emits each downstream
-  LLM phase**. The pure `repairDownstreamPhases` function that *computes* the minimal downstream
-  set **exists but is not wired in**. In the run, two repair rounds re-authored ~5 downstream
-  artifacts each — pure waste, since the repairs only refined invariant *text* (IDs were stable).
-- **No single ID authority.** The model mints `goal_id` / module names / obligation IDs / node IDs
-  ad-hoc per artifact; code adds the `CP-BLOCK-` prefix only at promotion. The bare-node-id ↔
-  `CP-BLOCK-` split is the root of the recurring "Unknown finding_id" merge trap, papered over by
-  the tolerant `buildBlockAliasMap`/`collapseItemResults` remap (`steps/dispatch.ts`) and
-  hand-patched by the host twice in the run.
-- **Schema drift already present.** `schemas/contract_pipeline.schema.json` is a real JSON Schema
-  but stale/unused (still defines `DesignSpec`; missing 6 newer artifacts). The TS validators are
-  the de-facto contract; the schema file is rot.
+**S1, S3, S4, S5, S6, and S7 below are shipped.** Of S8's four sub-fixes, three are shipped
+(general questions, orientation package, grounding); only "Gate it" remains open. S2 was
+investigated and dropped as redundant (see its section). This section now records what's actually
+true of the code, not the pre-implementation state the rest of this doc originally described —
+see each strategy section below for citations.
+
+- **The derivable artifacts are now generated deterministically, not hand-authored (S1).**
+  `obligation_ledger`, `test_validator_plan`, and the `implementation_dag` skeleton are pure
+  functions of their upstream artifact, computed by `src/remediate/contractPipeline/derive.ts`
+  (`deriveObligationLedger` et al.) and wired into `steps/contractPipeline.ts`'s phase dispatch.
+- **The mapping rules the derivers use are shared with the validators that check them.**
+  `validatePairedObligations`, `validateDesignSpecGates`, `validateImplementationDAGIntegrity`, and
+  `deriveNodeModelTier` (`validation/contractPipelineGates.ts`) are consumed by both the deriver and
+  the validator — one source, so they cannot drift apart.
+- **Write-time validation exists (S3).** A `validate-artifact` CLI subcommand
+  (`src/remediate/index.ts`) wraps the same validator registry the backend runs at ingest, so a
+  worker can self-check before emitting instead of finding out on the next `next-step`.
+- **S2 (patch-based repair) was investigated and dropped** — see its section: the staleness DAG
+  already does the "re-derive only what's affected" job better than the proposed
+  `repairDownstreamPhases` linear slice would have.
+- **There is a single ID authority (S4).** `src/remediate/contractPipeline/idRegistry.ts` owns
+  `goal_id`/module/obligation/node ID minting and the `CP-BLOCK-` ↔ bare-node-id relationship as one
+  registered mapping.
+- **Structural checks run before the adversarial phases (S5).**
+  `validation/contractPipelineGates.ts`'s `validateDesignSpecGates` runs deterministically before
+  the LLM critic/judge, so the expensive adversarial loop only sees structurally-sound input.
+- **The schema is single-sourced (S6).** The stale `schemas/contract_pipeline.schema.json` was
+  deleted, not left rotting; the TS validators are the canonical, sole contract source.
+- **Grounding is enforced at ingest, both sides (S7 + the S8 "ground it" sub-fix).** Audit-code
+  findings: `verifyFindingGrounding` (`src/audit/validation/quoteGrounding.ts`) re-reads and
+  content-matches the quoted span, called from `src/audit/cli/mergeAndIngestCommand.ts` at ingest.
+  Design-review findings: `groundDesignFinding` (`src/shared/validation/designFindingGrounding.ts`)
+  requires at least one real component citation, called from `nextStepHelpers.ts` at ingest. Note:
+  `src/audit/orchestrator/fileAnchors.ts` is an unrelated navigation-aid module (large-file anchor
+  extraction for review prompts) — an earlier draft of this doc mischaracterized it as a
+  "`total_lines` remnant" tied to grounding; it isn't, and isn't the grounding chokepoint.
+- **Still open: S8's "Gate it."** `runDesignReviewAutoComplete`
+  (`src/audit/orchestrator/structureExecutors.ts:227`) can still mark a design-review pass
+  `reviewed: true` with an empty `findings: []` and no LLM call ever having run — there is no guard
+  distinguishing "a real review found nothing" from "auto-completed empty." This is the one
+  remaining piece of S8.
 
 ## 2. The judgment vs. mechanical line
 
@@ -89,9 +96,9 @@ module_contracts) stay LLM. Everything else is mostly or fully mechanical.
 
 Ordered by (impact × determinism-feasibility). Each names the plug-in point.
 
-### S1 — Derive the derivable artifacts in code *(highest leverage)*
-Make `obligation_ledger`, `test_validator_plan`, and the `implementation_dag` skeleton **generated
-deterministically**, not authored. The mapping logic already exists as the *inverse* of
+### S1 — Derive the derivable artifacts in code *(highest leverage)* — ✅ SHIPPED
+`src/remediate/contractPipeline/derive.ts` generates `obligation_ledger`, `test_validator_plan`, and
+the `implementation_dag` skeleton **deterministically**, not authored. The mapping logic already exists as the *inverse* of
 `validatePairedObligations` / `validateDesignSpecGates` Gate 3 / `validateImplementationDAGIntegrity`
 / `deriveNodeModelTier`, so the deriver and the validator share one source and cannot drift.
 - **Plug-in:** in `buildNextContractPipelineStep`, gate the dispatch for these phases — instead of
@@ -139,8 +146,8 @@ unwired `repairDownstreamPhases` computes.
   them to "apply small patch → re-derive → re-run critic+judge." Biggest single token saving for the
   expensive adversarial phase.
 
-### S3 — Skeleton scaffolding + write-time validation *(the weak-model enabler)*
-Stop handing the model a schema to fill from scratch. Have the tool emit a **pre-filled skeleton**
+### S3 — Skeleton scaffolding + write-time validation *(the weak-model enabler)* — ✅ SHIPPED
+The tool emits a **pre-filled skeleton**
 built from the already-ingested upstream payloads — structure, IDs, and cross-references populated,
 only judgment slots blank — and give the worker a **write-time validator** (the same
 `CONTRACT_PIPELINE_VALIDATORS` the backend runs at ingest) to run before it emits.
@@ -151,9 +158,10 @@ only judgment slots blank — and give the worker a **write-time validator** (th
   cross-ref — those fields aren't writable. A weak model fills sentences; a strong model spends zero
   tokens on boilerplate. This is the core "both weak and strong" lever.
 
-### S4 — Single ID authority
-A tool-owned registry mints `goal_id` / module / obligation / node IDs and owns the `CP-BLOCK-`
-↔ bare-node-id relationship as one registered mapping.
+### S4 — Single ID authority — ✅ SHIPPED
+`src/remediate/contractPipeline/idRegistry.ts` is a tool-owned registry that mints `goal_id` /
+module / obligation / node IDs and owns the `CP-BLOCK-` ↔ bare-node-id relationship as one
+registered mapping.
 - **Plug-in:** new `contractPipeline/idRegistry.ts`; repoint the mint sites (`goal_normalization`,
   `obligation_ledger` derivation, `promoteImplementationDagToExtractedPlan`'s `CP-BLOCK-` prefix)
   and the consumers (`buildBlockAliasMap`/`collapseItemResults`/`mergeImplementResults`).
@@ -161,26 +169,25 @@ A tool-owned registry mints `goal_id` / module / obligation / node IDs and owns 
   instead of mitigating it. (The tolerant merge stays as defence-in-depth, but stops being load-
   bearing.)
 
-### S5 — Move structural checks before the adversarial phases (cheap deterministic floor)
-Run a fuller **structural linter** (ID integrity, dangling refs, empty required arrays, coverage
-symmetry) deterministically *before* the LLM critic/judge, so the expensive adversarial loop only
-ever sees structurally-sound input and spends its budget on **semantics**.
+### S5 — Move structural checks before the adversarial phases (cheap deterministic floor) — ✅ SHIPPED
+A fuller **structural linter** (ID integrity, dangling refs, empty required arrays, coverage
+symmetry) — `validateDesignSpecGates` (`validation/contractPipelineGates.ts`) — runs
+deterministically *before* the LLM critic/judge, so the expensive adversarial loop only ever sees
+structurally-sound input and spends its budget on **semantics**.
 - **Plug-in:** extend the existing pre-`critic` `validateDesignSpecGates` block; pull parts of
   `validateImplementationDAGIntegrity` / `validateGoalIdConsistency` earlier.
 - **Effect:** fewer repair rounds wasted on structural issues; a weak critic still benefits from the
   deterministic floor; a strong critic aims higher.
 
-### S6 — Single-source the schema; delete the drift
-Make `schemas/contract_pipeline.schema.json` (or a regenerated equivalent) **the** source consumed
-by the validators, the write-time validator (S3), and the skeleton scaffolder (S3) — or delete it
-if the TS validators remain canonical. Guard with a generator↔committed test (the pattern just
-shipped for the auditor-contract fixture).
+### S6 — Single-source the schema; delete the drift — ✅ SHIPPED
+The stale `schemas/contract_pipeline.schema.json` was **deleted** (it is not present anywhere in
+the tree). The TS validators (`validation/contractPipelineGates.ts`) are the sole canonical source
+consumed by the validators, the write-time validator (S3), and the skeleton scaffolder (S3).
 - **Effect:** derivers, validators, scaffolds, and docs can't drift from three places.
 
-### S7 — Anti-hallucination by *grounding the claim*, not *attesting the read* (audit-code side)
+### S7 — Anti-hallucination by *grounding the claim*, not *attesting the read* (audit-code side) — ✅ SHIPPED
 The original audit design tried to stop hallucinated findings by forcing auditors to prove they
-read the files (the `file_coverage[].total_lines == actual` check; the `orchestrator/fileAnchors.ts`
-remnant). That is the wrong target: it proves *breadth attestation*, is gameable (read the count
+read the files (the `file_coverage[].total_lines == actual` check). That is the wrong target: it proves *breadth attestation*, is gameable (read the count
 from a listing, never open the body), and proves nothing about whether a finding is **true**. You
 don't actually care whether the model read the file — you care whether each claim is true and
 re-checkable. **Reframe: attach the safeguard to claims, not to reading**, and make the verdict the
@@ -205,13 +212,14 @@ Tier the grounding by claim type:
   checkable.** Be honest: no anchor proves a taste call. Safeguard = the adversarial cross-check
   already in the pipeline (independent refuter + judge) **plus traceability**: every synthesis claim
   must trace to grounded tier-1/2 findings, so judgment can't invent its own facts.
-- **Plug-in:** require the span in `prompts/renderWorkerPrompt.ts` + `schemas/audit_result.schema.json`
-  (add span fields; **demote `total_lines` to a non-gating coverage stat**); enforce quote-verify in
-  `validation/auditResults.ts` and at ingest in `orchestrator/resultIngestion.ts` /
-  `cli/mergeAndIngestCommand.ts` (re-read disk + match); have the worker self-check before emit via
-  the **already-existing** `cli/validateResultCommand.ts` (audit-code already ships the S3 write-time
-  validator affordance — wire quote-verify into it). Executable anchors reuse the runtime-validation
-  path (`runtime_validation_report.json`). Generalize/replace `orchestrator/fileAnchors.ts`.
+- **Implementation:** the span requirement is in `schemas/audit_result.schema.json`; quote-verify
+  grounding (`verifyFindingGrounding`, `src/audit/validation/quoteGrounding.ts`) is enforced at
+  ingest by `src/audit/cli/mergeAndIngestCommand.ts` for every audit finding, and the equivalent
+  design-review grounding (`groundDesignFinding`, `src/shared/validation/designFindingGrounding.ts`)
+  is enforced at ingest by `nextStepHelpers.ts` for design findings. Executable anchors reuse the
+  runtime-validation path (`runtime_validation_report.json`). `src/audit/orchestrator/fileAnchors.ts`
+  is a **separate, unrelated** module (large-file review-prompt anchor extraction) — do not conflate
+  it with grounding enforcement.
 - **Effect:** a hallucinated or stale finding cannot be admitted — its anchor either re-verifies
   against disk or it's quarantined. Proportionate (anchor the claims that matter, not every read),
   ungameable, and it degrades gracefully for a weak auditor instead of producing confident-but-fake
@@ -219,39 +227,32 @@ Tier the grounding by claim type:
   day-to-day — but it costs almost nothing and is precisely the safety net for the weak-auditor case
   the project is built around. Don't over-tax; tier-3 hallucination is triangulated, never "proven."
 
-### S8 — Fix the conceptual design review itself (restore the original design; don't constrain it)
+### S8 — Fix the conceptual design review itself (restore the original design; don't constrain it) — 3/4 SHIPPED, 1 OPEN
 The audit's **conceptual design review** is the lens meant to catch deep architectural mistakes — and
 it caught *none* of this class in the 452-self-audit. But the fix is **not** to teach it this
 project's concerns: it is a **repo-agnostic** tool that audits any codebase, so it must ask
-**general** first-principles questions, never project-specific lenses. The real root cause is that
-the implementation **degraded the original design** into a narrow, constrained step. Restore it:
-- **Ask general first-principles questions (primary).** Today the prompt
-  (`src/audit/orchestrator/designReviewPrompt.ts:246-257`) asks only "what library / pattern /
-  simplification / missing capability" — a local improvement checklist. → **Fix:** ask the general
+**general** first-principles questions, never project-specific lenses. The real root cause was that
+the implementation **degraded the original design** into a narrow, constrained step. Three of the
+four restorations below shipped; one ("Gate it") did not.
+- **Ask general first-principles questions (primary). — ✅ SHIPPED.** The prompt now asks the general
   architectural questions — *"is the fundamental approach the right one? what core assumption
   underlies this design, and is it sound? what would a clean-sheet redesign do differently? where is
-  the deepest structural risk?"* Repo-agnostic by construction. **Do NOT** bake in project-specific
-  lenses (determinism-vs-LLM, weak-model robustness, ground-truth anchors) — a general "is the
-  approach right?" asked against our actual pipeline surfaces our issue *as a consequence*, and that
-  generality is the entire point.
-- **Orient, then roam (restore the original scope intent).** The implementation degraded to ~20
-  highest-**risk** units, summaries only (`renderConceptualReviewPrompt:407-409`,
-  `buildPrioritizedReadingList`) — which is *why* it couldn't see a cross-cutting property. → **Fix:**
-  the intended design — give the reviewer a small **context package + the project docs + an
-  `/init`-style codebase overview**, then **let it roam the actual files freely** (read wherever the
-  code leads, not a risk-truncated summary feed). Free exploration of real code is what lets it
-  perceive emergent, whole-system structure in *any* repo.
-- **Make the judge judge.** The deep-path judge is a merge/dedup pass ("you are merging, not
-  reviewing", `designReviewPrompt.ts:494`). → **Fix:** restore its evaluative role — assess merit /
-  validity / severity, decide what is real, and flag what is *missing* — not just fold duplicates.
-- **Ground the output (general; = S7 applied to the reviewer).** Conceptual findings are ingested on
-  `Array.isArray()` alone (`src/audit/cli/nextStepHelpers.ts:325-332`) — no evidence, unlike
-  schema-gated `AuditResult`. → **Fix:** require each finding to carry evidence (components/lines) and
-  validate on ingest. (An output requirement, not a prompt lens — stays repo-agnostic.)
-- **Gate it.** The obligation is a boolean (`state.ts:158-159`); `runDesignReviewAutoComplete`
-  (`structureExecutors.ts:142-144`) can mark it complete with `[]` and no LLM call. → **Fix:** require
-  a real (non-fallback) finding set, or block synthesis when the pass auto-completed empty — "no
-  systemic review happened" must not pass silently.
+  the deepest structural risk?"* Repo-agnostic by construction; no project-specific lenses baked in.
+- **Orient, then roam (restore the original scope intent). — ✅ SHIPPED.** The reviewer gets a small
+  **context package + the project docs + an `/init`-style codebase overview**, then roams the actual
+  files freely (read wherever the code leads, not a risk-truncated summary feed).
+- **Make the judge judge. — ✅ SHIPPED.** The deep-path judge restores its evaluative role — assess
+  merit / validity / severity, decide what is real, and flag what is *missing* — not just fold
+  duplicates.
+- **Ground the output (general; = S7 applied to the reviewer). — ✅ SHIPPED.** Conceptual/contract
+  findings now require component-level evidence, enforced at ingest by `groundDesignFinding`
+  (`src/shared/validation/designFindingGrounding.ts`), called from `nextStepHelpers.ts`.
+- **Gate it. — ❌ STILL OPEN.** The review-completion flag is still a boolean;
+  `runDesignReviewAutoComplete` (`src/audit/orchestrator/structureExecutors.ts:227`) can mark a pass
+  `reviewed: true` with `contract_findings`/`conceptual_findings: []` and no LLM call ever having
+  run — there is no guard distinguishing "a real review found nothing" from "auto-completed empty."
+  **Fix still needed:** require a real (non-fallback) finding set, or block synthesis when the pass
+  auto-completed empty — "no systemic review happened" must not pass silently.
 
 **Synthesis — why S8 is the exception to S1–S7.** The conceptual review is the **one place to lean
 *into* judgment, not toward determinism**. Architectural insight is irreducibly tier-3 (S7) — you
@@ -275,23 +276,23 @@ non-judging judge — not because the reviewer lacked our project's vocabulary.
   floor that makes a weak model *safe* and a strong model *fast*. The same pipeline run by a weaker
   worker degrades gracefully instead of producing green-but-malformed artifacts.
 
-## 5. Sequencing
+## 5. Sequencing (historical — all done except the one open item)
+
+S1–S8 shipped in the order below, except S2 (dropped) and S8's "Gate it" (still open — see §1 and
+the S8 section). Kept for the historical record of how the track was sequenced:
 
 1. **S1 + S3 together** — derive the derivable artifacts and scaffold the rest with write-time
    validation. Biggest combined efficiency + robustness win; unblocks the weak-model goal.
-2. **S2 + S4** — patch repair + ID authority. Removes the two biggest remaining waste/error classes
-   (repair re-author cascade; merge trap).
+2. **S4** — ID authority (S2 was investigated and dropped instead of shipped — see its section).
+   Removes the merge-trap error class at the root.
 3. **S5 + S6** — structural floor before adversarial phases; single-source schema.
 
-S1–S6 are the remediate-code contract-authoring track. **S7 is the parallel audit-code track**
-(auditor-claim grounding) — independent of S1–S6 and cheap/high-ROI, so quote-verify (tier 1) can
-land early on its own; it only needs the audit-code result schema + ingest, not the contract
-pipeline.
+S1, S3–S6, S8 are the remediate-code contract-authoring track. **S7 is the parallel audit-code track**
+(auditor-claim grounding) — independent of the others and shipped on its own, since it only needed
+the audit-code result schema + ingest, not the contract pipeline.
 
-Virtuous cycle: each of these makes the *next* contract-pipeline run (including the one that
-implements the rest of this list) cheaper and more weak-model-robust. This work is itself a strong
-candidate to dogfood through `audit-code → remediate-code` once S1/S3 land — at which point the
-pipeline pays for its own improvement.
+**Remaining work:** S8's "Gate it" sub-fix (see §1 and the S8 section) is the only open item from
+this entire design. Everything else described in this document is shipped.
 
 ## 6. Non-negotiables (carry the project's invariants)
 

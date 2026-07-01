@@ -163,7 +163,13 @@ host_delegation agents (the conceptual pass expanding to its perspective fan-out
 under deep). Finding sets merge into synthesis as distinct report sections,
 separate from auditor findings.
 
-**Structured output:** both agents emit findings inline; skill writes to disk.
+**Structured output:** both agents WRITE their findings JSON directly to a
+result path (via their own Write tool), then reply with a short confirmation —
+not inline emission. An earlier design tried inline emission with the skill
+writing the reply to disk; that mechanism was tried and reverted (it silently
+dropped results), so the target design itself is the worker-writes-the-file
+pattern audit-code's packet dispatch already uses
+(`src/audit/cli/dispatch/packetPrompt.ts`).
 
 **Prompt caching:** the shared structural context block (graph, surfaces, flows,
 risk register, file inventory) is identical for both agents. It goes first in
@@ -247,10 +253,14 @@ session's JIT choices, not authority.
 **Ingestion folded in:** when results arrive, ingestion and re-dispatch happen
 in the same logical turn. No separate next-step call just to ingest.
 
-**Auditor structured output:** workers emit `AuditResult[]` inline in their
-response. Skill captures and writes the file. Payload stays out of orchestrator
-context; orchestrator only sees the path. Workers no longer manually write JSON
-or execute a submit command.
+**Auditor structured output:** workers WRITE `AuditResult[]` directly to their
+result path with their own Write tool, then reply with a short confirmation —
+not inline emission (an earlier design tried emitting inline for the skill to
+capture and write; that mechanism was tried and reverted because it silently
+dropped results — see `src/audit/cli/dispatch/packetPrompt.ts`, which documents
+the revert and asserts the write-instruction wording via a regression test).
+Payload stays out of orchestrator context; orchestrator only sees the path.
+Workers do not execute a submit command.
 
 **Prompt caching for workers:** schema definition, general instructions, and
 repo metadata form a fixed shared prefix identical across all workers in a run.
@@ -272,7 +282,9 @@ Always fires; never skipped unless running headless (auto-complete writes
 `status: "omitted"` so headless runs still terminate cleanly).
 
 Host agent receives the findings and produces themes, executive summary, and
-top risks. Emits inline; skill writes to disk.
+top risks, and WRITES the result to disk itself — not inline emission (see the
+dispatch section above: this pattern was tried and reverted because it
+silently dropped results).
 
 The existing `synthesisNarrativePrompt.ts` is kept; the change is adding the
 host_delegation wrapper and executor registration.

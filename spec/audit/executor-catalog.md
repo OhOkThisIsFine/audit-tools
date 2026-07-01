@@ -4,88 +4,81 @@
 
 This document defines the bounded executable steps available to the orchestrator.
 
+## Source of truth
+
+The canonical, machine-readable registry is `EXECUTOR_REGISTRY` in
+`src/audit/orchestrator/executors.ts` — 21 entries, each declaring an `id`, a
+`kind` (`deterministic` runs inline; `host_delegation` pauses the pipeline and
+asks the active LLM/host agent to do the work), and the `obligation_ids` it
+satisfies. `nextStep.ts`'s priority chain (see `CLAUDE.md` → audit-code
+architecture) picks the highest-priority unsatisfied obligation and dispatches
+to whichever executor's `obligation_ids` includes it. This document is the
+declarative reference; that table is authoritative. For each artifact's exact
+filename/format/staleness, see [`artifact-contract.md`](artifact-contract.md)
+and [`dependency-map.md`](dependency-map.md) — not duplicated here.
+
+Two executors carry `obligation_ids: []` and are never selected by the priority
+scan — they run only via an explicit `preferredExecutor` override:
+`runtime_validation_update_executor` (imported runtime-validation evidence) and
+`external_analyzer_import_executor` (imported normalized external-analyzer
+results). One executor, `agent`, is a legacy `host_delegation` placeholder with
+`obligation_ids: []` — retained only so in-flight runs that still reference
+`"agent"` in a persisted artifact resolve; it no longer owns
+`audit_tasks_completed` (superseded by `rolling_dispatch_executor`). One
+executor, `friction_capture_executor`, is retained for schema compatibility but
+is currently **unreachable** — its obligation (`friction_capture_current`) is
+not in `deriveAuditState`'s priority chain, so the engine never selects it; the
+actual friction triage fires from the `present_report` terminal step
+(`decideAuditFrictionCloseout`, called from `nextStepHelpers.ts`/
+`nextStepCommand.ts`) instead.
+
 ## Executors
 
-### `intake_executor`
+### Intake
 
-Produces:
+| Executor | Kind | Obligation | Produces |
+|---|---|---|---|
+| `provider_confirmation_executor` | host_delegation | `provider_confirmation` | `provider_confirmation.json` |
+| `intake_executor` | deterministic | `repo_manifest`, `file_disposition` | `repo_manifest.json`, `file_disposition.json` (one call, one obligation with two artifact names) |
+| `intent_checkpoint_executor` | host_delegation | `intent_checkpoint_current` | `intent_checkpoint.json` |
+| `auto_fix_executor` | deterministic | `auto_fixes_applied` | `auto_fixes_applied.json` |
 
-- `repo_manifest.json`
+### Analysis
 
-### `disposition_executor`
+| Executor | Kind | Obligation | Produces |
+|---|---|---|---|
+| `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | `external_analyzer_acquisition.json` (triggers `external_analyzer_results.json`) |
+| `structure_executor` | deterministic | `structure_artifacts` | `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `git_history.json` — all in one call |
+| `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | `analyzer_capability.json` (+ refreshed `graph_bundle.json` when analyzer edges merge in) |
+| `design_assessment_executor` | deterministic | `design_assessment_current` | `design_assessment.json` (deterministic pass) |
+| `design_review_contract` | host_delegation | `design_review_contract_completed` | updates `design_assessment.json` (contract-assessment mode — invariants/boundaries/obligations) |
+| `design_review_conceptual` | host_delegation | `design_review_conceptual_completed` | updates `design_assessment.json` (conceptual-critique mode — philosophy/alternatives) |
+| `syntax_resolution_executor` | deterministic | `syntax_resolved` | `syntax_resolution_status.json` |
 
-Produces:
+### Execution
 
-- `file_disposition.json`
+| Executor | Kind | Obligation | Produces |
+|---|---|---|---|
+| `planning_executor` | deterministic | `planning_artifacts` | `scope.json`, `coverage_matrix.json`, `audit_tasks.json`, `audit_plan_metrics.json`, `task_affinity_graph.json` — all in one call |
+| `rolling_dispatch_executor` | host_delegation | `audit_tasks_completed` | consumes `audit_tasks.json`; drives host-subagent or in-process dispatch until results are produced |
+| `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | `external_analyzer_results.json` |
+| `result_ingestion_executor` | deterministic | `audit_results_ingested` | refreshed `coverage_matrix.json`, `flow_coverage.json`, `requeue_tasks.json` from `audit_results.jsonl` |
+| `runtime_validation_executor` | deterministic | `runtime_validation_current` | `runtime_validation_tasks.json`, initial `runtime_validation_report.json` |
+| `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | refreshed `runtime_validation_report.json` from imported evidence |
 
-### `structure_executor`
+### Reporting
 
-Produces:
+| Executor | Kind | Obligation | Produces |
+|---|---|---|---|
+| `synthesis_executor` | deterministic | `synthesis_current` | `audit-report.md` + `audit-findings.json` (co-produced) + `audit_plan_metrics.json` |
+| `synthesis_narrative_executor` | host_delegation | `synthesis_narrative_current` | `synthesis-narrative.json` (+ re-renders `audit-findings.json`/`audit-report.md` with the enriched narrative) |
 
-- `unit_manifest.json`
-- `surface_manifest.json`
-- `graph_bundle.json`
-- `critical_flows.json`
-- `risk_register.json`
+### Legacy / unreachable
 
-### `coverage_initializer`
-
-Produces:
-
-- `coverage_matrix.json`
-- `flow_coverage.json`
-
-### `task_generation_executor`
-
-Produces:
-
-- `audit_tasks.json`
-
-### `requeue_executor`
-
-Produces:
-
-- `requeue_tasks.json`
-
-### `result_ingestion_executor`
-
-Consumes:
-
-- `audit_results.json`
-  Produces:
-- refreshed `coverage_matrix.json`
-- refreshed `flow_coverage.json`
-- refreshed `requeue_tasks.json`
-- refreshed synthesis if configured
-
-### `runtime_validation_planner`
-
-Produces:
-
-- `runtime_validation_tasks.json`
-- baseline or merged `runtime_validation_report.json`
-
-### `runtime_validation_update_executor`
-
-Consumes:
-
-- runtime validation update payload
-  Produces:
-- refreshed `runtime_validation_report.json`
-- refreshed `synthesis_report.json`
-
-### `synthesis_executor`
-
-Produces:
-
-- `merged_findings.json`
-- `root_cause_clusters.json`
-- `synthesis_report.json`
-
-### `validation_executor`
-
-Consumes current artifacts
-Produces validation result in-memory or as future artifact
+| Executor | Kind | Obligation | Note |
+|---|---|---|---|
+| `agent` | host_delegation | *(none)* | Legacy placeholder for `audit_tasks_completed`, superseded by `rolling_dispatch_executor`. Retained only for persisted-artifact compatibility. |
+| `friction_capture_executor` | deterministic | `friction_capture_current` | Unreachable — obligation not in the priority chain. Friction triage actually fires from the `present_report` terminal step. |
 
 ## Bounded-step expectations
 
@@ -95,10 +88,3 @@ Each executor should:
 - have clear outputs
 - verify its own result as much as possible
 - avoid mixing unrelated responsibilities
-
-## Future executor categories
-
-- external analyzer import executor
-- semantic audit task dispatcher
-- runtime validation execution adapter
-- completion checker

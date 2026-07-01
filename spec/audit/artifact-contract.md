@@ -7,110 +7,62 @@ Artifacts are the continuity layer for the single-entrypoint audit engine. They 
 ## Artifact rules
 
 1. Every artifact must have a defined producer.
-2. Every artifact must have a defined consumer.
-3. Every artifact must have defined freshness dependencies.
-4. Artifacts must be machine-readable and stable.
-5. Orchestration decisions should be based on artifacts, not hidden transient reasoning.
+2. Every artifact must have defined freshness dependencies.
+3. Artifacts must be machine-readable and stable.
+4. Orchestration decisions should be based on artifacts, not hidden transient reasoning.
 
-## Core artifacts
+## Source of truth
 
-### `repo_manifest.json`
+The canonical, machine-readable artifact registry is `ARTIFACT_DEFINITIONS` in
+`src/audit/io/artifacts.ts` — 31 entries, each declaring a filename, a phase
+(`intake` / `analysis` / `execution` / `reporting` / `supervisor`), and typed
+read/write functions (JSON, NDJSON, or plain text). This document is the
+declarative reference; that table is authoritative. For exact upstream
+dependencies (staleness edges) per artifact, see
+[`dependency-map.md`](dependency-map.md) — not duplicated here. For which
+executor produces which artifact and its obligation id, see
+[`executor-catalog.md`](executor-catalog.md) — also not duplicated here.
 
-Producer: intake executor
-Consumers: almost everything downstream
-Stale if: repository intake changes
+Three artifacts participate in orchestrator state but are **not**
+`ARTIFACT_DEFINITIONS` entries (loaded/written specially, not staleness-DAG
+nodes): `active-dispatch.json` (in-flight dispatch state), design-review
+snapshots (per-pass semantic projections), and the per-file graph-edge cache
+(C2 incremental graph-build reuse). `agent-feedback.jsonl` is also outside the
+registry — worker-appended, orchestrator-read-only — but *does* participate in
+the staleness DAG (see dependency-map.md).
 
-### `file_disposition.json`
+## Artifacts by phase
 
-Producer: disposition executor
-Consumers: unit planning, coverage initialization, extraction filtering
-Stale if: repo manifest changes or disposition logic changes
+### Intake
 
-### `unit_manifest.json`
+| Artifact | Format | Purpose |
+|---|---|---|
+| `provider_confirmation.json` | JSON | Auto-discovered/confirmed provider set for this run. |
+| `repo_manifest.json` | JSON | Repository structure and file classification. |
+| `file_disposition.json` | JSON | Per-file audit-scope disposition derived from the manifest. |
+| `auto_fixes_applied.json` | JSON | Record of mechanical auto-fixes applied before review. |
+| `intent_checkpoint.json` | JSON | User/host-confirmed audit intent and lens propositions. |
 
-Producer: unit planning executor
-Consumers: task generation, risk, runtime validation, coverage
-Stale if: repo manifest or file disposition changes
+### Analysis
 
-### `surface_manifest.json`
+| Artifact | Format | Purpose |
+|---|---|---|
+| `unit_manifest.json` | JSON | Parsed units (functions/classes/modules). |
+| `graph_bundle.json` | JSON | Dependency/call graph, with optional external-analyzer edge enrichment. |
+| `surface_manifest.json` | JSON | Public API surface and exports. |
+| `critical_flows.json` | JSON | Identified critical execution/data flows. |
+| `flow_coverage.json` | JSON | Coverage of critical flows by ingested results. |
+| `risk_register.json` | JSON | Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list). |
+| `git_history.json` | JSON | Deterministic co-change/churn/authorship mined from the commit log. |
+| `design_assessment.json` | JSON | Deterministic + optional host-delegated design assessment (see below). |
+| `analyzer_capability.json` | JSON | Marker: outcome of the optional graph-enrichment pass (`applied`/`omitted`) + per-analyzer provenance. |
+| `external_analyzer_acquisition.json` | JSON | Marker: external-analyzer acquisition run record (gitleaks + consent-gated eslint/semgrep/jscpd). |
 
-Producer: surface extractor
-Consumers: flow inference, risk, semantic audit planning
-Stale if: repo manifest or file disposition changes
+`flow_coverage.json` is listed here at `analysis` phase per `ARTIFACT_DEFINITIONS`
+even though it's computed after execution — the phase tag reflects where it's
+declared in the registry, not a strict pipeline-order guarantee.
 
-### `graph_bundle.json`
-
-Producer: graph extractor
-Consumers: structural review, synthesis, future clustering improvements
-Stale if: repo manifest or file disposition changes
-
-### `critical_flows.json`
-
-Producer: flow extractor
-Consumers: flow-aware tasks, flow coverage, runtime validation
-Stale if: surface manifest or repo structure changes
-
-### `risk_register.json`
-
-Producer: risk planner
-Consumers: prioritization, runtime validation planning
-Stale if: unit manifest or critical flows change
-
-### `coverage_matrix.json`
-
-Producer: coverage initializer / result ingestion / coverage reconciler
-Consumers: requeue, completion, validation
-Stale if: audit results change or planning baseline changes
-
-### `flow_coverage.json`
-
-Producer: flow coverage reconciler
-Consumers: flow requeue, runtime validation planning, completion
-Stale if: critical flows or coverage matrix change
-
-### `audit_tasks.json`
-
-Producer: task generation executor
-Consumers: external audit execution loop
-Stale if: unit manifest or flow planning changes materially
-
-### `requeue_tasks.json`
-
-Producer: requeue executor
-Consumers: external audit execution loop
-Stale if: coverage or flow coverage changes
-
-### `runtime_validation_tasks.json`
-
-Producer: runtime validation planner
-Consumers: external runtime validation execution
-Stale if: risk, units, or flow coverage change
-
-### `runtime_validation_report.json`
-
-Producer: runtime validation update executor
-Consumers: synthesis
-Stale if: tasks change or new evidence arrives
-
-### `audit_results.json`
-
-Producer: external LLM/task execution loop
-Consumers: coverage, synthesis
-Stale if: new results are added or replaced
-
-### `external_analyzer_results.json`
-
-Producer: external analyzer adapters
-Consumers: future risk/synthesis/planning enrichers
-Stale if: imported analyzer data changes
-
-### `design_assessment.json`
-
-Producer: deterministic design assessment executor and optional design review worker
-Consumers: synthesis and planning context
-Stale if: repository structure, dependency graph, surfaces, or critical flows change
-
-The optional design-review portion may include observational contract assessment.
+The design-assessment portion may include observational contract assessment.
 That mode infers existing contracts from the repository artifacts and inspected
 code: invariants, trust boundaries, preconditions, postconditions, data
 lifecycle obligations, and critical-flow guarantees. It should attack those
@@ -120,20 +72,38 @@ categories such as `inferred_contract_gap`, `trust_boundary_gap`,
 invent a new contract DSL, create a remediation plan, edit source code, or turn
 audit-code into an implementation pipeline.
 
-### `merged_findings.json`
+### Execution
 
-Producer: synthesis executor
-Consumers: end users, future prioritization layers
-Stale if: audit results or runtime validation report change
+| Artifact | Format | Purpose |
+|---|---|---|
+| `scope.json` | JSON | How this run was scoped (`full` vs. `delta` with `--since` seed/expanded file sets). |
+| `coverage_matrix.json` | JSON | Task allocation matrix: files × lens buckets, tracks which are queued/complete. |
+| `runtime_validation_tasks.json` | JSON | Runtime-validation task specs derived from risk + coverage. |
+| `runtime_validation_report.json` | JSON | Runtime-validation results (initial + import-refreshed). |
+| `external_analyzer_results.json` | JSON | Normalized findings from acquired external analyzers. |
+| `syntax_resolution_status.json` | JSON | Per-file syntax-parse status and failures. |
+| `audit_results.jsonl` | **NDJSON** | Ingested `AuditResult` records, one per line — not a `.json` array. |
+| `audit_tasks.json` | JSON | Task specifications for external (host-delegated) audit execution. |
+| `audit_plan_metrics.json` | JSON | Planning metrics and cost estimates for the current task set. |
+| `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; partitioned just-in-time at dispatch, never persisted back. |
+| `requeue_tasks.json` | JSON | Re-audit tasks derived from coverage/flow-coverage gaps. |
 
-### `root_cause_clusters.json`
+### Reporting
 
-Producer: synthesis executor
-Consumers: end users, remediation planning
-Stale if: merged findings or runtime validation report change
+| Artifact | Format | Purpose | Deliverable? |
+|---|---|---|---|
+| `audit-report.md` | **Markdown** | Human-readable rendered report. | **Promoted** on completion. |
+| `audit-findings.json` | JSON | Canonical machine contract (`AuditFindingsReport`) — source of truth. | **Promoted** on completion. |
+| `synthesis-narrative.json` | JSON | Marker: whether the optional LLM narrative pass (themes/exec-summary/top-risks) was `applied` or `omitted`. | internal |
 
-### `synthesis_report.json`
+`audit-report.md` and `audit-findings.json` are co-produced by
+`synthesis_executor` in one call — `audit-report.md` is the render of
+`audit-findings.json`, not an independently-derived artifact.
 
-Producer: synthesis executor
-Consumers: end users, completion logic
-Stale if: synthesis inputs change
+### Supervisor
+
+| Artifact | Format | Purpose |
+|---|---|---|
+| `audit_state.json` | JSON | Orchestrator state snapshot (stateless — re-derivable from the rest of the bundle). |
+| `artifact_metadata.json` | JSON | Per-artifact staleness metadata (recorded upstream revisions/hashes). |
+| `tooling_manifest.json` | JSON | Detected tooling/analyzer versions (rebuilt fresh every `advanceAudit` call — never stale by construction). |
