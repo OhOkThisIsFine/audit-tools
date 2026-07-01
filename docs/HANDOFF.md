@@ -8,18 +8,11 @@
 
 ## Live state
 
-- On npm as `latest` (current version tracked in `package.json`, not pinned here). Last published:
-  v0.30.56 (2026-07-01) — quota-parity/tree-kill/knip-slices-1+2.
-- **Merged to main, publish-pending:** this session's `remediate-code` run against the two remaining
-  plan-carrying backlog items — jscpd registered as a second acquired ecosystem-specific analyzer
-  (`src/audit/extractors/analyzers/candidates.ts`, proves the own-vs-acquire pattern generalizes beyond
-  eslint/semgrep) and a confirmed-no-gap consent-gate finding logged to `docs/backlog.md`. The third
-  planned node (knip slice-3 graph-context-in-prompt) was independently re-verified at implement time and
-  found to rest on a false premise (`WorkerTask` carries no `file_paths`/tags) — left unchanged rather
-  than shipping a broken fix; see `docs/backlog.md` → "Forward tracks" for the corrected direction on any
-  future attempt. All suites green (audit 3379/0, remediate 2103/0), `check` clean.
-- **Immediate next:** publish the merged work as the next patch release
-  (`env -u CLAUDECODE npm run release:patch:publish`), verify live on npm, reinstall both global bins.
+- On npm as `latest`. Last published: v0.30.58 (2026-07-01) — jscpd analyzer + consent-gate confirmation
+  (from the prior sprint) plus this sprint's doc-review resolution (R10): mechanical CLAUDE.md/spec fixes,
+  knip dev-gate rationale relocated into CLAUDE.md, several small doc cross-links/trims, and two orphaned
+  files deleted. Both global bins reinstalled + verified at 0.30.58.
+- **Immediate next:** none — nothing pending from this sprint.
 - Ethan runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
