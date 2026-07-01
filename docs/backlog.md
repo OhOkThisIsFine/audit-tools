@@ -7,18 +7,23 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Quota-aware dispatch did NOT prevent a 5-hour session-limit wall mid-implementation (2026-06-30).**
-  During the audit-full-sweep remediation, the rolling implement phase fanned out 4 concurrent node-worker
-  subagents; 3 of 4 (CP-NODE-1/2/3) died mid-run with `You've hit your session limit · resets 1:50pm` — the
-  account-wide 5-hour rolling cap. The whole point of the quota subsystem (per-model+provider sliding window,
-  proactive escalation/spill) is to SEE the depleting 5-hour budget and pace/pause/spill BEFORE the wall, not
-  let N workers burn into it and fail. Gaps to fix: (1) the 5-hour **session/rolling-window** limit for the
-  host Claude provider is not modeled as a quota source the dispatcher reads — only RPM/TPM are; (2) no
-  proactive pre-dispatch check "will spawning K workers exceed remaining session budget?" → should reduce
-  concurrency or pause-until-reset instead of dispatching into failure; (3) dead-on-quota workers leave their
-  worktrees with partial/no edits and no result file, so the rolling session can't distinguish "quota-killed"
-  from "real failure" — quota death should be a retryable pause, not a node failure. (Ethan, 2026-06-30.)
-  Relates to [[claude-quota-credential-resolution]] / [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
+- **Quota-aware dispatch pre-wall pacing — SHIPPED as the token-budget gate (2026-06-30); live validation env-bound.**
+  Was: 4 concurrent workers walled the account 5-hour cap with no proactive pacing. Root cause (verified, see
+  `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`): the proactive `/usage` endpoint WORKS and its
+  `remaining_pct` reached the scheduler, but `applyQuotaSourceAdjustment` only reacted at 0.1/0.3 cliff bands →
+  at 0.6 it dispatched full concurrency → parallel burn → simultaneous wall. Fix (design of record
+  `spec/dispatch-token-budget-gate.md`): the everything-agnostic **token-budget dispatch gate** —
+  (A/B, v-pending) concurrency governed ONLY by (1) IDE/provider subagent allowance + (2) token budget; invented
+  caps (first_contact/fallback/cliffs) deleted; per-`(pool,window-label)` learned tokens-per-percent slope
+  (windows scale differently), budget = MIN across a pool's own windows, partitioned across pools;
+  (C) the per-target budget view (remaining %, budget, in-flight/upcoming tokens, reset) surfaced to the
+  orchestrating host in the dispatch step; (D) quota-death = retryable pause — a session-limit worker death
+  pauses its pool until the parsed reset (no thrash), strands remaining nodes as a retryable `quota_paused`
+  terminal (kept pending, not failed), and PRESERVES their worktrees; a later next-step resumes clean.
+  **Still open (env-bound):** live validation on a real rate-limited multi-worker run — can't be exercised
+  without hitting the wall. The cold-start calibration slope + the resume path especially want a live check.
+  Relates to [[claude-usage-endpoint-body-shape]] / [[claude-quota-credential-resolution]] /
+  [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
 
 - **Node verify scope guard — FIXED in tooling (2026-06-30).** Was: a node's host/DAG-authored
   `targeted_commands` could run the WHOLE suite (`npx vitest run tests/remediate`), which accept-node executed
