@@ -130,10 +130,10 @@ Within a block, each item runs through:
    check, not a freshness opinion: catches cases where tests pass but the
    change deviates from written intent.
 
-Per-item state: `pending -> documented -> tested -> refactored -> verified
--> resolved`, or `blocked` with reason at any step. A blocked item does
-not stop sibling items in the same block or other blocks from making
-progress.
+Per-item state: `pending -> tested -> tested_successfully -> refactored -> verified -> resolved`
+(or `resolved_no_change`), with side-states `blocked`, `needs_clarification`, `deemed_inappropriate`,
+and `ignored` reachable at defined points. A blocked item does not stop sibling items in the same
+block or other blocks from making progress.
 
 Phase 3 runs to termination. Every item that can make progress does, even
 if other items are blocked. No item-level user prompts during Phase 3.
@@ -230,21 +230,14 @@ refined once the first runs produce real clarification batches.
 
 ## Schemas
 
-Each artifact has a JSON Schema mirrored in `schemas/`:
+Only `finding.schema.json` is mirrored in `schemas/` as a JSON Schema. The rest of the remediation
+contract (`RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `ClosingPlan`,
+`TestSpec`, `VerificationResult`, `TriageBatch`, the remediation report) is validated by hand-written
+TypeScript validator functions in `src/remediate/validation/` (`remediationState.ts`,
+`contractPipeline.ts`, `contractPipelineGates.ts`, `artifacts.ts`), not JSON Schema files.
 
-- `finding.schema.json`
-- `remediation_plan.schema.json`
-- `remediation_block.schema.json`
-- `item_spec.schema.json`
-- `clarification_request.schema.json`
-- `closing_plan.schema.json`
-- `test_spec.schema.json`
-- `verification_result.schema.json`
-- `triage_batch.schema.json`
-- `remediation_report.schema.json`
-
-Every phase transition validates its output against the relevant schema
-before the next phase may read it.
+Every phase transition validates its output against the relevant validator before the next phase may
+read it.
 
 ## Intermediate status
 
