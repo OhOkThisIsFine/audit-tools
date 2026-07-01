@@ -9,21 +9,17 @@
 ## Live state
 
 - On npm as `latest` (current version tracked in `package.json`, not pinned here). Last published:
-  v0.30.55 (2026-07-01).
-- **Uncommitted/unpublished as of this note:** this session's work — remediate A-8 hybrid quota wiring,
-  audit-side quota-escalation parity (rate-limit evidence now threaded through `buildDispatchPool`, the
-  `poolsOverride` A-8 branch, and `driveRollingAuditDispatch`), Windows spawn tree-kill
-  (`spawnLoggedCommand.ts` `taskkill /T /F`) + PATHEXT-probe fallback for bare shim commands, and the
-  knip dead-code candidate (slices 1+2 — consent-gated `knipCandidate`/`parseKnip`, joins via the existing
-  generic `getExternalSignalPaths` seam, no new wiring needed). All suites green (audit 3376/0, remediate
-  2103/0), `check`/`check:deadcode` clean.
-- **Immediate next (two independent items):** (1) commit + ship the quota-parity/tree-kill/knip-slices-1+2
-  work above (build/check/tests already verified green in-session); (2) a `remediate-code` run targeting
-  knip slice 3 + the analyzer-registry proof tool (jscpd) + a consent-gate confirmation has its
-  contract-authoring phase DONE and validated (6 adversarial repair rounds, all real defects — see
-  `docs/backlog.md` → "Front-load broad prior-art search..." for the retrospective); no code written yet.
-  Resume with a plain `/remediate-code` next session — state is fully on disk under
-  `.audit-tools/remediation/`, next call dispatches the 3-node implementation DAG.
+  v0.30.56 (2026-07-01) — quota-parity/tree-kill/knip-slices-1+2.
+- **Merged to main, publish-pending:** this session's `remediate-code` run against the two remaining
+  plan-carrying backlog items — jscpd registered as a second acquired ecosystem-specific analyzer
+  (`src/audit/extractors/analyzers/candidates.ts`, proves the own-vs-acquire pattern generalizes beyond
+  eslint/semgrep) and a confirmed-no-gap consent-gate finding logged to `docs/backlog.md`. The third
+  planned node (knip slice-3 graph-context-in-prompt) was independently re-verified at implement time and
+  found to rest on a false premise (`WorkerTask` carries no `file_paths`/tags) — left unchanged rather
+  than shipping a broken fix; see `docs/backlog.md` → "Forward tracks" for the corrected direction on any
+  future attempt. All suites green (audit 3379/0, remediate 2103/0), `check` clean.
+- **Immediate next:** publish the merged work as the next patch release
+  (`env -u CLAUDECODE npm run release:patch:publish`), verify live on npm, reinstall both global bins.
 - Ethan runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
@@ -42,6 +38,9 @@
 - **Branch-strand trap (bit twice already):** a remediation run leaves you checked out on its
   worktree branch — commit/push docs from `main` (verify `git rev-parse --abbrev-ref HEAD`) or the commit
   strands off main.
+- **Never pass `isolation: "worktree"` to the Agent tool when dispatching a remediate-code/audit-code
+  implement node** — the tool's dispatch plan already names the correct worktree; a second isolation
+  worktree strands the subagent's edits where `accept-node` can't see them. See backlog → durable traps.
 
 ---
 
@@ -49,22 +48,36 @@
 
 Rationale: the **loop is the meta-tool**; making it cheaper, convergent, and safe has compounding leverage
 on all downstream work, and is the "redesign before scheduled autonomy" the north star requires
-([[autonomous-pipeline-capstone-spec]]). Loop-infra (T1–T3) is now COMPLETE end-to-end — nothing open on
+([[autonomous-pipeline-capstone-spec]]). Loop-infra (T1–T3) is COMPLETE end-to-end — nothing open on
 those tracks. Remaining sequencing: cheap ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 
+### T1 — Self-scaling pipeline — ✅ COMPLETE
+Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
+([[self-scaling-pipeline-not-forked-paths]]). Nothing open on this track.
+
+### T2 — Make the loop converge & safe — ✅ COMPLETE
+Repair-cap/convergence-termination, friction detection wiring, and the quarantine-on-fail-loud data-loss
+fix are all shipped. Nothing open on this track.
+
+### T3 — Headline product capability — ✅ COMPLETE
+Remediator auto-phasing (derivation + persistence + ordinal threading + scheduler barrier + per-phase
+boundary gate) is fully shipped end-to-end. Nothing open on this track.
+
 ### T4 — Remaining host-friction inventory
-- Nothing open. All A/B/C/D items shipped (contract-pipeline host-friction inventory, phase-cut, boundary
-  gates, merge-to-base). Selective-deepening convergence (both known loops) has a shipped code fix.
+Nothing open. All A/B/C/D items shipped (contract-pipeline host-friction inventory, phase-cut, boundary
+gates, merge-to-base). Selective-deepening convergence (both known loops) has a shipped code fix; live
+validation on a real deepening-capable run remains env-bound (T6-class).
 
 ### T5 — Product / analysis forward tracks
 1. **Dead-code analyzer (knip) — slice 3, graph cross-check.** Slices 1+2 shipped. Open: `graph_bundle.json`
    doesn't exist yet at knip's dispatch time (obligation ordering), so a cross-check against in/out-degree +
-   entrypoint provenance can't happen inline. Two candidate designs recorded in
-   [`docs/backlog.md`](backlog.md) — neither built yet.
-2. **Deterministic analyzers — own-vs-acquire acquisition engine.** Only git-history mining and gitleaks
-   secret scanning are fully acquired. The generic acquire-any-ecosystem-tool engine (capability-probe →
-   run ephemerally → normalize via the existing adapter seam → degrade-to-empty) is not built; each
-   additional analyzer today would still be one-off wiring, not a registry entry. See
+   entrypoint provenance can't happen inline. Candidate designs (and a corrected note on why the 2026-07-01
+   attempt on option (b) was reverted, not shipped) are in [`docs/backlog.md`](backlog.md).
+2. **Deterministic analyzers — own-vs-acquire acquisition engine.** Git-history mining, gitleaks secret
+   scanning, and now jscpd (duplication detection, 2026-07-01) are acquired. The generic acquire-any-
+   ecosystem-tool engine itself (capability-probe → run ephemerally → normalize via the existing adapter
+   seam → degrade-to-empty) is proven by two independent analyzers now, but rubocop/clippy/hadolint/
+   actionlint/type-coverage/osv-scanner etc. remain unregistered gaps. See
    [`docs/backlog.md`](backlog.md) for the 3-part plan. *([[deterministic-analyzers-own-vs-acquire]])*
 3. **Schema-enforced generation — CE-004 residual + broader semantic checks.** Emit-time constraint seam
    and the `total_lines` semantic gate (CE-009) are shipped. Open: the always-on conversation host
@@ -77,7 +90,8 @@ those tracks. Remaining sequencing: cheap ergonomics (T4) → product/analysis t
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist
   (Antigravity/OpenCode); provider `queryLimits` (revisit if a provider gains a proactive endpoint);
   headroom proxy final opt-in flip (Ethan's own decision, proxy already verified healthy); narrow staleness
-  on prose-heavy artifacts (bounded semantic judgment, defer until churn is measured).
+  on prose-heavy artifacts (bounded semantic judgment, defer until churn is measured); cross-provider quota
+  live-endpoint confirmation (Claude/Codex live-confirmed, Copilot/Antigravity gated→degrade).
   *(full detail in `docs/backlog.md` → "Deferred / waiting")*
 
 ---

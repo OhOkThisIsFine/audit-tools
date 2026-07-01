@@ -63,14 +63,15 @@ The rolling engine samples the pool's snapshot around dispatch and attributes to
 when no history.
 
 ## Surface to the orchestrating agent
-The dispatch step exposes, per target: `{remaining_pct, reset_at, in_flight_tokens, upcoming_tokens,
-remaining_token_budget}` — so the host driver (or a nested Y-dispatcher) sees the real constraints,
-not an opaque slot count. Mechanical gate enforces; the driver picks within it.
+The dispatch step exposes, per target: `{remaining_pct, reset_at, in_flight_tokens,
+remaining_token_budget}`, plus a wave-level `upcoming_tokens` (estimated wave token load, not
+per-target) — so the host driver (or a nested Y-dispatcher) sees the real constraints, not an opaque
+slot count. Mechanical gate enforces; the driver picks within it.
 
 ## Quota-death = retryable pause (data-loss fix)
-A detected session/rate-limit worker death is a pause-until-`reset_at` + preserve-worktree
-(`quarantineUncommittedWorktreeEdits`) + re-dispatch — never a node failure. Distinguishes
-quota-killed from real failure so partial worktrees are not lost.
+A detected session/rate-limit worker death is a pause-until-`reset_at` + preserve-worktree (an
+early return before `removeWorktree` in `acceptNodeWorktree`) + re-dispatch — never a node failure.
+Distinguishes quota-killed from real failure so partial worktrees are not lost.
 
 ## Build order (green at every commit)
 - **A.** Strip the invented caps (`first_contact`, `fallback`, cliffs). Governed by token budget +
