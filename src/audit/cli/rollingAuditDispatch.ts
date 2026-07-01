@@ -39,6 +39,7 @@ import {
   type DispatchableSource,
   withSourceConfig,
   sourceByPoolId,
+  captureStepBoundaryFriction,
 } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -279,7 +280,13 @@ export function makeAuditProviderPacketDispatcher(params: {
       if (limitCheck.isRateLimited) {
         // Non-consuming re-queue: the rolling engine drops the provider and puts
         // this packet back into the pending pool so it retries once the cooldown passes.
-        return { packet, outcome: "rate_limited" };
+        // Carry the channel/text evidence so a consumer's `recordRateLimit` hook can
+        // feed a channel-isolated host-session source (CE-003) for bounded escalation.
+        return {
+          packet,
+          outcome: "rate_limited",
+          rateLimit: { channel: "error", text: stderrText },
+        };
       }
 
       // The worker writes its AuditResult[] per the prompt; confirm it landed and
@@ -291,7 +298,11 @@ export function makeAuditProviderPacketDispatcher(params: {
         const stdoutText = (await readOptionalTextFile(stdoutPath)) ?? "";
         const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
         if (stdoutLimitCheck.isRateLimited) {
-          return { packet, outcome: "rate_limited" };
+          return {
+            packet,
+            outcome: "rate_limited",
+            rateLimit: { channel: "status", text: stdoutText },
+          };
         }
         return {
           packet,
@@ -383,6 +394,24 @@ export async function driveRollingAuditDispatch(params: {
     hostModelId: params.hostModelId,
     tasksOverride: params.tasksOverride,
     poolsOverride: params.poolsOverride,
+    // Retained host-session source (audit-side parity with remediate's
+    // driveRollingImplementDispatch): feeds the bounded re-limit escalation
+    // chain a reviewable friction record instead of only a stderr line.
+    onEscalation: (escalation) => {
+      void captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "quota_escalation",
+          discriminator: escalation.packet_id,
+          note: escalation.reason,
+          severity: "high",
+          category: "trap",
+          area: "dispatch/quota",
+        },
+        "audit-code",
+      );
+    },
   });
 
   // Nothing eligible this pass (every task already answered / budget-capped):
@@ -421,7 +450,22 @@ export async function driveRollingAuditDispatch(params: {
     packets,
     dispatch.pools as CapacityPool[],
     sessionConfig,
-    {},
+    {
+      // Write side: feed the retained host-session source from the worker
+      // ERROR/STATUS channel evidence carried on a rate_limited result (now
+      // populated by makeAuditProviderPacketDispatcher above). Read side:
+      // an already-escalated packet is stranded instead of re-queued.
+      recordRateLimit: (packet, result) => {
+        if (result.rateLimit) {
+          dispatch.hostSession.recordLimit(
+            result.rateLimit.channel,
+            result.rateLimit.text,
+            packet.id,
+          );
+        }
+      },
+      isPacketEscalated: (packetId) => dispatch.hostSession.isEscalated(packetId),
+    },
     dispatchPacket,
   );
 

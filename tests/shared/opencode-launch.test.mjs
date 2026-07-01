@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveOpenCodeSpawnCommand } = await import("../../src/shared/providers/opencodeLaunch.ts");
+const { resolveOpenCodeSpawnCommand, resolveWindowsShimSpawnCommand } = await import(
+  "../../src/shared/providers/opencodeLaunch.ts"
+);
 
 test("resolveOpenCodeSpawnCommand passes through on non-win32", () => {
   assert.deepEqual(
@@ -43,4 +45,50 @@ test("resolveOpenCodeSpawnCommand leaves unrelated win32 commands untouched", ()
     resolveOpenCodeSpawnCommand("node.exe", ["run"], "win32", "cmd.exe"),
     { command: "node.exe", args: ["run"] },
   );
+});
+
+test("resolveWindowsShimSpawnCommand wraps a bare command outside the allowlist when the PATH probe finds a .cmd shim", () => {
+  const probe = (command) => (command === "sometool" ? ".cmd" : undefined);
+  const resolved = resolveWindowsShimSpawnCommand(
+    "sometool",
+    ["--flag"],
+    ["opencode", "npx"],
+    "win32",
+    "cmd.exe",
+    probe,
+  );
+  assert.equal(resolved.command, "cmd.exe");
+  assert.deepEqual(resolved.args, ["/d", "/s", "/c", "sometool --flag"]);
+});
+
+test("resolveWindowsShimSpawnCommand leaves a bare command untouched when the PATH probe finds no shim", () => {
+  const probe = () => undefined;
+  assert.deepEqual(
+    resolveWindowsShimSpawnCommand(
+      "sometool",
+      ["--flag"],
+      ["opencode", "npx"],
+      "win32",
+      "cmd.exe",
+      probe,
+    ),
+    { command: "sometool", args: ["--flag"] },
+  );
+});
+
+test("resolveWindowsShimSpawnCommand never invokes the probe for a command with a recognized extension", () => {
+  let probeCalled = false;
+  const probe = () => {
+    probeCalled = true;
+    return undefined;
+  };
+  resolveWindowsShimSpawnCommand(
+    "node.exe",
+    ["run"],
+    ["opencode", "npx"],
+    "win32",
+    "cmd.exe",
+    probe,
+  );
+  assert.equal(probeCalled, false, "probe must be short-circuited for a recognized extension");
 });

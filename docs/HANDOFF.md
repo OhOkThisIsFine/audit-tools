@@ -41,10 +41,49 @@
   `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`; endpoint-shape finding in memory
   [[claude-usage-endpoint-body-shape]]. **Remaining (env-bound):** live validation on a real rate-limited
   multi-worker run (cold-start slope + resume path).
-- **Immediate next:** no code work queued. Nightly/live validation of the two selective-deepening loop fixes
-  (task_id-mismatch loop + idempotency_key-collision loop, both code-complete) needs an actual deepening-
-  capable run — env-bound, not a host-actionable next step. Otherwise proceed to the next T4/T5 item in the
-  ordering below.
+- **Shipped this session (2026-07-01, publish-pending):** with live-run validation still the only thing blocking
+  the env-bound items above, this session wired everything that WASN'T actually env-bound (per Ethan's steer:
+  "we're leaning hard on live runs — let's just wire the things we can"):
+  - **Remediate A-8 hybrid quota wiring.** The hybrid in-process branch (`nextStep.ts` ~1774) previously sized
+    pools with zero account-wall awareness; now constructs a retained `HostSessionQuotaSource` for
+    `buildConfirmedPools`, and each rate-limited node also surfaces as `quota_escalation` friction (the
+    branch's own existing settle/exhaust mechanism was already correct and is untouched).
+  - **Audit-side quota-escalation parity (the harder half of the two known "unwired" gaps).** Found the real
+    blocker first: `makeAuditProviderPacketDispatcher` computed rate-limit channel evidence then discarded it —
+    `RollingDispatchResult.rateLimit` was never populated on the audit side at all. Fixed that, then threaded a
+    retained `HostSessionQuotaSource` through 3 real touch points: `buildDispatchPool` (+ `PrepareDispatchResult`),
+    the `poolsOverride` A-8 branch in `dispatch.ts` (which bypasses `buildDispatchPool` entirely — needed its own
+    source), and `driveRollingAuditDispatch`'s `runRollingDispatch` call. Extended the pinned
+    `RollingDispatchEngineContract` (N-X06, non-breaking additive fields) with `recordRateLimit`/
+    `isPacketEscalated`, which `src/audit/orchestrator/rollingDispatch.ts` was silently dropping before.
+    `hybridDispatch.ts`'s `buildAuditSourcePools` needed NO change — confirmed remediate's own
+    `buildConfirmedPools` also omits hostSession for backend/NIM source pools (host-session models the
+    *conversation host's* wall specifically), so the original plan to touch it was itself a correction.
+  - **Windows spawn-safety (2 of an evaluated 3 ecc-borrow leads were real gaps, 2 already shipped, 1 a false
+    premise).** `spawnLoggedCommand.ts` now tree-kills (`taskkill /pid <pid> /T /F`, best-effort, non-blocking)
+    alongside the existing signal-based kill, so a cmd.exe-wrapped provider shim's real grandchild no longer
+    orphans on cancel/timeout. `opencodeLaunch.ts`'s `resolveWindowsShimSpawnCommand` gained an injectable
+    PATHEXT-probe fallback for bare commands outside the hardcoded shim allowlist. (CVE-2024-27980 metachar
+    escaping was already correct; worktree node_modules junction-sync already exists
+    (`ensureWorktreeNodeModules`); the hook-bypass lead was a false premise — `core.hooksPath` doesn't apply to
+    a Claude Code PreToolUse hook.)
+  - **knip dead-code analyzer, slices 1+2.** New consent-gated `knipCandidate`/`parseKnip` in
+    `extractors/analyzers/candidates.ts`, parser grounded against knip's real `--reporter json` source (not
+    guessed). No separate merge-point wiring needed — the join (`getExternalSignalPaths` → task tagging) is
+    already fully generic across every candidate. Slice 3 (graph cross-check) deliberately NOT started — see
+    `docs/backlog.md` for the real ordering constraint found (`external_analyzers_current` runs before
+    `graph_enrichment_current`, so `graph_bundle.json` doesn't exist yet at knip's dispatch time).
+  - **Corrected two stale backlog claims along the way:** the `web-tree-sitter` precise-graph-edges item was
+    already fully shipped (tree-sitter analyzers wired via `graphEnrichmentExecutor.ts` since before this
+    session) — backlog updated, nothing built. And `GraphEdge.confidence` is a plain 0–1 number, not a string
+    ladder, so no schema change was needed anywhere this session touched graph edges.
+  All suites green throughout (audit 3376/0, remediate 2103/0), `check`/`check:deadcode` clean. Not yet
+  committed/published as of this note — see immediate next.
+- **Immediate next:** commit + ship the above (build/check/tests already verified green in-session). After that,
+  nightly/live validation of the two selective-deepening loop fixes (task_id-mismatch loop + idempotency_key-
+  collision loop, both code-complete) needs an actual deepening-capable run — env-bound, not a host-actionable
+  next step. Otherwise proceed to the next T4/T5 item in the ordering below (knip slice 3 is now the front of
+  that queue, per the notes above).
 - Per-lap shipped detail is not narrated here (that's changelog creep — see git log). This doc is the
   **open-work roadmap** only: current state above, sequenced open items below.
 

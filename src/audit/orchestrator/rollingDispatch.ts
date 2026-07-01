@@ -106,6 +106,8 @@ export async function runRollingDispatch<TPacket>(
       confirmedPools: activePools,
       sessionConfig,
       dispatchPacket,
+      recordRateLimit: contract.recordRateLimit,
+      isPacketEscalated: contract.isPacketEscalated,
       onResult: (result) => {
         allResults.push(result);
         contract.onResult?.(result);

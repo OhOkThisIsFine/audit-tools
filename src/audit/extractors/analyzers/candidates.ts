@@ -218,16 +218,97 @@ const eslintCandidate: ExternalAnalyzerCandidate = {
   parse: parseEslint,
 };
 
+/**
+ * Parse knip's `--reporter json` stdout — `{ issues: [{ file, exports?, types?,
+ * nsExports?, nsTypes? }] }`, each per-type array holding `{ name, line, col }`
+ * (grounded against `node_modules/knip/dist/reporters/json.js` in this repo, not
+ * guessed). Only the four "unused export"-shaped report types are consumed —
+ * unused files/dependencies are a different signal class this candidate does
+ * not surface. Every item is a LEAD, not a confirmed finding: standalone knip
+ * cannot see dispatch-table/re-export-alias/dynamic wiring, so it is tagged
+ * `external_analyzer_signal` (the same generic seam every candidate uses) and
+ * left to the per-file lens subauditor to confirm-or-refute, never merged as a
+ * finding directly.
+ */
+const KNIP_EXPORT_ISSUE_TYPES = ["exports", "types", "nsExports", "nsTypes"] as const;
+
+function parseKnip(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout || "{}");
+  } catch {
+    return [];
+  }
+  const issues =
+    payload && typeof payload === "object" && Array.isArray((payload as { issues?: unknown }).issues)
+      ? ((payload as { issues: Record<string, unknown>[] }).issues)
+      : [];
+  const items: ReturnType<ExternalAnalyzerCandidate["parse"]> = [];
+  for (const row of issues) {
+    const file = typeof row.file === "string" ? row.file : "";
+    if (!file) continue;
+    for (const issueType of KNIP_EXPORT_ISSUE_TYPES) {
+      const symbols = row[issueType];
+      if (!Array.isArray(symbols)) continue;
+      for (const symbol of symbols) {
+        if (!symbol || typeof symbol !== "object") continue;
+        const name = typeof (symbol as { name?: unknown }).name === "string"
+          ? (symbol as { name: string }).name
+          : "unknown";
+        const line = typeof (symbol as { line?: unknown }).line === "number"
+          ? (symbol as { line: number }).line
+          : undefined;
+        items.push({
+          id: `knip-${issueType}:${file}:${name}:${line ?? 0}`,
+          category: "maintainability",
+          severity: "low",
+          path: file,
+          line_start: line,
+          summary: `knip: unused ${issueType === "types" || issueType === "nsTypes" ? "type" : "export"} '${name}' — unverified against the graph; confirm truly dead or refute as dynamic/entrypoint-only wiring before reporting.`,
+          rule: `knip-${issueType}`,
+        });
+      }
+    }
+  }
+  return items;
+}
+
+const knipCandidate: ExternalAnalyzerCandidate = {
+  id: "knip",
+  runner: "npx",
+  spec: "knip@6",
+  // CONSENT-GATED: needs repo config to avoid noise, and every flag here is an
+  // unverified lead (no graph cross-check yet — see docs/backlog.md), not a
+  // confirmed finding; same tier as eslint/semgrep.
+  defaultRun: false,
+  detect: (root) => detectNodeEcosystem(root),
+  // No positional/cwd flag needed: the acquisition engine already spawns with
+  // cwd = root (runExternalAnalyzer's `run(argv, root)`), and knip discovers
+  // project files from its own config/tsconfig relative to cwd.
+  buildArgv: (prefix) => [
+    ...prefix,
+    "--reporter",
+    "json",
+    "--include",
+    "exports,types,nsExports,nsTypes",
+    "--no-exit-code",
+  ],
+  parse: parseKnip,
+};
+
 /** The curated external analyzer candidate set. gitleaks is the default member. */
 export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   gitleaksCandidate,
   semgrepCandidate,
   eslintCandidate,
+  knipCandidate,
 ];
 
 export {
   gitleaksCandidate,
   semgrepCandidate,
+  knipCandidate,
+  parseKnip,
   eslintCandidate,
   parseGitleaks,
   GITLEAKS_VERSION,

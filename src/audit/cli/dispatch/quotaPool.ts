@@ -8,7 +8,10 @@ import type {
 } from "audit-tools/shared";
 import { DEFAULT_EMPIRICAL_HALF_LIFE_HOURS } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
-import { HostSessionQuotaSource } from "audit-tools/shared/quota/hostSessionQuotaSource";
+import {
+  HostSessionQuotaSource,
+  type HostSessionEscalation,
+} from "audit-tools/shared/quota/hostSessionQuotaSource";
 import { resolveFreshSessionProviderName } from "../../providers/index.js";
 import {
   computeDispatchCapacity,
@@ -51,6 +54,14 @@ export interface ResolvedDispatchPool {
    * `contextBudgetTokens`).
    */
   tierBudgets: Record<DispatchModelTier, number> | null;
+  /**
+   * The retained host-session source constructed for this pool's sizing pass.
+   * Returned (not just used internally) so a caller can thread the SAME instance
+   * into `runRollingDispatch`'s `recordRateLimit`/`isPacketEscalated` hooks —
+   * mirroring remediate's pattern where one retained source feeds both pool
+   * sizing and the dispatcher's escalation guard.
+   */
+  hostSession: HostSessionQuotaSource;
 }
 
 /**
@@ -80,6 +91,13 @@ export async function buildDispatchPool(params: {
   hostModelRoster?: HostModelRosterEntry[] | null;
   /** Opaque model identity for the quota key when no model name resolves. */
   hostModelId?: string | null;
+  /**
+   * Fed to the retained `HostSessionQuotaSource` this pool construction owns —
+   * routes a bounded account-wall escalation to the caller's friction chokepoint
+   * instead of only the default stderr line. Omit to keep the prior silent-stderr
+   * behavior.
+   */
+  onEscalation?: (escalation: HostSessionEscalation) => void;
 }): Promise<ResolvedDispatchPool> {
   const { sessionConfig, queryLimits, hostActiveSubagentLimit } = params;
   const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
@@ -113,7 +131,10 @@ export async function buildDispatchPool(params: {
   // first-class PRE-WALL source: graduated remaining_pct → LOW/CRITICAL throttle
   // before a hard 429, paused → cooldown. It gates on the exact key, passing
   // through for every other pool, so it never masks the proactive/learned sources.
-  const hostSession = new HostSessionQuotaSource({ providerModelKey: quotaProviderKey });
+  const hostSession = new HostSessionQuotaSource({
+    providerModelKey: quotaProviderKey,
+    onEscalation: params.onEscalation,
+  });
   const quotaSource = buildQuotaSource({ halfLifeHours, hostSession });
 
   // The capability handshake limits are merged FIRST so they outrank the
@@ -187,6 +208,7 @@ export async function buildDispatchPool(params: {
       hostModel,
       contextBudgetTokens: Math.max(...Object.values(tierBudgets)),
       tierBudgets,
+      hostSession,
     };
   }
   return {
@@ -194,6 +216,7 @@ export async function buildDispatchPool(params: {
     hostModel,
     contextBudgetTokens: probeBudget(pools[0]!),
     tierBudgets: null,
+    hostSession,
   };
 }
 

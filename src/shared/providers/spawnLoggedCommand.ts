@@ -103,10 +103,36 @@ class SpawnRunController {
     this.endLogs(callback);
   }
 
-  private fail = (error: unknown): void => {
-    if (this.child && !this.child.killed) {
-      this.child.kill(FORCE_KILL_SIGNAL);
+  /**
+   * Kill the child, and on Windows ALSO reap its full process tree. A Windows
+   * shim launch (resolveWindowsShimSpawnCommand) wraps the real command as
+   * `cmd.exe /d /s /c "<command>"`, so `child.kill()` alone only terminates the
+   * cmd.exe wrapper and orphans its real grandchild (npx/opencode/codex/…).
+   * `child.kill(signal)` still fires first (preserves the existing signal
+   * contract); the tree-kill is a best-effort supplement that must never throw
+   * or block — a missing/failing taskkill degrades to the pre-existing
+   * single-process kill, not a crash.
+   */
+  private killTree(signal: NodeJS.Signals): void {
+    const child = this.child;
+    if (!child) return;
+    child.kill(signal);
+    if (process.platform === "win32" && typeof child.pid === "number") {
+      try {
+        const reaper = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+        });
+        reaper.on("error", () => {
+          // Best-effort only — taskkill missing/failing must never surface.
+        });
+      } catch {
+        // Synchronous spawn failure (e.g. ENOENT) — ignore, best-effort.
+      }
     }
+  }
+
+  private fail = (error: unknown): void => {
+    this.killTree(FORCE_KILL_SIGNAL);
     const normalized = error instanceof Error ? error : new Error(String(error));
     this.settle(() => this.reject(normalized));
   };
@@ -316,10 +342,10 @@ class SpawnRunController {
 
     this.timer = setTimeout(() => {
       this.timedOut = true;
-      spawnedChild.kill(TERMINATION_SIGNAL);
+      this.killTree(TERMINATION_SIGNAL);
       this.forceKillTimer = setTimeout(() => {
         if (!this.settled) {
-          spawnedChild.kill(FORCE_KILL_SIGNAL);
+          this.killTree(FORCE_KILL_SIGNAL);
         }
       }, this.killGraceMs);
     }, this.input.timeoutMs);
