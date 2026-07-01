@@ -86,38 +86,40 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
-- **Dead-code / unused-export as an ACQUIRED audit analyzer (knip), graph-cross-checked, advisory-lead to the
-  subauditor — resolves the deferred dead-code track.** Layer the tested-but-unwired / unused-export signal onto the
-  audit engine's *other* mechanical resources so the orchestrator + subauditors consume it for TARGET repos (not just
-  our own CI gate). Design of record:
-  (1) **Acquire, don't bundle.** knip is an ecosystem-native JS/TS tool → a registry entry + normalizing adapter in the
-  acquisition engine (`src/audit/extractors/analyzers/`), run ephemerally for JS/TS targets, degrade-to-empty
-  elsewhere. Findings rejoin at the SAME seam as semgrep/eslint/gitleaks (`buildExternalAnalyzerFollowupTasks →
-  mergeFindings`). Fits own-vs-acquire; enriches the shared finding contract, never forks planning.
-  (2) **Cross-check against the engine's own graph — this is the whole point.** Production-mode knip has REAL false
-  positives: it can't trace dispatch-table / re-export-alias / dynamic wiring (proven this sprint —
-  `runPlanPhase`/`resolveFreshSessionProviderName` flag as unused but are live). The engine's language-neutral
-  `graph_bundle` (calls/import edges) is exactly the substrate that closes that blind spot, and knip brings the
-  full-file-universe + entrypoint provenance the bare graph-edge query lacked (the original deferral reason in
-  [[graph-signals-thin-substrate-extraction-persist]]). knip ∪ engine-graph is the complete picture neither has alone:
-  reconcile knip's "unused export" against the graph's in/out-degree + entrypoint set before surfacing.
-  (3) **Advisory lead, LLM adjudicates — never a confirmed finding dumped in.** Because of (2)'s false positives, a
-  reconciled candidate goes to the maintainability/dead-code lens subauditor as a *verification lead* ("knip says
-  unused; graph shows N callers via <edge kind> — confirm truly-dead or refute as dynamic/entrypoint"), same adapter
-  discipline as the other acquired tools. This is the LLM-in-the-loop seam, not a mechanical verdict. The same
-  reconcile-then-adjudicate shape applies to ts-prune / other ecosystems' equivalents.
-  Subsumes the deferred general dead-code track. (Ethan, 2026-06-30.)
-  [[deterministic-analyzers-own-vs-acquire]] [[graph-signals-thin-substrate-extraction-persist]]
-- **Precise `calls`/import edges via pure-JS `web-tree-sitter` (WASM) — candidate, deferred.** Our graph extraction
-  (`src/audit/extractors/graph.ts`) resolves imports/calls by **regex**, which is approximate. A real AST pass would
-  give precise `calls` edges. The OS-agnostic, no-native-build way (fits our two-tier dep policy + everything-agnostic
-  principle) is **`web-tree-sitter` (WASM grammars)** as a new extractor behind the existing `GraphEdge` contract —
-  borrow the *idea*, not a native toolchain. Surfaced by the 2026-06-28 evaluation of `safishamsi/graphify` (a Python
-  tree-sitter knowledge-graph tool — not adoptable wholesale: native grammar wheels, Python stack, violates
-  no-native-build). Secondary borrows from that eval: god-node/betweenness "surprise" signals, an
-  EXTRACTED/INFERRED/AMBIGUOUS confidence ladder. Eval report: `graphify-evaluation.md` (saved to user Desktop).
-  Efficiency/precision-only; defer until regex edge imprecision is a measured cost.
+- **Precise `calls`/import edges via `web-tree-sitter` — ALREADY SHIPPED, entry was stale.** Verified 2026-07-01:
+  `web-tree-sitter` + `tree-sitter-wasms` are devDependencies; `src/audit/extractors/analyzers/typescript.ts`
+  (+ python.ts/css.ts/html.ts) already extract `imports`/`calls`/`references` edges via tree-sitter with numeric
+  confidence (`TS_CALL_EDGE_CONFIDENCE = 0.9`, matching `GraphEdge.confidence`'s real `z.number().min(0).max(1)`
+  schema — there is no string confidence ladder in the type system, that was backlog-note aspiration only), and
+  `graphEnrichmentExecutor.ts` already layers them onto the regex floor with auto-fallback. Nothing to build.
   ([[graph-signals-thin-substrate-extraction-persist]])
+
+- **Dead-code / unused-export as an ACQUIRED audit analyzer (knip) — slices 1+2 SHIPPED (2026-07-01); graph
+  cross-check (slice 3) deliberately NOT started, real ordering constraint found.**
+  **Shipped:** a `knip` candidate (`src/audit/extractors/analyzers/candidates.ts`, `knipCandidate`/`parseKnip`) —
+  npx runner, consent-gated (`defaultRun: false`, same tier as eslint/semgrep), `detectNodeEcosystem`-scoped. Parser
+  is grounded against `node_modules/knip/dist/reporters/json.js`'s real `--reporter json` shape
+  (`{issues: [{file, exports?, types?, nsExports?, nsTypes?}]}`), not guessed — verified by reading knip's actual
+  reporter source (this repo already has knip as a devDependency for its own `check:deadcode` gate). Every knip
+  finding's summary is explicitly hedged ("unverified against the graph; confirm truly dead or refute...").
+  **No separate merge-point wiring was needed**: the join is already fully generic — `getExternalSignalPaths`
+  (`src/audit/orchestrator/taskBuilder.ts:240`) tool-agnostically pulls `.path` from ANY `ExternalAnalyzerResults[]`
+  entry and tags the matching file's per-lens audit task `external_analyzer_signal`, which the LLM subauditor then
+  adjudicates — the same seam gitleaks/eslint/semgrep already use. (Correction: an earlier note in this entry cited
+  `buildExternalAnalyzerFollowupTasks → mergeFindings` as the join point — that function does not exist anywhere in
+  the codebase; the real generic seam is `getExternalSignalPaths` + task tagging, confirmed by direct grep.)
+  **Slice 3 (graph cross-check) — NOT started, scoped but deliberately deferred:** the priority chain runs
+  `external_analyzers_current` BEFORE `structure_artifacts`/`graph_enrichment_current`, so `graph_bundle.json`
+  does not exist yet when knip's raw results land — a cross-check against in/out-degree + entrypoint provenance
+  can't happen inline in `parseKnip`. Real options to resolve later: (a) a new later obligation that re-opens
+  persisted knip results once the graph exists and re-annotates confidence/suppression, or (b) give the per-file
+  lens subauditor prompt direct graph context for `external_analyzer_signal`-tagged files so the LLM does the
+  reconciliation itself at review time (no new obligation needed) — this is the cheaper option and probably right,
+  but wasn't validated this pass. Entrypoint provenance for whichever option is chosen should be derived from the
+  EXISTING `package-entrypoint-link`/`workspace-package-link`/route edges (`graphManifestEdges/packageJson.ts` etc.)
+  — no new `GraphBundle` schema field needed; an earlier version of this plan proposed adding one, corrected after
+  finding the edges already carry the signal. (Ethan, 2026-06-30; corrected + slices 1+2 shipped 2026-07-01.)
+  [[deterministic-analyzers-own-vs-acquire]] [[graph-signals-thin-substrate-extraction-persist]]
 - **Three borrow-level leads from the `affaan-m/ecc` evaluation (2026-06-28).** ecc itself is not adoptable/applicable
   (agent-config distribution OS, wrong domain/stack — see `ecc-evaluation.md` on user Desktop), but a deeper pass
   surfaced three idea/reference-level leads worth acting on, none requiring vendoring:

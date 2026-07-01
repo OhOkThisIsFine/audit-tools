@@ -10,6 +10,7 @@ import {
 import type { AuditTask } from "../../types.js";
 import type { DispatchModelHint } from "audit-tools/shared";
 import type { CapacityPool } from "../../quota/index.js";
+import type { HostSessionQuotaSource } from "audit-tools/shared/quota/hostSessionQuotaSource";
 
 // Shared interfaces, constants, and type re-exports for the dispatch pipeline.
 // Consumed by tierRouting, packetFilter, packetPrompt, quotaPool, and the
@@ -94,6 +95,13 @@ export interface PrepareDispatchResult {
    * re-resolving the pool.
    */
   pools: CapacityPool[];
+  /**
+   * The retained host-session source for this dispatch's pool sizing. Returned
+   * so `driveRollingAuditDispatch` can thread the SAME instance into
+   * `runRollingDispatch`'s `recordRateLimit`/`isPacketEscalated` hooks, mirroring
+   * remediate's retained-source pattern.
+   */
+  hostSession: HostSessionQuotaSource;
 }
 
 export interface DispatchPlanEntry {

@@ -1771,6 +1771,23 @@ async function buildImplementDispatchStep(ctx: {
       // orchestrator runs the in-process partition THIS cycle while the host spawns
       // subagents for its partition. Pure host-subagent dispatch falls out when no
       // backend pool is confirmed (the coordinator has nothing to split against).
+      // Retained host-session source for the hybrid pool-sizing pre-wall throttle
+      // (this branch previously sized pools with no account-wall awareness at all,
+      // unlike the primary path above). This branch has its own already-working,
+      // bounded rate-limited/settle mechanism below (DC-4) rather than routing
+      // through HostSessionQuotaSource.recordLimit/isEscalated, so onEscalation is
+      // unused here — the source only feeds buildConfirmedPools' sizing.
+      const hybridProviderName = resolveHostProviderName(sessionConfigImpl);
+      const hybridHostSessionModelKey = buildProviderModelKey(
+        hybridProviderName,
+        (sessionConfigImpl as { block_quota?: { host_model?: string | null } } | undefined)
+          ?.block_quota?.host_model ??
+          resolvedHostModelId ??
+          null,
+      );
+      const hybridHostSession = new HostSessionQuotaSource({
+        providerModelKey: hybridHostSessionModelKey,
+      });
       const confirmedPools = await buildConfirmedPools({
         sessionConfig: sessionConfigImpl ?? null,
         hostMaxConcurrent: resolvedHostMaxConcurrent,
@@ -1778,6 +1795,7 @@ async function buildImplementDispatchStep(ctx: {
         hostOutputTokens: resolvedHostOutputTokens,
         hostModels: resolvedHostModels,
         hostModelId: resolvedHostModelId,
+        hostSession: hybridHostSession,
       });
       const backendPools = confirmedPools.filter(isInProcessPool);
 
@@ -1836,6 +1854,25 @@ async function buildImplementDispatchStep(ctx: {
         );
         for (const poolId of exhaustedPools) {
           await partition.coordinator.settlePool(poolId);
+        }
+        // Surface each rate-limited node as reviewable friction (not just the
+        // settle side-effect above). The shared step-boundary chokepoint dedupes
+        // on {eventType, runId, discriminator}, so a chronically-exhausted backend
+        // pool re-hitting the same block_id across cycles collapses to one record.
+        for (const blockId of rateLimited) {
+          void captureStepBoundaryFriction(
+            artifactsDir,
+            runId,
+            {
+              eventType: "quota_escalation",
+              discriminator: blockId,
+              note: "A-8 hybrid in-process node rate-limited; its backend pool was settled for this run.",
+              severity: "high",
+              category: "trap",
+              area: "dispatch/quota",
+            },
+            "remediate-code",
+          );
         }
         // The backend carried the whole batch (or every host node was contested by a
         // peer driver) → nothing for the host this cycle; merge what landed + transition.

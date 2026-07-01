@@ -22,6 +22,12 @@ import type { AuditTask } from "../types.js";
 import { sizeIndexFromManifest, orderTasksForPacketReview, buildReviewPacketsFromPartition } from "../orchestrator/reviewPackets.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { taskResultPath, packetPromptPath, artifactNameForId } from "./args.js";
+import { resolveFreshSessionProviderName } from "../providers/index.js";
+import { buildProviderModelKey } from "../quota/index.js";
+import {
+  HostSessionQuotaSource,
+  type HostSessionEscalation,
+} from "audit-tools/shared/quota/hostSessionQuotaSource";
 import {
   type ActiveDispatchState,
   type DispatchResultMapEntry,
@@ -142,6 +148,12 @@ export async function prepareDispatchArtifacts(params: {
    * spilling off of. Absent → the host-model pools from `buildDispatchPool`.
    */
   poolsOverride?: CapacityPool[];
+  /**
+   * Fed to the retained host-session source (both branches below) so a bounded
+   * account-wall escalation routes to the caller's friction chokepoint instead of
+   * only the default stderr line. Omit to keep the prior silent-stderr behavior.
+   */
+  onEscalation?: (escalation: HostSessionEscalation) => void;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -223,11 +235,23 @@ export async function prepareDispatchArtifacts(params: {
       pendingItemTokens: [],
     });
     const limits = probe.primary.schedule.resolved_limits;
+    // This branch bypasses buildDispatchPool entirely (A-8 hybrid: sizing against
+    // the caller-pinned backend pool, not the host-model handshake), so it must
+    // construct its own retained host-session source rather than inheriting one.
+    const overrideProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
+    const overrideHostSession = new HostSessionQuotaSource({
+      providerModelKey: buildProviderModelKey(
+        overrideProviderName,
+        params.hostModel ?? params.hostModelId ?? null,
+      ),
+      onEscalation: params.onEscalation,
+    });
     dispatchPool = {
       pools: params.poolsOverride,
       hostModel: params.hostModel ?? null,
       contextBudgetTokens: Math.max(1, limits.context_tokens - limits.output_tokens),
       tierBudgets: null,
+      hostSession: overrideHostSession,
     };
   } else {
     dispatchPool = await buildDispatchPool({
@@ -239,6 +263,7 @@ export async function prepareDispatchArtifacts(params: {
       hostOutputTokens: params.hostOutputTokens,
       hostModelRoster: params.hostModelRoster,
       hostModelId: params.hostModelId,
+      onEscalation: params.onEscalation,
     });
   }
   const taskGraph = resolveDispatchTaskGraph(bundle, orderedTasks);
@@ -488,5 +513,6 @@ export async function prepareDispatchArtifacts(params: {
     dispatch_warnings_path: warningsPath,
     plan,
     pools: dispatchPool.pools,
+    hostSession: dispatchPool.hostSession,
   };
 }

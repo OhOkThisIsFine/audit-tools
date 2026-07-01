@@ -47,6 +47,13 @@ export interface RollingDispatchEngineResult<TPacket = unknown> {
   outcome: "success" | "rate_limited" | "timeout" | "error";
   actualTokens?: number;
   error?: unknown;
+  /**
+   * Worker ERROR/STATUS channel evidence that classified a `rate_limited`
+   * outcome, carried so a consumer's `recordRateLimit` hook can feed a
+   * channel-isolated host-session source (CE-003). Absent on non-rate_limited
+   * outcomes.
+   */
+  rateLimit?: { channel: "error" | "status" | "result"; text: string };
 }
 
 /**
@@ -71,4 +78,20 @@ export interface RollingDispatchEngineContract<TPacket = unknown> {
   consumerTerminal:
     | ((status: "complete" | "partial", results: RollingDispatchEngineResult<TPacket>[]) => void)
     | undefined;
+  /**
+   * Host-session escalation write side: invoked at the `rate_limited`
+   * observation point so the consumer can feed its retained host-session
+   * source's channel-isolated `recordLimit`. Optional — omit to leave the
+   * source unfed (no escalation can ever fire, INV-QD-07 unchanged).
+   */
+  recordRateLimit?: (
+    packet: RollingDispatchEnginePacket<TPacket>,
+    result: RollingDispatchEngineResult<TPacket>,
+  ) => void;
+  /**
+   * Host-session escalation read side: an already-ESCALATED packet is
+   * stranded instead of re-queued. Optional — omit to leave INV-QD-07
+   * behaviour unchanged.
+   */
+  isPacketEscalated?: (packetId: string) => boolean;
 }

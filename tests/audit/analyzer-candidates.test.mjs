@@ -7,6 +7,8 @@ const {
   parseGitleaks,
   semgrepCandidate,
   eslintCandidate,
+  knipCandidate,
+  parseKnip,
 } = await import("../../src/audit/extractors/analyzers/candidates.ts");
 const { OWNED_TOOL_IDS, registerExternalAnalyzers } = await import(
   "../../src/audit/extractors/analyzers/acquisitionEngine.ts"
@@ -67,6 +69,71 @@ test("parseGitleaks degrades to empty on malformed / empty report", () => {
   assert.deepEqual(parseGitleaks(""), []);
   assert.deepEqual(parseGitleaks("not json"), []);
   assert.deepEqual(parseGitleaks("{}"), []);
+});
+
+test("knip is consent-gated like eslint/semgrep, npx runner, no positional/cwd arg", () => {
+  assert.equal(knipCandidate.defaultRun, false);
+  assert.equal(knipCandidate.runner, "npx");
+  const argv = knipCandidate.buildArgv(["npx", "knip@6"], "/repo");
+  assert.deepEqual(argv, [
+    "npx",
+    "knip@6",
+    "--reporter",
+    "json",
+    "--include",
+    "exports,types,nsExports,nsTypes",
+    "--no-exit-code",
+  ]);
+});
+
+// Shape grounded against node_modules/knip/dist/reporters/json.js in this repo:
+// { issues: [{ file, exports?, types?, nsExports?, nsTypes? }] }, each entry
+// { name, line, col, pos, namespace }.
+test("parseKnip maps unused-export issues across all four report types", () => {
+  const report = JSON.stringify({
+    issues: [
+      {
+        file: "src/foo.ts",
+        exports: [{ name: "unusedFn", line: 12, col: 1, pos: 200 }],
+        types: [{ name: "UnusedType", line: 20, col: 1, pos: 400 }],
+      },
+      {
+        file: "src/bar.ts",
+        nsExports: [{ name: "nsThing", line: 5, col: 1, pos: 50 }],
+        nsTypes: [{ name: "NsType", line: 8, col: 1, pos: 90 }],
+      },
+    ],
+  });
+  const items = parseKnip(report);
+  assert.equal(items.length, 4);
+  const byRule = Object.fromEntries(items.map((i) => [i.rule, i]));
+  assert.equal(byRule["knip-exports"].path, "src/foo.ts");
+  assert.equal(byRule["knip-exports"].line_start, 12);
+  assert.equal(byRule["knip-exports"].category, "maintainability");
+  assert.match(byRule["knip-exports"].summary, /unusedFn/);
+  assert.match(byRule["knip-exports"].summary, /confirm truly dead or refute/);
+  assert.equal(byRule["knip-types"].path, "src/foo.ts");
+  assert.equal(byRule["knip-nsExports"].path, "src/bar.ts");
+  assert.equal(byRule["knip-nsTypes"].path, "src/bar.ts");
+});
+
+test("parseKnip ignores non-export-shaped issue types (files/dependencies/etc) and degrades to empty on malformed input", () => {
+  assert.deepEqual(parseKnip(""), []);
+  assert.deepEqual(parseKnip("not json"), []);
+  assert.deepEqual(parseKnip("{}"), []);
+  const withUnrelatedTypes = JSON.stringify({
+    issues: [
+      {
+        file: "src/dead.ts",
+        files: [{}],
+        dependencies: [{ name: "leftpad" }],
+        exports: [{ name: "onlyThis", line: 1 }],
+      },
+    ],
+  });
+  const items = parseKnip(withUnrelatedTypes);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].rule, "knip-exports");
 });
 
 test("parseSemgrep + parseEslint degrade to empty on malformed input", () => {
