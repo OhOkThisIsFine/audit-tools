@@ -928,6 +928,7 @@ export {
   quotaNudgeMarkerName,
   renderQuotaCoverageNudge,
 } from "./quota/quotaCoverageNudge.js";
+export { renderTokenBudgetView } from "./quota/tokenBudgetView.js";
 export {
   ClaudeOAuthQuotaSource,
   parseProviderModelKey,

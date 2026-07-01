@@ -194,6 +194,15 @@ export const DispatchCapacityPoolSummarySchema = z
     cooldown_until: z.string().nullable(),
     estimated_wave_tokens: z.number().int().min(0),
     binding_cap: WaveBindingCapSchema,
+    /**
+     * Per-target token-budget view surfaced to the orchestrating host so it sees
+     * the real constraints, not just an opaque slot count: the remaining token
+     * budget the gate spent against (MIN across the pool's own windows; null when
+     * no live snapshot / cold start) and the tokens already in flight against it.
+     * `remaining_pct` / `reset_at` come from `quota_source_snapshot`.
+     */
+    remaining_token_budget: z.number().nullable().optional(),
+    in_flight_tokens: z.number().int().min(0).optional(),
     quota_source_snapshot: QuotaUsageSnapshotSchema.nullable().optional(),
     /** Raw silent-degrade marker for this pool (see CapacityPool.quotaSignalDegraded). */
     quota_signal_degraded: z.boolean().optional(),
@@ -515,6 +524,8 @@ export function summarizeDispatchCapacityPools(
     cooldown_until: allocation.schedule.cooldown_until,
     estimated_wave_tokens: allocation.schedule.estimated_wave_tokens,
     binding_cap: allocation.schedule.binding_cap ?? "none",
+    remaining_token_budget: allocation.schedule.remaining_token_budget ?? null,
+    in_flight_tokens: allocation.schedule.in_flight_tokens ?? 0,
     quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,
     ...(allocation.quotaSignalDegraded ? { quota_signal_degraded: true } : {}),
     ...(allocation.quotaCoverage ? { quota_coverage: allocation.quotaCoverage } : {}),
