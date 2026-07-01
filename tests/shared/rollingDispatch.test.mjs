@@ -440,6 +440,125 @@ test("createRollingDispatcher — when every pool exhausts, the packet is strand
   assert.ok(dispatcher.getState().exhaustedPoolIds.has("only-pool"));
 });
 
+// ---------------------------------------------------------------------------
+// Piece D — quota-death = retryable pause + pool-pause + quota_paused terminal
+// ---------------------------------------------------------------------------
+
+test("selectProvider — skips a pool paused until a future reset (pause-honor, no thrash)", async () => {
+  const packet = makePacket("p1");
+  const tracker = new InFlightTokenTracker();
+  const paused = makePool("paused-pool");
+  const healthy = makePool("healthy-pool");
+  const now = Date.now();
+  const pausedMap = new Map([["paused-pool", now + 60_000]]);
+  // paused-pool is paused → selection falls through to healthy-pool.
+  const slot = selectProvider(
+    packet,
+    [paused, healthy],
+    tracker,
+    {},
+    unlimitedSession(),
+    new Set(),
+    pausedMap,
+    now,
+  );
+  assert.ok(slot !== null);
+  assert.equal(slot.poolId, "healthy-pool");
+});
+
+test("selectProvider — a pool whose reset has already passed is eligible again", async () => {
+  const packet = makePacket("p1");
+  const tracker = new InFlightTokenTracker();
+  const pool = makePool("recovered-pool");
+  const now = Date.now();
+  const pausedMap = new Map([["recovered-pool", now - 1_000]]); // reset in the past
+  const slot = selectProvider(
+    packet,
+    [pool],
+    tracker,
+    {},
+    unlimitedSession(),
+    new Set(),
+    pausedMap,
+    now,
+  );
+  assert.ok(slot !== null, "past-reset pool is re-eligible");
+  assert.equal(slot.poolId, "recovered-pool");
+});
+
+test("createRollingDispatcher — a rate_limited result with a session-limit reset records a pool pause + parses reset_at (does NOT permanently exhaust)", async () => {
+  await setupTmpQuotaDir();
+  // Single pool that rate-limits with a wall-clock session-limit string.
+  const LIMIT_TEXT = "You've hit your session limit. Resets in 2h";
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("only-pool")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({
+      packet,
+      outcome: "rate_limited",
+      rateLimit: { channel: "error", text: LIMIT_TEXT },
+    }),
+  });
+  dispatcher.enqueue([makePacket("p1")]);
+  const results = await dispatcher.run();
+
+  assert.equal(results.length, 0, "paused packet produces no completion");
+  const state = dispatcher.getState();
+  // Pool is PAUSED (with a reset), not permanently exhausted.
+  assert.ok(state.pausedPoolResetAt.has("only-pool"), "pool recorded as paused");
+  assert.ok(!state.exhaustedPoolIds.has("only-pool"), "reset pause is not permanent exhaustion");
+  const resetAt = state.pausedPoolResetAt.get("only-pool");
+  assert.ok(resetAt > Date.now(), "reset is in the future (~2h)");
+});
+
+test("createRollingDispatcher — all pools paused → quota_paused terminal with stranded ids + earliest_reset_at (NOT empty_pool, NOT blocked)", async () => {
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => ({
+      packet,
+      outcome: "rate_limited",
+      rateLimit: {
+        channel: "error",
+        // pool-a resets sooner than pool-b → earliest_reset_at must be pool-a's.
+        text: slot.poolId === "pool-a" ? "session limit reached. Resets in 1h" : "session limit reached. Resets in 3h",
+      },
+    }),
+  });
+  dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
+  const results = await dispatcher.run();
+
+  assert.equal(results.length, 0, "both packets stranded, none completed");
+  const terminal = dispatcher.getTerminal();
+  assert.ok(terminal !== null, "stranded work surfaces a terminal");
+  assert.equal(terminal.reason, "quota_paused", "reason is the retryable quota_paused, not empty_pool");
+  assert.deepEqual(terminal.stranded_ids.sort(), ["p1", "p2"]);
+  assert.ok(typeof terminal.earliest_reset_at === "string", "carries the earliest reset");
+  // Earliest reset is ~1h (pool-a), well under the ~3h pool-b wall.
+  const resetMs = Date.parse(terminal.earliest_reset_at) - Date.now();
+  assert.ok(resetMs < 2 * 3600_000, "earliest_reset_at is pool-a's sooner reset");
+});
+
+test("createRollingDispatcher — one pool paused, a healthy peer still lands the work (pause-honor spills, no strand)", async () => {
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("paused-pool"), makePool("healthy-pool")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      if (slot.poolId === "paused-pool") {
+        return { packet, outcome: "rate_limited", rateLimit: { channel: "error", text: "session limit reached. Resets in 1h" } };
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+  dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
+  const results = await dispatcher.run();
+  assert.equal(results.length, 2, "both packets land on the healthy peer");
+  assert.ok(results.every((r) => r.outcome === "success"));
+  assert.equal(dispatcher.getTerminal(), null, "no strand — healthy pool absorbed the work");
+});
+
 test("createRollingDispatcher — host-session source wired via recordRateLimit/isPacketEscalated strands a same-packet account wall BEFORE all pools exhaust", async () => {
   await setupTmpQuotaDir();
   // Four pools that ALL rate-limit p1 with a parseable host-session-limit string.
