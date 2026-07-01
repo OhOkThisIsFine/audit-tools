@@ -25,31 +25,6 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   Relates to [[claude-usage-endpoint-body-shape]] / [[claude-quota-credential-resolution]] /
   [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
 
-- **Node verify scope guard — FIXED in tooling (2026-06-30).** Was: a node's host/DAG-authored
-  `targeted_commands` could run the WHOLE suite (`npx vitest run tests/remediate`), which accept-node executed
-  as an *additional* verify alongside the scoped derive — re-entering the full suite in a per-node worktree.
-  That caused both (a) the cross-node deadlock (a source node's verify fails on a stale test owned by a
-  DIFFERENT node) and (b) a concurrent-worktree hermeticity flake (`postinstall.test.ts` ENOENT racing the
-  shared `.test-home-postinstall` temp path; passes 10/10 standalone). FIX: `isWholeSuiteTestCommand` in
-  `src/remediate/steps/dispatch.ts` — `buildFreeVerifyCommands` now drops any test-runner invocation whose
-  target is a directory/whole-suite rather than a concrete `.test.<ext>` file, on BOTH the accept-node gate
-  and the worker-prompt render (one helper, both paths). The scoped derive already covers the node's own
-  touched tests, so nothing is lost. Tests: `dispatch-evidence-and-writescope.test.ts` →
-  `isWholeSuiteTestCommand`. With scoped verify + the tool's sequential accept-node (each next worktree off
-  the accumulating main), the separate-source/test-node deadlock cannot recur. [[decomposition-colocate-source-and-tests]]
-
-- **Intake input-selection stale-redelivery — FIXED in tooling (v0.30.54, 2026-06-30/07-01).** Was: a no-arg
-  `remediate-code next-step` short-circuited to `present_report` off a leftover `remediation-report.md` even when a
-  fresh `audit-findings.json`/`audit-report.md` had just been regenerated. The `complete_redelivery` guard (memory:
-  fixed 0.28.11) only checked in-progress-intake signals (conversation-start / extracted-plan / host-confirmed
-  summary), never the default-discovered audit doc's freshness. FIX: `isDefaultCandidateFresherThanReport`
-  (`src/remediate/steps/nextStep.ts`) compares the best default-discovered candidate's mtime against the leftover
-  report's mtime and folds into the `freshIntent` check — a newer audit doc now falls through to `pending_intake`,
-  which already surfaces the discovered file (path/type/mtime/finding-count) via the existing
-  `confirm_auto_discovered_input` gate for host confirmation, so no separate candidate-listing UI was needed. Test:
-  `tests/remediate/next-step-lifecycle.test.ts` → "a freshly-regenerated audit doc newer than a leftover report is
-  not silently redelivered". (Generalizes [[stale-remediation-report-complete-redelivery-trap]] beyond the fixed path.)
-
 - **Friction detection — M-QUOTA escalation chain WIRED (remediate); live validation still env-bound.**
   The `recordLimit → escalate → strand → quota_escalation friction` chain is now fed end-to-end on the named
   remediate driver path. `createRollingDispatcher` gained a generic `recordRateLimit` write hook (fired at the
@@ -86,29 +61,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
-- **Precise `calls`/import edges via `web-tree-sitter` — ALREADY SHIPPED, entry was stale.** Verified 2026-07-01:
-  `web-tree-sitter` + `tree-sitter-wasms` are devDependencies; `src/audit/extractors/analyzers/typescript.ts`
-  (+ python.ts/css.ts/html.ts) already extract `imports`/`calls`/`references` edges via tree-sitter with numeric
-  confidence (`TS_CALL_EDGE_CONFIDENCE = 0.9`, matching `GraphEdge.confidence`'s real `z.number().min(0).max(1)`
-  schema — there is no string confidence ladder in the type system, that was backlog-note aspiration only), and
-  `graphEnrichmentExecutor.ts` already layers them onto the regex floor with auto-fallback. Nothing to build.
-  ([[graph-signals-thin-substrate-extraction-persist]])
-
-- **Dead-code / unused-export as an ACQUIRED audit analyzer (knip) — slices 1+2 SHIPPED (2026-07-01); graph
-  cross-check (slice 3) deliberately NOT started, real ordering constraint found.**
-  **Shipped:** a `knip` candidate (`src/audit/extractors/analyzers/candidates.ts`, `knipCandidate`/`parseKnip`) —
-  npx runner, consent-gated (`defaultRun: false`, same tier as eslint/semgrep), `detectNodeEcosystem`-scoped. Parser
-  is grounded against `node_modules/knip/dist/reporters/json.js`'s real `--reporter json` shape
-  (`{issues: [{file, exports?, types?, nsExports?, nsTypes?}]}`), not guessed — verified by reading knip's actual
-  reporter source (this repo already has knip as a devDependency for its own `check:deadcode` gate). Every knip
-  finding's summary is explicitly hedged ("unverified against the graph; confirm truly dead or refute...").
-  **No separate merge-point wiring was needed**: the join is already fully generic — `getExternalSignalPaths`
-  (`src/audit/orchestrator/taskBuilder.ts:240`) tool-agnostically pulls `.path` from ANY `ExternalAnalyzerResults[]`
-  entry and tags the matching file's per-lens audit task `external_analyzer_signal`, which the LLM subauditor then
-  adjudicates — the same seam gitleaks/eslint/semgrep already use. (Correction: an earlier note in this entry cited
-  `buildExternalAnalyzerFollowupTasks → mergeFindings` as the join point — that function does not exist anywhere in
-  the codebase; the real generic seam is `getExternalSignalPaths` + task tagging, confirmed by direct grep.)
-  **Slice 3 (graph cross-check) — NOT started, scoped but deliberately deferred:** the priority chain runs
+- **Dead-code / unused-export as an ACQUIRED audit analyzer (knip) — slice 3 (graph cross-check) open.**
+  Slices 1+2 (knip candidate/parser grounded against `node_modules/knip/dist/reporters/json.js`'s real
+  `--reporter json` shape; generic `getExternalSignalPaths` + task-tagging join, no separate merge-point wiring
+  needed) shipped 2026-07-01.
+  **Slice 3 — NOT started, scoped but deliberately deferred:** the priority chain runs
   `external_analyzers_current` BEFORE `structure_artifacts`/`graph_enrichment_current`, so `graph_bundle.json`
   does not exist yet when knip's raw results land — a cross-check against in/out-degree + entrypoint provenance
   can't happen inline in `parseKnip`. Real options to resolve later: (a) a new later obligation that re-opens
@@ -117,8 +74,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   reconciliation itself at review time (no new obligation needed) — this is the cheaper option and probably right,
   but wasn't validated this pass. Entrypoint provenance for whichever option is chosen should be derived from the
   EXISTING `package-entrypoint-link`/`workspace-package-link`/route edges (`graphManifestEdges/packageJson.ts` etc.)
-  — no new `GraphBundle` schema field needed; an earlier version of this plan proposed adding one, corrected after
-  finding the edges already carry the signal. (Ethan, 2026-06-30; corrected + slices 1+2 shipped 2026-07-01.)
+  — no new `GraphBundle` schema field needed.
   [[deterministic-analyzers-own-vs-acquire]] [[graph-signals-thin-substrate-extraction-persist]]
 - **Three borrow-level leads from the `affaan-m/ecc` evaluation (2026-06-28).** ecc itself is not adoptable/applicable
   (agent-config distribution OS, wrong domain/stack — see `ecc-evaluation.md` on user Desktop), but a deeper pass
