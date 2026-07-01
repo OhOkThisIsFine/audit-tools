@@ -33,12 +33,14 @@
   `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`; endpoint-shape finding in memory
   [[claude-usage-endpoint-body-shape]]. **Remaining (env-bound):** live validation on a real rate-limited
   multi-worker run (cold-start slope + resume path).
-- **Immediate next (docs/backlog.md → Open bugs):** selective-deepening loop #2 — steward result
-  `idempotency_key` collision (confirmed live, 2026-06-30). Fix is concrete and non-env-bound: incorporate
-  `task_id` into `result_content_discriminator` for steward/lens-verification/deepening results so distinct
-  deepening tasks get distinct ledger records (preserve INV-2 replay-no-op for same-task_id replays); update
-  ledger tests. Full diagnosis: `.audit-tools/audit/deepening-loop-diagnosis.md`. **No host-side unblock exists**
-  for a stuck run — the code fix must land first, then a clean re-run.
+- **Selective-deepening loop #2 fix — SHIPPED to main, publish-pending.** `buildResultContentDiscriminator`
+  now folds `task_id` into the `deepening`/`steward` branch (`src/shared/contentKey.ts`), so each selective-
+  deepening round's regenerated task gets a distinct idempotency_key instead of colliding with the prior
+  round's (INV-2 replay-no-op preserved for genuine same-task_id replays). Call sites: `ledger.ts`
+  `stampLedgerKeys`, `resultBaseline.ts` `deriveLiveResultKeys`. New tests in `content-key-seam.test.mjs` +
+  `ledger.test.mjs`. Suites green (audit 3368/0, remediate 2103/0). **Immediate next:** publish (patch bump),
+  reinstall global bins, then live-validate on a real deepening-capable run — the fix can't be exercised by
+  unit tests alone. Detail: `docs/backlog.md` → "Selective-deepening loop #2".
 - Per-lap shipped detail is not narrated here (that's changelog creep — see git log). This doc is the
   **open-work roadmap** only: current state above, sequenced open items below.
 
@@ -123,7 +125,8 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
     in-place re-wrap); `archiveContractArtifact` preserves the host input + clears the canonical so the gate re-fires;
     every host-facing path points at the input file. Remaining: C2 host-authored boilerplate for trivial scope
     (→ subsumed by T1). *(all in backlog → "Contract-pipeline host-friction inventory")*
-11. **Selective-deepening task_id convergence** — partial fix needs a live deepening-capable run to validate.
+11. **Selective-deepening task_id convergence** — both known loops now have code fixes shipped; live-deepening-
+    capable-run validation is the only remaining step (T6-class, env-bound).
 
 ### T5 — Product / analysis forward tracks
 12. **Content-addressed granular staleness — ✅ TRACK COMPLETE (2026-06-28).** Coverage slice

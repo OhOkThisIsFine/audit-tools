@@ -95,6 +95,21 @@ export interface ResultContentDiscriminatorInput {
    */
   attempt?: number;
   /**
+   * Required for (and ONLY meaningful for) `source: 'deepening'` or `'steward'`:
+   * the result's task_id. Selective-deepening/steward tasks are re-minted under a
+   * FRESH task_id each round (`taskIdFor` hashes the growing source-result set —
+   * see `selectiveDeepening/shared.ts`), but all rounds share the same
+   * {unit_id, lens, pass_id} coordinate. Without this component every round's
+   * clean result would derive the bare `'deepening'`/`'steward'` discriminator and
+   * collide at the SAME idempotencyKey as the prior round — the ledger's INV-2
+   * replay gate would then drop the new round's result as a no-op forever
+   * (confirmed live 2026-06-30). Folding task_id in gives each round's task a
+   * distinct discriminator (⇒ distinct idempotencyKey, persists) while a genuine
+   * replay of the SAME task_id still reproduces the SAME discriminator (⇒ INV-2
+   * no-op is preserved).
+   */
+  task_id?: string;
+  /**
    * Per-split discriminator (N-IDEMPOTENCY). File-split sibling tasks of one
    * unit+lens+pass legitimately share the {unit_id, lens, pass_id} grouping
    * coordinate but carry DISTINCT task_ids (`…:part-N`, or `…:<filePath>` for a
@@ -207,8 +222,20 @@ export function buildResultContentDiscriminator(
 
 function baseDiscriminator(input: ResultContentDiscriminatorInput): string {
   const source = input?.source;
-  if (source === 'base' || source === 'deepening' || source === 'steward') {
+  if (source === 'base') {
     return source;
+  }
+  if (source === 'deepening' || source === 'steward') {
+    const taskId = input.task_id;
+    if (typeof taskId !== 'string' || taskId.length === 0) {
+      // Without the task_id every round's result collides at the bare
+      // 'deepening'/'steward' discriminator (the confirmed live bug) — refuse
+      // rather than mint a colliding key.
+      throw new Error(
+        `buildResultContentDiscriminator: source '${source}' requires a non-empty task_id`,
+      );
+    }
+    return `${source}:${taskId}`;
   }
   if (source === 'redispatch') {
     const attempt = input.attempt;

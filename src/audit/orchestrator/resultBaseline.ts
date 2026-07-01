@@ -81,6 +81,7 @@ export function deriveLiveResultKeys(input: LiveResultKeyInput): {
   const discriminator = buildResultContentDiscriminator({
     source: input.source,
     attempt: input.attempt,
+    task_id: input.task_id,
     split_discriminator: splitDiscriminatorFromTaskId(input.task_id, input.lens),
   });
   const coordinate = {
