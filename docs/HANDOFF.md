@@ -8,26 +8,12 @@
 
 ## Live state
 
-- On npm as `latest`. Last **published** version: v0.30.60 (2026-07-02) — spec-doc rewrite pass (6 docs
-  against real source) + knip slice-3 corrected-premise fix. Both global bins reinstalled + verified at
-  0.30.60.
-- **Merged to main, publish-pending (commit `7a381220`):** osv-scanner registered as the second
-  `binary`-runner external analyzer candidate (dependency vuln scanning), plus a real engine
-  generalization — `BinarySpec.archived?: boolean` in `binaryAcquisition.ts` so a non-archived release
-  asset (osv-scanner ships the raw executable, not a tarball) is written directly as the cached
-  executable instead of going through `tar`. Full detail in `docs/backlog.md`'s own-vs-acquire entry.
-  Suites green except one pre-existing, unrelated failure (see below). `check` clean.
-- **Publish blocked (Ethan's own call, 2026-07-02):** `README.md` has Ethan's own uncommitted in-progress
-  rewrite in this checkout — the release script's clean-tree guard requires a fully clean tree to tag, so
-  publish is deliberately deferred until that WIP is committed or stashed. **Do not** commit, stash, or
-  touch `README.md` without Ethan's go-ahead. Once it's resolved: `env -u CLAUDECODE npm run
-  release:patch:publish` from repo root, verify live, reinstall both global bins.
-- **Known pre-existing test failure, unrelated to any of the above work:**
-  `tests/audit/entrypoint-contract.test.mjs` → "product docs consistently present /audit-code as the
-  canonical surface" fails because Ethan's in-progress `README.md` rewrite removed the "Conversation
-  Setup" section the test still asserts on. This will self-resolve once the README rewrite lands (either
-  the test gets updated to match the new README structure, or the section is kept) — do not "fix" it by
-  reverting README.md.
+- On npm as `latest`. Last published: v0.30.61 (2026-07-02) — osv-scanner as the second `binary`-runner
+  external analyzer (+ the `BinarySpec.archived` engine generalization for non-archived release assets)
+  and Ethan's README.md rewrite (leaner, tool-parity-first framing; the doc-contract test was updated to
+  check durable concepts instead of exact heading strings). Both global bins reinstalled + verified at
+  0.30.61.
+- **Immediate next:** none — nothing pending from this sprint.
 - Ethan runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
