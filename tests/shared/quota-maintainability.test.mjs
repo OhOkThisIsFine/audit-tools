@@ -5,9 +5,10 @@
  *                       schedulePoolConverging() helper; 3-pass algorithm now named
  *                       and documented rather than inline.
  *
- *   FND-MNT-bf201bf7 — scheduleWave real-time quota-source-snapshot adjustment
- *                       extracted into applyQuotaSourceAdjustment(); scheduleWave
- *                       is now ~100 lines with named concerns.
+ *   FND-MNT-bf201bf7 — scheduleWave's real-time quota-source adjustment is now the
+ *                       token-budget gate (per-window remaining budget, learned
+ *                       tokens_per_pct slope), replacing the old remaining_pct
+ *                       cliff step-function.
  */
 
 import test from "node:test";
@@ -76,13 +77,13 @@ test("MNT-56e100e0: converging allocation preserves exploratory binding cap on n
         enabled: true,
         safety_margin: 1.0,
         empirical_half_life_hours: 24,
-        unknown_hosted_concurrency: 1, // force narrow slice
       },
     },
-    // Many large items so TPM fires on the exploratory pass.
+    // Many large items so TPM fires on the exploratory pass (3000 TPM / 2000 per
+    // item → the TPM cap binds).
     pendingItemTokens: new Array(20).fill(2_000),
   });
-  // With unknown_hosted_concurrency=1 and a tight TPM budget, cap must be set.
+  // The tight TPM budget must set a binding cap on the exploratory pass.
   assert.ok(
     capacity.binding_cap !== "none",
     `expected a binding cap, got 'none'`,
@@ -104,74 +105,70 @@ test("MNT-56e100e0: multi-pool: second pool receives items not consumed by the f
   assert.equal(capacity.pools[1].slots, 3);
 });
 
-// ── FND-MNT-bf201bf7: applyQuotaSourceAdjustment extracted from scheduleWave ──
-// These tests confirm that the extracted helper preserves the existing snapshot
-// adjustment behaviour: critical → throttle to 1 + cooldown, low → halve wave.
+// ── FND-MNT-bf201bf7: token-budget gate (replaces the extracted cliff helper) ──
+// The old applyQuotaSourceAdjustment step-function (critical → 1, low → halve) is
+// gone; these confirm the token-budget gate: an exhausted window → 1 + cooldown,
+// a cold-start window → small calibration batch, a healthy window → no reduction.
 
-test("MNT-bf201bf7: quota snapshot below CRITICAL throttles scheduleWave to 1", () => {
+test("MNT-bf201bf7: an exhausted window throttles scheduleWave to 1", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: { quota: { enabled: true } },
     hostModel: null,
     requestedConcurrency: 10,
     quotaSourceSnapshot: {
-      remaining_pct: 0.05, // below QUOTA_REMAINING_PCT_CRITICAL (0.1)
+      remaining_pct: 0, // genuinely empty → known-zero budget for any slope
       reset_at: null,
     },
   });
   assert.equal(schedule.max_concurrent, 1);
-  assert.equal(schedule.binding_cap, "cooldown");
 });
 
-test("MNT-bf201bf7: quota snapshot in LOW band halves scheduleWave", () => {
-  // remaining_pct = 0.2, which is between LOW (0.3) and CRITICAL (0.1)
-  // safety_margin=1.0 so the fallback cap is the binding limit; then the snapshot
-  // halves whatever that resolved to.
+test("MNT-bf201bf7: a cold-start window admits only a small calibration batch", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0,
-        unknown_hosted_concurrency: 8,
-      },
-    },
+    sessionConfig: { quota: { enabled: true } },
     hostModel: null,
     requestedConcurrency: 8,
+    quotaStateEntry: null, // no learned slope
     quotaSourceSnapshot: {
-      remaining_pct: 0.2, // between 0.1 and 0.3 → LOW band
+      remaining_pct: 0.5, // healthy pct, but nothing learned → calibration
       reset_at: null,
     },
   });
-  assert.equal(schedule.max_concurrent, 4); // halved from 8
-  assert.equal(schedule.binding_cap, "cooldown");
+  assert.ok(schedule.max_concurrent <= 3, `cold-start batch, got ${schedule.max_concurrent}`);
+  assert.equal(schedule.binding_cap, "token_budget");
 });
 
-test("MNT-bf201bf7: quota snapshot at or above LOW does not reduce scheduleWave", () => {
+test("MNT-bf201bf7: a healthy learned window does not reduce scheduleWave", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0,
-        unknown_hosted_concurrency: 4,
-      },
-    },
+    sessionConfig: { quota: { enabled: true, safety_margin: 1.0 } },
     hostModel: null,
     requestedConcurrency: 4,
+    quotaStateEntry: {
+      updated_at: new Date().toISOString(),
+      buckets: {
+        "1": { success_weight: 5, failure_weight: 0 },
+        "2": { success_weight: 5, failure_weight: 0 },
+        "3": { success_weight: 5, failure_weight: 0 },
+        "4": { success_weight: 5, failure_weight: 0 },
+      },
+      cooldown_until: null,
+      last_429_at: null,
+      tokens_per_pct: { default: 1_000_000 }, // huge budget
+    },
+    estimatedSlotTokens: [1000, 1000, 1000, 1000],
     quotaSourceSnapshot: {
-      remaining_pct: 0.5, // well above LOW (0.3)
+      remaining_pct: 0.5,
       reset_at: null,
     },
   });
   assert.equal(schedule.max_concurrent, 4); // no reduction
-  assert.ok(
-    schedule.binding_cap !== "cooldown",
-    `expected no cooldown cap, got '${schedule.binding_cap}'`,
-  );
+  assert.equal(schedule.binding_cap, "none");
 });
 
-test("MNT-bf201bf7: critical snapshot with reset_at sets cooldown_until", () => {
+test("MNT-bf201bf7: exhausted snapshot with reset_at sets cooldown_until", () => {
   const resetAt = new Date(Date.now() + 60_000).toISOString();
   const schedule = scheduleWave({
     providerName: "claude-code",
@@ -179,7 +176,7 @@ test("MNT-bf201bf7: critical snapshot with reset_at sets cooldown_until", () => 
     hostModel: null,
     requestedConcurrency: 10,
     quotaSourceSnapshot: {
-      remaining_pct: 0.02,
+      remaining_pct: 0, // genuinely empty → throttle + persist cooldown (anti-flap)
       reset_at: resetAt,
     },
   });

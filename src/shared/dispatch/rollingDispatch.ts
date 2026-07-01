@@ -40,7 +40,11 @@ import {
   DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
   QUOTA_REMAINING_PCT_LOW,
 } from "../quota/scheduler.js";
-import { recordWaveOutcome, readQuotaState } from "../quota/state.js";
+import {
+  recordWaveOutcome,
+  readQuotaState,
+  recordTokensPerPctObservation,
+} from "../quota/state.js";
 import { buildEmptyPoolTerminal } from "../quota/capacity.js";
 import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { tierRank } from "./tierRank.js";
@@ -420,6 +424,79 @@ export function createRollingDispatcher<TPacket>(
   // Per-pool in-flight count for optional maxConcurrentPerPool cap.
   const inFlightPerPool: Map<string, number> = new Map();
 
+  // Token-budget slope learning (per pool): remember the last-observed
+  // remaining_pct per window label and the tokens dispatched since that reading,
+  // so a completion whose pool snapshot has advanced can attribute Δtokens across
+  // Δpercent and seed/update the learned tokens_per_pct slope. Degrade-safe: when
+  // the snapshot hasn't moved (Δpercent below the floor) nothing is learned.
+  interface SlopeBaseline {
+    /** remaining_pct (0–1) per window label at the baseline reading. */
+    pctByLabel: Map<string, number>;
+    /** Tokens dispatched against this pool since the baseline reading. */
+    tokensSinceBaseline: number;
+  }
+  const slopeBaselines: Map<string, SlopeBaseline> = new Map();
+
+  function windowPctMap(pool: CapacityPool | undefined): Map<string, number> {
+    const map = new Map<string, number>();
+    const snap = pool?.quotaSourceSnapshot;
+    if (!snap) return map;
+    if (snap.windows && snap.windows.length > 0) {
+      for (const w of snap.windows) {
+        if (w.remaining_pct != null && Number.isFinite(w.remaining_pct)) {
+          map.set(w.label, w.remaining_pct);
+        }
+      }
+    } else if (snap.remaining_pct != null && Number.isFinite(snap.remaining_pct)) {
+      map.set("default", snap.remaining_pct);
+    }
+    return map;
+  }
+
+  function ensureBaseline(poolId: string): void {
+    if (slopeBaselines.has(poolId)) return;
+    const pool = confirmedPools.find((p) => p.id === poolId);
+    slopeBaselines.set(poolId, {
+      pctByLabel: windowPctMap(pool),
+      tokensSinceBaseline: 0,
+    });
+  }
+
+  /**
+   * Attribute the tokens dispatched since the baseline to whichever of the pool's
+   * windows have MOVED, folding a slope sample per moved window. No-op when the
+   * pool has no live snapshot or no window advanced. Re-baselines on any fold.
+   */
+  async function observeSlope(poolId: string, tokens: number): Promise<void> {
+    const baseline = slopeBaselines.get(poolId);
+    if (!baseline) return;
+    baseline.tokensSinceBaseline += Math.max(0, tokens);
+    const pool = confirmedPools.find((p) => p.id === poolId);
+    const current = windowPctMap(pool);
+    let foldedAny = false;
+    for (const [label, priorPct] of baseline.pctByLabel) {
+      const nowPct = current.get(label);
+      if (nowPct == null) continue;
+      if ((priorPct - nowPct) * 100 < 0.5) continue; // below MIN_SLOPE_DELTA_PERCENT
+      try {
+        await recordTokensPerPctObservation(
+          poolId,
+          label,
+          priorPct,
+          nowPct,
+          baseline.tokensSinceBaseline,
+        );
+      } catch {
+        // Non-fatal: slope learning must never abort dispatch.
+      }
+      foldedAny = true;
+    }
+    if (foldedAny) {
+      slopeBaselines.set(poolId, { pctByLabel: current, tokensSinceBaseline: 0 });
+      quotaStateCacheDirty = true;
+    }
+  }
+
   // Quota state cache — refreshed before each dispatch pass.
   let quotaStateCache: QuotaState = { version: 2, entries: {} };
   let quotaStateCacheDirty = true;
@@ -450,6 +527,7 @@ export function createRollingDispatcher<TPacket>(
     // Remove from pending queue.
     state.pendingQueue = state.pendingQueue.filter((p) => p.id !== packet.id);
 
+    ensureBaseline(slot.poolId);
     inFlightTracker.recordDispatched(slot.poolId, packet.estimatedTokens);
     inFlightPerPool.set(slot.poolId, (inFlightPerPool.get(slot.poolId) ?? 0) + 1);
 
@@ -517,6 +595,12 @@ export function createRollingDispatcher<TPacket>(
     } catch {
       // Non-fatal: quota recording failure should not abort dispatch.
     }
+
+    // Token-budget slope learning: attribute the tokens this packet consumed to
+    // whichever of the pool's windows have advanced since the baseline reading,
+    // seeding/refining the learned tokens_per_pct slope. No-op unless the pool's
+    // live snapshot moved (degrade-safe).
+    await observeSlope(providerSlot.poolId, estimatedTokens);
 
     quotaStateCacheDirty = true;
 

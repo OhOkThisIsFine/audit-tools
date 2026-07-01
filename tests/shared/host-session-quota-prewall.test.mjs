@@ -125,7 +125,8 @@ test("graduated pre-wall: after a recorded limit the band is below CRITICAL (sch
 
   // Advance past the reset so the window reopened but the tracker is still live —
   // the account just brushed the wall. The graduated band must be < CRITICAL so
-  // applyQuotaSourceAdjustment throttles the wave to 1 BEFORE a hard 429.
+  // the rolling engine's proactive spill (and the token-budget gate's near-wall
+  // handling) treat the pool as degraded BEFORE a hard 429.
   now.set(resetMs + 1);
   const probe = await hostSession.probeUsage(KEY);
   assert.equal(probe.status, "ok");
