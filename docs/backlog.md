@@ -48,6 +48,20 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   → filter to grep-zero-caller candidates → delete symbol + orphaned tests. Re-run when worthwhile; no
   fixed cadence. [[deterministic-analyzers-own-vs-acquire]]
 
+- **Consent-gate for proposed analyzers — confirmed no gap; LLM-proposal channel deferred.** 2026-07-01
+  verification: (1) `admitSpawn` (`src/audit/extractors/analyzers/acquisitionEngine.ts`) already gates
+  EVERY `defaultRun: false` candidate — including `jscpd` (CP-NODE-2, `defaultRun: false` in
+  `src/audit/extractors/analyzers/candidates.ts`) — behind a non-empty `consentToken`; confirmed, no gap.
+  (2) There is no runtime path for an LLM to propose a brand-new analyzer id beyond the static
+  `EXTERNAL_ANALYZER_CANDIDATES` array (`src/audit/extractors/analyzers/registry.ts`) — out of scope
+  this round; if a future proposal channel is built, it must route through the same `admitSpawn`
+  chokepoint, never bypass it. (3) Latent (not currently exercised) hazard: `SessionConfig`'s persisted
+  schema (`ExternalAcquisitionConfig` in `src/shared/types/sessionConfig.ts`) does not structurally
+  strip `external_acquisition.consent_token` on write/serialize — harmless today (nothing persists
+  `SessionConfig` verbatim to a shared/committed artifact), but if a future proposal-channel writer ever
+  round-trips `SessionConfig` through a persisted file, the token would leak. Flag for whoever builds
+  that channel: strip or redact `consent_token` before any such persistence.
+
 ## Forward tracks
 
 - **Dead-code / unused-export as an ACQUIRED audit analyzer (knip) — slice 3 (graph cross-check) open.**
