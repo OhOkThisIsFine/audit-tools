@@ -55,6 +55,14 @@ export interface BinarySpec {
   checksumsAsset: string;
   /** `${releaseUrlBase}/${assetName}` is the download URL (asset + checksums). */
   releaseUrlForAsset(assetName: string): string;
+  /**
+   * Whether the release asset is an archive (.tar.gz/.zip) needing extraction
+   * (the default, e.g. gitleaks), or the raw executable bytes themselves (e.g.
+   * osv-scanner, whose release assets ARE the binary — `osv-scanner_linux_amd64`,
+   * `osv-scanner_windows_amd64.exe`). When `false`, the verified bytes are
+   * written directly to the cache as the executable — no `tar` invocation.
+   */
+  archived?: boolean;
 }
 
 export interface BinaryResolveOptions {
@@ -168,6 +176,30 @@ export async function resolveBinary(
       command: null,
       note: `checksum mismatch for ${assetName} (expected ${expected}, got ${actual})`,
     };
+  }
+
+  // Non-archived asset (e.g. osv-scanner): the verified bytes ARE the
+  // executable — write directly to the cached path, no `tar` involved.
+  if (spec.archived === false) {
+    try {
+      mkdirSync(versionDir, { recursive: true });
+      const resolved = join(versionDir, exeName(spec.binaryName, platform));
+      writeFileSync(resolved, assetBytes);
+      if (platform !== "win32") {
+        try {
+          chmodSync(resolved, 0o755);
+        } catch {
+          /* best-effort */
+        }
+      }
+      return { status: "downloaded", command: resolved };
+    } catch (error) {
+      return {
+        status: "unavailable",
+        command: null,
+        note: `write error: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 
   // Verified — write the archive and extract it with the system `tar` (bsdtar

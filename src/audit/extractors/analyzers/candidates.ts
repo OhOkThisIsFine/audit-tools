@@ -375,6 +375,132 @@ const jscpdCandidate: ExternalAnalyzerCandidate = {
   parse: parseJscpd,
 };
 
+// Pinned osv-scanner release (own-vs-acquire: acquire the mature Go binary,
+// pinned for reproducibility). Distinct from gitleaks in one respect worth
+// noting: osv-scanner's release assets ARE the raw executable
+// (`osv-scanner_linux_amd64`, `osv-scanner_windows_amd64.exe`) — not an
+// archive — so its BinarySpec sets `archived: false` (binaryAcquisition.ts).
+const OSV_SCANNER_VERSION = "2.4.0";
+const OSV_SCANNER_RELEASE_BASE = `https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}`;
+
+/** Map Node's platform/arch onto the osv-scanner release asset naming. */
+function osvScannerAsset(platform: NodeJS.Platform, arch: string): string | null {
+  const os =
+    platform === "win32"
+      ? "windows"
+      : platform === "darwin"
+        ? "darwin"
+        : platform === "linux"
+          ? "linux"
+          : null;
+  if (!os) return null;
+  // osv-scanner only publishes amd64/arm64 assets (no 32-bit/arm variants).
+  const cpu = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : null;
+  if (!cpu) return null;
+  const ext = os === "windows" ? ".exe" : "";
+  return `osv-scanner_${os}_${cpu}${ext}`;
+}
+
+const OSV_SCANNER_BINARY: BinarySpec = {
+  binaryName: "osv-scanner",
+  version: OSV_SCANNER_VERSION,
+  versionProbeArgs: ["osv-scanner", "--version"],
+  assetFor: osvScannerAsset,
+  checksumsAsset: "osv-scanner_SHA256SUMS",
+  releaseUrlForAsset: (asset) => `${OSV_SCANNER_RELEASE_BASE}/${asset}`,
+  archived: false,
+};
+
+/**
+ * Parse osv-scanner's `--format json` stdout — grounded against
+ * `pkg/models/results.go` (`VulnerabilityResults`) in google/osv-scanner, not
+ * guessed: `{ results: [{ source: {path}, packages: [{ package: {name,
+ * version}, vulnerabilities: [...], groups: [{ids, max_severity}] }] }] }`.
+ * One item per GROUP (osv-scanner's own alias-collapsed dedup unit), not per
+ * raw vulnerability id, so CVE/GHSA aliases for the same underlying issue
+ * don't fan out into duplicate items.
+ */
+function parseOsvScanner(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout || "{}");
+  } catch {
+    return [];
+  }
+  const results =
+    payload && typeof payload === "object" && Array.isArray((payload as { results?: unknown }).results)
+      ? ((payload as { results: Record<string, unknown>[] }).results)
+      : [];
+  const items: ReturnType<ExternalAnalyzerCandidate["parse"]> = [];
+  for (const result of results) {
+    if (!result || typeof result !== "object") continue;
+    const source = (result.source ?? {}) as Record<string, unknown>;
+    const sourcePath = typeof source.path === "string" ? source.path : "";
+    const packages = Array.isArray(result.packages) ? result.packages : [];
+    for (const pkg of packages) {
+      if (!pkg || typeof pkg !== "object") continue;
+      const pkgRecord = pkg as Record<string, unknown>;
+      const pkgInfo = (pkgRecord.package ?? {}) as Record<string, unknown>;
+      const pkgName = typeof pkgInfo.name === "string" ? pkgInfo.name : "unknown";
+      const pkgVersion = typeof pkgInfo.version === "string" ? pkgInfo.version : "";
+      const vulns = Array.isArray(pkgRecord.vulnerabilities)
+        ? (pkgRecord.vulnerabilities as Record<string, unknown>[])
+        : [];
+      const groups = Array.isArray(pkgRecord.groups)
+        ? (pkgRecord.groups as Record<string, unknown>[])
+        : [];
+      for (const group of groups) {
+        if (!group || typeof group !== "object") continue;
+        const ids = Array.isArray(group.ids)
+          ? group.ids.filter((id): id is string => typeof id === "string")
+          : [];
+        if (ids.length === 0) continue;
+        const maxSeverity = typeof group.max_severity === "string" ? group.max_severity.toUpperCase() : "";
+        const severity =
+          maxSeverity.includes("CRITICAL") || maxSeverity.includes("HIGH")
+            ? "high"
+            : maxSeverity.includes("LOW")
+              ? "low"
+              : "medium";
+        const primary = vulns.find(
+          (v) => v && typeof v === "object" && ids.includes((v as { id?: unknown }).id as string),
+        );
+        const summaryText =
+          primary && typeof primary.summary === "string" && primary.summary.trim().length > 0
+            ? primary.summary
+            : primary && typeof primary.details === "string"
+              ? primary.details.slice(0, 200)
+              : `known vulnerability in ${pkgName}`;
+        items.push({
+          id: `osv:${ids.join(",")}:${pkgName}@${pkgVersion}`,
+          category: "security",
+          severity,
+          path: sourcePath,
+          summary: `osv-scanner: ${pkgName}@${pkgVersion} — ${ids.join(", ")} — ${summaryText}`,
+          rule: ids[0],
+        });
+      }
+    }
+  }
+  return items;
+}
+
+const osvScannerCandidate: ExternalAnalyzerCandidate = {
+  id: "osv-scanner",
+  runner: "binary",
+  spec: OSV_SCANNER_VERSION,
+  binary: OSV_SCANNER_BINARY,
+  // CONSENT-GATED: network-dependent (queries the OSV vulnerability database)
+  // and heavier than gitleaks — same tier as semgrep/eslint/knip/jscpd.
+  defaultRun: false,
+  // Ecosystem-agnostic by design: osv-scanner recursively discovers whatever
+  // lockfiles exist (npm/pip/cargo/go/…) itself, so no per-ecosystem marker
+  // gate is needed here (mirrors gitleaks' `() => true`).
+  detect: () => true,
+  buildArgv: (prefix, root) => [...prefix, "scan", "--format", "json", "--recursive", root],
+  parse: parseOsvScanner,
+};
+
 /** The curated external analyzer candidate set. gitleaks is the default member. */
 export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   gitleaksCandidate,
@@ -382,6 +508,7 @@ export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   eslintCandidate,
   knipCandidate,
   jscpdCandidate,
+  osvScannerCandidate,
 ];
 
 export {
@@ -394,4 +521,7 @@ export {
   GITLEAKS_VERSION,
   jscpdCandidate,
   parseJscpd,
+  osvScannerCandidate,
+  parseOsvScanner,
+  OSV_SCANNER_VERSION,
 };

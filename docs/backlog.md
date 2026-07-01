@@ -220,13 +220,18 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   don't hand-roll a Ruby analyzer, shell out to the mature one). Concretely:
   (1) **Own only truly-agnostic extractors** — signals with no ecosystem tool: git-history mining (shipped) and
   text/git-based secret scanning (acquired via gitleaks, shipped).
-  (2) **Acquire everything ecosystem-specific on demand** (eslint, jscpd shipped 2026-07-01; rubocop, clippy,
-  mutation testing, hadolint, actionlint, type-coverage, osv-scanner, … remain gaps): detect ecosystem
+  (2) **Acquire everything ecosystem-specific on demand** (eslint, jscpd shipped 2026-07-01; osv-scanner shipped
+  2026-07-02; rubocop, clippy, mutation testing, hadolint, actionlint, type-coverage remain gaps): detect ecosystem
   deterministically → capability-probe the runner (`npx`/`pipx`/`cargo`/`bundle`/…) → run ephemerally → normalize
   through the existing adapter seam → degrade-to-empty when runtime/tool is absent. The build is the *engine*; each
   tool is a registry entry + one normalizing adapter. jscpd (duplication detection) is the proof-of-generalization
-  case: registered via the same `EXTERNAL_ANALYZER_CANDIDATES`/npx/`defaultRun:false` shape as eslint/semgrep, with
-  zero changes to `acquisitionEngine.ts` — confirms the engine is genuinely tool-agnostic, not eslint/semgrep-shaped.
+  case for the npx/pipx runners: registered via the same `EXTERNAL_ANALYZER_CANDIDATES`/npx/`defaultRun:false` shape
+  as eslint/semgrep, with zero changes to `acquisitionEngine.ts`. osv-scanner is the proof-of-generalization case for
+  the `binary` runner: a *second*, independent binary distribution shape from gitleaks — its release assets are the
+  raw executable, not an archive — which required (and got) one small, real engine generalization rather than a
+  workaround: `BinarySpec.archived?: boolean` (`binaryAcquisition.ts`, default `true` for back-compat) skips the
+  `tar` extraction step and writes the SHA256-verified bytes directly as the cached executable. Confirms the binary
+  path isn't gitleaks-shaped either. clippy (`cargo`) and rubocop (`bundle`) remain the two unexercised runners.
   (3) **Selection/safety gate without a maintained allowlist** — enforcement is mechanical run-safety written once
   (capability-probe, pin versions, sandboxed/read-only, degrade-to-empty, report-skipped-never-silently); a small
   value-curated DEFAULT set (high-likelihood × high-leverage × low-overhead — eslint/semgrep/gitleaks/git-mining/…)

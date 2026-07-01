@@ -11,6 +11,8 @@ const {
   parseKnip,
   jscpdCandidate,
   parseJscpd,
+  osvScannerCandidate,
+  parseOsvScanner,
 } = await import("../../src/audit/extractors/analyzers/candidates.ts");
 const { OWNED_TOOL_IDS, registerExternalAnalyzers } = await import(
   "../../src/audit/extractors/analyzers/acquisitionEngine.ts"
@@ -197,4 +199,111 @@ test("parseJscpd degrades to empty on malformed/empty/missing-duplicates input",
   assert.deepEqual(parseJscpd("not json"), []);
   assert.deepEqual(parseJscpd("{}"), []);
   assert.deepEqual(parseJscpd(JSON.stringify({ duplicates: "not-an-array" })), []);
+});
+
+test("osv-scanner is registered, consent-gated, binary runner, ecosystem-agnostic (like gitleaks) but raw (non-archived) asset", () => {
+  assert.ok(EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === "osv-scanner"), "osv-scanner must be registered");
+  assert.equal(osvScannerCandidate.defaultRun, false);
+  assert.equal(osvScannerCandidate.runner, "binary");
+  assert.equal(osvScannerCandidate.detect("/any/repo"), true);
+  assert.equal(osvScannerCandidate.binary?.archived, false);
+  const argv = osvScannerCandidate.buildArgv(["/cache/osv-scanner"], "/repo");
+  assert.deepEqual(argv, [
+    "/cache/osv-scanner",
+    "scan",
+    "--format",
+    "json",
+    "--recursive",
+    "/repo",
+  ]);
+});
+
+test("osv-scanner binary spec maps platform/arch to the real release asset naming", () => {
+  const spec = osvScannerCandidate.binary;
+  assert.equal(spec.assetFor("linux", "x64"), "osv-scanner_linux_amd64");
+  assert.equal(spec.assetFor("darwin", "arm64"), "osv-scanner_darwin_arm64");
+  assert.equal(spec.assetFor("win32", "x64"), "osv-scanner_windows_amd64.exe");
+  assert.equal(spec.assetFor("linux", "ia32"), null, "no 32-bit release asset exists");
+  assert.equal(spec.assetFor("sunos", "x64"), null, "no sunos release asset exists");
+});
+
+// Shape grounded against pkg/models/results.go (VulnerabilityResults) in
+// google/osv-scanner, not guessed: results[].source.path, results[].packages[]
+// .{package:{name,version}, vulnerabilities:[{id,summary,details}], groups:
+// [{ids,max_severity}]}.
+test("parseOsvScanner maps one item per group (alias-collapsed), not per raw vulnerability id", () => {
+  const report = JSON.stringify({
+    results: [
+      {
+        source: { path: "package-lock.json", type: "lockfile" },
+        packages: [
+          {
+            package: { name: "gogo/protobuf", version: "1.3.1", ecosystem: "Go" },
+            vulnerabilities: [
+              {
+                id: "GHSA-c3h9-896r-86jm",
+                summary: "Index validation issue",
+                details: "An issue was discovered...",
+              },
+              { id: "GO-2021-0053", summary: "" },
+            ],
+            groups: [
+              {
+                ids: ["GHSA-c3h9-896r-86jm", "GO-2021-0053"],
+                aliases: ["CVE-2021-3121"],
+                max_severity: "HIGH",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const items = parseOsvScanner(report);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].category, "security");
+  assert.equal(items[0].severity, "high");
+  assert.equal(items[0].path, "package-lock.json");
+  assert.equal(items[0].rule, "GHSA-c3h9-896r-86jm");
+  assert.match(items[0].summary, /gogo\/protobuf@1\.3\.1/);
+  assert.match(items[0].summary, /Index validation issue/);
+});
+
+test("parseOsvScanner maps max_severity to the engine's severity strings and skips groups with no ids", () => {
+  const makeReport = (maxSeverity) =>
+    JSON.stringify({
+      results: [
+        {
+          source: { path: "go.sum" },
+          packages: [
+            {
+              package: { name: "pkg", version: "1.0.0" },
+              vulnerabilities: [],
+              groups: [{ ids: ["OSV-1"], max_severity: maxSeverity }],
+            },
+          ],
+        },
+      ],
+    });
+  assert.equal(parseOsvScanner(makeReport("CRITICAL"))[0].severity, "high");
+  assert.equal(parseOsvScanner(makeReport("MODERATE"))[0].severity, "medium");
+  assert.equal(parseOsvScanner(makeReport("LOW"))[0].severity, "low");
+  assert.equal(parseOsvScanner(makeReport(""))[0].severity, "medium");
+
+  const noIds = JSON.stringify({
+    results: [
+      {
+        source: { path: "go.sum" },
+        packages: [{ package: { name: "pkg" }, vulnerabilities: [], groups: [{ ids: [] }] }],
+      },
+    ],
+  });
+  assert.deepEqual(parseOsvScanner(noIds), []);
+});
+
+test("parseOsvScanner degrades to empty on malformed/empty input", () => {
+  assert.deepEqual(parseOsvScanner(""), []);
+  assert.deepEqual(parseOsvScanner("not json"), []);
+  assert.deepEqual(parseOsvScanner("{}"), []);
+  assert.deepEqual(parseOsvScanner(JSON.stringify({ results: "not-an-array" })), []);
 });

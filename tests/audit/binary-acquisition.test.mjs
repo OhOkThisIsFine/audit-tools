@@ -132,6 +132,75 @@ test("resolveBinary degrades to unavailable with no fetcher (offline) and no PAT
   assert.equal(res.command, null);
 });
 
+test("resolveBinary(archived:false) writes the verified bytes directly as the executable, no tar", async () => {
+  const cacheDir = await mkdtemp(join(tmpdir(), "bincache-"));
+  try {
+    const rawSpec = makeSpec({
+      binaryName: "osv-scanner",
+      assetFor: () => "osv-scanner_linux_amd64",
+      checksumsAsset: "osv-scanner_SHA256SUMS",
+      archived: false,
+    });
+    const rawBytes = new TextEncoder().encode("FAKE-RAW-EXECUTABLE-BYTES");
+    const rawFetcher = async (url) => {
+      if (url.endsWith("SHA256SUMS")) {
+        return new TextEncoder().encode(
+          `${sha256(rawBytes)}  osv-scanner_linux_amd64\n`,
+        );
+      }
+      return rawBytes;
+    };
+    // A runner whose `tar` invocation would fail loudly — proves the
+    // non-archived path never calls it.
+    const runNeverCallsTar = () => {
+      throw new Error("tar must never be invoked for a non-archived asset");
+    };
+    const res = await resolveBinary(rawSpec, {
+      run: (argv) => {
+        if (argv[0] === "tar") return runNeverCallsTar();
+        // PATH version-probe fails (forces the download path).
+        return { status: 1, stdout: "", stderr: "not found", argv, duration_ms: 1, error: new Error("ENOENT") };
+      },
+      fetch: rawFetcher,
+      cacheDir,
+      platform: "linux",
+      arch: "x64",
+    });
+    assert.equal(res.status, "downloaded");
+    assert.ok(res.command && existsSync(res.command), "raw binary should be written to the cache");
+    const { readFileSync } = await import("node:fs");
+    assert.equal(readFileSync(res.command, "utf8"), "FAKE-RAW-EXECUTABLE-BYTES");
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveBinary(archived:false) still refuses a checksum mismatch", async () => {
+  const cacheDir = await mkdtemp(join(tmpdir(), "bincache-"));
+  try {
+    const rawSpec = makeSpec({
+      binaryName: "osv-scanner",
+      assetFor: () => "osv-scanner_linux_amd64",
+      checksumsAsset: "osv-scanner_SHA256SUMS",
+      archived: false,
+    });
+    const res = await resolveBinary(rawSpec, {
+      run: (argv) => ({ status: 1, stdout: "", stderr: "", argv, duration_ms: 1, error: new Error("ENOENT") }),
+      fetch: async (url) =>
+        url.endsWith("SHA256SUMS")
+          ? new TextEncoder().encode(`${"0".repeat(64)}  osv-scanner_linux_amd64\n`)
+          : new TextEncoder().encode("bytes"),
+      cacheDir,
+      platform: "linux",
+      arch: "x64",
+    });
+    assert.equal(res.status, "unavailable");
+    assert.match(res.note ?? "", /checksum mismatch/);
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveBinary returns unavailable when the os/arch has no asset", async () => {
   const res = await resolveBinary(makeSpec({ assetFor: () => null }), {
     run: offlineRunnerExtractingTo("gitleaks"),
