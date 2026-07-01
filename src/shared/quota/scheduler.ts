@@ -668,11 +668,17 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   // that is (near) exhausted forces cooldown to its reset_at. A cold-start window
   // (no absolute tokens, no learned slope) admits a small calibration batch so
   // the run can observe Δutilization and seed the slope.
+  // The remaining token budget the gate spent against (MIN across the pool's own
+  // windows), stamped on the schedule so the host-facing summary surfaces the SAME
+  // number the gate used — never a re-derived one. null when no live snapshot, or
+  // cold-start (no absolute/learned budget for any window yet).
+  let remainingTokenBudget: number | null = null;
   if (quotaSourceSnapshot && !cooldownUntil) {
     const { budget, calibrating, exhaustedResetAt } = deriveTokenBudget(
       quotaSourceSnapshot,
       quotaStateEntry?.tokens_per_pct,
     );
+    remainingTokenBudget = budget;
     if (budget === 0) {
       // A genuinely empty window (remaining fraction 0 / absolute count 0):
       // throttle to 1 and persist a cooldown to its reset so a later transiently
@@ -727,6 +733,8 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     model: hostModel,
     quota_source_snapshot: quotaSourceSnapshot,
     binding_cap: bindingCap,
+    remaining_token_budget: remainingTokenBudget,
+    in_flight_tokens: inFlightTokens,
   };
 }
 

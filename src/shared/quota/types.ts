@@ -102,6 +102,15 @@ export interface WaveSchedule {
    * requested concurrency). Optional so existing constructions stay valid.
    */
   binding_cap?: WaveBindingCap;
+  /**
+   * The remaining token budget the token-budget gate spent against for this pool
+   * (MIN across the pool's own quota windows), so the host-facing summary surfaces
+   * the SAME number the gate used. null when no live snapshot was available, or at
+   * cold start (no absolute/learned budget for any window yet).
+   */
+  remaining_token_budget?: number | null;
+  /** Tokens already in flight against this pool when the wave was sized (0 default). */
+  in_flight_tokens?: number;
 }
 
 export const BackoffStateSchema = z

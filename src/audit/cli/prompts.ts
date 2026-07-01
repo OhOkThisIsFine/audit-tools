@@ -1,6 +1,7 @@
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
   renderQuotaCoverageNudge,
+  renderTokenBudgetView,
   buildFrictionTriageBlock,
   type FrictionTriageDecision,
 } from "audit-tools/shared";
@@ -132,6 +133,7 @@ export function renderDispatchReviewPrompt(params: {
     params.dispatchQuotaPath,
     params.artifactsDir,
   );
+  const tokenBudgetView = renderTokenBudgetView(params.dispatchQuotaPath);
 
   return [
     "# audit-code dispatch review",
@@ -139,6 +141,7 @@ export function renderDispatchReviewPrompt(params: {
     ...dispatchDataLines,
     "",
     ...(quotaCoverageNudge ? [quotaCoverageNudge, ""] : []),
+    ...(tokenBudgetView ? [tokenBudgetView, ""] : []),
     DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
     "Subagent prompt shape:",
