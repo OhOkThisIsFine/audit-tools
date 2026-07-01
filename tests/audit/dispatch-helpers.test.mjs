@@ -257,6 +257,72 @@ test("buildTaskSections — coverageTemplate JSON is embedded verbatim", () => {
   );
 });
 
+test("buildTaskSections — renders external analyzer signal detail for tagged tasks, not just the generic tag", () => {
+  const task = { ...makeAuditTask("t1"), tags: ["external_analyzer_signal"] };
+  const lensDefs = makeLensDefs();
+  const lineIndex = { "src/t1.ts": 50 };
+  const externalAnalyzerResults = [
+    {
+      tool: "knip",
+      results: [
+        {
+          id: "knip-1",
+          category: "unused-export",
+          severity: "low",
+          path: "src/t1.ts",
+          line_start: 12,
+          summary: "Unused export 'helper'",
+          rule: "exports",
+        },
+      ],
+    },
+  ];
+
+  const sections = buildTaskSections([task], lensDefs, lineIndex, externalAnalyzerResults);
+  const joined = sections.join("\n");
+
+  assert.match(joined, /External analyzer signals for this task/);
+  assert.match(joined, /src\/t1\.ts:12 \[exports\] Unused export 'helper'/);
+});
+
+test("buildTaskSections — omits the analyzer signal section for tasks without the tag, even when results exist", () => {
+  const task = makeAuditTask("t1"); // no tags
+  const lensDefs = makeLensDefs();
+  const lineIndex = { "src/t1.ts": 50 };
+  const externalAnalyzerResults = [
+    {
+      tool: "knip",
+      results: [
+        { id: "knip-1", category: "unused-export", severity: "low", path: "src/t1.ts", line_start: 12, summary: "Unused export 'helper'" },
+      ],
+    },
+  ];
+
+  const sections = buildTaskSections([task], lensDefs, lineIndex, externalAnalyzerResults);
+  const joined = sections.join("\n");
+
+  assert.doesNotMatch(joined, /External analyzer signals for this task/);
+});
+
+test("buildTaskSections — omits the analyzer signal section when tagged but no results match this task's files", () => {
+  const task = { ...makeAuditTask("t1"), tags: ["external_analyzer_signal"] };
+  const lensDefs = makeLensDefs();
+  const lineIndex = { "src/t1.ts": 50 };
+  const externalAnalyzerResults = [
+    {
+      tool: "knip",
+      results: [
+        { id: "knip-1", category: "unused-export", severity: "low", path: "src/other.ts", line_start: 3, summary: "Unused export 'x'" },
+      ],
+    },
+  ];
+
+  const sections = buildTaskSections([task], lensDefs, lineIndex, externalAnalyzerResults);
+  const joined = sections.join("\n");
+
+  assert.doesNotMatch(joined, /External analyzer signals for this task/);
+});
+
 // ── collectOversizedWarnings ──────────────────────────────────────────────────
 
 function makeWaveSchedule(confidence, contextTokens = 10000, outputTokens = 2000) {

@@ -362,7 +362,7 @@ export async function prepareDispatchArtifacts(params: {
       ? await extractPacketAnchor({ packet, reviewRoot, bundle, taskResultsDir, warnings })
       : { anchorPath: null, anchorSummary: null };
     const largeFileSection = buildLargeFileSection(largeFileMode, anchorSummary, anchorPath);
-    const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex);
+    const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex, bundle.external_analyzer_results);
     // The worker writes its AuditResult[] array directly to this packet result
     // file (its prompt's result_path == this entry's result_path); merge-and-
     // ingest recovers each task_id from that one array file. Per-task result

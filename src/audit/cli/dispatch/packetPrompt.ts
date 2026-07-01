@@ -4,7 +4,12 @@ import { writeJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../../types.js";
 import type { ReviewPacket } from "../../types/reviewPlanning.js";
 import type { ArtifactBundle } from "../../io/artifacts.js";
-import { buildFileAnchorSummary, type FileAnchorSummary } from "../../orchestrator/fileAnchors.js";
+import type { ExternalAnalyzerResults } from "../../types/externalAnalyzer.js";
+import {
+  analyzerSignalAnchorsForPath,
+  buildFileAnchorSummary,
+  type FileAnchorSummary,
+} from "../../orchestrator/fileAnchors.js";
 import { artifactNameForId } from "../args.js";
 import { withinRoot } from "./paths.js";
 import { isIsolatedLargeFilePacket } from "./packetFilter.js";
@@ -139,12 +144,43 @@ export async function extractPacketAnchor(params: {
 }
 
 /**
+ * Renders the specific external-analyzer leads (rule/line/summary) for a
+ * task's files — not just the generic `external_analyzer_signal` tag. Reuses
+ * the same grounded extraction isolated-large-file anchoring already uses
+ * (`analyzerSignalAnchorsForPath`), so a knip/eslint/etc. lead now reaches the
+ * worker with enough detail to confirm-or-refute against the packet graph
+ * context, in ANY packet — not only isolated-large-file packets.
+ */
+function renderTaskAnalyzerSignals(
+  task: AuditTask,
+  externalAnalyzerResults: ExternalAnalyzerResults[] | undefined,
+): string[] {
+  if (!task.tags?.includes("external_analyzer_signal") || !externalAnalyzerResults?.length) {
+    return [];
+  }
+  const signals = task.file_paths.flatMap((path) =>
+    analyzerSignalAnchorsForPath(path, externalAnalyzerResults).map((signal) => ({ path, signal })),
+  );
+  if (signals.length === 0) {
+    return [];
+  }
+  return [
+    "External analyzer signals for this task (leads — confirm or refute against real evidence, do not treat as a finding on their own):",
+    ...signals.map(
+      ({ path, signal }) =>
+        `- ${path}${signal.line ? `:${signal.line}` : ""} [${signal.name}] ${signal.detail ?? ""}`.trimEnd(),
+    ),
+  ];
+}
+
+/**
  * Extracts the per-task flatMap that builds task section lines.
  */
 export function buildTaskSections(
   packetTasks: AuditTask[],
   lensDefs: Record<string, { description: string; do_not_report: string }>,
   lineIndex: Record<string, number>,
+  externalAnalyzerResults?: ExternalAnalyzerResults[],
 ): string[] {
   return packetTasks.flatMap((task) => {
     const lensDef = lensDefs[task.lens];
@@ -159,6 +195,7 @@ export function buildTaskSections(
       path,
       total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
     }));
+    const analyzerSignalLines = renderTaskAnalyzerSignals(task, externalAnalyzerResults);
     return [
       `### ${task.task_id}`,
       `unit_id: ${task.unit_id}`,
@@ -170,6 +207,7 @@ export function buildTaskSections(
       "",
       `Lens guidance: ${lensDef?.description ?? task.lens}`,
       `Do NOT report: ${lensDef?.do_not_report ?? "N/A"}`,
+      ...(analyzerSignalLines.length > 0 ? ["", ...analyzerSignalLines] : []),
       ...(isLensVerification
         ? [
             "",

@@ -135,32 +135,32 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   reference implementation. Until then the duplication is harmless but silent-drift-prone; a manual sync
   check is the interim mitigation.
 
-- **Dead-code / unused-export as an ACQUIRED audit analyzer (knip) — slice 3 (graph cross-check) open.**
+- **Dead-code / unused-export as an ACQUIRED audit analyzer (knip) — slices 1-3 SHIPPED (2026-07-02).**
   Slices 1+2 (knip candidate/parser grounded against `node_modules/knip/dist/reporters/json.js`'s real
   `--reporter json` shape; generic `getExternalSignalPaths` + task-tagging join, no separate merge-point wiring
   needed) shipped 2026-07-01.
-  **Slice 3 — NOT started, scoped but deliberately deferred:** the priority chain runs
-  `external_analyzers_current` BEFORE `structure_artifacts`/`graph_enrichment_current`, so `graph_bundle.json`
-  does not exist yet when knip's raw results land — a cross-check against in/out-degree + entrypoint provenance
-  can't happen inline in `parseKnip`. Real options to resolve later: (a) a new later obligation that re-opens
-  persisted knip results once the graph exists and re-annotates confidence/suppression, or (b) give the per-file
-  lens subauditor prompt direct graph context for `external_analyzer_signal`-tagged files so the LLM does the
-  reconciliation itself at review time (no new obligation needed) — this is the cheaper option and probably right,
-  but wasn't validated this pass. Entrypoint provenance for whichever option is chosen should be derived from the
-  EXISTING `package-entrypoint-link`/`workspace-package-link`/route edges (`graphManifestEdges/packageJson.ts` etc.)
-  — no new `GraphBundle` schema field needed.
-  **2026-07-01 attempt on option (b) reverted (verified false, not shipped):** a contract-pipeline module for
-  option (b) survived 7 judge/critique repair rounds but its core premise didn't hold against real source:
-  `renderWorkerPrompt(task: WorkerTask)` is synchronous/pure with a single call site
-  (`materializeReviewRun`, `src/audit/cli/reviewRun.ts:167`, called synchronously), and `WorkerTask` has no
-  `file_paths`/tags field to key a graph-context lookup off of (those live on `AuditTask`,
-  `task.pending_audit_tasks_path` resolves to an `AuditTask[]`, not a single task). Making the module read
-  `graph_bundle.json` from disk inside `renderWorkerPrompt` would also have forced it async, breaking that
-  call site, and duplicated a read of data the codebase already threads through in-memory elsewhere
-  (`ArtifactBundle.graph_bundle`, `src/audit/io/artifacts.ts:120`, passed as a parameter into
-  `buildReviewPackets`/`buildPacket` per `src/audit/cli/dispatch.ts`). Any future attempt at option (b) should
-  thread the already-loaded `GraphBundle` through as a parameter into `materializeReviewRun`/`renderWorkerPrompt`,
-  never re-read it from disk in the leaf renderer.
+  **Slice 3 — corrected premise, shipped as a smaller fix than originally scoped.** The 2026-07-01 attempt
+  (below) assumed graph context never reaches the worker and needs new obligation-ordering/plumbing; a
+  2026-07-02 re-trace found that premise false on the real primary dispatch path: `buildPacketPrompt`
+  (`src/audit/cli/dispatch/packetPrompt.ts`) already renders packet-level graph context (`entrypoints`/
+  `key_edges`/`boundary_files`/`quality`) via `renderPacketGraphContext` — the earlier attempt had targeted
+  `renderWorkerPrompt`/`WorkerTask`, a separate envelope-bootstrap mechanism not used for packet content at
+  all. The REAL gap was narrower: workers only ever saw a generic `external_analyzer_signal` tag + boilerplate
+  "raises priority" rationale (`taskBuilder.ts`), never the actual lead (symbol/line/rule/summary) — that
+  extraction already existed (`fileAnchors.ts`'s `analyzer_signal` anchor logic) but was wired only for
+  isolated-large-file packets. Fix: extracted the path-scoped sub-logic into
+  `analyzerSignalAnchorsForPath` (`src/audit/orchestrator/fileAnchors.ts`) and render it as a new
+  "External analyzer signals for this task" section in `buildTaskSections`
+  (`src/audit/cli/dispatch/packetPrompt.ts`) for any tagged task in any packet, threaded from
+  `bundle.external_analyzer_results` at `dispatch.ts`'s existing call site — no new obligation, no new
+  artifact read. Tests: `dispatch-helpers.test.mjs` (renders for tagged+matching, omits for untagged /
+  no-match).
+  **2026-07-01 attempt on option (b) reverted (historical — the false-premise part, kept for the lesson):**
+  a contract-pipeline module survived 7 judge/critique repair rounds but its core premise didn't hold against
+  real source: `renderWorkerPrompt(task: WorkerTask)` is synchronous/pure with a single call site
+  (`materializeReviewRun`, `src/audit/cli/reviewRun.ts:167`), and `WorkerTask` has no `file_paths`/tags field
+  to key a graph-context lookup off of. The lesson generalizes: always verify which of several dispatch-prompt
+  mechanisms is actually the LIVE one before scoping a fix around it.
   [[deterministic-analyzers-own-vs-acquire]] [[graph-signals-thin-substrate-extraction-persist]]
 - **Three borrow-level leads from the `affaan-m/ecc` evaluation (2026-06-28).** ecc itself is not adoptable/applicable
   (agent-config distribution OS, wrong domain/stack — see `ecc-evaluation.md` on user Desktop), but a deeper pass
