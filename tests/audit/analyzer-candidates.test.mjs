@@ -9,6 +9,8 @@ const {
   eslintCandidate,
   knipCandidate,
   parseKnip,
+  jscpdCandidate,
+  parseJscpd,
 } = await import("../../src/audit/extractors/analyzers/candidates.ts");
 const { OWNED_TOOL_IDS, registerExternalAnalyzers } = await import(
   "../../src/audit/extractors/analyzers/acquisitionEngine.ts"
@@ -157,4 +159,42 @@ test("parseSemgrep + parseEslint degrade to empty on malformed input", () => {
     ).map((i) => [i.rule, i.severity, i.line_start]),
     [["no-var", "medium", 2]],
   );
+});
+
+test("jscpd is registered, consent-gated like eslint/semgrep/knip, npx runner", () => {
+  assert.ok(EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === "jscpd"), "jscpd must be registered");
+  assert.equal(jscpdCandidate.defaultRun, false);
+  assert.equal(jscpdCandidate.runner, "npx");
+  assert.equal(jscpdCandidate.detect("/repo"), false);
+  assert.equal(typeof jscpdCandidate.reportFile?.("/repo"), "string");
+  const argv = jscpdCandidate.buildArgv(["npx", "jscpd@4"], "/repo");
+  assert.ok(argv.includes("--reporters") && argv.includes("json"));
+  assert.ok(argv.includes("--output"));
+  assert.ok(argv.includes("/repo"));
+});
+
+test("parseJscpd maps duplicates into generic items", () => {
+  const report = JSON.stringify({
+    duplicates: [
+      {
+        lines: 15,
+        firstFile: { name: "src/a.ts", startLoc: { line: 10 }, endLoc: { line: 25 } },
+        secondFile: { name: "src/b.ts", startLoc: { line: 40 }, endLoc: { line: 55 } },
+      },
+    ],
+  });
+  const items = parseJscpd(report);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].path, "src/a.ts");
+  assert.equal(items[0].line_start, 10);
+  assert.equal(items[0].line_end, 25);
+  assert.equal(items[0].category, "maintainability");
+  assert.match(items[0].summary, /src\/b\.ts/);
+});
+
+test("parseJscpd degrades to empty on malformed/empty/missing-duplicates input", () => {
+  assert.deepEqual(parseJscpd(""), []);
+  assert.deepEqual(parseJscpd("not json"), []);
+  assert.deepEqual(parseJscpd("{}"), []);
+  assert.deepEqual(parseJscpd(JSON.stringify({ duplicates: "not-an-array" })), []);
 });
