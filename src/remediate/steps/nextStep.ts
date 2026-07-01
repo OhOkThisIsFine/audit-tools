@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { StateStore, type RemediationState, type HostCapabilities } from "../state/store.js";
@@ -409,6 +409,28 @@ function resolveInputPaths(
  * in the tool, never by asking the loader to remember to drop the flag (a needed
  * manual flag is a bug signal).
  */
+/**
+ * True when `candidatePath` (the best default-discovered input, e.g.
+ * `.audit-tools/audit-findings.json`) was modified more recently than
+ * `reportPath` (a leftover `remediation-report.md`). A freshly-regenerated
+ * audit doc postdating the last remediation report is a NEW remediation
+ * source, not evidence the old run is still "the" answer — used to stop
+ * `complete_redelivery` from silently re-presenting a stale report over it.
+ * Missing/unreadable files compare as "not fresher" (fail toward redelivering,
+ * the pre-existing behaviour) rather than throwing.
+ */
+function isDefaultCandidateFresherThanReport(
+  candidatePath: string | undefined,
+  reportPath: string,
+): boolean {
+  if (!candidatePath) return false;
+  try {
+    return statSync(candidatePath).mtimeMs > statSync(reportPath).mtimeMs;
+  } catch {
+    return false;
+  }
+}
+
 function suppliedInputMatchesRun(
   inputResolution: InputResolution,
   manifest: IntakeSourceManifest | undefined,
@@ -4267,10 +4289,18 @@ function buildPreIntakeObligations(
         // built) — an active run, not a finished one. A fully-green close deletes
         // the whole artifact dir (close.ts), so the summary + checkpoint can only
         // co-exist for a live run; never re-deliver the leftover root report over it.
+        //
+        // A freshly-regenerated default-discovered audit doc (audit-findings.json /
+        // audit-report.md newer than the leftover report) is the same "don't
+        // redeliver" signal — a fresh audit run just landed and a bare next-step
+        // must fall through to pending_intake (which re-presents the discovered
+        // file for confirmation via confirm_auto_discovered_input, mtime + type +
+        // finding count included) rather than silently re-showing the stale report.
         const freshIntent =
           existsSync(ip.conversationStart) ||
           existsSync(ip.extractedPlan) ||
-          (existsSync(ip.summary) && existingCheckpoint?.confirmed_by === "host");
+          (existsSync(ip.summary) && existingCheckpoint?.confirmed_by === "host") ||
+          isDefaultCandidateFresherThanReport(inputResolution.existing[0], reportPath);
         return freshIntent ? "satisfied" : "missing";
       },
       execute: async (state, c) => ({
