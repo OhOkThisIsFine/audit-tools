@@ -819,6 +819,7 @@ export {
   summarizeDispatchCapacityPools,
   detectLivelock,
   buildEmptyPoolTerminal,
+  buildQuotaPausedTerminal,
 } from "./quota/capacity.js";
 export type {
   CapacityPool,

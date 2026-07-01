@@ -27,8 +27,13 @@ import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
  *   pool reports zero slots) and the engine cannot dispatch remaining items.
  * - `livelock_guard`: N consecutive waves passed with zero progress (all items
  *   remain undispatchable despite pools being present) and the guard tripped.
+ * - `quota_paused`: every remaining item's pool is paused until a stated host
+ *   session-limit reset (a "resets 1:50pm"-style wall), and nothing is in flight.
+ *   Distinct from `empty_pool` / `livelock_guard`: the strand is RETRYABLE — a
+ *   later step (after the earliest reset) redispatches the stranded items clean,
+ *   so the consumer must keep them PENDING, never mark them blocked/failed.
  */
-export type PartialCompletionReason = "empty_pool" | "livelock_guard";
+export type PartialCompletionReason = "empty_pool" | "livelock_guard" | "quota_paused";
 
 /**
  * Consumer-neutral signal that the dispatch engine reached a terminal it cannot
@@ -44,6 +49,12 @@ export interface PartialCompletionTerminal {
   reason: PartialCompletionReason;
   /** task/unit IDs the engine could not dispatch. */
   stranded_ids: string[];
+  /**
+   * Only set for `reason: "quota_paused"`: the ISO timestamp of the EARLIEST
+   * pool reset across the stranded items' paused pools. A later step scheduled
+   * at/after this instant can redispatch the stranded items — they redo clean.
+   */
+  earliest_reset_at?: string;
 }
 
 /**
@@ -91,6 +102,24 @@ export function buildEmptyPoolTerminal(strandedIds: string[]): PartialCompletion
   return {
     reason: "empty_pool",
     stranded_ids: [...strandedIds],
+  };
+}
+
+/**
+ * Produce a `quota_paused` {@link PartialCompletionTerminal}: the stranded items'
+ * pools are all paused until a stated host session-limit reset, and nothing is in
+ * flight. `earliestResetAt` (ISO) is the soonest reset a resuming step should wait
+ * for. The consumer keeps these items PENDING/re-dispatchable — they are NOT a
+ * failure, unlike the empty-pool / livelock terminals.
+ */
+export function buildQuotaPausedTerminal(
+  strandedIds: string[],
+  earliestResetAt: string | null,
+): PartialCompletionTerminal {
+  return {
+    reason: "quota_paused",
+    stranded_ids: [...strandedIds],
+    ...(earliestResetAt ? { earliest_reset_at: earliestResetAt } : {}),
   };
 }
 

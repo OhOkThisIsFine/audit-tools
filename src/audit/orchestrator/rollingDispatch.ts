@@ -9,7 +9,7 @@
  * 4. Returns a typed RollingRunResult with termination status.
  */
 
-import type { SessionConfig } from "audit-tools/shared";
+import type { SessionConfig, PartialCompletionReason } from "audit-tools/shared";
 import {
   createRollingDispatcher,
   detectLivelock,
@@ -37,7 +37,7 @@ export interface RollingRunResult<TPacket> {
   /** IDs of stranded packets when status === "partial". */
   stranded_ids: string[];
   /** Reason for partial termination (undefined when status === "complete"). */
-  partial_reason?: "empty_pool" | "livelock_guard";
+  partial_reason?: PartialCompletionReason;
   /**
    * Pool ids the engine dropped into its exhausted set this pass (after spill +
    * the reactive 429 re-route both failed to keep them eligible). These are the
