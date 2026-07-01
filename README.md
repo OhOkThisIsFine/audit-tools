@@ -1,16 +1,23 @@
 # audit-tools
 
-Portable, hybrid code **auditing** + **remediation** orchestrators for arbitrary repositories,
-shipped as one package exposing two CLIs / slash workflows:
+One npm package shipping **two independent code tools** over a shared library. Each has its
+own CLI and host slash-command, and each is useful on its own:
 
-- **`audit-code`** (`/audit-code`) — audits a codebase one bounded, backend-rendered step at a time
-  and produces a findings report (`audit-findings.json` + `audit-report.md`).
-- **`remediate-code`** (`/remediate-code`) — consumes that report (or free-form feedback) and applies
-  fixes step by step, emitting `remediation-outcomes.json` + `remediation-report.md`.
+- **`audit-code`** (`/audit-code`) — audits a repository and produces a findings report.
+- **`remediate-code`** (`/remediate-code`) — implements changes from findings, free-form intent, or both together.
 
-Both are **conversation-first**: the product is the slash workflow inside a host agent; the CLI is the
-backend/fallback. Each `next-step` call returns one prompt contract (JSON + markdown); the host agent
-executes it and calls back for the next. State persists to an artifact directory, so runs are resumable.
+They **compose but don't depend on each other**: audit-code's findings are valid input to
+remediate-code, but you can run either alone. Audit a repo and stop. Or point remediate-code
+at a plain-English request with no audit in sight — or hand it audit findings *and* extra
+instructions at the same time.
+
+Each tool writes its results to `.audit-tools/` as a machine contract (JSON) plus a
+human-readable render (markdown):
+
+| Tool | Machine contract | Human render |
+|---|---|---|
+| audit-code | `audit-findings.json` | `audit-report.md` |
+| remediate-code | `remediation-outcomes.json` | `remediation-report.md` |
 
 ## Install
 
@@ -18,253 +25,111 @@ executes it and calls back for the next. State persists to an artifact directory
 npm install -g audit-tools
 ```
 
-This installs both the `audit-code` and `remediate-code` bins and deploys the host slash-command assets
-(Claude Code, Codex, OpenCode, Antigravity) via the package postinstall.
+This puts both `audit-code` and `remediate-code` on your `PATH` and, via the package
+postinstall, deploys slash-command assets for supported hosts (Claude Code, Codex,
+OpenCode, VS Code, Antigravity).
 
 ## Usage
 
-```bash
-audit-code next-step        # advance the audit one step
-remediate-code next-step    # advance a remediation one step
-```
+The tools are meant to be run as slash-commands inside a host agent. Just invoke the command —
+no manual path, provider, or model flags. The agent works its way through the whole workflow
+on its own, running against your active conversation model, and only stops to ask you when it
+needs a real decision (scope, ambiguous intent, whether to open a PR, and the like).
 
-In a host agent, drive the workflow with `/audit-code` then `/remediate-code`.
-
-## Concepts
-
-One pipeline, two halves: audit → findings contract; remediate → consumes + fixes. The JSON contract is
-the source of truth; the markdown is its human render. Neither tool runs to completion in a single call —
-each derives state, does one bounded unit of work, persists, and returns. See `CLAUDE.md` for the full
-design concepts and standing decisions.
-
----
-
-## audit-code
-
-### Canonical Product Route
-
-The primary product is `/audit-code` in conversation.
-
-Normal product usage should:
-
-- use the active conversation model by default
-- use project files and attached repository context by default
-- avoid manual paths, provider flags, and model-selection arguments
-- keep semantic review with the active conversation agent by default
-- advance the audit automatically until it completes or no further automatic progress is possible
-
-### Conversation Setup
-
-The canonical asset for editor and conversation integrations is:
-
-`skills/audit-code/audit-code.prompt.md`
-
-Packaged installs and repository checkouts both ship that prompt asset.
-
-The intended user install is one global tool install:
-
-```bash
-npm install -g audit-tools
-```
-
-That makes `audit-code` available on `PATH`. During package install, the package
-also writes user-level command/skill assets for hosts we can seed safely, including
-the Claude command file, the global Codex skill bundle with `audit-code` display
-metadata, and the global OpenCode slash command entry in
-`~/.config/opencode/opencode.json`.
-
-After that, invoke `/audit-code` in a supported host. The prompt self-bootstraps
-the current repository by running:
-
-```bash
-audit-code ensure --quiet
-```
-
-That command writes or refreshes the repo-local assets only when they are missing
-or stale, then normal audit execution continues without manual paths, provider
-flags, or model-selection arguments.
-
-The explicit repair and compatibility setup path remains:
-
-```bash
-audit-code install
-```
-
-That bootstraps repo-local supporting surfaces for the hosts we can automate today, including:
-
-- Codex `AGENTS.md` fallback guidance for the global skill surface
-- Claude Desktop local MCP bundle artifacts and project template guidance
-- OpenCode `opencode.json` with auditor agent and permission wiring; the `/audit-code` command stays in the global npm-installed OpenCode config
-- VS Code prompt, custom agent, Copilot instructions, and `.vscode/mcp.json`
-- Antigravity planning-mode guidance plus the shared repo-local MCP launcher
-
-`audit-code ensure` refreshes those files automatically when the packaged prompt
-or skill changes. Use `audit-code install` or `audit-code ensure --force` when
-you intentionally want to rewrite every generated host surface on demand.
-
-After bootstrap, you can smoke-test the generated host assets and launcher from the repository root:
-
-```bash
-audit-code verify-install
-```
-
-After that, open a supported conversation surface in the repository and invoke `/audit-code`.
-
-If a host still needs manual prompt import after bootstrap, open:
+**Audit a repository:**
 
 ```text
-.audit-code/install/GETTING-STARTED.md
+/audit-code
 ```
 
-That repo-local guide now includes dedicated quick-start sections for Codex, Claude Desktop, OpenCode, VS Code, and Antigravity, plus the installed canonical prompt asset path for prompt-import fallback flows.
+You'll confirm scope and which lenses to review (security, correctness, reliability, and
+data-integrity are always on), then it runs to completion and leaves `audit-findings.json` +
+`audit-report.md` in `.audit-tools/`.
 
-For narrower compatibility, `audit-code install-host --host copilot` still exists.
-
-For hosts that still need manual import after bootstrap, or for environments with no repo-local install surface, after installing the package or checking out the repository, use:
-
-```bash
-audit-code prompt-path
-```
-
-Import the reported file into your editor or conversation environment's custom prompt configuration, then invoke `/audit-code` in conversation.
-
-### Repo-Local Backend Fallback
-
-The CLI in this repository is backend infrastructure and a repo-local fallback surface.
-
-The conversation step engine used by `/audit-code` — the single execution loop —
-runs from the target repository root:
-
-```bash
-audit-code next-step
-```
-
-Repository-local equivalent:
-
-```bash
-node /path/to/audit-tools/audit-code.mjs next-step
-```
-
-This advances deterministic audit state one bounded step, writes
-`.audit-tools/audit/steps/current-step.json` and
-`.audit-tools/audit/steps/current-prompt.md`, auto-builds `dist/` if it is
-missing, and creates the artifacts directory automatically. Hosts follow only
-the returned step prompt, then call `next-step` again. A bare `audit-code`
-invocation prints usage; there is no implicit batch loop.
-
-Explicit root override still exists for callers running from outside the target repository:
-
-```bash
-audit-code next-step --root /path/to/repo
-```
-
-### Backend Provider Modes
-
-If `provider` is omitted, the backend defaults to the safest mode:
-
-```json
-{
-  "provider": "local-subprocess"
-}
-```
-
-If you want best-effort cross-editor or provider routing, opt into:
-
-```json
-{
-  "provider": "auto",
-  "ui_mode": "visible"
-}
-```
-
-Optional backend config: `.audit-tools/audit/session-config.json`
-
-### Key Docs
-
-- `docs/audit-pkg/product.md`
-- `docs/audit-pkg/operator-guide.md`
-- `docs/audit-pkg/contracts.md`
-- `docs/audit-pkg/release.md`
-- `docs/audit-pkg/development.md`
-- `skills/audit-code/SKILL.md`
-
----
-
-## remediate-code
-
-Conversation-first remediation orchestrator. Accepts `audit-findings.json` (the deterministic machine
-contract from audit-code), an `audit-report.md` or other feedback document, or conversational feedback —
-then advances through one backend-rendered step prompt at a time.
-
-### Primary Usage
-
-```bash
-npm install -g audit-tools
-```
-
-Then start from a conversation:
+**Remediate — from findings, a request, or both:**
 
 ```text
 /remediate-code path/to/audit-findings.json
+/remediate-code split the auth module and make session refresh easier to test
+/remediate-code path/to/audit-findings.json — and prioritize the error-handling issues
 ```
 
-You can also start with free-form feedback:
+It plans the changes, implements and verifies them, and lands the result — a commit by
+default, or a PR / publish if you ask. You confirm scope and the closing action up front and
+review a summary before anything is committed.
 
-```text
-/remediate-code clean up the auth flow and make the session refresh behavior easier to test
-```
+### What to expect
 
-The global loader runs `remediate-code ensure --quiet`, then
-`remediate-code next-step`, reads only the returned `prompt_path`, and follows
-that one prompt. Each prompt carries its own allowed commands and stop condition.
+- **It drives itself.** A single slash-command runs the full workflow; it pauses only for
+  clarifications, not to hand each step back to you.
+- **Runs are resumable.** State persists to `.audit-tools/` in the target repo, so an
+  interrupted run picks up where it left off — just invoke the command again.
+- **Work runs in parallel** where it safely can, and remediation always re-validates its
+  changes rather than trusting any input blindly.
+- **Effort scales to the work.** Trivial changes get light review; risky or complex ones get
+  deeper scrutiny before anything lands.
 
-### Runtime Artifacts
+### The pipelines, step by step
 
-Active runs use `.audit-tools/remediation/` in the target repository:
+**audit-code:**
 
-- `.audit-tools/remediation/state.json`
-- `.audit-tools/remediation/steps/current-step.json`
-- `.audit-tools/remediation/steps/current-prompt.md`
+1. **Confirm providers** — discovers the LLMs available in your session and confirms which to use.
+2. **Understand the repo** — deterministically maps files, public surfaces, the dependency
+   graph, critical flows, and a risk register; runs available static analyzers and auto-fixes.
+3. **Confirm intent** — you review the scope and pick the review lenses.
+4. **Review the design** — two parallel passes: a contract pass (invariants, boundaries,
+   obligations) and a conceptual pass (philosophy, alternatives, better directions).
+5. **Plan** — turns the risk register into bounded, prioritized review tasks.
+6. **Review in parallel** — dispatches the review tasks to your LLMs, routing riskier work to
+   more capable models, and deep-dives selectively.
+7. **Synthesize** — consolidates everything into `audit-findings.json` + `audit-report.md`,
+   then layers on a narrative (themes, executive summary, top risks).
 
-After close, durable outputs land at `.audit-tools/`:
+**remediate-code:**
 
-- `remediation-report.md`
-- `remediation-outcomes.json`
-- `remediation-closing-result.json`
+1. **Confirm providers** — same session-level provider check as audit-code.
+2. **Intake** — reads the findings and/or free-form intent, validates the input, and drafts a
+   summary with any open questions.
+3. **Confirm intent** — you confirm scope, answer open questions, and set the closing action
+   (commit, push, open PR, publish, or halt).
+4. **Design the change** — decomposes the work into modules, drafts a contract per module in
+   parallel, detects and reconciles seams (where one module's output must match another's
+   input), then derives obligations and a test plan. Riskier changes get an independent
+   critic-and-judge pass.
+5. **Preview the risk** — shows the classified risk, file list, and commit message before
+   anything runs.
+6. **Implement in parallel** — executes the changes in isolated worktrees, running tests and
+   verifying each unit; failures are triaged and retried or blocked.
+7. **Close** — runs the closing action and writes `remediation-outcomes.json` +
+   `remediation-report.md`.
 
-### CLI
+### CLI (backend / fallback)
 
-| Command | Description |
-| --- | --- |
-| `remediate-code next-step [--input <path>] [--host-can-dispatch-subagents]` | Decide and render exactly one next action |
-| `remediate-code prepare-implement-dispatch --run-id <id>` | Write bounded implementation prompts |
-| `remediate-code merge-implement-results --run-id <id>` | Validate implementation results and update item state |
-| `remediate-code validate-artifacts` | Validate runtime artifacts |
-| `remediate-code ensure [--quiet]` | Repair/check global Claude, Codex, and OpenCode assets |
-
-### Auditor Compatibility
-
-The auditor's canonical `audit-findings.json` is parsed **deterministically** —
-findings, work-block assignments, and synthesis themes are adopted verbatim, with
-no LLM involved. A Markdown `audit-report.md` (or any other free-form or partial
-document) is instead routed through intake synthesis and bounded LLM finding
-extraction, so it cannot silently produce a zero-finding plan.
-
----
-
-## Build and Test
+The slash-commands are the product; the same engines are also directly runnable:
 
 ```bash
-npm install
-npm run build && npm run check
-npm test
-npm run verify:release
+audit-code next-step        # advance an audit one step
+remediate-code next-step    # advance a remediation one step
 ```
 
-When developing from a fresh clone or git worktree, run `npm install` at the repo root
-before build, check, or test workflows. Missing `node_modules` can cause misleading type errors.
+Add `--root <repo>` when running from outside the target repository.
 
-For GitHub Actions publication and npm Trusted Publishing setup, see `docs/audit-pkg/release.md`.
+## Develop
+
+TypeScript, Node 20+. From the repo root:
+
+```bash
+npm install     # always run first in a fresh clone/worktree
+npm run build   # tsc → dist/
+npm run check   # typecheck only
+npm test        # build + test
+```
+
+Missing `node_modules` makes `audit-tools/shared` resolve a stale `dist/`, producing
+misleading "no exported member" type errors — so install before build/check/test.
+
+See [`CLAUDE.md`](CLAUDE.md) for architecture and design decisions, the specs in
+[`spec/`](spec/), and the product/operator/contract guides in `docs/audit-pkg/`.
 
 ## License
 

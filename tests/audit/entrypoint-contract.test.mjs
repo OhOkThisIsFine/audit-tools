@@ -29,8 +29,11 @@ test('product docs consistently present /audit-code as the canonical surface', a
     assert.ok(content.includes('/audit-code'));
   }
 
-  assert.ok(readme.includes('Conversation Setup'));
-  assert.ok(readme.includes('Repo-Local Backend Fallback'));
+  // Conversational slash-command usage is documented (concept, not a specific
+  // heading string — the README's own section names have changed before).
+  assert.ok(readme.toLowerCase().includes('slash-command'));
+  // The CLI is documented as a backend/fallback, not the primary product surface.
+  assert.ok(readme.toLowerCase().includes('backend') && readme.toLowerCase().includes('fallback'));
   assert.ok(productDirection.toLowerCase().includes('repo-local fallback'));
   assert.ok(skill.includes('conversational product surface first'));
   assert.ok(skill.includes('explicit user authorization to fan out'));
