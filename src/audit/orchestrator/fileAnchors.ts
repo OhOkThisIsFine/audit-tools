@@ -140,6 +140,34 @@ function addAnchor(
   anchors.push(anchor);
 }
 
+/**
+ * External-analyzer signal anchors (rule/line/summary) for one path. Split out
+ * of {@link buildFileAnchorSummary} so packet-level prompt rendering (any
+ * multi-file packet, not just isolated-large-file mode) can surface the same
+ * grounded lead detail without paying for whole-file content scanning — this
+ * sub-extraction needs only `path` + `externalAnalyzerResults`, never `content`.
+ */
+export function analyzerSignalAnchorsForPath(
+  path: string,
+  externalAnalyzerResults: ExternalAnalyzerResults[] | undefined,
+): FileAnchor[] {
+  const normalizedPath = normalizePath(path).toLowerCase();
+  return (externalAnalyzerResults ?? [])
+    .flatMap((tool) => tool.results ?? [])
+    .filter((result) => normalizePath(result.path).toLowerCase() === normalizedPath)
+    .sort(
+      (a, b) =>
+        (a.line_start ?? 0) - (b.line_start ?? 0) ||
+        a.id.localeCompare(b.id),
+    )
+    .map((signal) => ({
+      kind: "analyzer_signal" as const,
+      name: truncate(signal.rule ?? signal.category, 80),
+      line: signal.line_start,
+      detail: truncate(signal.summary, 180),
+    }));
+}
+
 function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): GraphEdge[] {
   if (!graphBundle?.graphs) {
     return [];
@@ -275,21 +303,9 @@ export function buildFileAnchorSummary(params: {
     });
   }
 
-  const analyzerSignals = (params.externalAnalyzerResults ?? [])
-    .flatMap((tool) => tool.results ?? [])
-    .filter((result) => normalizePath(result.path).toLowerCase() === path.toLowerCase())
-    .sort(
-      (a, b) =>
-        (a.line_start ?? 0) - (b.line_start ?? 0) ||
-        a.id.localeCompare(b.id),
-    );
+  const analyzerSignals = analyzerSignalAnchorsForPath(path, params.externalAnalyzerResults);
   for (const signal of analyzerSignals) {
-    addAnchor(anchors, seen, {
-      kind: "analyzer_signal",
-      name: truncate(signal.rule ?? signal.category, 80),
-      line: signal.line_start,
-      detail: truncate(signal.summary, 180),
-    });
+    addAnchor(anchors, seen, signal);
   }
 
   const sorted = anchors.sort(
