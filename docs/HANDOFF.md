@@ -77,13 +77,12 @@
     already fully shipped (tree-sitter analyzers wired via `graphEnrichmentExecutor.ts` since before this
     session) — backlog updated, nothing built. And `GraphEdge.confidence` is a plain 0–1 number, not a string
     ladder, so no schema change was needed anywhere this session touched graph edges.
-  All suites green throughout (audit 3376/0, remediate 2103/0), `check`/`check:deadcode` clean. Not yet
-  committed/published as of this note — see immediate next.
-- **Immediate next:** commit + ship the above (build/check/tests already verified green in-session). After that,
-  nightly/live validation of the two selective-deepening loop fixes (task_id-mismatch loop + idempotency_key-
-  collision loop, both code-complete) needs an actual deepening-capable run — env-bound, not a host-actionable
-  next step. Otherwise proceed to the next T4/T5 item in the ordering below (knip slice 3 is now the front of
-  that queue, per the notes above).
+  All suites green throughout (audit 3376/0, remediate 2103/0), `check`/`check:deadcode` clean. Committed
+  (`d39a678`) and published as v0.30.56.
+- **Immediate next:** nightly/live validation of the two selective-deepening loop fixes (task_id-mismatch loop +
+  idempotency_key-collision loop, both code-complete) needs an actual deepening-capable run — env-bound, not a
+  host-actionable next step. Otherwise proceed to the next T4/T5 item in the ordering below (knip slice 3 is now
+  the front of that queue, per the notes above).
 - Per-lap shipped detail is not narrated here (that's changelog creep — see git log). This doc is the
   **open-work roadmap** only: current state above, sequenced open items below.
 
@@ -122,11 +121,11 @@ best-effort fall-back to fine-grained). _Nothing open on this track._
 4. **repair-cap → convergence-termination — ✅ SHIPPED.** `evaluateJudgeGate` is fixpoint-terminated:
    approved ⇒ proceed; new accepted CE ⇒ repair; all-already-addressed ⇒ escalate (blocked user-decision);
    `MAX_CONTRACT_REPAIR_ITERATIONS` is now the loud runaway backstop (2 ⇒ 8).
-5. **Friction detection is mechanical-only — DESCOPED (env-bound).** Recon found `HostSessionQuotaSource.recordLimit`
-   has ZERO production callers, so the whole record→escalate→strand→`quota_escalation`-friction chain is unwired
-   end-to-end (not just the friction tap); validating a fix needs a live rate-limited multi-worker run. Root cause +
-   seam map recorded in backlog → friction-detection entry; folds into the dispatch capability-tiered driver track.
-   *([[meta-audit-friction-must-be-tool-enforced]])*
+5. **Friction detection — WIRED end-to-end (remediate); live validation still env-bound.** The
+   record→escalate→strand→`quota_escalation`-friction chain is now fed via `HostSessionQuotaSource.recordLimit`
+   (production call sites: `src/remediate/steps/nextStep.ts`, `src/audit/cli/rollingAuditDispatch.ts`); validating
+   the live behavior still needs a rate-limited multi-worker run. See backlog → friction-detection entry; folds
+   into the dispatch capability-tiered driver track. *([[meta-audit-friction-must-be-tool-enforced]])*
 6. **P0 — data-loss on a GENUINE fail-loud — ✅ FIXED.** `quarantineUncommittedWorktreeEdits` preserves the
    worker's uncommitted source edits under a durable quarantine ref before `removeWorktree` on a commit-refusal.
 
