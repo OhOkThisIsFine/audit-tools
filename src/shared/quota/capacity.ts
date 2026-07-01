@@ -127,6 +127,13 @@ export interface CapacityPool {
   /** Real-time usage snapshot for this pool, if available. */
   quotaSourceSnapshot?: QuotaUsageSnapshot | null;
   /**
+   * Tokens already in flight against this pool (sum of estimated tokens for
+   * dispatched-but-not-yet-completed packets). Threaded into {@link scheduleWave}
+   * so the token-budget gate never over-subscribes the remaining window across
+   * concurrent dispatch. Defaults to 0 when absent.
+   */
+  inFlightTokens?: number;
+  /**
    * Explicit silent-degrade marker: true when this pool's proactive quota source
    * was queried and degraded to no snapshot (missing/expired creds, 401/5xx,
    * network error, unmappable payload) — i.e. a live reading was EXPECTED but
@@ -244,11 +251,10 @@ export interface ComputeDispatchCapacityInput {
 const CAP_PRIORITY: Record<WaveBindingCap, number> = {
   cooldown: 6,
   host_concurrency: 5,
+  token_budget: 5,
   tpm: 4,
   rpm: 3,
   learned: 2,
-  first_contact: 1,
-  fallback: 1,
   none: 0,
 };
 
@@ -463,6 +469,7 @@ function schedulePool(
     hostConcurrencyLimit: pool.hostConcurrencyLimit,
     discoveredLimits: pool.discoveredLimits ?? null,
     quotaSourceSnapshot: pool.quotaSourceSnapshot ?? null,
+    inFlightTokens: pool.inFlightTokens ?? 0,
   });
   return {
     pool_id: pool.id,

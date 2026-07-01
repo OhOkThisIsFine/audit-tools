@@ -211,13 +211,10 @@ export interface QuotaModelLimits {
 export interface QuotaConfig {
   enabled?: boolean;
   safety_margin?: number;
-  unknown_hosted_concurrency?: number;
-  unknown_local_concurrency?: number | "unlimited";
   default_context_tokens?: number;
   reserved_output_tokens?: number;
   empirical_half_life_hours?: number;
   ramp_up_enabled?: boolean;
-  first_contact_concurrency?: number;
   host_active_subagent_limit?: number;
   models?: Record<string, QuotaModelLimits>;
 }
