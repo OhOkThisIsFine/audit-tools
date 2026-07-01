@@ -14,13 +14,17 @@
   reconciliation. Suites green (remediate 2093/0, audit 2487/0). PLUS the **per-node verify scope guard**
   (`isWholeSuiteTestCommand`) — the tooling fix for the cross-node deadlock. Deliverables:
   `.audit-tools/remediation-{outcomes.json,report.md}`.
-- **Immediate next — quota-aware dispatch must model the host 5-hr session window** (Ethan's flagged
-  follow-up): 4 concurrent workers walled the account limit mid-run with no proactive pacing. Needs the
-  session/rolling window as a quota source + pre-dispatch "K workers vs remaining session budget" check +
-  quota-death-as-retryable-pause. Detail in `docs/backlog.md` → Open bugs. (Ties to the dispatch
-  capability-tiered driver track + [[claude-quota-credential-resolution]].)
-- **Also open (docs/backlog.md → Open bugs):** intake must present timestamped candidate docs instead of
-  silently binding a stale remediation-report. (The per-node verify-scope gap is now FIXED in tooling.)
+- **Token-budget dispatch gate — SHIPPED to main (A+B+C+D), publish-pending.** Replaces the invented
+  concurrency cliffs with a real budget gate: concurrency = only (1) IDE/provider subagent allowance +
+  (2) token budget. Per-`(pool,window-label)` learned tokens-per-percent (windows scale differently),
+  budget = MIN across a pool's windows, partitioned across pools; per-target budget view surfaced to the
+  host in the dispatch step; quota-death = retryable pause (preserve worktree, strand `quota_paused` pending,
+  resume clean). Design of record `spec/dispatch-token-budget-gate.md`; diagnosis
+  `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`; endpoint-shape finding in memory
+  [[claude-usage-endpoint-body-shape]]. **Remaining (env-bound):** live validation on a real rate-limited
+  multi-worker run (cold-start slope + resume path).
+- **Immediate next (docs/backlog.md → Open bugs):** intake must present timestamped candidate docs instead of
+  silently binding a stale remediation-report.
 - **Last published: v0.30.51.** Most recent lap (in tree, ship-pending): (1) **M-QUOTA escalation chain wired
   end-to-end** on the remediate driver path (`recordLimit→escalate→strand→quota_escalation friction`) — shared
   `createRollingDispatcher` gained `recordRateLimit`/`rateLimit` hooks; `driveRollingImplementDispatch` threads one
