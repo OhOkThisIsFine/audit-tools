@@ -31,7 +31,7 @@ export type KnipGraphTag =
  * A pre-derived, normalized index over one {@link GraphBundle} +
  * surface/critical-flow entrypoints, ready for O(1) lookups per lead.
  *
- * CE-001/INV-K6: `deriveGraphSignals` keys fanIn by the RAW `edge.to`, so a
+ * CE-001: `deriveGraphSignals` keys fanIn by the RAW `edge.to`, so a
  * Windows-backslash / mixed-case graph node id (`src\\Foo.ts`) never matches a
  * POSIX-normalized knip lead path (`src/Foo.ts`). This index re-keys EVERY node
  * (both `from` and `to` endpoints) and every entrypoint through
@@ -50,7 +50,7 @@ export interface KnipGraphIndex {
 /**
  * Normalize a graph node id / path / entrypoint to one comparable key:
  * backslashes → forward slashes, leading `./` stripped, lower-cased. Single
- * source so the index and every lookup key agree (CE-001/INV-K6).
+ * source so the index and every lookup key agree (CE-001).
  */
 export function normalizeNodeKey(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
@@ -58,7 +58,7 @@ export function normalizeNodeKey(path: string): string {
 
 /**
  * Map a lead file's extension to the id of the language analyzer that owns it
- * (CE-003/INV-K2). Reuses the analyzer registry's own `supports(file)` predicate
+ * (CE-003). Reuses the analyzer registry's own `supports(file)` predicate
  * so extension→analyzer stays single-sourced in the analyzers, not duplicated.
  * Returns null when no registered analyzer claims the file.
  */
@@ -131,7 +131,7 @@ export function classifyKnipLead(
   if (index.entrypoints.has(key)) return "ENTRYPOINT";
 
   // In-degree 0 and non-entrypoint: only trust the "dead" reading when this
-  // file's OWN language analyzer actually ran (per-file fidelity, CE-003/INV-K2).
+  // file's OWN language analyzer actually ran (per-file fidelity, CE-003).
   const analyzerId = analyzerIdForFile(leadPath);
   if (
     index.analyzersUsed.size === 0 ||
