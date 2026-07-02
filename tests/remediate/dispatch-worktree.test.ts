@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  readFileSync,
   realpathSync,
   rmSync,
 } from "node:fs";
@@ -26,6 +27,7 @@ import {
   acceptNodeWorktree,
   listQuarantinedCommits,
   seedUntrackedDeclaredPaths,
+  quarantineRef,
 } from "../../src/remediate/steps/dispatch.js";
 // ---------------------------------------------------------------------------
 // Stub spawnSync to avoid real git calls in unit tests
@@ -601,6 +603,47 @@ describe("acceptNodeWorktree — new-file inclusion + merged-base-green (real gi
       // Real failure → worktree dropped so the main tree is never dirtied.
       expect(existsSync(wt)).toBe(false);
     }
+  });
+
+  it("SURFACES a dirty-main-tree collision as an actionable directive instead of a raw cherry-pick error", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // A tracked source file both the node and the (unrelated) main-tree WIP touch.
+    writeFileSync(join(repo, "app.ts"), "export const v = 1;\n");
+    realSpawnSync("git", ["add", "app.ts"], { cwd: repo, encoding: "utf8", shell: false });
+    realSpawnSync("git", ["commit", "-m", "add app"], { cwd: repo, encoding: "utf8", shell: false });
+    const wt = makeWorktree(repo, "COL1");
+    // The node's legitimate edit to app.ts.
+    writeFileSync(join(wt, "app.ts"), "export const v = 2;\n");
+    // Unrelated pre-existing uncommitted WIP on the SAME file in the main tree.
+    writeFileSync(join(repo, "app.ts"), "export const v = 99; // host WIP\n");
+
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: RID,
+      blockId: "COL1",
+      worktreeRoot: wt,
+      scope: { allBlockScopes: [] },
+      branch: worktreeBranchForBlock("COL1", RID),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["app.ts"],
+      mergedBaseCheckCommand: ["node", "--version"],
+    });
+    expect(res.outcome).toBe("error");
+    expect(res.merged).toBe(false);
+    expect(res.diagnostic).toContain("app.ts");
+    expect(res.diagnostic).toMatch(/commit or stash/i);
+    // The node's committed work is preserved under its quarantine ref (not destroyed).
+    expect(
+      realSpawnSync("git", ["rev-parse", "--verify", "--quiet", quarantineRef(RID, "COL1")], {
+        cwd: repo,
+        encoding: "utf8",
+        shell: false,
+      }).status,
+    ).toBe(0);
+    // Main-tree WIP is untouched.
+    expect(readFileSync(join(repo, "app.ts"), "utf8")).toContain("host WIP");
   });
 
   it("FAILS LOUDLY for a NEW generated-artifact (non-source) file under write scope, naming the file", async () => {

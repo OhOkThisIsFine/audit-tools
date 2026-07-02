@@ -63,6 +63,22 @@ describe("N-R01: confirm_resume_or_restart gate", () => {
   });
 });
 
+describe("N-R01: --guidance-file against an advanced run trips input_conflict", () => {
+  it("guidanceFileSupplied against a past-intake run emits input_conflict (blocked), not a silent resume", async () => {
+    await saveState(makePlanningState({ status: "planning" }));
+    const step = await decideNextStep({ root: REPO_DIR, guidanceFileSupplied: true });
+    expect(step.step_kind).toBe("input_conflict");
+    expect(step.status).toBe("blocked");
+  });
+
+  it("bare re-invocation after the conflict (no guidance flag) does not re-fire input_conflict", async () => {
+    await saveState(makePlanningState({ status: "planning" }));
+    const step = await decideNextStep({ root: REPO_DIR });
+    // Bare call → the resume gate handles it, not input_conflict.
+    expect(step.step_kind).not.toBe("input_conflict");
+  });
+});
+
 describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () => {
   it("extracted-plan.json present with no checkpoint emits confirm_intent (not dispatch)", async () => {
     await writeFile(

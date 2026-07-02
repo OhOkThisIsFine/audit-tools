@@ -141,50 +141,71 @@ export async function resolveIntakeStep(params: {
     manifest = undefined;
   }
 
-  // Auto-discovered input confirmation gate: when a candidate was found via
-  // default discovery (no --input supplied) and no manifest has ever been
-  // written for this run (previousManifest is undefined), present the file to
-  // the user before writing source-manifest.json. Only after the user confirms
-  // (via confirm_auto_discovered_input_ack.json) does the run proceed to write
-  // the manifest and continue. Re-derivation (previousManifest set but cleared
-  // above) does NOT re-trigger the gate — the user already confirmed that input.
+  // Discovered-sources gate: on a fresh run (no manifest ever written) with no
+  // explicit source — neither `--input` (inputResolution.supplied) NOR
+  // `--guidance-file` (which lands as intake.conversationStart) — surface EVERY
+  // auto-discovered candidate to the host as a context manifest before writing
+  // source-manifest.json. The host decides (confirm the auto-selected best, or
+  // pass `--input <path>` to pick another / a new file). Awareness never blocks
+  // an explicit source: when the host supplied one, this gate is skipped entirely
+  // (that is what broke the old decline→re-offer loop — a `--guidance-file` reply
+  // used to re-trigger the identical single-candidate prompt). Re-derivation
+  // (previousManifest set but cleared above) does NOT re-trigger it.
   if (
     !inputResolution.supplied &&
+    !intake.conversationStart &&
     inputResolution.existing.length > 0 &&
     !manifest &&
     !previousManifest
   ) {
     const ackPath = join(artifactsDir, "confirm_auto_discovered_input_ack.json");
     const ack = await readOptionalJsonFile<{ status?: string }>(ackPath);
-    if (!ack || ack.status !== "confirmed") {
-      const candidatePath = inputResolution.existing[0];
-      // Determine source type label for the prompt
-      let sourceTypeLabel = "document";
-      let findingCount: number | undefined;
-      let mtimeStr: string | undefined;
-      try {
-        const fileStat = await stat(candidatePath);
-        mtimeStr = fileStat.mtime.toISOString();
-      } catch { /* best-effort */ }
-      if (candidatePath.toLowerCase().endsWith(".json")) {
+    if (ack?.status === "declined") {
+      // Host explicitly rejected the discovered defaults — do NOT silently build a
+      // manifest from the very candidate they declined; ask for an explicit source
+      // instead. This breaks the loop even without a `--guidance-file` reply.
+      return collectStartingPointStep(
+        [],
+        "Stop after collecting an explicit remediation source (--input <path>) and rerunning next-step.",
+      );
+    }
+    if (ack?.status !== "confirmed") {
+      // Build one manifest row per discovered source, each with provenance the
+      // host can weigh (type, mtime, finding count) — the full context set, not
+      // just the single best match the pipeline would auto-select.
+      const sourceRows: string[] = [];
+      // Defensive: fall back to the single-best `existing` if a caller omitted
+      // the full context set (older callers/tests predate `allExisting`).
+      const discovered = inputResolution.allExisting ?? inputResolution.existing;
+      for (const candidatePath of discovered) {
+        let sourceTypeLabel = "document";
+        let findingCount: number | undefined;
+        let mtimeStr: string | undefined;
         try {
-          const content = await readFile(candidatePath, "utf8");
-          const parsed = JSON.parse(content);
-          if (isAuditFindingsReport(parsed)) {
-            sourceTypeLabel = "structured_audit";
-            const asRecord = parsed as unknown as Record<string, unknown>;
-            if (Array.isArray(asRecord.findings)) {
-              findingCount = (asRecord.findings as unknown[]).length;
-            }
-          }
+          const fileStat = await stat(candidatePath);
+          mtimeStr = fileStat.mtime.toISOString();
         } catch { /* best-effort */ }
+        if (candidatePath.toLowerCase().endsWith(".json")) {
+          try {
+            const content = await readFile(candidatePath, "utf8");
+            const parsed = JSON.parse(content);
+            if (isAuditFindingsReport(parsed)) {
+              sourceTypeLabel = "structured_audit";
+              const asRecord = parsed as unknown as Record<string, unknown>;
+              if (Array.isArray(asRecord.findings)) {
+                findingCount = (asRecord.findings as unknown[]).length;
+              }
+            }
+          } catch { /* best-effort */ }
+        }
+        const meta = [
+          `type: ${sourceTypeLabel}`,
+          mtimeStr ? `modified ${mtimeStr}` : undefined,
+          findingCount !== undefined ? `${findingCount} finding(s)` : undefined,
+        ].filter((s): s is string => Boolean(s));
+        sourceRows.push(`- \`${candidatePath}\` — ${meta.join(", ")}`);
       }
-      const detailLines = [
-        `- **Path**: \`${candidatePath}\``,
-        `- **Type**: ${sourceTypeLabel}`,
-        mtimeStr ? `- **Last modified**: ${mtimeStr}` : undefined,
-        findingCount !== undefined ? `- **Findings**: ${findingCount}` : undefined,
-      ].filter((line): line is string => Boolean(line));
+      const autoSelected = inputResolution.existing[0];
 
       return {
         kind: "step",
@@ -195,19 +216,27 @@ export async function resolveIntakeStep(params: {
           repoRoot: root,
           artifactsDir,
           prompt: [
-            "# Confirm Auto-Discovered Input",
+            "# Confirm discovered remediation source(s)",
             "",
-            "A remediation input was automatically discovered. Please confirm whether to use it.",
+            "No `--input`/`--guidance-file` was supplied. The following remediation",
+            "source(s) were auto-discovered on disk. Review them and decide with the user",
+            "which to use — the tool would otherwise auto-select the highest-priority one",
+            `(\`${autoSelected}\`).`,
             "",
-            ...detailLines,
+            "**Discovered sources:**",
+            ...sourceRows,
             "",
-            `If you want to use this file, write the following to \`${ackPath}\`:`,
+            `To proceed with the auto-selected source (\`${autoSelected}\`), write to \`${ackPath}\`:`,
             "",
             "```json",
             '{ "status": "confirmed" }',
             "```",
             "",
-            `If you want to use a different file, write \`{ "status": "declined" }\` to \`${ackPath}\` and re-run with \`--input <path>\`.`,
+            "To use a DIFFERENT discovered source, or a file not listed, re-run with",
+            "`--input <path>` (it takes the lossless structured fast-path for a `.json`).",
+            "",
+            `To reject all discovered defaults, write \`{ "status": "declined" }\` to \`${ackPath}\``,
+            "and re-run with an explicit `--input <path>`.",
             "",
             `Then run: \`${params.loaderCommand("next-step")}\``,
           ].join("\n"),
@@ -216,7 +245,7 @@ export async function resolveIntakeStep(params: {
             params.loaderCommand("next-step --input <path>"),
           ],
           stopCondition:
-            "Stop after presenting the discovered file to the user and writing the ack.",
+            "Stop after presenting the discovered sources to the user and writing the ack.",
           artifactPaths: {
             confirm_auto_discovered_input_ack: ackPath,
           },
@@ -441,4 +470,10 @@ export interface InputResolution {
   existing: string[];
   missing: string[];
   checked: string[];
+  /**
+   * Every discovered source that exists — the full context set surfaced to the
+   * host at the discovered-sources gate, not just the single `existing[0]` the
+   * pipeline auto-selects. Equals `existing` on the `--input` path.
+   */
+  allExisting: string[];
 }

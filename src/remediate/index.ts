@@ -134,6 +134,7 @@ program
         root: options.root,
         artifactsDir,
         input: options.input,
+        guidanceFileSupplied: Boolean(options.guidanceFile),
         hostCanDispatchSubagents: options.hostCanDispatchSubagents,
         hostMaxConcurrent: options.hostMaxConcurrent
           ? parseInt(options.hostMaxConcurrent, 10) || undefined

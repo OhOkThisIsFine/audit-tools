@@ -141,6 +141,15 @@ export interface NextStepOptions {
   finalizeClosing?: boolean;
   forceReplan?: boolean;
   /**
+   * True when this invocation supplied `--guidance-file` (folded into
+   * intake/conversation-start.md before the step decision). Like a fresh
+   * `--input`, a guidance file introduces NEW intake, so against a run already
+   * past intake it must trip the resume-vs-restart conflict gate rather than
+   * silently resuming (and executing) the old, unrelated run. Set once at the
+   * bootstrap call; bare `next-step` follow-ups leave it undefined.
+   */
+  guidanceFileSupplied?: boolean;
+  /**
    * Opt IN to the in-process rolling dispatch engine for the implement phase.
    * Defaults off (proven host-fanned wave path). See `resolveRollingEngineEnabled`.
    */
@@ -362,6 +371,15 @@ interface InputResolution {
   existing: string[];
   missing: string[];
   checked: string[];
+  /**
+   * EVERY discovered source that exists — the full context set surfaced to the
+   * host, not just the single `existing[0]` the pipeline auto-selects. On the
+   * no-`--input` path this is all default candidates that exist on disk; on the
+   * `--input` path it equals `existing`. Used only to build the awareness
+   * manifest at the discovered-sources gate; never narrows the pipeline's own
+   * single-best selection (which still uses `existing`).
+   */
+  allExisting: string[];
 }
 
 function inputValues(input?: string | string[]): string[] {
@@ -376,11 +394,13 @@ function resolveInputPaths(
   const values = inputValues(input).filter((value) => value.trim().length > 0);
   if (values.length > 0) {
     const checked = values.map((value) => resolve(root, value));
+    const existing = checked.filter((candidate) => existsSync(candidate));
     return {
       supplied: true,
-      existing: checked.filter((candidate) => existsSync(candidate)),
+      existing,
       missing: checked.filter((candidate) => !existsSync(candidate)),
       checked,
+      allExisting: existing,
     };
   }
 
@@ -390,12 +410,14 @@ function resolveInputPaths(
   // highest-priority match — never feed both the structured contract and its
   // markdown render — so a lone .json input takes the lossless structured
   // fast-path instead of being demoted to multi-source LLM extraction.
-  const best = checked.find((candidate) => existsSync(candidate));
+  const allExisting = checked.filter((candidate) => existsSync(candidate));
+  const best = allExisting[0];
   return {
     supplied: false,
     existing: best ? [best] : [],
     missing: [],
     checked,
+    allExisting,
   };
 }
 
@@ -2986,7 +3008,7 @@ async function handleInputConflict(
   const suppliedInline =
     inputResolution.checked.length > 0
       ? inputResolution.checked.map((p) => `\`${p}\``).join(", ")
-      : "(input supplied)";
+      : "(new intake source via `--guidance-file`)";
   return writeCurrentStep({
     stepKind: "input_conflict",
     status: "blocked",
@@ -2994,11 +3016,11 @@ async function handleInputConflict(
     repoRoot: root,
     artifactsDir,
     prompt: `
-# New \`--input\` given, but a remediation run is already in progress
+# New intake source given, but a remediation run is already in progress
 
 A remediation run already exists in \`${artifactsDir}\` and has advanced past intake,
-so the new \`--input\` you passed will **not** replace it — it would be ignored and the
-existing plan resumed.
+so the new intake source you passed (\`--input\` or \`--guidance-file\`) will **not**
+replace it — it would be ignored and the existing plan resumed and executed.
 
 - **Current state**: \`${state.status}\`
 - **Plan**: \`${planId}\` (${itemCount} item(s))
@@ -3006,11 +3028,11 @@ existing plan resumed.
 
 Choose one explicitly and report the choice to the user:
 
-1. **Resume the existing run** — re-run WITHOUT \`--input\`: \`${loaderCommand("next-step")}\`
-2. **Start fresh from the new input** — first move aside or delete the existing
+1. **Resume the existing run** — re-run WITHOUT any \`--input\`/\`--guidance-file\`: \`${loaderCommand("next-step")}\`
+2. **Start fresh from the new source** — first move aside or delete the existing
    \`${artifactsDir}\` directory (and the stale \`remediation-report.md\` /
    \`remediation-outcomes.json\` in \`.audit-tools/\`, which would otherwise be overwritten on completion),
-   then re-run \`${loaderCommand("next-step --input <path>")}\`.
+   then re-run with your new source (\`${loaderCommand("next-step --input <path>")}\` or \`--guidance-file <path>\`).
 
 Stop after presenting this choice. Do not advance the run until the user decides.
 `,
@@ -4142,6 +4164,11 @@ interface PreIntakeSnapshot {
    * was built from — so the conflict gate treats it as a resume, not a conflict.
    */
   suppliedInputUnchanged: boolean;
+  /**
+   * True when `--guidance-file` was supplied this invocation — a fresh intake
+   * source, so it trips the input_conflict gate against an already-advanced run.
+   */
+  guidanceFileSupplied: boolean;
 }
 
 type RemediateObligation = ObligationDef<
@@ -4200,7 +4227,7 @@ function buildPreIntakeObligations(
   snapshot: PreIntakeSnapshot,
 ): RemediateObligation[] {
   const { artifactsDir, inputResolution } = ctx;
-  const { existingCheckpoint, resumeAck, entryState, suppliedInputUnchanged } = snapshot;
+  const { existingCheckpoint, resumeAck, entryState, suppliedInputUnchanged, guidanceFileSupplied } = snapshot;
   const ip = intakePaths(artifactsDir);
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
   const ackPath = join(artifactsDir, "confirm_resume_ack.json");
@@ -4209,15 +4236,18 @@ function buildPreIntakeObligations(
 
   return [
     {
-      // A new, DIFFERENT --input against a run already past intake must not
-      // silently resume the old plan; require an explicit resume-vs-restart
-      // choice. The SAME --input re-passed (the loader does this every next-step)
-      // is an unchanged input → a resume, not a conflict. Derives from the frozen
-      // entry state — never an intake-created one.
+      // A new, DIFFERENT intake source against a run already past intake must not
+      // silently resume (and re-execute) the old plan; require an explicit
+      // resume-vs-restart choice. Two ways a fresh source arrives: a new `--input`
+      // (the SAME --input re-passed by the loader every next-step is an unchanged
+      // input → a resume, not a conflict), OR a `--guidance-file` (a one-shot
+      // bootstrap that lands as conversation-start.md — it has no
+      // "unchanged" notion, so any guidance file against an advanced run conflicts;
+      // bare follow-ups don't set the flag). Derives from the frozen entry state.
       id: "input_conflict",
       derive: () =>
-        inputResolution.supplied &&
-        !suppliedInputUnchanged &&
+        ((inputResolution.supplied && !suppliedInputUnchanged) ||
+          guidanceFileSupplied) &&
         entryState != null &&
         entryState.status !== "pending"
           ? "missing"
@@ -4728,6 +4758,7 @@ async function decideNextStepLoop(
         resumeAck,
         entryState: state,
         suppliedInputUnchanged,
+        guidanceFileSupplied: Boolean(options.guidanceFileSupplied),
       }),
     },
     state,

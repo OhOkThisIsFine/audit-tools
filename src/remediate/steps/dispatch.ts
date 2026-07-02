@@ -800,6 +800,40 @@ export function mergeWorktree(
 }
 
 /**
+ * Repo-relative tracked paths in the MAIN checkout that have uncommitted changes
+ * AND collide with a path the node's branch edits. A pre-existing dirty tracked
+ * file the cherry-pick would touch makes `git cherry-pick` abort with the opaque
+ * "Your local changes to the following files would be overwritten by merge" — a
+ * condition the node itself cannot fix and that identically re-fails every
+ * auto-retry (observed: a docs-only node routed to human triage over unrelated
+ * uncommitted WIP on the same file). Detected here so `acceptNodeWorktree` can
+ * surface the actionable cause (which file, commit-or-stash) instead of the raw
+ * git error. Best-effort: an unavailable diff / status probe returns `[]` (fall
+ * through to the normal cherry-pick, which reproduces the original behaviour).
+ */
+export function dirtyMainTreeCollisions(root: string, branch: string): string[] {
+  const edited = gitEditedFilesForBranch(root, branch);
+  if (!edited.available || edited.files.size === 0) return [];
+  const status = spawnSync(
+    "git",
+    ["status", "--porcelain", "--", ...edited.files],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (status.error || status.status !== 0) return [];
+  const dirty: string[] = [];
+  for (const line of (status.stdout ?? "").split(/\r?\n/)) {
+    // Porcelain v1: two status chars + a space, then the path. Rename entries
+    // ("R  old -> new") keep the destination after the arrow.
+    const raw = line.slice(3).trim();
+    if (raw.length === 0) continue;
+    const arrow = raw.lastIndexOf(" -> ");
+    const p = (arrow >= 0 ? raw.slice(arrow + 4) : raw).replace(/\\/g, "/");
+    if (p.length > 0) dirty.push(p);
+  }
+  return dirty;
+}
+
+/**
  * Rebase a node's worktree branch onto the main checkout's current HEAD (the
  * remediation branch tip) so a sibling that merged AFTER this worktree was created
  * is folded in before this node verifies and merges. Additive edits to a shared
@@ -883,7 +917,7 @@ export function baseBranchLockPath(root: string, runId: string): string {
 }
 
 /** Durable ref under which a failed-but-committed node's commit is preserved. */
-function quarantineRef(runId: string, blockId: string): string {
+export function quarantineRef(runId: string, blockId: string): string {
   return `refs/remediation-quarantine/${refSafeSegment(runId, "run")}/${refSafeSegment(blockId, "node")}`;
 }
 
@@ -1467,6 +1501,31 @@ export async function acceptNodeWorktree(
       quarantineFailedNodeCommit(root, branch, runId, blockId);
       removeWorktree(root, wt);
       return { outcome: "error", verifyPassed, merged, diagnostic: rebase.error };
+    }
+
+    // Pre-flight: a dirty tracked file in the MAIN checkout that collides with a
+    // path this node edits makes the later cherry-pick abort with an opaque
+    // "local changes would be overwritten by merge" — a condition the node cannot
+    // fix and that re-fails identically on every auto-retry. Detect it up front
+    // (before the expensive verify) and surface the actionable cause; preserve the
+    // committed work under quarantine like every sibling error path so nothing is
+    // lost while the host commits/stashes the unrelated WIP.
+    const collisions = dirtyMainTreeCollisions(root, branch);
+    if (collisions.length > 0) {
+      quarantineFailedNodeCommit(root, branch, runId, blockId);
+      removeWorktree(root, wt);
+      const paths = collisions.map((c) => `\`${c}\``).join(", ");
+      const it = collisions.length > 1 ? "them" : "it";
+      return {
+        outcome: "error",
+        verifyPassed,
+        merged,
+        diagnostic:
+          `main tree has uncommitted changes to ${paths} — commit or stash ${it} ` +
+          `before merging this node (the cherry-pick would otherwise abort with ` +
+          `"local changes would be overwritten by merge"). This is unrelated to the ` +
+          `node's own fix; the node's work is preserved under its quarantine ref.`,
+      };
     }
 
     // Verify commands: when the host omits them (real rolling drivers), DERIVE them
