@@ -4,8 +4,7 @@
  * wall-clock time. STALE_LOCK_MS stays exported (a duration, unchanged in value).
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { writeFile } from "node:fs/promises";
 import {
   STALE_LOCK_MS,
@@ -18,7 +17,7 @@ const { acquireLock, releaseLock, FileLockTimeoutError } =
   await import("../../src/shared/quota/fileLock.ts");
 
 test("STALE_LOCK_MS is exported and unchanged (30s)", () => {
-  assert.equal(STALE_LOCK_MS, 30_000);
+  expect(STALE_LOCK_MS).toBe(30_000);
 });
 
 test("injected clock: timeout fires off the injected now, not wall time", async () => {
@@ -39,7 +38,7 @@ test("injected clock: timeout fires off the injected now, not wall time", async 
     const tick = setInterval(() => now.advance(2_000), 5);
     const result = await p;
     clearInterval(tick);
-    assert.ok(result instanceof FileLockTimeoutError, "must time out via the injected clock");
+    expect(result instanceof FileLockTimeoutError, "must time out via the injected clock").toBeTruthy();
   });
 });
 
@@ -53,8 +52,8 @@ test("injected clock: a lock older than STALE_LOCK_MS under the clock is stolen"
     const now = makeClock(Date.now() + STALE_LOCK_MS * 10);
 
     const token = await acquireLock(lockPath, 5_000, undefined, { now });
-    assert.equal(typeof token, "string");
-    assert.ok(token.length > 0);
+    expect(typeof token).toBe("string");
+    expect(token.length > 0).toBeTruthy();
     await releaseLock(lockPath, token);
   });
 });
@@ -63,7 +62,7 @@ test("default clock still works (no options) — fresh acquire/release", async (
   await withTempDir(async (dir) => {
     const lockPath = tmpLockPath(dir);
     const token = await acquireLock(lockPath);
-    assert.equal(typeof token, "string");
+    expect(typeof token).toBe("string");
     await releaseLock(lockPath, token);
   });
 });

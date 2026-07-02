@@ -1,25 +1,24 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { resolveLimits, hostClassFor, resolveHostModel } = await import(
   "../../src/shared/quota/limits.ts"
 );
 
 test("hostClassFor maps claude-code to hosted", () => {
-  assert.equal(hostClassFor("claude-code"), "hosted");
+  expect(hostClassFor("claude-code")).toBe("hosted");
 });
 
 test("hostClassFor maps opencode to local", () => {
-  assert.equal(hostClassFor("opencode"), "local");
+  expect(hostClassFor("opencode")).toBe("local");
 });
 
 test("hostClassFor maps local-subprocess to local", () => {
-  assert.equal(hostClassFor("local-subprocess"), "local");
+  expect(hostClassFor("local-subprocess")).toBe("local");
 });
 
 test("hostClassFor maps subprocess-template and vscode-task to unknown", () => {
-  assert.equal(hostClassFor("subprocess-template"), "unknown");
-  assert.equal(hostClassFor("vscode-task"), "unknown");
+  expect(hostClassFor("subprocess-template")).toBe("unknown");
+  expect(hostClassFor("vscode-task")).toBe("unknown");
 });
 
 test("resolveLimits uses explicit config when quota.models has an entry", () => {
@@ -38,12 +37,12 @@ test("resolveLimits uses explicit config when quota.models has an entry", () => 
     },
     hostModel: "my-provider/my-model",
   });
-  assert.equal(result.source, "explicit_config");
-  assert.equal(result.confidence, "high");
-  assert.equal(result.limits.context_tokens, 50_000);
-  assert.equal(result.limits.output_tokens, 2_048);
-  assert.equal(result.limits.requests_per_minute, 20);
-  assert.equal(result.limits.input_tokens_per_minute, null);
+  expect(result.source).toBe("explicit_config");
+  expect(result.confidence).toBe("high");
+  expect(result.limits.context_tokens).toBe(50_000);
+  expect(result.limits.output_tokens).toBe(2_048);
+  expect(result.limits.requests_per_minute).toBe(20);
+  expect(result.limits.input_tokens_per_minute).toBe(null);
 });
 
 test("resolveLimits uses discovered_capability when the handshake reports a window", () => {
@@ -53,10 +52,10 @@ test("resolveLimits uses discovered_capability when the handshake reports a wind
     hostModel: "anthropic/claude-opus-4-7",
     discoveredLimits: { context_tokens: 200_000, output_tokens: 32_000 },
   });
-  assert.equal(result.source, "discovered_capability");
-  assert.equal(result.confidence, "high");
-  assert.equal(result.limits.context_tokens, 200_000);
-  assert.equal(result.limits.output_tokens, 32_000);
+  expect(result.source).toBe("discovered_capability");
+  expect(result.confidence).toBe("high");
+  expect(result.limits.context_tokens).toBe(200_000);
+  expect(result.limits.output_tokens).toBe(32_000);
 });
 
 test("resolveLimits falls back to provider_default for a named model with no discovered window", () => {
@@ -67,9 +66,9 @@ test("resolveLimits falls back to provider_default for a named model with no dis
     sessionConfig: {},
     hostModel: "anthropic/claude-opus-4-7",
   });
-  assert.equal(result.source, "provider_default");
-  assert.equal(result.confidence, "low");
-  assert.equal(result.limits.context_tokens, 32_000);
+  expect(result.source).toBe("provider_default");
+  expect(result.confidence).toBe("low");
+  expect(result.limits.context_tokens).toBe(32_000);
 });
 
 test("resolveLimits falls back to provider_default when model is unknown", () => {
@@ -78,9 +77,9 @@ test("resolveLimits falls back to provider_default when model is unknown", () =>
     sessionConfig: {},
     hostModel: "unknown/model",
   });
-  assert.equal(result.source, "provider_default");
-  assert.equal(result.confidence, "low");
-  assert.equal(result.limits.context_tokens, 32_000);
+  expect(result.source).toBe("provider_default");
+  expect(result.confidence).toBe("low");
+  expect(result.limits.context_tokens).toBe(32_000);
 });
 
 test("resolveLimits uses quota.default_context_tokens from session config", () => {
@@ -88,8 +87,8 @@ test("resolveLimits uses quota.default_context_tokens from session config", () =
     providerName: "local-subprocess",
     sessionConfig: { quota: { default_context_tokens: 128_000, reserved_output_tokens: 8_192 } },
   });
-  assert.equal(result.limits.context_tokens, 128_000);
-  assert.equal(result.limits.output_tokens, 8_192);
+  expect(result.limits.context_tokens).toBe(128_000);
+  expect(result.limits.output_tokens).toBe(8_192);
 });
 
 test("resolveLimits with no hostModel falls back to provider_default for hosted provider", () => {
@@ -97,8 +96,8 @@ test("resolveLimits with no hostModel falls back to provider_default for hosted 
     providerName: "claude-code",
     sessionConfig: {},
   });
-  assert.equal(result.source, "provider_default");
-  assert.equal(result.confidence, "low");
+  expect(result.source).toBe("provider_default");
+  expect(result.confidence).toBe("low");
 });
 
 test("explicit_config takes precedence for a configured model", () => {
@@ -115,10 +114,10 @@ test("explicit_config takes precedence for a configured model", () => {
     },
     hostModel: "anthropic/claude-sonnet-4-6",
   });
-  assert.equal(result.source, "explicit_config");
-  assert.equal(result.limits.context_tokens, 1_000);
+  expect(result.source).toBe("explicit_config");
+  expect(result.limits.context_tokens).toBe(1_000);
   // known output_tokens not used — falls back to default_context_tokens? No, reserved_output_tokens default
-  assert.equal(result.limits.output_tokens, 4_096); // default reserved_output_tokens
+  expect(result.limits.output_tokens).toBe(4_096); // default reserved_output_tokens
 });
 
 test("resolveHostModel returns explicit hostModel argument when provided", () => {
@@ -127,7 +126,7 @@ test("resolveHostModel returns explicit hostModel argument when provided", () =>
     sessionConfig: {},
     explicitModel: "anthropic/claude-sonnet-4-6",
   });
-  assert.equal(result, "anthropic/claude-sonnet-4-6");
+  expect(result).toBe("anthropic/claude-sonnet-4-6");
 });
 
 test("resolveHostModel returns null when no argument, no env var, no session config, no provider default", () => {
@@ -137,7 +136,7 @@ test("resolveHostModel returns null when no argument, no env var, no session con
     env: {},
     envVar: "AUDIT_CODE_HOST_MODEL",
   });
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("resolveHostModel reads from env var when no explicit argument", () => {
@@ -147,7 +146,7 @@ test("resolveHostModel reads from env var when no explicit argument", () => {
     env: { AUDIT_CODE_HOST_MODEL: "anthropic/claude-opus-4-7" },
     envVar: "AUDIT_CODE_HOST_MODEL",
   });
-  assert.equal(result, "anthropic/claude-opus-4-7");
+  expect(result).toBe("anthropic/claude-opus-4-7");
 });
 
 test("resolveHostModel explicit argument takes precedence over env var", () => {
@@ -158,5 +157,5 @@ test("resolveHostModel explicit argument takes precedence over env var", () => {
     env: { AUDIT_CODE_HOST_MODEL: "anthropic/claude-opus-4-7" },
     envVar: "AUDIT_CODE_HOST_MODEL",
   });
-  assert.equal(result, "anthropic/claude-sonnet-4-6");
+  expect(result).toBe("anthropic/claude-sonnet-4-6");
 });

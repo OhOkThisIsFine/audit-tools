@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { ALL_LENSES, isLens } = await import("../../src/audit/types.ts");
 const { LENSES } = await import("audit-tools/shared");
@@ -10,16 +9,16 @@ const { LENSES } = await import("audit-tools/shared");
 test("isLens accepts every canonical lens, including observability", () => {
   // Count is read from the shared canonical vocabulary, not a magic literal:
   // audit's LENS_REGISTRY must match the single-sourced LENSES exactly.
-  assert.equal(ALL_LENSES.length, LENSES.length);
-  assert.ok(ALL_LENSES.includes("observability"), "observability must be canonical");
-  assert.ok(ALL_LENSES.includes("architecture"), "architecture must be canonical");
+  expect(ALL_LENSES.length).toBe(LENSES.length);
+  expect(ALL_LENSES.includes("observability"), "observability must be canonical").toBeTruthy();
+  expect(ALL_LENSES.includes("architecture"), "architecture must be canonical").toBeTruthy();
   for (const lens of ALL_LENSES) {
-    assert.ok(isLens(lens), `${lens} should be recognized as a valid lens`);
+    expect(isLens(lens), `${lens} should be recognized as a valid lens`).toBeTruthy();
   }
 });
 
 test("isLens rejects non-lens values", () => {
   for (const value of ["", "nonsense", "Observability", null, undefined, 7, {}, []]) {
-    assert.equal(isLens(value), false, `${String(value)} should not be a lens`);
+    expect(isLens(value), `${String(value)} should not be a lens`).toBe(false);
   }
 });

@@ -7,8 +7,7 @@
  *   INV-audit-reporting-08 — truncation diagnostic uses process.stderr, not console.warn
  *   OBL-INV-APR-09 — buildAuditFindingsReport contract_version === shared constant; deferred prompt has no Command argv
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   buildAuditReportModel,
@@ -91,22 +90,14 @@ test("INV-01: render finding count matches JSON contract finding_count", () => {
   const markdown = renderAuditReportMarkdown(report);
 
   // The markdown summary line must reflect the same count as the JSON contract.
-  assert.match(
-    markdown,
-    new RegExp(`- Findings: ${report.summary.finding_count}`),
-    "markdown summary finding count must equal JSON contract finding_count",
-  );
+  expect(markdown, "markdown summary finding count must equal JSON contract finding_count").toMatch(new RegExp(`- Findings: ${report.summary.finding_count}`));
 });
 
 test("INV-01: render work block count matches JSON contract work_block_count", () => {
   const report = baseReport();
   const markdown = renderAuditReportMarkdown(report);
 
-  assert.match(
-    markdown,
-    new RegExp(`- Work blocks: ${report.summary.work_block_count}`),
-    "markdown summary work block count must equal JSON contract work_block_count",
-  );
+  expect(markdown, "markdown summary work block count must equal JSON contract work_block_count").toMatch(new RegExp(`- Work blocks: ${report.summary.work_block_count}`));
 });
 
 test("INV-01: every finding id in JSON contract appears in the markdown render", () => {
@@ -114,10 +105,7 @@ test("INV-01: every finding id in JSON contract appears in the markdown render",
   const markdown = renderAuditReportMarkdown(report);
 
   for (const finding of report.findings) {
-    assert.ok(
-      markdown.includes(finding.id),
-      `finding id ${finding.id} must appear in the markdown render`,
-    );
+    expect(markdown.includes(finding.id), `finding id ${finding.id} must appear in the markdown render`).toBeTruthy();
   }
 });
 
@@ -126,10 +114,7 @@ test("INV-01: every work block id in JSON contract appears in the markdown rende
   const markdown = renderAuditReportMarkdown(report);
 
   for (const block of report.work_blocks) {
-    assert.ok(
-      markdown.includes(block.id),
-      `work block id ${block.id} must appear in the markdown render`,
-    );
+    expect(markdown.includes(block.id), `work block id ${block.id} must appear in the markdown render`).toBeTruthy();
   }
 });
 
@@ -154,17 +139,10 @@ test("INV-01: narrative-enriched render finding ids still match the JSON contrac
 
   // All finding ids from the JSON contract must appear in the enriched render.
   for (const finding of enriched.findings) {
-    assert.ok(
-      markdown.includes(finding.id),
-      `enriched finding id ${finding.id} must appear in the markdown render`,
-    );
+    expect(markdown.includes(finding.id), `enriched finding id ${finding.id} must appear in the markdown render`).toBeTruthy();
   }
   // The finding count must still match.
-  assert.match(
-    markdown,
-    new RegExp(`- Findings: ${enriched.summary.finding_count}`),
-    "enriched markdown summary finding count must match JSON contract",
-  );
+  expect(markdown, "enriched markdown summary finding count must match JSON contract").toMatch(new RegExp(`- Findings: ${enriched.summary.finding_count}`));
 });
 
 // ── INV-audit-reporting-04: applyNarrative sanitizes duplicate finding_ids ───
@@ -198,24 +176,21 @@ test("INV-04: a finding_id claimed by the first theme is not re-assigned by a la
   const enriched = applyNarrative(report, narrative);
 
   // Both themes are preserved.
-  assert.equal(enriched.themes.length, 2);
+  expect(enriched.themes.length).toBe(2);
 
   const t1 = enriched.themes.find((t) => t.theme_id === "T-1");
   const t2 = enriched.themes.find((t) => t.theme_id === "T-2");
-  assert.ok(t1);
-  assert.ok(t2);
+  expect(t1).toBeTruthy();
+  expect(t2).toBeTruthy();
 
   // T-1 keeps first.id as first-claimer.
-  assert.ok(t1.finding_ids.includes(first.id), "T-1 must retain the first-claimed id");
+  expect(t1.finding_ids.includes(first.id), "T-1 must retain the first-claimed id").toBeTruthy();
 
   // T-2 must NOT contain first.id (already claimed by T-1).
-  assert.ok(
-    !t2.finding_ids.includes(first.id),
-    "T-2 must not contain a finding_id already claimed by T-1",
-  );
+  expect(!t2.finding_ids.includes(first.id), "T-2 must not contain a finding_id already claimed by T-1").toBeTruthy();
 
   // T-2 keeps second.id which was not previously claimed.
-  assert.ok(t2.finding_ids.includes(second.id), "T-2 must keep its unclaimed finding_id");
+  expect(t2.finding_ids.includes(second.id), "T-2 must keep its unclaimed finding_id").toBeTruthy();
 });
 
 test("INV-04: duplicate finding_ids within one theme's list are deduplicated", () => {
@@ -238,14 +213,10 @@ test("INV-04: duplicate finding_ids within one theme's list are deduplicated", (
 
   const enriched = applyNarrative(report, narrative);
 
-  assert.equal(enriched.themes.length, 1);
+  expect(enriched.themes.length).toBe(1);
   const t1 = enriched.themes[0];
-  assert.equal(
-    t1.finding_ids.length,
-    1,
-    "duplicate finding_ids within one theme must be deduplicated to one entry",
-  );
-  assert.equal(t1.finding_ids[0], first.id);
+  expect(t1.finding_ids.length, "duplicate finding_ids within one theme must be deduplicated to one entry").toBe(1);
+  expect(t1.finding_ids[0]).toBe(first.id);
 });
 
 test("INV-04: applyNarrative never drops or re-severities findings — the finding set is unchanged", () => {
@@ -269,19 +240,11 @@ test("INV-04: applyNarrative never drops or re-severities findings — the findi
   const enriched = applyNarrative(report, narrative);
 
   // Finding set is unchanged in count, ids, and severities.
-  assert.equal(
-    enriched.findings.length,
-    originalFindings.length,
-    "applyNarrative must not drop or add findings",
-  );
+  expect(enriched.findings.length, "applyNarrative must not drop or add findings").toBe(originalFindings.length);
   for (const orig of originalFindings) {
     const enrichedFinding = enriched.findings.find((f) => f.id === orig.id);
-    assert.ok(enrichedFinding, `finding ${orig.id} must still be present after applyNarrative`);
-    assert.equal(
-      enrichedFinding.severity,
-      orig.severity,
-      `applyNarrative must not change severity of finding ${orig.id}`,
-    );
+    expect(enrichedFinding, `finding ${orig.id} must still be present after applyNarrative`).toBeTruthy();
+    expect(enrichedFinding.severity, `applyNarrative must not change severity of finding ${orig.id}`).toBe(orig.severity);
   }
 });
 
@@ -304,16 +267,8 @@ test("INV-06: normalizeExistingFindingsReport recomputes finding_count and work_
 
   const normalized = normalizeExistingFindingsReport(stale);
 
-  assert.equal(
-    normalized.summary.finding_count,
-    report.findings.length,
-    "finding_count must be recomputed from findings.length",
-  );
-  assert.equal(
-    normalized.summary.work_block_count,
-    report.work_blocks.length,
-    "work_block_count must be recomputed from work_blocks.length",
-  );
+  expect(normalized.summary.finding_count, "finding_count must be recomputed from findings.length").toBe(report.findings.length);
+  expect(normalized.summary.work_block_count, "work_block_count must be recomputed from work_blocks.length").toBe(report.work_blocks.length);
 });
 
 test("INV-06: normalizeExistingFindingsReport recomputes severity_breakdown from findings", () => {
@@ -331,11 +286,7 @@ test("INV-06: normalizeExistingFindingsReport recomputes severity_breakdown from
   for (const f of report.findings) {
     expected[f.severity] = (expected[f.severity] ?? 0) + 1;
   }
-  assert.deepEqual(
-    normalized.summary.severity_breakdown,
-    expected,
-    "severity_breakdown must be recomputed from findings",
-  );
+  expect(normalized.summary.severity_breakdown, "severity_breakdown must be recomputed from findings").toEqual(expected);
 });
 
 test("INV-06: normalizeExistingFindingsReport preserves upstream-derived fields (audited/excluded counts, runtime breakdown)", () => {
@@ -354,21 +305,9 @@ test("INV-06: normalizeExistingFindingsReport preserves upstream-derived fields 
 
   const normalized = normalizeExistingFindingsReport(stale);
 
-  assert.equal(
-    normalized.summary.audited_file_count,
-    17,
-    "audited_file_count must be preserved (not recomputable without bundle intermediates)",
-  );
-  assert.equal(
-    normalized.summary.excluded_file_count,
-    3,
-    "excluded_file_count must be preserved",
-  );
-  assert.deepEqual(
-    normalized.summary.runtime_validation_status_breakdown,
-    { confirmed: 5, pending: 2 },
-    "runtime_validation_status_breakdown must be preserved",
-  );
+  expect(normalized.summary.audited_file_count, "audited_file_count must be preserved (not recomputable without bundle intermediates)").toBe(17);
+  expect(normalized.summary.excluded_file_count, "excluded_file_count must be preserved").toBe(3);
+  expect(normalized.summary.runtime_validation_status_breakdown, "runtime_validation_status_breakdown must be preserved").toEqual({ confirmed: 5, pending: 2 });
 });
 
 // ── INV-audit-reporting-07: language-neutral render ───────────────────────────
@@ -444,16 +383,10 @@ test("INV-07: renderAuditReportMarkdown renders findings from mixed-language res
   const markdown = renderAuditReportMarkdown(report);
 
   // All four findings appear in the render, regardless of language.
-  assert.equal(report.summary.finding_count, 4, "all 4 mixed-language findings must be present");
+  expect(report.summary.finding_count, "all 4 mixed-language findings must be present").toBe(4);
   for (const finding of report.findings) {
-    assert.ok(
-      markdown.includes(finding.id),
-      `finding ${finding.id} from ${finding.affected_files[0].path} must appear in the render`,
-    );
-    assert.ok(
-      markdown.includes(finding.affected_files[0].path),
-      `file path ${finding.affected_files[0].path} must appear in the render`,
-    );
+    expect(markdown.includes(finding.id), `finding ${finding.id} from ${finding.affected_files[0].path} must appear in the render`).toBeTruthy();
+    expect(markdown.includes(finding.affected_files[0].path), `file path ${finding.affected_files[0].path} must appear in the render`).toBeTruthy();
   }
 });
 
@@ -487,12 +420,12 @@ test("INV-07: the report shape is identical whether findings reference .ts, .py,
   const goReport = makeReport("pkg/auth/auth.go");
 
   // All three have exactly one finding and one work block — shape is language-neutral.
-  assert.equal(tsReport.summary.finding_count, 1);
-  assert.equal(pyReport.summary.finding_count, 1);
-  assert.equal(goReport.summary.finding_count, 1);
+  expect(tsReport.summary.finding_count).toBe(1);
+  expect(pyReport.summary.finding_count).toBe(1);
+  expect(goReport.summary.finding_count).toBe(1);
 
-  assert.equal(tsReport.summary.work_block_count, pyReport.summary.work_block_count);
-  assert.equal(pyReport.summary.work_block_count, goReport.summary.work_block_count);
+  expect(tsReport.summary.work_block_count).toBe(pyReport.summary.work_block_count);
+  expect(pyReport.summary.work_block_count).toBe(goReport.summary.work_block_count);
 
   // The markdown render structure is the same across languages.
   const tsMd = renderAuditReportMarkdown(tsReport);
@@ -500,8 +433,8 @@ test("INV-07: the report shape is identical whether findings reference .ts, .py,
   const goMd = renderAuditReportMarkdown(goReport);
 
   for (const md of [tsMd, pyMd, goMd]) {
-    assert.match(md, /## Findings/);
-    assert.match(md, /- Severity: medium/);
+    expect(md).toMatch(/## Findings/);
+    expect(md).toMatch(/- Severity: medium/);
   }
 });
 
@@ -559,15 +492,8 @@ test("INV-08: renderSynthesisNarrativePrompt writes truncation notice to process
   }
 
   // The truncation notice must go to stderr, not console.warn.
-  assert.equal(
-    capturedConsoleWarn.length,
-    0,
-    "truncation notice must NOT use console.warn (INV-audit-reporting-08 / OBS-ad223196)",
-  );
-  assert.ok(
-    capturedStderr.some((msg) => msg.includes("truncated findings list")),
-    "truncation notice must be written to process.stderr",
-  );
+  expect(capturedConsoleWarn.length, "truncation notice must NOT use console.warn (INV-audit-reporting-08 / OBS-ad223196)").toBe(0);
+  expect(capturedStderr.some((msg) => msg.includes("truncated findings list")), "truncation notice must be written to process.stderr").toBeTruthy();
 });
 
 test("INV-08: renderSynthesisNarrativePrompt does NOT write to stderr when findings are within the render cap", () => {
@@ -589,11 +515,7 @@ test("INV-08: renderSynthesisNarrativePrompt does NOT write to stderr when findi
   const truncationMessages = capturedStderr.filter((msg) =>
     msg.includes("truncated findings list"),
   );
-  assert.equal(
-    truncationMessages.length,
-    0,
-    "no truncation notice must be emitted when findings are within the render cap",
-  );
+  expect(truncationMessages.length, "no truncation notice must be emitted when findings are within the render cap").toBe(0);
 });
 
 // ── OBL-INV-APR-09: contract_version single-source + deferred prompt has no Command argv ──
@@ -604,22 +526,11 @@ test("OBL-INV-APR-09: buildAuditFindingsReport stamps contract_version identical
   const report = baseReport();
 
   // The re-export in synthesis.ts must equal the shared canonical constant.
-  assert.equal(
-    AUDIT_FINDINGS_CONTRACT_VERSION,
-    sharedVersion,
-    "synthesis.ts AUDIT_FINDINGS_CONTRACT_VERSION must re-export the shared constant, not define a local copy",
-  );
+  expect(AUDIT_FINDINGS_CONTRACT_VERSION, "synthesis.ts AUDIT_FINDINGS_CONTRACT_VERSION must re-export the shared constant, not define a local copy").toBe(sharedVersion);
 
   // buildAuditFindingsReport must stamp the canonical version.
-  assert.equal(
-    report.contract_version,
-    sharedVersion,
-    "buildAuditFindingsReport must produce contract_version === shared AUDIT_FINDINGS_CONTRACT_VERSION",
-  );
+  expect(report.contract_version, "buildAuditFindingsReport must produce contract_version === shared AUDIT_FINDINGS_CONTRACT_VERSION").toBe(sharedVersion);
 
   // The version string must be non-trivial so a blank re-export cannot pass.
-  assert.ok(
-    typeof sharedVersion === "string" && sharedVersion.length > 0,
-    "shared AUDIT_FINDINGS_CONTRACT_VERSION must be a non-empty string",
-  );
+  expect(typeof sharedVersion === "string" && sharedVersion.length > 0, "shared AUDIT_FINDINGS_CONTRACT_VERSION must be a non-empty string").toBeTruthy();
 });

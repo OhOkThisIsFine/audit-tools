@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   coverageContentSignature,
@@ -37,8 +36,8 @@ test("coverageContentSignature: prefers hash, falls back to size_bytes", () => {
       { path: "b.ts", language: "ts", size_bytes: 200 },
     ],
   });
-  assert.equal(sig["a.ts"], "deadbeef", "hash wins when present");
-  assert.equal(sig["b.ts"], "size:200", "size fallback when no hash");
+  expect(sig["a.ts"], "hash wins when present").toBe("deadbeef");
+  expect(sig["b.ts"], "size fallback when no hash").toBe("size:200");
 });
 
 test("deriveCoverageElementKey: stable across ordering, moves on any input change", () => {
@@ -48,19 +47,11 @@ test("deriveCoverageElementKey: stable across ordering, moves on any input chang
     unit_ids: ["unit-1"],
   });
   const k1 = deriveCoverageElementKey(base, "sig1");
-  assert.equal(deriveCoverageElementKey(reordered, "sig1"), k1, "lens order does not move the key");
+  expect(deriveCoverageElementKey(reordered, "sig1"), "lens order does not move the key").toBe(k1);
 
-  assert.notEqual(deriveCoverageElementKey(base, "sig2"), k1, "content signal change moves the key");
-  assert.notEqual(
-    deriveCoverageElementKey(file("a.ts", { required_lenses: ["security"] }), "sig1"),
-    k1,
-    "required-lens set change moves the key",
-  );
-  assert.notEqual(
-    deriveCoverageElementKey(file("a.ts", { unit_ids: ["unit-2"] }), "sig1"),
-    k1,
-    "unit membership change moves the key",
-  );
+  expect(deriveCoverageElementKey(base, "sig2"), "content signal change moves the key").not.toBe(k1);
+  expect(deriveCoverageElementKey(file("a.ts", { required_lenses: ["security"] }), "sig1"), "required-lens set change moves the key").not.toBe(k1);
+  expect(deriveCoverageElementKey(file("a.ts", { unit_ids: ["unit-2"] }), "sig1"), "unit membership change moves the key").not.toBe(k1);
 });
 
 test("recordCoverageElementBaselines: one key per non-excluded file", () => {
@@ -69,8 +60,8 @@ test("recordCoverageElementBaselines: one key per non-excluded file", () => {
   };
   const sig = { "a.ts": "s1", "b.ts": "s2" };
   const store = recordCoverageElementBaselines(coverage, sig);
-  assert.ok(store["a.ts"], "non-excluded file gets a baseline");
-  assert.equal(store["b.ts"], undefined, "excluded file is omitted");
+  expect(store["a.ts"], "non-excluded file gets a baseline").toBeTruthy();
+  expect(store["b.ts"], "excluded file is omitted").toBe(undefined);
 });
 
 test("applyContentAddressedPreservation: preserves unchanged file's prior completion", () => {
@@ -82,13 +73,9 @@ test("applyContentAddressedPreservation: preserves unchanged file's prior comple
   // Fresh re-plan: same inputs → pending, awaiting preservation.
   const fresh = { files: [file("a.ts")] };
   const n = applyContentAddressedPreservation(fresh, prior, baselines, sig);
-  assert.equal(n, 1, "one file preserved");
-  assert.equal(fresh.files[0].audit_status, "complete", "carried prior status");
-  assert.deepEqual(
-    [...fresh.files[0].completed_lenses].sort(),
-    ["correctness", "security"],
-    "carried prior completed lenses",
-  );
+  expect(n, "one file preserved").toBe(1);
+  expect(fresh.files[0].audit_status, "carried prior status").toBe("complete");
+  expect([...fresh.files[0].completed_lenses].sort(), "carried prior completed lenses").toEqual(["correctness", "security"]);
 });
 
 test("applyContentAddressedPreservation: re-audits when content signal moves", () => {
@@ -99,14 +86,14 @@ test("applyContentAddressedPreservation: re-audits when content signal moves", (
   const fresh = { files: [file("a.ts")] };
   // Content signal changed (file edited) → key moves → not preserved.
   const n = applyContentAddressedPreservation(fresh, prior, baselines, { "a.ts": "s2" });
-  assert.equal(n, 0, "changed file is not preserved");
-  assert.equal(fresh.files[0].audit_status, "pending", "stays pending for re-audit");
+  expect(n, "changed file is not preserved").toBe(0);
+  expect(fresh.files[0].audit_status, "stays pending for re-audit").toBe("pending");
 });
 
 test("applyContentAddressedPreservation: no baseline (first run) preserves nothing", () => {
   const fresh = { files: [file("a.ts")] };
   const n = applyContentAddressedPreservation(fresh, { files: [file("a.ts")] }, undefined, { "a.ts": "s1" });
-  assert.equal(n, 0, "no baseline → no preservation");
+  expect(n, "no baseline → no preservation").toBe(0);
 });
 
 test("applyContentAddressedPreservation: skips excluded and already-complete files", () => {
@@ -125,7 +112,7 @@ test("applyContentAddressedPreservation: skips excluded and already-complete fil
     ],
   };
   const n = applyContentAddressedPreservation(fresh, prior, baselines, sig);
-  assert.equal(n, 0, "excluded and already-complete files are skipped");
+  expect(n, "excluded and already-complete files are skipped").toBe(0);
 });
 
 test("withCoverageElementBaselines: merges without clobbering result_baselines + stamps version", () => {
@@ -137,22 +124,19 @@ test("withCoverageElementBaselines: merges without clobbering result_baselines +
     },
     { "a.ts": "k1" },
   );
-  assert.deepEqual(merged.result_baselines, { ik1: "ck1" }, "result baselines untouched");
-  assert.deepEqual(merged.coverage_element_baselines, { "a.ts": "k1" });
-  assert.equal(merged.metadata_schema_version, METADATA_SCHEMA_VERSION);
+  expect(merged.result_baselines, "result baselines untouched").toEqual({ ik1: "ck1" });
+  expect(merged.coverage_element_baselines).toEqual({ "a.ts": "k1" });
+  expect(merged.metadata_schema_version).toBe(METADATA_SCHEMA_VERSION);
 
   const seeded = withCoverageElementBaselines(undefined, { "a.ts": "k1" });
-  assert.equal(seeded.metadata_schema_version, METADATA_SCHEMA_VERSION, "fresh manifest is F1-stamped");
-  assert.deepEqual(seeded.coverage_element_baselines, { "a.ts": "k1" });
+  expect(seeded.metadata_schema_version, "fresh manifest is F1-stamped").toBe(METADATA_SCHEMA_VERSION);
+  expect(seeded.coverage_element_baselines).toEqual({ "a.ts": "k1" });
 });
 
 test("readCoverageElementBaselines: reads the carried store, undefined when absent", () => {
-  assert.deepEqual(
-    readCoverageElementBaselines({ metadata_schema_version: 1, artifacts: {}, coverage_element_baselines: { "a.ts": "k" } }),
-    { "a.ts": "k" },
-  );
-  assert.equal(readCoverageElementBaselines(undefined), undefined);
-  assert.equal(readCoverageElementBaselines({ metadata_schema_version: 1, artifacts: {} }), undefined);
+  expect(readCoverageElementBaselines({ metadata_schema_version: 1, artifacts: {}, coverage_element_baselines: { "a.ts": "k" } })).toEqual({ "a.ts": "k" });
+  expect(readCoverageElementBaselines(undefined)).toBe(undefined);
+  expect(readCoverageElementBaselines({ metadata_schema_version: 1, artifacts: {} })).toBe(undefined);
 });
 
 test("computeArtifactMetadata: carries coverage_element_baselines forward from the bundle (F1-current)", () => {
@@ -165,7 +149,7 @@ test("computeArtifactMetadata: carries coverage_element_baselines forward from t
     },
   };
   const out = computeArtifactMetadata(bundle, undefined, []);
-  assert.deepEqual(out.coverage_element_baselines, { "a.ts": "k1" }, "carried forward from bundle");
+  expect(out.coverage_element_baselines, "carried forward from bundle").toEqual({ "a.ts": "k1" });
 });
 
 test("computeArtifactMetadata: drops an old-shape (pre-F1) coverage baseline store", () => {
@@ -175,5 +159,5 @@ test("computeArtifactMetadata: drops an old-shape (pre-F1) coverage baseline sto
     artifact_metadata: { artifacts: {}, coverage_element_baselines: { "a.ts": "k1" } },
   };
   const out = computeArtifactMetadata(bundle, undefined, []);
-  assert.equal(out.coverage_element_baselines, undefined, "old-shape store is not carried");
+  expect(out.coverage_element_baselines, "old-shape store is not carried").toBe(undefined);
 });

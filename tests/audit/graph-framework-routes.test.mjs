@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { buildGraphBundle } from "../../src/audit/extractors/graph.ts";
 import {
   extractConventionalRouteEvidence,
@@ -54,9 +53,9 @@ test("NestJS @Controller + method decorators combine prefix and sub-path", () =>
     ].join("\n"),
   });
 
-  assert.ok(hasRoute(routes, "GET", "/cats", file), "GET /cats");
-  assert.ok(hasRoute(routes, "GET", "/cats/:id", file), "GET /cats/:id");
-  assert.ok(hasRoute(routes, "POST", "/cats", file), "POST /cats");
+  expect(hasRoute(routes, "GET", "/cats", file), "GET /cats").toBeTruthy();
+  expect(hasRoute(routes, "GET", "/cats/:id", file), "GET /cats/:id").toBeTruthy();
+  expect(hasRoute(routes, "POST", "/cats", file), "POST /cats").toBeTruthy();
 });
 
 test("NestJS @Controller({ path }) object form resolves the prefix", () => {
@@ -70,7 +69,7 @@ test("NestJS @Controller({ path }) object form resolves the prefix", () => {
       "}",
     ].join("\n"),
   });
-  assert.ok(hasRoute(routes, "POST", "/auth/login", file));
+  expect(hasRoute(routes, "POST", "/auth/login", file)).toBeTruthy();
 });
 
 // TST-10b463bb: multiple @Controller decorators in the same file — each method
@@ -95,11 +94,11 @@ test("NestJS multiple @Controller decorators in one file assign prefix by docume
     ].join("\n"),
   });
 
-  assert.ok(hasRoute(routes, "GET", "/cats", file), "GET /cats from first controller");
-  assert.ok(hasRoute(routes, "GET", "/dogs/:id", file), "GET /dogs/:id from second controller");
-  assert.ok(hasRoute(routes, "POST", "/dogs", file), "POST /dogs from second controller");
+  expect(hasRoute(routes, "GET", "/cats", file), "GET /cats from first controller").toBeTruthy();
+  expect(hasRoute(routes, "GET", "/dogs/:id", file), "GET /dogs/:id from second controller").toBeTruthy();
+  expect(hasRoute(routes, "POST", "/dogs", file), "POST /dogs from second controller").toBeTruthy();
   // The cats controller's GET must NOT pick up the dogs prefix
-  assert.ok(!hasRoute(routes, "GET", "/dogs", file), "GET /dogs must not exist (cats has no prefix '/dogs')");
+  expect(!hasRoute(routes, "GET", "/dogs", file), "GET /dogs must not exist (cats has no prefix '/dogs')").toBeTruthy();
 });
 
 test("NestJS @Controller with no argument (empty prefix) yields bare-path routes", () => {
@@ -114,7 +113,7 @@ test("NestJS @Controller with no argument (empty prefix) yields bare-path routes
     ].join("\n"),
   });
 
-  assert.ok(hasRoute(routes, "GET", "/health", file), "GET /health — empty prefix leaves sub-path bare");
+  expect(hasRoute(routes, "GET", "/health", file), "GET /health — empty prefix leaves sub-path bare").toBeTruthy();
 });
 
 test("FastAPI decorator routes map method + path to the handler file", () => {
@@ -136,9 +135,9 @@ test("FastAPI decorator routes map method + path to the handler file", () => {
     ].join("\n"),
   });
 
-  assert.ok(hasRoute(routes, "GET", "/items/{item_id}", file));
-  assert.ok(hasRoute(routes, "POST", "/items", file));
-  assert.ok(hasRoute(routes, "WS", "/ws", file), "websocket maps to method WS");
+  expect(hasRoute(routes, "GET", "/items/{item_id}", file)).toBeTruthy();
+  expect(hasRoute(routes, "POST", "/items", file)).toBeTruthy();
+  expect(hasRoute(routes, "WS", "/ws", file), "websocket maps to method WS").toBeTruthy();
 });
 
 test("Flask @route with methods expands to one route per method", () => {
@@ -156,9 +155,9 @@ test("Flask @route with methods expands to one route per method", () => {
     ].join("\n"),
   });
 
-  assert.ok(hasRoute(routes, "GET", "/login", file));
-  assert.ok(hasRoute(routes, "POST", "/login", file));
-  assert.ok(hasRoute(routes, "GET", "/health", file), "no methods defaults to GET");
+  expect(hasRoute(routes, "GET", "/login", file)).toBeTruthy();
+  expect(hasRoute(routes, "POST", "/login", file)).toBeTruthy();
+  expect(hasRoute(routes, "GET", "/health", file), "no methods defaults to GET").toBeTruthy();
 });
 
 test("Angular route config resolves component to a route-handler-link", () => {
@@ -184,25 +183,16 @@ test("Angular route config resolves component to a route-handler-link", () => {
   });
 
   const routes = bundle.graphs.routes ?? [];
-  assert.ok(
-    routes.some((r) => r.path === "/heroes" && r.handler === heroes),
-    "heroes route resolves to its component file",
-  );
-  assert.ok(
-    routes.some((r) => r.path === "/dashboard" && r.handler === dashboard),
-    "dashboard route resolves to its component file",
-  );
+  expect(routes.some((r) => r.path === "/heroes" && r.handler === heroes), "heroes route resolves to its component file").toBeTruthy();
+  expect(routes.some((r) => r.path === "/dashboard" && r.handler === dashboard), "dashboard route resolves to its component file").toBeTruthy();
 
   const calls = bundle.graphs.calls ?? [];
-  assert.ok(
-    calls.some(
+  expect(calls.some(
       (e) =>
         e.kind === "route-handler-link" &&
         e.from === moduleFile &&
         e.to === heroes,
-    ),
-    "route-handler-link edge points at the resolved component",
-  );
+    ), "route-handler-link edge points at the resolved component").toBeTruthy();
 });
 
 test("framework route detection is language-gated (no NestJS patterns in Python, vice versa)", () => {
@@ -214,14 +204,8 @@ test("framework route detection is language-gated (no NestJS patterns in Python,
     [py]: "@Controller('nope')\nclass X:\n    @Get()\n    def f(self):\n        return 1\n",
     [ts]: 'const app = 1;\n// @app.get("/no") in a comment\n',
   });
-  assert.ok(
-    !routes.some((r) => r.path === "/nope"),
-    "NestJS decorators are not detected in .py files",
-  );
-  assert.ok(
-    !routes.some((r) => r.path === "/no"),
-    "FastAPI comments in .ts files are not detected as Python routes",
-  );
+  expect(!routes.some((r) => r.path === "/nope"), "NestJS decorators are not detected in .py files").toBeTruthy();
+  expect(!routes.some((r) => r.path === "/no"), "FastAPI comments in .ts files are not detected as Python routes").toBeTruthy();
 });
 
 test("uniqueSortedRoutes dedupes by signature and sorts by path/handler/method", () => {
@@ -237,15 +221,12 @@ test("uniqueSortedRoutes dedupes by signature and sorts by path/handler/method",
 
   const result = uniqueSortedRoutes(input);
   // One exact dup removed -> 4 unique signatures.
-  assert.equal(result.length, 4);
-  assert.deepEqual(
-    result.map((r) => `${r.method} ${r.path} ${r.handler}`),
-    ["GET /a h1", "POST /a h1", "GET /a h2", "GET /b h2"],
-  );
+  expect(result.length).toBe(4);
+  expect(result.map((r) => `${r.method} ${r.path} ${r.handler}`)).toEqual(["GET /a h1", "POST /a h1", "GET /a h2", "GET /b h2"]);
 });
 
 test("fallbackRouteEdge returns a GET edge for api/route paths and undefined otherwise", () => {
-  assert.deepEqual(fallbackRouteEdge("src/api/users.ts"), {
+  expect(fallbackRouteEdge("src/api/users.ts")).toEqual({
     method: "GET",
     handler: "src/api/users.ts",
     path: "/src_api_users.ts",
@@ -253,18 +234,18 @@ test("fallbackRouteEdge returns a GET edge for api/route paths and undefined oth
   // A path whose final segment is exactly `route.ts` (Next.js App Router
   // convention) produces a defined fallback edge.
   const routeEdge = fallbackRouteEdge("app/dashboard/route.ts");
-  assert.ok(routeEdge);
-  assert.equal(routeEdge.method, "GET");
-  assert.equal(routeEdge.handler, "app/dashboard/route.ts");
+  expect(routeEdge).toBeTruthy();
+  expect(routeEdge.method).toBe("GET");
+  expect(routeEdge.handler).toBe("app/dashboard/route.ts");
   // An unrelated path yields no fallback edge.
-  assert.equal(fallbackRouteEdge("src/lib/util.ts"), undefined);
+  expect(fallbackRouteEdge("src/lib/util.ts")).toBe(undefined);
   // COR-c5438ac1: a bare "route" substring inside an identifier must NOT
   // fabricate a route edge — only `api/` segments or `route`/`routes` segments.
-  assert.equal(fallbackRouteEdge("src/router.ts"), undefined);
-  assert.equal(fallbackRouteEdge("src/extractors/graphRoutes.ts"), undefined);
-  assert.equal(fallbackRouteEdge("src/reroute-helper.ts"), undefined);
+  expect(fallbackRouteEdge("src/router.ts")).toBe(undefined);
+  expect(fallbackRouteEdge("src/extractors/graphRoutes.ts")).toBe(undefined);
+  expect(fallbackRouteEdge("src/reroute-helper.ts")).toBe(undefined);
   // A `routes` directory segment still matches.
-  assert.ok(fallbackRouteEdge("app/routes/users.ts"));
+  expect(fallbackRouteEdge("app/routes/users.ts")).toBeTruthy();
 });
 
 // ---- extractConventionalRouteEvidence ----
@@ -273,83 +254,74 @@ test("extractConventionalRouteEvidence — App Router: file with exported GET/PO
   const file = "src/app/api/health/route.ts";
   const content = "export async function GET() {}\nexport async function POST() {}";
   const result = extractConventionalRouteEvidence(file, content);
-  assert.equal(result.length, 2);
-  assert.ok(
-    result.some((r) => r.method === "GET" && r.path === "/api/health" && r.handler === file),
-    "GET /api/health",
-  );
-  assert.ok(
-    result.some((r) => r.method === "POST" && r.path === "/api/health" && r.handler === file),
-    "POST /api/health",
-  );
+  expect(result.length).toBe(2);
+  expect(result.some((r) => r.method === "GET" && r.path === "/api/health" && r.handler === file), "GET /api/health").toBeTruthy();
+  expect(result.some((r) => r.method === "POST" && r.path === "/api/health" && r.handler === file), "POST /api/health").toBeTruthy();
 });
 
 test("extractConventionalRouteEvidence — App Router: dynamic segment [id] maps to :id", () => {
   const file = "app/users/[id]/route.ts";
   const result = extractConventionalRouteEvidence(file, "export function GET() {}");
-  assert.equal(result.length, 1);
-  assert.equal(result[0].method, "GET");
-  assert.equal(result[0].path, "/users/:id");
-  assert.equal(result[0].handler, file);
+  expect(result.length).toBe(1);
+  expect(result[0].method).toBe("GET");
+  expect(result[0].path).toBe("/users/:id");
+  expect(result[0].handler).toBe(file);
 });
 
 test("extractConventionalRouteEvidence — App Router: catch-all segment [...slug] maps to :slug*", () => {
   const file = "app/blog/[...slug]/route.ts";
   const result = extractConventionalRouteEvidence(file, "export function GET() {}");
-  assert.equal(result.length, 1);
-  assert.equal(result[0].path, "/blog/:slug*");
+  expect(result.length).toBe(1);
+  expect(result[0].path).toBe("/blog/:slug*");
 });
 
 test("extractConventionalRouteEvidence — App Router: route group (marketing) segment is stripped", () => {
   const file = "app/(marketing)/about/route.ts";
   const result = extractConventionalRouteEvidence(file, undefined);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].path, "/about");
-  assert.equal(result[0].handler, file);
-  assert.equal(result[0].method, undefined, "no method on fallback route");
+  expect(result.length).toBe(1);
+  expect(result[0].path).toBe("/about");
+  expect(result[0].handler).toBe(file);
+  expect(result[0].method, "no method on fallback route").toBe(undefined);
 });
 
 test("extractConventionalRouteEvidence — App Router: no exported HTTP methods produces a single method-less fallback route", () => {
   const file = "app/settings/route.ts";
   const result = extractConventionalRouteEvidence(file, "const config = {};");
-  assert.equal(result.length, 1);
-  assert.equal(result[0].path, "/settings");
-  assert.equal(result[0].handler, file);
-  assert.equal(result[0].method, undefined, "no method key on fallback route");
+  expect(result.length).toBe(1);
+  expect(result[0].path).toBe("/settings");
+  expect(result[0].handler).toBe(file);
+  expect(result[0].method, "no method key on fallback route").toBe(undefined);
 });
 
 test("extractConventionalRouteEvidence — Pages/API: pages/api/users/[id].ts maps to /api/users/:id", () => {
   const file = "pages/api/users/[id].ts";
   const result = extractConventionalRouteEvidence(file, undefined);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].path, "/api/users/:id");
-  assert.equal(result[0].handler, file);
+  expect(result.length).toBe(1);
+  expect(result[0].path).toBe("/api/users/:id");
+  expect(result[0].handler).toBe(file);
 });
 
 test("extractConventionalRouteEvidence — Pages/API: non-nested api path pages/api/health.ts maps to /api/health", () => {
   const file = "src/pages/api/health.ts";
   const result = extractConventionalRouteEvidence(file, undefined);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].path, "/api/health");
-  assert.equal(result[0].handler, file);
+  expect(result.length).toBe(1);
+  expect(result[0].path).toBe("/api/health");
+  expect(result[0].handler).toBe(file);
 });
 
 test("extractConventionalRouteEvidence — file matching neither convention returns empty array", () => {
-  assert.deepEqual(extractConventionalRouteEvidence("src/lib/utils.ts", undefined), []);
+  expect(extractConventionalRouteEvidence("src/lib/utils.ts", undefined)).toEqual([]);
   // HTTP method exports in a non-route file are ignored
-  assert.deepEqual(
-    extractConventionalRouteEvidence("src/components/Button.tsx", "export function GET() {}"),
-    [],
-  );
+  expect(extractConventionalRouteEvidence("src/components/Button.tsx", "export function GET() {}")).toEqual([]);
 });
 
 // FND-COR-c86f0260 regression: `api/` at the repo root without a `pages` ancestor
 // must NOT be treated as a Next.js Pages Router API route.
 test("FND-COR-c86f0260: api/ at repo root without pages/ ancestor is not a conventional API route", () => {
   // Paths that have `api` but no `pages` ancestor — must return empty.
-  assert.deepEqual(extractConventionalRouteEvidence("api/components/page.ts", undefined), []);
-  assert.deepEqual(extractConventionalRouteEvidence("api/health.ts", undefined), []);
-  assert.deepEqual(extractConventionalRouteEvidence("src/api/users.ts", undefined), []);
+  expect(extractConventionalRouteEvidence("api/components/page.ts", undefined)).toEqual([]);
+  expect(extractConventionalRouteEvidence("api/health.ts", undefined)).toEqual([]);
+  expect(extractConventionalRouteEvidence("src/api/users.ts", undefined)).toEqual([]);
 });
 
 // FND-COR-9fc7cbdb: extractImportBindings default-candidate split is already correct.
@@ -368,10 +340,7 @@ test("FND-COR-9fc7cbdb: import with default + named bindings resolves default to
   const callEdge = (bundle.graphs.calls ?? []).find(
     (e) => e.from === file && e.to === handler && e.kind === "route-handler-link",
   );
-  assert.ok(
-    callEdge !== undefined,
-    "default import binding must resolve to the correct handler via route-handler-link",
-  );
+  expect(callEdge !== undefined, "default import binding must resolve to the correct handler via route-handler-link").toBeTruthy();
 });
 
 // FND-COR-b29c9d4f: jsonc.ts stripJsonComments block-comment end index is correct.
@@ -379,16 +348,16 @@ test("FND-COR-9fc7cbdb: import with default + named bindings resolves default to
 test("FND-COR-b29c9d4f: stripJsonComments preserves character immediately after block comment", async () => {
   const { stripJsonComments } = await import("../../src/audit/extractors/graphManifestEdges/jsonc.ts");
   // "a/*b*/c" => "ac" (the 'c' after */ must be preserved)
-  assert.equal(stripJsonComments("a/*b*/c"), "ac");
+  expect(stripJsonComments("a/*b*/c")).toBe("ac");
   // Newlines inside block comments are preserved.
-  assert.equal(stripJsonComments("a/*\n*/c"), "a\nc");
+  expect(stripJsonComments("a/*\n*/c")).toBe("a\nc");
   // Character directly after closing */ must not be swallowed.
-  assert.equal(stripJsonComments("x/* comment */y"), "xy");
+  expect(stripJsonComments("x/* comment */y")).toBe("xy");
   // Verify a realistic JSONC snippet.
   const input = '{\n  // line comment\n  "key": /* block */ "value"\n}';
   const result = stripJsonComments(input);
-  assert.ok(result.includes('"key"'), "key must survive");
-  assert.ok(result.includes('"value"'), "value must survive");
-  assert.ok(!result.includes("//"), "line comment must be stripped");
-  assert.ok(!result.includes("block"), "block comment content must be stripped");
+  expect(result.includes('"key"'), "key must survive").toBeTruthy();
+  expect(result.includes('"value"'), "value must survive").toBeTruthy();
+  expect(!result.includes("//"), "line comment must be stripped").toBeTruthy();
+  expect(!result.includes("block"), "block comment content must be stripped").toBeTruthy();
 });

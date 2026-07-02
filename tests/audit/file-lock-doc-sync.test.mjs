@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +24,7 @@ function readNumericConst(src, name) {
   // Matches e.g. `const RETRY_INTERVAL_INITIAL_MS = 50;` and
   // `export const STALE_LOCK_MS = 30_000;` — underscores stripped for Number().
   const m = src.match(new RegExp(`${name}\\s*=\\s*([0-9_]+)`));
-  assert.ok(m, `Could not find numeric constant ${name} in fileLock.ts`);
+  expect(m, `Could not find numeric constant ${name} in fileLock.ts`).toBeTruthy();
   return Number(m[1].replace(/_/g, ""));
 }
 
@@ -42,45 +41,27 @@ test("CLAUDE.md file-lock description matches the shared withFileLock constants"
 
   // Sanity-check we parsed the live values (guards against a regex that silently
   // matched the wrong literal).
-  assert.equal(initialMs, 50, "Expected RETRY_INTERVAL_INITIAL_MS === 50 in fileLock.ts");
-  assert.equal(maxMs, 500, "Expected RETRY_INTERVAL_MAX_MS === 500 in fileLock.ts");
-  assert.equal(staleMs, 30_000, "Expected STALE_LOCK_MS === 30000 (production export)");
+  expect(initialMs, "Expected RETRY_INTERVAL_INITIAL_MS === 50 in fileLock.ts").toBe(50);
+  expect(maxMs, "Expected RETRY_INTERVAL_MAX_MS === 500 in fileLock.ts").toBe(500);
+  expect(staleMs, "Expected STALE_LOCK_MS === 30000 (production export)").toBe(30_000);
 
   // Locate the single sentence in CLAUDE.md that documents store.ts's lock.
   const lockLine = claudeMd
     .split(/\r?\n/)
     .find((line) => line.includes("withFileLock") && line.includes("backoff"));
-  assert.ok(
-    lockLine,
-    "Could not find the file-lock description sentence in CLAUDE.md (expected a line mentioning `withFileLock` and `backoff`)",
-  );
+  expect(lockLine, "Could not find the file-lock description sentence in CLAUDE.md (expected a line mentioning `withFileLock` and `backoff`)").toBeTruthy();
 
   // doc == code: the exact backoff window and stale threshold appear in the doc.
-  assert.ok(
-    lockLine.includes(`${initialMs}ms`),
-    `CLAUDE.md lock description must state the ${initialMs}ms initial backoff (from RETRY_INTERVAL_INITIAL_MS). Line: ${lockLine}`,
-  );
-  assert.ok(
-    lockLine.includes(`${maxMs}ms`),
-    `CLAUDE.md lock description must state the ${maxMs}ms max backoff (from RETRY_INTERVAL_MAX_MS). Line: ${lockLine}`,
-  );
+  expect(lockLine.includes(`${initialMs}ms`), `CLAUDE.md lock description must state the ${initialMs}ms initial backoff (from RETRY_INTERVAL_INITIAL_MS). Line: ${lockLine}`).toBeTruthy();
+  expect(lockLine.includes(`${maxMs}ms`), `CLAUDE.md lock description must state the ${maxMs}ms max backoff (from RETRY_INTERVAL_MAX_MS). Line: ${lockLine}`).toBeTruthy();
   const staleSeconds = staleMs / 1000;
-  assert.ok(
-    lockLine.includes(`${staleSeconds}s`),
-    `CLAUDE.md lock description must state the ${staleSeconds}s stale-lock window (from STALE_LOCK_MS). Line: ${lockLine}`,
-  );
+  expect(lockLine.includes(`${staleSeconds}s`), `CLAUDE.md lock description must state the ${staleSeconds}s stale-lock window (from STALE_LOCK_MS). Line: ${lockLine}`).toBeTruthy();
 
   // Negative guard: the stale "20ms / 250ms / 20 retries" wording must never
   // creep back anywhere in CLAUDE.md.
-  assert.ok(
-    !/20ms initial backoff|250ms max|20 retries/.test(claudeMd),
-    "CLAUDE.md still contains the stale '20ms/250ms/20 retries' lock wording; it must describe the shared withFileLock constants instead",
-  );
+  expect(!/20ms initial backoff|250ms max|20 retries/.test(claudeMd), "CLAUDE.md still contains the stale '20ms/250ms/20 retries' lock wording; it must describe the shared withFileLock constants instead").toBeTruthy();
 
   // The doc must also keep recording that store.ts adds no backoff of its own —
   // the durable invariant the single-sourcing established.
-  assert.ok(
-    /store\.ts`? adds no backoff/i.test(claudeMd),
-    "CLAUDE.md must state that store.ts adds no backoff/retry logic of its own (the lock is single-sourced in shared)",
-  );
+  expect(/store\.ts`? adds no backoff/i.test(claudeMd), "CLAUDE.md must state that store.ts adds no backoff/retry logic of its own (the lock is single-sourced in shared)").toBeTruthy();
 });

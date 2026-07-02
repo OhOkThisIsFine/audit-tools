@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { renderSynthesisNarrativePrompt } = await import("../../src/audit/reporting/synthesisNarrativePrompt.ts");
 
@@ -50,19 +49,19 @@ test("renderSynthesisNarrativePrompt renders header and finding summaries for a 
   const report = makeReport(findings, 2);
   const prompt = renderSynthesisNarrativePrompt(report);
 
-  assert.match(prompt, /# Synthesis narrative/, "prompt contains header");
-  assert.match(prompt, /- Findings: 1/, "prompt shows finding count");
-  assert.match(prompt, /- Work blocks: 2/, "prompt shows work block count");
-  assert.match(prompt, /## Findings/, "prompt contains findings section header");
+  expect(prompt, "prompt contains header").toMatch(/# Synthesis narrative/);
+  expect(prompt, "prompt shows finding count").toMatch(/- Findings: 1/);
+  expect(prompt, "prompt shows work block count").toMatch(/- Work blocks: 2/);
+  expect(prompt, "prompt contains findings section header").toMatch(/## Findings/);
   // The finding summary line must include id, severity, lens, title, and summary.
-  assert.match(prompt, /TST-0001/, "prompt includes finding id");
-  assert.match(prompt, /high/, "prompt includes severity");
-  assert.match(prompt, /security/, "prompt includes lens");
-  assert.match(prompt, /high\/security\/test/, "prompt includes category");
-  assert.match(prompt, /Weak token check/, "prompt includes title");
-  assert.match(prompt, /Token boundary is weak\./, "prompt includes summary");
-  assert.match(prompt, /src\/auth\.ts/, "prompt includes affected file path");
-  assert.doesNotMatch(prompt, /more findings/, "no overflow note for small report");
+  expect(prompt, "prompt includes finding id").toMatch(/TST-0001/);
+  expect(prompt, "prompt includes severity").toMatch(/high/);
+  expect(prompt, "prompt includes lens").toMatch(/security/);
+  expect(prompt, "prompt includes category").toMatch(/high\/security\/test/);
+  expect(prompt, "prompt includes title").toMatch(/Weak token check/);
+  expect(prompt, "prompt includes summary").toMatch(/Token boundary is weak\./);
+  expect(prompt, "prompt includes affected file path").toMatch(/src\/auth\.ts/);
+  expect(prompt, "no overflow note for small report").not.toMatch(/more findings/);
 });
 
 test("renderSynthesisNarrativePrompt preserves contract-assessment distinctions", () => {
@@ -82,10 +81,10 @@ test("renderSynthesisNarrativePrompt preserves contract-assessment distinctions"
   ]);
   const prompt = renderSynthesisNarrativePrompt(report);
 
-  assert.match(prompt, /DR-001 \[medium\/architecture\/inferred_contract_gap\]/);
-  assert.match(prompt, /DR-002 \[medium\/architecture\/design_simplification\]/);
-  assert.match(prompt, /contract assessment findings from conceptual design critique findings/);
-  assert.match(prompt, /Do not re-audit the code, change severities, or invent new findings/);
+  expect(prompt).toMatch(/DR-001 \[medium\/architecture\/inferred_contract_gap\]/);
+  expect(prompt).toMatch(/DR-002 \[medium\/architecture\/design_simplification\]/);
+  expect(prompt).toMatch(/contract assessment findings from conceptual design critique findings/);
+  expect(prompt).toMatch(/Do not re-audit the code, change severities, or invent new findings/);
 });
 
 // ── Overflow path ────────────────────────────────────────────────────────────
@@ -97,15 +96,14 @@ test("renderSynthesisNarrativePrompt includes overflow note when findings exceed
   const prompt = renderSynthesisNarrativePrompt(report);
 
   const overflowNote = `... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`;
-  assert.ok(prompt.includes(overflowNote), `overflow note present: "${overflowNote}"`);
+  expect(prompt.includes(overflowNote), `overflow note present: "${overflowNote}"`).toBeTruthy();
 
   // Count rendered finding lines (lines starting with "- F-")
   const findingLines = prompt.split("\n").filter((l) => /^- F-/.test(l));
-  assert.equal(findingLines.length, MAX_RENDERED_FINDINGS, "exactly 120 finding lines rendered");
+  expect(findingLines.length, "exactly 120 finding lines rendered").toBe(MAX_RENDERED_FINDINGS);
 
   // The 121st finding's title should not appear in the prompt.
-  assert.doesNotMatch(prompt, new RegExp(`Finding title ${MAX_RENDERED_FINDINGS + 1}`),
-    "121st finding title is not rendered");
+  expect(prompt, "121st finding title is not rendered").not.toMatch(new RegExp(`Finding title ${MAX_RENDERED_FINDINGS + 1}`));
 });
 
 // ── Empty findings ───────────────────────────────────────────────────────────
@@ -114,8 +112,8 @@ test("renderSynthesisNarrativePrompt renders sentinel line when findings array i
   const report = makeReport([]);
   const prompt = renderSynthesisNarrativePrompt(report);
 
-  assert.match(prompt, /\(no findings were recorded\)/, "sentinel line present");
-  assert.doesNotMatch(prompt, /more findings/, "no overflow note when findings empty");
+  expect(prompt, "sentinel line present").toMatch(/\(no findings were recorded\)/);
+  expect(prompt, "no overflow note when findings empty").not.toMatch(/more findings/);
 });
 
 // ── process.stderr on truncation (INV-audit-reporting-08 / OBS-ad223196) ─────
@@ -147,15 +145,9 @@ test("renderSynthesisNarrativePrompt emits to process.stderr when findings excee
   );
 
   const truncationChunks = stderrChunks.filter((c) => c.includes("synthesisNarrative: truncated"));
-  assert.equal(truncationChunks.length, 1, "process.stderr.write called exactly once with the truncation notice");
-  assert.ok(
-    truncationChunks[0].includes(String(MAX_RENDERED_FINDINGS)),
-    `stderr notice includes the cap (${MAX_RENDERED_FINDINGS})`,
-  );
-  assert.ok(
-    truncationChunks[0].includes(String(TOTAL)),
-    `stderr notice includes the total count (${TOTAL})`,
-  );
+  expect(truncationChunks.length, "process.stderr.write called exactly once with the truncation notice").toBe(1);
+  expect(truncationChunks[0].includes(String(MAX_RENDERED_FINDINGS)), `stderr notice includes the cap (${MAX_RENDERED_FINDINGS})`).toBeTruthy();
+  expect(truncationChunks[0].includes(String(TOTAL)), `stderr notice includes the total count (${TOTAL})`).toBeTruthy();
 });
 
 test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for exactly MAX_RENDERED_FINDINGS findings", () => {
@@ -169,7 +161,7 @@ test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for exactly
   );
 
   const truncationChunks = stderrChunks.filter((c) => c.includes("truncated findings list"));
-  assert.equal(truncationChunks.length, 0, "no stderr truncation notice when at exactly the cap");
+  expect(truncationChunks.length, "no stderr truncation notice when at exactly the cap").toBe(0);
 });
 
 test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for fewer than MAX_RENDERED_FINDINGS findings", () => {
@@ -181,7 +173,7 @@ test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for fewer t
   );
 
   const truncationChunks = stderrChunks.filter((c) => c.includes("truncated findings list"));
-  assert.equal(truncationChunks.length, 0, "no stderr truncation notice for small finding list");
+  expect(truncationChunks.length, "no stderr truncation notice for small finding list").toBe(0);
 });
 
 test("renderSynthesisNarrativePrompt still contains overflow note in prompt when stderr fires", () => {
@@ -195,7 +187,7 @@ test("renderSynthesisNarrativePrompt still contains overflow note in prompt when
   });
 
   const overflowNote = `... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`;
-  assert.ok(prompt.includes(overflowNote), "overflow note still present in returned prompt");
+  expect(prompt.includes(overflowNote), "overflow note still present in returned prompt").toBeTruthy();
 });
 
 // ── summarizeFinding truncation ───────────────────────────────────────────────
@@ -214,10 +206,10 @@ test("summarizeFinding truncates affected_files to 4 paths", () => {
   const report = makeReport([finding]);
   const prompt = renderSynthesisNarrativePrompt(report);
 
-  assert.match(prompt, /src\/a\.ts/, "first file appears");
-  assert.match(prompt, /src\/b\.ts/, "second file appears");
-  assert.match(prompt, /src\/c\.ts/, "third file appears");
-  assert.match(prompt, /src\/d\.ts/, "fourth file appears");
-  assert.doesNotMatch(prompt, /src\/e\.ts/, "fifth file does not appear (truncated)");
-  assert.doesNotMatch(prompt, /src\/f\.ts/, "sixth file does not appear (truncated)");
+  expect(prompt, "first file appears").toMatch(/src\/a\.ts/);
+  expect(prompt, "second file appears").toMatch(/src\/b\.ts/);
+  expect(prompt, "third file appears").toMatch(/src\/c\.ts/);
+  expect(prompt, "fourth file appears").toMatch(/src\/d\.ts/);
+  expect(prompt, "fifth file does not appear (truncated)").not.toMatch(/src\/e\.ts/);
+  expect(prompt, "sixth file does not appear (truncated)").not.toMatch(/src\/f\.ts/);
 });

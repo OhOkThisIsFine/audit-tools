@@ -6,7 +6,7 @@
  * These are deterministic structural and regression tests — they verify the
  * test suite's own integrity rather than the production sources directly.
  */
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -69,13 +69,9 @@ test("INV-audit-tests-01: no test file imports from dist/ at module load time (o
       violations.push(file);
     }
   }
-  assert.deepEqual(
-    violations,
-    [],
-    `These test files import from dist/ — they will silently pass on stale builds. ` +
+  expect(violations, `These test files import from dist/ — they will silently pass on stale builds. ` +
       `Fix: import from src/*.ts (tsx resolves at test time) or add to the allowlist if ` +
-      `the test is intentionally an integration test of the compiled artefact:\n  ${violations.join("\n  ")}`,
-  );
+      `the test is intentionally an integration test of the compiled artefact:\n  ${violations.join("\n  ")}`).toEqual([]);
 });
 
 // ── INV-audit-tests-02: shared dist/ import banned in test files ────────────
@@ -96,12 +92,8 @@ test("INV-audit-tests-02: no test file uses a relative path into shared/dist/", 
       violations.push(file);
     }
   }
-  assert.deepEqual(
-    violations,
-    [],
-    `These test files use relative paths into shared/dist/ — they bypass the workspace contract. ` +
-      `Fix: use 'audit-tools/shared' as the import specifier:\n  ${violations.join("\n  ")}`,
-  );
+  expect(violations, `These test files use relative paths into shared/dist/ — they bypass the workspace contract. ` +
+      `Fix: use 'audit-tools/shared' as the import specifier:\n  ${violations.join("\n  ")}`).toEqual([]);
 });
 
 // ── INV-audit-tests-04: python-logical-lines test has no trivially-true assertions ──
@@ -120,19 +112,10 @@ test("INV-audit-tests-04: well-formed multiline Python import emits ≥ 2 edges 
   const pl = pythonLookup("src/mod.py", "foo/bar.py", "foo/baz.py");
   const edges = extractPythonImportEdges("src/mod.py", content, pl);
   // Meaningful assertion: both bar and baz must be resolved, not trivially ≥ 0.
-  assert.ok(
-    edges.length >= 2,
-    `from-import must resolve both bar and baz, got ${edges.length} edge(s): ${JSON.stringify(edges)}`,
-  );
+  expect(edges.length >= 2, `from-import must resolve both bar and baz, got ${edges.length} edge(s): ${JSON.stringify(edges)}`).toBeTruthy();
   const tos = edges.map((e) => e.to);
-  assert.ok(
-    tos.some((t) => t.includes("bar")),
-    `expected edge to foo/bar.py, got: ${JSON.stringify(tos)}`,
-  );
-  assert.ok(
-    tos.some((t) => t.includes("baz")),
-    `expected edge to foo/baz.py, got: ${JSON.stringify(tos)}`,
-  );
+  expect(tos.some((t) => t.includes("bar")), `expected edge to foo/bar.py, got: ${JSON.stringify(tos)}`).toBeTruthy();
+  expect(tos.some((t) => t.includes("baz")), `expected edge to foo/baz.py, got: ${JSON.stringify(tos)}`).toBeTruthy();
 });
 
 // ── INV-audit-tests-05: computeStaleArtifacts handles absent artifact_metadata ─
@@ -144,14 +127,14 @@ const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/sta
 
 test("INV-audit-tests-05: computeStaleArtifacts returns empty Set when bundle is empty", () => {
   const stale = computeStaleArtifacts({});
-  assert.ok(stale instanceof Set, "must return a Set");
-  assert.equal(stale.size, 0, "empty bundle has no stale artifacts");
+  expect(stale instanceof Set, "must return a Set").toBeTruthy();
+  expect(stale.size, "empty bundle has no stale artifacts").toBe(0);
 });
 
 test("INV-audit-tests-05: computeStaleArtifacts returns empty Set when artifact_metadata is null/undefined", () => {
   const staleUndef = computeStaleArtifacts({ artifact_metadata: undefined });
-  assert.ok(staleUndef instanceof Set, "must return a Set for undefined");
-  assert.equal(staleUndef.size, 0, "undefined artifact_metadata → no stale artifacts");
+  expect(staleUndef instanceof Set, "must return a Set for undefined").toBeTruthy();
+  expect(staleUndef.size, "undefined artifact_metadata → no stale artifacts").toBe(0);
 });
 
 // ── INV-audit-tests-06: test helpers must import from .mjs helpers, not global mocks ──
@@ -174,11 +157,7 @@ test("INV-audit-tests-06: test helper modules are valid ESM (no require() or __d
       violations.push(`${file}: contains module.exports assignment`);
     }
   }
-  assert.deepEqual(
-    violations,
-    [],
-    `These helper files contain CommonJS constructs, which break in ESM .mjs files:\n  ${violations.join("\n  ")}`,
-  );
+  expect(violations, `These helper files contain CommonJS constructs, which break in ESM .mjs files:\n  ${violations.join("\n  ")}`).toEqual([]);
 });
 
 // ── INV-audit-tests-07: no test source imports a locally-duplicated copy ──────
@@ -197,12 +176,9 @@ test("INV-audit-tests-07: worker-run-command.test.mjs does not define a local pa
     "utf8",
   );
   // The function was a local duplicate — it must no longer exist in the test file.
-  assert.ok(
-    !src.includes("function partitionIssues"),
-    "worker-run-command.test.mjs must not define a local partitionIssues() — " +
+  expect(!src.includes("function partitionIssues"), "worker-run-command.test.mjs must not define a local partitionIssues() — " +
       "the test must exercise the production partition logic via the workerRunCommand dep seam, " +
-      "not a shadow copy that can drift from production behavior.",
-  );
+      "not a shadow copy that can drift from production behavior.").toBeTruthy();
 });
 
 // ── FND-REL-0838abd9: example files used by schema-contracts tests must exist ─
@@ -222,11 +198,7 @@ test("FND-REL-0838abd9: schema-contracts example files exist on disk", () => {
   const missing = requiredExamples.filter(
     (f) => !existsSync(join(EXAMPLES_DIR, f)),
   );
-  assert.deepEqual(
-    missing,
-    [],
-    `These example files are required by schema-contracts tests but are missing from examples/:\n  ${missing.join("\n  ")}`,
-  );
+  expect(missing, `These example files are required by schema-contracts tests but are missing from examples/:\n  ${missing.join("\n  ")}`).toEqual([]);
 });
 
 // ── FND-REL-0838abd9-2: src modules imported by schema-contracts must exist ───
@@ -249,9 +221,5 @@ test("FND-REL-0838abd9-2: schema-contracts statically-imported src modules exist
   const missing = requiredModules.filter(
     (m) => !existsSync(join(SRC_DIR, m)),
   );
-  assert.deepEqual(
-    missing,
-    [],
-    `These src modules are statically imported by schema-contracts.test.mjs but are missing:\n  ${missing.join("\n  ")}`,
-  );
+  expect(missing, `These src modules are statically imported by schema-contracts.test.mjs but are missing:\n  ${missing.join("\n  ")}`).toEqual([]);
 });

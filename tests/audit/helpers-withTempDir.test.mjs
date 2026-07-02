@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 import { withTempDir } from "./helpers/withTempDir.mjs";
@@ -10,10 +10,7 @@ test("withTempDir creates a temp directory, passes it to the callback, and remov
     // The directory exists inside the callback.
     await access(dir);
     // The directory name starts with the given prefix.
-    assert.ok(
-      dir.includes("audit-code-withTempDir-test-"),
-      `expected dir to contain prefix, got: ${dir}`,
-    );
+    expect(dir.includes("audit-code-withTempDir-test-"), `expected dir to contain prefix, got: ${dir}`).toBeTruthy();
   });
   // The directory is removed after the callback returns.
   await assert.rejects(

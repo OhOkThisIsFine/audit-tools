@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFile, writeFile } from "node:fs/promises";
@@ -108,21 +108,21 @@ test("ClaudeCodeProvider reads the prompt and forwards the expected command argu
       );
 
       const result = await provider.launch(input);
-      assert.equal(result.accepted, true);
-      assert.equal(launches.length, 1);
-      assert.equal(launches[0].command, "claude-bin");
+      expect(result.accepted).toBe(true);
+      expect(launches.length).toBe(1);
+      expect(launches[0].command).toBe("claude-bin");
       // Unified behavior (drift-plan E4): the prompt is delivered via stdin, not
       // as a `-p <prompt>` argv value, so it no longer appears in args.
-      assert.deepEqual(launches[0].args, [
+      expect(launches[0].args).toEqual([
         "-p",
         "--model",
         "sonnet",
       ]);
-      assert.ok(!launches[0].args.includes("Audit this repo"));
-      assert.equal(launches[0].passedInput.stdinText, "Audit this repo");
+      expect(!launches[0].args.includes("Audit this repo")).toBeTruthy();
+      expect(launches[0].passedInput.stdinText).toBe("Audit this repo");
       // The launch input is forwarded with the task's per-task timeout applied.
-      assert.equal(launches[0].passedInput.promptPath, input.promptPath);
-      assert.equal(launches[0].passedInput.timeoutMs, 12345);
+      expect(launches[0].passedInput.promptPath).toBe(input.promptPath);
+      expect(launches[0].passedInput.timeoutMs).toBe(12345);
     });
   });
 });
@@ -150,11 +150,11 @@ test("ClaudeCodeProvider (audit-code) only skips permissions when explicitly con
       );
 
       await provider.launch(input);
-      assert.deepEqual(launches[0].args, [
+      expect(launches[0].args).toEqual([
         "-p",
         "--dangerously-skip-permissions",
       ]);
-      assert.equal(launches[0].passedInput.stdinText, "Audit this repo");
+      expect(launches[0].passedInput.stdinText).toBe("Audit this repo");
     });
   });
 });
@@ -181,7 +181,7 @@ test("ClaudeCodeProvider (audit-code) does not skip permissions by default", asy
       );
 
       await provider.launch(input);
-      assert.ok(!launches[0].args.includes("--dangerously-skip-permissions"));
+      expect(!launches[0].args.includes("--dangerously-skip-permissions")).toBeTruthy();
     });
   });
 });
@@ -226,13 +226,13 @@ test("LocalSubprocessProvider forwards worker_command through the launcher", asy
     });
 
     const result = await provider.launch(input);
-    assert.equal(result.accepted, true);
-    assert.equal(launches.length, 1);
-    assert.equal(launches[0].command, "node");
-    assert.deepEqual(launches[0].args, ["--test", "tests/sample.test.mjs"]);
+    expect(result.accepted).toBe(true);
+    expect(launches.length).toBe(1);
+    expect(launches[0].command).toBe("node");
+    expect(launches[0].args).toEqual(["--test", "tests/sample.test.mjs"]);
     // The launch input is forwarded with the task's per-task timeout applied.
-    assert.equal(launches[0].passedInput.repoRoot, input.repoRoot);
-    assert.equal(launches[0].passedInput.timeoutMs, 6000);
+    expect(launches[0].passedInput.repoRoot).toBe(input.repoRoot);
+    expect(launches[0].passedInput.timeoutMs).toBe(6000);
   });
 });
 
@@ -248,10 +248,10 @@ test("spawnLoggedCommand captures stdout/stderr logs for successful processes", 
       input,
     );
 
-    assert.equal(result.accepted, true);
-    assert.equal(result.exitCode, 0);
-    assert.match(await readFile(input.stdoutPath, "utf8"), /out/);
-    assert.match(await readFile(input.stderrPath, "utf8"), /err/);
+    expect(result.accepted).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(input.stdoutPath, "utf8")).toMatch(/out/);
+    expect(await readFile(input.stderrPath, "utf8")).toMatch(/err/);
   });
 });
 
@@ -264,13 +264,13 @@ test("spawnLoggedCommand reports nonzero exits with launch diagnostics", async (
       input,
     );
 
-    assert.equal(result.accepted, false);
-    assert.equal(result.exitCode, 7);
-    assert.equal(result.signal, null);
-    assert.match(result.command, /node/i);
-    assert.equal(result.stdoutPath, input.stdoutPath);
-    assert.equal(result.stderrPath, input.stderrPath);
-    assert.match(await readFile(input.stderrPath, "utf8"), /boom/);
+    expect(result.accepted).toBe(false);
+    expect(result.exitCode).toBe(7);
+    expect(result.signal).toBe(null);
+    expect(result.command).toMatch(/node/i);
+    expect(result.stdoutPath).toBe(input.stdoutPath);
+    expect(result.stderrPath).toBe(input.stderrPath);
+    expect(await readFile(input.stderrPath, "utf8")).toMatch(/boom/);
   });
 });
 
@@ -296,13 +296,13 @@ test("spawnLoggedCommand waits for close before ending logs", async () => {
     child.stdout.write("tail");
     child.emit("exit", 0, null);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(stdoutLog.writableEnded, false);
+    expect(stdoutLog.writableEnded).toBe(false);
     child.emit("close", 0, null);
 
     const result = await promise;
-    assert.equal(result.accepted, true);
-    assert.deepEqual(writes, ["tail"]);
-    assert.equal(stdoutLog.writableEnded, true);
+    expect(result.accepted).toBe(true);
+    expect(writes).toEqual(["tail"]);
+    expect(stdoutLog.writableEnded).toBe(true);
   });
 });
 
@@ -321,7 +321,7 @@ test("spawnLoggedCommand escalates from SIGTERM to SIGKILL when a timed out chil
       /Fresh session timed out after 20ms for run run-1/i,
     );
 
-    assert.deepEqual(child.killSignals, ["SIGTERM", "SIGKILL"]);
+    expect(child.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
   });
 });
 
@@ -354,23 +354,23 @@ test("ClaudeCodeProvider.launch emits pre-launch and post-launch diagnostics to 
       }
 
       // At least two writes: provider_launch and provider_done.
-      assert.ok(stderrWrites.length >= 2, "should emit at least two stderr writes");
+      expect(stderrWrites.length >= 2, "should emit at least two stderr writes").toBeTruthy();
 
       const launchRecord = JSON.parse(stderrWrites[0]);
-      assert.equal(launchRecord.event, "provider_launch");
-      assert.equal(launchRecord.provider, "claude-code");
-      assert.equal(launchRecord.runId, input.runId);
-      assert.equal(launchRecord.obligationId, input.obligationId);
-      assert.equal(launchRecord.promptPath, input.promptPath);
-      assert.equal(launchRecord.taskPath, input.taskPath);
+      expect(launchRecord.event).toBe("provider_launch");
+      expect(launchRecord.provider).toBe("claude-code");
+      expect(launchRecord.runId).toBe(input.runId);
+      expect(launchRecord.obligationId).toBe(input.obligationId);
+      expect(launchRecord.promptPath).toBe(input.promptPath);
+      expect(launchRecord.taskPath).toBe(input.taskPath);
 
       const doneRecord = JSON.parse(stderrWrites[1]);
-      assert.equal(doneRecord.event, "provider_done");
-      assert.equal(doneRecord.provider, "claude-code");
-      assert.equal(doneRecord.runId, input.runId);
-      assert.equal(doneRecord.obligationId, input.obligationId);
-      assert.ok("accepted" in doneRecord, "provider_done should include accepted");
-      assert.ok("exitCode" in doneRecord, "provider_done should include exitCode");
+      expect(doneRecord.event).toBe("provider_done");
+      expect(doneRecord.provider).toBe("claude-code");
+      expect(doneRecord.runId).toBe(input.runId);
+      expect(doneRecord.obligationId).toBe(input.obligationId);
+      expect("accepted" in doneRecord, "provider_done should include accepted").toBeTruthy();
+      expect("exitCode" in doneRecord, "provider_done should include exitCode").toBeTruthy();
     });
   });
 });
@@ -409,22 +409,22 @@ test("OpenCodeProvider.launch emits pre-launch and post-launch diagnostics to st
     }
 
     // The provider_launch record must have been written.
-    assert.ok(stderrWrites.length >= 2, "should emit provider_launch and provider_done");
+    expect(stderrWrites.length >= 2, "should emit provider_launch and provider_done").toBeTruthy();
     launchRecord = JSON.parse(stderrWrites[0]);
-    assert.equal(launchRecord.event, "provider_launch");
-    assert.equal(launchRecord.provider, "opencode");
-    assert.equal(launchRecord.runId, input.runId);
-    assert.equal(launchRecord.obligationId, input.obligationId);
-    assert.equal(launchRecord.promptPath, input.promptPath);
-    assert.equal(launchRecord.taskPath, input.taskPath);
+    expect(launchRecord.event).toBe("provider_launch");
+    expect(launchRecord.provider).toBe("opencode");
+    expect(launchRecord.runId).toBe(input.runId);
+    expect(launchRecord.obligationId).toBe(input.obligationId);
+    expect(launchRecord.promptPath).toBe(input.promptPath);
+    expect(launchRecord.taskPath).toBe(input.taskPath);
 
     doneRecord = JSON.parse(stderrWrites[1]);
-    assert.equal(doneRecord.event, "provider_done");
-    assert.equal(doneRecord.provider, "opencode");
-    assert.equal(doneRecord.runId, input.runId);
-    assert.equal(doneRecord.obligationId, input.obligationId);
-    assert.ok("accepted" in doneRecord, "provider_done should include accepted");
-    assert.ok("exitCode" in doneRecord, "provider_done should include exitCode");
+    expect(doneRecord.event).toBe("provider_done");
+    expect(doneRecord.provider).toBe("opencode");
+    expect(doneRecord.runId).toBe(input.runId);
+    expect(doneRecord.obligationId).toBe(input.obligationId);
+    expect("accepted" in doneRecord, "provider_done should include accepted").toBeTruthy();
+    expect("exitCode" in doneRecord, "provider_done should include exitCode").toBeTruthy();
   });
 });
 
@@ -450,6 +450,6 @@ test("spawnLoggedCommand rejects on log stream failures and tears down the child
       /disk full/i,
     );
 
-    assert.deepEqual(child.killSignals, ["SIGKILL"]);
+    expect(child.killSignals).toEqual(["SIGKILL"]);
   });
 });

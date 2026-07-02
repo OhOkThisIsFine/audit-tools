@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { parseReflectionsNdjson, aggregateReflections, renderProcessFeedbackSection } =
   await import("../../src/shared/agentReflections.ts");
@@ -22,10 +21,10 @@ test("parseReflectionsNdjson keeps only schema-valid lines and preserves optiona
   ].join("\n");
 
   const parsed = parseReflectionsNdjson(ndjson);
-  assert.equal(parsed.length, 2);
-  assert.deepEqual(parsed.map((r) => r.task_id), ["T1", "T4"]);
-  assert.deepEqual(parsed[0].tool_friction, ["flaky lock"]);
-  assert.deepEqual(parsed[1].suggestions, ["doc it"]);
+  expect(parsed.length).toBe(2);
+  expect(parsed.map((r) => r.task_id)).toEqual(["T1", "T4"]);
+  expect(parsed[0].tool_friction).toEqual(["flaky lock"]);
+  expect(parsed[1].suggestions).toEqual(["doc it"]);
 });
 
 test("aggregateReflections tallies clarity/severity and dedupes notes ranked by max severity", () => {
@@ -33,17 +32,17 @@ test("aggregateReflections tallies clarity/severity and dedupes notes ranked by 
     { task_id: "A", instruction_clarity: "ambiguous", severity: "low", tool_friction: ["dup note"] },
     { task_id: "B", instruction_clarity: "clear", severity: "high", tool_friction: ["dup note", "rare"] },
   ]);
-  assert.equal(agg.total, 2);
-  assert.equal(agg.clarity_breakdown.ambiguous, 1);
-  assert.equal(agg.clarity_breakdown.clear, 1);
-  assert.equal(agg.severity_breakdown.high, 1);
-  assert.equal(agg.severity_breakdown.low, 1);
+  expect(agg.total).toBe(2);
+  expect(agg.clarity_breakdown.ambiguous).toBe(1);
+  expect(agg.clarity_breakdown.clear).toBe(1);
+  expect(agg.severity_breakdown.high).toBe(1);
+  expect(agg.severity_breakdown.low).toBe(1);
   // "dup note" appears twice (max severity high); "rare" once at high → tie broken alphabetically.
-  assert.deepEqual(agg.friction, ["dup note", "rare"]);
+  expect(agg.friction).toEqual(["dup note", "rare"]);
 });
 
 test("renderProcessFeedbackSection omits the section when empty and renders it otherwise", () => {
-  assert.deepEqual(renderProcessFeedbackSection([]), []);
+  expect(renderProcessFeedbackSection([])).toEqual([]);
 
   const section = renderProcessFeedbackSection([
     {
@@ -55,11 +54,11 @@ test("renderProcessFeedbackSection omits the section when empty and renders it o
     },
   ]).join("\n");
 
-  assert.match(section, /## Process Feedback/);
-  assert.match(section, /Instruction clarity: unclear: 1/);
-  assert.match(section, /Reported impact: high: 1/);
-  assert.match(section, /### Tool & instruction friction/);
-  assert.match(section, /- lock EPERM under load/);
-  assert.match(section, /### Suggestions/);
-  assert.match(section, /- retry transient unlink/);
+  expect(section).toMatch(/## Process Feedback/);
+  expect(section).toMatch(/Instruction clarity: unclear: 1/);
+  expect(section).toMatch(/Reported impact: high: 1/);
+  expect(section).toMatch(/### Tool & instruction friction/);
+  expect(section).toMatch(/- lock EPERM under load/);
+  expect(section).toMatch(/### Suggestions/);
+  expect(section).toMatch(/- retry transient unlink/);
 });

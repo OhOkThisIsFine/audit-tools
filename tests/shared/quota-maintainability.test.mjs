@@ -11,8 +11,7 @@
  *                       cliff step-function.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { computeDispatchCapacity } = await import("../../src/shared/quota/capacity.ts");
 const { scheduleWave } = await import("../../src/shared/quota/scheduler.ts");
@@ -45,8 +44,8 @@ test("MNT-56e100e0: converging allocation does not exceed host concurrency limit
     sessionConfig: {},
     pendingItemTokens: new Array(10).fill(20_000),
   });
-  assert.equal(capacity.total_slots, 3);
-  assert.equal(capacity.binding_cap, "host_concurrency");
+  expect(capacity.total_slots).toBe(3);
+  expect(capacity.binding_cap).toBe("host_concurrency");
 });
 
 test("MNT-56e100e0: converging allocation never returns more slots than pending items", () => {
@@ -56,10 +55,7 @@ test("MNT-56e100e0: converging allocation never returns more slots than pending 
     sessionConfig: {},
     pendingItemTokens: [5_000, 3_000],
   });
-  assert.ok(
-    capacity.total_slots <= 2,
-    `slots ${capacity.total_slots} must not exceed 2 pending items`,
-  );
+  expect(capacity.total_slots <= 2, `slots ${capacity.total_slots} must not exceed 2 pending items`).toBeTruthy();
 });
 
 test("MNT-56e100e0: converging allocation preserves exploratory binding cap on narrow slice", () => {
@@ -84,10 +80,7 @@ test("MNT-56e100e0: converging allocation preserves exploratory binding cap on n
     pendingItemTokens: new Array(20).fill(2_000),
   });
   // The tight TPM budget must set a binding cap on the exploratory pass.
-  assert.ok(
-    capacity.binding_cap !== "none",
-    `expected a binding cap, got 'none'`,
-  );
+  expect(capacity.binding_cap !== "none", `expected a binding cap, got 'none'`).toBeTruthy();
 });
 
 test("MNT-56e100e0: multi-pool: second pool receives items not consumed by the first", () => {
@@ -100,9 +93,9 @@ test("MNT-56e100e0: multi-pool: second pool receives items not consumed by the f
     sessionConfig: {},
     pendingItemTokens: [1_000, 1_000, 1_000, 1_000, 1_000],
   });
-  assert.equal(capacity.total_slots, 5);
-  assert.equal(capacity.pools[0].slots, 2);
-  assert.equal(capacity.pools[1].slots, 3);
+  expect(capacity.total_slots).toBe(5);
+  expect(capacity.pools[0].slots).toBe(2);
+  expect(capacity.pools[1].slots).toBe(3);
 });
 
 // ── FND-MNT-bf201bf7: token-budget gate (replaces the extracted cliff helper) ──
@@ -121,7 +114,7 @@ test("MNT-bf201bf7: an exhausted window throttles scheduleWave to 1", () => {
       reset_at: null,
     },
   });
-  assert.equal(schedule.max_concurrent, 1);
+  expect(schedule.max_concurrent).toBe(1);
 });
 
 test("MNT-bf201bf7: a cold-start window admits only a small calibration batch", () => {
@@ -136,8 +129,8 @@ test("MNT-bf201bf7: a cold-start window admits only a small calibration batch", 
       reset_at: null,
     },
   });
-  assert.ok(schedule.max_concurrent <= 3, `cold-start batch, got ${schedule.max_concurrent}`);
-  assert.equal(schedule.binding_cap, "token_budget");
+  expect(schedule.max_concurrent <= 3, `cold-start batch, got ${schedule.max_concurrent}`).toBeTruthy();
+  expect(schedule.binding_cap).toBe("token_budget");
 });
 
 test("MNT-bf201bf7: a healthy learned window does not reduce scheduleWave", () => {
@@ -164,8 +157,8 @@ test("MNT-bf201bf7: a healthy learned window does not reduce scheduleWave", () =
       reset_at: null,
     },
   });
-  assert.equal(schedule.max_concurrent, 4); // no reduction
-  assert.equal(schedule.binding_cap, "none");
+  expect(schedule.max_concurrent).toBe(4); // no reduction
+  expect(schedule.binding_cap).toBe("none");
 });
 
 test("MNT-bf201bf7: exhausted snapshot with reset_at sets cooldown_until", () => {
@@ -180,8 +173,8 @@ test("MNT-bf201bf7: exhausted snapshot with reset_at sets cooldown_until", () =>
       reset_at: resetAt,
     },
   });
-  assert.equal(schedule.max_concurrent, 1);
-  assert.equal(schedule.cooldown_until, resetAt);
+  expect(schedule.max_concurrent).toBe(1);
+  expect(schedule.cooldown_until).toBe(resetAt);
 });
 
 test("MNT-bf201bf7: quota snapshot skipped when cooldown already active", () => {
@@ -205,7 +198,7 @@ test("MNT-bf201bf7: quota snapshot skipped when cooldown already active", () => 
     },
   });
   // Cooldown active → max_concurrent must be 1, binding_cap must be "cooldown"
-  assert.equal(schedule.max_concurrent, 1);
-  assert.equal(schedule.binding_cap, "cooldown");
-  assert.equal(schedule.cooldown_until, futureExpiry);
+  expect(schedule.max_concurrent).toBe(1);
+  expect(schedule.binding_cap).toBe("cooldown");
+  expect(schedule.cooldown_until).toBe(futureExpiry);
 });

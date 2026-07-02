@@ -36,12 +36,9 @@
  * RUN the in-process workers, so it must never run in the normal suite / CI. Run
  * it with:
  *   RUN_AUTONOMY_E2E=1 NVIDIA_API_KEY=... \
- *     node --import tsx/esm --test tests/audit/a9.test.mjs
- * from the repo root.
+ *     npx vitest run tests/audit/a9.test.mjs
  */
-
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { test, expect } from "vitest";
 import { readFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -146,11 +143,7 @@ async function runAuditHalf(root) {
     last = await nextStep();
     // The capstone's core invariant for the audit half: the in-process engine
     // ran instead of emitting a host-subagent review dispatch.
-    assert.notEqual(
-      last.kind,
-      'semantic_review',
-      'audit must drive review in-process, not emit a host-subagent dispatch step',
-    );
+    expect(last.kind, 'audit must drive review in-process, not emit a host-subagent dispatch step').not.toBe('semantic_review');
     if (last.kind === 'complete') break;
     if (last.kind === 'blocked') {
       // A blocked terminal still proves the in-process round-trip; synthesize +
@@ -211,11 +204,8 @@ async function runRemediateHalf(root, inputPath) {
     });
 
     // CAPSTONE INVARIANT (remediate half): never a host-subagent dispatch step.
-    assert.ok(
-      !HOST_SUBAGENT_DISPATCH_STEP_KINDS.has(step.step_kind),
-      `remediate emitted a host-subagent dispatch step (${step.step_kind}); the ` +
-        'in-process engine must drive implementation with no host fan-out',
-    );
+    expect(!HOST_SUBAGENT_DISPATCH_STEP_KINDS.has(step.step_kind), `remediate emitted a host-subagent dispatch step (${step.step_kind}); the ` +
+        'in-process engine must drive implementation with no host fan-out').toBeTruthy();
 
     if (step.step_kind === 'present_report') {
       // Terminal — the run reached complete. On a fully-green run the close phase
@@ -226,16 +216,9 @@ async function runRemediateHalf(root, inputPath) {
         dirname(artifactsDir),
         'remediation-state.complete.json',
       );
-      assert.ok(
-        existsSync(completeStatePath),
-        'present_report must coincide with a persisted complete state',
-      );
+      expect(existsSync(completeStatePath), 'present_report must coincide with a persisted complete state').toBeTruthy();
       const completeState = JSON.parse(readFileSync(completeStatePath, 'utf8'));
-      assert.equal(
-        completeState.status,
-        'complete',
-        'the persisted state must be complete',
-      );
+      expect(completeState.status, 'the persisted state must be complete').toBe('complete');
       return step;
     }
 
@@ -627,7 +610,7 @@ test(
       // 3. REMEDIATE HALF — drive to complete in-process, auto-satisfying host
       //    gates, asserting no host-subagent `dispatch_implement*` step.
       const finalStep = await runRemediateHalf(root, inputPath);
-      assert.equal(finalStep.step_kind, 'present_report');
+      expect(finalStep.step_kind).toBe('present_report');
 
       // ── Capstone assertion 1 already enforced inline (no dispatch step). ──
 
@@ -637,50 +620,33 @@ test(
 
       // ── Assertion 2: a remediation branch with landed commits. ──
       const branches = git('branch', '--list', 'remediation/*');
-      assert.equal(branches.status, 0, 'git branch --list must succeed');
+      expect(branches.status, 'git branch --list must succeed').toBe(0);
       const remediationBranches = branches.stdout
         .split('\n')
         .map((l) => l.replace(/^[*+]?\s*/, '').trim())
         .filter((l) => l.startsWith('remediation/'));
-      assert.ok(
-        remediationBranches.length >= 1,
-        `expected a remediation/<run-id> branch; got: ${branches.stdout.trim() || '(none)'}`,
-      );
+      expect(remediationBranches.length >= 1, `expected a remediation/<run-id> branch; got: ${branches.stdout.trim() || '(none)'}`).toBeTruthy();
       const remediationBranch = remediationBranches[0];
 
       // The branch carries commits AHEAD of the seeded base (landed work).
       const ahead = git('rev-list', '--count', `main..${remediationBranch}`);
-      assert.equal(ahead.status, 0, 'git rev-list must succeed');
-      assert.ok(
-        Number(ahead.stdout.trim()) >= 1,
-        `remediation branch ${remediationBranch} must have >=1 commit ahead of main; got ${ahead.stdout.trim()}`,
-      );
+      expect(ahead.status, 'git rev-list must succeed').toBe(0);
+      expect(Number(ahead.stdout.trim()) >= 1, `remediation branch ${remediationBranch} must have >=1 commit ahead of main; got ${ahead.stdout.trim()}`).toBeTruthy();
 
       // The landed fix verifies green on the remediation branch: check the defect
       // file at the branch tip returns the correct upper bound.
       const showFixed = git('show', `${remediationBranch}:${DEFECT_FILE}`);
-      assert.equal(showFixed.status, 0, 'the defect file must exist at the branch tip');
-      assert.doesNotMatch(
-        showFixed.stdout,
-        /value > max[\s\S]*return min/,
-        'the upper-bound branch must no longer return min on the remediation branch',
-      );
+      expect(showFixed.status, 'the defect file must exist at the branch tip').toBe(0);
+      expect(showFixed.stdout, 'the upper-bound branch must no longer return min on the remediation branch').not.toMatch(/value > max[\s\S]*return min/);
 
       // ── Assertion 3: a green closing gate, recorded in the outcomes contract.
       //    remediation-outcomes.json is written to dirname(artifactsDir) and
       //    SURVIVES the green-run artifact cleanup. ──
       const outcomesPath = join(root, '.audit-tools', 'remediation-outcomes.json');
-      assert.ok(existsSync(outcomesPath), 'remediation-outcomes.json must be written');
+      expect(existsSync(outcomesPath), 'remediation-outcomes.json must be written').toBeTruthy();
       const outcomes = JSON.parse(await readFile(outcomesPath, 'utf8'));
-      assert.ok(
-        outcomes.combined_test_result?.passed === true,
-        `closing gate must be green (combined_test_result.passed); got ${JSON.stringify(outcomes.combined_test_result)}`,
-      );
-      assert.notEqual(
-        outcomes.closing_result?.status,
-        'failed',
-        'the closing action must not have failed',
-      );
+      expect(outcomes.combined_test_result?.passed === true, `closing gate must be green (combined_test_result.passed); got ${JSON.stringify(outcomes.combined_test_result)}`).toBeTruthy();
+      expect(outcomes.closing_result?.status, 'the closing action must not have failed').not.toBe('failed');
 
       // ── Assertion 4 (ledger): a fully-reconciled per-finding coverage ledger.
       //    The persisted complete state carries the final item dispositions; the
@@ -691,10 +657,7 @@ test(
         '.audit-tools',
         'remediation-state.complete.json',
       );
-      assert.ok(
-        existsSync(completeStatePath),
-        'remediation-state.complete.json must be written at close',
-      );
+      expect(existsSync(completeStatePath), 'remediation-state.complete.json must be written at close').toBeTruthy();
       const completeState = JSON.parse(await readFile(completeStatePath, 'utf8'));
 
       // The denominator is the run's ACTUAL planned node set (the contract
@@ -707,34 +670,21 @@ test(
         items: completeState.items,
       });
       const completeness = assertLedgerComplete(ledger);
-      assert.ok(
-        completeness.complete,
-        `coverage ledger must be fully reconciled; missing=${JSON.stringify(
+      expect(completeness.complete, `coverage ledger must be fully reconciled; missing=${JSON.stringify(
           completeness.missing,
-        )} duplicated=${JSON.stringify(completeness.duplicated)}`,
-      );
+        )} duplicated=${JSON.stringify(completeness.duplicated)}`).toBeTruthy();
       // Non-vacuity: a 0/0 ledger is INCOMPLETE by INV-CL-05 — assert a real,
       // positive denominator so the green is never vacuous.
-      assert.ok(
-        ledger.denominator > 0,
-        'coverage ledger denominator must be > 0 (a 0/0 vacuous green FAILS)',
-      );
-      assert.equal(
-        ledger.covered,
-        ledger.denominator,
-        'every enumerated node must reach a terminal disposition',
-      );
+      expect(ledger.denominator > 0, 'coverage ledger denominator must be > 0 (a 0/0 vacuous green FAILS)').toBeTruthy();
+      expect(ledger.covered, 'every enumerated node must reach a terminal disposition').toBe(ledger.denominator);
       // Stronger non-vacuity: the run did real remediation — at least one node
       // genuinely RESOLVED (a ledger of only force-closed entries would still pass
       // the terminal check, but proves no actual fix landed).
-      assert.ok(
-        ledger.entries.some((e) => e.disposition === 'resolved'),
-        `at least one node must be genuinely resolved; entries=${JSON.stringify(ledger.entries)}`,
-      );
+      expect(ledger.entries.some((e) => e.disposition === 'resolved'), `at least one node must be genuinely resolved; entries=${JSON.stringify(ledger.entries)}`).toBeTruthy();
 
       // Cross-check the branch name helper matches the discovered branch's run id.
       const runId = remediationBranch.slice('remediation/'.length);
-      assert.equal(remediationBranchName(runId), remediationBranch);
+      expect(remediationBranchName(runId)).toBe(remediationBranch);
     });
   },
 );

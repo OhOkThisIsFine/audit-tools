@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -83,11 +82,11 @@ test("normalizeExistingFindingsReport recomputes summary counts and stamps curre
   const report = makeReport();
   const normalized = normalizeExistingFindingsReport(report);
 
-  assert.equal(normalized.contract_version, AUDIT_FINDINGS_CONTRACT_VERSION);
-  assert.equal(normalized.summary.finding_count, 2);
-  assert.equal(normalized.summary.work_block_count, 1);
-  assert.deepEqual(normalized.summary.severity_breakdown, { high: 1, medium: 1 });
-  assert.deepEqual(normalized.summary.lens_breakdown, { security: 1, tests: 1 });
+  expect(normalized.contract_version).toBe(AUDIT_FINDINGS_CONTRACT_VERSION);
+  expect(normalized.summary.finding_count).toBe(2);
+  expect(normalized.summary.work_block_count).toBe(1);
+  expect(normalized.summary.severity_breakdown).toEqual({ high: 1, medium: 1 });
+  expect(normalized.summary.lens_breakdown).toEqual({ security: 1, tests: 1 });
 });
 
 test("normalizeExistingFindingsReport preserves findings, work_blocks, and narrative fields unchanged", () => {
@@ -99,30 +98,27 @@ test("normalizeExistingFindingsReport preserves findings, work_blocks, and narra
   const report = makeReport(narrative);
   const normalized = normalizeExistingFindingsReport(report);
 
-  assert.deepEqual(normalized.findings, report.findings);
-  assert.deepEqual(normalized.work_blocks, report.work_blocks);
-  assert.deepEqual(normalized.themes, narrative.themes);
-  assert.equal(normalized.executive_summary, narrative.executive_summary);
-  assert.deepEqual(normalized.top_risks, narrative.top_risks);
+  expect(normalized.findings).toEqual(report.findings);
+  expect(normalized.work_blocks).toEqual(report.work_blocks);
+  expect(normalized.themes).toEqual(narrative.themes);
+  expect(normalized.executive_summary).toBe(narrative.executive_summary);
+  expect(normalized.top_risks).toEqual(narrative.top_risks);
 });
 
 test("normalizeExistingFindingsReport preserves non-reconstructable upstream summary fields", () => {
   const report = makeReport();
   const normalized = normalizeExistingFindingsReport(report);
 
-  assert.equal(normalized.summary.audited_file_count, 7);
-  assert.equal(normalized.summary.excluded_file_count, 2);
-  assert.deepEqual(
-    normalized.summary.runtime_validation_status_breakdown,
-    { pass: 1 },
-  );
+  expect(normalized.summary.audited_file_count).toBe(7);
+  expect(normalized.summary.excluded_file_count).toBe(2);
+  expect(normalized.summary.runtime_validation_status_breakdown).toEqual({ pass: 1 });
 });
 
 test("normalizeExistingFindingsReport is deterministic: calling twice yields the same result", () => {
   const report = makeReport();
   const first = normalizeExistingFindingsReport(report);
   const second = normalizeExistingFindingsReport(first);
-  assert.deepEqual(first, second);
+  expect(first).toEqual(second);
 });
 
 // ── resynthesize CLI command ──────────────────────────────────────────────────
@@ -138,25 +134,22 @@ test("resynthesize rewrites audit-findings.json and audit-report.md from promote
     const argv = [process.execPath, "cli.ts", "resynthesize", "--root", root];
     const { stdout, stderr, exitCode } = await runResynthesize(argv);
 
-    assert.equal(exitCode, 0, `Unexpected exit code. stderr: ${stderr}`);
+    expect(exitCode, `Unexpected exit code. stderr: ${stderr}`).toBe(0);
 
     const outputJson = JSON.parse(
       await readFile(join(auditToolsDir, "audit-findings.json"), "utf8"),
     );
-    assert.equal(outputJson.contract_version, AUDIT_FINDINGS_CONTRACT_VERSION);
-    assert.equal(outputJson.summary.finding_count, 2);
-    assert.equal(outputJson.summary.work_block_count, 1);
+    expect(outputJson.contract_version).toBe(AUDIT_FINDINGS_CONTRACT_VERSION);
+    expect(outputJson.summary.finding_count).toBe(2);
+    expect(outputJson.summary.work_block_count).toBe(1);
 
-    assert.ok(
-      existsSync(join(auditToolsDir, "audit-report.md")),
-      "audit-report.md should be written",
-    );
+    expect(existsSync(join(auditToolsDir, "audit-report.md")), "audit-report.md should be written").toBeTruthy();
 
     const parsed = JSON.parse(stdout);
-    assert.ok("findings_output" in parsed, "stdout JSON should include findings_output");
-    assert.ok("report_output" in parsed, "stdout JSON should include report_output");
-    assert.equal(parsed.finding_count, 2);
-    assert.equal(parsed.contract_version, AUDIT_FINDINGS_CONTRACT_VERSION);
+    expect("findings_output" in parsed, "stdout JSON should include findings_output").toBeTruthy();
+    expect("report_output" in parsed, "stdout JSON should include report_output").toBeTruthy();
+    expect(parsed.finding_count).toBe(2);
+    expect(parsed.contract_version).toBe(AUDIT_FINDINGS_CONTRACT_VERSION);
   });
 });
 
@@ -173,8 +166,8 @@ test("resynthesize does not require the .audit-tools/audit working directory", a
 
     const argv = [process.execPath, "cli.ts", "resynthesize", "--root", root];
     const { exitCode, stderr } = await runResynthesize(argv);
-    assert.equal(exitCode, 0, `Unexpected exit code. stderr: ${stderr}`);
-    assert.ok(!existsSync(join(root, ".audit-tools", "audit")), ".audit-tools/audit should not be created");
+    expect(exitCode, `Unexpected exit code. stderr: ${stderr}`).toBe(0);
+    expect(!existsSync(join(root, ".audit-tools", "audit")), ".audit-tools/audit should not be created").toBeTruthy();
   });
 });
 
@@ -194,9 +187,9 @@ test("resynthesize: a dangling --input followed by another flag falls back to th
     const argv = [process.execPath, "cli.ts", "resynthesize", "--input", "--root", root];
     const { stdout, exitCode, stderr } = await runResynthesize(argv);
 
-    assert.equal(exitCode, 0, `Unexpected exit code. stderr: ${stderr}`);
+    expect(exitCode, `Unexpected exit code. stderr: ${stderr}`).toBe(0);
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.source, join(auditToolsDir, "audit-findings.json"));
+    expect(parsed.source).toBe(join(auditToolsDir, "audit-findings.json"));
   });
 });
 
@@ -205,10 +198,7 @@ test("resynthesize exits with code 1 and names the missing file when audit-findi
     const argv = [process.execPath, "cli.ts", "resynthesize", "--root", root];
     const { exitCode, stderr } = await runResynthesize(argv);
 
-    assert.equal(exitCode, 1, "Should exit 1 when audit-findings.json is missing");
-    assert.ok(
-      stderr.includes("audit-findings.json"),
-      `stderr should name the missing file, got: ${stderr}`,
-    );
+    expect(exitCode, "Should exit 1 when audit-findings.json is missing").toBe(1);
+    expect(stderr.includes("audit-findings.json"), `stderr should name the missing file, got: ${stderr}`).toBeTruthy();
   });
 });

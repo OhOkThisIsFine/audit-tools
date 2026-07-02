@@ -35,7 +35,7 @@
  *      by nextStepHelpers.ts to compute finalReportPath after promotion.
  */
 
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -52,11 +52,7 @@ const AUDIT_FINDINGS_FILENAME = "audit-findings.json";
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("G: AUDIT_REPORT_FILENAME is the literal 'audit-report.md'", () => {
-  assert.equal(
-    AUDIT_REPORT_FILENAME,
-    "audit-report.md",
-    "AUDIT_REPORT_FILENAME must equal 'audit-report.md' — nextStepHelpers.ts uses this constant to construct finalReportPath after promotion",
-  );
+  expect(AUDIT_REPORT_FILENAME, "AUDIT_REPORT_FILENAME must equal 'audit-report.md' — nextStepHelpers.ts uses this constant to construct finalReportPath after promotion").toBe("audit-report.md");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,15 +74,11 @@ test("A1: promotion copies audit-report.md to dirname(artifactsDir)", async () =
 
     const result = await promoteFinalAuditReport({ artifactsDir });
 
-    assert.equal(result.promoted, true, "promoted must be true when source report exists");
-    assert.equal(result.warning, undefined, "no warning expected on clean promotion");
+    expect(result.promoted, "promoted must be true when source report exists").toBe(true);
+    expect(result.warning, "no warning expected on clean promotion").toBe(undefined);
 
     const destContent = await readFile(join(root, AUDIT_REPORT_FILENAME), "utf8");
-    assert.equal(
-      destContent,
-      reportContent,
-      "promoted audit-report.md must have the same content as the source",
-    );
+    expect(destContent, "promoted audit-report.md must have the same content as the source").toBe(reportContent);
   });
 });
 
@@ -107,11 +99,7 @@ test("A2: promotion copies audit-findings.json to dirname(artifactsDir)", async 
 
     const destPath = join(root, AUDIT_FINDINGS_FILENAME);
     const destContent = JSON.parse(await readFile(destPath, "utf8"));
-    assert.deepEqual(
-      destContent,
-      findingsObj,
-      "promoted audit-findings.json must have the same content as the source",
-    );
+    expect(destContent, "promoted audit-findings.json must have the same content as the source").toEqual(findingsObj);
   });
 });
 
@@ -141,15 +129,12 @@ test("B: canonical .audit-tools/audit/ artifactsDir promotes to .audit-tools/ �
     //   = join(auditToolsDir, "audit-findings.json")
     //   = join(root, ".audit-tools", "audit-findings.json")  ✓
     const info = await stat(remediateFirstCandidate);
-    assert.ok(
-      info.isFile(),
-      `audit-findings.json must exist at ${remediateFirstCandidate} — the first path probed by remediate-code defaultInputCandidates`,
-    );
+    expect(info.isFile(), `audit-findings.json must exist at ${remediateFirstCandidate} — the first path probed by remediate-code defaultInputCandidates`).toBeTruthy();
 
     // Report is co-promoted at the same directory
     const reportCandidate = join(root, ".audit-tools", "audit-report.md");
     const reportInfo = await stat(reportCandidate);
-    assert.ok(reportInfo.isFile(), "audit-report.md must also be promoted to .audit-tools/");
+    expect(reportInfo.isFile(), "audit-report.md must also be promoted to .audit-tools/").toBeTruthy();
   });
 });
 
@@ -171,9 +156,9 @@ test("B: dirname invariant — promoted destination is always dirname(artifactsD
 
     const expectedParent = dirname(artifactsDir); // root/nested/subdir
     const reportAtParent = await stat(join(expectedParent, AUDIT_REPORT_FILENAME));
-    assert.ok(reportAtParent.isFile());
+    expect(reportAtParent.isFile()).toBeTruthy();
     const findingsAtParent = await stat(join(expectedParent, AUDIT_FINDINGS_FILENAME));
-    assert.ok(findingsAtParent.isFile());
+    expect(findingsAtParent.isFile()).toBeTruthy();
   });
 });
 
@@ -195,20 +180,13 @@ test("C: promotion succeeds (promoted:true) even when audit-findings.json is mis
       { warn: (msg) => warnings.push(msg) },
     );
 
-    assert.equal(
-      result.promoted,
-      true,
-      "promoted must be true even when audit-findings.json is absent",
-    );
+    expect(result.promoted, "promoted must be true even when audit-findings.json is absent").toBe(true);
     // A warning is emitted for the missing JSON contract
-    assert.equal(warnings.length, 1, "exactly one warning expected for missing audit-findings.json");
-    assert.ok(
-      warnings[0].includes("audit-findings.json"),
-      "warning must mention audit-findings.json",
-    );
+    expect(warnings.length, "exactly one warning expected for missing audit-findings.json").toBe(1);
+    expect(warnings[0].includes("audit-findings.json"), "warning must mention audit-findings.json").toBeTruthy();
     // audit-report.md was still promoted
     const reportInfo = await stat(join(root, AUDIT_REPORT_FILENAME));
-    assert.ok(reportInfo.isFile());
+    expect(reportInfo.isFile()).toBeTruthy();
   });
 });
 
@@ -228,13 +206,10 @@ test("D: promotion returns promoted:false when audit-report.md source is missing
       { warn: (msg) => warnings.push(msg) },
     );
 
-    assert.equal(result.promoted, false, "promoted must be false when source report is missing");
-    assert.equal(result.cleaned, false, "cleaned must be false when promotion fails");
-    assert.equal(typeof result.warning, "string", "warning string must be present on failure");
-    assert.ok(
-      result.warning.includes("could not promote"),
-      "warning must describe the promotion failure",
-    );
+    expect(result.promoted, "promoted must be false when source report is missing").toBe(false);
+    expect(result.cleaned, "cleaned must be false when promotion fails").toBe(false);
+    expect(typeof result.warning, "warning string must be present on failure").toBe("string");
+    expect(result.warning.includes("could not promote"), "warning must describe the promotion failure").toBeTruthy();
   });
 });
 
@@ -259,7 +234,7 @@ test("D2: promotion with missing report does NOT place audit-findings.json at de
       },
     );
 
-    assert.equal(result.promoted, false);
+    expect(result.promoted).toBe(false);
     // destination audit-findings.json must NOT exist (copy was blocked)
     await assert.rejects(
       () => stat(join(root, AUDIT_FINDINGS_FILENAME)),
@@ -287,7 +262,7 @@ test("E1: artifactsDir is removed after successful promotion (cleaned:true)", as
 
     const result = await promoteFinalAuditReport({ artifactsDir });
 
-    assert.equal(result.cleaned, true, "cleaned must be true after successful promotion+cleanup");
+    expect(result.cleaned, "cleaned must be true after successful promotion+cleanup").toBe(true);
     await assert.rejects(
       () => stat(artifactsDir),
       { code: "ENOENT" },
@@ -317,10 +292,10 @@ test("E2: promoted:true but cleaned:false when remove throws (warning emitted)",
       },
     );
 
-    assert.equal(result.promoted, true, "promoted must still be true when only cleanup fails");
-    assert.equal(result.cleaned, false, "cleaned must be false when remove throws");
-    assert.equal(typeof result.warning, "string", "a warning must be emitted for the cleanup failure");
-    assert.ok(warnings.length > 0, "warn callback must have been called");
+    expect(result.promoted, "promoted must still be true when only cleanup fails").toBe(true);
+    expect(result.cleaned, "cleaned must be false when remove throws").toBe(false);
+    expect(typeof result.warning, "a warning must be emitted for the cleanup failure").toBe("string");
+    expect(warnings.length > 0, "warn callback must have been called").toBeTruthy();
   });
 });
 
@@ -345,29 +320,19 @@ test("F: promoteFinalAuditReport return shape has only promoted/cleaned/warning 
     // Only these three keys are part of the seam contract
     const knownKeys = new Set(["promoted", "cleaned", "warning"]);
     for (const key of Object.keys(result)) {
-      assert.ok(
-        knownKeys.has(key),
-        `unexpected property '${key}' in promoteFinalAuditReport result — seam contract violation`,
-      );
+      expect(knownKeys.has(key), `unexpected property '${key}' in promoteFinalAuditReport result — seam contract violation`).toBeTruthy();
     }
-    assert.equal(typeof result.promoted, "boolean");
-    assert.equal(typeof result.cleaned, "boolean");
+    expect(typeof result.promoted).toBe("boolean");
+    expect(typeof result.cleaned).toBe("boolean");
     // warning is optional; when present it must be a string
     if ("warning" in result && result.warning !== undefined) {
-      assert.equal(typeof result.warning, "string");
+      expect(typeof result.warning).toBe("string");
     }
   });
 });
 
 test("F: promoteFinalAuditReport is a function accepting { artifactsDir } param", () => {
-  assert.equal(
-    typeof promoteFinalAuditReport,
-    "function",
-    "promoteFinalAuditReport must be a callable function",
-  );
+  expect(typeof promoteFinalAuditReport, "promoteFinalAuditReport must be a callable function").toBe("function");
   // Arity: params object is first arg; options is second (optional)
-  assert.ok(
-    promoteFinalAuditReport.length <= 2,
-    "promoteFinalAuditReport must accept at most 2 arguments",
-  );
+  expect(promoteFinalAuditReport.length <= 2, "promoteFinalAuditReport must accept at most 2 arguments").toBeTruthy();
 });

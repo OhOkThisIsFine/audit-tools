@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,12 +38,12 @@ test("failure spread applies weight to exactly FAILURE_SPREAD_BUCKETS+1 buckets 
     const buckets = state.entries[KEY].buckets;
     // concurrency (2) through concurrency + 4 (6) inclusive => 5 buckets.
     for (const n of [2, 3, 4, 5, 6]) {
-      assert.ok(buckets[String(n)]?.failure_weight > 0, `bucket ${n} should have failure_weight`);
+      expect(buckets[String(n)]?.failure_weight > 0, `bucket ${n} should have failure_weight`).toBeTruthy();
     }
     // One past the spread must not be touched.
-    assert.equal(buckets["7"]?.failure_weight ?? 0, 0);
+    expect(buckets["7"]?.failure_weight ?? 0).toBe(0);
     // Below the starting concurrency must not be touched either.
-    assert.equal(buckets["1"]?.failure_weight ?? 0, 0);
+    expect(buckets["1"]?.failure_weight ?? 0).toBe(0);
   });
 });
 
@@ -56,9 +55,9 @@ test("failure spread starts at the reported concurrency for rate_limited outcome
     const buckets = state.entries[KEY].buckets;
     // concurrency (1) through concurrency + 4 (5) inclusive => 5 buckets.
     for (const n of [1, 2, 3, 4, 5]) {
-      assert.ok(buckets[String(n)]?.failure_weight > 0, `bucket ${n} should have failure_weight`);
+      expect(buckets[String(n)]?.failure_weight > 0, `bucket ${n} should have failure_weight`).toBeTruthy();
     }
-    assert.equal(buckets["6"]?.failure_weight ?? 0, 0);
+    expect(buckets["6"]?.failure_weight ?? 0).toBe(0);
   });
 });
 
@@ -74,17 +73,17 @@ test("success increments buckets 1..concurrency and persists across a reload", a
     const buckets = entry.buckets;
     // Success at concurrency 3 increments success_weight on buckets 1..3.
     for (const n of [1, 2, 3]) {
-      assert.ok(buckets[String(n)]?.success_weight > 0, `bucket ${n} should have success_weight`);
+      expect(buckets[String(n)]?.success_weight > 0, `bucket ${n} should have success_weight`).toBeTruthy();
     }
     // Bucket 4 (above the reported concurrency) is not credited a success.
-    assert.equal(buckets["4"]?.success_weight ?? 0, 0);
+    expect(buckets["4"]?.success_weight ?? 0).toBe(0);
     // The success path resets the consecutive 429 counter.
-    assert.equal(entry.consecutive_429_count, 0);
+    expect(entry.consecutive_429_count).toBe(0);
 
     // Disk round-trip: a fresh readQuotaState() returns the same persisted
     // buckets/weights, confirming withFileLock + writeQuotaState wrote state.
     const reread = await readQuotaState();
-    assert.deepEqual(reread.entries[KEY].buckets, buckets);
+    expect(reread.entries[KEY].buckets).toEqual(buckets);
   });
 });
 
@@ -94,23 +93,16 @@ test("recordWaveOutcome success clears cooldown_until", async () => {
     await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "rate_limited" }, 24);
     {
       const stateAfter429 = await readQuotaState();
-      assert.ok(
-        stateAfter429.entries[KEY].cooldown_until !== null,
-        "cooldown_until should be set after a rate_limited outcome",
-      );
+      expect(stateAfter429.entries[KEY].cooldown_until !== null, "cooldown_until should be set after a rate_limited outcome").toBeTruthy();
     }
 
     await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24);
     {
       const stateAfterSuccess = await readQuotaState();
       const entry = stateAfterSuccess.entries[KEY];
-      assert.equal(
-        entry.cooldown_until,
-        null,
-        "cooldown_until must be null after a success outcome",
-      );
+      expect(entry.cooldown_until, "cooldown_until must be null after a success outcome").toBe(null);
       // consecutive_429_count must also be cleared.
-      assert.equal(entry.consecutive_429_count, 0);
+      expect(entry.consecutive_429_count).toBe(0);
     }
   });
 
@@ -118,11 +110,7 @@ test("recordWaveOutcome success clears cooldown_until", async () => {
     // Case 2: no prior 429 — success keeps cooldown_until null (no regression).
     await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
     const state = await readQuotaState();
-    assert.equal(
-      state.entries[KEY].cooldown_until,
-      null,
-      "cooldown_until should remain null when no prior cooldown existed",
-    );
+    expect(state.entries[KEY].cooldown_until, "cooldown_until should remain null when no prior cooldown existed").toBe(null);
   });
 });
 
@@ -136,10 +124,10 @@ test("applyDecayToEntry returns the same entry reference when elapsed time is be
   };
   const result = applyDecayToEntry(entry, 24);
   // The early-exit guard (elapsedHours < 0.001) must return the exact same reference.
-  assert.strictEqual(result, entry, "should return the identical object reference when elapsed < 0.001h");
+  expect(result, "should return the identical object reference when elapsed < 0.001h").toBe(entry);
   // No bucket mutation.
-  assert.equal(entry.buckets["1"].success_weight, 2.0);
-  assert.equal(entry.buckets["1"].failure_weight, 1.0);
+  expect(entry.buckets["1"].success_weight).toBe(2.0);
+  expect(entry.buckets["1"].failure_weight).toBe(1.0);
 });
 
 test("applyDecayToEntry decays all bucket weights to near-zero after many half-lives", () => {
@@ -151,14 +139,8 @@ test("applyDecayToEntry decays all bucket weights to near-zero after many half-l
     consecutive_429_count: 0,
   };
   const result = applyDecayToEntry(entry, 24);
-  assert.ok(
-    result.buckets["1"].success_weight < 1e-6,
-    `success_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].success_weight}`,
-  );
-  assert.ok(
-    result.buckets["1"].failure_weight < 1e-6,
-    `failure_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].failure_weight}`,
-  );
+  expect(result.buckets["1"].success_weight < 1e-6, `success_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].success_weight}`).toBeTruthy();
+  expect(result.buckets["1"].failure_weight < 1e-6, `failure_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].failure_weight}`).toBeTruthy();
 });
 
 test("applyDecayToEntry halves weights after exactly one half-life and preserves other fields", () => {
@@ -171,21 +153,15 @@ test("applyDecayToEntry halves weights after exactly one half-life and preserves
   };
   const result = applyDecayToEntry(entry, 24);
   // Must be a new object, not the same reference.
-  assert.notStrictEqual(result, entry, "should return a new object after decay");
+  expect(result, "should return a new object after decay").not.toBe(entry);
   // Weights halved (within 1% tolerance to account for sub-millisecond clock drift).
-  assert.ok(
-    Math.abs(result.buckets["1"].success_weight - 2.0) < 0.01,
-    `success_weight should be ~2.0 after one half-life, got ${result.buckets["1"].success_weight}`,
-  );
-  assert.ok(
-    Math.abs(result.buckets["1"].failure_weight - 1.0) < 0.01,
-    `failure_weight should be ~1.0 after one half-life, got ${result.buckets["1"].failure_weight}`,
-  );
+  expect(Math.abs(result.buckets["1"].success_weight - 2.0) < 0.01, `success_weight should be ~2.0 after one half-life, got ${result.buckets["1"].success_weight}`).toBeTruthy();
+  expect(Math.abs(result.buckets["1"].failure_weight - 1.0) < 0.01, `failure_weight should be ~1.0 after one half-life, got ${result.buckets["1"].failure_weight}`).toBeTruthy();
   // Other fields preserved.
-  assert.equal(result.updated_at, entry.updated_at, "updated_at should be preserved");
-  assert.equal(result.cooldown_until, null, "cooldown_until should be preserved");
+  expect(result.updated_at, "updated_at should be preserved").toBe(entry.updated_at);
+  expect(result.cooldown_until, "cooldown_until should be preserved").toBe(null);
   // Original not mutated.
-  assert.equal(entry.buckets["1"].success_weight, 4.0, "original success_weight must not be mutated");
+  expect(entry.buckets["1"].success_weight, "original success_weight must not be mutated").toBe(4.0);
 });
 
 // Helper: build a minimal QuotaStateEntry with a single bucket at level N.
@@ -204,28 +180,28 @@ test("computeRampUpConcurrency: allows ramp-up when failure_weight has decayed b
   // failure_weight = 0.1 (below threshold) → ramp-up permitted: returns N+1
   const entry = makeEntryWithBucket(1, 3.0, 0.1);
   const result = computeRampUpConcurrency(entry, 24);
-  assert.equal(result, 2, "failure_weight 0.1 < MIN_EVIDENCE_WEIGHT should permit ramp-up to N+1");
+  expect(result, "failure_weight 0.1 < MIN_EVIDENCE_WEIGHT should permit ramp-up to N+1").toBe(2);
 });
 
 test("computeRampUpConcurrency: suppresses ramp-up when failure_weight equals MIN_EVIDENCE_WEIGHT", () => {
   // failure_weight exactly 0.5 (at threshold boundary) → ramp-up suppressed: returns N
   const entry = makeEntryWithBucket(1, 3.0, 0.5);
   const result = computeRampUpConcurrency(entry, 24);
-  assert.equal(result, 1, "failure_weight === MIN_EVIDENCE_WEIGHT should suppress ramp-up");
+  expect(result, "failure_weight === MIN_EVIDENCE_WEIGHT should suppress ramp-up").toBe(1);
 });
 
 test("computeRampUpConcurrency: suppresses ramp-up when failure_weight exceeds MIN_EVIDENCE_WEIGHT", () => {
   // failure_weight = 1.0 (above threshold) → ramp-up suppressed: returns N
   const entry = makeEntryWithBucket(1, 3.0, 1.0);
   const result = computeRampUpConcurrency(entry, 24);
-  assert.equal(result, 1, "failure_weight > MIN_EVIDENCE_WEIGHT should suppress ramp-up");
+  expect(result, "failure_weight > MIN_EVIDENCE_WEIGHT should suppress ramp-up").toBe(1);
 });
 
 test("computeRampUpConcurrency: allows ramp-up when failure_weight is exactly zero (no failures ever)", () => {
   // failure_weight = 0 (never any failures) → ramp-up permitted: returns N+1
   const entry = makeEntryWithBucket(1, 3.0, 0);
   const result = computeRampUpConcurrency(entry, 24);
-  assert.equal(result, 2, "failure_weight === 0 should permit ramp-up to N+1");
+  expect(result, "failure_weight === 0 should permit ramp-up to N+1").toBe(2);
 });
 
 // ── ARC-09b7ce76-2 regression: bucket map growth cap ──────────────────────────
@@ -243,16 +219,9 @@ test("ARC-09b7ce76-2: success at very high concurrency does not write buckets ab
     // No bucket key must exceed MAX_BUCKET_LEVEL — those entries are never read
     // back and would grow the file indefinitely.
     const aboveCeiling = keys.filter((k) => k > MAX_BUCKET_LEVEL);
-    assert.equal(
-      aboveCeiling.length,
-      0,
-      `success path wrote buckets above MAX_BUCKET_LEVEL (${MAX_BUCKET_LEVEL}): ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`,
-    );
+    expect(aboveCeiling.length, `success path wrote buckets above MAX_BUCKET_LEVEL (${MAX_BUCKET_LEVEL}): ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`).toBe(0);
     // Buckets 1..MAX_BUCKET_LEVEL must be written (proof that success evidence is recorded).
-    assert.ok(
-      buckets[String(MAX_BUCKET_LEVEL)]?.success_weight > 0,
-      `bucket ${MAX_BUCKET_LEVEL} (the ceiling) must have success evidence`,
-    );
+    expect(buckets[String(MAX_BUCKET_LEVEL)]?.success_weight > 0, `bucket ${MAX_BUCKET_LEVEL} (the ceiling) must have success evidence`).toBeTruthy();
   });
 });
 
@@ -270,11 +239,7 @@ test("ARC-09b7ce76-2: failure spread does not write buckets above MAX_BUCKET_LEV
     // No key must exceed that ceiling.
     const failureCeiling = MAX_BUCKET_LEVEL + 4; // 36
     const aboveCeiling = keys.filter((k) => k > failureCeiling);
-    assert.equal(
-      aboveCeiling.length,
-      0,
-      `failure spread wrote buckets above ceiling ${failureCeiling}: ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`,
-    );
+    expect(aboveCeiling.length, `failure spread wrote buckets above ceiling ${failureCeiling}: ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`).toBe(0);
   });
 });
 
@@ -286,9 +251,9 @@ test("ARC-09b7ce76-2: normal failure spread within range still writes all expect
     const state = await readQuotaState();
     const buckets = state.entries[KEY].buckets;
     for (const n of [2, 3, 4, 5, 6]) {
-      assert.ok(buckets[String(n)]?.failure_weight > 0, `bucket ${n} must have failure evidence after spread`);
+      expect(buckets[String(n)]?.failure_weight > 0, `bucket ${n} must have failure evidence after spread`).toBeTruthy();
     }
-    assert.equal(buckets["7"]?.failure_weight ?? 0, 0, "bucket 7 must not be touched");
+    expect(buckets["7"]?.failure_weight ?? 0, "bucket 7 must not be touched").toBe(0);
   });
 });
 
@@ -301,23 +266,16 @@ test("ARC-09b7ce76-2: clearBucketFailureEvidence zeros failure_weight on the tar
 
     // Verify the failure is there.
     const before = await readQuotaState();
-    assert.ok(before.entries[KEY].buckets["3"].failure_weight > 0, "bucket 3 must have failure evidence");
-    assert.ok(before.entries[KEY].buckets["4"].failure_weight > 0, "bucket 4 must have failure evidence");
+    expect(before.entries[KEY].buckets["3"].failure_weight > 0, "bucket 3 must have failure evidence").toBeTruthy();
+    expect(before.entries[KEY].buckets["4"].failure_weight > 0, "bucket 4 must have failure evidence").toBeTruthy();
 
     // Clear failure evidence at level 3 only.
     await clearBucketFailureEvidence(KEY, 3);
 
     const after = await readQuotaState();
-    assert.equal(
-      after.entries[KEY].buckets["3"].failure_weight,
-      0,
-      "clearBucketFailureEvidence must zero failure_weight on bucket 3",
-    );
+    expect(after.entries[KEY].buckets["3"].failure_weight, "clearBucketFailureEvidence must zero failure_weight on bucket 3").toBe(0);
     // Bucket 4 must be unchanged — only the targeted bucket is cleared.
-    assert.ok(
-      after.entries[KEY].buckets["4"].failure_weight > 0,
-      "bucket 4 failure_weight must be unchanged after clearing only bucket 3",
-    );
+    expect(after.entries[KEY].buckets["4"].failure_weight > 0, "bucket 4 failure_weight must be unchanged after clearing only bucket 3").toBeTruthy();
   });
 });
 
@@ -329,21 +287,13 @@ test("ARC-09b7ce76-2: clearBucketFailureEvidence preserves success_weight", asyn
 
     const before = await readQuotaState();
     const successWeightBefore = before.entries[KEY].buckets["3"].success_weight;
-    assert.ok(successWeightBefore > 0, "bucket 3 must have success evidence before clearing");
+    expect(successWeightBefore > 0, "bucket 3 must have success evidence before clearing").toBeTruthy();
 
     await clearBucketFailureEvidence(KEY, 3);
 
     const after = await readQuotaState();
-    assert.equal(
-      after.entries[KEY].buckets["3"].failure_weight,
-      0,
-      "failure_weight must be zeroed",
-    );
-    assert.equal(
-      after.entries[KEY].buckets["3"].success_weight,
-      successWeightBefore,
-      "success_weight must be preserved after clearing failure evidence",
-    );
+    expect(after.entries[KEY].buckets["3"].failure_weight, "failure_weight must be zeroed").toBe(0);
+    expect(after.entries[KEY].buckets["3"].success_weight, "success_weight must be preserved after clearing failure evidence").toBe(successWeightBefore);
   });
 });
 
@@ -358,29 +308,17 @@ test("COR-d528d2cd: 'error' outcome records failure weight but does NOT set rate
     const entry = state.entries[KEY];
 
     // Failure weight must be present (error is penalised like timeout).
-    assert.ok(entry.buckets["2"]?.failure_weight > 0, "error outcome must record failure_weight on the bucket");
+    expect(entry.buckets["2"]?.failure_weight > 0, "error outcome must record failure_weight on the bucket").toBeTruthy();
 
     // consecutive_429_count must NOT be incremented — errors are not rate limits.
-    assert.equal(
-      entry.consecutive_429_count ?? 0,
-      0,
-      "error outcome must not increment consecutive_429_count",
-    );
+    expect(entry.consecutive_429_count ?? 0, "error outcome must not increment consecutive_429_count").toBe(0);
 
     // cooldown_until must NOT be set — only rate_limited triggers exponential backoff cooldown.
-    assert.equal(
-      entry.cooldown_until,
-      null,
-      "error outcome must not set cooldown_until (was collapased to timeout — COR-d528d2cd regression)",
-    );
+    expect(entry.cooldown_until, "error outcome must not set cooldown_until (was collapased to timeout — COR-d528d2cd regression)").toBe(null);
 
     // last_429_at must NOT be stamped — an 'error' is not a rate-limit signal
     // (COR-610ddf2c: the field meant "last 429" but was stamped on every failure).
-    assert.equal(
-      entry.last_429_at ?? null,
-      null,
-      "error outcome must not stamp last_429_at (COR-610ddf2c regression)",
-    );
+    expect(entry.last_429_at ?? null, "error outcome must not stamp last_429_at (COR-610ddf2c regression)").toBe(null);
   });
 });
 
@@ -390,11 +328,11 @@ test("COR-d528d2cd: 'timeout' outcome records failure weight and does NOT set ra
 
     const state = await readQuotaState();
     const entry = state.entries[KEY];
-    assert.ok(entry.buckets["2"]?.failure_weight > 0, "timeout outcome must record failure_weight");
-    assert.equal(entry.consecutive_429_count ?? 0, 0, "timeout must not increment consecutive_429_count");
-    assert.equal(entry.cooldown_until, null, "timeout must not set cooldown_until");
+    expect(entry.buckets["2"]?.failure_weight > 0, "timeout outcome must record failure_weight").toBeTruthy();
+    expect(entry.consecutive_429_count ?? 0, "timeout must not increment consecutive_429_count").toBe(0);
+    expect(entry.cooldown_until, "timeout must not set cooldown_until").toBe(null);
     // COR-610ddf2c: a timeout is not a 429 — last_429_at must stay null.
-    assert.equal(entry.last_429_at ?? null, null, "timeout outcome must not stamp last_429_at (COR-610ddf2c)");
+    expect(entry.last_429_at ?? null, "timeout outcome must not stamp last_429_at (COR-610ddf2c)").toBe(null);
   });
 });
 
@@ -402,10 +340,7 @@ test("COR-610ddf2c: only a 'rate_limited' outcome stamps last_429_at", async () 
   await withTempStateDir(async () => {
     await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "rate_limited" }, 24);
     const entry = (await readQuotaState()).entries[KEY];
-    assert.ok(
-      typeof entry.last_429_at === "string" && entry.last_429_at.length > 0,
-      "a rate_limited outcome must stamp last_429_at with an ISO timestamp",
-    );
+    expect(typeof entry.last_429_at === "string" && entry.last_429_at.length > 0, "a rate_limited outcome must stamp last_429_at with an ISO timestamp").toBeTruthy();
   });
 });
 
@@ -422,15 +357,11 @@ test("COR-d528d2cd: 'error' and 'timeout' produce identical quota state (both ar
     const tmoEntry = state.entries[KEY_TMO];
 
     // Both should have identical failure_weight and zero cooldown.
-    assert.equal(
-      errEntry.buckets["3"]?.failure_weight,
-      tmoEntry.buckets["3"]?.failure_weight,
-      "error and timeout must produce identical failure_weight at the observed concurrency",
-    );
-    assert.equal(errEntry.cooldown_until, null, "error: no cooldown");
-    assert.equal(tmoEntry.cooldown_until, null, "timeout: no cooldown");
-    assert.equal(errEntry.consecutive_429_count ?? 0, 0, "error: no 429 count");
-    assert.equal(tmoEntry.consecutive_429_count ?? 0, 0, "timeout: no 429 count");
+    expect(errEntry.buckets["3"]?.failure_weight, "error and timeout must produce identical failure_weight at the observed concurrency").toBe(tmoEntry.buckets["3"]?.failure_weight);
+    expect(errEntry.cooldown_until, "error: no cooldown").toBe(null);
+    expect(tmoEntry.cooldown_until, "timeout: no cooldown").toBe(null);
+    expect(errEntry.consecutive_429_count ?? 0, "error: no 429 count").toBe(0);
+    expect(tmoEntry.consecutive_429_count ?? 0, "timeout: no 429 count").toBe(0);
   });
 });
 
@@ -441,8 +372,8 @@ test("COR-d528d2cd: 'rate_limited' outcome correctly increments 429 count and se
 
     const state = await readQuotaState();
     const entry = state.entries[KEY];
-    assert.ok(entry.consecutive_429_count > 0, "rate_limited must increment consecutive_429_count");
-    assert.ok(entry.cooldown_until !== null, "rate_limited must set cooldown_until");
+    expect(entry.consecutive_429_count > 0, "rate_limited must increment consecutive_429_count").toBeTruthy();
+    expect(entry.cooldown_until !== null, "rate_limited must set cooldown_until").toBeTruthy();
   });
 });
 
@@ -451,14 +382,14 @@ test("ARC-09b7ce76-2: clearBucketFailureEvidence on missing key or bucket is a n
     // No-op when key does not exist yet.
     await clearBucketFailureEvidence("nonexistent/key", 5);
     const state = await readQuotaState();
-    assert.equal(Object.keys(state.entries).length, 0, "state must remain empty after no-op clear");
+    expect(Object.keys(state.entries).length, "state must remain empty after no-op clear").toBe(0);
 
     // No-op when bucket does not exist for a known key.
     await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24);
     await clearBucketFailureEvidence(KEY, 99); // bucket 99 was never written
     const stateAfter = await readQuotaState();
-    assert.ok(stateAfter.entries[KEY], "key entry must still exist");
-    assert.ok(stateAfter.entries[KEY].buckets["1"]?.success_weight > 0, "existing bucket must be unaffected");
+    expect(stateAfter.entries[KEY], "key entry must still exist").toBeTruthy();
+    expect(stateAfter.entries[KEY].buckets["1"]?.success_weight > 0, "existing bucket must be unaffected").toBeTruthy();
   });
 });
 
@@ -474,7 +405,7 @@ test("ARC-09b7ce76-2: clearing blocking failure unblocks computeMaxSafeConcurren
     const entryBlocked = stateBlocked.entries[KEY];
     // Failure weight at bucket 2 dominates → scan breaks at 2 → maxSafe = 1.
     const maxBefore = computeMaxSafeConcurrency(entryBlocked, 24);
-    assert.equal(maxBefore, 1, "scan must stop at the failed bucket before recovery");
+    expect(maxBefore, "scan must stop at the failed bucket before recovery").toBe(1);
 
     // Clear the blocking failure at level 2.
     await clearBucketFailureEvidence(KEY, 2);
@@ -482,7 +413,7 @@ test("ARC-09b7ce76-2: clearing blocking failure unblocks computeMaxSafeConcurren
     const stateAfter = await readQuotaState();
     const entryAfter = stateAfter.entries[KEY];
     const maxAfter = computeMaxSafeConcurrency(entryAfter, 24);
-    assert.ok(maxAfter >= 2, `maxSafe must advance past the cleared bucket — got ${maxAfter}`);
+    expect(maxAfter >= 2, `maxSafe must advance past the cleared bucket — got ${maxAfter}`).toBeTruthy();
   });
 });
 
@@ -502,18 +433,10 @@ test("MNT-ba639774: computeMaxSafeConcurrency default scan ceiling tracks MAX_BU
   }
   const entry = { updated_at: new Date().toISOString(), buckets, cooldown_until: null, last_429_at: null, consecutive_429_count: 0 };
   // Default maxToCheck (= MAX_BUCKET_LEVEL): reaches the ceiling.
-  assert.equal(
-    computeMaxSafeConcurrency(entry, 24),
-    MAX_BUCKET_LEVEL,
-    "default scan must reach MAX_BUCKET_LEVEL when every bucket up to it is safe",
-  );
+  expect(computeMaxSafeConcurrency(entry, 24), "default scan must reach MAX_BUCKET_LEVEL when every bucket up to it is safe").toBe(MAX_BUCKET_LEVEL);
   // An explicit lower ceiling stops earlier — proves the default is the cap, not
   // a hidden internal constant.
-  assert.equal(
-    computeMaxSafeConcurrency(entry, 24, 5),
-    5,
-    "an explicit maxToCheck must override the default ceiling",
-  );
+  expect(computeMaxSafeConcurrency(entry, 24, 5), "an explicit maxToCheck must override the default ceiling").toBe(5);
 });
 
 // ── Token-budget slope learning (tokens_per_pct) ────────────────────────────
@@ -521,7 +444,7 @@ test("MNT-ba639774: computeMaxSafeConcurrency default scan ceiling tracks MAX_BU
 test("foldTokensPerPctObservation seeds a new window slope from the first sample", () => {
   // 5000 tokens over a 5-percent drop (0.50 → 0.45) → slope 1000 tokens/percent.
   const updated = foldTokensPerPctObservation(undefined, "session", 0.5, 0.45, 5000);
-  assert.ok(Math.abs(updated.session - 1000) < 1, `expected ~1000, got ${updated.session}`);
+  expect(Math.abs(updated.session - 1000) < 1, `expected ~1000, got ${updated.session}`).toBeTruthy();
 });
 
 test("foldTokensPerPctObservation blends into the prior EWMA and learns per label", () => {
@@ -529,18 +452,18 @@ test("foldTokensPerPctObservation blends into the prior EWMA and learns per labe
   // New session sample: 3000 tokens over 0.10 → 0.05 (5 percent) → 600/pct sample.
   const updated = foldTokensPerPctObservation(prior, "session", 0.1, 0.05, 3000);
   // EWMA(alpha 0.3): 1000*0.7 + 600*0.3 = 880. weekly untouched.
-  assert.ok(Math.abs(updated.session - 880) < 1, `expected ~880, got ${updated.session}`);
-  assert.equal(updated.weekly, 40);
+  expect(Math.abs(updated.session - 880) < 1, `expected ~880, got ${updated.session}`).toBeTruthy();
+  expect(updated.weekly).toBe(40);
 });
 
 test("foldTokensPerPctObservation ignores a below-threshold or non-positive delta (degrade-safe)", () => {
   const prior = { session: 1000 };
   // Δpercent = 0.3 (< 0.5 floor) → unchanged.
-  assert.deepEqual(foldTokensPerPctObservation(prior, "session", 0.5, 0.497, 5000), prior);
+  expect(foldTokensPerPctObservation(prior, "session", 0.5, 0.497, 5000)).toEqual(prior);
   // Non-positive tokens → unchanged.
-  assert.deepEqual(foldTokensPerPctObservation(prior, "session", 0.5, 0.4, 0), prior);
+  expect(foldTokensPerPctObservation(prior, "session", 0.5, 0.4, 0)).toEqual(prior);
   // Percent went UP (no consumption) → unchanged.
-  assert.deepEqual(foldTokensPerPctObservation(prior, "session", 0.4, 0.5, 5000), prior);
+  expect(foldTokensPerPctObservation(prior, "session", 0.4, 0.5, 5000)).toEqual(prior);
 });
 
 test("recordTokensPerPctObservation persists a per-window slope to quota-state", async () => {
@@ -548,8 +471,8 @@ test("recordTokensPerPctObservation persists a per-window slope to quota-state",
     await recordTokensPerPctObservation("prov/model", "weekly", 0.2, 0.1, 2000);
     const state = await readQuotaState();
     const entry = state.entries["prov/model"];
-    assert.ok(entry, "entry created");
+    expect(entry, "entry created").toBeTruthy();
     // 2000 tokens / (0.2-0.1)*100 = 10 percent → 200 tokens/pct.
-    assert.ok(Math.abs(entry.tokens_per_pct.weekly - 200) < 1e-9);
+    expect(Math.abs(entry.tokens_per_pct.weekly - 200) < 1e-9).toBeTruthy();
   });
 });

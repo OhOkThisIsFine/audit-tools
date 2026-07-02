@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,24 +68,21 @@ test("typescript analyzer resolves imports, re-exports, inheritance, and a cross
     const has = (from, to, kind) =>
       output.edges.some((e) => e.from === from && e.to === to && e.kind === kind);
 
-    assert.ok(has("src/a.ts", "src/b.ts", "ts-import"), "import b → b.ts");
-    assert.ok(has("src/a.ts", "src/base.ts", "ts-import"), "import Base/Contract → base.ts");
-    assert.ok(has("src/barrel.ts", "src/b.ts", "ts-reexport"), "barrel re-exports b.ts");
-    assert.ok(has("src/a.ts", "src/base.ts", "ts-extends"), "A extends Base");
-    assert.ok(has("src/a.ts", "src/base.ts", "ts-implements"), "A implements Contract");
-    assert.ok(has("src/a.ts", "src/b.ts", "ts-call"), "run() calls b() cross-file");
+    expect(has("src/a.ts", "src/b.ts", "ts-import"), "import b → b.ts").toBeTruthy();
+    expect(has("src/a.ts", "src/base.ts", "ts-import"), "import Base/Contract → base.ts").toBeTruthy();
+    expect(has("src/barrel.ts", "src/b.ts", "ts-reexport"), "barrel re-exports b.ts").toBeTruthy();
+    expect(has("src/a.ts", "src/base.ts", "ts-extends"), "A extends Base").toBeTruthy();
+    expect(has("src/a.ts", "src/base.ts", "ts-implements"), "A implements Contract").toBeTruthy();
+    expect(has("src/a.ts", "src/b.ts", "ts-call"), "run() calls b() cross-file").toBeTruthy();
 
     // No edge ever targets a file outside the audited set.
-    assert.ok(
-      output.edges.every((e) => includedFiles.includes(e.to)),
-      "every analyzer edge targets an audit-included file",
-    );
+    expect(output.edges.every((e) => includedFiles.includes(e.to)), "every analyzer edge targets an audit-included file").toBeTruthy();
 
     // Import edges carry the high analyzer confidence so they win the merge.
     const importEdge = output.edges.find(
       (e) => e.from === "src/a.ts" && e.to === "src/b.ts" && e.kind === "ts-import",
     );
-    assert.equal(importEdge.confidence, 0.99);
+    expect(importEdge.confidence).toBe(0.99);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -101,7 +97,7 @@ test("typescript analyzer returns no edges for an empty file set", async () => {
       includedFiles: [],
       pathLookup: new Map(),
     });
-    assert.deepEqual(output.edges, []);
+    expect(output.edges).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -143,9 +139,9 @@ test("collectFileEdges: emits ts-import edge for a static import declaration", a
   const importEdges = output.edges.filter(
     (e) => e.from === "src/main.ts" && e.to === "src/other.ts" && e.kind === "ts-import",
   );
-  assert.equal(importEdges.length, 1, "exactly one ts-import edge from main→other");
-  assert.equal(importEdges[0].from, "src/main.ts");
-  assert.equal(importEdges[0].to, "src/other.ts");
+  expect(importEdges.length, "exactly one ts-import edge from main→other").toBe(1);
+  expect(importEdges[0].from).toBe("src/main.ts");
+  expect(importEdges[0].to).toBe("src/other.ts");
 });
 
 test("collectFileEdges: emits ts-reexport edge for a re-export declaration", async () => {
@@ -156,7 +152,7 @@ test("collectFileEdges: emits ts-reexport edge for a re-export declaration", asy
   const reexportEdges = output.edges.filter(
     (e) => e.from === "src/barrel.ts" && e.to === "src/impl.ts" && e.kind === "ts-reexport",
   );
-  assert.equal(reexportEdges.length, 1, "exactly one ts-reexport edge");
+  expect(reexportEdges.length, "exactly one ts-reexport edge").toBe(1);
 });
 
 test("collectFileEdges: emits ts-import edge for a dynamic import call expression", async () => {
@@ -167,7 +163,7 @@ test("collectFileEdges: emits ts-import edge for a dynamic import call expressio
   const dynamicEdges = output.edges.filter(
     (e) => e.from === "src/main.ts" && e.to === "src/lazy.ts" && e.kind === "ts-import",
   );
-  assert.equal(dynamicEdges.length, 1, "exactly one ts-import edge for dynamic import");
+  expect(dynamicEdges.length, "exactly one ts-import edge for dynamic import").toBe(1);
 });
 
 test("collectFileEdges: emits ts-call edge and deduplicates repeated calls", async () => {
@@ -183,7 +179,7 @@ test("collectFileEdges: emits ts-call edge and deduplicates repeated calls", asy
   const callEdges = output.edges.filter(
     (e) => e.from === "src/main.ts" && e.to === "src/util.ts" && e.kind === "ts-call",
   );
-  assert.equal(callEdges.length, 1, "duplicate calls produce exactly one ts-call edge");
+  expect(callEdges.length, "duplicate calls produce exactly one ts-call edge").toBe(1);
 });
 
 test("collectFileEdges: emits ts-extends edge for class heritage", async () => {
@@ -194,7 +190,7 @@ test("collectFileEdges: emits ts-extends edge for class heritage", async () => {
   const extendsEdges = output.edges.filter(
     (e) => e.from === "src/dog.ts" && e.to === "src/base.ts" && e.kind === "ts-extends",
   );
-  assert.equal(extendsEdges.length, 1, "exactly one ts-extends edge");
+  expect(extendsEdges.length, "exactly one ts-extends edge").toBe(1);
 });
 
 test("collectFileEdges: emits ts-implements edge for interface heritage", async () => {
@@ -205,5 +201,5 @@ test("collectFileEdges: emits ts-implements edge for interface heritage", async 
   const implEdges = output.edges.filter(
     (e) => e.from === "src/task.ts" && e.to === "src/iface.ts" && e.kind === "ts-implements",
   );
-  assert.equal(implEdges.length, 1, "exactly one ts-implements edge");
+  expect(implEdges.length, "exactly one ts-implements edge").toBe(1);
 });

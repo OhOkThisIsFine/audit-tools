@@ -26,7 +26,7 @@
  *     concurrently-acquired lock (TOCTOU safety).
  */
 
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, stat, writeFile, readFile, utimes } from "node:fs/promises";
 import { join } from "node:path";
@@ -79,11 +79,7 @@ function tmpDir() {
 test("A: stale-lock thresholds are equal across shared fileLock and StateStore", () => {
   // Both constants are module-private so we verify the observable values are equal.
   // If either side changed its threshold, this enforces parity at the seam.
-  assert.equal(
-    SHARED_STALE_LOCK_MS,
-    STORE_STALE_LOCK_MS,
-    "shared fileLock and StateStore must use the same stale-lock threshold (30 000 ms)",
-  );
+  expect(SHARED_STALE_LOCK_MS, "shared fileLock and StateStore must use the same stale-lock threshold (30 000 ms)").toBe(STORE_STALE_LOCK_MS);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,8 +89,8 @@ test("A: stale-lock thresholds are equal across shared fileLock and StateStore",
 test("B1: acquireLock returns a non-empty string token", async () => {
   const lockPath = join(tmpdir(), `seam-shared-${randomUUID()}.lock`);
   const token = await acquireLock(lockPath, 5_000);
-  assert.equal(typeof token, "string");
-  assert.ok(token.length > 0, "token must be a non-empty string");
+  expect(typeof token).toBe("string");
+  expect(token.length > 0, "token must be a non-empty string").toBeTruthy();
   await releaseLock(lockPath, token);
 });
 
@@ -119,8 +115,8 @@ test("B4: acquireLock times out as FileLockTimeoutError when lock is held", asyn
     await assert.rejects(
       () => acquireLock(lockPath, 200),
       (err) => {
-        assert.ok(err instanceof FileLockTimeoutError, "must be FileLockTimeoutError");
-        assert.equal(err.name, "FileLockTimeoutError");
+        expect(err instanceof FileLockTimeoutError, "must be FileLockTimeoutError").toBeTruthy();
+        expect(err.name).toBe("FileLockTimeoutError");
         return true;
       },
     );
@@ -145,7 +141,7 @@ test("B5: withFileLock serializes concurrent callers — no lost updates", async
 
   await Promise.all(writers);
   const final = parseInt(await readFile(counterPath, "utf8"), 10);
-  assert.equal(final, N, `expected ${N} updates, got ${final}`);
+  expect(final, `expected ${N} updates, got ${final}`).toBe(N);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,9 +172,9 @@ test("C1: StateStore.saveState and withFileLock on separate files in the same di
     }, 10_000),
   ]);
 
-  assert.equal(storeResult.status, "fulfilled", `StateStore.saveState failed: ${storeResult.reason}`);
-  assert.equal(lockResult.status, "fulfilled", `withFileLock failed: ${lockResult.reason}`);
-  assert.equal(lockResult.value, "ok");
+  expect(storeResult.status, `StateStore.saveState failed: ${storeResult.reason}`).toBe("fulfilled");
+  expect(lockResult.status, `withFileLock failed: ${lockResult.reason}`).toBe("fulfilled");
+  expect(lockResult.value).toBe("ok");
 });
 
 test("C2: StateStore.saveState does not consume or interfere with shared fileLock's lock file", { skip: skipNoStore }, async () => {
@@ -197,7 +193,7 @@ test("C2: StateStore.saveState does not consume or interfere with shared fileLoc
 
   // Shared lock should still be valid (not stolen or deleted by StateStore)
   const info = await stat(sharedLockPath);
-  assert.ok(info.isFile(), "shared lock file must still exist while held");
+  expect(info.isFile(), "shared lock file must still exist while held").toBeTruthy();
 
   await releaseLock(sharedLockPath, token);
 });
@@ -226,8 +222,8 @@ test("C3: multiple concurrent StateStore.saveState calls on the same dir seriali
 
   // Final state must be readable (not corrupted by concurrent writes)
   const final = await stores[0].loadState();
-  assert.ok(final !== null, "state must be readable after concurrent saves");
-  assert.equal(typeof final.status, "string", "state.status must be a string");
+  expect(final !== null, "state must be readable after concurrent saves").toBeTruthy();
+  expect(typeof final.status, "state.status must be a string").toBe("string");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,11 +242,11 @@ test("D: token-checked stale removal does not clobber a freshly-acquired lock", 
 
   // Acquire a fresh lock over the stale one (should clean it up and succeed)
   const freshToken = await acquireLock(lockPath, 5_000);
-  assert.notEqual(freshToken, staleToken, "fresh token must differ from stale token");
+  expect(freshToken, "fresh token must differ from stale token").not.toBe(staleToken);
 
   // Verify the stale token content was replaced by the fresh token
   const content = await readFile(lockPath, "utf8");
-  assert.equal(content, freshToken, "lock file must contain the fresh token after stale cleanup");
+  expect(content, "lock file must contain the fresh token after stale cleanup").toBe(freshToken);
 
   await releaseLock(lockPath, freshToken);
   await assert.rejects(() => stat(lockPath), { code: "ENOENT" });

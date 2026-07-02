@@ -4,8 +4,7 @@
  *
  * Deterministic in-process tests — no LLM calls, minimal disk IO.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,20 +41,16 @@ test("COR-a278fbe0: runSample task_id matches the unit_id:lens pattern", async (
     if (results && Array.isArray(results)) {
       for (const r of results) {
         if (r.task_id) {
-          assert.notEqual(
-            r.task_id,
-            "src-api:security:src/api/auth.ts:1-100",
-            "Hardcoded task_id must not appear in persisted results",
-          );
+          expect(r.task_id, "Hardcoded task_id must not appear in persisted results").not.toBe("src-api:security:src/api/auth.ts:1-100");
           // Must follow <unit_id>:<lens> pattern (no file path embedded)
           const parts = r.task_id.split(":");
-          assert.ok(parts.length >= 2, `task_id '${r.task_id}' must have at least 2 colon-separated parts`);
+          expect(parts.length >= 2, `task_id '${r.task_id}' must have at least 2 colon-separated parts`).toBeTruthy();
         }
       }
     }
     // If results file doesn't exist (sample may write differently), verify the
     // structural contract via source inspection — documented in the test body.
-    assert.ok(true, "Sample run completed without throwing");
+    expect(true, "Sample run completed without throwing").toBeTruthy();
   });
 });
 
@@ -74,11 +69,7 @@ test("COR-df0bf37c: Array.isArray guard distinguishes null/absent results from e
     { input: [{ id: 1 }], expected: true },
   ];
   for (const { input, expected } of cases) {
-    assert.equal(
-      Array.isArray(input),
-      expected,
-      `Array.isArray(${JSON.stringify(input)}) should be ${expected}`,
-    );
+    expect(Array.isArray(input), `Array.isArray(${JSON.stringify(input)}) should be ${expected}`).toBe(expected);
   }
 });
 
@@ -96,10 +87,7 @@ test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape
     { status: "active", obligations: [], blockers: [] },
     { value: undefined },
   );
-  assert.ok(
-    ["fallthrough", "continue", "return"].includes(result.action),
-    `Expected valid action; got ${result.action}`,
-  );
+  expect(["fallthrough", "continue", "return"].includes(result.action), `Expected valid action; got ${result.action}`).toBeTruthy();
 });
 
 // ── COR-03418a9f-2: all-invalid analyzer decisions → stderr diagnostic ────────
@@ -134,14 +122,14 @@ test("COR-03418a9f-2: handleGraphEnrichmentBranch emits stderr for all-invalid a
       // (decisions file is only consumed when unresolved.length > 0)
       const result = await handleGraphEnrichmentBranch(params, bundle, state, { value: undefined });
       // No manifest means no unresolved entries, so the decisions path is not taken
-      assert.equal(result.action, "fallthrough", "no manifest → fallthrough");
+      expect(result.action, "no manifest → fallthrough").toBe("fallthrough");
     } finally {
       process.stderr.write = origWrite;
     }
     // The diagnostic is only emitted when unresolved.length > 0 AND all values are invalid.
     // This test verifies the function doesn't crash with invalid values in the file;
     // the diagnostic path requires a non-empty unresolved list (controlled by registry).
-    assert.ok(true, "Function handles all-invalid decisions without throwing");
+    expect(true, "Function handles all-invalid decisions without throwing").toBeTruthy();
   });
 });
 
@@ -153,16 +141,8 @@ const { getFlag } = await import("../../src/audit/cli/args.ts");
 
 test("COR-4c72c062: getFlag returns fallback (not undefined) when next token is a long flag", () => {
   // Caller passes '--root --artifacts-dir something' — root gets fallback
-  assert.equal(
-    getFlag(["--root", "--artifacts-dir", "something"], "--root", "/default"),
-    "/default",
-    "When next token is a long flag, getFlag returns the explicit fallback",
-  );
-  assert.equal(
-    getFlag(["--root", "--artifacts-dir", "something"], "--root"),
-    undefined,
-    "When next token is a long flag and no fallback given, returns undefined",
-  );
+  expect(getFlag(["--root", "--artifacts-dir", "something"], "--root", "/default"), "When next token is a long flag, getFlag returns the explicit fallback").toBe("/default");
+  expect(getFlag(["--root", "--artifacts-dir", "something"], "--root"), "When next token is a long flag and no fallback given, returns undefined").toBe(undefined);
 });
 
 // ── COR-570cb86b: sampleRunCommand argv is used for artifactsDir only (verified) ─
@@ -172,7 +152,7 @@ test("COR-4c72c062: getFlag returns fallback (not undefined) when next token is 
 test("COR-570cb86b: sampleRunCommand argv is consumed only for artifactsDir (documented behavior)", () => {
   // This is a positive assertion: SAMPLE_REPO_FILES is constant within the module;
   // the sample does not need --root or other flags because it builds synthetic data.
-  assert.ok(true, "sampleRunCommand uses argv only for --artifacts-dir; all other sample data is derived from constants");
+  expect(true, "sampleRunCommand uses argv only for --artifacts-dir; all other sample data is derived from constants").toBeTruthy();
 });
 
 // ── COR-70b138b4: quotaCommand sessionConfig error → stderr warning + defaults ─
@@ -182,7 +162,7 @@ test("COR-570cb86b: sampleRunCommand argv is consumed only for artifactsDir (doc
 test("COR-70b138b4: quotaCommand sessionConfig failure falls back to defaults with stderr warning (verified behavior)", () => {
   // The catch block in cmdQuota already writes to process.stderr. This is the
   // appropriate response for a display command — better than crashing.
-  assert.ok(true, "cmdQuota catches sessionConfig errors, emits stderr, uses empty SessionConfig as default");
+  expect(true, "cmdQuota catches sessionConfig errors, emits stderr, uses empty SessionConfig as default").toBeTruthy();
 });
 
 // ── COR-2cf46bf7: ensureSemanticReviewRun writeJsonFile(pendingTasksPath) ─────
@@ -196,10 +176,10 @@ test("COR-2cf46bf7: ensureSemanticReviewRun writes pendingTasks to two distinct 
   // serve different consumers: the operator handoff reads current-tasks.json; the
   // worker reads pending_audit_tasks_path. Deduplication is not possible without
   // breaking one consumer.
-  assert.ok(true, "Both writes in ensureSemanticReviewRun are intentional and serve distinct consumers");
+  expect(true, "Both writes in ensureSemanticReviewRun are intentional and serve distinct consumers").toBeTruthy();
 });
 
 // ── COR-dc621e7a: buildManualReviewBlocker routing is correct (verified in INV-01) ─
 test("COR-dc621e7a: buildManualReviewBlocker routing verified by INV-audit-cli-01 tests", () => {
-  assert.ok(true, "INV-audit-cli-01 in audit-cli-invariants.test.mjs covers this invariant");
+  expect(true, "INV-audit-cli-01 in audit-cli-invariants.test.mjs covers this invariant").toBeTruthy();
 });

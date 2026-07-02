@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,14 +28,14 @@ const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
 test("mapAntigravityUsage binds on the least-remaining model", () => {
   const snap = mapAntigravityUsage(LIVE, NOW);
-  assert.equal(snap.remaining_pct, 0.3);
-  assert.equal(snap.reset_at, new Date(Date.parse("2026-06-17T05:00:00Z")).toISOString());
-  assert.equal(snap.source, "antigravity");
+  expect(snap.remaining_pct).toBe(0.3);
+  expect(snap.reset_at).toBe(new Date(Date.parse("2026-06-17T05:00:00Z")).toISOString());
+  expect(snap.source).toBe("antigravity");
 });
 
 test("mapAntigravityUsage returns null when no model has a numeric remainingFraction", () => {
-  assert.equal(mapAntigravityUsage({ models: [{ quotaInfo: null }, {}] }, NOW), null);
-  assert.equal(mapAntigravityUsage({}, NOW), null);
+  expect(mapAntigravityUsage({ models: [{ quotaInfo: null }, {}] }, NOW)).toBe(null);
+  expect(mapAntigravityUsage({}, NOW)).toBe(null);
 });
 
 // ---- queryCurrentUsage ----
@@ -44,53 +43,53 @@ test("mapAntigravityUsage returns null when no model has a numeric remainingFrac
 test("queryCurrentUsage returns null for a non-Antigravity provider without fetching", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new AntigravityQuotaSource({ readAccessToken: () => "tok", fetchImpl, now: () => NOW });
-  assert.equal(await src.queryCurrentUsage("codex/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("codex/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("queryCurrentUsage POSTs fetchAvailableModels with Bearer + antigravity UA", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new AntigravityQuotaSource({ readAccessToken: () => "tok", project: "proj-1", fetchImpl, now: () => NOW });
   const snap = await src.queryCurrentUsage("antigravity/*");
-  assert.equal(snap.remaining_pct, 0.3);
+  expect(snap.remaining_pct).toBe(0.3);
   const c = fetchImpl.calls[0];
-  assert.match(c.url, /v1internal:fetchAvailableModels$/);
-  assert.equal(c.init.method, "POST");
-  assert.equal(c.init.headers.Authorization, "Bearer tok");
-  assert.equal(c.init.headers["User-Agent"], "antigravity");
-  assert.equal(c.init.body, JSON.stringify({ project: "proj-1" }));
+  expect(c.url).toMatch(/v1internal:fetchAvailableModels$/);
+  expect(c.init.method).toBe("POST");
+  expect(c.init.headers.Authorization).toBe("Bearer tok");
+  expect(c.init.headers["User-Agent"]).toBe("antigravity");
+  expect(c.init.body).toBe(JSON.stringify({ project: "proj-1" }));
 });
 
 test("reads the token from ANTIGRAVITY_ACCESS_TOKEN env (default reader)", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new AntigravityQuotaSource({ env: { ANTIGRAVITY_ACCESS_TOKEN: "tok-env" }, stateDbPath: NOPATH, fetchImpl, now: () => NOW });
   const snap = await src.queryCurrentUsage("antigravity/*");
-  assert.equal(snap.remaining_pct, 0.3);
-  assert.equal(fetchImpl.calls[0].init.headers.Authorization, "Bearer tok-env");
+  expect(snap.remaining_pct).toBe(0.3);
+  expect(fetchImpl.calls[0].init.headers.Authorization).toBe("Bearer tok-env");
 });
 
 test("degrades to null when no token resolves (no fetch)", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new AntigravityQuotaSource({ readAccessToken: () => null, fetchImpl, now: () => NOW });
-  assert.equal(await src.queryCurrentUsage("antigravity/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("antigravity/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("degrades to null on 401", async () => {
   const fetchImpl = recordingFetch({ ok: false, status: 401, json: async () => ({}) });
   const src = new AntigravityQuotaSource({ readAccessToken: () => "tok", fetchImpl, now: () => NOW });
-  assert.equal(await src.queryCurrentUsage("antigravity/*"), null);
-  assert.equal(fetchImpl.calls.length, 1);
+  expect(await src.queryCurrentUsage("antigravity/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(1);
 });
 
 test("the DEFAULT fetch makes no network call under a test runner", async () => {
   const src = new AntigravityQuotaSource({ env: { ANTIGRAVITY_ACCESS_TOKEN: "tok" }, stateDbPath: NOPATH, now: () => NOW });
-  assert.equal(await src.queryCurrentUsage("antigravity/*"), null);
+  expect(await src.queryCurrentUsage("antigravity/*")).toBe(null);
 });
 
 test("fetchAntigravityUsage sends {} body when no project + maps", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const snap = await fetchAntigravityUsage({ accessToken: "t" }, { fetchImpl, now: () => NOW, userAgent: "antigravity" });
-  assert.equal(snap.remaining_pct, 0.3);
-  assert.equal(fetchImpl.calls[0].init.body, "{}");
+  expect(snap.remaining_pct).toBe(0.3);
+  expect(fetchImpl.calls[0].init.body).toBe("{}");
 });

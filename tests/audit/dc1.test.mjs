@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,19 +81,16 @@ function bundleWithCheckpoint(checkpointExtra = {}) {
 
 await test("clause identity comes from the shared clauseIdentity authority", () => {
   const result = interpretIntent(CLAUSE_A);
-  assert.equal(result.clauses.length, 1);
-  assert.equal(result.clauses[0].clause_id, clauseIdentity(CLAUSE_A));
+  expect(result.clauses.length).toBe(1);
+  expect(result.clauses[0].clause_id).toBe(clauseIdentity(CLAUSE_A));
 });
 
 await test("clauseIdentity is stable across cosmetic punctuation/case/whitespace", () => {
-  assert.equal(
-    clauseIdentity("Ensure   the Mascot stays cheerful."),
-    clauseIdentity(CLAUSE_A),
-  );
+  expect(clauseIdentity("Ensure   the Mascot stays cheerful.")).toBe(clauseIdentity(CLAUSE_A));
 });
 
 await test("distinct directives get distinct clause ids", () => {
-  assert.notEqual(clauseIdentity(CLAUSE_A), clauseIdentity(CLAUSE_B));
+  expect(clauseIdentity(CLAUSE_A)).not.toBe(clauseIdentity(CLAUSE_B));
 });
 
 await test("unresolvedConstraintClauses surfaces a clause_id per unresolved clause", () => {
@@ -102,11 +98,8 @@ await test("unresolvedConstraintClauses surfaces a clause_id per unresolved clau
     bundleWithCheckpoint({ free_form_intent: `${CLAUSE_A}; ${CLAUSE_B}` })
       .intent_checkpoint,
   );
-  assert.equal(unresolved.length, 2);
-  assert.deepEqual(
-    unresolved.map((c) => c.clause_id).sort(),
-    [clauseIdentity(CLAUSE_A), clauseIdentity(CLAUSE_B)].sort(),
-  );
+  expect(unresolved.length).toBe(2);
+  expect(unresolved.map((c) => c.clause_id).sort()).toEqual([clauseIdentity(CLAUSE_A), clauseIdentity(CLAUSE_B)].sort());
 });
 
 // CE-004 core: resolution keys on clause_id, NOT the rendered question. An entry
@@ -124,10 +117,7 @@ await test("CE-004: a constraint with the right clause_id but a STALE question s
       },
     ],
   });
-  assert.equal(
-    obligationState(bundle, "intent_checkpoint_current").state,
-    "satisfied",
-  );
+  expect(obligationState(bundle, "intent_checkpoint_current").state).toBe("satisfied");
 });
 
 // CE-004 collision direction: answering ONE of two distinct clauses (by its
@@ -145,8 +135,8 @@ await test("CE-004: answering one clause does not resolve a different clause", (
     ],
   });
   const unresolved = unresolvedConstraintClauses(bundle.intent_checkpoint);
-  assert.equal(unresolved.length, 1, "exactly the un-answered clause remains");
-  assert.equal(unresolved[0].clause_id, clauseIdentity(CLAUSE_B));
+  expect(unresolved.length, "exactly the un-answered clause remains").toBe(1);
+  expect(unresolved[0].clause_id).toBe(clauseIdentity(CLAUSE_B));
 });
 
 // ── 2. Resolution-state parametric matrix ───────────────────────────────────
@@ -214,34 +204,25 @@ for (const c of RESOLUTION_CASES) {
       return entry.clause_id ? { clause_id: clauseIdentity(text), ...base } : base;
     });
     const bundle = bundleWithCheckpoint({ free_form_intent: free, constraint_clauses });
-    assert.equal(
-      unresolvedConstraintClauses(bundle.intent_checkpoint).length,
-      c.expectUnresolved,
-    );
-    assert.equal(
-      obligationState(bundle, "intent_checkpoint_current").state,
-      c.expectGate,
-    );
+    expect(unresolvedConstraintClauses(bundle.intent_checkpoint).length).toBe(c.expectUnresolved);
+    expect(obligationState(bundle, "intent_checkpoint_current").state).toBe(c.expectGate);
   });
 }
 
 await test("unresolved clause routes next-step back to the intent checkpoint executor", () => {
   const bundle = bundleWithCheckpoint({ free_form_intent: CLAUSE_A });
   const decision = decideNextStep(bundle);
-  assert.equal(decision.selected_obligation, "intent_checkpoint_current");
-  assert.equal(decision.selected_executor, "intent_checkpoint_executor");
+  expect(decision.selected_obligation).toBe("intent_checkpoint_current");
+  expect(decision.selected_executor).toBe("intent_checkpoint_executor");
 });
 
 await test("encodable-only intent never blocks the gate", () => {
   const result = interpretFreeFormIntentForAudit(ENCODABLE);
-  assert.equal(result.has_unencodable, false);
-  assert.equal(
-    obligationState(
+  expect(result.has_unencodable).toBe(false);
+  expect(obligationState(
       bundleWithCheckpoint({ free_form_intent: ENCODABLE }),
       "intent_checkpoint_current",
-    ).state,
-    "satisfied",
-  );
+    ).state).toBe("satisfied");
 });
 
 // ── 3. confirm-intent prompt surfaces clause_id + headless convergence ───────
@@ -266,20 +247,20 @@ await test("confirm_intent prompt surfaces the clause_id and constraint_clauses 
       unresolvedConstraintClauses: unresolved,
     },
   );
-  assert.match(prompt, /Blocking: unencodable intent clauses/);
-  assert.match(prompt, /ensure the mascot stays cheerful/);
-  assert.match(prompt, /clause_id/);
-  assert.match(prompt, new RegExp(clauseIdentity(CLAUSE_A).replace(/[|]/g, "\\|")));
+  expect(prompt).toMatch(/Blocking: unencodable intent clauses/);
+  expect(prompt).toMatch(/ensure the mascot stays cheerful/);
+  expect(prompt).toMatch(/clause_id/);
+  expect(prompt).toMatch(new RegExp(clauseIdentity(CLAUSE_A).replace(/[|]/g, "\\|")));
 });
 
 await test("headless auto-complete records each clause keyed on clause_id and converges", () => {
   const bundle = bundleWithCheckpoint({ free_form_intent: `${CLAUSE_A}; ${CLAUSE_B}` });
   const run = runIntentCheckpointAutoComplete(bundle, "/repo");
   const recorded = run.updated.intent_checkpoint.constraint_clauses ?? [];
-  assert.equal(recorded.length, 2, "both unencodable clauses recorded");
+  expect(recorded.length, "both unencodable clauses recorded").toBe(2);
   for (const entry of recorded) {
-    assert.ok(entry.clause_id && entry.clause_id.length > 0, "each entry carries a clause_id");
-    assert.ok(entry.host_answer && entry.host_answer.length > 0);
+    expect(entry.clause_id && entry.clause_id.length > 0, "each entry carries a clause_id").toBeTruthy();
+    expect(entry.host_answer && entry.host_answer.length > 0).toBeTruthy();
   }
 });
 
@@ -298,13 +279,10 @@ await test("drift: LENS_KEYWORD_MAP is the single shared authority, well-formed 
   );
   const { VALID_LENSES } = await import("audit-tools/shared");
 
-  assert.ok(Array.isArray(LENS_KEYWORD_MAP) && LENS_KEYWORD_MAP.length > 0);
+  expect(Array.isArray(LENS_KEYWORD_MAP) && LENS_KEYWORD_MAP.length > 0).toBeTruthy();
   for (const entry of LENS_KEYWORD_MAP) {
-    assert.ok(Array.isArray(entry.keywords) && entry.keywords.length > 0);
-    assert.ok(
-      VALID_LENSES.has(entry.lens),
-      `LENS_KEYWORD_MAP entry maps to an unknown lens '${entry.lens}'`,
-    );
+    expect(Array.isArray(entry.keywords) && entry.keywords.length > 0).toBeTruthy();
+    expect(VALID_LENSES.has(entry.lens), `LENS_KEYWORD_MAP entry maps to an unknown lens '${entry.lens}'`).toBeTruthy();
   }
 });
 
@@ -314,15 +292,15 @@ await test("drift: clause decomposition routes through the shared interpreter on
     join(repoRoot, "src", "audit", "orchestrator", "intentInterpreter.ts"),
     "utf8",
   );
-  assert.match(auditSrc, /interpretIntent/, "audit must delegate to shared interpretIntent");
-  assert.doesNotMatch(auditSrc, /LENS_KEYWORD_MAP/, "audit must not carry its own keyword map");
+  expect(auditSrc, "audit must delegate to shared interpretIntent").toMatch(/interpretIntent/);
+  expect(auditSrc, "audit must not carry its own keyword map").not.toMatch(/LENS_KEYWORD_MAP/);
   // Remediate ordering consumes the shared InterpretedIntent only.
   const orderSrc = readFileSync(
     join(repoRoot, "src", "remediate", "intent", "intentOrdering.ts"),
     "utf8",
   );
-  assert.match(orderSrc, /InterpretedIntent/, "remediate ordering consumes the shared type");
-  assert.doesNotMatch(orderSrc, /LENS_KEYWORD_MAP/);
+  expect(orderSrc, "remediate ordering consumes the shared type").toMatch(/InterpretedIntent/);
+  expect(orderSrc).not.toMatch(/LENS_KEYWORD_MAP/);
 });
 
 // ── 5. No-verbatim sentinel guard (structured fields — CE-005) ──────────────
@@ -337,7 +315,7 @@ await test("sentinel: the verbatim free_form_intent never appears in the audit i
   // restates the clause by design, but no field equals the raw input verbatim,
   // and the structured signal fields never carry it.
   for (const clause of result.encoded_clauses) {
-    assert.ok(!clause.detail.includes(SENTINEL), "encoded detail must not carry the raw token");
+    expect(!clause.detail.includes(SENTINEL), "encoded detail must not carry the raw token").toBeTruthy();
   }
   // The whole interpretation, minus the human-facing checkpoint_question render,
   // must be free of the sentinel (INV-S04 structured-signal surface).
@@ -346,10 +324,7 @@ await test("sentinel: the verbatim free_form_intent never appears in the audit i
     encoded_clauses: result.encoded_clauses,
     has_unencodable: result.has_unencodable,
   };
-  assert.ok(
-    !JSON.stringify(structural).includes(SENTINEL),
-    "structured interpreter output must not carry the verbatim free_form_intent",
-  );
+  expect(!JSON.stringify(structural).includes(SENTINEL), "structured interpreter output must not carry the verbatim free_form_intent").toBeTruthy();
 });
 
 await test("sentinel: the remediate InterpretedIntent SIGNAL fields never carry the verbatim string", () => {
@@ -363,12 +338,9 @@ await test("sentinel: the remediate InterpretedIntent SIGNAL fields never carry 
     prioritySignals: interpreted.prioritySignals,
     scopeEmphasis: interpreted.scopeEmphasis,
   };
-  assert.ok(
-    !JSON.stringify(signalOnly).includes(SENTINEL),
-    "InterpretedIntent signal fields must not echo the raw free_form_intent",
-  );
+  expect(!JSON.stringify(signalOnly).includes(SENTINEL), "InterpretedIntent signal fields must not echo the raw free_form_intent").toBeTruthy();
   // The sentinel is unencodable, so it is surfaced for promotion (never dropped).
-  assert.ok(interpreted.unencodableClauses.includes(SENTINEL));
+  expect(interpreted.unencodableClauses.includes(SENTINEL)).toBeTruthy();
 });
 
 await test("sentinel: the remediate ordering result never carries the verbatim string", () => {
@@ -381,7 +353,7 @@ await test("sentinel: the remediate ordering result never carries the verbatim s
     blocks,
     interpretFreeFormIntent(SENTINEL),
   );
-  assert.ok(!JSON.stringify({ of, ob }).includes(SENTINEL), "ordering must not inject the raw string");
+  expect(!JSON.stringify({ of, ob }).includes(SENTINEL), "ordering must not inject the raw string").toBeTruthy();
 });
 
 await test("sentinel: worker-prompt renderers carry no free_form_intent reference at all (CE-005)", () => {
@@ -398,12 +370,8 @@ await test("sentinel: worker-prompt renderers carry no free_form_intent referenc
       .split(/\r?\n/)
       .map((line, i) => [i + 1, line])
       .filter(([, line]) => FORBIDDEN.test(line));
-    assert.equal(
-      hits.length,
-      0,
-      `${file} must not reference free_form_intent (interpret upstream — INV-S04/CE-005):\n` +
-        hits.map(([n, l]) => `${n}: ${l.trim()}`).join("\n"),
-    );
+    expect(hits.length, `${file} must not reference free_form_intent (interpret upstream — INV-S04/CE-005):\n` +
+        hits.map(([n, l]) => `${n}: ${l.trim()}`).join("\n")).toBe(0);
   }
 });
 
@@ -421,12 +389,12 @@ await test("remediate fold: an emphasised lens sorts its finding/block first", (
   const interpreted = interpretFreeFormIntent("prioritize security");
   const { findings: of, blocks: ob } = applyIntentOrdering(findings, blocks, interpreted);
   // Security finding sorts first despite its lower severity (lens emphasis boost).
-  assert.equal(of[0].id, "F-sec");
-  assert.equal(ob[0].block_id, "B-sec");
+  expect(of[0].id).toBe("F-sec");
+  expect(ob[0].block_id).toBe("B-sec");
   // Ordering-only: nothing dropped.
-  assert.equal(of.length, 2);
-  assert.equal(ob.length, 2);
-  assert.deepEqual(of.map((f) => f.id).sort(), ["F-low-maint", "F-sec"]);
+  expect(of.length).toBe(2);
+  expect(ob.length).toBe(2);
+  expect(of.map((f) => f.id).sort()).toEqual(["F-low-maint", "F-sec"]);
 });
 
 await test("remediate fold: empty/absent intent is a strict no-op (severity order preserved)", () => {
@@ -440,8 +408,8 @@ await test("remediate fold: empty/absent intent is a strict no-op (severity orde
   ];
   const { findings: of, blocks: ob } = applyIntentOrdering(findings, blocks, interpretFreeFormIntent(""));
   // No signal → returned unchanged (no reordering at all).
-  assert.deepEqual(of.map((f) => f.id), ["F-1", "F-2"]);
-  assert.deepEqual(ob.map((b) => b.block_id), ["B-1", "B-2"]);
+  expect(of.map((f) => f.id)).toEqual(["F-1", "F-2"]);
+  expect(ob.map((b) => b.block_id)).toEqual(["B-1", "B-2"]);
 });
 
 await test("remediate fold: scope emphasis lifts findings whose path matches", () => {
@@ -456,7 +424,7 @@ await test("remediate fold: scope emphasis lifts findings whose path matches", (
   const interpreted = interpretFreeFormIntent("focus on src/auth");
   const wAuth = findingIntentWeight(findings[1], interpreted);
   const wOther = findingIntentWeight(findings[0], interpreted);
-  assert.ok(wAuth > wOther, "the in-scope finding must outweigh the out-of-scope one");
+  expect(wAuth > wOther, "the in-scope finding must outweigh the out-of-scope one").toBeTruthy();
   const { findings: of } = applyIntentOrdering(findings, blocks, interpreted);
-  assert.equal(of[0].id, "F-auth");
+  expect(of[0].id).toBe("F-auth");
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { extractRateLimitHeaders } = await import("../../src/audit/quota/headerExtraction.ts");
 const { getHeaderExtractorForProvider } = await import("../../src/audit/quota/headerExtractors/index.ts");
@@ -37,11 +36,11 @@ test("extracts standard x-ratelimit-* headers", () => {
   ].join("\n");
 
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 50);
-  assert.equal(result.input_tokens_per_minute, 100000);
-  assert.equal(result.remaining_requests, 42);
-  assert.equal(result.remaining_tokens, 80000);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(50);
+  expect(result.input_tokens_per_minute).toBe(100000);
+  expect(result.remaining_requests).toBe(42);
+  expect(result.remaining_tokens).toBe(80000);
 });
 
 test("extracts anthropic-ratelimit-* headers", () => {
@@ -53,19 +52,19 @@ test("extracts anthropic-ratelimit-* headers", () => {
   ].join("\n");
 
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 60);
-  assert.equal(result.input_tokens_per_minute, 200000);
-  assert.equal(result.remaining_requests, 55);
-  assert.equal(result.remaining_tokens, 190000);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(60);
+  expect(result.input_tokens_per_minute).toBe(200000);
+  expect(result.remaining_requests).toBe(55);
+  expect(result.remaining_tokens).toBe(190000);
 });
 
 test("case-insensitive header matching", () => {
   const text = "X-RateLimit-Limit-Requests: 25\nX-RATELIMIT-LIMIT-TOKENS: 50000";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 25);
-  assert.equal(result.input_tokens_per_minute, 50000);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(25);
+  expect(result.input_tokens_per_minute).toBe(50000);
 });
 
 test("first match wins for duplicate headers", () => {
@@ -75,14 +74,14 @@ test("first match wins for duplicate headers", () => {
   ].join("\n");
 
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 50);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(50);
 });
 
 test("returns null for text without rate limit headers", () => {
   const text = "some random log output\nerror: something failed\n";
   const result = extractRateLimitHeaders(text);
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("extracts from JSON objects with header fields", () => {
@@ -95,10 +94,10 @@ test("extracts from JSON objects with header fields", () => {
   });
 
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 40);
-  assert.equal(result.input_tokens_per_minute, 80000);
-  assert.equal(result.remaining_requests, 38);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(40);
+  expect(result.input_tokens_per_minute).toBe(80000);
+  expect(result.remaining_requests).toBe(38);
 });
 
 test("extracts from JSON lines with response_headers", () => {
@@ -114,15 +113,15 @@ test("extracts from JSON lines with response_headers", () => {
   ].join("\n");
 
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 30);
-  assert.equal(result.input_tokens_per_minute, 150000);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(30);
+  expect(result.input_tokens_per_minute).toBe(150000);
 });
 
 test("ignores invalid numeric values", () => {
   const text = "x-ratelimit-limit-requests: abc\nx-ratelimit-limit-tokens: -5";
   const result = extractRateLimitHeaders(text);
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 // ── zero remaining values (COR-c7af6f1b) ───────────────────────────────────
@@ -130,29 +129,29 @@ test("ignores invalid numeric values", () => {
 test("parseNumericValue correctly handles zero for remaining_requests (x-ratelimit)", () => {
   const text = "x-ratelimit-limit-requests: 50\nx-ratelimit-remaining-requests: 0";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.remaining_requests, 0, "remaining_requests should be 0, not null");
+  expect(result).not.toBe(null);
+  expect(result.remaining_requests, "remaining_requests should be 0, not null").toBe(0);
 });
 
 test("parseNumericValue correctly handles zero for remaining_tokens (x-ratelimit)", () => {
   const text = "x-ratelimit-limit-tokens: 100000\nx-ratelimit-remaining-tokens: 0";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.remaining_tokens, 0, "remaining_tokens should be 0, not null");
+  expect(result).not.toBe(null);
+  expect(result.remaining_tokens, "remaining_tokens should be 0, not null").toBe(0);
 });
 
 test("parseNumericValue correctly handles zero for remaining_requests (anthropic-ratelimit)", () => {
   const text = "anthropic-ratelimit-requests-limit: 60\nanthropic-ratelimit-requests-remaining: 0";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.remaining_requests, 0, "remaining_requests should be 0, not null");
+  expect(result).not.toBe(null);
+  expect(result.remaining_requests, "remaining_requests should be 0, not null").toBe(0);
 });
 
 test("parseNumericValue correctly handles zero for remaining_tokens (anthropic-ratelimit)", () => {
   const text = "anthropic-ratelimit-tokens-limit: 200000\nanthropic-ratelimit-tokens-remaining: 0";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.remaining_tokens, 0, "remaining_tokens should be 0, not null");
+  expect(result).not.toBe(null);
+  expect(result.remaining_tokens, "remaining_tokens should be 0, not null").toBe(0);
 });
 
 test("extractFromHeaderObject path: remaining_requests 0 alongside non-zero limit returns 0", () => {
@@ -163,15 +162,15 @@ test("extractFromHeaderObject path: remaining_requests 0 alongside non-zero limi
     "x-ratelimit-remaining-requests": "0",
   });
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.remaining_requests, 0, "extractFromHeaderObject: remaining_requests should be 0, not null");
+  expect(result).not.toBe(null);
+  expect(result.remaining_requests, "extractFromHeaderObject: remaining_requests should be 0, not null").toBe(0);
 });
 
 test("positive remaining values still parse correctly", () => {
   const text = "x-ratelimit-limit-requests: 50\nx-ratelimit-remaining-requests: 5";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.remaining_requests, 5);
+  expect(result).not.toBe(null);
+  expect(result.remaining_requests).toBe(5);
 });
 
 test("negative remaining values still return null", () => {
@@ -179,20 +178,20 @@ test("negative remaining values still return null", () => {
   const text = "x-ratelimit-limit-requests: 50\nx-ratelimit-remaining-requests: -1";
   const result = extractRateLimitHeaders(text);
   // remaining_requests is null (negative not valid), but requests_per_minute still parsed
-  assert.notEqual(result, null);
-  assert.equal(result.remaining_requests, null, "negative remaining should produce null");
+  expect(result).not.toBe(null);
+  expect(result.remaining_requests, "negative remaining should produce null").toBe(null);
 });
 
 // ── getHeaderExtractorForProvider ───────────────────────────────────────────
 
 test("getHeaderExtractorForProvider returns claude-code extractor", () => {
   const extractor = getHeaderExtractorForProvider("claude-code");
-  assert.equal(extractor.name, "claude-code");
+  expect(extractor.name).toBe("claude-code");
 });
 
 test("getHeaderExtractorForProvider falls back to generic", () => {
   const extractor = getHeaderExtractorForProvider("opencode");
-  assert.equal(extractor.name, "generic");
+  expect(extractor.name).toBe("generic");
 });
 
 test("claude-code extractor finds headers in JSON stderr lines", () => {
@@ -209,18 +208,18 @@ test("claude-code extractor finds headers in JSON stderr lines", () => {
 
   const extractor = getHeaderExtractorForProvider("claude-code");
   const result = extractor.extract(stderr);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 50);
-  assert.equal(result.input_tokens_per_minute, 100000);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(50);
+  expect(result.input_tokens_per_minute).toBe(100000);
 });
 
 test("generic extractor finds raw headers in text", () => {
   const stderr = "x-ratelimit-limit-requests: 20\nx-ratelimit-limit-tokens: 40000\n";
   const extractor = getHeaderExtractorForProvider("opencode");
   const result = extractor.extract(stderr);
-  assert.notEqual(result, null);
-  assert.equal(result.requests_per_minute, 20);
-  assert.equal(result.input_tokens_per_minute, 40000);
+  expect(result).not.toBe(null);
+  expect(result.requests_per_minute).toBe(20);
+  expect(result.input_tokens_per_minute).toBe(40000);
 });
 
 // ── singleton identity (MNT-9c585b98) ─────────────────────────────────────
@@ -228,13 +227,13 @@ test("generic extractor finds raw headers in text", () => {
 test("getHeaderExtractorForProvider returns same instance on repeated calls for a known provider", () => {
   const a = getHeaderExtractorForProvider("claude-code");
   const b = getHeaderExtractorForProvider("claude-code");
-  assert.strictEqual(a, b, "claude-code extractor should be a singleton, not a new instance per call");
+  expect(a, "claude-code extractor should be a singleton, not a new instance per call").toBe(b);
 });
 
 test("getHeaderExtractorForProvider returns same generic instance on repeated calls for an unknown provider", () => {
   const a = getHeaderExtractorForProvider("unknown-provider");
   const b = getHeaderExtractorForProvider("other-unknown");
-  assert.strictEqual(a, b, "generic fallback extractor should be the same singleton for all unknown providers");
+  expect(a, "generic fallback extractor should be the same singleton for all unknown providers").toBe(b);
 });
 
 // ── parseResetValue branches (TST-b225b404) ────────────────────────────────
@@ -244,11 +243,11 @@ test("parseResetValue: relative seconds with 's' suffix sets reset_at to a futur
   const text = "x-ratelimit-limit-requests: 1\nx-ratelimit-reset-requests: 42s";
   const result = extractRateLimitHeaders(text);
   const after = Date.now();
-  assert.notEqual(result, null);
-  assert.notEqual(result.reset_at, null);
+  expect(result).not.toBe(null);
+  expect(result.reset_at).not.toBe(null);
   const ts = new Date(result.reset_at).getTime();
-  assert.ok(ts >= before + 42000, `reset_at (${ts}) should be >= before+42s (${before + 42000})`);
-  assert.ok(ts <= after + 42000, `reset_at (${ts}) should be <= after+42s (${after + 42000})`);
+  expect(ts >= before + 42000, `reset_at (${ts}) should be >= before+42s (${before + 42000})`).toBeTruthy();
+  expect(ts <= after + 42000, `reset_at (${ts}) should be <= after+42s (${after + 42000})`).toBeTruthy();
 });
 
 test("parseResetValue: plain numeric relative seconds (no suffix) sets reset_at to a future ISO timestamp", () => {
@@ -256,26 +255,26 @@ test("parseResetValue: plain numeric relative seconds (no suffix) sets reset_at 
   const text = "x-ratelimit-limit-requests: 1\nx-ratelimit-reset-requests: 10";
   const result = extractRateLimitHeaders(text);
   const after = Date.now();
-  assert.notEqual(result, null);
-  assert.notEqual(result.reset_at, null);
+  expect(result).not.toBe(null);
+  expect(result.reset_at).not.toBe(null);
   const ts = new Date(result.reset_at).getTime();
-  assert.ok(ts >= before + 10000, `reset_at (${ts}) should be >= before+10s (${before + 10000})`);
-  assert.ok(ts <= after + 10000, `reset_at (${ts}) should be <= after+10s (${after + 10000})`);
+  expect(ts >= before + 10000, `reset_at (${ts}) should be >= before+10s (${before + 10000})`).toBeTruthy();
+  expect(ts <= after + 10000, `reset_at (${ts}) should be <= after+10s (${after + 10000})`).toBeTruthy();
 });
 
 test("parseResetValue: blank reset header value leaves reset_at null", () => {
   // Whitespace-only value: trimmed is empty, transform returns null
   const text = "x-ratelimit-limit-requests: 1\nx-ratelimit-reset-requests:   ";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.reset_at, null);
+  expect(result).not.toBe(null);
+  expect(result.reset_at).toBe(null);
 });
 
 test("parseResetValue: non-ISO non-numeric value is returned as-is", () => {
   const text = "x-ratelimit-limit-requests: 1\nx-ratelimit-reset-requests: unknown";
   const result = extractRateLimitHeaders(text);
-  assert.notEqual(result, null);
-  assert.equal(result.reset_at, "unknown");
+  expect(result).not.toBe(null);
+  expect(result.reset_at).toBe("unknown");
 });
 
 // ── OBS-34ce7e45: stderr diagnostics on silent null returns ─────────────────
@@ -286,10 +285,10 @@ test("extractRateLimitHeaders emits diagnostic to stderr when non-empty text has
   process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const result = extractRateLimitHeaders("some random log output\nerror: something failed\n");
-    assert.equal(result, null);
+    expect(result).toBe(null);
     const event = parseStderrEvent(chunks, "header_extraction_no_match");
-    assert.ok(event, `expected a header_extraction_no_match stderr event, got: ${chunks.join("")}`);
-    assert.equal(event.reason, "no rate-limit data found in non-empty stderr text");
+    expect(event, `expected a header_extraction_no_match stderr event, got: ${chunks.join("")}`).toBeTruthy();
+    expect(event.reason).toBe("no rate-limit data found in non-empty stderr text");
   } finally {
     process.stderr.write = origWrite;
   }
@@ -301,12 +300,8 @@ test("extractRateLimitHeaders does NOT emit diagnostic for empty input", () => {
   process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const result = extractRateLimitHeaders("");
-    assert.equal(result, null);
-    assert.equal(
-      parseStderrEvent(chunks, "header_extraction_no_match"),
-      null,
-      `unexpected diagnostic in stderr for empty input: ${chunks.join("")}`,
-    );
+    expect(result).toBe(null);
+    expect(parseStderrEvent(chunks, "header_extraction_no_match"), `unexpected diagnostic in stderr for empty input: ${chunks.join("")}`).toBe(null);
   } finally {
     process.stderr.write = origWrite;
   }
@@ -318,12 +313,8 @@ test("extractRateLimitHeaders does NOT emit diagnostic for whitespace-only input
   process.stderr.write = (chunk) => { chunks.push(String(chunk)); return true; };
   try {
     const result = extractRateLimitHeaders("   \n\t  ");
-    assert.equal(result, null);
-    assert.equal(
-      parseStderrEvent(chunks, "header_extraction_no_match"),
-      null,
-      `unexpected diagnostic in stderr for whitespace input: ${chunks.join("")}`,
-    );
+    expect(result).toBe(null);
+    expect(parseStderrEvent(chunks, "header_extraction_no_match"), `unexpected diagnostic in stderr for whitespace input: ${chunks.join("")}`).toBe(null);
   } finally {
     process.stderr.write = origWrite;
   }
@@ -337,9 +328,9 @@ test("ClaudeCodeHeaderExtractor emits diagnostic when no structured JSON header 
     const extractor = getHeaderExtractorForProvider("claude-code");
     extractor.extract("plain text line\nanother plain line\n");
     const event = parseStderrEvent(chunks, "header_extractor_fallback");
-    assert.ok(event, `expected a header_extractor_fallback stderr event, got: ${chunks.join("")}`);
-    assert.equal(event.provider, "claude-code");
-    assert.equal(event.reason, "no structured JSON lines with headers/response_headers found in non-empty stderr");
+    expect(event, `expected a header_extractor_fallback stderr event, got: ${chunks.join("")}`).toBeTruthy();
+    expect(event.provider).toBe("claude-code");
+    expect(event.reason).toBe("no structured JSON lines with headers/response_headers found in non-empty stderr");
   } finally {
     process.stderr.write = origWrite;
   }
@@ -356,12 +347,8 @@ test("ClaudeCodeHeaderExtractor does NOT emit fallback diagnostic when structure
     ].join("\n");
     const extractor = getHeaderExtractorForProvider("claude-code");
     const result = extractor.extract(stderr);
-    assert.notEqual(result, null);
-    assert.equal(
-      parseStderrEvent(chunks, "header_extractor_fallback"),
-      null,
-      `unexpected fallback diagnostic when structured lines present: ${chunks.join("")}`,
-    );
+    expect(result).not.toBe(null);
+    expect(parseStderrEvent(chunks, "header_extractor_fallback"), `unexpected fallback diagnostic when structured lines present: ${chunks.join("")}`).toBe(null);
   } finally {
     process.stderr.write = origWrite;
   }

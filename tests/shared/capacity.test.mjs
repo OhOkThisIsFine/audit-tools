@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const {
@@ -31,12 +31,12 @@ test("single pool: capacity is the full pending layout capped by host concurrenc
   });
   // Ambition is the 17 pending items; the host's 4-subagent ceiling binds — NOT a
   // preset wave size, and not the pathological serialized-to-1.
-  assert.equal(capacity.total_slots, 4);
-  assert.equal(capacity.binding_cap, "host_concurrency");
-  assert.equal(capacity.pools.length, 1);
-  assert.equal(capacity.primary.slots, 4);
+  expect(capacity.total_slots).toBe(4);
+  expect(capacity.binding_cap).toBe("host_concurrency");
+  expect(capacity.pools.length).toBe(1);
+  expect(capacity.primary.slots).toBe(4);
   // Estimated tokens for one wave = the top-4 packets' costs.
-  assert.equal(capacity.estimated_wave_tokens, 4 * 30000);
+  expect(capacity.estimated_wave_tokens).toBe(4 * 30000);
 });
 
 test("single pool: never dispatches more slots than there are pending items", () => {
@@ -45,7 +45,7 @@ test("single pool: never dispatches more slots than there are pending items", ()
     sessionConfig: {},
     pendingItemTokens: [1000, 1000],
   });
-  assert.equal(capacity.total_slots, 2);
+  expect(capacity.total_slots).toBe(2);
 });
 
 test("single pool, no host ceiling: a parallel agent host fans out instead of serializing to 1", () => {
@@ -56,7 +56,7 @@ test("single pool, no host ceiling: a parallel agent host fans out instead of se
   });
   // claude-code with no learned history and no host cap invents no floor and no
   // ceiling — it fans out across the pending work rather than serializing to 1.
-  assert.ok(capacity.total_slots > 1, `expected parallel dispatch, got ${capacity.total_slots}`);
+  expect(capacity.total_slots > 1, `expected parallel dispatch, got ${capacity.total_slots}`).toBeTruthy();
 });
 
 test("multi pool: capacity sums independent host pool slots", () => {
@@ -68,14 +68,14 @@ test("multi pool: capacity sums independent host pool slots", () => {
     sessionConfig: {},
     pendingItemTokens: [900, 800, 700, 600, 500, 400],
   });
-  assert.equal(capacity.total_slots, 5);
-  assert.equal(capacity.binding_cap, "host_concurrency");
-  assert.deepEqual(capacity.pools.map((p) => [p.pool_id, p.slots]), [
+  expect(capacity.total_slots).toBe(5);
+  expect(capacity.binding_cap).toBe("host_concurrency");
+  expect(capacity.pools.map((p) => [p.pool_id, p.slots])).toEqual([
     ["cli", 2],
     ["ide", 3],
   ]);
-  assert.equal(capacity.estimated_wave_tokens, 900 + 800 + 700 + 600 + 500);
-  assert.equal(capacity.primary.pool_id, "ide");
+  expect(capacity.estimated_wave_tokens).toBe(900 + 800 + 700 + 600 + 500);
+  expect(capacity.primary.pool_id).toBe("ide");
 });
 
 test("multi pool: total slots never exceed pending item count", () => {
@@ -87,11 +87,8 @@ test("multi pool: total slots never exceed pending item count", () => {
     sessionConfig: {},
     pendingItemTokens: [1000, 1000],
   });
-  assert.equal(capacity.total_slots, 2);
-  assert.equal(
-    capacity.pools.reduce((sum, pool) => sum + pool.slots, 0),
-    2,
-  );
+  expect(capacity.total_slots).toBe(2);
+  expect(capacity.pools.reduce((sum, pool) => sum + pool.slots, 0)).toBe(2);
 });
 
 test("multi pool: summary exposes serializable per-pool quota metadata", () => {
@@ -104,12 +101,12 @@ test("multi pool: summary exposes serializable per-pool quota metadata", () => {
     pendingItemTokens: [3000, 2000, 1000],
   });
   const summaries = summarizeDispatchCapacityPools(capacity);
-  assert.deepEqual(summaries.map((s) => [s.pool_id, s.slots]), [
+  expect(summaries.map((s) => [s.pool_id, s.slots])).toEqual([
     ["cli", 1],
     ["ide", 2],
   ]);
-  assert.equal(summaries[0].binding_cap, "host_concurrency");
-  assert.equal(summaries[0].resolved_limits.context_tokens > 0, true);
+  expect(summaries[0].binding_cap).toBe("host_concurrency");
+  expect(summaries[0].resolved_limits.context_tokens > 0).toBe(true);
 });
 
 test("computeDispatchCapacity rejects an empty pool list", () => {

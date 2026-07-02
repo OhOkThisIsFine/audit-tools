@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,14 +108,14 @@ test("next-step emits a single host edge-reasoning step, then rewrites only the 
         { cwd: root },
       )).stdout,
     );
-    assert.equal(paused.step_kind, "edge_reasoning");
-    assert.equal(paused.status, "ready");
+    expect(paused.step_kind).toBe("edge_reasoning");
+    expect(paused.status).toBe("ready");
     const resultsPath = paused.artifact_paths.edge_reasoning_results;
-    assert.match(resultsPath, /edge-reasoning\.json$/);
+    expect(resultsPath).toMatch(/edge-reasoning\.json$/);
     const prompt = await readFile(paused.prompt_path, "utf8");
-    assert.match(prompt, /heuristic-cross-module-link/);
-    assert.match(prompt, /"rewrites"/);
-    assert.match(prompt, /edge-reasoning\.json/);
+    expect(prompt).toMatch(/heuristic-cross-module-link/);
+    expect(prompt).toMatch(/"rewrites"/);
+    expect(prompt).toMatch(/edge-reasoning\.json/);
 
     // Host supplies the rewrites.
     await writeFile(
@@ -149,16 +148,16 @@ test("next-step emits a single host edge-reasoning step, then rewrites only the 
     const edge = graphBundle.graphs.references.find(
       (e) => e.kind === INJECTED_EDGE.kind,
     );
-    assert.ok(edge, "the injected edge survives enrichment");
-    assert.equal(edge.reason, "auth.ts consumes the session object created by session.ts.");
+    expect(edge, "the injected edge survives enrichment").toBeTruthy();
+    expect(edge.reason).toBe("auth.ts consumes the session object created by session.ts.");
     // Edge identity is invariant — only `reason` changed.
-    assert.equal(edgeIdentity(edge), edgeIdentity(INJECTED_EDGE));
+    expect(edgeIdentity(edge)).toBe(edgeIdentity(INJECTED_EDGE));
 
     // The marker that satisfies graph_enrichment_current was written.
     const capability = JSON.parse(
       await readFile(join(artifactsDir, "analyzer_capability.json"), "utf8"),
     );
-    assert.ok(capability.status === "applied" || capability.status === "omitted");
+    expect(capability.status === "applied" || capability.status === "omitted").toBeTruthy();
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -178,27 +177,25 @@ test("next-step emits a dispatch task carrying the edge-reasoning prompt when th
         { cwd: root },
       )).stdout,
     );
-    assert.equal(step.step_kind, "edge_reasoning_dispatch");
-    assert.equal(step.status, "ready");
+    expect(step.step_kind).toBe("edge_reasoning_dispatch");
+    expect(step.status).toBe("ready");
 
     const promptPath = step.artifact_paths.edge_reasoning_prompt;
-    assert.match(promptPath, /edge-reasoning-prompt\.md$/);
-    assert.match(step.artifact_paths.edge_reasoning_results, /edge-reasoning\.json$/);
+    expect(promptPath).toMatch(/edge-reasoning-prompt\.md$/);
+    expect(step.artifact_paths.edge_reasoning_results).toMatch(/edge-reasoning\.json$/);
 
     // The dispatch instruction tells the host to fan the prompt out to a subagent.
     const dispatchPrompt = await readFile(step.prompt_path, "utf8");
-    assert.match(dispatchPrompt, /subagent/i);
-    assert.match(dispatchPrompt, /edge-reasoning-prompt\.md/);
+    expect(dispatchPrompt).toMatch(/subagent/i);
+    expect(dispatchPrompt).toMatch(/edge-reasoning-prompt\.md/);
 
     // The edge-reasoning prompt itself is isolated in its own file.
     const edgePrompt = await readFile(promptPath, "utf8");
-    assert.match(edgePrompt, /heuristic-cross-module-link/);
-    assert.match(edgePrompt, /"rewrites"/);
+    expect(edgePrompt).toMatch(/heuristic-cross-module-link/);
+    expect(edgePrompt).toMatch(/"rewrites"/);
 
     // The results path is pre-declared as writable for the subagent.
-    assert.ok(
-      (step.access?.write_paths ?? []).some((p) => p.endsWith("edge-reasoning.json")),
-    );
+    expect((step.access?.write_paths ?? []).some((p) => p.endsWith("edge-reasoning.json"))).toBeTruthy();
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -218,8 +215,8 @@ test("next-step does not pause for edge reasoning when the flag is off (graph un
         { cwd: root },
       )).stdout,
     );
-    assert.notEqual(step.step_kind, "edge_reasoning");
-    assert.notEqual(step.step_kind, "edge_reasoning_dispatch");
+    expect(step.step_kind).not.toBe("edge_reasoning");
+    expect(step.step_kind).not.toBe("edge_reasoning_dispatch");
 
     // The low-confidence edge keeps its original reason — graph untouched.
     const graphBundle = JSON.parse(
@@ -228,8 +225,8 @@ test("next-step does not pause for edge reasoning when the flag is off (graph un
     const edge = graphBundle.graphs.references.find(
       (e) => e.kind === INJECTED_EDGE.kind,
     );
-    assert.ok(edge);
-    assert.equal(edge.reason, INJECTED_EDGE.reason);
+    expect(edge).toBeTruthy();
+    expect(edge.reason).toBe(INJECTED_EDGE.reason);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -250,8 +247,8 @@ test("next-step does not pause for edge reasoning when there are no low-confiden
         { cwd: root },
       )).stdout,
     );
-    assert.notEqual(step.step_kind, "edge_reasoning");
-    assert.notEqual(step.step_kind, "edge_reasoning_dispatch");
+    expect(step.step_kind).not.toBe("edge_reasoning");
+    expect(step.step_kind).not.toBe("edge_reasoning_dispatch");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

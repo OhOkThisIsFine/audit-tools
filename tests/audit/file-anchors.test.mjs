@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
 
 const { buildFileAnchorSummary } = await importSourceModule(
@@ -23,10 +22,10 @@ test("symbol scan and keyword scan are independent — a line matching both SYMB
   );
   const keywordAnchor = summary.anchors.find((a) => a.kind === "keyword");
 
-  assert.ok(symbolAnchor, "Expected a symbol/route/export anchor for the function declaration");
-  assert.ok(keywordAnchor, "Expected a keyword anchor for the security-sensitive keyword");
-  assert.equal(summary.counts.symbols + summary.counts.routes >= 1, true, "symbolCount or routeCount must be at least 1");
-  assert.equal(summary.counts.keywords >= 1, true, "keywordCount must be at least 1");
+  expect(symbolAnchor, "Expected a symbol/route/export anchor for the function declaration").toBeTruthy();
+  expect(keywordAnchor, "Expected a keyword anchor for the security-sensitive keyword").toBeTruthy();
+  expect(summary.counts.symbols + summary.counts.routes >= 1, "symbolCount or routeCount must be at least 1").toBe(true);
+  expect(summary.counts.keywords >= 1, "keywordCount must be at least 1").toBe(true);
 });
 
 test("symbol scan breaks after first SYMBOL_PATTERNS match — only one symbol anchor per line regardless of how many patterns match", () => {
@@ -44,16 +43,8 @@ test("symbol scan breaks after first SYMBOL_PATTERNS match — only one symbol a
   );
 
   // Exactly one symbol-class anchor should be produced for this single line.
-  assert.equal(
-    symbolLikeAnchors.length,
-    1,
-    `Expected exactly 1 symbol-class anchor for a single-function line, got ${symbolLikeAnchors.length}: ${JSON.stringify(symbolLikeAnchors.map((a) => a.kind))}`,
-  );
-  assert.equal(
-    summary.counts.symbols + summary.counts.routes,
-    1,
-    "symbolCount + routeCount must be exactly 1 for a single matched line",
-  );
+  expect(symbolLikeAnchors.length, `Expected exactly 1 symbol-class anchor for a single-function line, got ${symbolLikeAnchors.length}: ${JSON.stringify(symbolLikeAnchors.map((a) => a.kind))}`).toBe(1);
+  expect(summary.counts.symbols + summary.counts.routes, "symbolCount + routeCount must be exactly 1 for a single matched line").toBe(1);
 });
 
 // ── MAX_ANCHORS cap ───────────────────────────────────────────────────────────
@@ -72,20 +63,16 @@ test("MAX_ANCHORS cap limits anchors to 160 and sets omitted_anchor_count", () =
     totalLines: lines.length,
   });
 
-  assert.equal(summary.anchors.length, 160, "anchors must be capped at 160");
-  assert.ok(summary.omitted_anchor_count > 0, "omitted_anchor_count must be > 0 when cap is hit");
+  expect(summary.anchors.length, "anchors must be capped at 160").toBe(160);
+  expect(summary.omitted_anchor_count > 0, "omitted_anchor_count must be > 0 when cap is hit").toBeTruthy();
   // Conservation: file_start boundary + file_end boundary + 200 symbol anchors
   // = 202 total collected (after dedup). The kept anchors (capped at 160) plus
   // the omitted count must equal that uncapped total — i.e. nothing is lost or
   // double-counted by the cap (TST-8d6f7754: previously a self-comparison
   // tautology that asserted nothing).
   const total = summary.anchors.length + summary.omitted_anchor_count;
-  assert.equal(total, 202, "kept + omitted must equal the uncapped collected total (2 boundaries + 200 symbols)");
-  assert.equal(
-    summary.omitted_anchor_count,
-    total - 160,
-    "omitted_anchor_count must account for exactly the anchors dropped by the 160 cap",
-  );
+  expect(total, "kept + omitted must equal the uncapped collected total (2 boundaries + 200 symbols)").toBe(202);
+  expect(summary.omitted_anchor_count, "omitted_anchor_count must account for exactly the anchors dropped by the 160 cap").toBe(total - 160);
 });
 
 test("omitted_anchor_count is 0 when total anchors are within cap", () => {
@@ -101,8 +88,8 @@ test("omitted_anchor_count is 0 when total anchors are within cap", () => {
     totalLines: 3,
   });
 
-  assert.equal(summary.omitted_anchor_count, 0, "omitted_anchor_count must be 0 when under cap");
-  assert.ok(summary.anchors.length > 0, "anchors must be non-empty");
+  expect(summary.omitted_anchor_count, "omitted_anchor_count must be 0 when under cap").toBe(0);
+  expect(summary.anchors.length > 0, "anchors must be non-empty").toBeTruthy();
 });
 
 // ── KEYWORD_PATTERN matching ──────────────────────────────────────────────────
@@ -125,14 +112,8 @@ test("KEYWORD_PATTERN matches security-sensitive keywords and produces keyword a
       totalLines: 1,
     });
     const kwAnchor = summary.anchors.find((a) => a.kind === "keyword");
-    assert.ok(
-      kwAnchor,
-      `Expected a keyword anchor for line containing '${kw}'; got none`,
-    );
-    assert.ok(
-      kwAnchor.name.toLowerCase().includes(kw.toLowerCase()),
-      `keyword anchor name '${kwAnchor.name}' should reflect '${kw}'`,
-    );
+    expect(kwAnchor, `Expected a keyword anchor for line containing '${kw}'; got none`).toBeTruthy();
+    expect(kwAnchor.name.toLowerCase().includes(kw.toLowerCase()), `keyword anchor name '${kwAnchor.name}' should reflect '${kw}'`).toBeTruthy();
   }
 });
 
@@ -144,8 +125,8 @@ test("lines with no recognized keyword produce no keyword anchor", () => {
     totalLines: 1,
   });
   const kwAnchor = summary.anchors.find((a) => a.kind === "keyword");
-  assert.equal(kwAnchor, undefined, "Expected no keyword anchor for an innocuous line");
-  assert.equal(summary.counts.keywords, 0, "keyword count must be 0");
+  expect(kwAnchor, "Expected no keyword anchor for an innocuous line").toBe(undefined);
+  expect(summary.counts.keywords, "keyword count must be 0").toBe(0);
 });
 
 // ── Windows path normalization for graph edge matching ────────────────────────
@@ -165,15 +146,9 @@ test("normalizePath converts Windows backslashes to forward slashes for graph ed
     graphBundle,
   });
   const graphAnchor = summary.anchors.find((a) => a.kind === "graph");
-  assert.ok(
-    graphAnchor,
-    "Expected a graph anchor when a backslash edge matches the normalized path",
-  );
-  assert.ok(
-    graphAnchor.detail.includes("outbound"),
-    `Expected outbound detail for an edge FROM src/foo.ts; got '${graphAnchor.detail}'`,
-  );
-  assert.equal(summary.counts.graph_edges, 1, "graph_edges count must be 1");
+  expect(graphAnchor, "Expected a graph anchor when a backslash edge matches the normalized path").toBeTruthy();
+  expect(graphAnchor.detail.includes("outbound"), `Expected outbound detail for an edge FROM src/foo.ts; got '${graphAnchor.detail}'`).toBeTruthy();
+  expect(summary.counts.graph_edges, "graph_edges count must be 1").toBe(1);
 });
 
 // ── deduplication ─────────────────────────────────────────────────────────────
@@ -191,11 +166,7 @@ test("deduplication: identical kind+line+name+detail anchors are collapsed to on
     totalLines: 1,
   });
   const boundaryAnchors = summary1.anchors.filter((a) => a.kind === "boundary" && a.name === "file_start");
-  assert.equal(
-    boundaryAnchors.length,
-    1,
-    "file_start boundary anchor must appear exactly once",
-  );
+  expect(boundaryAnchors.length, "file_start boundary anchor must appear exactly once").toBe(1);
 });
 
 // TST-91fc5147: anchor deduplication — negative tests
@@ -224,14 +195,10 @@ test("TST-91fc5147: graph edge that appears in two buckets with the same kind fi
     graphBundle,
   });
   const graphAnchors = summary.anchors.filter((a) => a.kind === "graph");
-  assert.equal(
-    graphAnchors.length,
-    1,
-    "graph anchor for the same edge appearing in two buckets must be deduplicated to 1",
-  );
+  expect(graphAnchors.length, "graph anchor for the same edge appearing in two buckets must be deduplicated to 1").toBe(1);
   // Note: counts.graph_edges tracks raw collected edges (pre-dedup), not
   // the number of anchors emitted. The anchor array is the dedup'd surface.
-  assert.equal(summary.counts.graph_edges, 2, "counts.graph_edges reflects raw edge count (2), not anchor count");
+  expect(summary.counts.graph_edges, "counts.graph_edges reflects raw edge count (2), not anchor count").toBe(2);
 });
 
 test("TST-91fc5147: two distinct graph edges (different to-targets) each produce separate anchors", () => {
@@ -252,12 +219,8 @@ test("TST-91fc5147: two distinct graph edges (different to-targets) each produce
     graphBundle,
   });
   const graphAnchors = summary.anchors.filter((a) => a.kind === "graph");
-  assert.equal(
-    graphAnchors.length,
-    2,
-    "two distinct outbound edges must produce two separate graph anchors",
-  );
-  assert.equal(summary.counts.graph_edges, 2, "graph_edges count must be 2");
+  expect(graphAnchors.length, "two distinct outbound edges must produce two separate graph anchors").toBe(2);
+  expect(summary.counts.graph_edges, "graph_edges count must be 2").toBe(2);
 });
 
 // ── boundary anchors ──────────────────────────────────────────────────────────
@@ -269,10 +232,10 @@ test("boundary anchors: single-line file emits only file_start boundary", () => 
     totalLines: 1,
   });
   const boundaries = summary.anchors.filter((a) => a.kind === "boundary");
-  assert.equal(boundaries.length, 1, "single-line file should have exactly 1 boundary anchor");
-  assert.equal(boundaries[0].name, "file_start", "the single boundary must be file_start");
+  expect(boundaries.length, "single-line file should have exactly 1 boundary anchor").toBe(1);
+  expect(boundaries[0].name, "the single boundary must be file_start").toBe("file_start");
   const fileEnd = summary.anchors.find((a) => a.kind === "boundary" && a.name === "file_end");
-  assert.equal(fileEnd, undefined, "single-line file must not emit file_end");
+  expect(fileEnd, "single-line file must not emit file_end").toBe(undefined);
 });
 
 test("boundary anchors: multi-line file emits both file_start and file_end", () => {
@@ -284,10 +247,10 @@ test("boundary anchors: multi-line file emits both file_start and file_end", () 
   });
   const fileStart = summary.anchors.find((a) => a.kind === "boundary" && a.name === "file_start");
   const fileEnd = summary.anchors.find((a) => a.kind === "boundary" && a.name === "file_end");
-  assert.ok(fileStart, "multi-line file must have a file_start boundary");
-  assert.equal(fileStart.line, 1, "file_start must be at line 1");
-  assert.ok(fileEnd, "multi-line file must have a file_end boundary");
-  assert.equal(fileEnd.line, 5, "file_end must be at totalLines (5)");
+  expect(fileStart, "multi-line file must have a file_start boundary").toBeTruthy();
+  expect(fileStart.line, "file_start must be at line 1").toBe(1);
+  expect(fileEnd, "multi-line file must have a file_end boundary").toBeTruthy();
+  expect(fileEnd.line, "file_end must be at totalLines (5)").toBe(5);
 });
 
 // ── counts accuracy ───────────────────────────────────────────────────────────
@@ -326,11 +289,11 @@ test("counts fields accurately reflect tallied symbols, routes, keywords, graph 
     externalAnalyzerResults,
   });
 
-  assert.equal(summary.counts.symbols, 1, "symbols count must be 1");
-  assert.equal(summary.counts.routes, 1, "routes count must be 1");
-  assert.ok(summary.counts.keywords >= 1, "keywords count must be >= 1 (secret)");
-  assert.equal(summary.counts.graph_edges, 2, "graph_edges count must be 2 (both edges touch src/counts.ts)");
-  assert.equal(summary.counts.analyzer_signals, 1, "analyzer_signals count must be 1 (only the matching path)");
+  expect(summary.counts.symbols, "symbols count must be 1").toBe(1);
+  expect(summary.counts.routes, "routes count must be 1").toBe(1);
+  expect(summary.counts.keywords >= 1, "keywords count must be >= 1 (secret)").toBeTruthy();
+  expect(summary.counts.graph_edges, "graph_edges count must be 2 (both edges touch src/counts.ts)").toBe(2);
+  expect(summary.counts.analyzer_signals, "analyzer_signals count must be 1 (only the matching path)").toBe(1);
 });
 
 // ── analyzer signal filtering ─────────────────────────────────────────────────
@@ -355,9 +318,9 @@ test("analyzer signals are filtered to the given file path (case-insensitive, ba
   });
 
   const sigAnchors = summary.anchors.filter((a) => a.kind === "analyzer_signal");
-  assert.equal(sigAnchors.length, 1, "only one analyzer_signal anchor should be present (matching path)");
-  assert.equal(sigAnchors[0].name, "rule-a", "anchor should be for rule-a");
-  assert.equal(summary.counts.analyzer_signals, 1, "analyzer_signals count must be 1");
+  expect(sigAnchors.length, "only one analyzer_signal anchor should be present (matching path)").toBe(1);
+  expect(sigAnchors[0].name, "anchor should be for rule-a").toBe("rule-a");
+  expect(summary.counts.analyzer_signals, "analyzer_signals count must be 1").toBe(1);
 });
 
 // ── path normalization in returned summary ────────────────────────────────────
@@ -368,5 +331,5 @@ test("path in the returned FileAnchorSummary is normalized (leading ./ stripped,
     content: "",
     totalLines: 1,
   });
-  assert.equal(summary.path, "src/foo.ts", "summary.path must be normalized to src/foo.ts");
+  expect(summary.path, "summary.path must be normalized to src/foo.ts").toBe("src/foo.ts");
 });

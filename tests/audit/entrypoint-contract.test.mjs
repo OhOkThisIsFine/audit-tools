@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { test, expect } from "vitest";
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +12,7 @@ async function readText(relativePath) {
 
 test('package bin points audit-code at the wrapper entrypoint', async () => {
   const packageJson = JSON.parse(await readText('package.json'));
-  assert.equal(packageJson.bin['audit-code'], 'audit-code.mjs');
+  expect(packageJson.bin['audit-code']).toBe('audit-code.mjs');
 });
 
 test('product docs consistently present /audit-code as the canonical surface', async () => {
@@ -26,23 +25,23 @@ test('product docs consistently present /audit-code as the canonical surface', a
   // edits don't break the contract. Every doc must still present the canonical
   // /audit-code surface.
   for (const content of [readme, productDirection, skill]) {
-    assert.ok(content.includes('/audit-code'));
+    expect(content.includes('/audit-code')).toBeTruthy();
   }
 
   // Conversational slash-command usage is documented (concept, not a specific
   // heading string — the README's own section names have changed before).
-  assert.ok(readme.toLowerCase().includes('slash-command'));
+  expect(readme.toLowerCase().includes('slash-command')).toBeTruthy();
   // The CLI is documented as a backend/fallback, not the primary product surface.
-  assert.ok(readme.toLowerCase().includes('backend') && readme.toLowerCase().includes('fallback'));
-  assert.ok(productDirection.toLowerCase().includes('repo-local fallback'));
-  assert.ok(skill.includes('conversational product surface first'));
-  assert.ok(skill.includes('explicit user authorization to fan out'));
-  assert.ok(skill.includes('probe alternate'));
+  expect(readme.toLowerCase().includes('backend') && readme.toLowerCase().includes('fallback')).toBeTruthy();
+  expect(productDirection.toLowerCase().includes('repo-local fallback')).toBeTruthy();
+  expect(skill.includes('conversational product surface first')).toBeTruthy();
+  expect(skill.includes('explicit user authorization to fan out')).toBeTruthy();
+  expect(skill.includes('probe alternate')).toBeTruthy();
   // The prompt must document both invocation commands and the two stable
   // behavioral instructions (follow only the returned step; stop when told),
   // matched on durable keywords instead of whole sentences.
-  assert.ok(prompt.includes('audit-code ensure --quiet'));
-  assert.ok(prompt.includes('audit-code next-step'));
-  assert.ok(prompt.includes('follow only that prompt'));
-  assert.ok(prompt.includes('Stop when'));
+  expect(prompt.includes('audit-code ensure --quiet')).toBeTruthy();
+  expect(prompt.includes('audit-code next-step')).toBeTruthy();
+  expect(prompt.includes('follow only that prompt')).toBeTruthy();
+  expect(prompt.includes('Stop when')).toBeTruthy();
 });

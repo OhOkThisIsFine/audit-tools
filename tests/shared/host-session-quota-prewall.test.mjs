@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { HostSessionQuotaSource } = await import(
   "../../src/shared/quota/hostSessionQuotaSource.ts"
@@ -63,8 +62,8 @@ test("CE-001/CE-002 prepend: host-session source is consulted FIRST for its own 
   const composite = new CompositeQuotaSource([hostSession, learned]);
 
   const own = await composite.probeUsage(KEY);
-  assert.equal(own.snapshot.source, "host_session", "host-session wins for its own key");
-  assert.equal(own.snapshot.remaining_pct, 0, "paused → 0, not the learned 0.9");
+  expect(own.snapshot.source, "host-session wins for its own key").toBe("host_session");
+  expect(own.snapshot.remaining_pct, "paused → 0, not the learned 0.9").toBe(0);
 });
 
 test("passthrough: host-session never masks the learned source for a DIFFERENT key", async () => {
@@ -76,8 +75,8 @@ test("passthrough: host-session never masks the learned source for a DIFFERENT k
   const composite = new CompositeQuotaSource([hostSession, learned]);
 
   const other = await composite.probeUsage(OTHER_KEY);
-  assert.equal(other.snapshot.source, "learned-stub", "other key → learned answers");
-  assert.equal(other.snapshot.remaining_pct, 0.9);
+  expect(other.snapshot.source, "other key → learned answers").toBe("learned-stub");
+  expect(other.snapshot.remaining_pct).toBe(0.9);
 });
 
 test("composition: open + no limit known passes through to the learned source for its OWN key", async () => {
@@ -88,7 +87,7 @@ test("composition: open + no limit known passes through to the learned source fo
 
   // No limit ever recorded → host-session has no usage signal → it must not win.
   const own = await composite.probeUsage(KEY);
-  assert.equal(own.snapshot.source, "learned-stub", "no signal → defers to learned (no masking)");
+  expect(own.snapshot.source, "no signal → defers to learned (no masking)").toBe("learned-stub");
 });
 
 /** A minimal real-shaped CapacityPool for the rolling-dispatch tests. */
@@ -112,8 +111,8 @@ test("buildQuotaSource PREPENDS the host-session source before proactive sources
 
   const composite = buildQuotaSource({ claudeOAuth: false, hostSession });
   const own = await composite.probeUsage(KEY);
-  assert.equal(own.snapshot.source, "host_session", "prepended → answers first for its key");
-  assert.equal(own.snapshot.remaining_pct, 0, "paused signal surfaced through the cascade");
+  expect(own.snapshot.source, "prepended → answers first for its key").toBe("host_session");
+  expect(own.snapshot.remaining_pct, "paused signal surfaced through the cascade").toBe(0);
 });
 
 test("graduated pre-wall: after a recorded limit the band is below CRITICAL (scheduler throttles pre-429)", async () => {
@@ -129,16 +128,10 @@ test("graduated pre-wall: after a recorded limit the band is below CRITICAL (sch
   // handling) treat the pool as degraded BEFORE a hard 429.
   now.set(resetMs + 1);
   const probe = await hostSession.probeUsage(KEY);
-  assert.equal(probe.status, "ok");
-  assert.ok(
-    probe.snapshot.remaining_pct > 0,
-    "graduated, not a hard 0",
-  );
-  assert.ok(
-    probe.snapshot.remaining_pct < QUOTA_REMAINING_PCT_CRITICAL,
-    `near-wall band must be below CRITICAL (${QUOTA_REMAINING_PCT_CRITICAL}); got ${probe.snapshot.remaining_pct}`,
-  );
-  assert.ok(probe.snapshot.remaining_pct < QUOTA_REMAINING_PCT_LOW);
+  expect(probe.status).toBe("ok");
+  expect(probe.snapshot.remaining_pct > 0, "graduated, not a hard 0").toBeTruthy();
+  expect(probe.snapshot.remaining_pct < QUOTA_REMAINING_PCT_CRITICAL, `near-wall band must be below CRITICAL (${QUOTA_REMAINING_PCT_CRITICAL}); got ${probe.snapshot.remaining_pct}`).toBeTruthy();
+  expect(probe.snapshot.remaining_pct < QUOTA_REMAINING_PCT_LOW).toBeTruthy();
 });
 
 test("isPaused fix: an in-flight same-packet re-limit sequence still escalates even when probed between limits", async () => {
@@ -162,11 +155,11 @@ test("isPaused fix: an in-flight same-packet re-limit sequence still escalates e
     // Advance to just past the reset and PROBE — the resume path runs here.
     now.advance(3600_000 + 10);
     const probe = await hostSession.probeUsage(KEY);
-    assert.equal(probe.status, "ok", `probe ${i + 1} sees the window reopened`);
+    expect(probe.status, `probe ${i + 1} sees the window reopened`).toBe("ok");
   }
-  assert.notEqual(last.escalation, null, "livelock detected despite resume-probes between limits");
-  assert.equal(hostSession.isEscalated("pkt-loop"), true);
-  assert.equal(escalations.length, 1);
+  expect(last.escalation, "livelock detected despite resume-probes between limits").not.toBe(null);
+  expect(hostSession.isEscalated("pkt-loop")).toBe(true);
+  expect(escalations.length).toBe(1);
 });
 
 test("rollingDispatch consults isPacketEscalated: an escalated packet is STRANDED, not re-queued (INV-QD-07 preserved)", async () => {
@@ -179,7 +172,7 @@ test("rollingDispatch consults isPacketEscalated: an escalated packet is STRANDE
   // Drive the packet over the bound so it is escalated.
   hostSession.recordLimit("error", "session limit reached. Resets in 1h", "pkt-esc");
   hostSession.recordLimit("error", "session limit reached. Resets in 1h", "pkt-esc");
-  assert.equal(hostSession.isEscalated("pkt-esc"), true);
+  expect(hostSession.isEscalated("pkt-esc")).toBe(true);
 
   const dispatcher = createRollingDispatcher({
     confirmedPools: [singlePool()],
@@ -198,13 +191,10 @@ test("rollingDispatch consults isPacketEscalated: an escalated packet is STRANDE
 
   // The escalated packet is neither completed nor infinitely re-queued: it is
   // stranded and surfaced via the empty-pool terminal.
-  assert.equal(results.length, 0, "no terminal result for an escalated/stranded packet");
+  expect(results.length, "no terminal result for an escalated/stranded packet").toBe(0);
   const terminal = dispatcher.getTerminal();
-  assert.notEqual(terminal, null, "stranded packet surfaces a terminal");
-  assert.ok(
-    terminal.stranded_ids.includes("pkt-esc"),
-    `terminal names the stranded packet: ${JSON.stringify(terminal)}`,
-  );
+  expect(terminal, "stranded packet surfaces a terminal").not.toBe(null);
+  expect(terminal.stranded_ids.includes("pkt-esc"), `terminal names the stranded packet: ${JSON.stringify(terminal)}`).toBeTruthy();
 });
 
 test("rollingDispatch without escalation: a non-escalated rate_limited packet keeps INV-QD-07 re-route/strand semantics", async () => {
@@ -217,6 +207,6 @@ test("rollingDispatch without escalation: a non-escalated rate_limited packet ke
   });
   dispatcher.enqueue([{ id: "pkt-rl", payload: {}, estimatedTokens: 10, complexity: 0.5 }]);
   const results = await dispatcher.run();
-  assert.equal(results.length, 0, "rate_limited packet not recorded as a terminal result");
-  assert.notEqual(dispatcher.getTerminal(), null, "stranded via the normal empty-pool terminal");
+  expect(results.length, "rate_limited packet not recorded as a terminal result").toBe(0);
+  expect(dispatcher.getTerminal(), "stranded via the normal empty-pool terminal").not.toBe(null);
 });

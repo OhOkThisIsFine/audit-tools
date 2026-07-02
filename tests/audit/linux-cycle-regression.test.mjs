@@ -25,8 +25,7 @@
  * through the slice-2b re-attempt.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,13 +84,9 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
       const step = JSON.parse((await runWrapper(["next-step"], { cwd: root, env })).stdout);
       if (i === 0) firstKind = step.step_kind;
 
-      assert.notEqual(
-        step.step_kind,
-        "blocked",
-        `floor-only next-step folded to 'blocked' at iteration ${i + 1} — the slice-2b ` +
+      expect(step.step_kind, `floor-only next-step folded to 'blocked' at iteration ${i + 1} — the slice-2b ` +
           `false-cycle regression. Cycle detection must exempt the 'no-metadata' bootstrap ` +
-          `state and tolerate content-signature revisits (see HANDOFF ⚠️ block).`,
-      );
+          `state and tolerate content-signature revisits (see HANDOFF ⚠️ block).`).not.toBe("blocked");
 
       if (step.step_kind === "analyzer_install") {
         await mkdir(incomingDir, { recursive: true });
@@ -164,7 +159,7 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
       }
       if (TERMINAL_KINDS.has(step.step_kind)) {
         // Reached a legitimate terminal without ever folding to blocked.
-        assert.ok(firstKind && firstKind !== "blocked");
+        expect(firstKind && firstKind !== "blocked").toBeTruthy();
         return;
       }
       throw new Error(

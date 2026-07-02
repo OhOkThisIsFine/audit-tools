@@ -40,8 +40,7 @@
  *             in both the executor write-sets and the dependency map.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -216,13 +215,9 @@ test("PARITY-1: every artifact in an executor artifacts_written is a known filen
   const unknown = [...ALL_EXECUTOR_WRITTEN].filter(
     (name) => !KNOWN_FILENAMES.has(name) && !SIDE_CHANNEL_FILES.has(name),
   );
-  assert.deepEqual(
-    unknown.sort(),
-    [],
-    `Executor artifacts_written contains unknown filenames: [${unknown.join(", ")}]. ` +
+  expect(unknown.sort(), `Executor artifacts_written contains unknown filenames: [${unknown.join(", ")}]. ` +
       "Either add them to ARTIFACT_DEFINITIONS, add to SIDE_CHANNEL_FILES if intentionally untracked, " +
-      "or fix the typo.",
-  );
+      "or fix the typo.").toEqual([]);
 });
 
 // ── PARITY-2: every upstream referenced in ARTIFACT_DEPENDS_ON_MAP is writable ──
@@ -250,14 +245,10 @@ test("PARITY-2: every artifact referenced as an upstream in ARTIFACT_DEPENDS_ON_
     }
   }
 
-  assert.deepEqual(
-    mismatches.sort(),
-    [],
-    `ARTIFACT_DEPENDS_ON_MAP references upstreams that nothing writes: [${mismatches.join(", ")}]. ` +
+  expect(mismatches.sort(), `ARTIFACT_DEPENDS_ON_MAP references upstreams that nothing writes: [${mismatches.join(", ")}]. ` +
       "Staleness propagation from these artifacts can never fire. " +
       "If an artifact was renamed, update ARTIFACT_DEPENDS_ON_MAP values to the new filename " +
-      "AND update the executor's artifacts_written to match.",
-  );
+      "AND update the executor's artifacts_written to match.").toEqual([]);
 });
 
 // ── PARITY-2b: every key in ARTIFACT_DEPENDS_ON_MAP is a known filename ─────────
@@ -280,12 +271,8 @@ test("PARITY-2b: every key in ARTIFACT_DEPENDS_ON_MAP (dependent artifact) is a 
       staleMapKeys.push(depArtifact);
     }
   }
-  assert.deepEqual(
-    staleMapKeys.sort(),
-    [],
-    `ARTIFACT_DEPENDS_ON_MAP keys reference artifact names not in ARTIFACT_DEFINITIONS: [${staleMapKeys.join(", ")}]. ` +
-      "These entries are stale — either add the artifact to ARTIFACT_DEFINITIONS or remove the key from the DAG.",
-  );
+  expect(staleMapKeys.sort(), `ARTIFACT_DEPENDS_ON_MAP keys reference artifact names not in ARTIFACT_DEFINITIONS: [${staleMapKeys.join(", ")}]. ` +
+      "These entries are stale — either add the artifact to ARTIFACT_DEFINITIONS or remove the key from the DAG.").toEqual([]);
 });
 
 // ── PARITY-3: every map key with dependents has at least one writer ────────────
@@ -295,12 +282,8 @@ test("PARITY-3: every ARTIFACT_DEPENDENTS_MAP key that has downstream dependents
 
   const deadKeys = MAP_KEYS_WITH_DEPENDENTS.filter((key) => !allWritable.has(key));
 
-  assert.deepEqual(
-    deadKeys.sort(),
-    [],
-    `ARTIFACT_DEPENDENTS_MAP keys with dependents that nothing writes: [${deadKeys.join(", ")}]. ` +
-      "These staleness edges can never fire. If the artifact was renamed or deleted, update the map.",
-  );
+  expect(deadKeys.sort(), `ARTIFACT_DEPENDENTS_MAP keys with dependents that nothing writes: [${deadKeys.join(", ")}]. ` +
+      "These staleness edges can never fire. If the artifact was renamed or deleted, update the map.").toEqual([]);
 });
 
 // ── PARITY-4: all dependency-map values are known filenames ──────────────────
@@ -310,90 +293,50 @@ test("PARITY-4: all downstream filenames in ARTIFACT_DEPENDENTS_MAP are known ar
     (name) => !KNOWN_FILENAMES.has(name),
   );
 
-  assert.deepEqual(
-    unknownDownstreams.sort(),
-    [],
-    `ARTIFACT_DEPENDENTS_MAP references unknown downstream filenames: [${unknownDownstreams.join(", ")}]. ` +
-      "Staleness would propagate to a non-existent artifact. Fix the typo or add to ARTIFACT_DEFINITIONS.",
-  );
+  expect(unknownDownstreams.sort(), `ARTIFACT_DEPENDENTS_MAP references unknown downstream filenames: [${unknownDownstreams.join(", ")}]. ` +
+      "Staleness would propagate to a non-existent artifact. Fix the typo or add to ARTIFACT_DEFINITIONS.").toEqual([]);
 });
 
 // ── PARITY-5: specific high-value edges (regression guards) ──────────────────
 
 test("PARITY-5a: planning executor writes scope.json AND scope.json → coverage_matrix.json, audit_tasks.json edges exist", () => {
   // ARC-cebe3421-3 regression guard.
-  assert.ok(
-    ALL_EXECUTOR_WRITTEN.has("scope.json"),
-    "planning executor must list scope.json in artifacts_written",
-  );
+  expect(ALL_EXECUTOR_WRITTEN.has("scope.json"), "planning executor must list scope.json in artifacts_written").toBeTruthy();
   const scopeDeps = ARTIFACT_DEPENDENTS_MAP["scope.json"];
-  assert.ok(
-    Array.isArray(scopeDeps) && scopeDeps.includes("coverage_matrix.json"),
-    "scope.json → coverage_matrix.json direct edge must exist in ARTIFACT_DEPENDENTS_MAP",
-  );
-  assert.ok(
-    Array.isArray(scopeDeps) && scopeDeps.includes("audit_tasks.json"),
-    "scope.json → audit_tasks.json direct edge must exist (ARC-cebe3421-3: scope change with identical coverage must still re-stale tasks)",
-  );
+  expect(Array.isArray(scopeDeps) && scopeDeps.includes("coverage_matrix.json"), "scope.json → coverage_matrix.json direct edge must exist in ARTIFACT_DEPENDENTS_MAP").toBeTruthy();
+  expect(Array.isArray(scopeDeps) && scopeDeps.includes("audit_tasks.json"), "scope.json → audit_tasks.json direct edge must exist (ARC-cebe3421-3: scope change with identical coverage must still re-stale tasks)").toBeTruthy();
 });
 
 test("PARITY-5b: structure executor writes graph_bundle.json AND graph_bundle.json → analyzer_capability.json edge exists", () => {
-  assert.ok(
-    ALL_EXECUTOR_WRITTEN.has("graph_bundle.json"),
-    "structure or graph-enrichment executor must list graph_bundle.json in artifacts_written",
-  );
+  expect(ALL_EXECUTOR_WRITTEN.has("graph_bundle.json"), "structure or graph-enrichment executor must list graph_bundle.json in artifacts_written").toBeTruthy();
   const graphDeps = ARTIFACT_DEPENDENTS_MAP["graph_bundle.json"];
-  assert.ok(
-    Array.isArray(graphDeps) && graphDeps.includes("analyzer_capability.json"),
-    "graph_bundle.json → analyzer_capability.json edge must exist (enrichment re-stale guard)",
-  );
+  expect(Array.isArray(graphDeps) && graphDeps.includes("analyzer_capability.json"), "graph_bundle.json → analyzer_capability.json edge must exist (enrichment re-stale guard)").toBeTruthy();
 });
 
 test("PARITY-5c: synthesis executor writes audit-findings.json AND audit-findings.json → synthesis-narrative.json edge exists", () => {
-  assert.ok(
-    ALL_EXECUTOR_WRITTEN.has("audit-findings.json"),
-    "synthesis executor must list audit-findings.json in artifacts_written",
-  );
+  expect(ALL_EXECUTOR_WRITTEN.has("audit-findings.json"), "synthesis executor must list audit-findings.json in artifacts_written").toBeTruthy();
   const findingsDeps = ARTIFACT_DEPENDENTS_MAP["audit-findings.json"];
-  assert.ok(
-    Array.isArray(findingsDeps) && findingsDeps.includes("synthesis-narrative.json"),
-    "audit-findings.json → synthesis-narrative.json edge must exist (fresh synthesis re-stales narrative)",
-  );
+  expect(Array.isArray(findingsDeps) && findingsDeps.includes("synthesis-narrative.json"), "audit-findings.json → synthesis-narrative.json edge must exist (fresh synthesis re-stales narrative)").toBeTruthy();
 });
 
 test("PARITY-5d: syntax-resolution executor writes external_analyzer_results.json AND that file is a key with dependents", () => {
-  assert.ok(
-    ALL_EXECUTOR_WRITTEN.has("external_analyzer_results.json"),
-    "syntax-resolution executor must list external_analyzer_results.json in artifacts_written",
-  );
+  expect(ALL_EXECUTOR_WRITTEN.has("external_analyzer_results.json"), "syntax-resolution executor must list external_analyzer_results.json in artifacts_written").toBeTruthy();
   const deps = ARTIFACT_DEPENDENTS_MAP["external_analyzer_results.json"];
-  assert.ok(
-    Array.isArray(deps) && deps.length > 0,
-    "external_analyzer_results.json must have at least one dependent in ARTIFACT_DEPENDENTS_MAP",
-  );
+  expect(Array.isArray(deps) && deps.length > 0, "external_analyzer_results.json must have at least one dependent in ARTIFACT_DEPENDENTS_MAP").toBeTruthy();
 });
 
 test("PARITY-5e: intake executor writes repo_manifest.json AND repo_manifest.json → file_disposition.json edge exists", () => {
   // repo_manifest.json is written via a local variable in intakeExecutors.ts
   // (not an inline literal). This test verifies our extraction caught it.
-  assert.ok(
-    ALL_EXECUTOR_WRITTEN.has("repo_manifest.json"),
-    "intake executor must list repo_manifest.json in artifacts_written " +
-      "(extraction may have missed the local-variable pattern — check extractArtifactsWritten)",
-  );
+  expect(ALL_EXECUTOR_WRITTEN.has("repo_manifest.json"), "intake executor must list repo_manifest.json in artifacts_written " +
+      "(extraction may have missed the local-variable pattern — check extractArtifactsWritten)").toBeTruthy();
   const repoDeps = ARTIFACT_DEPENDENTS_MAP["repo_manifest.json"];
-  assert.ok(
-    Array.isArray(repoDeps) && repoDeps.includes("file_disposition.json"),
-    "repo_manifest.json → file_disposition.json edge must exist",
-  );
+  expect(Array.isArray(repoDeps) && repoDeps.includes("file_disposition.json"), "repo_manifest.json → file_disposition.json edge must exist").toBeTruthy();
 });
 
 test("PARITY-5f: agent-feedback.jsonl (lifecycle file) is a key in ARTIFACT_DEPENDENTS_MAP pointing to audit-report.md", () => {
   // Verify the lifecycle file is correctly wired so a reflection appended after
   // synthesis re-stales the markdown report exactly once.
   const feedbackDeps = ARTIFACT_DEPENDENTS_MAP[AGENT_FEEDBACK_FILENAME];
-  assert.ok(
-    Array.isArray(feedbackDeps) && feedbackDeps.includes(AUDIT_REPORT_FILENAME),
-    `${AGENT_FEEDBACK_FILENAME} → ${AUDIT_REPORT_FILENAME} edge must exist so worker reflections re-stale the report`,
-  );
+  expect(Array.isArray(feedbackDeps) && feedbackDeps.includes(AUDIT_REPORT_FILENAME), `${AGENT_FEEDBACK_FILENAME} → ${AUDIT_REPORT_FILENAME} edge must exist so worker reflections re-stale the report`).toBeTruthy();
 });

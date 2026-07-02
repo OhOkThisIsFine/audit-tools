@@ -5,8 +5,7 @@
  * grows, and is lock-safe under concurrent adds (no lost update).
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,18 +18,18 @@ test("settled-pools store: empty by default, round-trips, idempotent, accumulate
   const dir = mkdtempSync(join(tmpdir(), "settled-"));
   try {
     const path = join(dir, "settled.json");
-    assert.deepEqual([...(await readSettledPools(path))], []);
+    expect([...(await readSettledPools(path))]).toEqual([]);
 
     await addSettledPool(path, "pool/nim");
-    assert.deepEqual([...(await readSettledPools(path))], ["pool/nim"]);
+    expect([...(await readSettledPools(path))]).toEqual(["pool/nim"]);
 
     // Idempotent — re-settling an already-settled pool is a no-op.
     await addSettledPool(path, "pool/nim");
-    assert.deepEqual([...(await readSettledPools(path))], ["pool/nim"]);
+    expect([...(await readSettledPools(path))]).toEqual(["pool/nim"]);
 
     // Accumulates (the set only grows within a run).
     await addSettledPool(path, "pool/codex");
-    assert.deepEqual([...(await readSettledPools(path))].sort(), ["pool/codex", "pool/nim"]);
+    expect([...(await readSettledPools(path))].sort()).toEqual(["pool/codex", "pool/nim"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -44,7 +43,7 @@ test("settled-pools store: concurrent adds don't lose entries (lock-guarded)", a
       ["a", "b", "c", "d", "e"].map((id) => addSettledPool(path, `pool/${id}`)),
     );
     const set = await readSettledPools(path);
-    assert.equal(set.size, 5);
+    expect(set.size).toBe(5);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

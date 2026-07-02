@@ -8,8 +8,7 @@
  * tests feed adversarial argv and assert the WHOLE command is refused, plus the
  * legitimate read-only commands still pass, plus the runner spawns argv-only.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   isAllowedAnchorCommand,
   runAllowlistedReadOnlyCommand,
@@ -34,14 +33,10 @@ test("isAllowedAnchorCommand allows legitimate read-only inspection commands", (
     ["grep.exe", "x"],
     ["C:\\\\tools\\\\rg.cmd", "x"],
   ]) {
-    assert.equal(isAllowedAnchorCommand(cmd), true, `should allow ${cmd.join(" ")}`);
+    expect(isAllowedAnchorCommand(cmd), `should allow ${cmd.join(" ")}`).toBe(true);
   }
   for (const sub of GIT_READONLY_SUBCOMMANDS) {
-    assert.equal(
-      isAllowedAnchorCommand(["git", sub, "HEAD"]),
-      true,
-      `should allow git ${sub}`,
-    );
+    expect(isAllowedAnchorCommand(["git", sub, "HEAD"]), `should allow git ${sub}`).toBe(true);
   }
 });
 
@@ -71,11 +66,7 @@ test("CRIT: adversarial arguments on an ALLOWED executable are refused (arg vali
     ["grep", "--some-future-write-flag", "x"],
   ];
   for (const cmd of adversarial) {
-    assert.equal(
-      isAllowedAnchorCommand(cmd),
-      false,
-      `MUST refuse adversarial argv: ${cmd.join(" ")}`,
-    );
+    expect(isAllowedAnchorCommand(cmd), `MUST refuse adversarial argv: ${cmd.join(" ")}`).toBe(false);
   }
 });
 
@@ -99,7 +90,7 @@ test("CRIT: git is refused for non-read-only subcommands and for write/reconfigu
     ["git", "--no-pager"],
   ];
   for (const cmd of refused) {
-    assert.equal(isAllowedAnchorCommand(cmd), false, `MUST refuse git: ${cmd.join(" ")}`);
+    expect(isAllowedAnchorCommand(cmd), `MUST refuse git: ${cmd.join(" ")}`).toBe(false);
   }
 });
 
@@ -118,21 +109,17 @@ test("non-allowlisted executables are refused regardless of args", () => {
     [""],
     [],
   ]) {
-    assert.equal(
-      isAllowedAnchorCommand(cmd),
-      false,
-      `MUST refuse non-allowlisted: ${cmd.join(" ") || "(empty)"}`,
-    );
+    expect(isAllowedAnchorCommand(cmd), `MUST refuse non-allowlisted: ${cmd.join(" ") || "(empty)"}`).toBe(false);
   }
 });
 
 test("ANCHOR_ALLOWLIST exposes the inspection executables incl. git", () => {
   for (const exe of ["grep", "rg", "ripgrep", "findstr", "madge", "ast-grep", "sg", "git"]) {
-    assert.ok(ANCHOR_ALLOWLIST.has(exe), `${exe} should be in ANCHOR_ALLOWLIST`);
+    expect(ANCHOR_ALLOWLIST.has(exe), `${exe} should be in ANCHOR_ALLOWLIST`).toBeTruthy();
   }
   // It must NOT advertise anything that executes arbitrary code.
   for (const exe of ["node", "npm", "bash", "sh", "python"]) {
-    assert.ok(!ANCHOR_ALLOWLIST.has(exe), `${exe} must NOT be in ANCHOR_ALLOWLIST`);
+    expect(!ANCHOR_ALLOWLIST.has(exe), `${exe} must NOT be in ANCHOR_ALLOWLIST`).toBeTruthy();
   }
 });
 
@@ -143,10 +130,10 @@ test("runAllowlistedReadOnlyCommand runs an allowlisted command argv-only and re
     process.cwd(),
     ALLOWLISTED_EXEC_TIMEOUT_MS,
   );
-  assert.equal(r.timed_out, false);
-  assert.equal(r.spawn_error, undefined);
-  assert.equal(r.exit_code, 0, `expected exit 0, got ${r.exit_code}: ${r.output}`);
-  assert.match(r.output.trim(), /true/);
+  expect(r.timed_out).toBe(false);
+  expect(r.spawn_error).toBe(undefined);
+  expect(r.exit_code, `expected exit 0, got ${r.exit_code}: ${r.output}`).toBe(0);
+  expect(r.output.trim()).toMatch(/true/);
 });
 
 test("runAllowlistedReadOnlyCommand reports a spawn error for a missing executable without throwing", async () => {
@@ -155,6 +142,6 @@ test("runAllowlistedReadOnlyCommand reports a spawn error for a missing executab
     process.cwd(),
     ALLOWLISTED_EXEC_TIMEOUT_MS,
   );
-  assert.equal(r.exit_code, null);
-  assert.ok(typeof r.spawn_error === "string" && r.spawn_error.length > 0);
+  expect(r.exit_code).toBe(null);
+  expect(typeof r.spawn_error === "string" && r.spawn_error.length > 0).toBeTruthy();
 });

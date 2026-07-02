@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -62,17 +61,14 @@ test("syntax resolution skips ESLint when no repo-local ESLint config exists", a
   await withTempRepo(async (root) => {
     const result = runSyntaxResolutionExecutor(createBundle(), root);
 
-    assert.deepEqual(result.updated.external_analyzer_results[0].results, []);
-    assert.deepEqual(
-      result.updated.external_analyzer_results[0].tool_statuses.map((status) => [
+    expect(result.updated.external_analyzer_results[0].results).toEqual([]);
+    expect(result.updated.external_analyzer_results[0].tool_statuses.map((status) => [
         status.tool,
         status.status,
-      ]),
-      [["eslint", "skipped"]],
-    );
-    assert.ok(result.updated.syntax_resolution_status);
-    assert.ok(result.artifacts_written.includes("syntax_resolution_status.json"));
-    assert.equal(existsSync(join(root, "eslint-ran.txt")), false);
+      ])).toEqual([["eslint", "skipped"]]);
+    expect(result.updated.syntax_resolution_status).toBeTruthy();
+    expect(result.artifacts_written.includes("syntax_resolution_status.json")).toBeTruthy();
+    expect(existsSync(join(root, "eslint-ran.txt"))).toBe(false);
   });
 });
 
@@ -82,8 +78,8 @@ test("syntax resolution runs ESLint when repo-local ESLint config exists", async
 
     const result = runSyntaxResolutionExecutor(createBundle(), root);
 
-    assert.equal(existsSync(join(root, "eslint-ran.txt")), true);
-    assert.deepEqual(result.updated.external_analyzer_results[0].results, [
+    expect(existsSync(join(root, "eslint-ran.txt"))).toBe(true);
+    expect(result.updated.external_analyzer_results[0].results).toEqual([
       {
         id: "eslint-0",
         category: "maintainability",
@@ -96,13 +92,10 @@ test("syntax resolution runs ESLint when repo-local ESLint config exists", async
         rule: "fixture/rule",
       },
     ]);
-    assert.deepEqual(
-      result.updated.external_analyzer_results[0].tool_statuses.map((status) => [
+    expect(result.updated.external_analyzer_results[0].tool_statuses.map((status) => [
         status.tool,
         status.status,
-      ]),
-      [["eslint", "findings"]],
-    );
+      ])).toEqual([["eslint", "findings"]]);
   });
 });
 
@@ -130,11 +123,11 @@ test("syntax resolution maps ESLint severities to the canonical vocabulary (COR-
     const severities = result.updated.external_analyzer_results[0].results.map(
       (r) => r.severity,
     );
-    assert.deepEqual(severities, ["high", "medium"]);
+    expect(severities).toEqual(["high", "medium"]);
     // No persisted result may carry an out-of-vocabulary severity.
     const canonical = new Set(["critical", "high", "medium", "low", "info"]);
     for (const sev of severities) {
-      assert.ok(canonical.has(sev), `severity ${sev} must be canonical`);
+      expect(canonical.has(sev), `severity ${sev} must be canonical`).toBeTruthy();
     }
   });
 });
@@ -159,9 +152,9 @@ test("syntax resolution records unresolved tsc as analyzer diagnostics", async (
       const tscStatus = result.updated.external_analyzer_results[0].tool_statuses.find(
         (status) => status.tool === "tsc",
       );
-      assert.equal(tscStatus.status, "not_resolved");
-      assert.equal(tscStatus.resolved, false);
-      assert.match(result.progress_summary, /analyzer diagnostic/i);
+      expect(tscStatus.status).toBe("not_resolved");
+      expect(tscStatus.resolved).toBe(false);
+      expect(result.progress_summary).toMatch(/analyzer diagnostic/i);
     } finally {
       process.env.PATH = originalPath;
     }
@@ -181,8 +174,8 @@ test("syntax resolution stores parse failure snippets for malformed ESLint outpu
       (status) => status.tool === "eslint",
     );
 
-    assert.equal(eslintStatus.status, "parse_error");
-    assert.match(eslintStatus.output_snippet, /not json from eslint/);
+    expect(eslintStatus.status).toBe("parse_error");
+    expect(eslintStatus.output_snippet).toMatch(/not json from eslint/);
   });
 });
 
@@ -204,16 +197,16 @@ test("syntax resolution preserves existing external_analyzer_results and appends
     const result = runSyntaxResolutionExecutor(bundle, root);
     const results = result.updated.external_analyzer_results[0].results;
 
-    assert.equal(results.length, 2);
-    assert.equal(results[0].path, preExisting.path);
-    assert.equal(results[0].line_start, preExisting.line_start);
-    assert.equal(results[0].rule, preExisting.rule);
-    assert.equal(results[0].summary, preExisting.summary);
-    assert.equal(results[1].id, "eslint-0");
-    assert.equal(results[1].path, "src/app.js");
-    assert.equal(results[1].line_start, 1);
-    assert.equal(results[1].rule, "fixture/rule");
-    assert.equal(results[1].summary, "fixture lint error");
+    expect(results.length).toBe(2);
+    expect(results[0].path).toBe(preExisting.path);
+    expect(results[0].line_start).toBe(preExisting.line_start);
+    expect(results[0].rule).toBe(preExisting.rule);
+    expect(results[0].summary).toBe(preExisting.summary);
+    expect(results[1].id).toBe("eslint-0");
+    expect(results[1].path).toBe("src/app.js");
+    expect(results[1].line_start).toBe(1);
+    expect(results[1].rule).toBe("fixture/rule");
+    expect(results[1].summary).toBe("fixture lint error");
   });
 });
 
@@ -236,8 +229,8 @@ test("syntax resolution deduplicates items with matching path:line_start:rule:su
     const result = runSyntaxResolutionExecutor(bundle, root);
     const results = result.updated.external_analyzer_results[0].results;
 
-    assert.equal(results.length, 1);
-    assert.equal(results[0].id, duplicate.id);
+    expect(results.length).toBe(1);
+    expect(results[0].id).toBe(duplicate.id);
   });
 });
 
@@ -246,8 +239,8 @@ test("syntax resolution uses empty array when bundle has no external_analyzer_re
     // No ESLint config → ESLint skipped, no new items
     const result = runSyntaxResolutionExecutor(createBundle(), root);
 
-    assert.deepEqual(result.updated.external_analyzer_results[0].results, []);
-    assert.equal(result.updated.external_analyzer_results[0].results.length, 0);
+    expect(result.updated.external_analyzer_results[0].results).toEqual([]);
+    expect(result.updated.external_analyzer_results[0].results.length).toBe(0);
   });
 });
 
@@ -290,9 +283,9 @@ test("tsc parse-error log includes root and exit_code", async () => {
       (l) => l.includes("[syntax-resolution] tsc output could not be parsed"),
     );
     if (parseLine) {
-      assert.ok(parseLine.includes(root), `stderr line should include root path: ${parseLine}`);
-      assert.ok(parseLine.match(/exit_code=\d+/), `stderr line should include exit_code: ${parseLine}`);
-      assert.ok(parseLine.match(/ts=\d{4}-\d{2}-\d{2}T/), `stderr line should include ISO timestamp: ${parseLine}`);
+      expect(parseLine.includes(root), `stderr line should include root path: ${parseLine}`).toBeTruthy();
+      expect(parseLine.match(/exit_code=\d+/), `stderr line should include exit_code: ${parseLine}`).toBeTruthy();
+      expect(parseLine.match(/ts=\d{4}-\d{2}-\d{2}T/), `stderr line should include ISO timestamp: ${parseLine}`).toBeTruthy();
     }
     // If the fake tsc binary wasn't resolved (e.g. no exec bit on Windows) the
     // parse-error branch may not fire — skip assertion rather than fail.
@@ -322,9 +315,9 @@ test("eslint parse-error log includes root and exit_code", async () => {
     const parseLine = stderrLines.find(
       (l) => l.includes("[syntax-resolution] eslint output could not be parsed"),
     );
-    assert.ok(parseLine, `expected eslint parse-error stderr line; got: ${JSON.stringify(stderrLines)}`);
-    assert.ok(parseLine.includes(root), `stderr line should include root path: ${parseLine}`);
-    assert.ok(parseLine.match(/exit_code=\d+/), `stderr line should include exit_code: ${parseLine}`);
-    assert.ok(parseLine.match(/ts=\d{4}-\d{2}-\d{2}T/), `stderr line should include ISO timestamp: ${parseLine}`);
+    expect(parseLine, `expected eslint parse-error stderr line; got: ${JSON.stringify(stderrLines)}`).toBeTruthy();
+    expect(parseLine.includes(root), `stderr line should include root path: ${parseLine}`).toBeTruthy();
+    expect(parseLine.match(/exit_code=\d+/), `stderr line should include exit_code: ${parseLine}`).toBeTruthy();
+    expect(parseLine.match(/ts=\d{4}-\d{2}-\d{2}T/), `stderr line should include ISO timestamp: ${parseLine}`).toBeTruthy();
   });
 });

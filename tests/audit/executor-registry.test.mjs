@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { EXECUTOR_REGISTRY, isHostDelegationExecutor } = await import("../../src/audit/orchestrator/executors.ts");
 
@@ -7,24 +6,14 @@ test("synthesis_narrative_executor is classified as host_delegation in the regis
   const entry = EXECUTOR_REGISTRY.find(
     (e) => e.id === "synthesis_narrative_executor",
   );
-  assert.ok(entry, "synthesis_narrative_executor must exist in EXECUTOR_REGISTRY");
-  assert.strictEqual(
-    entry.kind,
-    "host_delegation",
-    "synthesis_narrative_executor kind must be host_delegation",
-  );
+  expect(entry, "synthesis_narrative_executor must exist in EXECUTOR_REGISTRY").toBeTruthy();
+  expect(entry.kind, "synthesis_narrative_executor kind must be host_delegation").toBe("host_delegation");
 });
 
 test("isHostDelegationExecutor returns true for synthesis_narrative_executor", () => {
-  assert.strictEqual(
-    isHostDelegationExecutor("synthesis_narrative_executor"),
-    true,
-  );
+  expect(isHostDelegationExecutor("synthesis_narrative_executor")).toBe(true);
 });
 
 test("isHostDelegationExecutor returns false for synthesis_executor (deterministic sibling)", () => {
-  assert.strictEqual(
-    isHostDelegationExecutor("synthesis_executor"),
-    false,
-  );
+  expect(isHostDelegationExecutor("synthesis_executor")).toBe(false);
 });

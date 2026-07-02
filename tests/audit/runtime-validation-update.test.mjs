@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { updateRuntimeValidationReport } = await import("../../src/audit/orchestrator/runtimeValidationUpdate.ts");
 
@@ -60,10 +59,10 @@ test("drops existing results whose task_id is not in the manifest (stale-task pr
   const report = updateRuntimeValidationReport(manifest, existing, updates);
   const ids = report.results.map((r) => r.task_id);
 
-  assert.ok(ids.includes("task-a"), "task-a should be in output");
-  assert.ok(ids.includes("task-b"), "task-b should be in output");
-  assert.ok(!ids.includes("task-c"), "task-c (stale) must not appear in output");
-  assert.equal(report.results.length, 2);
+  expect(ids.includes("task-a"), "task-a should be in output").toBeTruthy();
+  expect(ids.includes("task-b"), "task-b should be in output").toBeTruthy();
+  expect(!ids.includes("task-c"), "task-c (stale) must not appear in output").toBeTruthy();
+  expect(report.results.length).toBe(2);
 });
 
 // ---------------------------------------------------------------------------
@@ -76,16 +75,13 @@ test("inserts a pending stub for tasks present in the manifest but absent from b
 
   const report = updateRuntimeValidationReport(manifest, existing, updates);
 
-  assert.equal(report.results.length, 2);
+  expect(report.results.length).toBe(2);
 
   for (const r of report.results) {
-    assert.equal(r.status, "pending", `${r.task_id} should be pending`);
-    assert.ok(
-      typeof r.summary === "string" && r.summary.includes(r.task_id),
-      "pending stub summary should mention the task_id",
-    );
-    assert.deepEqual(r.evidence, [], `${r.task_id} evidence should be empty`);
-    assert.deepEqual(r.notes, [], `${r.task_id} notes should be empty`);
+    expect(r.status, `${r.task_id} should be pending`).toBe("pending");
+    expect(typeof r.summary === "string" && r.summary.includes(r.task_id), "pending stub summary should mention the task_id").toBeTruthy();
+    expect(r.evidence, `${r.task_id} evidence should be empty`).toEqual([]);
+    expect(r.notes, `${r.task_id} notes should be empty`).toEqual([]);
   }
 });
 
@@ -104,24 +100,24 @@ test("merges update into existing result, deduplicating evidence and notes, upda
   const report = updateRuntimeValidationReport(manifest, existing, updates);
   const result = report.results.find((r) => r.task_id === "task-a");
 
-  assert.ok(result, "merged result for task-a must exist");
+  expect(result, "merged result for task-a must exist").toBeTruthy();
 
   // status and summary come from the update
-  assert.equal(result.status, "confirmed", "merged status should be the update's status");
-  assert.equal(result.summary, "summary for task-a", "merged summary should be the update's summary");
+  expect(result.status, "merged status should be the update's status").toBe("confirmed");
+  expect(result.summary, "merged summary should be the update's summary").toBe("summary for task-a");
 
   // evidence: union, no duplicates, preserves all unique entries
   const evidence = result.evidence ?? [];
-  assert.ok(evidence.includes("e1"), "e1 must be in merged evidence");
-  assert.ok(evidence.includes("e2"), "e2 must be in merged evidence");
-  assert.ok(evidence.includes("e3"), "e3 must be in merged evidence");
-  assert.equal(evidence.length, 3, "no duplicate evidence entries");
+  expect(evidence.includes("e1"), "e1 must be in merged evidence").toBeTruthy();
+  expect(evidence.includes("e2"), "e2 must be in merged evidence").toBeTruthy();
+  expect(evidence.includes("e3"), "e3 must be in merged evidence").toBeTruthy();
+  expect(evidence.length, "no duplicate evidence entries").toBe(3);
 
   // notes: union, no duplicates
   const notes = result.notes ?? [];
-  assert.ok(notes.includes("n1"), "n1 must be in merged notes");
-  assert.ok(notes.includes("n2"), "n2 must be in merged notes");
-  assert.equal(notes.length, 2, "no duplicate note entries");
+  expect(notes.includes("n1"), "n1 must be in merged notes").toBeTruthy();
+  expect(notes.includes("n2"), "n2 must be in merged notes").toBeTruthy();
+  expect(notes.length, "no duplicate note entries").toBe(2);
 });
 
 // ---------------------------------------------------------------------------
@@ -137,16 +133,16 @@ test("normalizes duplicate evidence/notes in an existing result that has no matc
   const report = updateRuntimeValidationReport(manifest, existing, updates);
   const result = report.results.find((r) => r.task_id === "task-a");
 
-  assert.ok(result, "result for task-a must exist");
+  expect(result, "result for task-a must exist").toBeTruthy();
 
   const evidence = result.evidence ?? [];
-  assert.ok(evidence.includes("dup"), "'dup' should appear once");
-  assert.ok(evidence.includes("unique"), "'unique' should appear");
-  assert.equal(evidence.length, 2, "duplicate 'dup' must be removed");
+  expect(evidence.includes("dup"), "'dup' should appear once").toBeTruthy();
+  expect(evidence.includes("unique"), "'unique' should appear").toBeTruthy();
+  expect(evidence.length, "duplicate 'dup' must be removed").toBe(2);
 
   const notes = result.notes ?? [];
-  assert.ok(notes.includes("x"), "'x' should appear once");
-  assert.equal(notes.length, 1, "duplicate 'x' must be removed");
+  expect(notes.includes("x"), "'x' should appear once").toBeTruthy();
+  expect(notes.length, "duplicate 'x' must be removed").toBe(1);
 });
 
 // ---------------------------------------------------------------------------
@@ -164,11 +160,11 @@ test("inserts a pending stub for manifest tasks absent from updates when updates
   const a = report.results.find((r) => r.task_id === "task-a");
   const b = report.results.find((r) => r.task_id === "task-b");
 
-  assert.ok(a, "task-a must be present");
-  assert.equal(a.status, "pending", "task-a should be a pending stub");
+  expect(a, "task-a must be present").toBeTruthy();
+  expect(a.status, "task-a should be a pending stub").toBe("pending");
 
-  assert.ok(b, "task-b must be present");
-  assert.equal(b.status, "not_confirmed", "task-b should receive the update result, not a stub");
+  expect(b, "task-b must be present").toBeTruthy();
+  expect(b.status, "task-b should receive the update result, not a stub").toBe("not_confirmed");
 });
 
 // ---------------------------------------------------------------------------
@@ -189,12 +185,9 @@ test("warns when existing results contain stale task IDs", () => {
   });
   const ids = report.results.map((r) => r.task_id);
 
-  assert.equal(warnMessages.length, 1, "console.warn should be called exactly once");
-  assert.ok(
-    warnMessages[0].join(" ").includes("stale-x"),
-    "warning should include the stale task_id",
-  );
-  assert.ok(!ids.includes("stale-x"), "stale result must not appear in output");
+  expect(warnMessages.length, "console.warn should be called exactly once").toBe(1);
+  expect(warnMessages[0].join(" ").includes("stale-x"), "warning should include the stale task_id").toBeTruthy();
+  expect(!ids.includes("stale-x"), "stale result must not appear in output").toBeTruthy();
 });
 
 test("warns when update results contain stale task IDs", () => {
@@ -211,12 +204,9 @@ test("warns when update results contain stale task IDs", () => {
   });
   const ids = report.results.map((r) => r.task_id);
 
-  assert.equal(warnMessages.length, 1, "console.warn should be called exactly once");
-  assert.ok(
-    warnMessages[0].join(" ").includes("stale-y"),
-    "warning should include the stale task_id",
-  );
-  assert.ok(!ids.includes("stale-y"), "stale update result must not appear in output");
+  expect(warnMessages.length, "console.warn should be called exactly once").toBe(1);
+  expect(warnMessages[0].join(" ").includes("stale-y"), "warning should include the stale task_id").toBeTruthy();
+  expect(!ids.includes("stale-y"), "stale update result must not appear in output").toBeTruthy();
 });
 
 test("consolidates stale IDs from both existing and updates into one warning", () => {
@@ -233,10 +223,10 @@ test("consolidates stale IDs from both existing and updates into one warning", (
     updateRuntimeValidationReport(manifest, existing, updates);
   });
 
-  assert.equal(warnMessages.length, 1, "console.warn should be called exactly once even with stale IDs in both sources");
+  expect(warnMessages.length, "console.warn should be called exactly once even with stale IDs in both sources").toBe(1);
   const warnText = warnMessages[0].join(" ");
-  assert.ok(warnText.includes("stale-p"), "warning should include stale-p");
-  assert.ok(warnText.includes("stale-q"), "warning should include stale-q");
+  expect(warnText.includes("stale-p"), "warning should include stale-p").toBeTruthy();
+  expect(warnText.includes("stale-q"), "warning should include stale-q").toBeTruthy();
 });
 
 test("does not warn when all task IDs are valid", () => {
@@ -248,7 +238,7 @@ test("does not warn when all task IDs are valid", () => {
     updateRuntimeValidationReport(manifest, existing, updates);
   });
 
-  assert.equal(warnMessages.length, 0, "console.warn must not be called when all task IDs are valid");
+  expect(warnMessages.length, "console.warn must not be called when all task IDs are valid").toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -266,5 +256,5 @@ test("returned results are sorted lexicographically by task_id", () => {
   const report = updateRuntimeValidationReport(manifest, existing, updates);
   const ids = report.results.map((r) => r.task_id);
 
-  assert.deepEqual(ids, ["task-a", "task-m", "task-z"]);
+  expect(ids).toEqual(["task-a", "task-m", "task-z"]);
 });

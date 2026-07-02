@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,21 +40,14 @@ const repoRoot = join(here, "..", "..");
 /** Assert `value` satisfies `schema`; surface the zod issues on failure. */
 function accepts(schema, value, label) {
   const result = schema.safeParse(value);
-  assert.ok(
-    result.success,
-    `${label} should satisfy schema but did not: ${
+  expect(result.success, `${label} should satisfy schema but did not: ${
       result.success ? "" : JSON.stringify(result.error.issues)
-    }`,
-  );
+    }`).toBeTruthy();
 }
 
 /** Assert `value` is rejected by `schema`. */
 function rejects(schema, value, label) {
-  assert.equal(
-    schema.safeParse(value).success,
-    false,
-    `${label} should have been rejected by schema`,
-  );
+  expect(schema.safeParse(value).success, `${label} should have been rejected by schema`).toBe(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -565,17 +557,9 @@ test("risk_register example keys match live buildRiskRegister output shape", asy
     undefined,
   );
   accepts(RiskRegisterSchema, liveOutput, "live risk register");
-  assert.deepEqual(
-    Object.keys(liveOutput).sort(),
-    Object.keys(riskRegisterExample).sort(),
-    "live buildRiskRegister top-level keys must match example file keys",
-  );
+  expect(Object.keys(liveOutput).sort(), "live buildRiskRegister top-level keys must match example file keys").toEqual(Object.keys(riskRegisterExample).sort());
   if (liveOutput.items.length > 0 && riskRegisterExample.items.length > 0) {
-    assert.deepEqual(
-      Object.keys(liveOutput.items[0]).sort(),
-      Object.keys(riskRegisterExample.items[0]).sort(),
-      "live buildRiskRegister item keys must match example file item keys",
-    );
+    expect(Object.keys(liveOutput.items[0]).sort(), "live buildRiskRegister item keys must match example file item keys").toEqual(Object.keys(riskRegisterExample.items[0]).sort());
   }
 });
 
@@ -661,7 +645,7 @@ test("risk register builder caps additive scores at the shared 0..10 scale", () 
       },
     ],
   );
-  assert.equal(riskRegister.items[0].risk_score, 10);
+  expect(riskRegister.items[0].risk_score).toBe(10);
 });
 
 // ---------------------------------------------------------------------------
@@ -727,18 +711,14 @@ test("every inline lens enum across generated schemas equals the LensSchema sour
   const lensSchema = JSON.parse(
     await readFile(join(schemasDir, "lens.schema.json"), "utf8"),
   );
-  assert.deepEqual(
-    lensSchema.enum,
-    [...CANONICAL],
-    "lens.schema.json must contain exactly the canonical lens values",
-  );
+  expect(lensSchema.enum, "lens.schema.json must contain exactly the canonical lens values").toEqual([...CANONICAL]);
 
   const offenders = [];
   function checkInlineLensEnums(obj, file) {
     if (typeof obj !== "object" || obj === null) return;
     if (Array.isArray(obj.enum) && obj.enum.includes("correctness")) {
       try {
-        assert.deepEqual(obj.enum, [...CANONICAL]);
+        expect(obj.enum).toEqual([...CANONICAL]);
       } catch {
         offenders.push(file);
       }
@@ -750,9 +730,5 @@ test("every inline lens enum across generated schemas equals the LensSchema sour
     const parsed = JSON.parse(await readFile(join(schemasDir, file), "utf8"));
     checkInlineLensEnums(parsed, file);
   }
-  assert.deepEqual(
-    offenders,
-    [],
-    `these schemas contain a lens enum that drifted from LensSchema: ${offenders.join(", ")}`,
-  );
+  expect(offenders, `these schemas contain a lens enum that drifted from LensSchema: ${offenders.join(", ")}`).toEqual([]);
 });

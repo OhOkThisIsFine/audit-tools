@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { captureConsole } from "./helpers/captureConsole.mjs";
@@ -42,17 +41,14 @@ test("unknown command sets process.exitCode = 1", async () => {
   const result = await captureConsole(() =>
     runCli([process.execPath, "cli.js", "this-is-not-a-command"]),
   );
-  assert.equal(result.code, 1, "exitCode should be 1 for unknown command");
+  expect(result.code, "exitCode should be 1 for unknown command").toBe(1);
 });
 
 test("unknown command prints 'Unknown command' error", async () => {
   const result = await captureConsole(() =>
     runCli([process.execPath, "cli.js", "bogus-cmd"]),
   );
-  assert.ok(
-    result.stderr.includes("Unknown command"),
-    `stderr should include 'Unknown command', got: ${result.stderr}`,
-  );
+  expect(result.stderr.includes("Unknown command"), `stderr should include 'Unknown command', got: ${result.stderr}`).toBeTruthy();
 });
 
 test("unknown command error lists all known commands", async () => {
@@ -60,10 +56,7 @@ test("unknown command error lists all known commands", async () => {
     runCli([process.execPath, "cli.js", "bogus-cmd"]),
   );
   for (const cmd of KNOWN_COMMANDS) {
-    assert.ok(
-      result.stderr.includes(cmd),
-      `'${cmd}' should appear in the error listing, got: ${result.stderr}`,
-    );
+    expect(result.stderr.includes(cmd), `'${cmd}' should appear in the error listing, got: ${result.stderr}`).toBeTruthy();
   }
 });
 
@@ -102,10 +95,6 @@ for (const [moduleFile, exportName] of cmdModuleMap) {
     const mod = await import(
       pathToFileURL(join(repoRoot, "src", "audit", "cli", moduleFile)).href
     );
-    assert.equal(
-      typeof mod[exportName],
-      "function",
-      `${moduleFile} should export a function named '${exportName}'`,
-    );
+    expect(typeof mod[exportName], `${moduleFile} should export a function named '${exportName}'`).toBe("function");
   });
 }

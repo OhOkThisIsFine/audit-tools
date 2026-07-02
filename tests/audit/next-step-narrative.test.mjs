@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -79,12 +78,12 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
 
     // First next-step lands on the narrative pause.
     const paused = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
-    assert.equal(paused.step_kind, "synthesis_narrative");
-    assert.equal(paused.status, "ready");
+    expect(paused.step_kind).toBe("synthesis_narrative");
+    expect(paused.status).toBe("ready");
     const narrativeResultsPath = paused.artifact_paths.synthesis_narrative_results;
-    assert.match(narrativeResultsPath, /synthesis-narrative\.json$/);
+    expect(narrativeResultsPath).toMatch(/synthesis-narrative\.json$/);
     const prompt = await readFile(paused.prompt_path, "utf8");
-    assert.match(prompt, /Synthesis narrative/i);
+    expect(prompt).toMatch(/Synthesis narrative/i);
 
     // Findings are re-keyed to content-derived ids at synthesis, so discover the
     // synthesized id and reference it the way the narrative LLM would (the
@@ -95,8 +94,8 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
     const authFinding = synthesized.findings.find(
       (f) => f.title === "Auth path lacks structured rejection telemetry",
     );
-    assert.ok(authFinding, "synthesized findings must include the auth finding");
-    assert.match(prompt, new RegExp(authFinding.id));
+    expect(authFinding, "synthesized findings must include the auth finding").toBeTruthy();
+    expect(prompt).toMatch(new RegExp(authFinding.id));
 
     // Host supplies the narrative referencing the synthesized id.
     await writeFile(
@@ -123,22 +122,22 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
     // Second next-step ingests the narrative; subsequent calls clear the
     // friction-triage pause and complete.
     const done = await nextStepToComplete(root);
-    assert.equal(done.step_kind, "present_report");
-    assert.equal(done.status, "complete");
+    expect(done.step_kind).toBe("present_report");
+    expect(done.status).toBe("complete");
 
     // The canonical contract was promoted to the repo root with the narrative.
     const findings = JSON.parse(
       await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8"),
     );
-    assert.equal(findings.themes.length, 1);
-    assert.equal(findings.themes[0].theme_id, "T-1");
+    expect(findings.themes.length).toBe(1);
+    expect(findings.themes[0].theme_id).toBe("T-1");
     const tagged = findings.findings.find((f) => f.id === authFinding.id);
-    assert.equal(tagged.theme_id, "T-1");
-    assert.equal(findings.executive_summary, "A single auth-observability theme was identified.");
+    expect(tagged.theme_id).toBe("T-1");
+    expect(findings.executive_summary).toBe("A single auth-observability theme was identified.");
 
     const report = await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8");
-    assert.match(report, /## Themes/);
-    assert.match(report, /### T-1 — Authentication observability gaps/);
+    expect(report).toMatch(/## Themes/);
+    expect(report).toMatch(/### T-1 — Authentication observability gaps/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -165,15 +164,15 @@ test("next-step omits the narrative when synthesis.narrative is disabled", async
     );
 
     const done = await nextStepToComplete(root);
-    assert.equal(done.step_kind, "present_report");
-    assert.equal(done.status, "complete");
+    expect(done.step_kind).toBe("present_report");
+    expect(done.status).toBe("complete");
 
     const findings = JSON.parse(
       await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8"),
     );
-    assert.equal(findings.themes, undefined);
+    expect(findings.themes).toBe(undefined);
     const report = await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8");
-    assert.doesNotMatch(report, /## Themes/);
+    expect(report).not.toMatch(/## Themes/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

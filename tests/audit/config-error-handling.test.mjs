@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -73,14 +72,14 @@ test("audit-code advance-audit fails loudly on malformed session-config.json", a
     const result = await runNode(wrapperPath, ["advance-audit"], { cwd: root });
     const combined = `${result.stderr}\n${result.stdout}`;
 
-    assert.notEqual(result.code, 0);
-    assert.match(combined, /session-config\.json/i);
-    assert.match(combined, /json|parse|invalid/i);
+    expect(result.code).not.toBe(0);
+    expect(combined).toMatch(/session-config\.json/i);
+    expect(combined).toMatch(/json|parse|invalid/i);
     const handoff = JSON.parse(
       await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"),
     );
-    assert.equal(handoff.status, "blocked");
-    assert.match(handoff.summary, /session-config\.json/i);
+    expect(handoff.status).toBe("blocked");
+    expect(handoff.summary).toMatch(/session-config\.json/i);
   });
 });
 
@@ -96,15 +95,15 @@ test("audit-code advance-audit fails loudly on invalid session-config fields", a
     const result = await runNode(wrapperPath, ["advance-audit"], { cwd: root });
     const combined = `${result.stderr}\n${result.stdout}`;
 
-    assert.notEqual(result.code, 0);
-    assert.match(combined, /session-config\.json/i);
-    assert.match(combined, /provider/i);
-    assert.match(combined, /unsupported provider/i);
+    expect(result.code).not.toBe(0);
+    expect(combined).toMatch(/session-config\.json/i);
+    expect(combined).toMatch(/provider/i);
+    expect(combined).toMatch(/unsupported provider/i);
     const handoff = JSON.parse(
       await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"),
     );
-    assert.equal(handoff.status, "blocked");
-    assert.match(handoff.summary, /provider/i);
+    expect(handoff.status).toBe("blocked");
+    expect(handoff.summary).toMatch(/provider/i);
   });
 });
 
@@ -121,8 +120,8 @@ test("validate fails loudly on corrupted artifact json", async () => {
     );
     const combined = `${result.stderr}\n${result.stdout}`;
 
-    assert.notEqual(result.code, 0);
-    assert.match(combined, /repo_manifest\.json/i);
-    assert.match(combined, /json|parse|invalid/i);
+    expect(result.code).not.toBe(0);
+    expect(combined).toMatch(/repo_manifest\.json/i);
+    expect(combined).toMatch(/json|parse|invalid/i);
   });
 });

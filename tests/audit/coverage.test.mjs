@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 // Direct unit coverage for the coverage-matrix module. orchestration.test.mjs
@@ -14,18 +14,15 @@ const {
 
 test("createCoverageMatrix builds one record per path with pending/unclassified defaults", () => {
   const matrix = createCoverageMatrix(["a.ts", "b.ts"]);
-  assert.equal(matrix.files.length, 2);
+  expect(matrix.files.length).toBe(2);
   for (const record of matrix.files) {
-    assert.equal(record.audit_status, "pending");
-    assert.equal(record.classification_status, "unclassified");
-    assert.deepEqual(record.unit_ids, []);
-    assert.deepEqual(record.required_lenses, []);
-    assert.deepEqual(record.completed_lenses, []);
+    expect(record.audit_status).toBe("pending");
+    expect(record.classification_status).toBe("unclassified");
+    expect(record.unit_ids).toEqual([]);
+    expect(record.required_lenses).toEqual([]);
+    expect(record.completed_lenses).toEqual([]);
   }
-  assert.deepEqual(
-    matrix.files.map((f) => f.path),
-    ["a.ts", "b.ts"],
-  );
+  expect(matrix.files.map((f) => f.path)).toEqual(["a.ts", "b.ts"]);
 });
 
 test("markExcludedPath sets excluded status and clears lens/unit arrays", () => {
@@ -37,11 +34,11 @@ test("markExcludedPath sets excluded status and clears lens/unit arrays", () => 
   markExcludedPath(matrix, "a.ts", "generated");
 
   const record = matrix.files[0];
-  assert.equal(record.audit_status, "excluded");
-  assert.equal(record.classification_status, "generated");
-  assert.deepEqual(record.required_lenses, []);
-  assert.deepEqual(record.completed_lenses, []);
-  assert.deepEqual(record.unit_ids, []);
+  expect(record.audit_status).toBe("excluded");
+  expect(record.classification_status).toBe("generated");
+  expect(record.required_lenses).toEqual([]);
+  expect(record.completed_lenses).toEqual([]);
+  expect(record.unit_ids).toEqual([]);
 
   // markExcludedPath on an unknown path must be a no-op (no throw).
   assert.doesNotThrow(() => markExcludedPath(matrix, "missing.ts", "excluded"));
@@ -56,17 +53,17 @@ test("applyUnitCoverage adds deduped unit + required lenses and skips excluded f
   applyUnitCoverage(matrix, "a.ts", "unit-a", ["correctness", "security"]);
 
   const record = matrix.files[0];
-  assert.deepEqual(record.unit_ids, ["unit-a"]);
-  assert.deepEqual([...record.required_lenses].sort(), ["correctness", "security"]);
-  assert.equal(record.classification_status, "classified");
+  expect(record.unit_ids).toEqual(["unit-a"]);
+  expect([...record.required_lenses].sort()).toEqual(["correctness", "security"]);
+  expect(record.classification_status).toBe("classified");
 
   // An excluded file is left untouched by applyUnitCoverage.
   markExcludedPath(matrix, "skip.ts", "vendor");
   applyUnitCoverage(matrix, "skip.ts", "unit-skip", ["security"]);
   const skip = matrix.files[1];
-  assert.equal(skip.audit_status, "excluded");
-  assert.deepEqual(skip.unit_ids, []);
-  assert.deepEqual(skip.required_lenses, []);
+  expect(skip.audit_status).toBe("excluded");
+  expect(skip.unit_ids).toEqual([]);
+  expect(skip.required_lenses).toEqual([]);
 });
 
 test("applyFileCoverage marks complete only when all required lenses completed, else partial", () => {
@@ -92,12 +89,12 @@ test("applyFileCoverage marks complete only when all required lenses completed, 
   const partial = matrix.files[1];
   const excluded = matrix.files[2];
 
-  assert.equal(full.audit_status, "complete");
-  assert.equal(partial.audit_status, "partial");
+  expect(full.audit_status).toBe("complete");
+  expect(partial.audit_status).toBe("partial");
   // The non-required 'tests' lens was filtered out.
-  assert.deepEqual(partial.completed_lenses, ["correctness"]);
+  expect(partial.completed_lenses).toEqual(["correctness"]);
   // Excluded files are never marked complete/partial.
-  assert.equal(excluded.audit_status, "excluded");
+  expect(excluded.audit_status).toBe("excluded");
 });
 
 test("applyFileCoverage uses Map lookup — correctly matches all 500 covered files in a 1000-file matrix", () => {
@@ -120,18 +117,10 @@ test("applyFileCoverage uses Map lookup — correctly matches all 500 covered fi
 
   // The last 500 files should be complete; the first 500 should remain partial/pending.
   for (let i = 0; i < 500; i++) {
-    assert.notEqual(
-      matrix.files[i].audit_status,
-      "complete",
-      `file-${i}.ts should not be complete`,
-    );
+    expect(matrix.files[i].audit_status, `file-${i}.ts should not be complete`).not.toBe("complete");
   }
   for (let i = 500; i < 1000; i++) {
-    assert.equal(
-      matrix.files[i].audit_status,
-      "complete",
-      `file-${i}.ts should be complete`,
-    );
+    expect(matrix.files[i].audit_status, `file-${i}.ts should be complete`).toBe("complete");
   }
 });
 
@@ -140,14 +129,14 @@ test("markExcludedPath and applyUnitCoverage find records correctly via index an
 
   // markExcludedPath mutates exactly the target record.
   markExcludedPath(matrix, "b.ts", "vendor");
-  assert.equal(matrix.files[0].audit_status, "pending", "a.ts must not be mutated");
-  assert.equal(matrix.files[1].audit_status, "excluded", "b.ts must be excluded");
-  assert.equal(matrix.files[2].audit_status, "pending", "c.ts must not be mutated");
+  expect(matrix.files[0].audit_status, "a.ts must not be mutated").toBe("pending");
+  expect(matrix.files[1].audit_status, "b.ts must be excluded").toBe("excluded");
+  expect(matrix.files[2].audit_status, "c.ts must not be mutated").toBe("pending");
 
   // applyUnitCoverage mutates exactly the target record.
   applyUnitCoverage(matrix, "a.ts", "unit-a", ["correctness"]);
-  assert.deepEqual(matrix.files[0].unit_ids, ["unit-a"]);
-  assert.deepEqual(matrix.files[2].unit_ids, [], "c.ts must not be mutated");
+  expect(matrix.files[0].unit_ids).toEqual(["unit-a"]);
+  expect(matrix.files[2].unit_ids, "c.ts must not be mutated").toEqual([]);
 
   // Both are no-ops for a path not present in the matrix.
   assert.doesNotThrow(() => markExcludedPath(matrix, "missing.ts", "excluded"));
@@ -174,11 +163,11 @@ test("buildRequeueTargets reports only outstanding work", () => {
   const targets = buildRequeueTargets(matrix);
   const byPath = new Map(targets.map((t) => [t.path, t.missing_lenses]));
   // partial.ts is still missing 'security'.
-  assert.deepEqual(byPath.get("partial.ts"), ["security"]);
+  expect(byPath.get("partial.ts")).toEqual(["security"]);
   // complete.ts has no missing lenses -> not a requeue target.
-  assert.ok(!byPath.has("complete.ts"));
+  expect(!byPath.has("complete.ts")).toBeTruthy();
   // excluded.ts is never a requeue target.
-  assert.ok(!byPath.has("excluded.ts"));
+  expect(!byPath.has("excluded.ts")).toBeTruthy();
   // pending.ts is missing 'correctness'.
-  assert.deepEqual(byPath.get("pending.ts"), ["correctness"]);
+  expect(byPath.get("pending.ts")).toEqual(["correctness"]);
 });

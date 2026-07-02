@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,8 +14,8 @@ test("records an empty tool_timings array when no formatter runs", async () => {
     };
     const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
-    assert.deepEqual(applied.executed_tools, []);
-    assert.deepEqual(applied.tool_timings, []);
+    expect(applied.executed_tools).toEqual([]);
+    expect(applied.tool_timings).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -47,19 +46,12 @@ test("keeps tool_timings aligned with executed_tools", async () => {
     const applied = result.updated.auto_fixes_applied;
 
     // At least one formatter must have executed — the forEach body is live code.
-    assert.ok(
-      applied.executed_tools.length > 0,
-      "expected at least one formatter to execute; tool_timings forEach would be dead code if empty",
-    );
-    assert.equal(
-      applied.tool_timings.length,
-      applied.executed_tools.length,
-      "tool_timings and executed_tools must be the same length",
-    );
+    expect(applied.executed_tools.length > 0, "expected at least one formatter to execute; tool_timings forEach would be dead code if empty").toBeTruthy();
+    expect(applied.tool_timings.length, "tool_timings and executed_tools must be the same length").toBe(applied.executed_tools.length);
     applied.tool_timings.forEach((entry, i) => {
-      assert.equal(entry.tool, applied.executed_tools[i]);
-      assert.equal(typeof entry.duration_ms, "number");
-      assert.ok(entry.duration_ms >= 0);
+      expect(entry.tool).toBe(applied.executed_tools[i]);
+      expect(typeof entry.duration_ms).toBe("number");
+      expect(entry.duration_ms >= 0).toBeTruthy();
     });
   } finally {
     await rm(root, { recursive: true, force: true });

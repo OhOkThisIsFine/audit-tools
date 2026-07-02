@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -75,12 +75,9 @@ test("cmdWorkerRun writes a failed WorkerResult when audit_results_path looks li
 
     const raw = await readFile(resultPath, "utf8");
     const workerResult = JSON.parse(raw);
-    assert.strictEqual(workerResult.status, "failed");
-    assert.ok(
-      workerResult.errors[0].match(/looks like a CLI flag/i),
-      `expected 'looks like a CLI flag' in errors, got: ${workerResult.errors[0]}`,
-    );
-    assert.strictEqual(process.exitCode, 1);
+    expect(workerResult.status).toBe("failed");
+    expect(workerResult.errors[0].match(/looks like a CLI flag/i), `expected 'looks like a CLI flag' in errors, got: ${workerResult.errors[0]}`).toBeTruthy();
+    expect(process.exitCode).toBe(1);
   } finally {
     process.exitCode = 0; // reset so we don't pollute other tests
     await cleanup();
@@ -182,15 +179,11 @@ test("cmdWorkerRun: valid audit results reach runAuditStep (partition: errors fa
     });
 
     // runAuditStep must have been reached — no fatal validation error fired
-    assert.ok(auditStepCalled, "runAuditStep must be called when all audit results are valid");
+    expect(auditStepCalled, "runAuditStep must be called when all audit results are valid").toBeTruthy();
 
     const raw = await readFile(resultPath, "utf8");
     const workerResult = JSON.parse(raw);
-    assert.strictEqual(
-      workerResult.status,
-      "completed",
-      `expected completed status, got: ${workerResult.status}`,
-    );
+    expect(workerResult.status, `expected completed status, got: ${workerResult.status}`).toBe("completed");
   } finally {
     await cleanup();
   }
@@ -256,11 +249,8 @@ test("cmdWorkerRun writes a failed WorkerResult when agent mode yields zero matc
 
     const raw = await readFile(resultPath, "utf8");
     const workerResult = JSON.parse(raw);
-    assert.strictEqual(workerResult.status, "failed");
-    assert.ok(
-      workerResult.errors[0].match(/did not emit any audit results/i),
-      `expected 'did not emit any audit results' in errors, got: ${workerResult.errors[0]}`,
-    );
+    expect(workerResult.status).toBe("failed");
+    expect(workerResult.errors[0].match(/did not emit any audit results/i), `expected 'did not emit any audit results' in errors, got: ${workerResult.errors[0]}`).toBeTruthy();
   } finally {
     process.exitCode = 0;
     await cleanup();
@@ -295,8 +285,8 @@ test("cmdWorkerRun re-throws when writeJsonFile fails for the final result write
     await assert.rejects(
       () => cmdWorkerRun(["--task", taskPath]),
       (err) => {
-        assert.ok(err instanceof Error, "expected an Error");
-        assert.ok(err.message.length > 0, "expected a non-empty error message");
+        expect(err instanceof Error, "expected an Error").toBeTruthy();
+        expect(err.message.length > 0, "expected a non-empty error message").toBeTruthy();
         return true;
       },
     );

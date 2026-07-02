@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { claimFlowReviewBlocks } = await import("../../src/audit/orchestrator/flowPlanning.ts");
 
@@ -39,17 +38,11 @@ test("DEFAULT_FLOW_LENS_PRIORITY matches the lensSetForFlow allowed set", async 
   const scheduledLenses = new Set(blocks.map((b) => b.lens));
 
   for (const lens of LENS_SET_FOR_FLOW) {
-    assert.ok(
-      scheduledLenses.has(lens),
-      `lens '${lens}' should be scheduled by claimFlowReviewBlocks but was absent`,
-    );
+    expect(scheduledLenses.has(lens), `lens '${lens}' should be scheduled by claimFlowReviewBlocks but was absent`).toBeTruthy();
   }
   // No extra phantom lenses were scheduled.
   for (const lens of scheduledLenses) {
-    assert.ok(
-      LENS_SET_FOR_FLOW.includes(lens),
-      `scheduled lens '${lens}' is not in the lensSetForFlow allowed set`,
-    );
+    expect(LENS_SET_FOR_FLOW.includes(lens), `scheduled lens '${lens}' is not in the lensSetForFlow allowed set`).toBeTruthy();
   }
 });
 
@@ -83,24 +76,15 @@ test("claimFlowReviewBlocks schedules blocks for all 7 flow lenses on initial ca
   const scheduledLenses = new Set(blocks.map((b) => b.lens));
 
   for (const lens of concerns) {
-    assert.ok(
-      scheduledLenses.has(lens),
-      `lens '${lens}' should be scheduled without a requeue step`,
-    );
+    expect(scheduledLenses.has(lens), `lens '${lens}' should be scheduled without a requeue step`).toBeTruthy();
   }
   // Verify priority ordering: security < data_integrity < observability by index.
   const lensOrder = blocks.map((b) => b.lens);
   const secIdx = lensOrder.indexOf("security");
   const diIdx = lensOrder.indexOf("data_integrity");
   const obsIdx = lensOrder.indexOf("observability");
-  assert.ok(
-    secIdx < diIdx,
-    `security (${secIdx}) should rank before data_integrity (${diIdx})`,
-  );
-  assert.ok(
-    diIdx < obsIdx,
-    `data_integrity (${diIdx}) should rank before observability (${obsIdx})`,
-  );
+  expect(secIdx < diIdx, `security (${secIdx}) should rank before data_integrity (${diIdx})`).toBeTruthy();
+  expect(diIdx < obsIdx, `data_integrity (${diIdx}) should rank before observability (${obsIdx})`).toBeTruthy();
 });
 
 test("returns empty array when criticalFlows has no flows", () => {
@@ -109,7 +93,7 @@ test("returns empty array when criticalFlows has no flows", () => {
     new Map(),
     new Set(),
   );
-  assert.deepEqual(blocks, []);
+  expect(blocks).toEqual([]);
 });
 
 test("returns a block with matching file_paths, flow_id, and lens", () => {
@@ -131,11 +115,11 @@ test("returns a block with matching file_paths, flow_id, and lens", () => {
 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
-  assert.equal(blocks.length, 1);
-  assert.equal(blocks[0].flow_id, "flow-1");
-  assert.equal(blocks[0].lens, "security");
-  assert.deepEqual(blocks[0].file_paths, ["src/a.ts"]);
-  assert.ok(assigned.has("security:src/a.ts"), "assigned set should contain security:src/a.ts");
+  expect(blocks.length).toBe(1);
+  expect(blocks[0].flow_id).toBe("flow-1");
+  expect(blocks[0].lens).toBe("security");
+  expect(blocks[0].file_paths).toEqual(["src/a.ts"]);
+  expect(assigned.has("security:src/a.ts"), "assigned set should contain security:src/a.ts").toBeTruthy();
 });
 
 test("filters out paths not present in pendingByLens for the lens", () => {
@@ -157,8 +141,8 @@ test("filters out paths not present in pendingByLens for the lens", () => {
 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
-  assert.equal(blocks.length, 1);
-  assert.deepEqual(blocks[0].file_paths, ["src/a.ts"]);
+  expect(blocks.length).toBe(1);
+  expect(blocks[0].file_paths).toEqual(["src/a.ts"]);
 });
 
 test("skips flows whose lens has no pending paths", () => {
@@ -180,7 +164,7 @@ test("skips flows whose lens has no pending paths", () => {
 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
-  assert.deepEqual(blocks, []);
+  expect(blocks).toEqual([]);
 });
 
 // TST-a8ea07db: pendingByLens HAS an entry for the lens but the intersection
@@ -204,7 +188,7 @@ test("skips flow when pendingByLens entry exists but no flow path is pending", (
 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
-  assert.deepEqual(blocks, [], "flow with zero matching paths after filtering must be skipped");
+  expect(blocks, "flow with zero matching paths after filtering must be skipped").toEqual([]);
 });
 
 test("ignores concerns that are not in the DEFAULT_FLOW_LENS_PRIORITY list", () => {
@@ -234,8 +218,8 @@ test("ignores concerns that are not in the DEFAULT_FLOW_LENS_PRIORITY list", () 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
   // Only security block should be returned; unknown_concern is filtered
-  assert.equal(blocks.length, 1);
-  assert.equal(blocks[0].lens, "security");
+  expect(blocks.length).toBe(1);
+  expect(blocks[0].lens).toBe("security");
 });
 
 test("sorts candidates by file_paths count descending before deduplication", () => {
@@ -267,7 +251,7 @@ test("sorts candidates by file_paths count descending before deduplication", () 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
   // flow-A has 2 paths; flow-B has 1; flow-A should come first
-  assert.equal(blocks[0].flow_id, "flow-A");
+  expect(blocks[0].flow_id).toBe("flow-A");
 });
 
 test("breaks file_paths count ties by lens priority (security beats reliability)", () => {
@@ -300,7 +284,7 @@ test("breaks file_paths count ties by lens priority (security beats reliability)
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
   // Both have 2 file_paths; security has higher priority than reliability
-  assert.equal(blocks[0].lens, "security");
+  expect(blocks[0].lens).toBe("security");
 });
 
 test("breaks lens+size ties by flow_id alphabetical order", () => {
@@ -332,7 +316,7 @@ test("breaks lens+size ties by flow_id alphabetical order", () => {
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
   // Same lens and same number of pending paths (1 each); alpha < beta alphabetically
-  assert.equal(blocks[0].flow_id, "flow-alpha");
+  expect(blocks[0].flow_id).toBe("flow-alpha");
 });
 
 test("deduplicates: paths already in assigned are excluded from returned blocks", () => {
@@ -356,8 +340,8 @@ test("deduplicates: paths already in assigned are excluded from returned blocks"
 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
-  assert.equal(blocks.length, 1);
-  assert.deepEqual(blocks[0].file_paths, ["src/b.ts"]);
+  expect(blocks.length).toBe(1);
+  expect(blocks[0].file_paths).toEqual(["src/b.ts"]);
 });
 
 test("drops candidate entirely when all its paths are already assigned", () => {
@@ -381,7 +365,7 @@ test("drops candidate entirely when all its paths are already assigned", () => {
 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
-  assert.deepEqual(blocks, []);
+  expect(blocks).toEqual([]);
 });
 
 test("mutates the assigned set with all returned lens:path keys", () => {
@@ -405,8 +389,8 @@ test("mutates the assigned set with all returned lens:path keys", () => {
 
   claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
-  assert.ok(assigned.has("security:src/a.ts"), "assigned should contain security:src/a.ts");
-  assert.ok(assigned.has("security:src/b.ts"), "assigned should contain security:src/b.ts");
+  expect(assigned.has("security:src/a.ts"), "assigned should contain security:src/a.ts").toBeTruthy();
+  expect(assigned.has("security:src/b.ts"), "assigned should contain security:src/b.ts").toBeTruthy();
 });
 
 test("a single flow with multiple matching lenses produces one block per lens", () => {
@@ -430,8 +414,8 @@ test("a single flow with multiple matching lenses produces one block per lens", 
 
   const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set());
 
-  assert.equal(blocks.length, 2);
+  expect(blocks.length).toBe(2);
   // security has higher priority and should appear first
-  assert.equal(blocks[0].lens, "security");
-  assert.equal(blocks[1].lens, "reliability");
+  expect(blocks[0].lens).toBe("security");
+  expect(blocks[1].lens).toBe("reliability");
 });

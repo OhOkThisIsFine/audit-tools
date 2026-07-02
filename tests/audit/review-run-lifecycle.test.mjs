@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -66,11 +66,11 @@ async function readHandoff(artifactsDir) {
 test("activeReviewRunFromTask returns null for a non-agent task", async () => {
   await withTempArtifacts(({ artifactsDir, root }) => {
     const task = { ...agentTask(artifactsDir, root), preferred_executor: "inline" };
-    assert.equal(activeReviewRunFromTask(artifactsDir, task), null);
+    expect(activeReviewRunFromTask(artifactsDir, task)).toBe(null);
 
     const noResults = { ...agentTask(artifactsDir, root) };
     delete noResults.audit_results_path;
-    assert.equal(activeReviewRunFromTask(artifactsDir, noResults), null);
+    expect(activeReviewRunFromTask(artifactsDir, noResults)).toBe(null);
   });
 });
 
@@ -78,11 +78,11 @@ test("activeReviewRunFromTask returns an ActiveReviewRun for a valid agent task"
   await withTempArtifacts(({ artifactsDir, root }) => {
     const task = agentTask(artifactsDir, root);
     const run = activeReviewRunFromTask(artifactsDir, task);
-    assert.ok(run);
-    assert.equal(run.run_id, task.run_id);
-    assert.equal(run.audit_results_path, task.audit_results_path);
-    assert.equal(run.pending_audit_tasks_path, task.pending_audit_tasks_path);
-    assert.deepEqual(run.worker_command, task.worker_command);
+    expect(run).toBeTruthy();
+    expect(run.run_id).toBe(task.run_id);
+    expect(run.audit_results_path).toBe(task.audit_results_path);
+    expect(run.pending_audit_tasks_path).toBe(task.pending_audit_tasks_path);
+    expect(run.worker_command).toEqual(task.worker_command);
   });
 });
 
@@ -90,7 +90,7 @@ test("activeReviewRunFromTask returns an ActiveReviewRun for a valid agent task"
 
 test("loadCurrentActiveReviewRun returns null when current-task.json is absent", async () => {
   await withTempArtifacts(async ({ artifactsDir }) => {
-    assert.equal(await loadCurrentActiveReviewRun(artifactsDir), null);
+    expect(await loadCurrentActiveReviewRun(artifactsDir)).toBe(null);
   });
 });
 
@@ -103,8 +103,8 @@ test("loadCurrentActiveReviewRun returns an ActiveReviewRun for a valid agent ta
       JSON.stringify(task, null, 2),
     );
     const run = await loadCurrentActiveReviewRun(artifactsDir);
-    assert.ok(run);
-    assert.equal(run.run_id, task.run_id);
+    expect(run).toBeTruthy();
+    expect(run.run_id).toBe(task.run_id);
   });
 });
 
@@ -132,7 +132,7 @@ test("writeHandoffOnly writes a blocked operator-handoff.json to artifactsDir", 
       progress_summary: "review handoff summary",
     });
     const handoff = await readHandoff(artifactsDir);
-    assert.equal(handoff.status, "blocked");
+    expect(handoff.status).toBe("blocked");
   });
 });
 
@@ -151,9 +151,9 @@ test("ensureSemanticReviewRun new-run branch writes an agent task and returns a 
       timeoutMs: 60_000,
     });
 
-    assert.ok(result.activeReviewRun);
-    assert.ok(result.activeReviewRun.run_id.length > 0);
-    assert.equal(result.state.status, "blocked");
+    expect(result.activeReviewRun).toBeTruthy();
+    expect(result.activeReviewRun.run_id.length > 0).toBeTruthy();
+    expect(result.state.status).toBe("blocked");
 
     const currentTask = JSON.parse(
       await readFile(
@@ -161,7 +161,7 @@ test("ensureSemanticReviewRun new-run branch writes an agent task and returns a 
         "utf8",
       ),
     );
-    assert.equal(currentTask.preferred_executor, "agent");
+    expect(currentTask.preferred_executor).toBe("agent");
   });
 });
 
@@ -210,16 +210,13 @@ test("ensureSemanticReviewRun new-run: access.read_paths is non-empty and contai
     );
 
     // access.read_paths must be populated
-    assert.ok(Array.isArray(currentTask.access?.read_paths), "access.read_paths is an Array");
-    assert.ok(currentTask.access.read_paths.length > 0, "access.read_paths is non-empty");
+    expect(Array.isArray(currentTask.access?.read_paths), "access.read_paths is an Array").toBeTruthy();
+    expect(currentTask.access.read_paths.length > 0, "access.read_paths is non-empty").toBeTruthy();
 
     // Every file_paths entry from the pending tasks must appear in read_paths
     const expectedPaths = pendingAuditTasks.flatMap((t) => t.file_paths);
     for (const expectedPath of expectedPaths) {
-      assert.ok(
-        currentTask.access.read_paths.includes(expectedPath),
-        `access.read_paths contains expected path: ${expectedPath}`,
-      );
+      expect(currentTask.access.read_paths.includes(expectedPath), `access.read_paths contains expected path: ${expectedPath}`).toBeTruthy();
     }
   });
 });
@@ -244,8 +241,8 @@ test("ensureSemanticReviewRun existing-run branch reuses the run without creatin
     });
 
     // The pre-seeded run is reused, so no new runId is minted.
-    assert.equal(result.activeReviewRun.run_id, "SEEDED-RUN");
-    assert.equal(result.state.status, "blocked");
+    expect(result.activeReviewRun.run_id).toBe("SEEDED-RUN");
+    expect(result.state.status).toBe("blocked");
   });
 });
 
@@ -272,7 +269,7 @@ test("persistConfigErrorHandoff writes a blocked handoff carrying the progress s
     });
 
     const handoff = await readHandoff(artifactsDir);
-    assert.equal(handoff.status, "blocked");
-    assert.equal(handoff.summary, summary);
+    expect(handoff.status).toBe("blocked");
+    expect(handoff.summary).toBe(summary);
   });
 });

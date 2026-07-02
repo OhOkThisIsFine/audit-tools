@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFileSync } from "node:fs";
@@ -49,14 +48,14 @@ function minimalValidResult(taskId) {
 
 test("validate-result.mjs: exits 1 with usage when both --run-id and --task-id are missing", () => {
   const result = run(validateScript, []);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /Usage:/i);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toMatch(/Usage:/i);
 });
 
 test("validate-result.mjs: exits 1 with usage when --task-id is missing", () => {
   const result = run(validateScript, ["--run-id", "run-123"]);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /Usage:/i);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toMatch(/Usage:/i);
 });
 
 test("validate-result.mjs: sanitizes task-id special characters in the resolved file path", () => {
@@ -66,9 +65,9 @@ test("validate-result.mjs: sanitizes task-id special characters in the resolved 
       "--task-id", "foo/bar baz",
       "--artifacts-dir", artifactsDir,
     ]);
-    assert.equal(result.status, 1);
+    expect(result.status).toBe(1);
     // The sanitized filename appears in the file-not-found error on stderr
-    assert.match(result.stderr, /foo_bar_baz\.json/);
+    expect(result.stderr).toMatch(/foo_bar_baz\.json/);
   });
 });
 
@@ -89,8 +88,8 @@ test("validate-result.mjs: exits 0 for a valid result file", () => {
       "--task-id", taskId,
       "--artifacts-dir", artifactsDir,
     ]);
-    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
-    assert.match(result.stdout, new RegExp(taskId));
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout).toMatch(new RegExp(taskId));
   });
 });
 
@@ -111,8 +110,8 @@ test("validate-result.mjs: exits 1 for a result file with invalid JSON", () => {
       "--task-id", taskId,
       "--artifacts-dir", artifactsDir,
     ]);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /Invalid JSON/i);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/Invalid JSON/i);
   });
 });
 
@@ -122,19 +121,19 @@ test("validate-result.mjs: default --artifacts-dir resolves under .audit-tools/a
     // matching where the orchestrator/wrapper actually writes runs. The
     // file-not-found error names the resolved path.
     const result = run(validateScript, ["--run-id", "run-x", "--task-id", "task-x"], cwd);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /[/\\]\.audit-tools[/\\]audit[/\\]runs[/\\]run-x[/\\]/);
-    assert.doesNotMatch(result.stderr, /\.audit-artifacts/);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/[/\\]\.audit-tools[/\\]audit[/\\]runs[/\\]run-x[/\\]/);
+    expect(result.stderr).not.toMatch(/\.audit-artifacts/);
   });
 });
 
 test("merge-results.mjs: default --artifacts-dir resolves under .audit-tools/audit, not .audit-artifacts (COR-bf5c7331)", () => {
   withTempDir("dispatch-scripts-default-dir-merge-", (cwd) => {
     const result = run(mergeScript, ["--run-id", "run-y"], cwd);
-    assert.equal(result.status, 1);
+    expect(result.status).toBe(1);
     // task-results-not-found error names the resolved default path.
-    assert.match(result.stderr, /[/\\]\.audit-tools[/\\]audit[/\\]runs[/\\]run-y[/\\]/);
-    assert.doesNotMatch(result.stderr, /\.audit-artifacts/);
+    expect(result.stderr).toMatch(/[/\\]\.audit-tools[/\\]audit[/\\]runs[/\\]run-y[/\\]/);
+    expect(result.stderr).not.toMatch(/\.audit-artifacts/);
   });
 });
 
@@ -142,8 +141,8 @@ test("merge-results.mjs: default --artifacts-dir resolves under .audit-tools/aud
 
 test("merge-results.mjs: exits 1 with usage when --run-id is missing", () => {
   const result = run(mergeScript, []);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /Usage:/i);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toMatch(/Usage:/i);
 });
 
 test("merge-results.mjs: exits 1 when task-results directory does not exist", () => {
@@ -152,8 +151,8 @@ test("merge-results.mjs: exits 1 when task-results directory does not exist", ()
       "--run-id", "run-nodir",
       "--artifacts-dir", artifactsDir,
     ]);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /task-results directory not found/i);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/task-results directory not found/i);
   });
 });
 
@@ -181,23 +180,23 @@ test("merge-results.mjs: separates valid and invalid results, writes both output
     ]);
 
     // INV-03: exits non-zero (1) when any result failed validation.
-    assert.equal(result.status, 1, `expected non-zero exit on partial failure; stderr: ${result.stderr}`);
+    expect(result.status, `expected non-zero exit on partial failure; stderr: ${result.stderr}`).toBe(1);
 
     const runResultsPath = join(artifactsDir, "runs", runId, "run-results.json");
     const failedTasksPath = join(artifactsDir, "runs", runId, "failed-tasks.json");
 
     const runResults = JSON.parse(readFileSync(runResultsPath, "utf8"));
-    assert.equal(runResults.length, 1);
-    assert.equal(runResults[0].task_id, goodTaskId);
+    expect(runResults.length).toBe(1);
+    expect(runResults[0].task_id).toBe(goodTaskId);
 
     const failedTasks = JSON.parse(readFileSync(failedTasksPath, "utf8"));
-    assert.equal(failedTasks.length, 1);
+    expect(failedTasks.length).toBe(1);
 
     // stderr reports failure count
-    assert.match(result.stderr, /1 task\(s\) failed/i);
+    expect(result.stderr).toMatch(/1 task\(s\) failed/i);
 
     // stdout reports passing count in "N/M tasks valid" format
-    assert.match(result.stdout, /1\/2 tasks valid/i);
+    expect(result.stdout).toMatch(/1\/2 tasks valid/i);
   });
 });
 
@@ -225,15 +224,15 @@ test("merge-results.mjs: emits a stderr warning when pending-audit-tasks.json co
     ]);
 
     // Script must NOT exit non-zero due to the bad tasks file
-    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
 
     // A warning about the unreadable tasks file must appear on stderr
-    assert.match(result.stderr, /\[warn\] Could not read pending-audit-tasks\.json/);
+    expect(result.stderr).toMatch(/\[warn\] Could not read pending-audit-tasks\.json/);
 
     // Merge must still produce a run-results.json
     const runResultsPath = join(runDir, "run-results.json");
     const runResults = JSON.parse(readFileSync(runResultsPath, "utf8"));
-    assert.equal(runResults.length, 1);
+    expect(runResults.length).toBe(1);
   });
 });
 
@@ -262,10 +261,10 @@ test("validate-result.mjs: emits a stderr warning when pending-audit-tasks.json 
     ]);
 
     // A warning about the unreadable tasks file must appear on stderr
-    assert.match(result.stderr, /\[warn\] Could not read pending-audit-tasks\.json/);
+    expect(result.stderr).toMatch(/\[warn\] Could not read pending-audit-tasks\.json/);
 
     // Validation must still run and pass for the valid result
-    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
   });
 });
 
@@ -292,16 +291,16 @@ test("INV-01: merge-results.mjs expands a top-level AuditResult[] array from a s
     ]);
 
     // Both elements are valid → clean exit.
-    assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
 
     const runResultsPath = join(artifactsDir, "runs", runId, "run-results.json");
     const runResults = JSON.parse(readFileSync(runResultsPath, "utf8"));
-    assert.equal(runResults.length, 2, "both array elements should be merged");
+    expect(runResults.length, "both array elements should be merged").toBe(2);
     const ids = runResults.map((r) => r.task_id).sort();
-    assert.deepEqual(ids, ["task-array-1", "task-array-2"]);
+    expect(ids).toEqual(["task-array-1", "task-array-2"]);
 
     // stdout should reflect 2/2 tasks valid.
-    assert.match(result.stdout, /2\/2 tasks valid/i);
+    expect(result.stdout).toMatch(/2\/2 tasks valid/i);
   });
 });
 
@@ -324,7 +323,7 @@ test("INV-03: merge-results.mjs exits 0 when all results are valid", () => {
       "--artifacts-dir", artifactsDir,
     ]);
 
-    assert.equal(result.status, 0, `expected clean exit; stderr: ${result.stderr}`);
-    assert.match(result.stdout, /1\/1 tasks valid/i);
+    expect(result.status, `expected clean exit; stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout).toMatch(/1\/1 tasks valid/i);
   });
 });

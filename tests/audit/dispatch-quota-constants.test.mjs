@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // reviewPacketSizing re-exports ESTIMATED_TOKENS_PER_LINE from audit-tools/shared
 // and aliases ESTIMATED_PROMPT_OVERHEAD_TOKENS as ESTIMATED_PACKET_PROMPT_TOKENS.
@@ -17,17 +16,17 @@ const { ESTIMATED_TOKENS_PER_LINE: sharedETPL } = await import("audit-tools/shar
 
 test("reviewPacketSizing uses shared ESTIMATED_TOKENS_PER_LINE (no local duplicate)", () => {
   // The value sourced from reviewPacketSizing must equal the shared one.
-  assert.equal(ESTIMATED_TOKENS_PER_LINE, sharedETPL);
-  assert.equal(ESTIMATED_TOKENS_PER_LINE, 4);
+  expect(ESTIMATED_TOKENS_PER_LINE).toBe(sharedETPL);
+  expect(ESTIMATED_TOKENS_PER_LINE).toBe(4);
 });
 
 test("DEFAULT_TARGET_PACKET_TOKENS equals 8000 * sharedESTIMATED_TOKENS_PER_LINE (32000)", () => {
-  assert.equal(DEFAULT_TARGET_PACKET_TOKENS, 8000 * sharedETPL);
-  assert.equal(DEFAULT_TARGET_PACKET_TOKENS, 32000);
+  expect(DEFAULT_TARGET_PACKET_TOKENS).toBe(8000 * sharedETPL);
+  expect(DEFAULT_TARGET_PACKET_TOKENS).toBe(32000);
 });
 
 test("ESTIMATED_PACKET_PROMPT_TOKENS aliases the shared ESTIMATED_PROMPT_OVERHEAD_TOKENS (900)", () => {
-  assert.equal(ESTIMATED_PACKET_PROMPT_TOKENS, 900);
+  expect(ESTIMATED_PACKET_PROMPT_TOKENS).toBe(900);
 });
 
 test("taskContentTokens with sizeIndex uses estimateTokensFromBytes (bytes/4 ceiling)", () => {
@@ -43,7 +42,7 @@ test("taskContentTokens with sizeIndex uses estimateTokensFromBytes (bytes/4 cei
     rationale: "test",
     file_line_counts: {},
   };
-  assert.equal(taskContentTokens(task, sizeIndex), 100);
+  expect(taskContentTokens(task, sizeIndex)).toBe(100);
 });
 
 test("taskContentTokens without sizeIndex falls back to lines * ESTIMATED_TOKENS_PER_LINE from shared", () => {
@@ -58,6 +57,6 @@ test("taskContentTokens without sizeIndex falls back to lines * ESTIMATED_TOKENS
     rationale: "test",
     file_line_counts: { "src/bar.ts": 50 },
   };
-  assert.equal(taskContentTokens(task, undefined, undefined), 50 * ESTIMATED_TOKENS_PER_LINE);
-  assert.equal(taskContentTokens(task, undefined, undefined), 200);
+  expect(taskContentTokens(task, undefined, undefined)).toBe(50 * ESTIMATED_TOKENS_PER_LINE);
+  expect(taskContentTokens(task, undefined, undefined)).toBe(200);
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   isBrowserExtensionManifestPath,
@@ -12,44 +11,35 @@ const {
 // ── isBrowserExtensionManifestPath ───────────────────────────────────────────
 
 test("isBrowserExtensionManifestPath returns true for manifest.json variants", () => {
-  assert.equal(isBrowserExtensionManifestPath("manifest.json"), true);
-  assert.equal(isBrowserExtensionManifestPath("C:\\ext\\manifest.json"), true);
-  assert.equal(isBrowserExtensionManifestPath("Manifest.JSON"), true);
-  assert.equal(isBrowserExtensionManifestPath("subdir/manifest.json"), true);
+  expect(isBrowserExtensionManifestPath("manifest.json")).toBe(true);
+  expect(isBrowserExtensionManifestPath("C:\\ext\\manifest.json")).toBe(true);
+  expect(isBrowserExtensionManifestPath("Manifest.JSON")).toBe(true);
+  expect(isBrowserExtensionManifestPath("subdir/manifest.json")).toBe(true);
 });
 
 test("isBrowserExtensionManifestPath returns false for non-manifest paths", () => {
-  assert.equal(isBrowserExtensionManifestPath("src/manifest.json.ts"), false);
-  assert.equal(isBrowserExtensionManifestPath("manifest.json.bak"), false);
-  assert.equal(isBrowserExtensionManifestPath("notmanifest.json"), false);
-  assert.equal(isBrowserExtensionManifestPath("package.json"), false);
+  expect(isBrowserExtensionManifestPath("src/manifest.json.ts")).toBe(false);
+  expect(isBrowserExtensionManifestPath("manifest.json.bak")).toBe(false);
+  expect(isBrowserExtensionManifestPath("notmanifest.json")).toBe(false);
+  expect(isBrowserExtensionManifestPath("package.json")).toBe(false);
 });
 
 // ── hasBrowserExtensionManifestFile ─────────────────────────────────────────
 
 test("hasBrowserExtensionManifestFile detects manifest.json in repo manifest file list", () => {
-  assert.equal(
-    hasBrowserExtensionManifestFile({ files: [{ path: "manifest.json", size_bytes: 1 }] }),
-    true,
-  );
-  assert.equal(
-    hasBrowserExtensionManifestFile({ files: [{ path: "C:\\ext\\manifest.json", size_bytes: 1 }] }),
-    true,
-  );
+  expect(hasBrowserExtensionManifestFile({ files: [{ path: "manifest.json", size_bytes: 1 }] })).toBe(true);
+  expect(hasBrowserExtensionManifestFile({ files: [{ path: "C:\\ext\\manifest.json", size_bytes: 1 }] })).toBe(true);
 });
 
 test("hasBrowserExtensionManifestFile returns false when no manifest.json is in the file list", () => {
-  assert.equal(
-    hasBrowserExtensionManifestFile({ files: [{ path: "src/index.ts", size_bytes: 1 }] }),
-    false,
-  );
-  assert.equal(hasBrowserExtensionManifestFile({ files: [] }), false);
+  expect(hasBrowserExtensionManifestFile({ files: [{ path: "src/index.ts", size_bytes: 1 }] })).toBe(false);
+  expect(hasBrowserExtensionManifestFile({ files: [] })).toBe(false);
 });
 
 // ── deriveBrowserExtensionLensesForPath ──────────────────────────────────────
 
 test("deriveBrowserExtensionLensesForPath returns config lenses for manifest.json", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("manifest.json"), [
+  expect(deriveBrowserExtensionLensesForPath("manifest.json")).toEqual([
     "security",
     "correctness",
     "config_deployment",
@@ -58,7 +48,7 @@ test("deriveBrowserExtensionLensesForPath returns config lenses for manifest.jso
 });
 
 test("deriveBrowserExtensionLensesForPath returns background lenses for service/ prefix", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("service/main.js"), [
+  expect(deriveBrowserExtensionLensesForPath("service/main.js")).toEqual([
     "security",
     "correctness",
     "reliability",
@@ -67,7 +57,7 @@ test("deriveBrowserExtensionLensesForPath returns background lenses for service/
 });
 
 test("deriveBrowserExtensionLensesForPath returns background lenses for background/ prefix", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("background/sw.js"), [
+  expect(deriveBrowserExtensionLensesForPath("background/sw.js")).toEqual([
     "security",
     "correctness",
     "reliability",
@@ -76,7 +66,7 @@ test("deriveBrowserExtensionLensesForPath returns background lenses for backgrou
 });
 
 test("deriveBrowserExtensionLensesForPath returns background lenses when path contains 'service-worker'", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("lib/service-worker.js"), [
+  expect(deriveBrowserExtensionLensesForPath("lib/service-worker.js")).toEqual([
     "security",
     "correctness",
     "reliability",
@@ -85,7 +75,7 @@ test("deriveBrowserExtensionLensesForPath returns background lenses when path co
 });
 
 test("deriveBrowserExtensionLensesForPath returns content lenses for content/ prefix", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("content/script.js"), [
+  expect(deriveBrowserExtensionLensesForPath("content/script.js")).toEqual([
     "security",
     "correctness",
     "reliability",
@@ -93,7 +83,7 @@ test("deriveBrowserExtensionLensesForPath returns content lenses for content/ pr
 });
 
 test("deriveBrowserExtensionLensesForPath returns content lenses when path contains 'content-script'", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("lib/content-script.js"), [
+  expect(deriveBrowserExtensionLensesForPath("lib/content-script.js")).toEqual([
     "security",
     "correctness",
     "reliability",
@@ -101,12 +91,12 @@ test("deriveBrowserExtensionLensesForPath returns content lenses when path conta
 });
 
 test("deriveBrowserExtensionLensesForPath returns UI lenses for HTML files", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("popup/popup.html"), [
+  expect(deriveBrowserExtensionLensesForPath("popup/popup.html")).toEqual([
     "security",
     "correctness",
     "maintainability",
   ]);
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("sidebar.html"), [
+  expect(deriveBrowserExtensionLensesForPath("sidebar.html")).toEqual([
     "security",
     "correctness",
     "maintainability",
@@ -114,7 +104,7 @@ test("deriveBrowserExtensionLensesForPath returns UI lenses for HTML files", () 
 });
 
 test("deriveBrowserExtensionLensesForPath returns worker lenses for worker paths", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("download_worker.js"), [
+  expect(deriveBrowserExtensionLensesForPath("download_worker.js")).toEqual([
     "correctness",
     "reliability",
     "performance",
@@ -122,45 +112,45 @@ test("deriveBrowserExtensionLensesForPath returns worker lenses for worker paths
 });
 
 test("deriveBrowserExtensionLensesForPath returns empty array for unmatched paths", () => {
-  assert.deepEqual(deriveBrowserExtensionLensesForPath("utils/helpers.js"), []);
+  expect(deriveBrowserExtensionLensesForPath("utils/helpers.js")).toEqual([]);
 });
 
 // ── inferBrowserExtensionUnitKind ────────────────────────────────────────────
 
 test("inferBrowserExtensionUnitKind returns 'extension_config' for manifest.json", () => {
-  assert.equal(inferBrowserExtensionUnitKind("manifest.json"), "extension_config");
+  expect(inferBrowserExtensionUnitKind("manifest.json")).toBe("extension_config");
 });
 
 test("inferBrowserExtensionUnitKind returns 'extension_background' for service/ and background/ prefixes", () => {
-  assert.equal(inferBrowserExtensionUnitKind("service/main.js"), "extension_background");
-  assert.equal(inferBrowserExtensionUnitKind("background/sw.js"), "extension_background");
+  expect(inferBrowserExtensionUnitKind("service/main.js")).toBe("extension_background");
+  expect(inferBrowserExtensionUnitKind("background/sw.js")).toBe("extension_background");
 });
 
 test("inferBrowserExtensionUnitKind returns 'extension_content' for content/ prefix", () => {
-  assert.equal(inferBrowserExtensionUnitKind("content/script.js"), "extension_content");
+  expect(inferBrowserExtensionUnitKind("content/script.js")).toBe("extension_content");
 });
 
 test("inferBrowserExtensionUnitKind returns 'worker' for paths containing 'worker'", () => {
-  assert.equal(inferBrowserExtensionUnitKind("download_worker.js"), "worker");
+  expect(inferBrowserExtensionUnitKind("download_worker.js")).toBe("worker");
 });
 
 test("inferBrowserExtensionUnitKind returns 'extension_ui' for HTML files", () => {
-  assert.equal(inferBrowserExtensionUnitKind("popup.html"), "extension_ui");
+  expect(inferBrowserExtensionUnitKind("popup.html")).toBe("extension_ui");
 });
 
 test("inferBrowserExtensionUnitKind returns undefined for unmatched paths", () => {
-  assert.equal(inferBrowserExtensionUnitKind("utils/helpers.js"), undefined);
+  expect(inferBrowserExtensionUnitKind("utils/helpers.js")).toBe(undefined);
 });
 
 // ── buildBrowserExtensionSurfacesFromGraph ───────────────────────────────────
 
 test("buildBrowserExtensionSurfacesFromGraph returns [] for undefined graphBundle", () => {
-  assert.deepEqual(buildBrowserExtensionSurfacesFromGraph(undefined), []);
+  expect(buildBrowserExtensionSurfacesFromGraph(undefined)).toEqual([]);
 });
 
 test("buildBrowserExtensionSurfacesFromGraph returns [] when references is empty", () => {
   const bundle = { graphs: { references: [] } };
-  assert.deepEqual(buildBrowserExtensionSurfacesFromGraph(bundle), []);
+  expect(buildBrowserExtensionSurfacesFromGraph(bundle)).toEqual([]);
 });
 
 test("background-link edge to .js target yields surface with kind 'background' and exposure 'local'", () => {
@@ -172,10 +162,10 @@ test("background-link edge to .js target yields surface with kind 'background' a
     },
   };
   const surfaces = buildBrowserExtensionSurfacesFromGraph(bundle);
-  assert.equal(surfaces.length, 1);
-  assert.equal(surfaces[0].kind, "background");
-  assert.equal(surfaces[0].exposure, "local");
-  assert.equal(surfaces[0].entrypoint, "background/sw.js");
+  expect(surfaces.length).toBe(1);
+  expect(surfaces[0].kind).toBe("background");
+  expect(surfaces[0].exposure).toBe("local");
+  expect(surfaces[0].entrypoint).toBe("background/sw.js");
 });
 
 test("content-script-link edge to .js target yields surface with kind 'interface' and exposure 'network'", () => {
@@ -191,9 +181,9 @@ test("content-script-link edge to .js target yields surface with kind 'interface
     },
   };
   const surfaces = buildBrowserExtensionSurfacesFromGraph(bundle);
-  assert.equal(surfaces.length, 1);
-  assert.equal(surfaces[0].kind, "interface");
-  assert.equal(surfaces[0].exposure, "network");
+  expect(surfaces.length).toBe(1);
+  expect(surfaces[0].kind).toBe("interface");
+  expect(surfaces[0].exposure).toBe("network");
 });
 
 test("ui-page-link edge to .html target yields surface with kind 'interface' and exposure 'local'", () => {
@@ -205,9 +195,9 @@ test("ui-page-link edge to .html target yields surface with kind 'interface' and
     },
   };
   const surfaces = buildBrowserExtensionSurfacesFromGraph(bundle);
-  assert.equal(surfaces.length, 1);
-  assert.equal(surfaces[0].kind, "interface");
-  assert.equal(surfaces[0].exposure, "local");
+  expect(surfaces.length).toBe(1);
+  expect(surfaces[0].kind).toBe("interface");
+  expect(surfaces[0].exposure).toBe("local");
 });
 
 test("content-style-link edge produces no surface (not in EXTENSION_SURFACE_EDGE_KINDS)", () => {
@@ -222,7 +212,7 @@ test("content-style-link edge produces no surface (not in EXTENSION_SURFACE_EDGE
       ],
     },
   };
-  assert.deepEqual(buildBrowserExtensionSurfacesFromGraph(bundle), []);
+  expect(buildBrowserExtensionSurfacesFromGraph(bundle)).toEqual([]);
 });
 
 test("binary target (.png) is excluded by isExecutableExtensionSurfaceTarget", () => {
@@ -233,7 +223,7 @@ test("binary target (.png) is excluded by isExecutableExtensionSurfaceTarget", (
       ],
     },
   };
-  assert.deepEqual(buildBrowserExtensionSurfacesFromGraph(bundle), []);
+  expect(buildBrowserExtensionSurfacesFromGraph(bundle)).toEqual([]);
 });
 
 test("duplicate kind+path combination is deduplicated to one surface", () => {
@@ -246,7 +236,7 @@ test("duplicate kind+path combination is deduplicated to one surface", () => {
     },
   };
   const surfaces = buildBrowserExtensionSurfacesFromGraph(bundle);
-  assert.equal(surfaces.length, 1);
+  expect(surfaces.length).toBe(1);
 });
 
 test("file with excluded disposition status is skipped", () => {
@@ -258,7 +248,7 @@ test("file with excluded disposition status is skipped", () => {
     },
   };
   const disposition = { files: [{ path: "vendor/bg.js", status: "vendor" }] };
-  assert.deepEqual(buildBrowserExtensionSurfacesFromGraph(bundle, disposition), []);
+  expect(buildBrowserExtensionSurfacesFromGraph(bundle, disposition)).toEqual([]);
 });
 
 test("output surfaces are sorted by entrypoint then kind", () => {
@@ -271,7 +261,7 @@ test("output surfaces are sorted by entrypoint then kind", () => {
     },
   };
   const surfaces = buildBrowserExtensionSurfacesFromGraph(bundle);
-  assert.equal(surfaces.length, 2);
-  assert.equal(surfaces[0].entrypoint, "a/bg.js");
-  assert.equal(surfaces[1].entrypoint, "z/content.js");
+  expect(surfaces.length).toBe(2);
+  expect(surfaces[0].entrypoint).toBe("a/bg.js");
+  expect(surfaces[1].entrypoint).toBe("z/content.js");
 });

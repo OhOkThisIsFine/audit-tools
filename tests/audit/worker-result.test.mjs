@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   buildWorkerResult,
@@ -23,16 +22,16 @@ await test("buildWorkerResult maps all params to WorkerResult contract fields", 
   };
   const result = buildWorkerResult(params);
 
-  assert.equal(result.contract_version, WORKER_RESULT_CONTRACT_VERSION);
-  assert.equal(result.run_id, params.runId);
-  assert.equal(result.obligation_id, params.obligationId);
-  assert.equal(result.status, params.status);
-  assert.equal(result.progress_made, params.progressMade);
-  assert.equal(result.selected_executor, params.selectedExecutor);
-  assert.deepEqual(result.artifacts_written, params.artifactsWritten);
-  assert.equal(result.summary, params.summary);
-  assert.equal(result.next_likely_step, params.nextLikelyStep);
-  assert.deepEqual(result.errors, params.errors);
+  expect(result.contract_version).toBe(WORKER_RESULT_CONTRACT_VERSION);
+  expect(result.run_id).toBe(params.runId);
+  expect(result.obligation_id).toBe(params.obligationId);
+  expect(result.status).toBe(params.status);
+  expect(result.progress_made).toBe(params.progressMade);
+  expect(result.selected_executor).toBe(params.selectedExecutor);
+  expect(result.artifacts_written).toEqual(params.artifactsWritten);
+  expect(result.summary).toBe(params.summary);
+  expect(result.next_likely_step).toBe(params.nextLikelyStep);
+  expect(result.errors).toEqual(params.errors);
 });
 
 await test("buildWorkerResult accepts null obligation_id and null selected_executor", () => {
@@ -48,8 +47,8 @@ await test("buildWorkerResult accepts null obligation_id and null selected_execu
     errors: [],
   });
 
-  assert.equal(result.obligation_id, null);
-  assert.equal(result.selected_executor, null);
+  expect(result.obligation_id).toBe(null);
+  expect(result.selected_executor).toBe(null);
 });
 
 // ── formatAuditResultValidationError ─────────────────────────────────────────
@@ -75,9 +74,6 @@ await test("formatAuditResultValidationError includes error count and formatted 
   ];
   const result = formatAuditResultValidationError(issues);
 
-  assert.ok(result.includes("2 error(s)"), `expected '2 error(s)' in: ${result}`);
-  assert.ok(
-    result.includes("task_id must be a string"),
-    `expected first issue message in: ${result}`,
-  );
+  expect(result.includes("2 error(s)"), `expected '2 error(s)' in: ${result}`).toBeTruthy();
+  expect(result.includes("task_id must be a string"), `expected first issue message in: ${result}`).toBeTruthy();
 });

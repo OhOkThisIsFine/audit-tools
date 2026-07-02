@@ -1,5 +1,4 @@
-import test, { afterEach } from "node:test";
-import assert from "node:assert/strict";
+import { test, afterEach, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -54,61 +53,61 @@ function source(auth, fetchImpl) {
 
 test("returns null for a non-OpenCode provider without reading anything", async () => {
   const fetchImpl = routingFetch();
-  assert.equal(await source(authFixture(), fetchImpl).queryCurrentUsage("claude-code/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await source(authFixture(), fetchImpl).queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("routes opencode/anthropic/* to the Claude usage endpoint with OpenCode's anthropic token", async () => {
   const fetchImpl = routingFetch();
   const snap = await source(authFixture(), fetchImpl).queryCurrentUsage("opencode/anthropic/claude-sonnet-4-6");
-  assert.equal(snap.source, "claude-oauth");
-  assert.equal(snap.remaining_pct, 0.7); // five_hour 30% used
-  assert.match(fetchImpl.calls[0].url, /api\.anthropic\.com/);
-  assert.equal(fetchImpl.calls[0].init.headers.Authorization, "Bearer ant-tok");
-  assert.equal(fetchImpl.calls[0].init.headers["User-Agent"], "claude-cli (external, cli)");
+  expect(snap.source).toBe("claude-oauth");
+  expect(snap.remaining_pct).toBe(0.7); // five_hour 30% used
+  expect(fetchImpl.calls[0].url).toMatch(/api\.anthropic\.com/);
+  expect(fetchImpl.calls[0].init.headers.Authorization).toBe("Bearer ant-tok");
+  expect(fetchImpl.calls[0].init.headers["User-Agent"]).toBe("claude-cli (external, cli)");
 });
 
 test("routes opencode/openai/* to the Codex wham endpoint with account id", async () => {
   const fetchImpl = routingFetch();
   const snap = await source(authFixture(), fetchImpl).queryCurrentUsage("opencode/openai/gpt-x");
-  assert.equal(snap.source, "codex");
-  assert.equal(snap.remaining_pct, 0.5);
-  assert.match(fetchImpl.calls[0].url, /wham\/usage/);
-  assert.equal(fetchImpl.calls[0].init.headers["ChatGPT-Account-Id"], "acct");
+  expect(snap.source).toBe("codex");
+  expect(snap.remaining_pct).toBe(0.5);
+  expect(fetchImpl.calls[0].url).toMatch(/wham\/usage/);
+  expect(fetchImpl.calls[0].init.headers["ChatGPT-Account-Id"]).toBe("acct");
 });
 
 test("routes opencode/github-copilot/* to the Copilot endpoint", async () => {
   const fetchImpl = routingFetch();
   const snap = await source(authFixture(), fetchImpl).queryCurrentUsage("opencode/github-copilot/some-model");
-  assert.equal(snap.source, "copilot");
-  assert.equal(snap.remaining_pct, 0.8);
-  assert.match(fetchImpl.calls[0].url, /copilot_internal\/user/);
+  expect(snap.source).toBe("copilot");
+  expect(snap.remaining_pct).toBe(0.8);
+  expect(fetchImpl.calls[0].url).toMatch(/copilot_internal\/user/);
 });
 
 test("returns null for google (API key, no proactive endpoint) and for un-namespaced models", async () => {
   const fetchImpl = routingFetch();
   const src = source(authFixture(), fetchImpl);
-  assert.equal(await src.queryCurrentUsage("opencode/google/g-model"), null);
-  assert.equal(await src.queryCurrentUsage("opencode/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("opencode/google/g-model")).toBe(null);
+  expect(await src.queryCurrentUsage("opencode/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("degrades to null when the routed provider's token is expired or absent", async () => {
   const fetchImpl = routingFetch();
   const expired = source(authFixture({ anthropic: { type: "oauth", access: "ant-tok", expires: NOW - 1 } }), fetchImpl);
-  assert.equal(await expired.queryCurrentUsage("opencode/anthropic/claude-x"), null);
+  expect(await expired.queryCurrentUsage("opencode/anthropic/claude-x")).toBe(null);
   const absent = source(authFixture({ anthropic: undefined }), fetchImpl);
-  assert.equal(await absent.queryCurrentUsage("opencode/anthropic/claude-x"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await absent.queryCurrentUsage("opencode/anthropic/claude-x")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("degrades to null when auth.json is missing", async () => {
   const fetchImpl = routingFetch();
   const src = new OpenCodeQuotaSource({ authPath: join(tmpdir(), "no-opencode", "auth.json"), fetchImpl, now: () => NOW });
-  assert.equal(await src.queryCurrentUsage("opencode/anthropic/claude-x"), null);
+  expect(await src.queryCurrentUsage("opencode/anthropic/claude-x")).toBe(null);
 });
 
 test("the DEFAULT fetch makes no network call under a test runner", async () => {
   const src = new OpenCodeQuotaSource({ authPath: writeAuth(authFixture()), now: () => NOW });
-  assert.equal(await src.queryCurrentUsage("opencode/anthropic/claude-x"), null);
+  expect(await src.queryCurrentUsage("opencode/anthropic/claude-x")).toBe(null);
 });

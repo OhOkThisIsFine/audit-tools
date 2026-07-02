@@ -9,7 +9,7 @@
  *   5. per-clause escape-hatch for unencodable hard clause in compound intent
  */
 
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { scheduleWave, classifyProvider, selectDispatchDriver, DISPATCH_Y_DISPATCHER_MIN_ITEMS } = await import(
@@ -47,27 +47,11 @@ test("quota-only throttling: max_concurrent bounded exclusively by RPM when it i
     hostConcurrencyLimit: null,
   });
 
-  assert.equal(
-    schedule.max_concurrent,
-    N,
-    `max_concurrent should equal RPM limit ${N}, got ${schedule.max_concurrent}`,
-  );
-  assert.equal(
-    schedule.binding_cap,
-    "rpm",
-    `binding_cap should be 'rpm', got ${schedule.binding_cap}`,
-  );
-  assert.equal(
-    schedule.cooldown_until,
-    null,
-    "cooldown_until should be null when there is no cooldown",
-  );
+  expect(schedule.max_concurrent, `max_concurrent should equal RPM limit ${N}, got ${schedule.max_concurrent}`).toBe(N);
+  expect(schedule.binding_cap, `binding_cap should be 'rpm', got ${schedule.binding_cap}`).toBe("rpm");
+  expect(schedule.cooldown_until, "cooldown_until should be null when there is no cooldown").toBe(null);
   // source should reflect explicit_config since limits came from quota.models
-  assert.equal(
-    schedule.confidence,
-    "high",
-    "confidence should be 'high' for explicit_config limit source",
-  );
+  expect(schedule.confidence, "confidence should be 'high' for explicit_config limit source").toBe("high");
 });
 
 // ---------------------------------------------------------------------------
@@ -75,21 +59,13 @@ test("quota-only throttling: max_concurrent bounded exclusively by RPM when it i
 // ---------------------------------------------------------------------------
 
 test("capability-tier routing: classifyProvider returns correct host-class for every ResolvedProviderName", () => {
-  assert.equal(classifyProvider("claude-code").hostClass, "hosted", "claude-code → hosted");
-  assert.equal(classifyProvider("codex").hostClass, "hosted", "codex → hosted");
-  assert.equal(classifyProvider("opencode").hostClass, "local", "opencode → local");
-  assert.equal(
-    classifyProvider("local-subprocess").hostClass,
-    "local",
-    "local-subprocess → local",
-  );
-  assert.equal(
-    classifyProvider("subprocess-template").hostClass,
-    "unknown",
-    "subprocess-template → unknown",
-  );
-  assert.equal(classifyProvider("vscode-task").hostClass, "unknown", "vscode-task → unknown");
-  assert.equal(classifyProvider("antigravity").hostClass, "unknown", "antigravity → unknown");
+  expect(classifyProvider("claude-code").hostClass, "claude-code → hosted").toBe("hosted");
+  expect(classifyProvider("codex").hostClass, "codex → hosted").toBe("hosted");
+  expect(classifyProvider("opencode").hostClass, "opencode → local").toBe("local");
+  expect(classifyProvider("local-subprocess").hostClass, "local-subprocess → local").toBe("local");
+  expect(classifyProvider("subprocess-template").hostClass, "subprocess-template → unknown").toBe("unknown");
+  expect(classifyProvider("vscode-task").hostClass, "vscode-task → unknown").toBe("unknown");
+  expect(classifyProvider("antigravity").hostClass, "antigravity → unknown").toBe("unknown");
 });
 
 test("capability-tier routing: classifyProvider.concurrencyFloor lifts capable agent hosts off the cold-start floor", () => {
@@ -97,21 +73,11 @@ test("capability-tier routing: classifyProvider.concurrencyFloor lifts capable a
   // floor; everything else stays at the conservative cold-start floor — all
   // surfaced ONLY via the struct's concurrencyFloor (no separable constant).
   const agentFloor = classifyProvider("claude-code").concurrencyFloor;
-  assert.ok(agentFloor > 3, "claude-code floor lifted above the cold-start floor");
-  assert.equal(
-    classifyProvider("vscode-task").concurrencyFloor,
-    agentFloor,
-    "vscode-task shares the agent-host floor",
-  );
+  expect(agentFloor > 3, "claude-code floor lifted above the cold-start floor").toBeTruthy();
+  expect(classifyProvider("vscode-task").concurrencyFloor, "vscode-task shares the agent-host floor").toBe(agentFloor);
   // codex / opencode are not capable agent hosts → conservative cold-start floor.
-  assert.ok(
-    classifyProvider("codex").concurrencyFloor < agentFloor,
-    "codex stays at the cold-start floor",
-  );
-  assert.ok(
-    classifyProvider("opencode").concurrencyFloor < agentFloor,
-    "opencode stays at the cold-start floor",
-  );
+  expect(classifyProvider("codex").concurrencyFloor < agentFloor, "codex stays at the cold-start floor").toBeTruthy();
+  expect(classifyProvider("opencode").concurrencyFloor < agentFloor, "opencode stays at the cold-start floor").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -124,7 +90,7 @@ test("selectDispatchDriver: local provider always uses the in-process engine", (
     eligibleItemCount: 50,
     slots: 8,
   });
-  assert.equal(sel.strategy, "in_process", "local provider → in_process regardless of frontier size");
+  expect(sel.strategy, "local provider → in_process regardless of frontier size").toBe("in_process");
 });
 
 test("selectDispatchDriver: a single slot drives slot-pull (no loop to delegate)", () => {
@@ -133,7 +99,7 @@ test("selectDispatchDriver: a single slot drives slot-pull (no loop to delegate)
     eligibleItemCount: 50,
     slots: 1,
   });
-  assert.equal(sel.strategy, "slot_pull", "one slot → host drives serially, no dispatcher agent");
+  expect(sel.strategy, "one slot → host drives serially, no dispatcher agent").toBe("slot_pull");
 });
 
 test("selectDispatchDriver: a small frontier drives slot-pull even on a capable agent host", () => {
@@ -142,7 +108,7 @@ test("selectDispatchDriver: a small frontier drives slot-pull even on a capable 
     eligibleItemCount: DISPATCH_Y_DISPATCHER_MIN_ITEMS - 1,
     slots: 8,
   });
-  assert.equal(sel.strategy, "slot_pull", "frontier below the threshold → host drives directly");
+  expect(sel.strategy, "frontier below the threshold → host drives directly").toBe("slot_pull");
 });
 
 test("selectDispatchDriver: a large frontier on a capable agent host delegates to a dispatcher subagent", () => {
@@ -151,8 +117,8 @@ test("selectDispatchDriver: a large frontier on a capable agent host delegates t
     eligibleItemCount: DISPATCH_Y_DISPATCHER_MIN_ITEMS,
     slots: 8,
   });
-  assert.equal(sel.strategy, "y_dispatcher", "frontier at/above the threshold with multiple slots → delegate the loop");
-  assert.match(sel.reason, /delegate the rolling loop/i);
+  expect(sel.strategy, "frontier at/above the threshold with multiple slots → delegate the loop").toBe("y_dispatcher");
+  expect(sel.reason).toMatch(/delegate the rolling loop/i);
 });
 
 test("selectDispatchDriver: an explicit threshold override is honored", () => {
@@ -162,7 +128,7 @@ test("selectDispatchDriver: an explicit threshold override is honored", () => {
     slots: 4,
     threshold: 3,
   });
-  assert.equal(sel.strategy, "y_dispatcher", "frontier 3 ≥ override threshold 3 → delegate");
+  expect(sel.strategy, "frontier 3 ≥ override threshold 3 → delegate").toBe("y_dispatcher");
 });
 
 test("renderDispatchDriverInstruction: prose matches the chosen strategy and embeds the slots label", () => {
@@ -170,21 +136,21 @@ test("renderDispatchDriverInstruction: prose matches the chosen strategy and emb
     { strategy: "y_dispatcher", reason: "x" },
     "`max_concurrent_agents`",
   );
-  assert.match(y, /dedicated dispatcher subagent/i);
-  assert.match(y, /`max_concurrent_agents`/);
+  expect(y).toMatch(/dedicated dispatcher subagent/i);
+  expect(y).toMatch(/`max_concurrent_agents`/);
 
   const pull = renderDispatchDriverInstruction(
     { strategy: "slot_pull", reason: "x" },
     "**4**",
   );
-  assert.match(pull, /drive the (rolling )?loop directly|drive the loop yourself/i);
-  assert.match(pull, /\*\*4\*\*/);
+  expect(pull).toMatch(/drive the (rolling )?loop directly|drive the loop yourself/i);
+  expect(pull).toMatch(/\*\*4\*\*/);
 
   const inproc = renderDispatchDriverInstruction(
     { strategy: "in_process", reason: "x" },
     "N",
   );
-  assert.match(inproc, /in-process rolling engine/i);
+  expect(inproc).toMatch(/in-process rolling engine/i);
 });
 
 // ---------------------------------------------------------------------------
@@ -206,16 +172,8 @@ test("free_form_intent never emitted verbatim: IntentCheckpoint type-level invar
 
   // Round-trip through JSON preserves the structured fields
   const roundTripped = JSON.parse(JSON.stringify(checkpoint));
-  assert.equal(
-    roundTripped.scope_summary,
-    "Audit the payments module",
-    "scope_summary must survive JSON round-trip",
-  );
-  assert.equal(
-    roundTripped.intent_summary,
-    "Full security review of payments",
-    "intent_summary must survive JSON round-trip",
-  );
+  expect(roundTripped.scope_summary, "scope_summary must survive JSON round-trip").toBe("Audit the payments module");
+  expect(roundTripped.intent_summary, "intent_summary must survive JSON round-trip").toBe("Full security review of payments");
 
   // The sentinel is stored on the type but must NOT appear in any
   // shared-layer prompt-builder output.  buildCacheablePrompt is the
@@ -226,20 +184,11 @@ test("free_form_intent never emitted verbatim: IntentCheckpoint type-level invar
     perAgentPayload: `Goal: ${checkpoint.intent_summary}`,
   });
 
-  assert.ok(
-    !builtPrompt.includes(SENTINEL),
-    `Sentinel free_form_intent value must not appear in built prompt; got:\n${builtPrompt}`,
-  );
+  expect(!builtPrompt.includes(SENTINEL), `Sentinel free_form_intent value must not appear in built prompt; got:\n${builtPrompt}`).toBeTruthy();
 
   // Structured fields ARE present; the sentinel is NOT
-  assert.ok(
-    builtPrompt.includes(checkpoint.scope_summary),
-    "scope_summary should appear in the assembled prompt",
-  );
-  assert.ok(
-    builtPrompt.includes(checkpoint.intent_summary),
-    "intent_summary should appear in the assembled prompt",
-  );
+  expect(builtPrompt.includes(checkpoint.scope_summary), "scope_summary should appear in the assembled prompt").toBeTruthy();
+  expect(builtPrompt.includes(checkpoint.intent_summary), "intent_summary should appear in the assembled prompt").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -257,11 +206,7 @@ test("emptied provider pool reaches waiting_for_provider terminal state", () => 
 
   // Re-discovery surfaces the same (now-excluded) provider only.
   const genuinelyNew = filterNewProviders([excludedProvider], settled);
-  assert.equal(
-    genuinelyNew.length,
-    0,
-    "No genuinely new providers after the only provider is excluded",
-  );
+  expect(genuinelyNew.length, "No genuinely new providers after the only provider is excluded").toBe(0);
 
   // Engine transitions into waiting_for_provider (not a dispatch state).
   const pausedState = {
@@ -278,17 +223,13 @@ test("emptied provider pool reaches waiting_for_provider terminal state", () => 
     livelockLimit: 999, // stay paused, do not livelock in this test
   });
 
-  assert.equal(
-    next.kind,
-    "waiting_for_provider",
-    "outcome should be waiting_for_provider, not a dispatch-capable state",
-  );
-  assert.notEqual(next.kind, "running", "must not fall through to running/dispatch");
-  assert.notEqual(next.kind, "terminal", "must not immediately livelock");
+  expect(next.kind, "outcome should be waiting_for_provider, not a dispatch-capable state").toBe("waiting_for_provider");
+  expect(next.kind, "must not fall through to running/dispatch").not.toBe("running");
+  expect(next.kind, "must not immediately livelock").not.toBe("terminal");
 
   // No retry or re-offer of the excluded provider: settled set is not mutated
-  assert.ok(settled.has(excludedProvider), "settled set must still contain the excluded provider");
-  assert.equal(settled.size, 1, "settled set must not grow or shrink");
+  expect(settled.has(excludedProvider), "settled set must still contain the excluded provider").toBeTruthy();
+  expect(settled.size, "settled set must not grow or shrink").toBe(1);
 });
 
 // ---------------------------------------------------------------------------
@@ -311,44 +252,26 @@ test("per-clause escape-hatch: unencodable hard clause in otherwise-encodable co
     result = interpretIntent(input);
   }, "interpretIntent must not throw for compound intent with one unencodable clause");
 
-  assert.ok(result, "result must be non-null");
+  expect(result, "result must be non-null").toBeTruthy();
 
   // Encodable clauses are processed without error
   const encodableClauses = result.clauses.filter((c) => c.encodable);
-  assert.ok(
-    encodableClauses.length >= 2,
-    `expected at least 2 encodable clauses, got ${encodableClauses.length}: ${JSON.stringify(result.clauses.map((c) => c.text))}`,
-  );
+  expect(encodableClauses.length >= 2, `expected at least 2 encodable clauses, got ${encodableClauses.length}: ${JSON.stringify(result.clauses.map((c) => c.text))}`).toBeTruthy();
 
   // Unencodable clause surfaces a checkpoint_question (escape-hatch)
-  assert.ok(
-    result.has_unencodable,
-    "has_unencodable must be true when an unencodable clause is present",
-  );
-  assert.ok(
-    result.checkpoint_questions.length >= 1,
-    `expected at least one checkpoint_question, got ${result.checkpoint_questions.length}`,
-  );
+  expect(result.has_unencodable, "has_unencodable must be true when an unencodable clause is present").toBeTruthy();
+  expect(result.checkpoint_questions.length >= 1, `expected at least one checkpoint_question, got ${result.checkpoint_questions.length}`).toBeTruthy();
 
   // The escape-hatch entry names the specific clause — checkpoint_question is non-empty
   for (const q of result.checkpoint_questions) {
-    assert.ok(
-      typeof q === "string" && q.length > 0,
-      `checkpoint_question must be a non-empty string, got: ${JSON.stringify(q)}`,
-    );
+    expect(typeof q === "string" && q.length > 0, `checkpoint_question must be a non-empty string, got: ${JSON.stringify(q)}`).toBeTruthy();
   }
 
   // The two valid clauses are independently encoded (their sibling unencodable
   // clause does not suppress them)
   const unencodableClauses = result.clauses.filter((c) => !c.encodable);
-  assert.ok(
-    unencodableClauses.length >= 1,
-    "at least one clause must be unencodable",
-  );
+  expect(unencodableClauses.length >= 1, "at least one clause must be unencodable").toBeTruthy();
   for (const u of unencodableClauses) {
-    assert.ok(
-      typeof u.checkpoint_question === "string" && u.checkpoint_question.length > 0,
-      `unencodable clause must carry a checkpoint_question, got: ${JSON.stringify(u)}`,
-    );
+    expect(typeof u.checkpoint_question === "string" && u.checkpoint_question.length > 0, `unencodable clause must carry a checkpoint_question, got: ${JSON.stringify(u)}`).toBeTruthy();
   }
 });

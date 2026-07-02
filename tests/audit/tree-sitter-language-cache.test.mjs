@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,8 +31,8 @@ test("getTreeSitterParser: two dependency paths both degrade to undefined withou
     const parserA = await getTreeSitterParser(ABSENT_GRAMMAR, dirA);
     const parserB = await getTreeSitterParser(ABSENT_GRAMMAR, dirB);
 
-    assert.equal(parserA, undefined, "absent grammar via path A returns undefined");
-    assert.equal(parserB, undefined, "absent grammar via path B returns undefined");
+    expect(parserA, "absent grammar via path A returns undefined").toBe(undefined);
+    expect(parserB, "absent grammar via path B returns undefined").toBe(undefined);
   } finally {
     await rm(dirA, { recursive: true, force: true });
     await rm(dirB, { recursive: true, force: true });
@@ -49,23 +48,20 @@ test("getTreeSitterParser: reset clears cache so a subsequent call re-attempts r
     // First call: absent grammar → undefined, and records a degradation while
     // caching a null slot in the per-module languageCache.
     const firstResult = await getTreeSitterParser(ABSENT_GRAMMAR, dir);
-    assert.equal(firstResult, undefined);
+    expect(firstResult).toBe(undefined);
     const countAfterFirst = getTreeSitterDegradationCount();
-    assert.ok(countAfterFirst > 0, "first failed resolution records a degradation");
+    expect(countAfterFirst > 0, "first failed resolution records a degradation").toBeTruthy();
 
     // After reset, the module-level maps are cleared. A second call must
     // re-attempt resolution rather than returning the cached null. We prove the
     // re-attempt happened by observing the degradation counter climb *again*
     // from zero — a cached null would short-circuit before re-incrementing.
     __resetTreeSitterForTests();
-    assert.equal(getTreeSitterDegradationCount(), 0, "reset zeroes the counter");
+    expect(getTreeSitterDegradationCount(), "reset zeroes the counter").toBe(0);
 
     const secondResult = await getTreeSitterParser(ABSENT_GRAMMAR, dir);
-    assert.equal(secondResult, undefined, "still undefined after cache reset — no throw");
-    assert.ok(
-      getTreeSitterDegradationCount() > 0,
-      "re-attempted resolution after reset (counter climbed from zero again)",
-    );
+    expect(secondResult, "still undefined after cache reset — no throw").toBe(undefined);
+    expect(getTreeSitterDegradationCount() > 0, "re-attempted resolution after reset (counter climbed from zero again)").toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
     __resetTreeSitterForTests();
@@ -79,15 +75,11 @@ test("getTreeSitterParser: repeated call with same absent grammar returns undefi
   try {
     const first = await getTreeSitterParser(ABSENT_GRAMMAR, dir);
     const second = await getTreeSitterParser(ABSENT_GRAMMAR, dir);
-    assert.equal(first, undefined);
-    assert.equal(second, undefined);
+    expect(first).toBe(undefined);
+    expect(second).toBe(undefined);
     // The second call is served from the cached null slot, so it must NOT
     // record an additional degradation — failures are memoised, not re-counted.
-    assert.equal(
-      getTreeSitterDegradationCount(),
-      1,
-      "a repeated absent-grammar call reuses the cached null (no extra degradation)",
-    );
+    expect(getTreeSitterDegradationCount(), "a repeated absent-grammar call reuses the cached null (no extra degradation)").toBe(1);
   } finally {
     await rm(dir, { recursive: true, force: true });
     __resetTreeSitterForTests();
@@ -98,18 +90,15 @@ test("getTreeSitterParser: repeated call with same absent grammar returns undefi
 
 test("getTreeSitterDegradationCount increments on grammar load failure", async () => {
   __resetTreeSitterForTests();
-  assert.equal(getTreeSitterDegradationCount(), 0, "starts at zero after reset");
+  expect(getTreeSitterDegradationCount(), "starts at zero after reset").toBe(0);
 
   const dir = await mkdtemp(join(tmpdir(), "ts-degrade-grammar-"));
   try {
     // An unknown grammar forces loadLanguage to fail (no wasm), which is a
     // degradation regardless of whether web-tree-sitter itself resolved.
     const result = await getTreeSitterParser(ABSENT_GRAMMAR, dir);
-    assert.equal(result, undefined, "graceful degradation preserved");
-    assert.ok(
-      getTreeSitterDegradationCount() > 0,
-      "counter must be > 0 after at least one resolution failure",
-    );
+    expect(result, "graceful degradation preserved").toBe(undefined);
+    expect(getTreeSitterDegradationCount() > 0, "counter must be > 0 after at least one resolution failure").toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
     __resetTreeSitterForTests();
@@ -127,15 +116,12 @@ test("getTreeSitterParser: two distinct absent grammars on the same path each de
   try {
     const a = await getTreeSitterParser(ABSENT_GRAMMAR, dir);
     const b = await getTreeSitterParser(ABSENT_GRAMMAR_B, dir);
-    assert.equal(a, undefined, "first absent grammar returns undefined");
-    assert.equal(b, undefined, "second absent grammar returns undefined");
+    expect(a, "first absent grammar returns undefined").toBe(undefined);
+    expect(b, "second absent grammar returns undefined").toBe(undefined);
     // Each grammar is a distinct cache key — the degradation counter must
     // reflect both failures, not just one (which would indicate the second
     // absent grammar was served from the first's cached null).
-    assert.ok(
-      getTreeSitterDegradationCount() >= 2,
-      `expected degradation count >= 2 for two distinct absent grammars; got ${getTreeSitterDegradationCount()}`,
-    );
+    expect(getTreeSitterDegradationCount() >= 2, `expected degradation count >= 2 for two distinct absent grammars; got ${getTreeSitterDegradationCount()}`).toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
     __resetTreeSitterForTests();
@@ -149,17 +135,10 @@ test("__resetTreeSitterForTests resets degradation counter", async () => {
   try {
     // Force at least one degradation by requesting an absent grammar.
     await getTreeSitterParser(ABSENT_GRAMMAR, dir);
-    assert.ok(
-      getTreeSitterDegradationCount() > 0,
-      "counter must be > 0 after a failure",
-    );
+    expect(getTreeSitterDegradationCount() > 0, "counter must be > 0 after a failure").toBeTruthy();
 
     __resetTreeSitterForTests();
-    assert.equal(
-      getTreeSitterDegradationCount(),
-      0,
-      "counter must be 0 after reset",
-    );
+    expect(getTreeSitterDegradationCount(), "counter must be 0 after reset").toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });
     __resetTreeSitterForTests();

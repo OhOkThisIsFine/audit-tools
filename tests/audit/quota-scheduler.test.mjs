@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   scheduleWave,
@@ -27,37 +26,34 @@ function makeEntry(buckets, overrides = {}) {
 // ── buildProviderModelKey ────────────────────────────────────────────────────
 
 test("buildProviderModelKey uses provider/* when no model given", () => {
-  assert.equal(buildProviderModelKey("claude-code", null), "claude-code/*");
-  assert.equal(buildProviderModelKey("claude-code", undefined), "claude-code/*");
+  expect(buildProviderModelKey("claude-code", null)).toBe("claude-code/*");
+  expect(buildProviderModelKey("claude-code", undefined)).toBe("claude-code/*");
 });
 
 test("buildProviderModelKey includes model when provided", () => {
-  assert.equal(
-    buildProviderModelKey("anthropic", "claude-sonnet-4-6"),
-    "anthropic/claude-sonnet-4-6",
-  );
+  expect(buildProviderModelKey("anthropic", "claude-sonnet-4-6")).toBe("anthropic/claude-sonnet-4-6");
 });
 
 // ── decayWeight ──────────────────────────────────────────────────────────────
 
 test("decayWeight returns original value with zero elapsed time", () => {
-  assert.equal(decayWeight(10, 0, 24), 10);
+  expect(decayWeight(10, 0, 24)).toBe(10);
 });
 
 test("decayWeight halves weight after one half-life", () => {
   const result = decayWeight(10, 24, 24);
-  assert.ok(Math.abs(result - 5) < 0.001, `expected ~5, got ${result}`);
+  expect(Math.abs(result - 5) < 0.001, `expected ~5, got ${result}`).toBeTruthy();
 });
 
 test("decayWeight returns 0 for non-positive halfLifeHours", () => {
-  assert.equal(decayWeight(10, 1, 0), 0);
+  expect(decayWeight(10, 1, 0)).toBe(0);
 });
 
 // ── computeMaxSafeConcurrency ────────────────────────────────────────────────
 
 test("computeMaxSafeConcurrency returns 1 when no buckets", () => {
   const entry = makeEntry({});
-  assert.equal(computeMaxSafeConcurrency(entry, 24), 1);
+  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
 });
 
 test("computeMaxSafeConcurrency returns highest safe bucket", () => {
@@ -67,7 +63,7 @@ test("computeMaxSafeConcurrency returns highest safe bucket", () => {
     "3": { success_weight: 3, failure_weight: 0.1 },
     "4": { success_weight: 0.1, failure_weight: 5 }, // unsafe
   });
-  assert.equal(computeMaxSafeConcurrency(entry, 24), 3);
+  expect(computeMaxSafeConcurrency(entry, 24)).toBe(3);
 });
 
 test("computeMaxSafeConcurrency stops at first unsafe bucket", () => {
@@ -76,7 +72,7 @@ test("computeMaxSafeConcurrency stops at first unsafe bucket", () => {
     "2": { success_weight: 0.1, failure_weight: 5 }, // unsafe — should stop here
     "3": { success_weight: 5, failure_weight: 0 },   // won't reach this
   });
-  assert.equal(computeMaxSafeConcurrency(entry, 24), 1);
+  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
 });
 
 test("computeMaxSafeConcurrency requires minimum evidence weight", () => {
@@ -84,7 +80,7 @@ test("computeMaxSafeConcurrency requires minimum evidence weight", () => {
     "1": { success_weight: 0.1, failure_weight: 0 }, // below MIN_EVIDENCE_WEIGHT of 0.5
   });
   // Even though success > failure, there's not enough evidence
-  assert.equal(computeMaxSafeConcurrency(entry, 24), 1);
+  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
 });
 
 // ── scheduleWave ─────────────────────────────────────────────────────────────
@@ -96,7 +92,7 @@ test("scheduleWave returns requestedConcurrency when quota is disabled", () => {
     hostModel: null,
     requestedConcurrency: 22,
   });
-  assert.equal(schedule.max_concurrent, 22);
+  expect(schedule.max_concurrent).toBe(22);
 });
 
 test("scheduleWave caps wave size by RPM limit", () => {
@@ -114,7 +110,7 @@ test("scheduleWave caps wave size by RPM limit", () => {
     requestedConcurrency: 22,
   });
   // floor(10 * 0.8) = 8
-  assert.equal(schedule.max_concurrent, 8);
+  expect(schedule.max_concurrent).toBe(8);
 });
 
 test("scheduleWave caps wave size by TPM limit using per-slot estimates", () => {
@@ -133,7 +129,7 @@ test("scheduleWave caps wave size by TPM limit using per-slot estimates", () => 
     // Slot estimates: [8000, 6000, 4000, 2000, 1000]. Top-3 = 18000 > 10000, top-2 = 14000 > 10000, top-1 = 8000 < 10000
     estimatedSlotTokens: [8000, 6000, 4000, 2000, 1000],
   });
-  assert.equal(schedule.max_concurrent, 1);
+  expect(schedule.max_concurrent).toBe(1);
 });
 
 test("scheduleWave per-slot TPM allows more slots when they fit budget", () => {
@@ -152,7 +148,7 @@ test("scheduleWave per-slot TPM allows more slots when they fit budget", () => {
     // Slot estimates: [3000, 3000, 3000, 3000, 3000]. Top-5 = 15000 < 20000
     estimatedSlotTokens: [3000, 3000, 3000, 3000, 3000],
   });
-  assert.equal(schedule.max_concurrent, 5);
+  expect(schedule.max_concurrent).toBe(5);
 });
 
 test("scheduleWave estimated_wave_tokens uses actual slot sums", () => {
@@ -163,8 +159,8 @@ test("scheduleWave estimated_wave_tokens uses actual slot sums", () => {
     requestedConcurrency: 3,
     estimatedSlotTokens: [5000, 3000, 1000],
   });
-  assert.equal(schedule.max_concurrent, 3);
-  assert.equal(schedule.estimated_wave_tokens, 9000);
+  expect(schedule.max_concurrent).toBe(3);
+  expect(schedule.estimated_wave_tokens).toBe(9000);
 });
 
 test("scheduleWave caps wave size by TPM limit", () => {
@@ -183,7 +179,7 @@ test("scheduleWave caps wave size by TPM limit", () => {
     estimatedSlotTokens: [3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000, 3_000],
   });
   // sumTopN of 4 slots (4*3000=12000) > 10000, sumTopN of 3 slots (3*3000=9000) <= 10000 → wave = 3
-  assert.equal(schedule.max_concurrent, 3);
+  expect(schedule.max_concurrent).toBe(3);
 });
 
 test("scheduleWave caps wave size by host active subagent limit", () => {
@@ -211,8 +207,8 @@ test("scheduleWave caps wave size by host active subagent limit", () => {
     hostConcurrencyLimit,
     quotaStateEntry,
   });
-  assert.equal(schedule.max_concurrent, 6);
-  assert.deepEqual(schedule.host_concurrency_limit, hostConcurrencyLimit);
+  expect(schedule.max_concurrent).toBe(6);
+  expect(schedule.host_concurrency_limit).toEqual(hostConcurrencyLimit);
 });
 
 test("scheduleWave applies host active subagent limit even when quota is disabled", () => {
@@ -227,7 +223,7 @@ test("scheduleWave applies host active subagent limit even when quota is disable
       description: "Host active subagent limit reported by the conversation host.",
     },
   });
-  assert.equal(schedule.max_concurrent, 6);
+  expect(schedule.max_concurrent).toBe(6);
 });
 
 test("scheduleWave: a reported host limit supersedes the conservative unknown-hosted fallback", () => {
@@ -247,7 +243,7 @@ test("scheduleWave: a reported host limit supersedes the conservative unknown-ho
       description: "Host active subagent limit reported by the conversation host.",
     },
   });
-  assert.equal(schedule.max_concurrent, 4);
+  expect(schedule.max_concurrent).toBe(4);
 });
 
 test("scheduleWave: a reported host limit never raises waves above a known RPM cap", () => {
@@ -267,7 +263,7 @@ test("scheduleWave: a reported host limit never raises waves above a known RPM c
     },
     discoveredLimits: { requests_per_minute: 3, source: "provider_query" },
   });
-  assert.equal(schedule.max_concurrent, 3);
+  expect(schedule.max_concurrent).toBe(3);
 });
 
 test("scheduleWave invents NO ceiling for an unconfigured provider (no host limit, no rpm/tpm, no budget)", () => {
@@ -281,8 +277,8 @@ test("scheduleWave invents NO ceiling for an unconfigured provider (no host limi
     requestedConcurrency: 96,
     quotaStateEntry: null,
   });
-  assert.equal(wide.max_concurrent, 96);
-  assert.equal(wide.binding_cap, "none");
+  expect(wide.max_concurrent).toBe(96);
+  expect(wide.binding_cap).toBe("none");
 
   // A genuinely unknown (non-agent-host) provider is ALSO uncapped now — no floor.
   const unknown = scheduleWave({
@@ -292,51 +288,36 @@ test("scheduleWave invents NO ceiling for an unconfigured provider (no host limi
     requestedConcurrency: 96,
     quotaStateEntry: null,
   });
-  assert.equal(unknown.max_concurrent, 96);
-  assert.equal(unknown.binding_cap, "none");
+  expect(unknown.max_concurrent).toBe(96);
+  expect(unknown.binding_cap).toBe("none");
 });
 
 test("resolveHostModel: explicit -> config -> env -> null", () => {
   // Explicit override wins over everything.
-  assert.equal(
-    resolveHostModel({
+  expect(resolveHostModel({
       providerName: "claude-code",
       sessionConfig: { block_quota: { host_model: "x/cfg" } },
       explicitModel: "x/explicit",
       env: { AUDIT_CODE_HOST_MODEL: "x/env" },
       envVar: "AUDIT_CODE_HOST_MODEL",
-    }),
-    "x/explicit",
-  );
+    })).toBe("x/explicit");
   // Then session-config block_quota.host_model.
-  assert.equal(
-    resolveHostModel({
+  expect(resolveHostModel({
       providerName: "claude-code",
       sessionConfig: { block_quota: { host_model: "x/cfg" } },
       env: {},
-    }),
-    "x/cfg",
-  );
+    })).toBe("x/cfg");
   // Then the env hint.
-  assert.equal(
-    resolveHostModel({
+  expect(resolveHostModel({
       providerName: "claude-code",
       sessionConfig: {},
       env: { AUDIT_CODE_HOST_MODEL: "x/env" },
       envVar: "AUDIT_CODE_HOST_MODEL",
-    }),
-    "x/env",
-  );
+    })).toBe("x/env");
   // No signal → null (genuinely unknown model — no hardcoded per-provider
   // default; the real window comes from the dispatch-time handshake).
-  assert.equal(
-    resolveHostModel({ providerName: "claude-code", sessionConfig: {}, env: {} }),
-    null,
-  );
-  assert.equal(
-    resolveHostModel({ providerName: "subprocess-template", sessionConfig: {}, env: {} }),
-    null,
-  );
+  expect(resolveHostModel({ providerName: "claude-code", sessionConfig: {}, env: {} })).toBe(null);
+  expect(resolveHostModel({ providerName: "subprocess-template", sessionConfig: {}, env: {} })).toBe(null);
 });
 
 test("scheduleWave invents NO ceiling for an unconfigured local provider", () => {
@@ -350,8 +331,8 @@ test("scheduleWave invents NO ceiling for an unconfigured local provider", () =>
       requestedConcurrency: 22,
       quotaStateEntry: null,
     });
-    assert.equal(schedule.max_concurrent, 22, `expected uncapped wave for ${providerName}`);
-    assert.equal(schedule.binding_cap, "none");
+    expect(schedule.max_concurrent, `expected uncapped wave for ${providerName}`).toBe(22);
+    expect(schedule.binding_cap).toBe("none");
   }
 });
 
@@ -368,7 +349,7 @@ test("scheduleWave still applies host limit for an unconfigured local provider",
       description: "Host active subagent limit.",
     },
   });
-  assert.equal(schedule.max_concurrent, 8);
+  expect(schedule.max_concurrent).toBe(8);
 });
 
 test("scheduleWave dispatches the full wave when discovered limits are generous", () => {
@@ -380,7 +361,7 @@ test("scheduleWave dispatches the full wave when discovered limits are generous"
     quotaStateEntry: null,
     discoveredLimits: { requests_per_minute: 20, source: "header_extraction" },
   });
-  assert.equal(schedule.max_concurrent, 16); // 20 * 0.8 safety margin = 16
+  expect(schedule.max_concurrent).toBe(16); // 20 * 0.8 safety margin = 16
 });
 
 test("scheduleWave bypasses first-contact cap when quota state exists", () => {
@@ -397,7 +378,7 @@ test("scheduleWave bypasses first-contact cap when quota state exists", () => {
       "5": { success_weight: 5, failure_weight: 0 },
     }),
   });
-  assert.equal(schedule.max_concurrent, 6); // ramp-up: 5 succeeded + 1
+  expect(schedule.max_concurrent).toBe(6); // ramp-up: 5 succeeded + 1
 });
 
 test("scheduleWave respects learned concurrency cap (ramp-up disabled)", () => {
@@ -415,7 +396,7 @@ test("scheduleWave respects learned concurrency cap (ramp-up disabled)", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.max_concurrent, 4);
+  expect(schedule.max_concurrent).toBe(4);
 });
 
 test("scheduleWave reduces to 1 during active cooldown", () => {
@@ -428,8 +409,8 @@ test("scheduleWave reduces to 1 during active cooldown", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.max_concurrent, 1);
-  assert.equal(schedule.cooldown_until, cooldownUntil);
+  expect(schedule.max_concurrent).toBe(1);
+  expect(schedule.cooldown_until).toBe(cooldownUntil);
 });
 
 test("scheduleWave ignores expired cooldown", () => {
@@ -448,8 +429,8 @@ test("scheduleWave ignores expired cooldown", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.ok(schedule.max_concurrent > 1, "expired cooldown should not reduce max_concurrent to 1");
-  assert.equal(schedule.cooldown_until, null);
+  expect(schedule.max_concurrent > 1, "expired cooldown should not reduce max_concurrent to 1").toBeTruthy();
+  expect(schedule.cooldown_until).toBe(null);
 });
 
 test("scheduleWave max_concurrent is always at least 1", () => {
@@ -463,7 +444,7 @@ test("scheduleWave max_concurrent is always at least 1", () => {
     hostModel: "test/model",
     requestedConcurrency: 0,
   });
-  assert.equal(schedule.max_concurrent, 1);
+  expect(schedule.max_concurrent).toBe(1);
 });
 
 test("scheduleWave source and confidence reflect the limit origin", () => {
@@ -474,49 +455,49 @@ test("scheduleWave source and confidence reflect the limit origin", () => {
     discoveredLimits: { context_tokens: 200_000, output_tokens: 8_192 },
     requestedConcurrency: 1,
   });
-  assert.equal(schedule.source, "discovered_capability");
-  assert.equal(schedule.confidence, "high");
-  assert.equal(schedule.model, "anthropic/claude-sonnet-4-6");
+  expect(schedule.source).toBe("discovered_capability");
+  expect(schedule.confidence).toBe("high");
+  expect(schedule.model).toBe("anthropic/claude-sonnet-4-6");
 });
 
 test("detectHostActiveSubagentLimit detects Codex Desktop limit", () => {
   const limit = detectHostActiveSubagentLimit({
     CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop",
   });
-  assert.ok(limit !== null, "expected a non-null limit for Codex Desktop");
-  assert.equal(limit.active_subagents, 6);
-  assert.equal(limit.source, "environment");
-  assert.equal(limit.description, "Codex Desktop active subagent limit.");
+  expect(limit !== null, "expected a non-null limit for Codex Desktop").toBeTruthy();
+  expect(limit.active_subagents).toBe(6);
+  expect(limit.source).toBe("environment");
+  expect(limit.description).toBe("Codex Desktop active subagent limit.");
 });
 
 test("detectHostActiveSubagentLimit respects AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS env var", () => {
   const limit = detectHostActiveSubagentLimit({
     AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "3",
   });
-  assert.ok(limit !== null, "expected a non-null limit from env var");
-  assert.equal(limit.active_subagents, 3);
-  assert.equal(limit.source, "environment");
+  expect(limit !== null, "expected a non-null limit from env var").toBeTruthy();
+  expect(limit.active_subagents).toBe(3);
+  expect(limit.source).toBe("environment");
 });
 
 test("detectHostActiveSubagentLimit returns null for non-numeric AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
   const limit = detectHostActiveSubagentLimit({
     AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "abc",
   });
-  assert.equal(limit, null);
+  expect(limit).toBe(null);
 });
 
 test("detectHostActiveSubagentLimit returns null for zero AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
   const limit = detectHostActiveSubagentLimit({
     AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "0",
   });
-  assert.equal(limit, null);
+  expect(limit).toBe(null);
 });
 
 test("detectHostActiveSubagentLimit returns null for negative AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
   const limit = detectHostActiveSubagentLimit({
     AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "-1",
   });
-  assert.equal(limit, null);
+  expect(limit).toBe(null);
 });
 
 test("resolveHostActiveSubagentLimit prefers explicit host report over environment", () => {
@@ -527,37 +508,37 @@ test("resolveHostActiveSubagentLimit prefers explicit host report over environme
       CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop",
     },
   });
-  assert.equal(limit?.active_subagents, 4);
-  assert.equal(limit?.source, "cli_flags");
+  expect(limit?.active_subagents).toBe(4);
+  expect(limit?.source).toBe("cli_flags");
 });
 
 // ── Exponential backoff ─────────────────────────────────────────────────────
 
 test("computeBackoffCooldownMs escalates exponentially", () => {
-  assert.equal(computeBackoffCooldownMs(1), 60_000);
-  assert.equal(computeBackoffCooldownMs(2), 120_000);
-  assert.equal(computeBackoffCooldownMs(3), 240_000);
-  assert.equal(computeBackoffCooldownMs(4), 480_000);
+  expect(computeBackoffCooldownMs(1)).toBe(60_000);
+  expect(computeBackoffCooldownMs(2)).toBe(120_000);
+  expect(computeBackoffCooldownMs(3)).toBe(240_000);
+  expect(computeBackoffCooldownMs(4)).toBe(480_000);
 });
 
 test("computeBackoffCooldownMs caps at 15 minutes", () => {
-  assert.equal(computeBackoffCooldownMs(10), 15 * 60_000);
-  assert.equal(computeBackoffCooldownMs(100), 15 * 60_000);
+  expect(computeBackoffCooldownMs(10)).toBe(15 * 60_000);
+  expect(computeBackoffCooldownMs(100)).toBe(15 * 60_000);
 });
 
 test("computeBackoffCooldownMs handles count 0 gracefully", () => {
-  assert.equal(computeBackoffCooldownMs(0), 60_000);
+  expect(computeBackoffCooldownMs(0)).toBe(60_000);
 });
 
 test("computeBackoffFailureWeight escalates with consecutive failures", () => {
-  assert.equal(computeBackoffFailureWeight(1), 1.0);
-  assert.equal(computeBackoffFailureWeight(2), 1.5);
-  assert.equal(computeBackoffFailureWeight(3), 2.0);
-  assert.equal(computeBackoffFailureWeight(5), 3.0);
+  expect(computeBackoffFailureWeight(1)).toBe(1.0);
+  expect(computeBackoffFailureWeight(2)).toBe(1.5);
+  expect(computeBackoffFailureWeight(3)).toBe(2.0);
+  expect(computeBackoffFailureWeight(5)).toBe(3.0);
 });
 
 test("computeBackoffFailureWeight handles count 0 gracefully", () => {
-  assert.equal(computeBackoffFailureWeight(0), 1.0);
+  expect(computeBackoffFailureWeight(0)).toBe(1.0);
 });
 
 // ── Cold-start ramp-up ──────────────────────────────────────────────────────
@@ -567,14 +548,14 @@ test("computeRampUpConcurrency returns maxSafe+1 with sufficient consecutive suc
     "1": { success_weight: 5, failure_weight: 0 },
     "2": { success_weight: 3, failure_weight: 0 },
   });
-  assert.equal(computeRampUpConcurrency(entry, 24), 3);
+  expect(computeRampUpConcurrency(entry, 24)).toBe(3);
 });
 
 test("computeRampUpConcurrency stays at maxSafe with insufficient evidence", () => {
   const entry = makeEntry({
     "1": { success_weight: 1, failure_weight: 0 },
   });
-  assert.equal(computeRampUpConcurrency(entry, 24), 1);
+  expect(computeRampUpConcurrency(entry, 24)).toBe(1);
 });
 
 test("computeRampUpConcurrency stays at maxSafe when top bucket has failures", () => {
@@ -587,8 +568,8 @@ test("computeRampUpConcurrency stays at maxSafe when top bucket has failures", (
   // → maxSafe=1 (the old success>failure rule wrongly admitted bucket 2 as safe).
   // The maxSafe bucket (1) is itself clean and well-evidenced, so ramp-up still
   // probes one level above the corrected ceiling: rampUp = maxSafe + 1 = 2.
-  assert.equal(computeMaxSafeConcurrency(entry, 24), 1);
-  assert.equal(computeRampUpConcurrency(entry, 24), 2);
+  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
+  expect(computeRampUpConcurrency(entry, 24)).toBe(2);
 });
 
 test("scheduleWave uses ramp-up by default with quota state", () => {
@@ -604,7 +585,7 @@ test("scheduleWave uses ramp-up by default with quota state", () => {
     quotaStateEntry: entry,
   });
   // maxSafe=2, ramp-up gives 3
-  assert.equal(schedule.max_concurrent, 3);
+  expect(schedule.max_concurrent).toBe(3);
 });
 
 test("scheduleWave disables ramp-up when ramp_up_enabled is false", () => {
@@ -619,7 +600,7 @@ test("scheduleWave disables ramp-up when ramp_up_enabled is false", () => {
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.max_concurrent, 2);
+  expect(schedule.max_concurrent).toBe(2);
 });
 
 // ── binding_cap (OBS-005): which cap bound the final wave size ───────────────
@@ -636,8 +617,8 @@ test("scheduleWave reports binding_cap='rpm' when the RPM limit binds", () => {
     hostModel: "anthropic/claude-sonnet-4-6",
     requestedConcurrency: 22,
   });
-  assert.equal(schedule.max_concurrent, 8);
-  assert.equal(schedule.binding_cap, "rpm");
+  expect(schedule.max_concurrent).toBe(8);
+  expect(schedule.binding_cap).toBe("rpm");
 });
 
 test("scheduleWave reports binding_cap='tpm' when the TPM limit binds", () => {
@@ -653,8 +634,8 @@ test("scheduleWave reports binding_cap='tpm' when the TPM limit binds", () => {
     requestedConcurrency: 5,
     estimatedSlotTokens: [8000, 6000, 4000, 2000, 1000],
   });
-  assert.equal(schedule.max_concurrent, 1);
-  assert.equal(schedule.binding_cap, "tpm");
+  expect(schedule.max_concurrent).toBe(1);
+  expect(schedule.binding_cap).toBe("tpm");
 });
 
 test("scheduleWave reports binding_cap='learned' when the learned cap binds", () => {
@@ -670,7 +651,7 @@ test("scheduleWave reports binding_cap='learned' when the learned cap binds", ()
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.binding_cap, "learned");
+  expect(schedule.binding_cap).toBe("learned");
 });
 
 test("scheduleWave reports binding_cap='token_budget' when a small learned budget binds", () => {
@@ -710,8 +691,8 @@ test("scheduleWave reports binding_cap='token_budget' when a small learned budge
       windows: [{ label: "session", remaining_pct: 0.4, reset_at: null }],
     },
   });
-  assert.equal(schedule.binding_cap, "token_budget");
-  assert.ok(schedule.max_concurrent < 10, `expected budget to cap below 10, got ${schedule.max_concurrent}`);
+  expect(schedule.binding_cap).toBe("token_budget");
+  expect(schedule.max_concurrent < 10, `expected budget to cap below 10, got ${schedule.max_concurrent}`).toBeTruthy();
 });
 
 test("scheduleWave reports binding_cap='cooldown' during an active cooldown", () => {
@@ -724,7 +705,7 @@ test("scheduleWave reports binding_cap='cooldown' during an active cooldown", ()
     requestedConcurrency: 22,
     quotaStateEntry: entry,
   });
-  assert.equal(schedule.binding_cap, "cooldown");
+  expect(schedule.binding_cap).toBe("cooldown");
 });
 
 test("scheduleWave reports binding_cap='host_concurrency' when the host limit binds", () => {
@@ -739,8 +720,8 @@ test("scheduleWave reports binding_cap='host_concurrency' when the host limit bi
       description: "Host active subagent limit.",
     },
   });
-  assert.equal(schedule.max_concurrent, 6);
-  assert.equal(schedule.binding_cap, "host_concurrency");
+  expect(schedule.max_concurrent).toBe(6);
+  expect(schedule.binding_cap).toBe("host_concurrency");
 });
 
 test("F4 inv-3: a reported host limit binds; with no handshake signal nothing invents a floor", () => {
@@ -750,7 +731,7 @@ test("F4 inv-3: a reported host limit binds; with no handshake signal nothing in
     sessionConfig: { quota: { host_active_subagent_limit: 8 } },
     env: {},
   });
-  assert.notEqual(capableLimit, null);
+  expect(capableLimit).not.toBe(null);
   const capable = scheduleWave({
     providerName: "claude-code",
     sessionConfig: { quota: {} },
@@ -759,8 +740,8 @@ test("F4 inv-3: a reported host limit binds; with no handshake signal nothing in
     quotaStateEntry: null,
     hostConcurrencyLimit: capableLimit,
   });
-  assert.equal(capable.max_concurrent, 8);
-  assert.equal(capable.binding_cap, "host_concurrency");
+  expect(capable.max_concurrent).toBe(8);
+  expect(capable.binding_cap).toBe("host_concurrency");
 
   // No handshake signal → resolveHostActiveSubagentLimit returns null and, with
   // no learned/rpm/tpm/budget signal, the wave is uncapped (no invented floor).
@@ -768,7 +749,7 @@ test("F4 inv-3: a reported host limit binds; with no handshake signal nothing in
     sessionConfig: { quota: {} },
     env: {},
   });
-  assert.equal(unknownLimit, null);
+  expect(unknownLimit).toBe(null);
   const unknown = scheduleWave({
     providerName: "local-subprocess",
     sessionConfig: {},
@@ -777,8 +758,8 @@ test("F4 inv-3: a reported host limit binds; with no handshake signal nothing in
     quotaStateEntry: null,
     hostConcurrencyLimit: unknownLimit,
   });
-  assert.equal(unknown.binding_cap, "none");
-  assert.equal(unknown.max_concurrent, 96);
+  expect(unknown.binding_cap).toBe("none");
+  expect(unknown.max_concurrent).toBe(96);
 });
 
 test("scheduleWave reports binding_cap='none' when nothing reduces the requested wave", () => {
@@ -788,6 +769,6 @@ test("scheduleWave reports binding_cap='none' when nothing reduces the requested
     hostModel: null,
     requestedConcurrency: 4,
   });
-  assert.equal(schedule.max_concurrent, 4);
-  assert.equal(schedule.binding_cap, "none");
+  expect(schedule.max_concurrent).toBe(4);
+  expect(schedule.binding_cap).toBe("none");
 });

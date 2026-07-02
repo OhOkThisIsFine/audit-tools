@@ -23,8 +23,7 @@
  *      promotedAuditReportPath(artifactsDir).
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -52,34 +51,20 @@ test("1: synthesis-write target byte-identical to promote source (no ENOENT)", (
   const artifactsDir = join("/repo", ".audit-tools", "audit");
   // The audit registry writes `audit_report` to join(artifactsDir, fileName).
   const writeTarget = join(artifactsDir, ARTIFACT_DEFINITIONS.audit_report.fileName);
-  assert.equal(
-    writeTarget,
-    auditReportPath(artifactsDir),
-    "registry write path for audit_report must equal the shared auditReportPath — this is the path promote reads FROM",
-  );
+  expect(writeTarget, "registry write path for audit_report must equal the shared auditReportPath — this is the path promote reads FROM").toBe(auditReportPath(artifactsDir));
   const findingsWriteTarget = join(
     artifactsDir,
     ARTIFACT_DEFINITIONS.audit_findings.fileName,
   );
-  assert.equal(
-    findingsWriteTarget,
-    auditFindingsPath(artifactsDir),
-    "registry write path for audit_findings must equal the shared auditFindingsPath",
-  );
+  expect(findingsWriteTarget, "registry write path for audit_findings must equal the shared auditFindingsPath").toBe(auditFindingsPath(artifactsDir));
 });
 
 test("2: promote source/dest derive byte-identically from the shared helpers", () => {
   const artifactsDir = join("/repo", ".audit-tools", "audit");
-  assert.equal(auditReportPath(artifactsDir), join(artifactsDir, AUDIT_REPORT_FILENAME));
-  assert.equal(
-    promotedAuditReportPath(artifactsDir),
-    join(dirname(artifactsDir), AUDIT_REPORT_FILENAME),
-  );
-  assert.equal(
-    promotedAuditFindingsPath(artifactsDir),
-    join(dirname(artifactsDir), AUDIT_FINDINGS_FILENAME),
-  );
-  assert.equal(outputDirFor(artifactsDir), dirname(artifactsDir));
+  expect(auditReportPath(artifactsDir)).toBe(join(artifactsDir, AUDIT_REPORT_FILENAME));
+  expect(promotedAuditReportPath(artifactsDir)).toBe(join(dirname(artifactsDir), AUDIT_REPORT_FILENAME));
+  expect(promotedAuditFindingsPath(artifactsDir)).toBe(join(dirname(artifactsDir), AUDIT_FINDINGS_FILENAME));
+  expect(outputDirFor(artifactsDir)).toBe(dirname(artifactsDir));
 });
 
 test("3: real promote round-trip — write at auditReportPath, read at promotedAuditReportPath", async () => {
@@ -97,10 +82,10 @@ test("3: real promote round-trip — write at auditReportPath, read at promotedA
     );
 
     const result = await promoteFinalAuditReport({ artifactsDir });
-    assert.equal(result.promoted, true, "promote must succeed reading the synthesis write target");
+    expect(result.promoted, "promote must succeed reading the synthesis write target").toBe(true);
 
     const promotedBytes = await readFile(promotedAuditReportPath(artifactsDir), "utf8");
-    assert.equal(promotedBytes, reportBytes, "promoted report must be byte-identical");
+    expect(promotedBytes, "promoted report must be byte-identical").toBe(reportBytes);
   } finally {
     await cleanup();
   }
@@ -111,8 +96,5 @@ test("4: present_report path after promotion equals promotedAuditReportPath", ()
   // when promoted, and present_report renders that path. Assert the destination
   // promote writes to is the same path the prompt advertises.
   const artifactsDir = join("/repo", ".audit-tools", "audit");
-  assert.equal(
-    promotedAuditReportPath(artifactsDir),
-    join(outputDirFor(artifactsDir), AUDIT_REPORT_FILENAME),
-  );
+  expect(promotedAuditReportPath(artifactsDir)).toBe(join(outputDirFor(artifactsDir), AUDIT_REPORT_FILENAME));
 });

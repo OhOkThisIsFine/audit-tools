@@ -5,8 +5,7 @@
  *   - resolveConceptualReviewSettings (checkpoint > config > default-shallow)
  *   - prepareConceptualDispatch (shallow single prompt vs deep N+judge fan-out)
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, onTestFinished, expect } from "vitest";
 import { mkdtemp, rm, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,22 +48,22 @@ function minimalBundle(checkpointOverrides = {}) {
 // ── perspective selection / clamping ──────────────────────────────────────────
 
 test("clampPerspectiveCount: default when undefined / non-finite", () => {
-  assert.equal(clampPerspectiveCount(undefined), DEFAULT_CONCEPTUAL_PERSPECTIVES);
-  assert.equal(clampPerspectiveCount(NaN), DEFAULT_CONCEPTUAL_PERSPECTIVES);
+  expect(clampPerspectiveCount(undefined)).toBe(DEFAULT_CONCEPTUAL_PERSPECTIVES);
+  expect(clampPerspectiveCount(NaN)).toBe(DEFAULT_CONCEPTUAL_PERSPECTIVES);
 });
 
 test("clampPerspectiveCount: floors at 2 and caps at the built-in count", () => {
-  assert.equal(clampPerspectiveCount(1), 2);
-  assert.equal(clampPerspectiveCount(0), 2);
-  assert.equal(clampPerspectiveCount(999), CONCEPTUAL_PERSPECTIVES.length);
-  assert.equal(clampPerspectiveCount(3), 3);
+  expect(clampPerspectiveCount(1)).toBe(2);
+  expect(clampPerspectiveCount(0)).toBe(2);
+  expect(clampPerspectiveCount(999)).toBe(CONCEPTUAL_PERSPECTIVES.length);
+  expect(clampPerspectiveCount(3)).toBe(3);
 });
 
 test("selectPerspectives: returns the first N distinct built-in perspectives", () => {
   const four = selectPerspectives(4);
-  assert.equal(four.length, 4);
+  expect(four.length).toBe(4);
   const names = new Set(four.map((p) => p.name));
-  assert.equal(names.size, 4, "perspectives must be distinct");
+  expect(names.size, "perspectives must be distinct").toBe(4);
 });
 
 // ── perspective prompt rendering ──────────────────────────────────────────────
@@ -73,14 +72,14 @@ test("renderConceptualPerspectivePrompt: carries the perspective, independence n
   const bundle = minimalBundle();
   const [p] = selectPerspectives(5);
   const prompt = renderConceptualPerspectivePrompt(bundle, p, 0, 5, { max_units: 5 });
-  assert.match(prompt, new RegExp(p.name));
-  assert.match(prompt, /one of 5 independent reviewers/);
-  assert.match(prompt, /NOT see the other reviewers/);
+  expect(prompt).toMatch(new RegExp(p.name));
+  expect(prompt).toMatch(/one of 5 independent reviewers/);
+  expect(prompt).toMatch(/NOT see the other reviewers/);
   // conceptual categories present, contract categories absent
-  assert.match(prompt, /tool_opportunity/);
-  assert.doesNotMatch(prompt, /inferred_contract_gap/);
+  expect(prompt).toMatch(/tool_opportunity/);
+  expect(prompt).not.toMatch(/inferred_contract_gap/);
   // shares the structural-context prefix
-  assert.ok(prompt.includes(renderSharedStructuralContext(bundle, 5)));
+  expect(prompt.includes(renderSharedStructuralContext(bundle, 5))).toBeTruthy();
 });
 
 test("renderConceptualJudgePrompt: lists every perspective result path and is framed as independent merge", () => {
@@ -89,19 +88,19 @@ test("renderConceptualJudgePrompt: lists every perspective result path and is fr
     { name: "Adversary", path: "/x/p2.json" },
   ];
   const prompt = renderConceptualJudgePrompt(sources);
-  assert.match(prompt, /independent judge/i);
-  assert.match(prompt, /Deduplicate/i);
-  assert.match(prompt, /\/x\/p1\.json/);
-  assert.match(prompt, /\/x\/p2\.json/);
-  assert.match(prompt, /Pragmatist/);
-  assert.match(prompt, /Adversary/);
+  expect(prompt).toMatch(/independent judge/i);
+  expect(prompt).toMatch(/Deduplicate/i);
+  expect(prompt).toMatch(/\/x\/p1\.json/);
+  expect(prompt).toMatch(/\/x\/p2\.json/);
+  expect(prompt).toMatch(/Pragmatist/);
+  expect(prompt).toMatch(/Adversary/);
 });
 
 // ── resolveConceptualReviewSettings ───────────────────────────────────────────
 
 test("resolveConceptualReviewSettings: defaults to shallow when neither checkpoint nor config set depth", () => {
   const s = resolveConceptualReviewSettings(minimalBundle(), {});
-  assert.equal(s.conceptual_depth, "shallow");
+  expect(s.conceptual_depth).toBe("shallow");
 });
 
 test("resolveConceptualReviewSettings: checkpoint wins over session config", () => {
@@ -111,131 +110,125 @@ test("resolveConceptualReviewSettings: checkpoint wins over session config", () 
   const s = resolveConceptualReviewSettings(bundle, {
     design_review: { conceptual_depth: "shallow", perspectives: 7 },
   });
-  assert.equal(s.conceptual_depth, "deep");
-  assert.equal(s.perspectives, 4);
+  expect(s.conceptual_depth).toBe("deep");
+  expect(s.perspectives).toBe(4);
 });
 
 test("resolveConceptualReviewSettings: session config is the fallback when checkpoint is silent", () => {
   const s = resolveConceptualReviewSettings(minimalBundle(), {
     design_review: { conceptual_depth: "deep", perspectives: 3, max_units: 9 },
   });
-  assert.equal(s.conceptual_depth, "deep");
-  assert.equal(s.perspectives, 3);
-  assert.equal(s.max_units, 9);
+  expect(s.conceptual_depth).toBe("deep");
+  expect(s.perspectives).toBe(3);
+  expect(s.max_units).toBe(9);
 });
 
 // ── prepareConceptualDispatch ─────────────────────────────────────────────────
 
 test("prepareConceptualDispatch (shallow): writes one conceptual prompt, no fan-out", async (t) => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "shallow" },
   });
-  assert.equal(dispatch.deep, false);
-  assert.equal(dispatch.readPaths.length, 1);
-  assert.equal(dispatch.writePaths.length, 1);
-  assert.match(dispatch.conceptualResultsPath, /design-review-conceptual-findings\.json$/);
+  expect(dispatch.deep).toBe(false);
+  expect(dispatch.readPaths.length).toBe(1);
+  expect(dispatch.writePaths.length).toBe(1);
+  expect(dispatch.conceptualResultsPath).toMatch(/design-review-conceptual-findings\.json$/);
   await access(dispatch.readPaths[0]); // prompt file exists
 });
 
 test("prepareConceptualDispatch (deep): writes N perspective prompts + an independent judge", async (t) => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 3 },
   });
-  assert.equal(dispatch.deep, true);
+  expect(dispatch.deep).toBe(true);
   // readPaths: 3 perspective prompts + 3 perspective result files + 1 judge prompt (COR-60ca1f72)
   // writePaths: 3 perspective results + 1 judged result
-  assert.equal(dispatch.readPaths.length, 7);
-  assert.equal(dispatch.writePaths.length, 4);
+  expect(dispatch.readPaths.length).toBe(7);
+  expect(dispatch.writePaths.length).toBe(4);
   // the judge writes the single ingested results file
-  assert.equal(
-    dispatch.writePaths[dispatch.writePaths.length - 1],
-    dispatch.conceptualResultsPath,
-  );
+  expect(dispatch.writePaths[dispatch.writePaths.length - 1]).toBe(dispatch.conceptualResultsPath);
   // perspective prompt files exist on disk (result files don't yet — perspectives haven't run)
   const perspectivePromptPaths = dispatch.readPaths.filter((p) => p.includes("-prompt.md"));
-  assert.equal(perspectivePromptPaths.length, 4); // 3 perspective prompts + 1 judge prompt
+  expect(perspectivePromptPaths.length).toBe(4); // 3 perspective prompts + 1 judge prompt
   for (const p of perspectivePromptPaths) {
     await access(p);
   }
   // instruction text names a 3-perspective fan-out and an independent judge
   const instr = dispatch.instructionLines.join("\n");
-  assert.match(instr, /3-perspective fan-out/);
-  assert.match(instr, /independent judge/i);
+  expect(instr).toMatch(/3-perspective fan-out/);
+  expect(instr).toMatch(/independent judge/i);
   // judge prompt references each perspective result file
   const judgePromptPath = dispatch.artifactPaths.conceptual_judge_prompt;
   const judgePrompt = await readFile(judgePromptPath, "utf8");
   for (let i = 1; i <= 3; i++) {
-    assert.ok(
-      judgePrompt.includes(dispatch.artifactPaths[`conceptual_perspective_${i}_results`]),
-      `judge prompt should reference perspective ${i} results`,
-    );
+    expect(judgePrompt.includes(dispatch.artifactPaths[`conceptual_perspective_${i}_results`]), `judge prompt should reference perspective ${i} results`).toBeTruthy();
   }
 });
 
 test("prepareConceptualDispatch (deep): perspective count is clamped to the built-in maximum", async (t) => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 999 },
   });
   // readPaths = N perspective prompts + N perspective result files + 1 judge prompt (COR-60ca1f72)
-  assert.equal(dispatch.readPaths.length, CONCEPTUAL_PERSPECTIVES.length * 2 + 1);
+  expect(dispatch.readPaths.length).toBe(CONCEPTUAL_PERSPECTIVES.length * 2 + 1);
 });
 
 // ── F4: conceptual fan-out carries model tiers ────────────────────────────────
 
 test("deep fan-out carries standard tier on perspectives and deep on the judge", async (t) => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 3 },
     hostCanSelectSubagentModel: true,
   });
-  assert.deepEqual(dispatch.modelHints, {
+  expect(dispatch.modelHints).toEqual({
     perspectives: { tier: "standard", reasons: ["conceptual_perspective_ideation"] },
     judge: { tier: "deep", reasons: ["conceptual_judge_synthesis"] },
   });
   const instr = dispatch.instructionLines.join("\n");
   const perspectiveTierCount = (instr.match(/\[model_hint\.tier: standard\]/g) ?? []).length;
-  assert.equal(perspectiveTierCount, 3, "each perspective line renders its tier");
-  assert.match(instr, /independent judge.*\[model_hint\.tier: deep\]/s);
-  assert.match(instr, /Map each `model_hint\.tier`/);
+  expect(perspectiveTierCount, "each perspective line renders its tier").toBe(3);
+  expect(instr).toMatch(/independent judge.*\[model_hint\.tier: deep\]/s);
+  expect(instr).toMatch(/Map each `model_hint\.tier`/);
 });
 
 test("tiers stay inert metadata when the host cannot select subagent models", async (t) => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const dispatch = await prepareConceptualDispatch({
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 3 },
   });
-  assert.equal(dispatch.modelHints?.judge.tier, "deep");
-  assert.doesNotMatch(dispatch.instructionLines.join("\n"), /model_hint/);
+  expect(dispatch.modelHints?.judge.tier).toBe("deep");
+  expect(dispatch.instructionLines.join("\n")).not.toMatch(/model_hint/);
 });
 
 test("perspective tier is overridable via settings; shallow path carries no hints", async (t) => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const deep = await prepareConceptualDispatch({
     artifactsDir,
     bundle: minimalBundle(),
     settings: { conceptual_depth: "deep", perspectives: 2, perspective_tier: "deep" },
     hostCanSelectSubagentModel: true,
   });
-  assert.equal(deep.modelHints?.perspectives.tier, "deep");
+  expect(deep.modelHints?.perspectives.tier).toBe("deep");
 
   const shallow = await prepareConceptualDispatch({
     artifactsDir,
@@ -243,13 +236,13 @@ test("perspective tier is overridable via settings; shallow path carries no hint
     settings: { conceptual_depth: "shallow" },
     hostCanSelectSubagentModel: true,
   });
-  assert.equal(shallow.modelHints, undefined);
-  assert.doesNotMatch(shallow.instructionLines.join("\n"), /model_hint/);
+  expect(shallow.modelHints).toBe(undefined);
+  expect(shallow.instructionLines.join("\n")).not.toMatch(/model_hint/);
 });
 
 test("resolveConceptualReviewSettings threads perspective_tier from session config", () => {
   const s = resolveConceptualReviewSettings(minimalBundle(), {
     design_review: { conceptual_depth: "deep", perspective_tier: "small" },
   });
-  assert.equal(s.perspective_tier, "small");
+  expect(s.perspective_tier).toBe("small");
 });

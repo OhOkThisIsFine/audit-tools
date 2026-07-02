@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildReviewPackets } = await import("../../src/audit/orchestrator/reviewPackets.ts");
 
@@ -49,14 +48,11 @@ test("buildReviewPackets respects maxContextTokens by reducing targetPacketLines
 
   const packetsUnbounded = buildReviewPackets(tasks);
   // 5000 lines < 8000 default target → not isolated → both tasks in one packet
-  assert.equal(packetsUnbounded.length, 1, "unbounded: both tasks should share one packet");
+  expect(packetsUnbounded.length, "unbounded: both tasks should share one packet").toBe(1);
 
   const packetsBounded = buildReviewPackets(tasks, { maxContextTokens: 5_000 });
   // targetPacketTokens = 4100 → 20000 > 4100 → each task isolated → 2 packets
-  assert.ok(
-    packetsBounded.length > packetsUnbounded.length,
-    `bounded (${packetsBounded.length}) should produce more packets than unbounded (${packetsUnbounded.length})`,
-  );
+  expect(packetsBounded.length > packetsUnbounded.length, `bounded (${packetsBounded.length}) should produce more packets than unbounded (${packetsUnbounded.length})`).toBeTruthy();
 });
 
 test("buildReviewPackets with maxContextTokens never exceeds the budget per packet", () => {
@@ -70,10 +66,7 @@ test("buildReviewPackets with maxContextTokens never exceeds the budget per pack
 
   const packets = buildReviewPackets(tasks, { maxContextTokens });
   for (const packet of packets) {
-    assert.ok(
-      packet.estimated_tokens <= maxContextTokens,
-      `Packet ${packet.packet_id} estimated tokens (${packet.estimated_tokens}) exceed budget (${maxContextTokens})`,
-    );
+    expect(packet.estimated_tokens <= maxContextTokens, `Packet ${packet.packet_id} estimated tokens (${packet.estimated_tokens}) exceed budget (${maxContextTokens})`).toBeTruthy();
   }
 });
 
@@ -81,11 +74,8 @@ test("buildReviewPackets without maxContextTokens behaves identically to before"
   const tasks = [makeTask("x", 100), makeTask("y", 100)];
   const withoutOpt = buildReviewPackets(tasks);
   const withNull = buildReviewPackets(tasks, { maxContextTokens: undefined });
-  assert.equal(withoutOpt.length, withNull.length);
-  assert.deepEqual(
-    withoutOpt.map((p) => p.packet_id),
-    withNull.map((p) => p.packet_id),
-  );
+  expect(withoutOpt.length).toBe(withNull.length);
+  expect(withoutOpt.map((p) => p.packet_id)).toEqual(withNull.map((p) => p.packet_id));
 });
 
 test("buildReviewPackets with very tight maxContextTokens puts each task in its own packet", () => {
@@ -97,14 +87,14 @@ test("buildReviewPackets with very tight maxContextTokens puts each task in its 
     makeTask("r", 300),
   ];
   const packets = buildReviewPackets(tasks, { maxContextTokens: 2_000 });
-  assert.equal(packets.length, tasks.length);
+  expect(packets.length).toBe(tasks.length);
 });
 
 test("buildReviewPackets with huge maxContextTokens behaves like unbounded", () => {
   const tasks = [makeTask("a", 100), makeTask("b", 100), makeTask("c", 100)];
   const bounded = buildReviewPackets(tasks, { maxContextTokens: 1_000_000 });
   const unbounded = buildReviewPackets(tasks);
-  assert.equal(bounded.length, unbounded.length);
+  expect(bounded.length).toBe(unbounded.length);
 });
 
 test("estimated_tokens derives from size_bytes when a sizeIndex is supplied", () => {
@@ -120,11 +110,11 @@ test("estimated_tokens derives from size_bytes when a sizeIndex is supplied", ()
   ];
 
   const [withBytes] = buildReviewPackets(tasks, { sizeIndex });
-  assert.equal(withBytes.estimated_tokens, 900 + 10_000);
+  expect(withBytes.estimated_tokens).toBe(900 + 10_000);
 
   // Without a sizeIndex it falls back to the line-based estimate.
   const [withLines] = buildReviewPackets(tasks);
-  assert.equal(withLines.estimated_tokens, 900 + 5 * 4);
+  expect(withLines.estimated_tokens).toBe(900 + 5 * 4);
 });
 
 test("byte-driven packet budget splits graph-linked files to honor maxContextTokens", () => {
@@ -160,14 +150,11 @@ test("byte-driven packet budget splits graph-linked files to honor maxContextTok
   });
 
   // The five files do not all fit in one budgeted packet.
-  assert.ok(packets.length >= 2, `expected a split, got ${packets.length} packet(s)`);
+  expect(packets.length >= 2, `expected a split, got ${packets.length} packet(s)`).toBeTruthy();
   for (const packet of packets) {
-    assert.ok(
-      packet.estimated_tokens <= maxContextTokens,
-      `Packet ${packet.packet_id} estimated tokens (${packet.estimated_tokens}) exceed budget (${maxContextTokens})`,
-    );
+    expect(packet.estimated_tokens <= maxContextTokens, `Packet ${packet.packet_id} estimated tokens (${packet.estimated_tokens}) exceed budget (${maxContextTokens})`).toBeTruthy();
   }
   // Every task is still covered exactly once.
   const coveredTaskIds = packets.flatMap((p) => p.task_ids).sort();
-  assert.deepEqual(coveredTaskIds, tasks.map((t) => t.task_id).sort());
+  expect(coveredTaskIds).toEqual(tasks.map((t) => t.task_id).sort());
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, onTestFinished, expect } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +21,7 @@ test("walk logs a warning and skips hashing for oversized files", async (t) => {
 
     const warnings = [];
     const originalWarn = console.warn;
-    t.after(() => {
+    onTestFinished(() => {
       console.warn = originalWarn;
     });
     console.warn = (...args) => warnings.push(args.join(" "));
@@ -35,27 +34,21 @@ test("walk logs a warning and skips hashing for oversized files", async (t) => {
 
     // The oversized file is still in the manifest
     const largeEntry = manifest.files.find((f) => f.path.includes("large.js"));
-    assert.ok(largeEntry, "oversized file should still be inventoried");
-    assert.equal(largeEntry.hash, undefined, "oversized file should have no hash");
+    expect(largeEntry, "oversized file should still be inventoried").toBeTruthy();
+    expect(largeEntry.hash, "oversized file should have no hash").toBe(undefined);
 
     // The small file is hashed normally
     const smallEntry = manifest.files.find((f) => f.path.includes("small.js"));
-    assert.ok(smallEntry, "small file should be inventoried");
-    assert.ok(smallEntry.hash, "small file should have a hash");
+    expect(smallEntry, "small file should be inventoried").toBeTruthy();
+    expect(smallEntry.hash, "small file should have a hash").toBeTruthy();
 
     // A warning was emitted for the oversized file
     const oversizedWarning = warnings.find(
       (w) => w.includes("skipping oversized file") && w.includes("large.js"),
     );
-    assert.ok(oversizedWarning, `expected oversized-file warning; got: ${JSON.stringify(warnings)}`);
-    assert.ok(
-      oversizedWarning.includes("bytes"),
-      "warning should mention byte size",
-    );
-    assert.ok(
-      oversizedWarning.includes("limit"),
-      "warning should mention the configured limit",
-    );
+    expect(oversizedWarning, `expected oversized-file warning; got: ${JSON.stringify(warnings)}`).toBeTruthy();
+    expect(oversizedWarning.includes("bytes"), "warning should mention byte size").toBeTruthy();
+    expect(oversizedWarning.includes("limit"), "warning should mention the configured limit").toBeTruthy();
   });
 });
 
@@ -68,7 +61,7 @@ test("walk logs a warning and continues when readdir throws", async (t) => {
 
     const warnings = [];
     const originalWarn = console.warn;
-    t.after(() => {
+    onTestFinished(() => {
       console.warn = originalWarn;
     });
     console.warn = (...args) => warnings.push(args.join(" "));
@@ -85,16 +78,12 @@ test("walk logs a warning and continues when readdir throws", async (t) => {
     const manifest = await buildRepoManifestFromFs({ root });
 
     const okEntry = manifest.files.find((f) => f.path.includes("ok.js"));
-    assert.ok(okEntry, "ok.js should be in results");
+    expect(okEntry, "ok.js should be in results").toBeTruthy();
     const nestedEntry = manifest.files.find((f) => f.path.includes("nested.js"));
-    assert.ok(nestedEntry, "nested.js should be in results");
+    expect(nestedEntry, "nested.js should be in results").toBeTruthy();
 
     // No warnings for a clean walk
-    assert.equal(
-      warnings.filter((w) => w.includes("skipping unreadable directory")).length,
-      0,
-      "no unreadable-directory warnings expected for a clean walk",
-    );
+    expect(warnings.filter((w) => w.includes("skipping unreadable directory")).length, "no unreadable-directory warnings expected for a clean walk").toBe(0);
   });
 });
 
@@ -105,7 +94,7 @@ test("walk logs a warning and continues when stat throws", async (t) => {
 
     const warnings = [];
     const originalWarn = console.warn;
-    t.after(() => {
+    onTestFinished(() => {
       console.warn = originalWarn;
     });
     console.warn = (...args) => warnings.push(args.join(" "));
@@ -115,13 +104,9 @@ test("walk logs a warning and continues when stat throws", async (t) => {
 
     const entryA = manifest.files.find((f) => f.path.includes("file-a.js"));
     const entryB = manifest.files.find((f) => f.path.includes("file-b.js"));
-    assert.ok(entryA, "file-a.js should be in results");
-    assert.ok(entryB, "file-b.js should be in results");
+    expect(entryA, "file-a.js should be in results").toBeTruthy();
+    expect(entryB, "file-b.js should be in results").toBeTruthy();
 
-    assert.equal(
-      warnings.filter((w) => w.includes("skipping unreadable file")).length,
-      0,
-      "no unreadable-file warnings expected for a clean walk",
-    );
+    expect(warnings.filter((w) => w.includes("skipping unreadable file")).length, "no unreadable-file warnings expected for a clean walk").toBe(0);
   });
 });

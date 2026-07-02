@@ -1,7 +1,6 @@
 // Tests for N-CE301: partial-completion terminal — audit state + synthesis report
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.ts");
 const { buildAuditReportModel, renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.ts");
@@ -53,7 +52,7 @@ await test("N-CE301: pending audit tasks keep audit_tasks_completed missing (bas
   });
   const state = deriveAuditState(bundle);
   const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  assert.equal(atc?.state, "missing", "without terminal, pending tasks → missing");
+  expect(atc?.state, "without terminal, pending tasks → missing").toBe("missing");
 });
 
 await test("N-CE301: partial_completion_terminal present → audit_tasks_completed satisfied despite pending tasks", () => {
@@ -75,11 +74,7 @@ await test("N-CE301: partial_completion_terminal present → audit_tasks_complet
   });
   const state = deriveAuditState(bundle);
   const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  assert.equal(
-    atc?.state,
-    "satisfied",
-    "partial_completion_terminal must unlock audit_tasks_completed",
-  );
+  expect(atc?.state, "partial_completion_terminal must unlock audit_tasks_completed").toBe("satisfied");
 });
 
 await test("N-CE301: livelock_guard terminal also satisfies audit_tasks_completed", () => {
@@ -102,7 +97,7 @@ await test("N-CE301: livelock_guard terminal also satisfies audit_tasks_complete
   });
   const state = deriveAuditState(bundle);
   const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  assert.equal(atc?.state, "satisfied");
+  expect(atc?.state).toBe("satisfied");
 });
 
 await test("N-CE301: terminal only covers stranded IDs — non-stranded pending tasks still block", () => {
@@ -126,7 +121,7 @@ await test("N-CE301: terminal only covers stranded IDs — non-stranded pending 
   });
   const state = deriveAuditState(bundle);
   const atc = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  assert.equal(atc?.state, "missing", "T2 is still pending and NOT stranded → missing");
+  expect(atc?.state, "T2 is still pending and NOT stranded → missing").toBe("missing");
 });
 
 // ── synthesis report: stranded_unit_count from partial_completion_terminal ───
@@ -146,16 +141,13 @@ await test("N-CE301: stranded_unit_count populated from partial_completion_termi
       },
     },
   });
-  assert.equal(model.summary.stranded_unit_count, 2);
+  expect(model.summary.stranded_unit_count).toBe(2);
 });
 
 await test("N-CE301: stranded_unit_count absent when no partial_completion_terminal", () => {
   const model = buildAuditReportModel({ results: [] });
-  assert.ok(
-    model.summary.stranded_unit_count === undefined ||
-      model.summary.stranded_unit_count === 0,
-    "stranded_unit_count must be absent or 0 when no terminal",
-  );
+  expect(model.summary.stranded_unit_count === undefined ||
+      model.summary.stranded_unit_count === 0, "stranded_unit_count must be absent or 0 when no terminal").toBeTruthy();
 });
 
 await test("N-CE301: renderAuditReportMarkdown includes partial-coverage warning when stranded_unit_count > 0", () => {
@@ -174,14 +166,11 @@ await test("N-CE301: renderAuditReportMarkdown includes partial-coverage warning
     },
   });
   const md = renderAuditReportMarkdown(model);
-  assert.match(
-    md,
-    /2 unit\(s\) were not audited because the provider pool was exhausted before dispatch could complete \(partial coverage\)/,
-  );
+  expect(md).toMatch(/2 unit\(s\) were not audited because the provider pool was exhausted before dispatch could complete \(partial coverage\)/);
 });
 
 await test("N-CE301: no partial-coverage warning when no terminal set", () => {
   const model = buildAuditReportModel({ results: [] });
   const md = renderAuditReportMarkdown(model);
-  assert.doesNotMatch(md, /provider pool was exhausted/);
+  expect(md).not.toMatch(/provider pool was exhausted/);
 });

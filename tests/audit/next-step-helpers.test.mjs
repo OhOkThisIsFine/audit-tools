@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -45,8 +45,8 @@ await test("buildTerminalStep returns complete when bundle.audit_report is set",
     const state = { status: "planning", obligations: [] }; // not "complete" but report is present
 
     const result = await buildTerminalStep(params, bundle, state, "reason");
-    assert.equal(result.kind, "complete");
-    assert.ok(result.finalReportPath.endsWith("audit-report.md"));
+    expect(result.kind).toBe("complete");
+    expect(result.finalReportPath.endsWith("audit-report.md")).toBeTruthy();
   });
 });
 
@@ -64,8 +64,8 @@ await test("buildTerminalStep returns blocked when audit_report is falsy and sta
     const state = { status: "planning", obligations: [] };
 
     const result = await buildTerminalStep(params, bundle, state, "blocked reason");
-    assert.equal(result.kind, "blocked");
-    assert.equal(result.reason, "blocked reason");
+    expect(result.kind).toBe("blocked");
+    expect(result.reason).toBe("blocked reason");
   });
 });
 
@@ -102,16 +102,12 @@ await test("handleGraphEnrichmentBranch returns analyzer_install when unresolved
     // return the analyzer_install prompt. If pylint is not in the default
     // registry (no unresolved entries), fall through is acceptable — either
     // way the function must not throw.
-    assert.ok(
-      branch.action === "fallthrough" ||
+    expect(branch.action === "fallthrough" ||
       branch.action === "return" ||
-      branch.action === "continue",
-    );
+      branch.action === "continue").toBeTruthy();
     if (branch.action === "return") {
-      assert.ok(
-        branch.result.kind === "analyzer_install" ||
-        branch.result.kind === "edge_reasoning",
-      );
+      expect(branch.result.kind === "analyzer_install" ||
+        branch.result.kind === "edge_reasoning").toBeTruthy();
     }
   });
 });
@@ -158,7 +154,7 @@ await test("handleGraphEnrichmentBranch returns continue after consuming a valid
     // With an empty repo_manifest, unresolved will be [] — the function should
     // fall through to the edge-reasoning check and return "fallthrough" (no
     // candidates, flag off). The decisions file is irrelevant in this path.
-    assert.ok(branch.action === "fallthrough" || branch.action === "continue");
+    expect(branch.action === "fallthrough" || branch.action === "continue").toBeTruthy();
   });
 });
 
@@ -179,7 +175,7 @@ await test("handleGraphEnrichmentBranch returns fallthrough when unresolved is e
     };
 
     const branch = await handleGraphEnrichmentBranch(params, bundle, state, analyzersRef);
-    assert.equal(branch.action, "fallthrough");
+    expect(branch.action).toBe("fallthrough");
   });
 });
 
@@ -194,8 +190,8 @@ await test("handleDesignReviewBranch returns design_review_parallel when both pa
     const params = { artifactsDir };
 
     const branch = await handleDesignReviewBranch(params, bundle, state);
-    assert.equal(branch.action, "return");
-    assert.equal(branch.result.kind, "design_review_parallel");
+    expect(branch.action).toBe("return");
+    expect(branch.result.kind).toBe("design_review_parallel");
   });
 });
 
@@ -214,13 +210,13 @@ await test("handleDesignReviewBranch returns continue after merging contract fin
     const params = { artifactsDir };
 
     const branch = await handleDesignReviewBranch(params, bundle, state);
-    assert.equal(branch.action, "continue");
+    expect(branch.action).toBe("continue");
 
     // Written design_assessment.json should have contract_reviewed === true
     const { readFile } = await import("node:fs/promises");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
-    assert.equal(written.contract_reviewed, true);
-    assert.ok(!written.conceptual_reviewed, "conceptual_reviewed should be falsy");
+    expect(written.contract_reviewed).toBe(true);
+    expect(!written.conceptual_reviewed, "conceptual_reviewed should be falsy").toBeTruthy();
   });
 });
 
@@ -239,11 +235,11 @@ await test("handleDesignReviewBranch returns continue after merging conceptual f
     const params = { artifactsDir };
 
     const branch = await handleDesignReviewBranch(params, bundle, state);
-    assert.equal(branch.action, "continue");
+    expect(branch.action).toBe("continue");
 
     const { readFile } = await import("node:fs/promises");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
-    assert.equal(written.conceptual_reviewed, true);
+    expect(written.conceptual_reviewed).toBe(true);
   });
 });
 
@@ -264,12 +260,12 @@ await test("handleDesignReviewBranch returns continue after merging both incomin
     const params = { artifactsDir };
 
     const branch = await handleDesignReviewBranch(params, bundle, state);
-    assert.equal(branch.action, "continue");
+    expect(branch.action).toBe("continue");
 
     const { readFile } = await import("node:fs/promises");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
-    assert.equal(written.contract_reviewed, true);
-    assert.equal(written.conceptual_reviewed, true);
+    expect(written.contract_reviewed).toBe(true);
+    expect(written.conceptual_reviewed).toBe(true);
   });
 });
 
@@ -282,8 +278,8 @@ await test("handleDesignReviewBranch returns single-pass design_review_conceptua
     const params = { artifactsDir };
 
     const branch = await handleDesignReviewBranch(params, bundle, state);
-    assert.equal(branch.action, "return");
-    assert.equal(branch.result.kind, "design_review_conceptual");
+    expect(branch.action).toBe("return");
+    expect(branch.result.kind).toBe("design_review_conceptual");
   });
 });
 
@@ -308,7 +304,7 @@ await test("handleDesignReviewBranch returns continue after merging a valid lega
     const params = { artifactsDir };
 
     const branch = await handleDesignReviewBranch(params, bundle, state);
-    assert.equal(branch.action, "continue");
+    expect(branch.action).toBe("continue");
 
     // The incoming findings file should have been deleted
     let exists = true;
@@ -317,7 +313,7 @@ await test("handleDesignReviewBranch returns continue after merging a valid lega
     } catch {
       exists = false;
     }
-    assert.equal(exists, false, "findings file should be deleted after merge");
+    expect(exists, "findings file should be deleted after merge").toBe(false);
   });
 });
 
@@ -357,7 +353,7 @@ await test("checkFinalizationCycle returns undefined when distinct state count i
     });
 
     // index=4, seenStateSignatures.size=3 → 4+1-3=2 < 4 → no cycle yet
-    assert.equal(result, undefined);
+    expect(result).toBe(undefined);
   });
 });
 
@@ -397,8 +393,8 @@ await test("checkFinalizationCycle triggers terminal step after TOLERANCE repeat
     });
 
     // Should return a terminal result (blocked or complete)
-    assert.ok(result !== undefined);
-    assert.ok(result.kind === "blocked" || result.kind === "complete");
+    expect(result !== undefined).toBeTruthy();
+    expect(result.kind === "blocked" || result.kind === "complete").toBeTruthy();
   });
 });
 
@@ -411,7 +407,7 @@ await test("tryConsumeIncoming returns undefined when file does not exist", asyn
 
     const result = await tryConsumeIncoming(artifactsDir, "nonexistent.json");
 
-    assert.equal(result, undefined, "should resolve to undefined without throwing");
+    expect(result, "should resolve to undefined without throwing").toBe(undefined);
   });
 });
 
@@ -429,13 +425,9 @@ await test("tryConsumeIncoming returns parsed value and path when file exists", 
 
     const result = await tryConsumeIncoming(artifactsDir, filename);
 
-    assert.ok(result !== undefined, "result should not be undefined");
-    assert.deepEqual(result.value, payload, "value should match the written payload");
-    assert.equal(
-      result.path,
-      join(artifactsDir, "incoming", filename),
-      "path should equal join(artifactsDir, 'incoming', filename)",
-    );
+    expect(result !== undefined, "result should not be undefined").toBeTruthy();
+    expect(result.value, "value should match the written payload").toEqual(payload);
+    expect(result.path, "path should equal join(artifactsDir, 'incoming', filename)").toBe(join(artifactsDir, "incoming", filename));
   });
 });
 

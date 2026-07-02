@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,13 +63,11 @@ test("validateAuditResults reports field-level evidence type errors instead of c
     ],
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.field === "findings[0].evidence[0]" &&
         /must be a string, got object/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateAuditResults treats total_lines as advisory (S7) but still flags spans outside declared coverage", () => {
@@ -113,22 +111,18 @@ test("validateAuditResults treats total_lines as advisory (S7) but still flags s
 
   // S7: a total_lines mismatch is now an advisory WARNING, not a gating error —
   // findings are grounded by quote-and-verify, not by attesting a line count.
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.field === "file_coverage[0].total_lines" &&
         issue.severity === "warning" &&
         /does not match the current line count/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
   // The cited-span-within-declared-coverage check is unchanged (still an error).
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.field === "findings[0].affected_files[0]" &&
         /falls outside the declared file_coverage/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateAuditResults rejects task metadata drift and out-of-scope coverage", () => {
@@ -176,49 +170,37 @@ test("validateAuditResults rejects task metadata drift and out-of-scope coverage
     },
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.field === "unit_id" &&
         /must match the assigned task metadata/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues.some(
+    )).toBeTruthy();
+  expect(issues.some(
       (issue) =>
         issue.field === "pass_id" &&
         /must match the assigned task metadata/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues.some(
+    )).toBeTruthy();
+  expect(issues.some(
       (issue) =>
         issue.field === "lens" &&
         /must match the assigned task metadata/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues.some(
+    )).toBeTruthy();
+  expect(issues.some(
       (issue) =>
         issue.field === "file_coverage[1].path" &&
         issue.severity === "error" &&
         /not listed in the task file_paths/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues.some(
+    )).toBeTruthy();
+  expect(issues.some(
       (issue) =>
         issue.field === "findings[0].lens" &&
         /must match the assigned task lens/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues.some(
+    )).toBeTruthy();
+  expect(issues.some(
       (issue) =>
         issue.field === "findings[0].affected_files[0].path" &&
         /not in the declared assigned file_coverage/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateAuditResults accepts zero-line file coverage for empty files", () => {
@@ -248,7 +230,7 @@ test("validateAuditResults accepts zero-line file coverage for empty files", () 
     },
   );
 
-  assert.deepEqual(issues, []);
+  expect(issues).toEqual([]);
 });
 
 test("buildAuditReportModel omits pending runtime placeholder noise and builds deterministic work blocks", () => {
@@ -298,14 +280,11 @@ test("buildAuditReportModel omits pending runtime placeholder noise and builds d
     },
   });
 
-  assert.equal(report.findings.length, 1);
-  assert.equal(report.work_blocks.length, 1);
-  assert.equal(
-    report.findings[0].evidence.some((entry) =>
+  expect(report.findings.length).toBe(1);
+  expect(report.work_blocks.length).toBe(1);
+  expect(report.findings[0].evidence.some((entry) =>
       /has not executed yet/i.test(entry),
-    ),
-    false,
-  );
+    )).toBe(false);
 });
 
 test("buildRequeuePayload skips flow requeue duplicates when file coverage is already complete", () => {
@@ -345,8 +324,8 @@ test("buildRequeuePayload skips flow requeue duplicates when file coverage is al
     },
   );
 
-  assert.equal(payload.tasks.length, 1);
-  assert.equal(payload.tasks[0].task_id, "requeue:reliability:src/api/auth.ts");
+  expect(payload.tasks.length).toBe(1);
+  expect(payload.tasks[0].task_id).toBe("requeue:reliability:src/api/auth.ts");
 });
 
 test("buildRequeuePayload dedupeByScope merges a file task and flow task sharing a lens+file signature", () => {
@@ -393,10 +372,10 @@ test("buildRequeuePayload dedupeByScope merges a file task and flow task sharing
   );
 
   // Cross-source signatures collide -> exactly one merged task.
-  assert.equal(payload.tasks.length, 1);
+  expect(payload.tasks.length).toBe(1);
   // Per-source counts reflect the pre-merge totals (one file task, one flow task).
-  assert.equal(payload.file_task_count, 1);
-  assert.equal(payload.flow_task_count, 1);
+  expect(payload.file_task_count).toBe(1);
+  expect(payload.flow_task_count).toBe(1);
 });
 
 test("initializeCoverageFromPlan derives per-file required lenses instead of unit unions", () => {
@@ -430,14 +409,14 @@ test("initializeCoverageFromPlan derives per-file required lenses instead of uni
   const authCoverage = coverage.files.find((file) => file.path === "src/api/auth.ts");
   const deployCoverage = coverage.files.find((file) => file.path === "infra/deploy.yml");
 
-  assert.deepEqual(authCoverage.required_lenses, [
+  expect(authCoverage.required_lenses).toEqual([
     "security",
     "correctness",
     "reliability",
     "observability",
     "tests",
   ]);
-  assert.deepEqual(deployCoverage.required_lenses, [
+  expect(deployCoverage.required_lenses).toEqual([
     "reliability",
     "operability",
     "config_deployment",
@@ -494,13 +473,11 @@ test("buildChunkedAuditTasks claims critical-flow files without overlapping unit
     },
   );
 
-  assert.deepEqual(
-    tasks.map((task) => ({
+  expect(tasks.map((task) => ({
       task_id: task.task_id,
       lens: task.lens,
       file_paths: task.file_paths,
-    })),
-    [
+    }))).toEqual([
       {
         task_id: "flow:auth-session:security",
         lens: "security",
@@ -511,8 +488,7 @@ test("buildChunkedAuditTasks claims critical-flow files without overlapping unit
         lens: "security",
         file_paths: ["infra/deploy.yml"],
       },
-    ],
-  );
+    ]);
 });
 
 // TST-6ef02f3b: intent_priority_boost elevates low→medium and medium→high, but
@@ -545,20 +521,14 @@ test("buildChunkedAuditTasks intent_priority_boost elevates priority one tier wi
   }
 
   // maintainability base = low → after boost = medium
-  assert.equal(byLens["maintainability"], "medium", "low→medium boost for maintainability");
+  expect(byLens["maintainability"], "low→medium boost for maintainability").toBe("medium");
 
   // security base = medium (standard) or high (sensitive) → boost caps at high; must not exceed high
-  assert.ok(
-    byLens["security"] === "high" || byLens["security"] === "medium",
-    `security priority must be high or medium after boost, got ${byLens["security"]}`,
-  );
+  expect(byLens["security"] === "high" || byLens["security"] === "medium", `security priority must be high or medium after boost, got ${byLens["security"]}`).toBeTruthy();
 
   // correctness is NOT boosted — must remain at its base priority (not elevated)
   if (byLens["correctness"]) {
-    assert.ok(
-      byLens["correctness"] !== "high",
-      "unboosted correctness must not be elevated to high",
-    );
+    expect(byLens["correctness"] !== "high", "unboosted correctness must not be elevated to high").toBeTruthy();
   }
 });
 
@@ -583,13 +553,10 @@ test("buildChunkedAuditTasks already-high priority lens stays at high when boost
   });
 
   const secTask = tasks.find((t) => t.lens === "security");
-  assert.ok(secTask, "security task should exist");
-  assert.ok(
-    ["low", "medium", "high"].includes(secTask.priority),
-    `priority must be one of the valid values; got ${secTask.priority}`,
-  );
+  expect(secTask, "security task should exist").toBeTruthy();
+  expect(["low", "medium", "high"].includes(secTask.priority), `priority must be one of the valid values; got ${secTask.priority}`).toBeTruthy();
   // "high" is the ceiling; boosting an already-high task must not break it
-  assert.notEqual(secTask.priority, "critical", "no over-promotion beyond high");
+  expect(secTask.priority, "no over-promotion beyond high").not.toBe("critical");
 });
 
 test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () => {
@@ -632,13 +599,11 @@ test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () 
     },
   );
 
-  assert.deepEqual(
-    tasks.map((task) => ({
+  expect(tasks.map((task) => ({
       task_id: task.task_id,
       file_paths: task.file_paths,
       tags: task.tags,
-    })),
-    [
+    }))).toEqual([
       {
         task_id: "src-unit:correctness:part-1",
         file_paths: ["src/a.ts", "src/b.ts"],
@@ -649,8 +614,7 @@ test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () 
         file_paths: ["src/c.ts"],
         tags: ["line_budget_split"],
       },
-    ],
-  );
+    ]);
 });
 
 test("buildChunkedAuditTasks splits an oversized file into its own large_file task", () => {
@@ -689,16 +653,16 @@ test("buildChunkedAuditTasks splits an oversized file into its own large_file ta
   const smallTask = tasks.find((t) => t.task_id === "src-unit:correctness");
 
   // The oversized file is emitted as its own task containing only that file.
-  assert.ok(bigTask, "oversized file should get its own task");
-  assert.deepEqual(bigTask.file_paths, ["src/big.ts"]);
-  assert.ok(bigTask.tags.includes("large_file"));
+  expect(bigTask, "oversized file should get its own task").toBeTruthy();
+  expect(bigTask.file_paths).toEqual(["src/big.ts"]);
+  expect(bigTask.tags.includes("large_file")).toBeTruthy();
 
   // The remaining small file is grouped in a separate (non-large-file) task.
-  assert.ok(smallTask, "small file should get its own budget task");
-  assert.deepEqual(smallTask.file_paths, ["src/small.ts"]);
-  assert.ok(!(smallTask.tags ?? []).includes("large_file"));
+  expect(smallTask, "small file should get its own budget task").toBeTruthy();
+  expect(smallTask.file_paths).toEqual(["src/small.ts"]);
+  expect(!(smallTask.tags ?? []).includes("large_file")).toBeTruthy();
 
-  assert.equal(tasks.length, 2);
+  expect(tasks.length).toBe(2);
 });
 
 function makeTrivialFiles(authLenses = ["security", "correctness"]) {
@@ -740,8 +704,8 @@ test("buildChunkedAuditTasks excludes trivial audit files from tasks", () => {
     },
   );
 
-  assert.equal(tasks.length, 2);
-  assert.ok(tasks.every((task) => task.file_paths.includes("src/api/auth.ts")));
+  expect(tasks.length).toBe(2);
+  expect(tasks.every((task) => task.file_paths.includes("src/api/auth.ts"))).toBeTruthy();
 });
 
 test("autoCompleteTrivialCoverage marks trivial files as excluded", () => {
@@ -753,22 +717,22 @@ test("autoCompleteTrivialCoverage marks trivial files as excluded", () => {
     "src/api/auth.ts": 4,
   });
 
-  assert.deepEqual(skipped, [".gitignore", "pkg/__init__.py"]);
-  assert.equal(coverage.files[0].audit_status, "excluded");
-  assert.equal(coverage.files[1].audit_status, "excluded");
-  assert.equal(coverage.files[2].audit_status, "pending");
+  expect(skipped).toEqual([".gitignore", "pkg/__init__.py"]);
+  expect(coverage.files[0].audit_status).toBe("excluded");
+  expect(coverage.files[1].audit_status).toBe("excluded");
+  expect(coverage.files[2].audit_status).toBe("pending");
 });
 
 test("loadSessionConfig writes a default repo-local session config when missing", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
     const config = await loadSessionConfig(artifactsDir);
-    assert.equal(config.provider, "local-subprocess");
+    expect(config.provider).toBe("local-subprocess");
 
     const persisted = JSON.parse(
       await readFile(join(artifactsDir, "session-config.json"), "utf8"),
     );
-    assert.equal(persisted.provider, "local-subprocess");
+    expect(persisted.provider).toBe("local-subprocess");
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }
@@ -783,12 +747,12 @@ test("loadSessionConfig reads and returns a pre-existing config with a non-defau
       "utf8",
     );
     const config = await loadSessionConfig(artifactsDir);
-    assert.equal(config.provider, "claude-code");
+    expect(config.provider).toBe("claude-code");
     // File must not have been overwritten to a default value.
     const persisted = JSON.parse(
       await readFile(join(artifactsDir, "session-config.json"), "utf8"),
     );
-    assert.equal(persisted.provider, "claude-code");
+    expect(persisted.provider).toBe("claude-code");
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }
@@ -804,10 +768,10 @@ test("loadSessionConfig merges a partial config with defaults", async () => {
       "utf8",
     );
     const config = await loadSessionConfig(artifactsDir);
-    assert.equal(config.provider, "codex");
+    expect(config.provider).toBe("codex");
     // The returned object must be a plain object (not null, not a string).
-    assert.equal(typeof config, "object");
-    assert.ok(config !== null);
+    expect(typeof config).toBe("object");
+    expect(config !== null).toBeTruthy();
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }
@@ -825,16 +789,10 @@ test("loadSessionConfig handles malformed JSON in the config file", async () => 
     await assert.rejects(
       loadSessionConfig(artifactsDir),
       (err) => {
-        assert.ok(
-          err instanceof Error,
-          "expected an Error to be thrown for malformed JSON",
-        );
+        expect(err instanceof Error, "expected an Error to be thrown for malformed JSON").toBeTruthy();
         // The io layer wraps JSON.parse errors with the path in the message.
-        assert.ok(
-          err.message.toLowerCase().includes("json") ||
-            err.message.includes("session-config.json"),
-          `expected error message to reference JSON or the config file, got: ${err.message}`,
-        );
+        expect(err.message.toLowerCase().includes("json") ||
+            err.message.includes("session-config.json"), `expected error message to reference JSON or the config file, got: ${err.message}`).toBeTruthy();
         return true;
       },
     );

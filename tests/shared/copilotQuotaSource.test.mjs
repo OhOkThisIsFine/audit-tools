@@ -1,5 +1,4 @@
-import test, { afterEach } from "node:test";
-import assert from "node:assert/strict";
+import { test, afterEach, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -44,17 +43,17 @@ const NOPATH = join(tmpdir(), "copilot-none", "x");
 
 test("mapCopilotUsage uses premium_interactions percent_remaining", () => {
   const snap = mapCopilotUsage(LIVE, NOW);
-  assert.equal(snap.remaining_pct, 0.25);
-  assert.equal(snap.reset_at, new Date(Date.parse("2026-07-01")).toISOString());
-  assert.equal(snap.requests_remaining, 75);
-  assert.equal(snap.source, "copilot");
+  expect(snap.remaining_pct).toBe(0.25);
+  expect(snap.reset_at).toBe(new Date(Date.parse("2026-07-01")).toISOString());
+  expect(snap.requests_remaining).toBe(75);
+  expect(snap.source).toBe("copilot");
 });
 
 test("mapCopilotUsage treats unlimited as full and falls back to entitlement ratio / chat", () => {
-  assert.equal(mapCopilotUsage({ quota_snapshots: { premium_interactions: { unlimited: true } } }, NOW).remaining_pct, 1);
-  assert.equal(mapCopilotUsage({ quota_snapshots: { premium_interactions: { entitlement: 300, remaining: 75 } } }, NOW).remaining_pct, 0.25);
-  assert.equal(mapCopilotUsage({ quota_snapshots: { chat: { percent_remaining: 50 } } }, NOW).remaining_pct, 0.5);
-  assert.equal(mapCopilotUsage({ quota_snapshots: {} }, NOW), null);
+  expect(mapCopilotUsage({ quota_snapshots: { premium_interactions: { unlimited: true } } }, NOW).remaining_pct).toBe(1);
+  expect(mapCopilotUsage({ quota_snapshots: { premium_interactions: { entitlement: 300, remaining: 75 } } }, NOW).remaining_pct).toBe(0.25);
+  expect(mapCopilotUsage({ quota_snapshots: { chat: { percent_remaining: 50 } } }, NOW).remaining_pct).toBe(0.5);
+  expect(mapCopilotUsage({ quota_snapshots: {} }, NOW)).toBe(null);
 });
 
 // ---- resolveGhHostsPath (OS-agnostic gh config dir) ----
@@ -62,25 +61,13 @@ test("mapCopilotUsage treats unlimited as full and falls back to entitlement rat
 test("resolveGhHostsPath is OS-agnostic: Windows AppData, Unix ~/.config, GH_CONFIG_DIR override", () => {
   const norm = (s) => s.replace(/\\/g, "/");
   // Unix default → ~/.config/gh/hosts.yml
-  assert.match(
-    norm(resolveGhHostsPath({}, "linux", "/home/u")),
-    /^\/home\/u\/\.config\/gh\/hosts\.yml$/,
-  );
+  expect(norm(resolveGhHostsPath({}, "linux", "/home/u"))).toMatch(/^\/home\/u\/\.config\/gh\/hosts\.yml$/);
   // Windows default → %AppData%\GitHub CLI\hosts.yml (this is the bug the live probe found)
-  assert.match(
-    norm(resolveGhHostsPath({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" }, "win32", "C:\\Users\\u")),
-    /AppData\/Roaming\/GitHub CLI\/hosts\.yml$/,
-  );
+  expect(norm(resolveGhHostsPath({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" }, "win32", "C:\\Users\\u"))).toMatch(/AppData\/Roaming\/GitHub CLI\/hosts\.yml$/);
   // Windows with no APPDATA env still derives a GitHub CLI dir under the home tree
-  assert.match(
-    norm(resolveGhHostsPath({}, "win32", "C:\\Users\\u")),
-    /GitHub CLI\/hosts\.yml$/,
-  );
+  expect(norm(resolveGhHostsPath({}, "win32", "C:\\Users\\u"))).toMatch(/GitHub CLI\/hosts\.yml$/);
   // GH_CONFIG_DIR wins on any platform
-  assert.match(
-    norm(resolveGhHostsPath({ GH_CONFIG_DIR: "/custom/gh" }, "linux", "/home/u")),
-    /^\/custom\/gh\/hosts\.yml$/,
-  );
+  expect(norm(resolveGhHostsPath({ GH_CONFIG_DIR: "/custom/gh" }, "linux", "/home/u"))).toMatch(/^\/custom\/gh\/hosts\.yml$/);
 });
 
 // ---- queryCurrentUsage ----
@@ -88,8 +75,8 @@ test("resolveGhHostsPath is OS-agnostic: Windows AppData, Unix ~/.config, GH_CON
 test("queryCurrentUsage returns null for a non-Copilot provider without fetching", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new CopilotQuotaSource({ copilotConfigPath: tmp("config.json", JSON.stringify({ token: GHO })), ghHostsPath: NOPATH, fetchImpl, now: () => NOW, env: {} });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("reads the gho token from the Copilot CLI config and maps a 200", async () => {
@@ -99,9 +86,9 @@ test("reads the gho token from the Copilot CLI config and maps a 200", async () 
     ghHostsPath: NOPATH, fetchImpl, now: () => NOW, env: {},
   });
   const snap = await src.queryCurrentUsage("copilot/*");
-  assert.equal(snap.remaining_pct, 0.25);
-  assert.equal(fetchImpl.calls[0].init.headers.Authorization, `Bearer ${GHO}`);
-  assert.match(fetchImpl.calls[0].url, /copilot_internal\/user$/);
+  expect(snap.remaining_pct).toBe(0.25);
+  expect(fetchImpl.calls[0].init.headers.Authorization).toBe(`Bearer ${GHO}`);
+  expect(fetchImpl.calls[0].url).toMatch(/copilot_internal\/user$/);
 });
 
 test("reads the gho token from the gh CLI hosts.yml", async () => {
@@ -111,36 +98,36 @@ test("reads the gho token from the gh CLI hosts.yml", async () => {
     ghHostsPath: tmp("hosts.yml", `github.com:\n  oauth_token: ${GHO}\n  user: testuser\n`),
     fetchImpl, now: () => NOW, env: {},
   });
-  assert.equal((await src.queryCurrentUsage("github-copilot/*")).remaining_pct, 0.25);
+  expect((await src.queryCurrentUsage("github-copilot/*")).remaining_pct).toBe(0.25);
 });
 
 test("honors an explicit GH_COPILOT_TOKEN env over files", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new CopilotQuotaSource({ copilotConfigPath: NOPATH, ghHostsPath: NOPATH, fetchImpl, now: () => NOW, env: { GH_COPILOT_TOKEN: GHO } });
-  assert.equal((await src.queryCurrentUsage("copilot/*")).remaining_pct, 0.25);
+  expect((await src.queryCurrentUsage("copilot/*")).remaining_pct).toBe(0.25);
 });
 
 test("degrades to null when no gho token can be found (no fetch)", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new CopilotQuotaSource({ copilotConfigPath: NOPATH, ghHostsPath: NOPATH, fetchImpl, now: () => NOW, env: {} });
-  assert.equal(await src.queryCurrentUsage("copilot/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("copilot/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("degrades to null on 401", async () => {
   const fetchImpl = recordingFetch({ ok: false, status: 401, json: async () => ({}) });
   const src = new CopilotQuotaSource({ copilotConfigPath: tmp("config.json", JSON.stringify({ token: GHO })), ghHostsPath: NOPATH, fetchImpl, now: () => NOW, env: {} });
-  assert.equal(await src.queryCurrentUsage("copilot/*"), null);
-  assert.equal(fetchImpl.calls.length, 1);
+  expect(await src.queryCurrentUsage("copilot/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(1);
 });
 
 test("the DEFAULT fetch makes no network call under a test runner", async () => {
   const src = new CopilotQuotaSource({ copilotConfigPath: tmp("config.json", JSON.stringify({ token: GHO })), ghHostsPath: NOPATH, now: () => NOW, env: { GH_COPILOT_TOKEN: GHO } });
-  assert.equal(await src.queryCurrentUsage("copilot/*"), null);
+  expect(await src.queryCurrentUsage("copilot/*")).toBe(null);
 });
 
 test("fetchCopilotUsage maps with an injected token (broker reuse path)", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const snap = await fetchCopilotUsage({ token: GHO }, { fetchImpl, now: () => NOW, userAgent: "ua" });
-  assert.equal(snap.remaining_pct, 0.25);
+  expect(snap.remaining_pct).toBe(0.25);
 });

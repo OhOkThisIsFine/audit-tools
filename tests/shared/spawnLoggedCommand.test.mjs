@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect, vi } from "vitest";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
@@ -80,10 +80,10 @@ test("spawnLoggedCommand passes command and args to spawn untouched (INV-shared-
     },
   );
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, ORIGINAL_COMMAND);
-  assert.deepEqual(calls[0].args, ORIGINAL_ARGS);
-  assert.equal(result.accepted, true);
+  expect(calls.length).toBe(1);
+  expect(calls[0].command).toBe(ORIGINAL_COMMAND);
+  expect(calls[0].args).toEqual(ORIGINAL_ARGS);
+  expect(result.accepted).toBe(true);
 });
 
 // A child that stays open until `settle()` is called, so a heartbeat can fire
@@ -122,7 +122,7 @@ function recordingWriteStream(sink) {
 }
 
 test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.stderr, in headless mode (OBS-101)", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const stderrWrites = [];
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk) => {
@@ -146,7 +146,7 @@ test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.s
     });
 
     // Advance past one heartbeat interval (30s) so the interval callback runs.
-    t.mock.timers.tick(30_000);
+    vi.advanceTimersByTime(30_000);
 
     // Structured heartbeat is written to the run log file (stderrLog), not process.stderr,
     // in headless mode so it is correlated, machine-parseable, and durable.
@@ -157,41 +157,35 @@ test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.s
         return false;
       }
     });
-    assert.ok(heartbeatLine, "expected a structured provider_heartbeat line in stderrLog");
+    expect(heartbeatLine, "expected a structured provider_heartbeat line in stderrLog").toBeTruthy();
     const parsed = JSON.parse(heartbeatLine);
-    assert.equal(parsed.runId, "RUN-1");
-    assert.equal(typeof parsed.elapsedMs, "number");
+    expect(parsed.runId).toBe("RUN-1");
+    expect(typeof parsed.elapsedMs).toBe("number");
 
     // process.stderr.write must NOT have been called with the structured JSON in headless mode.
-    assert.ok(
-      !stderrWrites.some((line) => {
+    expect(!stderrWrites.some((line) => {
         try {
           return JSON.parse(line).type === "provider_heartbeat";
         } catch {
           return false;
         }
-      }),
-      "expected no structured heartbeat on process.stderr in headless mode",
-    );
+      }), "expected no structured heartbeat on process.stderr in headless mode").toBeTruthy();
 
     // The human "[provider] ... still running" line is still written to the
     // per-run stderr log unconditionally.
-    assert.ok(
-      stderrLogLines.some((line) => line.includes("still running")),
-      "expected the human still-running line in the stderr log",
-    );
+    expect(stderrLogLines.some((line) => line.includes("still running")), "expected the human still-running line in the stderr log").toBeTruthy();
 
     openChild.settle();
     const result = await promise;
-    assert.equal(result.accepted, true);
+    expect(result.accepted).toBe(true);
   } finally {
     process.stderr.write = originalStderrWrite;
-    t.mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("spawnLoggedCommand echoes structured heartbeat to process.stderr when uiMode is visible (OBS-101)", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const stderrWrites = [];
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk) => {
@@ -212,41 +206,35 @@ test("spawnLoggedCommand echoes structured heartbeat to process.stderr when uiMo
       },
     });
 
-    t.mock.timers.tick(30_000);
+    vi.advanceTimersByTime(30_000);
 
     // In visible mode the structured heartbeat appears in both stderrLog AND process.stderr.
-    assert.ok(
-      stderrLogLines.some((line) => {
+    expect(stderrLogLines.some((line) => {
         try {
           return JSON.parse(line).type === "provider_heartbeat";
         } catch {
           return false;
         }
-      }),
-      "expected structured heartbeat in stderrLog in visible mode",
-    );
-    assert.ok(
-      stderrWrites.some((line) => {
+      }), "expected structured heartbeat in stderrLog in visible mode").toBeTruthy();
+    expect(stderrWrites.some((line) => {
         try {
           return JSON.parse(line).type === "provider_heartbeat";
         } catch {
           return false;
         }
-      }),
-      "expected structured heartbeat on process.stderr in visible mode",
-    );
+      }), "expected structured heartbeat on process.stderr in visible mode").toBeTruthy();
 
     openChild.settle();
     const result = await promise;
-    assert.equal(result.accepted, true);
+    expect(result.accepted).toBe(true);
   } finally {
     process.stderr.write = originalStderrWrite;
-    t.mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("spawnLoggedCommand rejects with timeout error and sends SIGTERM when timeoutMs elapses", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const killCalls = [];
   let openChild;
   try {
@@ -266,32 +254,26 @@ test("spawnLoggedCommand rejects with timeout error and sends SIGTERM when timeo
     });
 
     // Advance past timeoutMs — the timeout timer fires, setting timedOut=true and sending SIGTERM.
-    t.mock.timers.tick(5_001);
+    vi.advanceTimersByTime(5_001);
 
-    assert.ok(killCalls.includes("SIGTERM"), "expected SIGTERM to be sent after timeout");
+    expect(killCalls.includes("SIGTERM"), "expected SIGTERM to be sent after timeout").toBeTruthy();
 
     // Settle the child so the promise resolves/rejects.
     openChild.emit("exit", null, "SIGTERM");
     openChild.emit("close", null, "SIGTERM");
 
     await assert.rejects(promise, (err) => {
-      assert.ok(
-        err.message.includes("timed out"),
-        `expected 'timed out' in error message, got: ${err.message}`,
-      );
-      assert.ok(
-        err.message.includes(input.runId),
-        `expected run ID in error message, got: ${err.message}`,
-      );
+      expect(err.message.includes("timed out"), `expected 'timed out' in error message, got: ${err.message}`).toBeTruthy();
+      expect(err.message.includes(input.runId), `expected run ID in error message, got: ${err.message}`).toBeTruthy();
       return true;
     });
   } finally {
-    t.mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("spawnLoggedCommand escalates to SIGKILL after grace period when child does not exit after SIGTERM", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const killCalls = [];
   let openChild;
   try {
@@ -311,27 +293,27 @@ test("spawnLoggedCommand escalates to SIGKILL after grace period when child does
     });
 
     // Advance past timeoutMs — SIGTERM should be sent.
-    t.mock.timers.tick(5_001);
-    assert.ok(killCalls.includes("SIGTERM"), "expected SIGTERM after timeout");
+    vi.advanceTimersByTime(5_001);
+    expect(killCalls.includes("SIGTERM"), "expected SIGTERM after timeout").toBeTruthy();
     // Child does not exit — advance past killGraceMs without emitting close.
-    t.mock.timers.tick(201);
-    assert.ok(killCalls.includes("SIGKILL"), "expected SIGKILL escalation after grace period");
+    vi.advanceTimersByTime(201);
+    expect(killCalls.includes("SIGKILL"), "expected SIGKILL escalation after grace period").toBeTruthy();
 
     // Now settle the child (as if SIGKILL took effect).
     openChild.emit("exit", null, "SIGKILL");
     openChild.emit("close", null, "SIGKILL");
 
     await assert.rejects(promise, (err) => {
-      assert.ok(err.message.includes("timed out"), `expected 'timed out' in message, got: ${err.message}`);
+      expect(err.message.includes("timed out"), `expected 'timed out' in message, got: ${err.message}`).toBeTruthy();
       return true;
     });
   } finally {
-    t.mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
 test("spawnLoggedCommand does NOT send SIGKILL when child exits cleanly within the grace period after SIGTERM", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const killCalls = [];
   let openChild;
   try {
@@ -351,24 +333,24 @@ test("spawnLoggedCommand does NOT send SIGKILL when child exits cleanly within t
     });
 
     // Advance past timeoutMs — SIGTERM should be sent.
-    t.mock.timers.tick(5_001);
-    assert.ok(killCalls.includes("SIGTERM"), "expected SIGTERM after timeout");
+    vi.advanceTimersByTime(5_001);
+    expect(killCalls.includes("SIGTERM"), "expected SIGTERM after timeout").toBeTruthy();
 
     // Child honors SIGTERM and exits before grace period expires.
     openChild.emit("exit", null, "SIGTERM");
     openChild.emit("close", null, "SIGTERM");
 
     // Advance past killGraceMs — SIGKILL should NOT be sent because child already closed.
-    t.mock.timers.tick(201);
-    assert.ok(!killCalls.includes("SIGKILL"), "expected NO SIGKILL when child exits within grace period");
-    assert.equal(killCalls.filter((s) => s === "SIGTERM").length, 1, "expected exactly one SIGTERM call");
+    vi.advanceTimersByTime(201);
+    expect(!killCalls.includes("SIGKILL"), "expected NO SIGKILL when child exits within grace period").toBeTruthy();
+    expect(killCalls.filter((s) => s === "SIGTERM").length, "expected exactly one SIGTERM call").toBe(1);
 
     await assert.rejects(promise, (err) => {
-      assert.ok(err.message.includes("timed out"), `expected 'timed out' in message, got: ${err.message}`);
+      expect(err.message.includes("timed out"), `expected 'timed out' in message, got: ${err.message}`).toBeTruthy();
       return true;
     });
   } finally {
-    t.mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
@@ -398,13 +380,13 @@ test("spawnLoggedCommand pipes stdinText to the child stdin and closes it", asyn
     },
   );
 
-  assert.equal(spawnCalls.length, 1);
+  expect(spawnCalls.length).toBe(1);
   // stdio[0] must be 'pipe' when stdinText is provided.
-  assert.equal(spawnCalls[0].opts.stdio[0], "pipe");
+  expect(spawnCalls[0].opts.stdio[0]).toBe("pipe");
   // stdin.end must have been called with the exact stdinText value.
-  assert.equal(stdinEndCalls.length, 1);
-  assert.equal(stdinEndCalls[0], "hello from stdin");
-  assert.equal(result.accepted, true);
+  expect(stdinEndCalls.length).toBe(1);
+  expect(stdinEndCalls[0]).toBe("hello from stdin");
+  expect(result.accepted).toBe(true);
 });
 
 test("spawnLoggedCommand rejects when stdinText is set but child.stdin is null", async () => {
@@ -424,10 +406,7 @@ test("spawnLoggedCommand rejects when stdinText is set but child.stdin is null",
       },
     ),
     (err) => {
-      assert.ok(
-        err.message.includes("pipe-backed stdin"),
-        `expected 'pipe-backed stdin' in error message, got: ${err.message}`,
-      );
+      expect(err.message.includes("pipe-backed stdin"), `expected 'pipe-backed stdin' in error message, got: ${err.message}`).toBeTruthy();
       return true;
     },
   );
@@ -447,8 +426,8 @@ test("SpawnRunController can be instantiated without an external Promise: spawnL
       spawn: () => makeChild(),
     },
   );
-  assert.ok(result !== null && typeof result === "object", "run() must resolve with an object");
-  assert.ok("accepted" in result, "resolved value must have an accepted field");
+  expect(result !== null && typeof result === "object", "run() must resolve with an object").toBeTruthy();
+  expect("accepted" in result, "resolved value must have an accepted field").toBeTruthy();
 });
 
 test("SpawnRunController.run() resolves with accepted=true when child exits with code 0", async () => {
@@ -465,8 +444,8 @@ test("SpawnRunController.run() resolves with accepted=true when child exits with
       },
     },
   );
-  assert.equal(result.accepted, true);
-  assert.equal(result.exitCode, 0);
+  expect(result.accepted).toBe(true);
+  expect(result.exitCode).toBe(0);
 });
 
 test("SpawnRunController.run() rejects when child exits with a non-zero code", async () => {
@@ -497,9 +476,9 @@ test("SpawnRunController.run() rejects when child exits with a non-zero code", a
       spawn: () => makeFailingChild(1),
     },
   );
-  assert.equal(result.accepted, false);
-  assert.equal(result.exitCode, 1);
-  assert.ok(typeof result.error === "string", "error field must be set for non-zero exit");
+  expect(result.accepted).toBe(false);
+  expect(result.exitCode).toBe(1);
+  expect(typeof result.error === "string", "error field must be set for non-zero exit").toBeTruthy();
 });
 
 // TST-42dbaa42: non-success branch coverage
@@ -545,16 +524,10 @@ test("spawnLoggedCommand returns accepted=false and error message when child exi
       spawn: () => makeFailingChild(),
     },
   );
-  assert.equal(result.accepted, false);
-  assert.equal(result.exitCode, 1);
-  assert.ok(
-    typeof result.error === "string" && result.error.includes("code 1"),
-    `expected error to contain 'code 1', got: ${result.error}`,
-  );
-  assert.ok(
-    result.signal === null || result.signal === undefined,
-    `expected signal to be null or undefined, got: ${result.signal}`,
-  );
+  expect(result.accepted).toBe(false);
+  expect(result.exitCode).toBe(1);
+  expect(typeof result.error === "string" && result.error.includes("code 1"), `expected error to contain 'code 1', got: ${result.error}`).toBeTruthy();
+  expect(result.signal === null || result.signal === undefined, `expected signal to be null or undefined, got: ${result.signal}`).toBeTruthy();
 });
 
 test("spawnLoggedCommand returns accepted=false and error message when child is killed by a signal", async () => {
@@ -568,20 +541,14 @@ test("spawnLoggedCommand returns accepted=false and error message when child is 
       spawn: () => makeSignaledChild(),
     },
   );
-  assert.equal(result.accepted, false);
-  assert.equal(result.signal, "SIGTERM");
-  assert.ok(
-    typeof result.error === "string" && result.error.includes("SIGTERM"),
-    `expected error to contain 'SIGTERM', got: ${result.error}`,
-  );
-  assert.ok(
-    result.exitCode === null || result.exitCode === undefined,
-    `expected exitCode to be null or undefined, got: ${result.exitCode}`,
-  );
+  expect(result.accepted).toBe(false);
+  expect(result.signal).toBe("SIGTERM");
+  expect(typeof result.error === "string" && result.error.includes("SIGTERM"), `expected error to contain 'SIGTERM', got: ${result.error}`).toBeTruthy();
+  expect(result.exitCode === null || result.exitCode === undefined, `expected exitCode to be null or undefined, got: ${result.exitCode}`).toBeTruthy();
 });
 
 test("spawnLoggedCommand fires both the structured heartbeat to log and onProgress when wired (OBS-101)", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
   const stderrWrites = [];
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk) => {
@@ -607,30 +574,24 @@ test("spawnLoggedCommand fires both the structured heartbeat to log and onProgre
       },
     });
 
-    t.mock.timers.tick(30_000);
+    vi.advanceTimersByTime(30_000);
 
     // Structured heartbeat is in the log file (headless mode: not on process.stderr).
-    assert.ok(
-      stderrLogLines.some((line) => {
+    expect(stderrLogLines.some((line) => {
         try {
           return JSON.parse(line).type === "provider_heartbeat";
         } catch {
           return false;
         }
-      }),
-      "expected the structured heartbeat in stderrLog",
-    );
-    assert.ok(
-      progressEvents.some((event) => event.type === "heartbeat"),
-      "expected an onProgress heartbeat callback",
-    );
+      }), "expected the structured heartbeat in stderrLog").toBeTruthy();
+    expect(progressEvents.some((event) => event.type === "heartbeat"), "expected an onProgress heartbeat callback").toBeTruthy();
 
     openChild.settle();
     const result = await promise;
-    assert.equal(result.accepted, true);
+    expect(result.accepted).toBe(true);
   } finally {
     process.stderr.write = originalStderrWrite;
-    t.mock.timers.reset();
+    vi.useRealTimers();
   }
 });
 
@@ -668,14 +629,8 @@ test("spawnLoggedCommand rejects when the child process emits an 'error' event (
       },
     ),
     (err) => {
-      assert.ok(
-        err instanceof Error,
-        `expected an Error instance, got ${typeof err}`,
-      );
-      assert.ok(
-        err.message.includes("ENOENT") || err.message.includes("spawn"),
-        `expected error to mention ENOENT or spawn, got: ${err.message}`,
-      );
+      expect(err instanceof Error, `expected an Error instance, got ${typeof err}`).toBeTruthy();
+      expect(err.message.includes("ENOENT") || err.message.includes("spawn"), `expected error to mention ENOENT or spawn, got: ${err.message}`).toBeTruthy();
       return true;
     },
   );
@@ -718,7 +673,7 @@ test("spawnLoggedCommand lifecycle: stdout/stderr logged and result carries corr
     },
   );
 
-  assert.equal(result.accepted, true, "lifecycle must settle accepted=true");
-  assert.equal(result.exitCode, 0, "exitCode must be 0 for clean exit");
-  assert.ok(result.command.includes(ORIGINAL_COMMAND), "command must be in result");
+  expect(result.accepted, "lifecycle must settle accepted=true").toBe(true);
+  expect(result.exitCode, "exitCode must be 0 for clean exit").toBe(0);
+  expect(result.command.includes(ORIGINAL_COMMAND), "command must be in result").toBeTruthy();
 });

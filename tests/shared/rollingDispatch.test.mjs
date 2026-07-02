@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, describe, it, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -60,40 +59,40 @@ async function setupTmpQuotaDir() {
 // InFlightTokenTracker
 // ---------------------------------------------------------------------------
 
-test("InFlightTokenTracker — records and releases tokens per pool", async (t) => {
-  await t.test("recordDispatched accumulates", () => {
+describe("InFlightTokenTracker — records and releases tokens per pool", () => {
+  it("recordDispatched accumulates", () => {
     const tracker = new InFlightTokenTracker();
     tracker.recordDispatched("pool-a", 1000);
-    assert.equal(tracker.getInFlightTokens("pool-a"), 1000);
+    expect(tracker.getInFlightTokens("pool-a")).toBe(1000);
     tracker.recordDispatched("pool-a", 500);
-    assert.equal(tracker.getInFlightTokens("pool-a"), 1500);
+    expect(tracker.getInFlightTokens("pool-a")).toBe(1500);
   });
 
-  await t.test("recordCompleted decreases", () => {
+  it("recordCompleted decreases", () => {
     const tracker = new InFlightTokenTracker();
     tracker.recordDispatched("pool-a", 1500);
     tracker.recordCompleted("pool-a", 1000);
-    assert.equal(tracker.getInFlightTokens("pool-a"), 500);
+    expect(tracker.getInFlightTokens("pool-a")).toBe(500);
   });
 
-  await t.test("unknown pool returns 0", () => {
+  it("unknown pool returns 0", () => {
     const tracker = new InFlightTokenTracker();
-    assert.equal(tracker.getInFlightTokens("nonexistent"), 0);
+    expect(tracker.getInFlightTokens("nonexistent")).toBe(0);
   });
 
-  await t.test("recordCompleted clamps to 0 (no negatives)", () => {
+  it("recordCompleted clamps to 0 (no negatives)", () => {
     const tracker = new InFlightTokenTracker();
     tracker.recordDispatched("pool-a", 100);
     tracker.recordCompleted("pool-a", 5000); // over-release
-    assert.equal(tracker.getInFlightTokens("pool-a"), 0);
+    expect(tracker.getInFlightTokens("pool-a")).toBe(0);
   });
 
-  await t.test("pools are independent", () => {
+  it("pools are independent", () => {
     const tracker = new InFlightTokenTracker();
     tracker.recordDispatched("pool-a", 1000);
     tracker.recordDispatched("pool-b", 2000);
-    assert.equal(tracker.getInFlightTokens("pool-a"), 1000);
-    assert.equal(tracker.getInFlightTokens("pool-b"), 2000);
+    expect(tracker.getInFlightTokens("pool-a")).toBe(1000);
+    expect(tracker.getInFlightTokens("pool-b")).toBe(2000);
   });
 });
 
@@ -127,7 +126,7 @@ test("selectProvider — a single pool nominally at RPM=0 still yields a slot (s
   const result = selectProvider(packet, [pool], tracker, {}, session);
   // rpmCap = Math.max(1, floor(0 * 1.0)) = 1, so wave_size stays >= 1 by design
   // (always dispatch at least one). A single eligible pool therefore yields a slot.
-  assert.notEqual(result, null);
+  expect(result).not.toBe(null);
 });
 
 test("selectProvider — returns slot when pool has headroom", async () => {
@@ -136,9 +135,9 @@ test("selectProvider — returns slot when pool has headroom", async () => {
   const pool = makePool("pool-a");
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [pool], tracker, {}, unlimitedSession());
-  assert.ok(slot !== null, "should return a slot for a pool with headroom");
-  assert.equal(slot.poolId, "pool-a");
-  assert.equal(slot.providerName, "claude-code");
+  expect(slot !== null, "should return a slot for a pool with headroom").toBeTruthy();
+  expect(slot.poolId).toBe("pool-a");
+  expect(slot.providerName).toBe("claude-code");
 });
 
 test("selectProvider — returns null when no pools provided", async () => {
@@ -146,7 +145,7 @@ test("selectProvider — returns null when no pools provided", async () => {
   const packet = makePacket("p1");
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [], tracker, {}, unlimitedSession());
-  assert.equal(slot, null);
+  expect(slot).toBe(null);
 });
 
 test("selectProvider — high-complexity routes to higher-rank pool first (INV-shared-core-02: rank from pool.rank, not provider name)", async () => {
@@ -159,8 +158,8 @@ test("selectProvider — high-complexity routes to higher-rank pool first (INV-s
   // Pass small-pool first in array; high-complexity should still prefer deep.
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [smallPool, deepPool], tracker, {}, unlimitedSession());
-  assert.ok(slot !== null);
-  assert.equal(slot.poolId, "deep-pool", "high-complexity packet should select pool with rank=deep");
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId, "high-complexity packet should select pool with rank=deep").toBe("deep-pool");
 });
 
 test("selectProvider — low-complexity routes to lower-rank pool first (INV-shared-core-02: rank from pool.rank, not provider name)", async () => {
@@ -171,8 +170,8 @@ test("selectProvider — low-complexity routes to lower-rank pool first (INV-sha
   const smallPool = makePool("small-pool", { providerName: "claude-code", rank: "small" });
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [deepPool, smallPool], tracker, {}, unlimitedSession());
-  assert.ok(slot !== null);
-  assert.equal(slot.poolId, "small-pool", "low-complexity packet should select pool with rank=small");
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId, "low-complexity packet should select pool with rank=small").toBe("small-pool");
 });
 
 // ---------------------------------------------------------------------------
@@ -196,10 +195,10 @@ test("createRollingDispatcher — dispatches all packets and returns all results
   dispatcher.enqueue(packets);
   const results = await dispatcher.run();
 
-  assert.equal(results.length, 5, "should return 5 results");
-  assert.ok(results.every((r) => r.outcome === "success"), "all outcomes should be success");
+  expect(results.length, "should return 5 results").toBe(5);
+  expect(results.every((r) => r.outcome === "success"), "all outcomes should be success").toBeTruthy();
   const ids = results.map((r) => r.packet.id).sort();
-  assert.deepEqual(ids, ["p1", "p2", "p3", "p4", "p5"], "all packet ids should be present");
+  expect(ids, "all packet ids should be present").toEqual(["p1", "p2", "p3", "p4", "p5"]);
 });
 
 test("createRollingDispatcher — onResult callback called once per packet", async () => {
@@ -217,7 +216,7 @@ test("createRollingDispatcher — onResult callback called once per packet", asy
   dispatcher.enqueue(packets);
   await dispatcher.run();
 
-  assert.equal(callbackIds.length, 3, "onResult called once per packet");
+  expect(callbackIds.length, "onResult called once per packet").toBe(3);
 });
 
 // ---------------------------------------------------------------------------
@@ -252,24 +251,24 @@ test("createRollingDispatcher — re-dispatches immediately on result arrival (r
 
   // Give the dispatcher a moment to start the first packet
   await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(dispatchOrder.length, 1, "only one dispatch should be active initially");
+  expect(dispatchOrder.length, "only one dispatch should be active initially").toBe(1);
 
   // Complete p1 — p2 should start
   resolvers["p1"]();
   await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(dispatchOrder.length, 2, "second dispatch should start after first completes");
+  expect(dispatchOrder.length, "second dispatch should start after first completes").toBe(2);
 
   // Complete p2 — p3 should start
   resolvers["p2"]();
   await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(dispatchOrder.length, 3, "third dispatch should start after second completes");
+  expect(dispatchOrder.length, "third dispatch should start after second completes").toBe(3);
 
   // Complete p3 — run() should resolve
   resolvers["p3"]();
   const results = await runPromise;
 
-  assert.equal(results.length, 3, "all 3 packets completed");
-  assert.equal(dispatchOrder.length, 3, "total dispatch calls equals packet count");
+  expect(results.length, "all 3 packets completed").toBe(3);
+  expect(dispatchOrder.length, "total dispatch calls equals packet count").toBe(3);
 });
 
 // ---------------------------------------------------------------------------
@@ -294,7 +293,7 @@ test("createRollingDispatcher — records wave outcomes after each result", asyn
 
   const state = await readQuotaState();
   const keys = Object.keys(state.entries);
-  assert.ok(keys.length > 0, "quota state should have at least one entry after dispatch");
+  expect(keys.length > 0, "quota state should have at least one entry after dispatch").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -314,11 +313,11 @@ test("createRollingDispatcher — run() resolves when all packets complete", asy
   const results = await dispatcher.run();
 
   const state = dispatcher.getState();
-  assert.equal(state.inFlight.size, 0, "inFlight should be empty after run()");
-  assert.equal(state.completedIds.size, 2, "all ids should be in completedIds");
-  assert.ok(state.completedIds.has("p1"));
-  assert.ok(state.completedIds.has("p2"));
-  assert.equal(results.length, 2);
+  expect(state.inFlight.size, "inFlight should be empty after run()").toBe(0);
+  expect(state.completedIds.size, "all ids should be in completedIds").toBe(2);
+  expect(state.completedIds.has("p1")).toBeTruthy();
+  expect(state.completedIds.has("p2")).toBeTruthy();
+  expect(results.length).toBe(2);
 });
 
 // ---------------------------------------------------------------------------
@@ -351,7 +350,7 @@ test("createRollingDispatcher — packets enqueued mid-run are dispatched before
 
   // Wait for p1 to be dispatched
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(dispatched.length, 1, "p1 dispatched");
+  expect(dispatched.length, "p1 dispatched").toBe(1);
 
   // Enqueue p2 while p1 is in flight
   dispatcher.enqueue([makePacket("p2")]);
@@ -360,9 +359,9 @@ test("createRollingDispatcher — packets enqueued mid-run are dispatched before
   firstResolver();
   const results = await runPromise;
 
-  assert.equal(results.length, 2, "both p1 and p2 should be in results");
+  expect(results.length, "both p1 and p2 should be in results").toBe(2);
   const ids = results.map((r) => r.packet.id).sort();
-  assert.deepEqual(ids, ["p1", "p2"]);
+  expect(ids).toEqual(["p1", "p2"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -390,19 +389,19 @@ test("createRollingDispatcher — rate_limited result re-queues the packet and d
   const results = await dispatcher.run();
 
   // Both packets eventually SUCCEED on the surviving pool — never stranded.
-  assert.equal(results.length, 2, "both packets complete after re-route");
-  assert.ok(results.every((r) => r.outcome === "success"), "all final outcomes success");
-  assert.deepEqual(results.map((r) => r.packet.id).sort(), ["p1", "p2"]);
+  expect(results.length, "both packets complete after re-route").toBe(2);
+  expect(results.every((r) => r.outcome === "success"), "all final outcomes success").toBeTruthy();
+  expect(results.map((r) => r.packet.id).sort()).toEqual(["p1", "p2"]);
 
   // pool-a was dropped after its first rate_limited result, so subsequent
   // packets route straight to pool-b.
-  assert.ok(attemptsByPool["pool-a"] >= 1, "pool-a attempted at least once");
-  assert.ok(attemptsByPool["pool-b"] >= 2, "both packets land on the surviving pool-b");
+  expect(attemptsByPool["pool-a"] >= 1, "pool-a attempted at least once").toBeTruthy();
+  expect(attemptsByPool["pool-b"] >= 2, "both packets land on the surviving pool-b").toBeTruthy();
 
   // No terminal — nothing stranded.
-  assert.equal(dispatcher.getTerminal(), null);
+  expect(dispatcher.getTerminal()).toBe(null);
   // The exhausted pool is recorded in state.
-  assert.ok(dispatcher.getState().exhaustedPoolIds.has("pool-a"));
+  expect(dispatcher.getState().exhaustedPoolIds.has("pool-a")).toBeTruthy();
 });
 
 test("createRollingDispatcher — when every pool exhausts, the packet is stranded and surfaced via getTerminal (INV-QD-07 empty_pool)", async () => {
@@ -426,18 +425,18 @@ test("createRollingDispatcher — when every pool exhausts, the packet is strand
   const results = await dispatcher.run();
 
   // The rate_limited packet is not a completion — no result, no onResult call.
-  assert.equal(results.length, 0, "stranded packet produces no completion result");
-  assert.equal(onResultCalls.length, 0, "onResult not called for a stranded packet");
+  expect(results.length, "stranded packet produces no completion result").toBe(0);
+  expect(onResultCalls.length, "onResult not called for a stranded packet").toBe(0);
 
   // It is surfaced as an empty_pool terminal.
   const terminal = dispatcher.getTerminal();
-  assert.ok(terminal !== null, "stranded packet must surface a terminal");
-  assert.equal(terminal.reason, "empty_pool");
-  assert.deepEqual(terminal.stranded_ids, ["p1"]);
+  expect(terminal !== null, "stranded packet must surface a terminal").toBeTruthy();
+  expect(terminal.reason).toBe("empty_pool");
+  expect(terminal.stranded_ids).toEqual(["p1"]);
 
   // The only pool was dropped after its first rate_limited; bounded retries.
-  assert.ok(attempts >= 1, "packet attempted at least once before stranding");
-  assert.ok(dispatcher.getState().exhaustedPoolIds.has("only-pool"));
+  expect(attempts >= 1, "packet attempted at least once before stranding").toBeTruthy();
+  expect(dispatcher.getState().exhaustedPoolIds.has("only-pool")).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -462,8 +461,8 @@ test("selectProvider — skips a pool paused until a future reset (pause-honor, 
     pausedMap,
     now,
   );
-  assert.ok(slot !== null);
-  assert.equal(slot.poolId, "healthy-pool");
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId).toBe("healthy-pool");
 });
 
 test("selectProvider — a pool whose reset has already passed is eligible again", async () => {
@@ -482,8 +481,8 @@ test("selectProvider — a pool whose reset has already passed is eligible again
     pausedMap,
     now,
   );
-  assert.ok(slot !== null, "past-reset pool is re-eligible");
-  assert.equal(slot.poolId, "recovered-pool");
+  expect(slot !== null, "past-reset pool is re-eligible").toBeTruthy();
+  expect(slot.poolId).toBe("recovered-pool");
 });
 
 test("createRollingDispatcher — a rate_limited result with a session-limit reset records a pool pause + parses reset_at (does NOT permanently exhaust)", async () => {
@@ -502,13 +501,13 @@ test("createRollingDispatcher — a rate_limited result with a session-limit res
   dispatcher.enqueue([makePacket("p1")]);
   const results = await dispatcher.run();
 
-  assert.equal(results.length, 0, "paused packet produces no completion");
+  expect(results.length, "paused packet produces no completion").toBe(0);
   const state = dispatcher.getState();
   // Pool is PAUSED (with a reset), not permanently exhausted.
-  assert.ok(state.pausedPoolResetAt.has("only-pool"), "pool recorded as paused");
-  assert.ok(!state.exhaustedPoolIds.has("only-pool"), "reset pause is not permanent exhaustion");
+  expect(state.pausedPoolResetAt.has("only-pool"), "pool recorded as paused").toBeTruthy();
+  expect(!state.exhaustedPoolIds.has("only-pool"), "reset pause is not permanent exhaustion").toBeTruthy();
   const resetAt = state.pausedPoolResetAt.get("only-pool");
-  assert.ok(resetAt > Date.now(), "reset is in the future (~2h)");
+  expect(resetAt > Date.now(), "reset is in the future (~2h)").toBeTruthy();
 });
 
 test("createRollingDispatcher — all pools paused → quota_paused terminal with stranded ids + earliest_reset_at (NOT empty_pool, NOT blocked)", async () => {
@@ -529,15 +528,15 @@ test("createRollingDispatcher — all pools paused → quota_paused terminal wit
   dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
   const results = await dispatcher.run();
 
-  assert.equal(results.length, 0, "both packets stranded, none completed");
+  expect(results.length, "both packets stranded, none completed").toBe(0);
   const terminal = dispatcher.getTerminal();
-  assert.ok(terminal !== null, "stranded work surfaces a terminal");
-  assert.equal(terminal.reason, "quota_paused", "reason is the retryable quota_paused, not empty_pool");
-  assert.deepEqual(terminal.stranded_ids.sort(), ["p1", "p2"]);
-  assert.ok(typeof terminal.earliest_reset_at === "string", "carries the earliest reset");
+  expect(terminal !== null, "stranded work surfaces a terminal").toBeTruthy();
+  expect(terminal.reason, "reason is the retryable quota_paused, not empty_pool").toBe("quota_paused");
+  expect(terminal.stranded_ids.sort()).toEqual(["p1", "p2"]);
+  expect(typeof terminal.earliest_reset_at === "string", "carries the earliest reset").toBeTruthy();
   // Earliest reset is ~1h (pool-a), well under the ~3h pool-b wall.
   const resetMs = Date.parse(terminal.earliest_reset_at) - Date.now();
-  assert.ok(resetMs < 2 * 3600_000, "earliest_reset_at is pool-a's sooner reset");
+  expect(resetMs < 2 * 3600_000, "earliest_reset_at is pool-a's sooner reset").toBeTruthy();
 });
 
 test("createRollingDispatcher — one pool paused, a healthy peer still lands the work (pause-honor spills, no strand)", async () => {
@@ -554,9 +553,9 @@ test("createRollingDispatcher — one pool paused, a healthy peer still lands th
   });
   dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
   const results = await dispatcher.run();
-  assert.equal(results.length, 2, "both packets land on the healthy peer");
-  assert.ok(results.every((r) => r.outcome === "success"));
-  assert.equal(dispatcher.getTerminal(), null, "no strand — healthy pool absorbed the work");
+  expect(results.length, "both packets land on the healthy peer").toBe(2);
+  expect(results.every((r) => r.outcome === "success")).toBeTruthy();
+  expect(dispatcher.getTerminal(), "no strand — healthy pool absorbed the work").toBe(null);
 });
 
 test("createRollingDispatcher — host-session source wired via recordRateLimit/isPacketEscalated strands a same-packet account wall BEFORE all pools exhaust", async () => {
@@ -597,20 +596,20 @@ test("createRollingDispatcher — host-session source wired via recordRateLimit/
   const results = await dispatcher.run();
 
   // p1 escalated (count 3 > bound 2) → stranded, not completed.
-  assert.equal(results.length, 0, "escalated packet produces no completion result");
+  expect(results.length, "escalated packet produces no completion result").toBe(0);
   const terminal = dispatcher.getTerminal();
-  assert.ok(terminal !== null, "escalated packet surfaces a terminal");
-  assert.deepEqual(terminal.stranded_ids, ["p1"]);
+  expect(terminal !== null, "escalated packet surfaces a terminal").toBeTruthy();
+  expect(terminal.stranded_ids).toEqual(["p1"]);
 
   // onEscalation fired exactly once for p1.
-  assert.equal(escalations.length, 1, "host-session source escalated once");
-  assert.equal(escalations[0].packet_id, "p1");
-  assert.ok(hostSession.isEscalated("p1"), "source marks p1 escalated");
+  expect(escalations.length, "host-session source escalated once").toBe(1);
+  expect(escalations[0].packet_id).toBe("p1");
+  expect(hostSession.isEscalated("p1"), "source marks p1 escalated").toBeTruthy();
 
   // Early strand: the 4th pool was never attempted (escalation fired on the 3rd
   // re-limit), so the strand is the ESCALATION guard, not pool exhaustion.
-  assert.equal(attemptedPools.size, 3, "stranded after 3 re-limits, before the 4th pool");
-  assert.ok(!attemptedPools.has("pool-d"), "the surviving 4th pool was never reached");
+  expect(attemptedPools.size, "stranded after 3 re-limits, before the 4th pool").toBe(3);
+  expect(!attemptedPools.has("pool-d"), "the surviving 4th pool was never reached").toBeTruthy();
 });
 
 test("createRollingDispatcher — dispatch callback that rejects is contained (resolves as error, never rejects run)", async () => {
@@ -626,10 +625,10 @@ test("createRollingDispatcher — dispatch callback that rejects is contained (r
   dispatcher.enqueue([makePacket("p1")]);
   // Must not reject — the engine maps a thrown dispatch into an 'error' result.
   const results = await dispatcher.run();
-  assert.equal(results.length, 1);
-  assert.equal(results[0].outcome, "error");
+  expect(results.length).toBe(1);
+  expect(results[0].outcome).toBe("error");
   // An 'error' (non-quota failure) is terminal, not re-queued, and not stranded.
-  assert.equal(dispatcher.getTerminal(), null);
+  expect(dispatcher.getTerminal()).toBe(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -651,8 +650,8 @@ test("selectProvider — skips pools in the exhausted set and routes to a surviv
     unlimitedSession(),
     new Set(["deep-pool"]),
   );
-  assert.ok(slot !== null, "a surviving pool should still be selected");
-  assert.equal(slot.poolId, "small-pool", "exhausted deep-pool must be skipped");
+  expect(slot !== null, "a surviving pool should still be selected").toBeTruthy();
+  expect(slot.poolId, "exhausted deep-pool must be skipped").toBe("small-pool");
 });
 
 test("selectProvider — returns null when every pool is exhausted", async () => {
@@ -667,7 +666,7 @@ test("selectProvider — returns null when every pool is exhausted", async () =>
     unlimitedSession(),
     new Set(["a", "b"]),
   );
-  assert.equal(slot, null, "no eligible pool → null");
+  expect(slot, "no eligible pool → null").toBe(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -689,8 +688,8 @@ test("selectProvider — spills off a quota-degraded pool to a healthy peer (INV
   const healthy = makePool("healthy-pool", { quotaSourceSnapshot: { remaining_pct: 0.95 } });
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [degraded, healthy], tracker, {}, enabledSession());
-  assert.ok(slot !== null);
-  assert.equal(slot.poolId, "healthy-pool", "load must spill off the degraded pool to the healthy peer");
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId, "load must spill off the degraded pool to the healthy peer").toBe("healthy-pool");
 });
 
 test("selectProvider — spills off a pool in active cooldown to a peer with headroom (INV-QD-14)", async () => {
@@ -702,8 +701,8 @@ test("selectProvider — spills off a pool in active cooldown to a peer with hea
   const healthy = makePool("healthy-pool");
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [cooling, healthy], tracker, {}, enabledSession());
-  assert.ok(slot !== null);
-  assert.equal(slot.poolId, "healthy-pool", "a pool in active cooldown is spilled over for a healthy peer");
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId, "a pool in active cooldown is spilled over for a healthy peer").toBe("healthy-pool");
 });
 
 test("selectProvider — all pools degraded still yields a slot; capability order applies within the fallback group (INV-QD-14)", async () => {
@@ -714,8 +713,8 @@ test("selectProvider — all pools degraded still yields a slot; capability orde
   const tracker = new InFlightTokenTracker();
   // small-pool first in array; a degraded pool is a usable fallback, never a stall.
   const slot = selectProvider(packet, [small, deep], tracker, {}, enabledSession());
-  assert.ok(slot !== null, "a degraded pool is still a usable fallback — never a stall");
-  assert.equal(slot.poolId, "deep-pool", "within the all-degraded group, high-complexity still prefers deep");
+  expect(slot !== null, "a degraded pool is still a usable fallback — never a stall").toBeTruthy();
+  expect(slot.poolId, "within the all-degraded group, high-complexity still prefers deep").toBe("deep-pool");
 });
 
 test("selectProvider — among healthy pools, capability still decides; health never overrides rank within a group (INV-QD-14)", async () => {
@@ -725,8 +724,8 @@ test("selectProvider — among healthy pools, capability still decides; health n
   const small = makePool("small-pool", { rank: "small", quotaSourceSnapshot: { remaining_pct: 0.9 } });
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [small, deep], tracker, {}, enabledSession());
-  assert.ok(slot !== null);
-  assert.equal(slot.poolId, "deep-pool", "both healthy → high-complexity prefers deep (capability, not health, decides)");
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId, "both healthy → high-complexity prefers deep (capability, not health, decides)").toBe("deep-pool");
 });
 
 // ---------------------------------------------------------------------------
@@ -735,5 +734,5 @@ test("selectProvider — among healthy pools, capability still decides; health n
 
 test("scorePacketComplexity — returns packet.complexity field", () => {
   const packet = makePacket("p1", { complexity: 0.75 });
-  assert.equal(scorePacketComplexity(packet), 0.75);
+  expect(scorePacketComplexity(packet)).toBe(0.75);
 });

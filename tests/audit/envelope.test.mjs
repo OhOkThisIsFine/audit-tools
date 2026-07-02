@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildManualReviewBlocker, buildBlockedAuditState } =
   await import("../../src/audit/cli/envelope.ts");
@@ -10,17 +9,14 @@ const { buildManualReviewBlocker, buildBlockedAuditState } =
 // CAN dispatch → "Ready for LLM semantic review" fan-out message (COR-dc621e7a).
 
 test("buildManualReviewBlocker returns blocked message for local-subprocess (cannot dispatch)", () => {
-  assert.equal(
-    buildManualReviewBlocker("local-subprocess"),
-    "Audit blocked: waiting for manual audit results or interactive provider configuration.",
-  );
+  expect(buildManualReviewBlocker("local-subprocess")).toBe("Audit blocked: waiting for manual audit results or interactive provider configuration.");
 });
 
 test("buildManualReviewBlocker returns fan-out instructions for LLM providers", () => {
   for (const provider of ["codex", "claude-code", "opencode"]) {
     const result = buildManualReviewBlocker(provider);
-    assert.match(result, /Ready for LLM semantic review/, `${provider}: expected fan-out message`);
-    assert.match(result, /fan out packets/, `${provider}: expected fan-out packets mention`);
+    expect(result, `${provider}: expected fan-out message`).toMatch(/Ready for LLM semantic review/);
+    expect(result, `${provider}: expected fan-out packets mention`).toMatch(/fan out packets/);
   }
 });
 
@@ -48,9 +44,9 @@ test("buildBlockedAuditState sets status to blocked and updates executor and obl
     executor: "some-executor",
     blocker: "provider not configured",
   });
-  assert.equal(result.status, "blocked");
-  assert.equal(result.last_executor, "some-executor");
-  assert.equal(result.last_obligation, "ob-1");
+  expect(result.status).toBe("blocked");
+  expect(result.last_executor).toBe("some-executor");
+  expect(result.last_obligation).toBe("ob-1");
 });
 
 test("buildBlockedAuditState appends a new blocker to the blockers array", () => {
@@ -61,9 +57,9 @@ test("buildBlockedAuditState appends a new blocker to the blockers array", () =>
     executor: "some-executor",
     blocker: "new-blocker",
   });
-  assert.ok(result.blockers.includes("new-blocker"), "new blocker is present");
-  assert.ok(result.blockers.includes("existing-blocker"), "pre-existing blocker is preserved");
-  assert.equal(result.blockers.length, 2);
+  expect(result.blockers.includes("new-blocker"), "new blocker is present").toBeTruthy();
+  expect(result.blockers.includes("existing-blocker"), "pre-existing blocker is preserved").toBeTruthy();
+  expect(result.blockers.length).toBe(2);
 });
 
 test("buildBlockedAuditState deduplicates repeated blockers", () => {
@@ -74,8 +70,8 @@ test("buildBlockedAuditState deduplicates repeated blockers", () => {
     executor: "some-executor",
     blocker: "duplicate-blocker",
   });
-  assert.equal(result.blockers.length, 1);
-  assert.equal(result.blockers[0], "duplicate-blocker");
+  expect(result.blockers.length).toBe(1);
+  expect(result.blockers[0]).toBe("duplicate-blocker");
 });
 
 test("buildBlockedAuditState patches the matching obligation's state and reason", () => {
@@ -87,8 +83,8 @@ test("buildBlockedAuditState patches the matching obligation's state and reason"
     blocker: "missing provider",
   });
   const matched = result.obligations.find((o) => o.id === "ob-1");
-  assert.equal(matched.state, "blocked");
-  assert.equal(matched.reason, "missing provider");
+  expect(matched.state).toBe("blocked");
+  expect(matched.reason).toBe("missing provider");
 });
 
 test("buildBlockedAuditState leaves non-matching obligations unchanged", () => {
@@ -100,8 +96,8 @@ test("buildBlockedAuditState leaves non-matching obligations unchanged", () => {
     blocker: "missing provider",
   });
   const untouched = result.obligations.find((o) => o.id === "ob-2");
-  assert.equal(untouched.state, "present");
-  assert.equal(untouched.reason, undefined);
+  expect(untouched.state).toBe("present");
+  expect(untouched.reason).toBe(undefined);
 });
 
 test("buildBlockedAuditState falls back to state.last_executor when executor param is null", () => {
@@ -112,5 +108,5 @@ test("buildBlockedAuditState falls back to state.last_executor when executor par
     executor: null,
     blocker: "some blocker",
   });
-  assert.equal(result.last_executor, "original-executor");
+  expect(result.last_executor).toBe("original-executor");
 });

@@ -96,15 +96,6 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
-- **Consolidate the test runners onto vitest (the owner, 2026-07-02).** Today `src/audit` tests run on
-  `node:test` (`tests/audit/*.test.mjs`, `node:assert`, via the `tsx/esm` loader) while `src/remediate`
-  runs on vitest (`tests/remediate/*.test.ts`). Two runners is a parity/drift hazard and buys nothing —
-  node:test's zero-dep advantage is moot since the audit tests already run through a TS loader and vitest
-  is already a dependency. Target: one runner (vitest) for both areas. Work: rewrite audit tests'
-  `node:assert` → vitest `expect`, `await t.test(...)` subtests → `describe/it`; fold `test:node` into the
-  vitest include globs; drop the `--import tsx/esm --test` scripts; update `CLAUDE.md`/README test
-  commands. Own sprint — touches every audit test file. Keep green at every commit.
-
 - **Last-writer-wins seams → default LWW, but compare-on-conflict (the owner, 2026-07-02).** Policy idea:
   wherever a write is last-writer-wins, keep LWW as the cheap default but, when a write would clobber a
   *newer* non-mergeable result, compare a monotonic marker and keep the newer/better rather than the
@@ -383,12 +374,17 @@ Standing gotchas worth keeping for any agent (strong or weak):
   audit-code provider test fails).
 - **Fresh git worktree lacks `node_modules`** → `audit-tools/shared` resolves a stale `dist/` (spurious
   "no exported member") → run `npm install` in the worktree first.
-- **`node --test` needs the tsx loader**: `node --import tsx/esm --test <file>` (bare `node --test` can't
-  resolve `audit-tools/shared` via tsconfig `paths`). Same for `npm run test:single`.
-- **Don't mask the test exit code.** `node --test … ; echo "exit=$?"` and `npm test > out; echo done` report
-  the *trailing* command's exit, not the suite's — and piping through `grep`/`rm` in the same Bash call races
-  the output file, so a real failure reads as "green." Capture the suite's own status: `npm test > out 2>&1 &&
-  echo PASS || echo "FAIL=$?"`. (Mis-reading a masked exit shipped a release whose CI then failed.)
+- **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`; the
+  node:test split was retired 2026-07-02). Run a single file with `npx vitest run <path>`. `node:assert/strict`
+  is still permitted as an assertion lib (runs under vitest) for the control-flow assertions
+  (`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that have no clean `expect` equivalent; value
+  assertions are `expect`. Framework-consistency is guarded by `shared-tests-invariants` (INV-shared-tests-02),
+  `audit-infra-architecture` (ARC-843ce274-2). Vitest `testTimeout` is raised to 120s in `vitest.config.ts`
+  because audit integration tests spawn real subprocesses (node:test had no per-test timeout).
+- **Don't mask the test exit code.** `npm test > out; echo done` reports the *trailing* command's exit, not the
+  suite's — and piping through `grep`/`rm` in the same Bash call races the output file, so a real failure reads
+  as "green." Capture the suite's own status: `npm test > out 2>&1 && echo PASS || echo "FAIL=$?"`.
+  (Mis-reading a masked exit shipped a release whose CI then failed.)
 - **Global `-g` install defers `postinstall`** (npm allow-scripts) → the host-integration deploy silently
   skips; finish with `npm i -g --allow-scripts=audit-tools` or `node "$(npm root -g)/audit-tools/scripts/postinstall.mjs"`.
 - **A global junction to a LIVE working tree silently shadows a registry install.** If the global
@@ -405,7 +401,14 @@ Standing gotchas worth keeping for any agent (strong or weak):
   (the packaged-smoke gate asserts specific tarball files).
 - **Async typecheck hook = stale-dist false alarm** after a shared-source edit (it runs `tsc` before the
   central rebuild); the authoritative gate is `npm run check` after `npm run build`.
-- **`t.mock.module` is unusable** under the tsx/esm loader → use a dependency-injection seam instead.
+- **Prefer a dependency-injection seam over module mocking** in tests. Under vitest, `vi.spyOn`/`vi.mock`
+  and fake timers (`vi.useFakeTimers({ toFake: [...] })`) are available, but the codebase's established
+  pattern is injectable deps (`WorkerRunDeps`, `createWriteStream`/`spawn` seams) — keep using those.
+- **Test-migration codemod trap (2026-07-02):** the one-shot node:test→vitest codemod's import-replace regex
+  used `[^;]*?` which matches across newlines, so a `import … from "node:test"` string appearing inside a
+  JSDoc **header comment** (example run-commands, prose) got matched — eating the comment's `*/` terminator
+  and the real import line ("Unterminated block comment" at EOF, or a missing runner import). Any future bulk
+  text rewrite of imports must anchor to line starts / exclude comment spans.
 - **Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/
   module_decomposition, not just a targeted one.** A remediate-code contract run (2026-07-01, knip
   slice-3 graph-context module) needed 6 adversarial repair rounds before converging; every accepted

@@ -15,8 +15,7 @@
  * (`N-R13`, `OBS-1234abcd`) are coined freely and consumed once — the finding's
  * recommendation is one row per family, with load-bearing ids enumerated under it.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,10 +99,7 @@ function collectFamilies() {
 }
 
 test("id-glossary: docs/glossary-ids.md exists", () => {
-  assert.ok(
-    existsSync(GLOSSARY),
-    "docs/glossary-ids.md must exist as the canonical id-family glossary",
-  );
+  expect(existsSync(GLOSSARY), "docs/glossary-ids.md must exist as the canonical id-family glossary").toBeTruthy();
 });
 
 test("id-glossary: every id-family prefix referenced in src is defined in the glossary", () => {
@@ -153,12 +149,8 @@ test("id-glossary: every id-family prefix referenced in src is defined in the gl
     }
   }
 
-  assert.deepEqual(
-    missing,
-    [],
-    `Every opaque id family referenced in packages/*/src must be defined in docs/glossary-ids.md. ` +
-      `Undefined families:\n  ${missing.join("\n  ")}`,
-  );
+  expect(missing, `Every opaque id family referenced in packages/*/src must be defined in docs/glossary-ids.md. ` +
+      `Undefined families:\n  ${missing.join("\n  ")}`).toEqual([]);
 });
 
 test("id-glossary: the documented INV areas actually occur in the source tree", () => {
@@ -176,9 +168,5 @@ test("id-glossary: the documented INV areas actually occur in the source tree", 
   );
 
   const stale = [...documentedInv].filter((a) => !liveInvAreas.has(a));
-  assert.deepEqual(
-    stale,
-    [],
-    `Glossary documents INV areas no longer referenced in src (remove them): ${stale.join(", ")}`,
-  );
+  expect(stale, `Glossary documents INV areas no longer referenced in src (remove them): ${stale.join(", ")}`).toEqual([]);
 });

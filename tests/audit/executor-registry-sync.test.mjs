@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // Import from source via tsx loader so un-rebuilt changes are caught.
 import { EXECUTOR_REGISTRY, isHostDelegationExecutor } from "../../src/audit/orchestrator/executors.ts";
@@ -11,27 +10,23 @@ test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entr
     const matches = EXECUTOR_REGISTRY.filter((entry) =>
       entry.obligation_ids.includes(obligationId),
     );
-    assert.equal(
-      matches.length,
-      1,
-      `PRIORITY obligation "${obligationId}" should be claimed by exactly one EXECUTOR_REGISTRY entry, got ${matches.length}: [${matches.map((e) => e.id).join(", ")}]`,
-    );
+    expect(matches.length, `PRIORITY obligation "${obligationId}" should be claimed by exactly one EXECUTOR_REGISTRY entry, got ${matches.length}: [${matches.map((e) => e.id).join(", ")}]`).toBe(1);
   }
 });
 
 test("isHostDelegationExecutor returns true for design_review_contract, design_review_conceptual, agent, intent_checkpoint_executor, provider_confirmation_executor, and synthesis_narrative_executor", () => {
-  assert.equal(isHostDelegationExecutor("design_review_contract"), true);
-  assert.equal(isHostDelegationExecutor("design_review_conceptual"), true);
-  assert.equal(isHostDelegationExecutor("agent"), true);
-  assert.equal(isHostDelegationExecutor("intent_checkpoint_executor"), true);
-  assert.equal(isHostDelegationExecutor("provider_confirmation_executor"), true);
-  assert.equal(isHostDelegationExecutor("synthesis_narrative_executor"), true);
-  assert.equal(isHostDelegationExecutor("intake_executor"), false);
-  assert.equal(isHostDelegationExecutor("synthesis_executor"), false);
-  assert.equal(isHostDelegationExecutor("planning_executor"), false);
-  assert.equal(isHostDelegationExecutor("unknown_executor"), false);
+  expect(isHostDelegationExecutor("design_review_contract")).toBe(true);
+  expect(isHostDelegationExecutor("design_review_conceptual")).toBe(true);
+  expect(isHostDelegationExecutor("agent")).toBe(true);
+  expect(isHostDelegationExecutor("intent_checkpoint_executor")).toBe(true);
+  expect(isHostDelegationExecutor("provider_confirmation_executor")).toBe(true);
+  expect(isHostDelegationExecutor("synthesis_narrative_executor")).toBe(true);
+  expect(isHostDelegationExecutor("intake_executor")).toBe(false);
+  expect(isHostDelegationExecutor("synthesis_executor")).toBe(false);
+  expect(isHostDelegationExecutor("planning_executor")).toBe(false);
+  expect(isHostDelegationExecutor("unknown_executor")).toBe(false);
   // design_review no longer exists in registry
-  assert.equal(isHostDelegationExecutor("design_review"), false);
+  expect(isHostDelegationExecutor("design_review")).toBe(false);
 });
 
 test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
@@ -45,31 +40,16 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
     "synthesis_narrative_executor",
   ]);
   for (const entry of EXECUTOR_REGISTRY) {
-    assert.ok(
-      entry.kind === "deterministic" || entry.kind === "host_delegation",
-      `EXECUTOR_REGISTRY entry "${entry.id}" has invalid kind: ${String(entry.kind)}`,
-    );
+    expect(entry.kind === "deterministic" || entry.kind === "host_delegation", `EXECUTOR_REGISTRY entry "${entry.id}" has invalid kind: ${String(entry.kind)}`).toBeTruthy();
     if (hostDelegationIds.has(entry.id)) {
-      assert.equal(
-        entry.kind,
-        "host_delegation",
-        `EXECUTOR_REGISTRY entry "${entry.id}" should have kind "host_delegation"`,
-      );
+      expect(entry.kind, `EXECUTOR_REGISTRY entry "${entry.id}" should have kind "host_delegation"`).toBe("host_delegation");
     } else {
-      assert.equal(
-        entry.kind,
-        "deterministic",
-        `EXECUTOR_REGISTRY entry "${entry.id}" should have kind "deterministic"`,
-      );
+      expect(entry.kind, `EXECUTOR_REGISTRY entry "${entry.id}" should have kind "deterministic"`).toBe("deterministic");
     }
   }
   // Verify exactly these executors are host_delegation
   const hostEntries = EXECUTOR_REGISTRY.filter((e) => e.kind === "host_delegation");
-  assert.deepEqual(
-    hostEntries.map((e) => e.id).sort(),
-    ["agent", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "provider_confirmation_executor", "rolling_dispatch_executor", "synthesis_narrative_executor"],
-    "Exactly 'agent', 'design_review_contract', 'design_review_conceptual', 'intent_checkpoint_executor', 'provider_confirmation_executor', 'rolling_dispatch_executor', and 'synthesis_narrative_executor' should have kind host_delegation",
-  );
+  expect(hostEntries.map((e) => e.id).sort(), "Exactly 'agent', 'design_review_contract', 'design_review_conceptual', 'intent_checkpoint_executor', 'provider_confirmation_executor', 'rolling_dispatch_executor', and 'synthesis_narrative_executor' should have kind host_delegation").toEqual(["agent", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "provider_confirmation_executor", "rolling_dispatch_executor", "synthesis_narrative_executor"]);
 });
 
 test("every registry executor with a PRIORITY obligation has a runner in EXECUTOR_RUNNERS (host-delegation dispatch executors excepted)", () => {
@@ -90,15 +70,9 @@ test("every registry executor with a PRIORITY obligation has a runner in EXECUTO
 
     const hasRunner = Object.hasOwn(EXECUTOR_RUNNERS, entry.id);
     if (HOST_DELEGATED_DISPATCH.has(entry.id)) {
-      assert.ok(
-        !hasRunner,
-        `host-delegation dispatch executor "${entry.id}" must NOT have a deterministic runner in EXECUTOR_RUNNERS`,
-      );
+      expect(!hasRunner, `host-delegation dispatch executor "${entry.id}" must NOT have a deterministic runner in EXECUTOR_RUNNERS`).toBeTruthy();
     } else {
-      assert.ok(
-        hasRunner,
-        `EXECUTOR_REGISTRY entry "${entry.id}" has PRIORITY obligation(s) [${entry.obligation_ids.filter((id) => prioritySet.has(id)).join(", ")}] but no runner in EXECUTOR_RUNNERS — advanceAudit could not dispatch it`,
-      );
+      expect(hasRunner, `EXECUTOR_REGISTRY entry "${entry.id}" has PRIORITY obligation(s) [${entry.obligation_ids.filter((id) => prioritySet.has(id)).join(", ")}] but no runner in EXECUTOR_RUNNERS — advanceAudit could not dispatch it`).toBeTruthy();
     }
   }
 });

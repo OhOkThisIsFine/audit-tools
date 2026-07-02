@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect, describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -24,18 +24,14 @@ const schemasDir = join(
 // their zod sources. If a contract changes and `generate-schemas.mjs` was not
 // rerun, the committed file diverges from what the source would render — this
 // test catches it so the JSON schema can never drift from the TypeScript type.
-test("committed worker schemas match their zod sources (run generate-schemas.mjs)", async (t) => {
+describe("committed worker schemas match their zod sources (run generate-schemas.mjs)", () => {
   for (const filename of Object.keys(WORKER_SCHEMA_SOURCES)) {
-    await t.test(filename, async () => {
+    it(filename, async () => {
       const committed = JSON.parse(
         await readFile(join(schemasDir, filename), "utf8"),
       );
       const regenerated = renderWorkerJsonSchema(filename);
-      assert.deepEqual(
-        committed,
-        regenerated,
-        `schemas/${filename} is stale — run \`node --import tsx/esm scripts/audit/generate-schemas.mjs\``,
-      );
+      expect(committed, `schemas/${filename} is stale — run \`node --import tsx/esm scripts/audit/generate-schemas.mjs\``).toEqual(regenerated);
     });
   }
 });
@@ -108,5 +104,5 @@ test("worker schemas accept a valid worker submission and reject invalid lens", 
     }),
   );
 
-  assert.deepEqual(LensSchema.options.length, 11);
+  expect(LensSchema.options.length).toEqual(11);
 });

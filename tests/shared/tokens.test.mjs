@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   estimateTokensFromBytes,
@@ -17,39 +16,39 @@ const {
 
 test("estimateTokensFromBytes is the single token-estimation primitive in shared", () => {
   // Zero and non-positive/non-finite inputs estimate to zero
-  assert.equal(estimateTokensFromBytes(0), 0);
-  assert.equal(estimateTokensFromBytes(-1), 0);
-  assert.equal(estimateTokensFromBytes(Number.NaN), 0);
-  assert.equal(estimateTokensFromBytes(Infinity), 0);
+  expect(estimateTokensFromBytes(0)).toBe(0);
+  expect(estimateTokensFromBytes(-1)).toBe(0);
+  expect(estimateTokensFromBytes(Number.NaN)).toBe(0);
+  expect(estimateTokensFromBytes(Infinity)).toBe(0);
   // 400 bytes / 4 bytes-per-token = 100 tokens
-  assert.equal(estimateTokensFromBytes(400), 100);
+  expect(estimateTokensFromBytes(400)).toBe(100);
   // 1 byte → ceil(1/4) = 1
-  assert.equal(estimateTokensFromBytes(1), 1);
+  expect(estimateTokensFromBytes(1)).toBe(1);
   // Pin each operand individually — the earlier `a*b === b*a` check was a
   // commutativity tautology that could never fail. The byte→token ratio and the
   // legacy per-line estimate are both 4, so their product is 16.
-  assert.equal(BYTES_PER_TOKEN, 4);
-  assert.equal(ESTIMATED_TOKENS_PER_LINE, 4);
-  assert.equal(ESTIMATED_TOKENS_PER_LINE * BYTES_PER_TOKEN, 16);
+  expect(BYTES_PER_TOKEN).toBe(4);
+  expect(ESTIMATED_TOKENS_PER_LINE).toBe(4);
+  expect(ESTIMATED_TOKENS_PER_LINE * BYTES_PER_TOKEN).toBe(16);
   // Canonical overhead constants
-  assert.equal(ESTIMATED_PROMPT_OVERHEAD_TOKENS, 900);
-  assert.equal(ESTIMATED_ITEM_OVERHEAD_TOKENS, 600);
+  expect(ESTIMATED_PROMPT_OVERHEAD_TOKENS).toBe(900);
+  expect(ESTIMATED_ITEM_OVERHEAD_TOKENS).toBe(600);
 });
 
 test("estimateTokensFromBytes is monotonic and zero for non-positive/non-finite", () => {
-  assert.equal(estimateTokensFromBytes(0), 0);
-  assert.equal(estimateTokensFromBytes(-5), 0);
-  assert.equal(estimateTokensFromBytes(Number.NaN), 0);
-  assert.equal(estimateTokensFromBytes(Infinity), 0);
+  expect(estimateTokensFromBytes(0)).toBe(0);
+  expect(estimateTokensFromBytes(-5)).toBe(0);
+  expect(estimateTokensFromBytes(Number.NaN)).toBe(0);
+  expect(estimateTokensFromBytes(Infinity)).toBe(0);
 
   let prev = -1;
   for (const bytes of [1, 4, 100, 4096, 1_000_000]) {
     const tokens = estimateTokensFromBytes(bytes);
-    assert.ok(tokens >= prev, `tokens should be non-decreasing at ${bytes}`);
+    expect(tokens >= prev, `tokens should be non-decreasing at ${bytes}`).toBeTruthy();
     prev = tokens;
   }
-  assert.equal(estimateTokensFromBytes(BYTES_PER_TOKEN), 1);
-  assert.equal(estimateTokensFromBytes(BYTES_PER_TOKEN * 10), 10);
+  expect(estimateTokensFromBytes(BYTES_PER_TOKEN)).toBe(1);
+  expect(estimateTokensFromBytes(BYTES_PER_TOKEN * 10)).toBe(10);
 });
 
 test("resolveContextBudget prefers explicit values, else the conservative floor", () => {
@@ -58,13 +57,10 @@ test("resolveContextBudget prefers explicit values, else the conservative floor"
     reservedOutputTokens: 4_000,
     safetyMargin: 0.5,
   });
-  assert.equal(explicit, Math.floor((100_000 - 4_000) * 0.5));
+  expect(explicit).toBe(Math.floor((100_000 - 4_000) * 0.5));
 
   // No window configured/discovered → conservative floor, never a guessed
   // per-model window.
   const defaults = resolveContextBudget({});
-  assert.equal(
-    defaults,
-    Math.floor((DEFAULT_CONTEXT_TOKENS - DEFAULT_OUTPUT_TOKENS) * BLOCK_SAFETY_MARGIN),
-  );
+  expect(defaults).toBe(Math.floor((DEFAULT_CONTEXT_TOKENS - DEFAULT_OUTPUT_TOKENS) * BLOCK_SAFETY_MARGIN));
 });

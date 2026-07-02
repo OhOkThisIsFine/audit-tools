@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // Importing the release script must be side-effect free: `main()` only runs when
 // the module is invoked as the entry script, so importing the pure selector
@@ -34,7 +33,7 @@ test("(a) identity select: head_sha-matching post-push run wins over stale same-
     tagPushedAtMs: pushedAt,
     headSha: "newsha111",
   });
-  assert.equal(selected.id, 200);
+  expect(selected.id).toBe(200);
 });
 
 test("(b) order-independence: reversing the array selects the same genuine run", () => {
@@ -58,8 +57,8 @@ test("(b) order-independence: reversing the array selects the same genuine run",
   const opts = { tag: TAG, tagPushedAtMs: pushedAt, headSha: "newsha111" };
   const forward = selectReleaseRun([stale, genuine], opts);
   const reversed = selectReleaseRun([genuine, stale], opts);
-  assert.equal(forward.id, 200);
-  assert.equal(reversed.id, 200);
+  expect(forward.id).toBe(200);
+  expect(reversed.id).toBe(200);
 });
 
 test("(c) no qualifying run -> null (waiter times out, no stale-name fallback)", () => {
@@ -77,7 +76,7 @@ test("(c) no qualifying run -> null (waiter times out, no stale-name fallback)",
     tagPushedAtMs: pushedAt,
     headSha: "newsha111", // no run matches this SHA; stale is too old for timestamp fallback
   });
-  assert.equal(selected, null);
+  expect(selected).toBe(null);
 });
 
 test("(d) headSha absent: selects newest run with created_at > tagPushedAtMs, no throw", () => {
@@ -111,7 +110,7 @@ test("(d) headSha absent: selects newest run with created_at > tagPushedAtMs, no
     tagPushedAtMs: pushedAt,
     headSha: undefined,
   });
-  assert.equal(selected.id, 300);
+  expect(selected.id).toBe(300);
 });
 
 test("(e) same-SHA re-push: newest among identical-head_sha runs", () => {
@@ -137,7 +136,7 @@ test("(e) same-SHA re-push: newest among identical-head_sha runs", () => {
     tagPushedAtMs: pushedAt,
     headSha: "samesha",
   });
-  assert.equal(selected.id, 300);
+  expect(selected.id).toBe(300);
 });
 
 test("skew: a genuine run stamped a few seconds before push is still selected", () => {
@@ -156,7 +155,7 @@ test("skew: a genuine run stamped a few seconds before push is still selected", 
     tagPushedAtMs: pushedAt,
     headSha: null,
   });
-  assert.equal(selected.id, 400);
+  expect(selected.id).toBe(400);
 });
 
 test("different-tag runs are never selected even when fresh", () => {
@@ -174,5 +173,5 @@ test("different-tag runs are never selected even when fresh", () => {
     tagPushedAtMs: pushedAt,
     headSha: null,
   });
-  assert.equal(selected, null);
+  expect(selected).toBe(null);
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildRepoManifest } = await import("../../src/audit/extractors/fileInventory.ts");
 
@@ -14,14 +13,14 @@ test("inferLanguage classifies common docs/config without linguist false positiv
     manifest.files.map((f) => [f.path, f.language]),
   );
 
-  assert.equal(lang["README.md"], "markdown");
-  assert.equal(lang["docs/GUIDE.MD"], "markdown"); // extension match is case-insensitive
-  assert.equal(lang["config.yml"], "yaml");
-  assert.equal(lang["ci.yaml"], "yaml");
+  expect(lang["README.md"]).toBe("markdown");
+  expect(lang["docs/GUIDE.MD"]).toBe("markdown"); // extension match is case-insensitive
+  expect(lang["config.yml"]).toBe("yaml");
+  expect(lang["ci.yaml"]).toBe("yaml");
 
   // Regression guard for the observed misclassifications.
-  assert.notEqual(lang["README.md"], "gcc machine description");
-  assert.notEqual(lang["config.yml"], "miniyaml");
+  expect(lang["README.md"]).not.toBe("gcc machine description");
+  expect(lang["config.yml"]).not.toBe("miniyaml");
 });
 
 test("inferLanguage classifies common source languages without misclassification", () => {
@@ -36,9 +35,9 @@ test("inferLanguage classifies common source languages without misclassification
     manifest.files.map((f) => [f.path, f.language]),
   );
 
-  assert.equal(lang["src/index.ts"], "typescript");
-  assert.equal(lang["src/util.js"], "javascript");
-  assert.equal(lang["scripts/run.py"], "python");
-  assert.equal(lang["cmd/main.go"], "go");
-  assert.equal(lang["package.json"], "json");
+  expect(lang["src/index.ts"]).toBe("typescript");
+  expect(lang["src/util.js"]).toBe("javascript");
+  expect(lang["scripts/run.py"]).toBe("python");
+  expect(lang["cmd/main.go"]).toBe("go");
+  expect(lang["package.json"]).toBe("json");
 });

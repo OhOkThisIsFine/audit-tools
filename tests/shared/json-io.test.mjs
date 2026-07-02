@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { test, expect } from "vitest";
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,10 +22,10 @@ test('writeJsonFile already 2-space-indents containers (run-results.json complia
     await writeJsonFile(path, value);
     const raw = await readFile(path, 'utf8');
     // Indentation is present: nested keys are wrapped onto their own indented lines.
-    assert.ok(raw.includes('\n  "results"'), 'top-level key indented by 2 spaces');
-    assert.ok(raw.includes('\n      "id"'), 'array-element key indented further');
+    expect(raw.includes('\n  "results"'), 'top-level key indented by 2 spaces').toBeTruthy();
+    expect(raw.includes('\n      "id"'), 'array-element key indented further').toBeTruthy();
     // Exactly the canonical 2-space serialization — no redundant re-indent.
-    assert.equal(raw, JSON.stringify(value, null, 2) + '\n');
+    expect(raw).toBe(JSON.stringify(value, null, 2) + '\n');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -48,10 +47,7 @@ test('readJsonStringScalar reconstructs an over-cap (>2000-char) scalar in full'
     // so a line-truncating reader would clip it. Confirm that pathology exists.
     const raw = await readFile(path, 'utf8');
     const longestLine = Math.max(...raw.split('\n').map((l) => l.length));
-    assert.ok(
-      longestLine > 2000,
-      `the scalar should produce an over-cap line (got longest ${longestLine})`,
-    );
+    expect(longestLine > 2000, `the scalar should produce an over-cap line (got longest ${longestLine})`).toBeTruthy();
 
     // The bounded accessor parses the file (no per-line cap) and returns it whole.
     const value = await readJsonStringScalar(path, [
@@ -60,8 +56,8 @@ test('readJsonStringScalar reconstructs an over-cap (>2000-char) scalar in full'
       'evidence',
       'quoted_text',
     ]);
-    assert.equal(value, longScalar);
-    assert.equal(value?.length, 5000);
+    expect(value).toBe(longScalar);
+    expect(value?.length).toBe(5000);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -82,11 +78,11 @@ test('readJsonStringScalarChunks streams an over-cap scalar in bounded chunks th
       ['evidence', 'base64'],
       1000,
     )) {
-      assert.ok(chunk.length <= 1000, 'no chunk exceeds the bounded chunk size');
+      expect(chunk.length <= 1000, 'no chunk exceeds the bounded chunk size').toBeTruthy();
       chunks.push(chunk);
     }
-    assert.equal(chunks.length, 5, '5000 chars / 1000 = 5 bounded chunks');
-    assert.equal(chunks.join(''), longScalar, 'chunks re-concatenate exactly');
+    expect(chunks.length, '5000 chars / 1000 = 5 bounded chunks').toBe(5);
+    expect(chunks.join(''), 'chunks re-concatenate exactly').toBe(longScalar);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -101,11 +97,11 @@ test('readJsonStringScalar round-trips an arbitrary scalar through write→read'
     await writeJsonFile(path, { a: { b: { c: scalar } } });
 
     const direct = await readJsonStringScalar(path, ['a', 'b', 'c']);
-    assert.equal(direct, scalar, 'scalar accessor round-trips exactly');
+    expect(direct, 'scalar accessor round-trips exactly').toBe(scalar);
 
     // Full-document round-trip stays intact too.
     const whole = await readJsonFile(path);
-    assert.equal(whole.a.b.c, scalar);
+    expect(whole.a.b.c).toBe(scalar);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -117,10 +113,10 @@ test('readJsonStringScalar returns undefined for a missing path or a non-string 
     const path = join(dir, 'u.json');
     await writeJsonFile(path, { a: { count: 42 }, list: ['only'] });
 
-    assert.equal(await readJsonStringScalar(path, ['a', 'missing']), undefined);
-    assert.equal(await readJsonStringScalar(path, ['a', 'count']), undefined, 'number is not a string scalar');
-    assert.equal(await readJsonStringScalar(path, ['list', '5']), undefined, 'out-of-range index');
-    assert.equal(await readJsonStringScalar(path, ['list', '0']), 'only');
+    expect(await readJsonStringScalar(path, ['a', 'missing'])).toBe(undefined);
+    expect(await readJsonStringScalar(path, ['a', 'count']), 'number is not a string scalar').toBe(undefined);
+    expect(await readJsonStringScalar(path, ['list', '5']), 'out-of-range index').toBe(undefined);
+    expect(await readJsonStringScalar(path, ['list', '0'])).toBe('only');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -137,15 +133,15 @@ test('NDJSON appender stays single-line per record (not reformatted)', async () 
 
     const raw = await readFile(path, 'utf8');
     const lines = raw.split('\n').filter((l) => l.length > 0);
-    assert.equal(lines.length, 2, 'one JSON record per physical line');
+    expect(lines.length, 'one JSON record per physical line').toBe(2);
     // No indentation injected into the JSONL records.
-    assert.ok(!raw.includes('\n  '), 'records are compact, not 2-space-indented');
+    expect(!raw.includes('\n  '), 'records are compact, not 2-space-indented').toBeTruthy();
     for (const line of lines) {
       // Each line is itself a complete, parseable JSON document.
       JSON.parse(line);
     }
     const records = await readNdjsonFile(path);
-    assert.deepEqual(records, [
+    expect(records).toEqual([
       { id: 'a', nested: { deep: [1, 2, 3] } },
       { id: 'b', nested: { deep: [4, 5, 6] } },
     ]);

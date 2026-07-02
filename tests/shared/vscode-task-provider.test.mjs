@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { SubprocessTemplateProvider } = await import("../../src/shared/providers/subprocessTemplateProvider.ts");
@@ -38,7 +38,7 @@ const deps = {
 
 test("SubprocessTemplateProvider with name 'vscode-task' has correct name", () => {
   const provider = new SubprocessTemplateProvider({ command_template: ["echo"] }, "vscode-task");
-  assert.equal(provider.name, "vscode-task");
+  expect(provider.name).toBe("vscode-task");
 });
 
 // ── SubprocessTemplateProvider (vscode-task) delegates launch ─────────────────
@@ -86,12 +86,9 @@ test("SubprocessTemplateProvider (vscode-task) delegates launch via injected lau
     // before launchCommand is invoked comes from readJsonFile (task not found),
     // which is acceptable — delegation still occurs if it reaches launchCommand.
     // Confirm the failure is a file-system error, not a delegation failure.
-    assert.ok(
-      err.message.includes("ENOENT") ||
+    expect(err.message.includes("ENOENT") ||
         err.message.includes("no such file") ||
-        err.code === "ENOENT",
-      `Expected file-not-found error from readJsonFile, got: ${err.message}`,
-    );
+        err.code === "ENOENT", `Expected file-not-found error from readJsonFile, got: ${err.message}`).toBeTruthy();
   }
   // If we reach here without the spy being called, it means readJsonFile
   // rejected before delegation — that's the correct structural path.
@@ -142,11 +139,11 @@ test("SubprocessTemplateProvider (vscode-task): launchCommand is invoked with re
 
   await provider.launch(input);
 
-  assert.equal(calls.length, 1, "launchCommand should be called exactly once");
-  assert.equal(calls[0].command, "my-runner", "first rendered token is the command");
-  assert.ok(Array.isArray(calls[0].args), "remaining tokens are passed as args array");
-  assert.equal(calls[0].args[0], "--task");
-  assert.equal(calls[0].args[1], taskPath, "taskPath placeholder was rendered");
+  expect(calls.length, "launchCommand should be called exactly once").toBe(1);
+  expect(calls[0].command, "first rendered token is the command").toBe("my-runner");
+  expect(Array.isArray(calls[0].args), "remaining tokens are passed as args array").toBeTruthy();
+  expect(calls[0].args[0]).toBe("--task");
+  expect(calls[0].args[1], "taskPath placeholder was rendered").toBe(taskPath);
 
   rmSync(tmpDir, { recursive: true, force: true });
 });
@@ -159,8 +156,8 @@ test("createFreshSessionProvider('vscode-task') returns a SubprocessTemplateProv
     { vscode_task: { command_template: ["echo", "{taskPath}"] } },
     deps,
   );
-  assert.equal(provider.name, "vscode-task");
-  assert.ok(provider instanceof SubprocessTemplateProvider);
+  expect(provider.name).toBe("vscode-task");
+  expect(provider instanceof SubprocessTemplateProvider).toBeTruthy();
 });
 
 test("createFreshSessionProvider('vscode-task') throws when vscode_task config is absent", () => {

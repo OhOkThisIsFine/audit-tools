@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -41,7 +41,7 @@ async function runQuota(argv) {
 
 function parsePreview(stdout) {
   const parsed = JSON.parse(stdout);
-  assert.ok(parsed.capacity_preview, "output should carry a capacity_preview block");
+  expect(parsed.capacity_preview, "output should carry a capacity_preview block").toBeTruthy();
   return parsed.capacity_preview;
 }
 
@@ -59,40 +59,27 @@ test("multi-rank --host-models roster shapes the preview and differs from no-ros
   const cachedPreview = parsePreview(noRoster.stdout);
 
   // Roster produces one pool per rank + populated tier budgets.
-  assert.equal(rosterPreview.pools.length, 3, "one pool per reported rank");
-  assert.ok(rosterPreview.tier_budgets, "roster preview has tier_budgets");
-  assert.ok(
-    Object.keys(rosterPreview.tier_budgets).length >= 3,
-    "tier_budgets populated across ranks",
-  );
+  expect(rosterPreview.pools.length, "one pool per reported rank").toBe(3);
+  expect(rosterPreview.tier_budgets, "roster preview has tier_budgets").toBeTruthy();
+  expect(Object.keys(rosterPreview.tier_budgets).length >= 3, "tier_budgets populated across ranks").toBeTruthy();
 
   // No-roster preview is the conservative cached/learned single pool.
-  assert.equal(cachedPreview.pools.length, 1, "no-roster falls back to one pool");
-  assert.equal(cachedPreview.tier_budgets, null, "no-roster has no tier_budgets");
+  expect(cachedPreview.pools.length, "no-roster falls back to one pool").toBe(1);
+  expect(cachedPreview.tier_budgets, "no-roster has no tier_budgets").toBe(null);
 
   // Guard against a tautology: the roster-derived budget must actually reflect
   // the reported (large) windows, NOT collapse to the cached/learned floor.
-  assert.notDeepStrictEqual(
-    rosterPreview,
-    cachedPreview,
-    "roster preview must differ from the cached/learned preview",
-  );
-  assert.ok(
-    rosterPreview.context_budget_tokens > cachedPreview.context_budget_tokens,
-    `roster budget (${rosterPreview.context_budget_tokens}) should exceed cached floor (${cachedPreview.context_budget_tokens})`,
-  );
+  expect(rosterPreview, "roster preview must differ from the cached/learned preview").not.toEqual(cachedPreview);
+  expect(rosterPreview.context_budget_tokens > cachedPreview.context_budget_tokens, `roster budget (${rosterPreview.context_budget_tokens}) should exceed cached floor (${cachedPreview.context_budget_tokens})`).toBeTruthy();
 });
 
 test("queryLimits undefined does not zero/empty the roster-derived preview", async () => {
   const { stdout } = await runQuota(["--host-models", ROSTER]);
   const preview = parsePreview(stdout);
-  assert.equal(preview.pools.length, 3, "pools present without a live provider query");
-  assert.ok(
-    preview.context_budget_tokens > 1,
-    "context budget is the roster window, not a zeroed floor",
-  );
+  expect(preview.pools.length, "pools present without a live provider query").toBe(3);
+  expect(preview.context_budget_tokens > 1, "context budget is the roster window, not a zeroed floor").toBeTruthy();
   for (const budget of Object.values(preview.tier_budgets)) {
-    assert.ok(budget > 1, "each tier budget is non-trivial");
+    expect(budget > 1, "each tier budget is non-trivial").toBeTruthy();
   }
 });
 
@@ -114,13 +101,10 @@ test("no handshake flags → cached/learned preview, and nothing is written to d
   const { stdout, stateDir } = await runQuotaKeepDir([]);
   try {
     const preview = parsePreview(stdout);
-    assert.equal(preview.pools.length, 1, "single cached/learned pool");
-    assert.equal(preview.tier_budgets, null, "no tier budgets without a roster");
+    expect(preview.pools.length, "single cached/learned pool").toBe(1);
+    expect(preview.tier_budgets, "no tier budgets without a roster").toBe(null);
     // Read-only command: must not invoke finalizeDispatchQuota.
-    assert.ok(
-      !existsSync(join(stateDir, "dispatch-quota.json")),
-      "quota command must not write dispatch-quota.json",
-    );
+    expect(!existsSync(join(stateDir, "dispatch-quota.json")), "quota command must not write dispatch-quota.json").toBeTruthy();
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

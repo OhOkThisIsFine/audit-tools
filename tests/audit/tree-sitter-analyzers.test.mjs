@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -58,15 +58,9 @@ test("python analyzer resolves absolute, from-submodule, and relative imports", 
       ),
   );
 
-  assert.ok(hasEdge(output.edges, "pkg/mod_a.py", "pkg/mod_b.py", "py-import"));
-  assert.ok(
-    hasEdge(output.edges, "pkg/mod_a.py", "pkg/mod_c.py", "py-from-import"),
-    "from pkg import mod_c resolves the submodule file",
-  );
-  assert.ok(
-    hasEdge(output.edges, "pkg/mod_a.py", "pkg/mod_d.py", "py-from-import"),
-    "relative from . import mod_d resolves",
-  );
+  expect(hasEdge(output.edges, "pkg/mod_a.py", "pkg/mod_b.py", "py-import")).toBeTruthy();
+  expect(hasEdge(output.edges, "pkg/mod_a.py", "pkg/mod_c.py", "py-from-import"), "from pkg import mod_c resolves the submodule file").toBeTruthy();
+  expect(hasEdge(output.edges, "pkg/mod_a.py", "pkg/mod_d.py", "py-from-import"), "relative from . import mod_d resolves").toBeTruthy();
 });
 
 test("html analyzer extracts script/link/img resource references", async () => {
@@ -85,14 +79,9 @@ test("html analyzer extracts script/link/img resource references", async () => {
       ),
   );
 
-  assert.ok(hasEdge(output.edges, "index.html", "app.js", "html-resource"));
-  assert.ok(
-    hasEdge(output.edges, "index.html", "styles/main.css", "html-resource"),
-  );
-  assert.ok(
-    hasEdge(output.edges, "index.html", "assets/logo.png", "html-resource"),
-    "root-relative /assets/logo.png resolves from repo root",
-  );
+  expect(hasEdge(output.edges, "index.html", "app.js", "html-resource")).toBeTruthy();
+  expect(hasEdge(output.edges, "index.html", "styles/main.css", "html-resource")).toBeTruthy();
+  expect(hasEdge(output.edges, "index.html", "assets/logo.png", "html-resource"), "root-relative /assets/logo.png resolves from repo root").toBeTruthy();
 });
 
 test("css analyzer extracts @import and url() references", async () => {
@@ -111,15 +100,9 @@ test("css analyzer extracts @import and url() references", async () => {
       ),
   );
 
-  assert.ok(hasEdge(output.edges, "theme.css", "base.css", "css-import"));
-  assert.ok(
-    hasEdge(output.edges, "theme.css", "vendor/reset.css", "css-import"),
-    "@import url(...) resolves",
-  );
-  assert.ok(
-    hasEdge(output.edges, "theme.css", "img/bg.png", "css-url"),
-    "url() in a declaration resolves",
-  );
+  expect(hasEdge(output.edges, "theme.css", "base.css", "css-import")).toBeTruthy();
+  expect(hasEdge(output.edges, "theme.css", "vendor/reset.css", "css-import"), "@import url(...) resolves").toBeTruthy();
+  expect(hasEdge(output.edges, "theme.css", "img/bg.png", "css-url"), "url() in a declaration resolves").toBeTruthy();
 });
 
 test("css analyzer skips external and protocol-relative URLs", async () => {
@@ -134,14 +117,14 @@ test("css analyzer skips external and protocol-relative URLs", async () => {
         context,
       ),
   );
-  assert.equal(output.edges.length, 0, "no edges for external resources");
+  expect(output.edges.length, "no edges for external resources").toBe(0);
 });
 
 test("sql analyzer is a registered stub: supports .sql, emits no edges", () => {
-  assert.equal(sqlAnalyzer.id, "sql");
-  assert.equal(sqlAnalyzer.supports("db/schema.sql"), true);
-  assert.equal(sqlAnalyzer.supports("src/app.ts"), false);
-  assert.deepEqual(sqlAnalyzer.analyze().edges, []);
+  expect(sqlAnalyzer.id).toBe("sql");
+  expect(sqlAnalyzer.supports("db/schema.sql")).toBe(true);
+  expect(sqlAnalyzer.supports("src/app.ts")).toBe(false);
+  expect(sqlAnalyzer.analyze().edges).toEqual([]);
 });
 
 test("merge: tree-sitter python/html edges supersede the regex floor for the same (from,to)", () => {
@@ -150,16 +133,16 @@ test("merge: tree-sitter python/html edges supersede the regex floor for the sam
     [{ from: "a.py", to: "b.py", kind: "py-import", confidence: 0.97 }],
   );
   const py = pyMerged.filter((e) => e.from === "a.py" && e.to === "b.py");
-  assert.equal(py.length, 1, "python import edges collapse to one");
-  assert.equal(py[0].kind, "py-import", "analyzer edge wins");
+  expect(py.length, "python import edges collapse to one").toBe(1);
+  expect(py[0].kind, "analyzer edge wins").toBe("py-import");
 
   const htmlMerged = mergeAnalyzerEdges(
     [{ from: "i.html", to: "a.js", kind: "html-resource-link", confidence: 0.9 }],
     [{ from: "i.html", to: "a.js", kind: "html-resource", confidence: 0.96 }],
   );
   const html = htmlMerged.filter((e) => e.from === "i.html" && e.to === "a.js");
-  assert.equal(html.length, 1);
-  assert.equal(html[0].kind, "html-resource");
+  expect(html.length).toBe(1);
+  expect(html[0].kind).toBe("html-resource");
 });
 
 test("graph-enrichment executor routes py-import into the imports bucket and supersedes the floor", async () => {
@@ -197,8 +180,8 @@ test("graph-enrichment executor routes py-import into the imports bucket and sup
   const imports = result.updated.graph_bundle.graphs.imports.filter(
     (e) => e.from === "a.py" && e.to === "b.py",
   );
-  assert.equal(imports.length, 1);
-  assert.equal(imports[0].kind, "py-import");
+  expect(imports.length).toBe(1);
+  expect(imports[0].kind).toBe("py-import");
 });
 
 // ── Parse-failure stderr warnings (OBS-f29f1d27) ─────────────────────────────
@@ -243,7 +226,7 @@ test("css-analyzer emits stderr warning on parse failure and still returns edges
     const { result } = await withCapturedStderr(() =>
       cssAnalyzer.analyze(paths.filter((p) => p.endsWith(".css")), context),
     );
-    assert.ok(Array.isArray(result.edges), "edges is always an array");
+    expect(Array.isArray(result.edges), "edges is always an array").toBeTruthy();
   });
   __resetTreeSitterForTests();
 });
@@ -254,7 +237,7 @@ test("python-analyzer emits stderr warning on parse failure and still returns ed
     const { result } = await withCapturedStderr(() =>
       pythonAnalyzer.analyze(paths.filter((p) => p.endsWith(".py")), context),
     );
-    assert.ok(Array.isArray(result.edges), "edges is always an array");
+    expect(Array.isArray(result.edges), "edges is always an array").toBeTruthy();
   });
   __resetTreeSitterForTests();
 });
@@ -265,7 +248,7 @@ test("html-analyzer emits stderr warning on parse failure and still returns edge
     const { result } = await withCapturedStderr(() =>
       htmlAnalyzer.analyze(paths.filter((p) => p.endsWith(".html")), context),
     );
-    assert.ok(Array.isArray(result.edges), "edges is always an array");
+    expect(Array.isArray(result.edges), "edges is always an array").toBeTruthy();
   });
   __resetTreeSitterForTests();
 });
@@ -294,10 +277,10 @@ test("tree-sitter analyzer omits and keeps the floor when web-tree-sitter is abs
       cacheRoot,
       analyzers: { python: "auto" },
     });
-    assert.equal(result.updated.analyzer_capability.status, "omitted");
-    assert.equal(JSON.stringify(result.updated.graph_bundle), floorJson);
+    expect(result.updated.analyzer_capability.status).toBe("omitted");
+    expect(JSON.stringify(result.updated.graph_bundle)).toBe(floorJson);
     const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "python");
-    assert.equal(entry.resolution, "absent");
+    expect(entry.resolution).toBe("absent");
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
@@ -324,7 +307,7 @@ test("cache reset seam clears all three module-level caches", async () => {
   const secondResult = await getTreeSitterParser("python");
   // On a machine without web-tree-sitter this is undefined; with it, a parser.
   // Either way the call must succeed without throwing.
-  assert.ok(secondResult === undefined || typeof secondResult === "object");
+  expect(secondResult === undefined || typeof secondResult === "object").toBeTruthy();
 
   __resetTreeSitterForTests();
 });

@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -133,8 +133,8 @@ test("decideNextStep covers representative priority states", () => {
     provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
     repo_manifest: createRepoManifest(),
   });
-  assert.equal(intakeDecision.selected_obligation, "file_disposition");
-  assert.equal(intakeDecision.selected_executor, "intake_executor");
+  expect(intakeDecision.selected_obligation).toBe("file_disposition");
+  expect(intakeDecision.selected_executor).toBe("intake_executor");
 
   const structureDecision = decideNextStep({
     provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
@@ -148,14 +148,14 @@ test("decideNextStep covers representative priority states", () => {
       completed_at: "2026-04-22T00:00:00Z",
     },
   });
-  assert.equal(structureDecision.selected_obligation, "structure_artifacts");
-  assert.equal(structureDecision.selected_executor, "structure_executor");
+  expect(structureDecision.selected_obligation).toBe("structure_artifacts");
+  expect(structureDecision.selected_executor).toBe("structure_executor");
 
   const agentDecision = decideNextStep(
     withArtifactMetadata(createDecisionBundle()),
   );
-  assert.equal(agentDecision.selected_obligation, "audit_tasks_completed");
-  assert.equal(agentDecision.selected_executor, "rolling_dispatch_executor");
+  expect(agentDecision.selected_obligation).toBe("audit_tasks_completed");
+  expect(agentDecision.selected_executor).toBe("rolling_dispatch_executor");
 
   const synthesisDecision = decideNextStep(
     withArtifactMetadata(
@@ -175,8 +175,8 @@ test("decideNextStep covers representative priority states", () => {
       }),
     ),
   );
-  assert.equal(synthesisDecision.selected_obligation, "synthesis_current");
-  assert.equal(synthesisDecision.selected_executor, "synthesis_executor");
+  expect(synthesisDecision.selected_obligation).toBe("synthesis_current");
+  expect(synthesisDecision.selected_executor).toBe("synthesis_executor");
 });
 
 test("shared helper advanceFixtureToPlanning returns planning bundle and lineIndex", async () => {
@@ -185,9 +185,9 @@ test("shared helper advanceFixtureToPlanning returns planning bundle and lineInd
 
     const { planning, lineIndex } = await advanceFixtureToPlanning(root);
 
-    assert.equal(planning.selected_executor, "planning_executor");
-    assert.ok(planning.updated_bundle.audit_tasks.length > 0);
-    assert.strictEqual(lineIndex, FIXTURE_LINE_INDEX);
+    expect(planning.selected_executor).toBe("planning_executor");
+    expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
+    expect(lineIndex).toBe(FIXTURE_LINE_INDEX);
   });
 });
 
@@ -197,13 +197,10 @@ test("advanceAudit planning stage builds tasks without requiring runtime validat
 
     const { planning } = await advanceFixtureToPlanning(root);
 
-    assert.equal(planning.selected_executor, "planning_executor");
-    assert.ok(planning.updated_bundle.audit_tasks.length > 0);
-    assert.equal(
-      findObligation(planning.audit_state, "runtime_validation_current")?.state,
-      "satisfied",
-    );
-    assert.equal(planning.next_likely_step, "audit_tasks_completed");
+    expect(planning.selected_executor).toBe("planning_executor");
+    expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
+    expect(findObligation(planning.audit_state, "runtime_validation_current")?.state).toBe("satisfied");
+    expect(planning.next_likely_step).toBe("audit_tasks_completed");
   });
 });
 
@@ -233,21 +230,19 @@ test("advanceAudit emits a structured run log threading obligation → executor 
       .map((line) => JSON.parse(line));
 
     // Every line carries an ISO timestamp.
-    assert.ok(events.every((event) => typeof event.ts === "string"));
-    assert.ok(events.every((event) => typeof event.correlationId === "string"));
+    expect(events.every((event) => typeof event.ts === "string")).toBeTruthy();
+    expect(events.every((event) => typeof event.correlationId === "string")).toBeTruthy();
 
     const secondInvocationStart = events.findIndex(
       (event, index) => index > 0 && event.kind === "obligation",
     );
-    assert.ok(secondInvocationStart > 0);
+    expect(secondInvocationStart > 0).toBeTruthy();
     const firstCorrelationId = events[0].correlationId;
     const secondCorrelationId = events[secondInvocationStart].correlationId;
-    assert.notEqual(firstCorrelationId, secondCorrelationId);
-    assert.ok(
-      events
+    expect(firstCorrelationId).not.toBe(secondCorrelationId);
+    expect(events
         .slice(0, secondInvocationStart)
-        .every((event) => event.correlationId === firstCorrelationId),
-    );
+        .every((event) => event.correlationId === firstCorrelationId)).toBeTruthy();
     // The third invocation (advanceAudit(preparedBundle)) starts at the next
     // "obligation" event after the second one. Events between second and third
     // invocations all share secondCorrelationId.
@@ -255,11 +250,9 @@ test("advanceAudit emits a structured run log threading obligation → executor 
       (event, index) => index > secondInvocationStart && event.kind === "obligation",
     );
     const endOfSecondInvocation = thirdInvocationStart > 0 ? thirdInvocationStart : events.length;
-    assert.ok(
-      events
+    expect(events
         .slice(secondInvocationStart, endOfSecondInvocation)
-        .every((event) => event.correlationId === secondCorrelationId),
-    );
+        .every((event) => event.correlationId === secondCorrelationId)).toBeTruthy();
 
     const obligations = events
       .filter((event) => event.kind === "obligation")
@@ -267,20 +260,20 @@ test("advanceAudit emits a structured run log threading obligation → executor 
     // First obligation is the top of the priority chain (provider_confirmation);
     // after the provider gate, the intake executor satisfies repo_manifest +
     // file_disposition together, so structure_artifacts follows.
-    assert.equal(obligations[0], "provider_confirmation");
-    assert.ok(obligations.includes("structure_artifacts"));
+    expect(obligations[0]).toBe("provider_confirmation");
+    expect(obligations.includes("structure_artifacts")).toBeTruthy();
 
     // Executor start/end pairs are emitted, and end carries a numeric duration.
-    assert.ok(events.some((event) => event.kind === "executor_start"));
+    expect(events.some((event) => event.kind === "executor_start")).toBeTruthy();
     const ends = events.filter((event) => event.kind === "executor_end");
-    assert.ok(ends.length > 0);
-    assert.ok(ends.every((event) => typeof event.duration_ms === "number"));
+    expect(ends.length > 0).toBeTruthy();
+    expect(ends.every((event) => typeof event.duration_ms === "number")).toBeTruthy();
 
     // Artifact writes are recorded.
     const artifacts = events
       .filter((event) => event.kind === "artifact_write")
       .map((event) => event.artifact);
-    assert.ok(artifacts.includes("repo_manifest.json"));
+    expect(artifacts.includes("repo_manifest.json")).toBeTruthy();
   });
 });
 
@@ -291,11 +284,11 @@ test("advanceAudit pauses on rolling_dispatch_executor handoff after planning ar
     const { planning } = await advanceFixtureToPlanning(root);
     const handoff = await advanceAudit(planning.updated_bundle);
 
-    assert.equal(handoff.selected_executor, "rolling_dispatch_executor");
-    assert.equal(handoff.selected_obligation, "audit_tasks_completed");
-    assert.equal(handoff.progress_made, false);
-    assert.equal(handoff.next_likely_step, "audit_tasks_completed");
-    assert.match(handoff.progress_summary, /not yet dispatched through advance-audit/i);
+    expect(handoff.selected_executor).toBe("rolling_dispatch_executor");
+    expect(handoff.selected_obligation).toBe("audit_tasks_completed");
+    expect(handoff.progress_made).toBe(false);
+    expect(handoff.next_likely_step).toBe("audit_tasks_completed");
+    expect(handoff.progress_summary).toMatch(/not yet dispatched through advance-audit/i);
   });
 });
 
@@ -314,14 +307,11 @@ test("advanceAudit ingests explicit audit results and advances toward synthesis"
       auditResults: results,
     });
 
-    assert.equal(ingest.selected_executor, "result_ingestion_executor");
-    assert.equal(ingest.selected_obligation, "forced:result_ingestion_executor");
-    assert.equal(
-      findObligation(ingest.audit_state, "audit_tasks_completed")?.state,
-      "satisfied",
-    );
-    assert.equal(ingest.updated_bundle.audit_results.length, results.length);
-    assert.equal(ingest.next_likely_step, "synthesis_current");
+    expect(ingest.selected_executor).toBe("result_ingestion_executor");
+    expect(ingest.selected_obligation).toBe("forced:result_ingestion_executor");
+    expect(findObligation(ingest.audit_state, "audit_tasks_completed")?.state).toBe("satisfied");
+    expect(ingest.updated_bundle.audit_results.length).toBe(results.length);
+    expect(ingest.next_likely_step).toBe("synthesis_current");
   });
 });
 
@@ -342,19 +332,13 @@ test("advanceAudit renders a final audit report after synthesis", async () => {
       preferredExecutor: "synthesis_executor",
     });
 
-    assert.equal(synthesis.selected_executor, "synthesis_executor");
-    assert.equal(synthesis.selected_obligation, "forced:synthesis_executor");
-    assert.match(synthesis.updated_bundle.audit_report, /# Audit Report/);
+    expect(synthesis.selected_executor).toBe("synthesis_executor");
+    expect(synthesis.selected_obligation).toBe("forced:synthesis_executor");
+    expect(synthesis.updated_bundle.audit_report).toMatch(/# Audit Report/);
     // Findings are re-keyed to content-derived ids at synthesis, so match the
     // (stable) title in the rendered section header rather than a packet id.
-    assert.match(
-      synthesis.updated_bundle.audit_report,
-      /### \S+ — Auth path lacks structured rejection telemetry/,
-    );
-    assert.equal(
-      findObligation(synthesis.audit_state, "synthesis_current")?.state,
-      "satisfied",
-    );
+    expect(synthesis.updated_bundle.audit_report).toMatch(/### \S+ — Auth path lacks structured rejection telemetry/);
+    expect(findObligation(synthesis.audit_state, "synthesis_current")?.state).toBe("satisfied");
   });
 });
 
@@ -371,11 +355,8 @@ test("advanceAudit reports missing mid-flow prerequisites with executor context"
         },
       ),
     (error) => {
-      assert.match(
-        error.message,
-        /advanceAudit result_ingestion_executor failed while resolving forced:result_ingestion_executor/i,
-      );
-      assert.match(error.message, /Cannot ingest results without coverage_matrix/i);
+      expect(error.message).toMatch(/advanceAudit result_ingestion_executor failed while resolving forced:result_ingestion_executor/i);
+      expect(error.message).toMatch(/Cannot ingest results without coverage_matrix/i);
       return true;
     },
   );
@@ -427,19 +408,19 @@ test("buildAuditReportModel handles empty inputs and unmatched runtime results c
     }],
   });
 
-  assert.equal(report.findings.length, 0);
-  assert.equal(report.work_blocks.length, 0);
-  assert.equal(report.summary.finding_count, 0);
-  assert.equal(report.summary.work_block_count, 0);
-  assert.equal(report.summary.audited_file_count, 1);
-  assert.equal(report.summary.excluded_file_count, 1);
-  assert.equal(report.summary.runtime_validation_status_breakdown.confirmed, 1);
-  assert.deepEqual(report.summary.lens_breakdown, {});
+  expect(report.findings.length).toBe(0);
+  expect(report.work_blocks.length).toBe(0);
+  expect(report.summary.finding_count).toBe(0);
+  expect(report.summary.work_block_count).toBe(0);
+  expect(report.summary.audited_file_count).toBe(1);
+  expect(report.summary.excluded_file_count).toBe(1);
+  expect(report.summary.runtime_validation_status_breakdown.confirmed).toBe(1);
+  expect(report.summary.lens_breakdown).toEqual({});
 
   const markdown = renderAuditReportMarkdown(report);
-  assert.match(markdown, /No remediation work blocks were generated\./);
-  assert.match(markdown, /No findings were recorded\./);
-  assert.doesNotMatch(markdown, /Lens breakdown:/);
+  expect(markdown).toMatch(/No remediation work blocks were generated\./);
+  expect(markdown).toMatch(/No findings were recorded\./);
+  expect(markdown).not.toMatch(/Lens breakdown:/);
 });
 
 test("buildAuditReportModel includes lens and pending runtime-validation breakdowns", () => {
@@ -533,18 +514,15 @@ test("buildAuditReportModel includes lens and pending runtime-validation breakdo
     },
   });
 
-  assert.deepEqual(report.summary.lens_breakdown, {
+  expect(report.summary.lens_breakdown).toEqual({
     maintainability: 1,
     security: 2,
   });
-  assert.equal(report.summary.runtime_validation_status_breakdown.confirmed, 1);
-  assert.equal(report.summary.runtime_validation_status_breakdown.pending, 2);
+  expect(report.summary.runtime_validation_status_breakdown.confirmed).toBe(1);
+  expect(report.summary.runtime_validation_status_breakdown.pending).toBe(2);
 
   const markdown = renderAuditReportMarkdown(report);
-  assert.match(
-    markdown,
-    /- Lens breakdown: maintainability: 1, security: 2/,
-  );
+  expect(markdown).toMatch(/- Lens breakdown: maintainability: 1, security: 2/);
 });
 
 test("buildAuditReportModel runtime breakdown omits pending without a manifest", () => {
@@ -561,7 +539,7 @@ test("buildAuditReportModel runtime breakdown omits pending without a manifest",
     },
   });
 
-  assert.deepEqual(report.summary.runtime_validation_status_breakdown, {
+  expect(report.summary.runtime_validation_status_breakdown).toEqual({
     confirmed: 1,
   });
 });
@@ -572,16 +550,9 @@ test("decideNextStep emits a warning reason when no executor is registered for t
     provider_confirmation: { confirmed_at: "2026-04-22T00:00:00Z", confirmed_by: "host" },
     repo_manifest: createRepoManifest(),
   });
-  assert.equal(normalDecision.selected_obligation, "file_disposition");
-  assert.ok(
-    normalDecision.selected_executor !== null,
-    "executor should be registered for file_disposition",
-  );
-  assert.match(
-    normalDecision.reason,
-    /Selected highest-priority actionable obligation file_disposition\./,
-    "normal path reason should reference the obligation id",
-  );
+  expect(normalDecision.selected_obligation).toBe("file_disposition");
+  expect(normalDecision.selected_executor !== null, "executor should be registered for file_disposition").toBeTruthy();
+  expect(normalDecision.reason, "normal path reason should reference the obligation id").toMatch(/Selected highest-priority actionable obligation file_disposition\./);
 });
 
 test("decideNextStep reason flags the gap when selected_executor is null", () => {
@@ -593,21 +564,11 @@ test("decideNextStep reason flags the gap when selected_executor is null", () =>
   const decision = decideNextStep({});
   if (decision.selected_executor === null && decision.selected_obligation !== null) {
     // Gap case: the reason MUST contain the sentinel phrase and the obligation id.
-    assert.match(
-      decision.reason,
-      /No executor found for obligation/,
-      "gap-case reason must contain the sentinel phrase",
-    );
-    assert.ok(
-      decision.reason.includes(decision.selected_obligation),
-      "gap-case reason must embed the obligation id",
-    );
+    expect(decision.reason, "gap-case reason must contain the sentinel phrase").toMatch(/No executor found for obligation/);
+    expect(decision.reason.includes(decision.selected_obligation), "gap-case reason must embed the obligation id").toBeTruthy();
   } else if (decision.selected_executor !== null) {
     // Normal case: the reason must reference the selected obligation.
-    assert.match(
-      decision.reason,
-      /Selected highest-priority actionable obligation/,
-    );
+    expect(decision.reason).toMatch(/Selected highest-priority actionable obligation/);
   }
   // Either branch exercises the relevant code path.
 });
@@ -621,11 +582,7 @@ test("every PRIORITY obligation maps to exactly one executor (E3 enforce-in-tool
     const owners = EXECUTOR_REGISTRY.filter((executor) =>
       executor.obligation_ids.includes(obligationId),
     );
-    assert.equal(
-      owners.length,
-      1,
-      `PRIORITY obligation "${obligationId}" must map to exactly one executor, found ${owners.length} (${owners.map((e) => e.id).join(", ")}).`,
-    );
+    expect(owners.length, `PRIORITY obligation "${obligationId}" must map to exactly one executor, found ${owners.length} (${owners.map((e) => e.id).join(", ")}).`).toBe(1);
   }
 });
 
@@ -735,50 +692,35 @@ test("buildAuditReportModel keeps identity-distinct findings separate while merg
     }],
   });
 
-  assert.equal(report.findings.length, 2);
-  assert.equal(report.summary.finding_count, 2);
+  expect(report.findings.length).toBe(2);
+  expect(report.summary.finding_count).toBe(2);
 
   const mergedFinding = report.findings[0];
-  assert.equal(mergedFinding.severity, "high");
-  assert.equal(mergedFinding.confidence, "high");
-  assert.equal(
-    mergedFinding.summary,
-    "Authentication failures are not logged consistently across auth helpers.",
-  );
-  assert.deepEqual(
-    mergedFinding.affected_files.map(
+  expect(mergedFinding.severity).toBe("high");
+  expect(mergedFinding.confidence).toBe("high");
+  expect(mergedFinding.summary).toBe("Authentication failures are not logged consistently across auth helpers.");
+  expect(mergedFinding.affected_files.map(
       (file) => `${file.path}:${file.line_start ?? ""}`,
-    ),
-    ["src/api/auth.ts:2", "src/lib/session.ts:10"],
-  );
-  assert.ok(
-    mergedFinding.evidence.some(
+    )).toEqual(["src/api/auth.ts:2", "src/lib/session.ts:10"]);
+  expect(mergedFinding.evidence.some(
       (entry) =>
         entry.includes("rv-orphan: confirmed") &&
         entry.includes("Detached runtime replay still corroborated the issue."),
-    ),
-  );
-  assert.ok(
-    mergedFinding.evidence.includes(
+    )).toBeTruthy();
+  expect(mergedFinding.evidence.includes(
       "external:eslint:src/api/auth.ts:Static analysis corroborated the auth-path gap.",
-    ),
-  );
-  assert.equal(
-    mergedFinding.evidence.some((entry) => /pending runtime evidence/i.test(entry)),
-    false,
-  );
+    )).toBeTruthy();
+  expect(mergedFinding.evidence.some((entry) => /pending runtime evidence/i.test(entry))).toBe(false);
 
   const distinctFinding = report.findings[1];
   // The identity-distinct finding stays separate (re-keyed to its own unique id,
   // not fused with the merged auth-path finding).
-  assert.ok(distinctFinding.id && distinctFinding.id !== mergedFinding.id);
-  assert.equal(distinctFinding.affected_files[0].path, "src/lib/session.ts");
+  expect(distinctFinding.id && distinctFinding.id !== mergedFinding.id).toBeTruthy();
+  expect(distinctFinding.affected_files[0].path).toBe("src/lib/session.ts");
 
   const markdown = renderAuditReportMarkdown(report);
-  assert.ok(markdown.includes(`### ${mergedFinding.id} — Missing audit trail`));
-  assert.ok(
-    markdown.includes(
+  expect(markdown.includes(`### ${mergedFinding.id} — Missing audit trail`)).toBeTruthy();
+  expect(markdown.includes(
       `### ${distinctFinding.id} — Session writes bypass audit hooks`,
-    ),
-  );
+    )).toBeTruthy();
 });

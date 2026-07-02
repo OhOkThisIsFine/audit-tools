@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,12 +6,9 @@ import { AuditFindingsReportSchema } from "audit-tools/shared";
 
 function assertMatchesJsonSchema(_schema, value, label) {
   const result = AuditFindingsReportSchema.safeParse(value);
-  assert.ok(
-    result.success,
-    `${label} should satisfy AuditFindingsReportSchema: ${
+  expect(result.success, `${label} should satisfy AuditFindingsReportSchema: ${
       result.success ? "" : JSON.stringify(result.error.issues)
-    }`,
-  );
+    }`).toBeTruthy();
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -72,7 +68,7 @@ function syntheticResults() {
 // narrative LLM would after reading the report — not the worker-packet ids.
 function idOf(report, title) {
   const found = report.findings.find((f) => f.title === title);
-  assert.ok(found, `no synthesized finding titled ${title}`);
+  expect(found, `no synthesized finding titled ${title}`).toBeTruthy();
   return found.id;
 }
 
@@ -103,27 +99,27 @@ function baseReport() {
 
 test("buildAuditFindingsReport wraps the model in the canonical contract", () => {
   const report = baseReport();
-  assert.equal(typeof report.contract_version, "string");
-  assert.ok(report.contract_version.length > 0);
-  assert.equal(report.summary.finding_count, 2);
-  assert.equal(report.findings.length, 2);
-  assert.ok(report.work_blocks.length >= 1);
+  expect(typeof report.contract_version).toBe("string");
+  expect(report.contract_version.length > 0).toBeTruthy();
+  expect(report.summary.finding_count).toBe(2);
+  expect(report.findings.length).toBe(2);
+  expect(report.work_blocks.length >= 1).toBeTruthy();
   // No narrative fields before the synthesis-narrative pass.
-  assert.equal(report.themes, undefined);
-  assert.equal(report.executive_summary, undefined);
-  assert.equal(report.top_risks, undefined);
+  expect(report.themes).toBe(undefined);
+  expect(report.executive_summary).toBe(undefined);
+  expect(report.top_risks).toBe(undefined);
   // Deterministic findings carry no theme tag yet.
-  assert.ok(report.findings.every((f) => f.theme_id === undefined));
+  expect(report.findings.every((f) => f.theme_id === undefined)).toBeTruthy();
   assertMatchesJsonSchema(null, report, "auditFindings");
 });
 
 test("deterministic report renders without narrative sections", () => {
   const markdown = renderAuditReportMarkdown(baseReport());
-  assert.match(markdown, /# Audit Report/);
-  assert.doesNotMatch(markdown, /## Executive Summary/);
-  assert.doesNotMatch(markdown, /## Top Risks/);
-  assert.doesNotMatch(markdown, /## Themes/);
-  assert.doesNotMatch(markdown, /- Theme:/);
+  expect(markdown).toMatch(/# Audit Report/);
+  expect(markdown).not.toMatch(/## Executive Summary/);
+  expect(markdown).not.toMatch(/## Top Risks/);
+  expect(markdown).not.toMatch(/## Themes/);
+  expect(markdown).not.toMatch(/- Theme:/);
 });
 
 test("applyNarrative tags findings, drops unknown ids, and round-trips theme_id", () => {
@@ -133,18 +129,18 @@ test("applyNarrative tags findings, drops unknown ids, and round-trips theme_id"
   const tokenId = idOf(report, "Token check is weak");
   const parseId = idOf(report, "Missing error handling");
 
-  assert.equal(enriched.themes.length, 1);
+  expect(enriched.themes.length).toBe(1);
   // Unknown finding id is dropped; real ones are retained.
-  assert.deepEqual(enriched.themes[0].finding_ids, [tokenId, parseId]);
-  assert.equal(enriched.executive_summary, "Two related input-trust weaknesses were found.");
-  assert.deepEqual(enriched.top_risks, [
+  expect(enriched.themes[0].finding_ids).toEqual([tokenId, parseId]);
+  expect(enriched.executive_summary).toBe("Two related input-trust weaknesses were found.");
+  expect(enriched.top_risks).toEqual([
     "Auth bypass via weak token",
     "Crash on malformed input",
   ]);
 
   const byId = Object.fromEntries(enriched.findings.map((f) => [f.id, f]));
-  assert.equal(byId[tokenId].theme_id, "T-1");
-  assert.equal(byId[parseId].theme_id, "T-1");
+  expect(byId[tokenId].theme_id).toBe("T-1");
+  expect(byId[parseId].theme_id).toBe("T-1");
 
   // The enriched canonical contract still validates.
   assertMatchesJsonSchema(null, enriched, "auditFindingsEnriched");
@@ -155,29 +151,29 @@ test("narrative-enriched report renders themes, summary, top risks (JSON↔markd
   const enriched = applyNarrative(report, syntheticNarrative(report));
   const markdown = renderAuditReportMarkdown(enriched);
 
-  assert.match(markdown, /## Executive Summary/);
-  assert.match(markdown, /Two related input-trust weaknesses were found\./);
-  assert.match(markdown, /## Top Risks/);
-  assert.match(markdown, /- Auth bypass via weak token/);
-  assert.match(markdown, /## Themes/);
-  assert.match(markdown, /### T-1 — Inputs trusted without validation/);
-  assert.match(markdown, /- Suggested fix pattern: Validate and normalize/);
+  expect(markdown).toMatch(/## Executive Summary/);
+  expect(markdown).toMatch(/Two related input-trust weaknesses were found\./);
+  expect(markdown).toMatch(/## Top Risks/);
+  expect(markdown).toMatch(/- Auth bypass via weak token/);
+  expect(markdown).toMatch(/## Themes/);
+  expect(markdown).toMatch(/### T-1 — Inputs trusted without validation/);
+  expect(markdown).toMatch(/- Suggested fix pattern: Validate and normalize/);
   // Note 2: the theme→finding mapping lives in the ## Themes section (the
   // per-finding block no longer repeats a `- Theme:` line).
-  assert.match(markdown, /- Findings: SEC-[0-9a-f]+, COR-[0-9a-f]+/);
+  expect(markdown).toMatch(/- Findings: SEC-[0-9a-f]+, COR-[0-9a-f]+/);
 });
 
 test("runSynthesisExecutor emits canonical findings and renders the report", () => {
   const results = syntheticResults();
   const run = runSynthesisExecutor({ audit_results: results }, results);
 
-  assert.ok(run.artifacts_written.includes("audit-findings.json"));
-  assert.ok(run.artifacts_written.includes("audit-report.md"));
-  assert.ok(run.updated.audit_findings);
-  assert.equal(run.updated.audit_findings.summary.finding_count, 2);
-  assert.equal(run.updated.audit_findings.themes, undefined);
-  assert.match(run.updated.audit_report, /# Audit Report/);
-  assert.doesNotMatch(run.updated.audit_report, /## Themes/);
+  expect(run.artifacts_written.includes("audit-findings.json")).toBeTruthy();
+  expect(run.artifacts_written.includes("audit-report.md")).toBeTruthy();
+  expect(run.updated.audit_findings).toBeTruthy();
+  expect(run.updated.audit_findings.summary.finding_count).toBe(2);
+  expect(run.updated.audit_findings.themes).toBe(undefined);
+  expect(run.updated.audit_report).toMatch(/# Audit Report/);
+  expect(run.updated.audit_report).not.toMatch(/## Themes/);
   assertMatchesJsonSchema(null, run.updated.audit_findings, "executorFindings");
 });
 
@@ -186,12 +182,12 @@ test("runSynthesisNarrativeExecutor omits cleanly without a narrative", () => {
   const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
 
   const run = runSynthesisNarrativeExecutor(synth, undefined);
-  assert.deepEqual(run.artifacts_written, ["synthesis-narrative.json"]);
-  assert.equal(run.updated.synthesis_narrative.status, "omitted");
-  assert.equal(run.updated.synthesis_narrative.theme_count, 0);
+  expect(run.artifacts_written).toEqual(["synthesis-narrative.json"]);
+  expect(run.updated.synthesis_narrative.status).toBe("omitted");
+  expect(run.updated.synthesis_narrative.theme_count).toBe(0);
   // Deterministic report is unchanged.
-  assert.doesNotMatch(run.updated.audit_report, /## Themes/);
-  assert.equal(run.updated.audit_findings.themes, undefined);
+  expect(run.updated.audit_report).not.toMatch(/## Themes/);
+  expect(run.updated.audit_findings.themes).toBe(undefined);
 });
 
 test("runSynthesisNarrativeExecutor omits narrative and writes base findings when audit_findings is absent (needsBaseWrite=true)", () => {
@@ -202,14 +198,14 @@ test("runSynthesisNarrativeExecutor omits narrative and writes base findings whe
   const run = runSynthesisNarrativeExecutor(bundle, undefined);
 
   // Both artifacts must be written because needsBaseWrite is true
-  assert.deepEqual(run.artifacts_written, ["audit-findings.json", "synthesis-narrative.json"]);
+  expect(run.artifacts_written).toEqual(["audit-findings.json", "synthesis-narrative.json"]);
   // Findings are built from scratch
-  assert.ok(run.updated.audit_findings);
-  assert.equal(run.updated.audit_findings.summary.finding_count, 2);
+  expect(run.updated.audit_findings).toBeTruthy();
+  expect(run.updated.audit_findings.summary.finding_count).toBe(2);
   // No narrative was applied — themes should be absent
-  assert.equal(run.updated.audit_findings.themes, undefined);
+  expect(run.updated.audit_findings.themes).toBe(undefined);
   // Narrative record reflects omitted status
-  assert.equal(run.updated.synthesis_narrative.status, "omitted");
+  expect(run.updated.synthesis_narrative.status).toBe("omitted");
 });
 
 test("runSynthesisNarrativeExecutor applies a provider narrative", () => {
@@ -217,14 +213,14 @@ test("runSynthesisNarrativeExecutor applies a provider narrative", () => {
   const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
 
   const run = runSynthesisNarrativeExecutor(synth, syntheticNarrative(synth.audit_findings));
-  assert.ok(run.artifacts_written.includes("audit-findings.json"));
-  assert.ok(run.artifacts_written.includes("audit-report.md"));
-  assert.ok(run.artifacts_written.includes("synthesis-narrative.json"));
-  assert.equal(run.updated.synthesis_narrative.status, "applied");
-  assert.equal(run.updated.synthesis_narrative.theme_count, 1);
-  assert.equal(run.updated.synthesis_narrative.top_risk_count, 2);
-  assert.equal(run.updated.audit_findings.themes.length, 1);
-  assert.match(run.updated.audit_report, /## Themes/);
+  expect(run.artifacts_written.includes("audit-findings.json")).toBeTruthy();
+  expect(run.artifacts_written.includes("audit-report.md")).toBeTruthy();
+  expect(run.artifacts_written.includes("synthesis-narrative.json")).toBeTruthy();
+  expect(run.updated.synthesis_narrative.status).toBe("applied");
+  expect(run.updated.synthesis_narrative.theme_count).toBe(1);
+  expect(run.updated.synthesis_narrative.top_risk_count).toBe(2);
+  expect(run.updated.audit_findings.themes.length).toBe(1);
+  expect(run.updated.audit_report).toMatch(/## Themes/);
   assertMatchesJsonSchema(null, run.updated.audit_findings, "appliedFindings");
 });
 
@@ -237,10 +233,10 @@ test("advanceAudit forced synthesis_narrative_executor applies and records the n
     narrativeResults: syntheticNarrative(synth.audit_findings),
   });
 
-  assert.equal(advanced.selected_executor, "synthesis_narrative_executor");
-  assert.equal(advanced.updated_bundle.synthesis_narrative.status, "applied");
-  assert.equal(advanced.updated_bundle.audit_findings.themes.length, 1);
+  expect(advanced.selected_executor).toBe("synthesis_narrative_executor");
+  expect(advanced.updated_bundle.synthesis_narrative.status).toBe("applied");
+  expect(advanced.updated_bundle.audit_findings.themes.length).toBe(1);
   const tokenId = idOf(synth.audit_findings, "Token check is weak");
   const f1 = advanced.updated_bundle.audit_findings.findings.find((f) => f.id === tokenId);
-  assert.equal(f1.theme_id, "T-1");
+  expect(f1.theme_id).toBe("T-1");
 });

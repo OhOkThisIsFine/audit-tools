@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildFlowCoverage } = await import("../../src/audit/orchestrator/flowCoverage.ts");
 
@@ -56,20 +55,14 @@ test("buildFlowCoverage status=complete when all required lenses are covered acr
   ]);
 
   const result = buildFlowCoverage(manifest, matrix);
-  assert.equal(result.flows.length, 1);
+  expect(result.flows.length).toBe(1);
   const flow = result.flows[0];
 
-  assert.equal(flow.status, "complete");
-  assert.deepEqual(flow.required_lenses.sort(), ["reliability", "security"]);
-  assert.ok(
-    flow.completed_lenses.includes("security"),
-    "completed_lenses must include security",
-  );
-  assert.ok(
-    flow.completed_lenses.includes("reliability"),
-    "completed_lenses must include reliability",
-  );
-  assert.equal(flow.completed_lenses.length, 2);
+  expect(flow.status).toBe("complete");
+  expect(flow.required_lenses.sort()).toEqual(["reliability", "security"]);
+  expect(flow.completed_lenses.includes("security"), "completed_lenses must include security").toBeTruthy();
+  expect(flow.completed_lenses.includes("reliability"), "completed_lenses must include reliability").toBeTruthy();
+  expect(flow.completed_lenses.length).toBe(2);
 });
 
 // ---------------------------------------------------------------------------
@@ -88,9 +81,9 @@ test("buildFlowCoverage status=partial when only some required lenses are covere
   const result = buildFlowCoverage(manifest, matrix);
   const flow = result.flows[0];
 
-  assert.equal(flow.status, "partial");
-  assert.deepEqual(flow.required_lenses.sort(), ["reliability", "security"]);
-  assert.deepEqual(flow.completed_lenses, ["security"]);
+  expect(flow.status).toBe("partial");
+  expect(flow.required_lenses.sort()).toEqual(["reliability", "security"]);
+  expect(flow.completed_lenses).toEqual(["security"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -109,9 +102,9 @@ test("buildFlowCoverage status=pending when no required lenses are covered", () 
   const result = buildFlowCoverage(manifest, matrix);
   const flow = result.flows[0];
 
-  assert.equal(flow.status, "pending");
-  assert.deepEqual(flow.required_lenses, ["correctness"]);
-  assert.deepEqual(flow.completed_lenses, []);
+  expect(flow.status).toBe("pending");
+  expect(flow.required_lenses).toEqual(["correctness"]);
+  expect(flow.completed_lenses).toEqual([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -133,11 +126,11 @@ test("COR-59c25418: lensSetForFlow accepts architecture, maintainability, config
   const flow = result.flows[0];
 
   // All three are valid lenses — they must appear in required_lenses.
-  assert.deepEqual(flow.required_lenses.sort(), ["architecture", "config_deployment", "maintainability"]);
+  expect(flow.required_lenses.sort()).toEqual(["architecture", "config_deployment", "maintainability"]);
   // Two of three are completed.
-  assert.deepEqual(flow.completed_lenses.sort(), ["architecture", "maintainability"]);
+  expect(flow.completed_lenses.sort()).toEqual(["architecture", "maintainability"]);
   // config_deployment is required but not completed → partial.
-  assert.equal(flow.status, "partial");
+  expect(flow.status).toBe("partial");
 });
 
 test("COR-59c25418: lensSetForFlow still drops truly invalid (unknown) concern strings", () => {
@@ -153,9 +146,9 @@ test("COR-59c25418: lensSetForFlow still drops truly invalid (unknown) concern s
   const flow = result.flows[0];
 
   // "not_a_real_lens" must be filtered out; the two valid lenses are accepted.
-  assert.deepEqual(flow.required_lenses.sort(), ["reliability", "security"]);
-  assert.deepEqual(flow.completed_lenses.sort(), ["reliability", "security"]);
-  assert.equal(flow.status, "complete");
+  expect(flow.required_lenses.sort()).toEqual(["reliability", "security"]);
+  expect(flow.completed_lenses.sort()).toEqual(["reliability", "security"]);
+  expect(flow.status).toBe("complete");
 });
 
 // ---------------------------------------------------------------------------
@@ -175,9 +168,9 @@ test("lensSetForFlow keeps all valid lenses (including architecture) and drops t
   const flow = result.flows[0];
 
   // All three are valid lenses — all survive the isLens filter.
-  assert.deepEqual(flow.required_lenses.sort(), ["architecture", "reliability", "security"]);
-  assert.deepEqual(flow.completed_lenses, ["security"]);
-  assert.equal(flow.status, "partial");
+  expect(flow.required_lenses.sort()).toEqual(["architecture", "reliability", "security"]);
+  expect(flow.completed_lenses).toEqual(["security"]);
+  expect(flow.status).toBe("partial");
 });
 
 // ---------------------------------------------------------------------------
@@ -201,8 +194,8 @@ test("buildFlowCoverage ignores excluded files when computing completed lenses",
   const flow = result.flows[0];
 
   // The excluded record's completed_lenses must not count.
-  assert.deepEqual(flow.completed_lenses, []);
-  assert.equal(flow.status, "pending");
+  expect(flow.completed_lenses).toEqual([]);
+  expect(flow.status).toBe("pending");
 });
 
 // ---------------------------------------------------------------------------
@@ -222,7 +215,7 @@ test("buildFlowCoverage coverage can be satisfied across multiple paths", () => 
   const result = buildFlowCoverage(manifest, matrix);
   const flow = result.flows[0];
 
-  assert.equal(flow.status, "complete");
-  assert.deepEqual(flow.completed_lenses.sort(), ["reliability", "security"]);
-  assert.deepEqual(flow.required_lenses.sort(), ["reliability", "security"]);
+  expect(flow.status).toBe("complete");
+  expect(flow.completed_lenses.sort()).toEqual(["reliability", "security"]);
+  expect(flow.required_lenses.sort()).toEqual(["reliability", "security"]);
 });

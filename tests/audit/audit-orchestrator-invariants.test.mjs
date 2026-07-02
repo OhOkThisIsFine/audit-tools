@@ -18,8 +18,7 @@
  * INV-08: no hardcoded model identities anywhere in orchestrator source
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,14 +39,8 @@ const { AGENT_FEEDBACK_FILENAME } = await import("audit-tools/shared");
 
 test("INV-03: scope.json → coverage_matrix is in ARTIFACT_DEPENDENTS_MAP", () => {
   const scopeDeps = ARTIFACT_DEPENDENTS_MAP["scope.json"];
-  assert.ok(
-    Array.isArray(scopeDeps),
-    "scope.json must have a dependents entry in ARTIFACT_DEPENDENTS_MAP",
-  );
-  assert.ok(
-    scopeDeps.includes("coverage_matrix.json"),
-    "scope.json must list coverage_matrix.json as a dependent so a scope change re-stales coverage",
-  );
+  expect(Array.isArray(scopeDeps), "scope.json must have a dependents entry in ARTIFACT_DEPENDENTS_MAP").toBeTruthy();
+  expect(scopeDeps.includes("coverage_matrix.json"), "scope.json must list coverage_matrix.json as a dependent so a scope change re-stales coverage").toBeTruthy();
 });
 
 test("INV-03: scope.json has direct edges to coverage_matrix.json AND audit_tasks.json", () => {
@@ -56,14 +49,8 @@ test("INV-03: scope.json has direct edges to coverage_matrix.json AND audit_task
   // carries stale tasks built under the old scope — the transitive path
   // scope→coverage_matrix→audit_tasks only fires when coverage_matrix content changes.
   const scopeDeps = ARTIFACT_DEPENDENTS_MAP["scope.json"] ?? [];
-  assert.ok(
-    scopeDeps.includes("coverage_matrix.json"),
-    "scope.json must list coverage_matrix.json as a direct dependent",
-  );
-  assert.ok(
-    scopeDeps.includes("audit_tasks.json"),
-    "scope.json must list audit_tasks.json as a DIRECT dependent (ARC-cebe3421-3: scope change that produces identical coverage_matrix content must still re-stale tasks)",
-  );
+  expect(scopeDeps.includes("coverage_matrix.json"), "scope.json must list coverage_matrix.json as a direct dependent").toBeTruthy();
+  expect(scopeDeps.includes("audit_tasks.json"), "scope.json must list audit_tasks.json as a DIRECT dependent (ARC-cebe3421-3: scope change that produces identical coverage_matrix content must still re-stale tasks)").toBeTruthy();
 });
 
 test("INV-03: coverage_matrix.json is downstream of scope.json transitively to flow_coverage.json and audit-report.md", () => {
@@ -85,18 +72,9 @@ test("INV-03: coverage_matrix.json is downstream of scope.json transitively to f
   }
 
   const fromScope = transitiveDownstream("scope.json");
-  assert.ok(
-    fromScope.has("coverage_matrix.json"),
-    "scope.json must transitively reach coverage_matrix.json",
-  );
-  assert.ok(
-    fromScope.has("flow_coverage.json"),
-    "scope.json must transitively reach flow_coverage.json (via coverage_matrix)",
-  );
-  assert.ok(
-    fromScope.has("audit-report.md"),
-    "scope.json must transitively reach audit-report.md so scope changes re-stale synthesis",
-  );
+  expect(fromScope.has("coverage_matrix.json"), "scope.json must transitively reach coverage_matrix.json").toBeTruthy();
+  expect(fromScope.has("flow_coverage.json"), "scope.json must transitively reach flow_coverage.json (via coverage_matrix)").toBeTruthy();
+  expect(fromScope.has("audit-report.md"), "scope.json must transitively reach audit-report.md so scope changes re-stale synthesis").toBeTruthy();
 });
 
 test("INV-03: planning_executor write set is covered by ARTIFACT_DEPENDENTS_MAP as upstream sources", () => {
@@ -119,10 +97,7 @@ test("INV-03: planning_executor write set is covered by ARTIFACT_DEPENDENTS_MAP 
     ...Object.values(ARTIFACT_DEPENDENTS_MAP).flat(),
   ]);
   for (const artifact of planningWriteSet) {
-    assert.ok(
-      allKnownArtifacts.has(artifact),
-      `planning_executor writes "${artifact}" but it is absent from ARTIFACT_DEPENDENTS_MAP (neither key nor value) — staleness cannot propagate to/from it`,
-    );
+    expect(allKnownArtifacts.has(artifact), `planning_executor writes "${artifact}" but it is absent from ARTIFACT_DEPENDENTS_MAP (neither key nor value) — staleness cannot propagate to/from it`).toBeTruthy();
   }
 });
 
@@ -133,10 +108,7 @@ test("INV-03: synthesis_executor write set is reachable from planning artifacts 
   const synthesisOutputs = ["audit-report.md", "audit-findings.json"];
   const allDownstreams = new Set(Object.values(ARTIFACT_DEPENDENTS_MAP).flat());
   for (const artifact of synthesisOutputs) {
-    assert.ok(
-      allDownstreams.has(artifact) || Object.keys(ARTIFACT_DEPENDENTS_MAP).includes(artifact),
-      `synthesis output "${artifact}" must appear in ARTIFACT_DEPENDENTS_MAP`,
-    );
+    expect(allDownstreams.has(artifact) || Object.keys(ARTIFACT_DEPENDENTS_MAP).includes(artifact), `synthesis output "${artifact}" must appear in ARTIFACT_DEPENDENTS_MAP`).toBeTruthy();
   }
 });
 
@@ -171,11 +143,7 @@ test("INV-04: computeStaleArtifacts is fixpoint-idempotent on an unchanged bundl
   // Second derivation on identical bundle — must produce identical result
   const stale2 = computeStaleArtifacts(withMeta);
 
-  assert.deepEqual(
-    [...stale1].sort(),
-    [...stale2].sort(),
-    "computeStaleArtifacts must be idempotent: same input produces same stale set",
-  );
+  expect([...stale1].sort(), "computeStaleArtifacts must be idempotent: same input produces same stale set").toEqual([...stale2].sort());
 });
 
 test("INV-04: a self-consistent bundle produces an empty stale set (no false positive staleness)", () => {
@@ -200,11 +168,7 @@ test("INV-04: a self-consistent bundle produces an empty stale set (no false pos
   const withMeta = { ...bundle, artifact_metadata: metadata };
   const stale = computeStaleArtifacts(withMeta);
 
-  assert.equal(
-    stale.size,
-    0,
-    `A self-consistent bundle should have no stale artifacts, but got: [${[...stale].join(", ")}]`,
-  );
+  expect(stale.size, `A self-consistent bundle should have no stale artifacts, but got: [${[...stale].join(", ")}]`).toBe(0);
 });
 
 test("INV-04: re-deriving staleness after a no-op advance yields identical stale set (no oscillation)", () => {
@@ -233,8 +197,8 @@ test("INV-04: re-deriving staleness after a no-op advance yields identical stale
   // Second run: re-derive on the exact same bundle
   const stale2 = computeStaleArtifacts(bundleWithMeta);
 
-  assert.deepEqual([...stale1].sort(), [...stale2].sort(), "staleness fixpoint must be stable");
-  assert.equal(stale1.size, 0, `expected empty stale set for consistent bundle, got [${[...stale1].join(", ")}]`);
+  expect([...stale1].sort(), "staleness fixpoint must be stable").toEqual([...stale2].sort());
+  expect(stale1.size, `expected empty stale set for consistent bundle, got [${[...stale1].join(", ")}]`).toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -269,11 +233,7 @@ test("INV-05: ARTIFACT_DEPENDS_ON_MAP (the canonical X-depends-on-Y table) is ac
     visit(node, []);
   }
 
-  assert.equal(
-    cycles.length,
-    0,
-    `ARTIFACT_DEPENDENCIES_MAP must be acyclic. Detected cycle(s):\n${cycles.map((c) => c.join(" → ")).join("\n")}`,
-  );
+  expect(cycles.length, `ARTIFACT_DEPENDENCIES_MAP must be acyclic. Detected cycle(s):\n${cycles.map((c) => c.join(" → ")).join("\n")}`).toBe(0);
 });
 
 test("INV-05: computeArtifactMetadata processes a full planning bundle without throwing (dependency-first order works)", () => {
@@ -299,14 +259,8 @@ test("INV-05: computeArtifactMetadata processes a full planning bundle without t
 
   // Should complete without throwing and return a valid metadata manifest.
   const metadata = computeArtifactMetadata(bundle);
-  assert.ok(
-    metadata && typeof metadata === "object" && typeof metadata.artifacts === "object",
-    "computeArtifactMetadata must return a valid ArtifactMetadataManifest",
-  );
-  assert.ok(
-    Object.keys(metadata.artifacts).length > 0,
-    "metadata must contain at least one artifact entry",
-  );
+  expect(metadata && typeof metadata === "object" && typeof metadata.artifacts === "object", "computeArtifactMetadata must return a valid ArtifactMetadataManifest").toBeTruthy();
+  expect(Object.keys(metadata.artifacts).length > 0, "metadata must contain at least one artifact entry").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -320,24 +274,16 @@ test("INV-06: audit_results_ingested is satisfied for a zero-task run (no tasks,
   const zeroTaskBundle = { audit_tasks: [] };
   const state = deriveAuditState(zeroTaskBundle);
   const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  assert.ok(obligation, "audit_results_ingested obligation must be present");
-  assert.equal(
-    obligation.state,
-    "satisfied",
-    "audit_results_ingested must be 'satisfied' when audit_tasks is empty (zero-task bypass)",
-  );
+  expect(obligation, "audit_results_ingested obligation must be present").toBeTruthy();
+  expect(obligation.state, "audit_results_ingested must be 'satisfied' when audit_tasks is empty (zero-task bypass)").toBe("satisfied");
 });
 
 test("INV-06: audit_results_ingested is satisfied when audit_tasks is absent (no tasks planned)", () => {
   const bundle = {};
   const state = deriveAuditState(bundle);
   const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  assert.ok(obligation, "audit_results_ingested must be derived");
-  assert.equal(
-    obligation.state,
-    "satisfied",
-    "audit_results_ingested must be 'satisfied' when no tasks are planned",
-  );
+  expect(obligation, "audit_results_ingested must be derived").toBeTruthy();
+  expect(obligation.state, "audit_results_ingested must be 'satisfied' when no tasks are planned").toBe("satisfied");
 });
 
 test("INV-06: audit_results_ingested is missing when tasks are present but audit_results is absent", () => {
@@ -357,12 +303,8 @@ test("INV-06: audit_results_ingested is missing when tasks are present but audit
   };
   const state = deriveAuditState(bundle);
   const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  assert.ok(obligation, "audit_results_ingested must be derived");
-  assert.equal(
-    obligation.state,
-    "missing",
-    "audit_results_ingested must be 'missing' when tasks are present but audit_results is absent",
-  );
+  expect(obligation, "audit_results_ingested must be derived").toBeTruthy();
+  expect(obligation.state, "audit_results_ingested must be 'missing' when tasks are present but audit_results is absent").toBe("missing");
 });
 
 test("INV-06: audit_results_ingested is satisfied when all tasks have matching results", () => {
@@ -390,7 +332,7 @@ test("INV-06: audit_results_ingested is satisfied when all tasks have matching r
   };
   const state = deriveAuditState(bundle);
   const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  assert.equal(obligation?.state, "satisfied", "audit_results_ingested must be satisfied when results are present");
+  expect(obligation?.state, "audit_results_ingested must be satisfied when results are present").toBe("satisfied");
 });
 
 // ---------------------------------------------------------------------------
@@ -421,10 +363,7 @@ test("INV-07: orchestrator source files contain no per-ecosystem conditional bra
   for (const filePath of filesToCheck) {
     const src = await readFile(filePath, "utf8");
     for (const pattern of forbiddenPatterns) {
-      assert.ok(
-        !pattern.test(src),
-        `${filePath} contains a per-ecosystem language branch (pattern: ${pattern}) — obligation/planning code must be language-neutral`,
-      );
+      expect(!pattern.test(src), `${filePath} contains a per-ecosystem language branch (pattern: ${pattern}) — obligation/planning code must be language-neutral`).toBeTruthy();
     }
   }
 });
@@ -458,11 +397,7 @@ test("INV-08: orchestrator source files contain no hardcoded model names or wind
     }
   }
 
-  assert.equal(
-    violations.length,
-    0,
-    `Orchestrator source must not hardcode model identities. Violations:\n${violations.join("\n")}`,
-  );
+  expect(violations.length, `Orchestrator source must not hardcode model identities. Violations:\n${violations.join("\n")}`).toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -503,18 +438,10 @@ test("INV-09: stale design_assessment.json does NOT activate legacyReviewed — 
   const state = deriveAuditState(staleBundle);
   const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
   const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
-  assert.ok(contract, "design_review_contract_completed must be present");
-  assert.ok(conceptual, "design_review_conceptual_completed must be present");
-  assert.equal(
-    contract.state,
-    "missing",
-    "design_review_contract_completed must be missing when design_assessment.json is stale (legacyReviewed gate)",
-  );
-  assert.equal(
-    conceptual.state,
-    "missing",
-    "design_review_conceptual_completed must be missing when design_assessment.json is stale (legacyReviewed gate)",
-  );
+  expect(contract, "design_review_contract_completed must be present").toBeTruthy();
+  expect(conceptual, "design_review_conceptual_completed must be present").toBeTruthy();
+  expect(contract.state, "design_review_contract_completed must be missing when design_assessment.json is stale (legacyReviewed gate)").toBe("missing");
+  expect(conceptual.state, "design_review_conceptual_completed must be missing when design_assessment.json is stale (legacyReviewed gate)").toBe("missing");
 });
 
 test("INV-09: non-stale legacy design_assessment (reviewed:true) still satisfies both review obligations", () => {
@@ -530,20 +457,12 @@ test("INV-09: non-stale legacy design_assessment (reviewed:true) still satisfies
   const state = deriveAuditState(bundle);
   const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
   const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
-  assert.ok(contract, "design_review_contract_completed must be present");
-  assert.ok(conceptual, "design_review_conceptual_completed must be present");
+  expect(contract, "design_review_contract_completed must be present").toBeTruthy();
+  expect(conceptual, "design_review_conceptual_completed must be present").toBeTruthy();
   // Without metadata, computeStaleArtifacts returns an empty stale set,
   // so design_assessment.json is NOT in the stale set → legacyReviewed fires.
-  assert.equal(
-    contract.state,
-    "satisfied",
-    "non-stale legacy reviewed:true must satisfy design_review_contract_completed",
-  );
-  assert.equal(
-    conceptual.state,
-    "satisfied",
-    "non-stale legacy reviewed:true must satisfy design_review_conceptual_completed",
-  );
+  expect(contract.state, "non-stale legacy reviewed:true must satisfy design_review_contract_completed").toBe("satisfied");
+  expect(conceptual.state, "non-stale legacy reviewed:true must satisfy design_review_conceptual_completed").toBe("satisfied");
 });
 
 test("INV-09: split design_assessment (contract_reviewed + conceptual_reviewed) satisfies both obligations regardless of staleness", () => {
@@ -560,8 +479,8 @@ test("INV-09: split design_assessment (contract_reviewed + conceptual_reviewed) 
   const state = deriveAuditState(bundle);
   const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
   const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
-  assert.equal(contract?.state, "satisfied", "contract_reviewed=true must satisfy contract obligation");
-  assert.equal(conceptual?.state, "satisfied", "conceptual_reviewed=true must satisfy conceptual obligation");
+  expect(contract?.state, "contract_reviewed=true must satisfy contract obligation").toBe("satisfied");
+  expect(conceptual?.state, "conceptual_reviewed=true must satisfy conceptual obligation").toBe("satisfied");
 });
 
 // ---------------------------------------------------------------------------
@@ -592,14 +511,8 @@ test("INV-10: a scope change stales audit_tasks.json even when coverage_matrix c
   };
 
   const stale = computeStaleArtifacts(changedScopeBundle);
-  assert.ok(
-    stale.has("coverage_matrix.json"),
-    "coverage_matrix.json must be stale when scope changes",
-  );
-  assert.ok(
-    stale.has("audit_tasks.json"),
-    "audit_tasks.json must be stale when scope changes (direct edge guards against identical-coverage no-fire)",
-  );
+  expect(stale.has("coverage_matrix.json"), "coverage_matrix.json must be stale when scope changes").toBeTruthy();
+  expect(stale.has("audit_tasks.json"), "audit_tasks.json must be stale when scope changes (direct edge guards against identical-coverage no-fire)").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -629,14 +542,6 @@ test("INV-11: all ARTIFACT_DEPENDENTS_MAP keys and values are known artifact fil
     }
   }
 
-  assert.deepEqual(
-    unknownKeys,
-    [],
-    `ARTIFACT_DEPENDENTS_MAP keys that are not known artifact filenames: ${unknownKeys.join(", ")}`,
-  );
-  assert.deepEqual(
-    unknownValues,
-    [],
-    `ARTIFACT_DEPENDENTS_MAP values that are not known artifact filenames: ${unknownValues.join(", ")}`,
-  );
+  expect(unknownKeys, `ARTIFACT_DEPENDENTS_MAP keys that are not known artifact filenames: ${unknownKeys.join(", ")}`).toEqual([]);
+  expect(unknownValues, `ARTIFACT_DEPENDENTS_MAP values that are not known artifact filenames: ${unknownValues.join(", ")}`).toEqual([]);
 });

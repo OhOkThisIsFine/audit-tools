@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect, describe, it } from "vitest";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
 
 const { isTrivialAuditPath, autoCompleteTrivialCoverage } =
@@ -7,67 +6,67 @@ const { isTrivialAuditPath, autoCompleteTrivialCoverage } =
 
 // ── isTrivialAuditPath — __init__.py special case ────────────────────────────
 
-await test("isTrivialAuditPath returns true for __init__.py with lineCount <= 3", async (t) => {
-  await t.test("lineCount 1", () => {
-    assert.equal(isTrivialAuditPath("pkg/__init__.py", 1), true);
+describe("isTrivialAuditPath returns true for __init__.py with lineCount <= 3", () => {
+  it("lineCount 1", () => {
+    expect(isTrivialAuditPath("pkg/__init__.py", 1)).toBe(true);
   });
 
-  await t.test("lineCount 3 (boundary)", () => {
-    assert.equal(isTrivialAuditPath("pkg/__init__.py", 3), true);
+  it("lineCount 3 (boundary)", () => {
+    expect(isTrivialAuditPath("pkg/__init__.py", 3)).toBe(true);
   });
 
-  await t.test("lineCount 0 short-circuits before name check — also true", () => {
-    assert.equal(isTrivialAuditPath("nested/a/b/__init__.py", 0), true);
+  it("lineCount 0 short-circuits before name check — also true", () => {
+    expect(isTrivialAuditPath("nested/a/b/__init__.py", 0)).toBe(true);
   });
 
-  await t.test("no directory prefix", () => {
-    assert.equal(isTrivialAuditPath("__init__.py", 3), true);
-  });
-});
-
-await test("isTrivialAuditPath returns false for __init__.py with lineCount > 3", async (t) => {
-  await t.test("lineCount 4 (first non-trivial)", () => {
-    assert.equal(isTrivialAuditPath("pkg/__init__.py", 4), false);
-  });
-
-  await t.test("lineCount 100", () => {
-    assert.equal(isTrivialAuditPath("pkg/__init__.py", 100), false);
+  it("no directory prefix", () => {
+    expect(isTrivialAuditPath("__init__.py", 3)).toBe(true);
   });
 });
 
-await test("isTrivialAuditPath returns false for __init__.py when hasExternalSignal is true", async (t) => {
-  await t.test("external signal overrides the trivial rule", () => {
-    assert.equal(isTrivialAuditPath("pkg/__init__.py", 1, true), false);
+describe("isTrivialAuditPath returns false for __init__.py with lineCount > 3", () => {
+  it("lineCount 4 (first non-trivial)", () => {
+    expect(isTrivialAuditPath("pkg/__init__.py", 4)).toBe(false);
+  });
+
+  it("lineCount 100", () => {
+    expect(isTrivialAuditPath("pkg/__init__.py", 100)).toBe(false);
   });
 });
 
-await test("isTrivialAuditPath is case-insensitive for __init__.py basename check", async (t) => {
-  await t.test("uppercased basename and directory", () => {
-    assert.equal(isTrivialAuditPath("PKG/__INIT__.PY", 2), true);
+describe("isTrivialAuditPath returns false for __init__.py when hasExternalSignal is true", () => {
+  it("external signal overrides the trivial rule", () => {
+    expect(isTrivialAuditPath("pkg/__init__.py", 1, true)).toBe(false);
+  });
+});
+
+describe("isTrivialAuditPath is case-insensitive for __init__.py basename check", () => {
+  it("uppercased basename and directory", () => {
+    expect(isTrivialAuditPath("PKG/__INIT__.PY", 2)).toBe(true);
   });
 });
 
 // TST-f0b6f64e: lineCount=0 short-circuits before the __init__.py name check —
 // any file with zero lines is trivial regardless of its name.
-await test("isTrivialAuditPath returns true for a non-__init__.py file with lineCount 0", async (t) => {
-  await t.test("regular .ts file with 0 lines is trivial", () => {
-    assert.equal(isTrivialAuditPath("src/generated/stub.ts", 0), true);
+describe("isTrivialAuditPath returns true for a non-__init__.py file with lineCount 0", () => {
+  it("regular .ts file with 0 lines is trivial", () => {
+    expect(isTrivialAuditPath("src/generated/stub.ts", 0)).toBe(true);
   });
 
-  await t.test("regular .py file with 0 lines is trivial", () => {
-    assert.equal(isTrivialAuditPath("module/empty.py", 0), true);
+  it("regular .py file with 0 lines is trivial", () => {
+    expect(isTrivialAuditPath("module/empty.py", 0)).toBe(true);
   });
 
-  await t.test("any file with 1 line is also trivial (lineCount <= 1 short-circuits)", () => {
+  it("any file with 1 line is also trivial (lineCount <= 1 short-circuits)", () => {
     // lineCount <= 1 is a separate short-circuit that covers any file name.
-    assert.equal(isTrivialAuditPath("src/regular.ts", 1), true);
+    expect(isTrivialAuditPath("src/regular.ts", 1)).toBe(true);
   });
 });
 
 // ── autoCompleteTrivialCoverage — guard branches ──────────────────────────────
 
-await test("autoCompleteTrivialCoverage skips files where required_lenses is already empty", async (t) => {
-  await t.test("already-cleared file is not in skipped; file with lenses is excluded", () => {
+describe("autoCompleteTrivialCoverage skips files where required_lenses is already empty", () => {
+  it("already-cleared file is not in skipped; file with lenses is excluded", () => {
     const coverage = {
       files: [
         {
@@ -97,23 +96,23 @@ await test("autoCompleteTrivialCoverage skips files where required_lenses is alr
     const skipped = autoCompleteTrivialCoverage(coverage, lineIndex);
 
     // The already-cleared file must NOT appear in skipped.
-    assert.ok(!skipped.includes("pkg/__init__.py"), "already-cleared file must not be in skipped");
+    expect(!skipped.includes("pkg/__init__.py"), "already-cleared file must not be in skipped").toBeTruthy();
 
     // The file with required_lenses=['security'] must appear in skipped.
-    assert.ok(skipped.includes("pkg2/__init__.py"), "file with lenses must be in skipped");
+    expect(skipped.includes("pkg2/__init__.py"), "file with lenses must be in skipped").toBeTruthy();
 
     // The excluded file has audit_status='excluded'.
     const excluded = coverage.files.find((f) => f.path === "pkg2/__init__.py");
-    assert.equal(excluded.audit_status, "excluded");
+    expect(excluded.audit_status).toBe("excluded");
 
     // The already-cleared file retains its original audit_status unchanged.
     const unchanged = coverage.files.find((f) => f.path === "pkg/__init__.py");
-    assert.equal(unchanged.audit_status, "pending");
+    expect(unchanged.audit_status).toBe("pending");
   });
 });
 
-await test("autoCompleteTrivialCoverage does not re-exclude already-excluded files", async (t) => {
-  await t.test("file with audit_status=excluded is skipped by the excluded guard", () => {
+describe("autoCompleteTrivialCoverage does not re-exclude already-excluded files", () => {
+  it("file with audit_status=excluded is skipped by the excluded guard", () => {
     const coverage = {
       files: [
         {
@@ -131,11 +130,11 @@ await test("autoCompleteTrivialCoverage does not re-exclude already-excluded fil
     const skipped = autoCompleteTrivialCoverage(coverage, lineIndex);
 
     // Already-excluded file must not appear in the returned array.
-    assert.equal(skipped.length, 0);
+    expect(skipped.length).toBe(0);
 
     // Fields must be untouched.
     const file = coverage.files[0];
-    assert.equal(file.audit_status, "excluded");
-    assert.deepEqual(file.required_lenses, ["security"]);
+    expect(file.audit_status).toBe("excluded");
+    expect(file.required_lenses).toEqual(["security"]);
   });
 });

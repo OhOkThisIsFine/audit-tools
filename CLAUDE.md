@@ -30,7 +30,7 @@ The `src/shared` area (imported as `audit-tools/shared`) single-sources step con
 | Source area | bin / slash command | Role |
 |---|---|---|
 | `src/shared` | — | Contracts, IO, quota, provider types, validation. Imported as `audit-tools/shared`. |
-| `src/audit` | `audit-code` / `/audit-code` | Audit orchestrator. Tests: `node --test` (`tests/audit/*.test.mjs`). |
+| `src/audit` | `audit-code` / `/audit-code` | Audit orchestrator. Tests: vitest (`tests/audit/*.test.mjs`). |
 | `src/remediate` | `remediate-code` / `/remediate-code` | Remediation orchestrator. Tests: vitest (`tests/remediate/*.test.ts`). |
 
 ## Commands
@@ -41,11 +41,17 @@ All TypeScript (ES2022, NodeNext, strict), Node 20+. From repo root:
 npm install                       # install deps
 npm run build                     # tsc → dist/
 npm run check                     # typecheck only (no emit)
-npm test                          # build + test (node:test audit + vitest remediate)
+npm test                          # build + vitest (audit + shared + remediate)
 
-npm run test:single -- tests/audit/<file>.test.mjs   # single audit test
+npx vitest run tests/audit/<file>.test.mjs           # single audit test
 npx vitest run tests/remediate/<file>.test.ts        # single remediate test
 ```
+
+One runner: **vitest** across all three areas (`tests/audit`, `tests/shared`, `tests/remediate`).
+The node:test split was retired — audit/shared `.test.mjs` files now use vitest `test`/`describe`/`it`
++ `expect`; `node:assert/strict` is still permitted as an assertion library (it runs fine under
+vitest) for the control-flow assertions (`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that
+have no clean `expect` equivalent.
 
 **Always run `npm install` first** in a fresh clone or worktree — missing `node_modules` → `audit-tools/shared` resolves a stale `dist/` → misleading "no exported member" type errors.
 
@@ -53,12 +59,13 @@ npx vitest run tests/remediate/<file>.test.ts        # single remediate test
 
 ```bash
 npm test
-npm run test:single -- tests/audit/next-step.test.mjs
+npx vitest run tests/audit/next-step.test.mjs
 npm run verify:release
 npm run smoke:packaged-audit-code        # AUDIT_CODE_VERBOSE=1 for verbose
 ```
 
-Tests use `node:test` / `node:assert`. Subtests must be `await t.test(...)` (Node 22 compat).
+Tests use vitest (`test`/`describe`/`it` + `expect`); `node:assert/strict` may still appear for
+control-flow assertions. Nested subtests use `describe`/`it`, not `t.test`.
 
 ### remediate-code (`src/remediate`)
 

@@ -1,5 +1,4 @@
-import test, { mock, afterEach } from "node:test";
-import assert from "node:assert/strict";
+import { test, afterEach, expect, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
@@ -7,7 +6,7 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 const { CompositeQuotaSource, buildQuotaSource } = await import("../../src/shared/quota/compositeQuotaSource.ts");
 const { RunLogger } = await import("../../src/shared/observability/runLog.ts");
 
-afterEach(() => mock.restoreAll());
+afterEach(() => vi.restoreAllMocks());
 
 function makeSnapshot(source) {
   return {
@@ -44,7 +43,7 @@ test("CompositeQuotaSource returns first non-null snapshot", async () => {
     snapshotSource("second", snap),
   ]);
   const result = await composite.queryCurrentUsage("provider/model");
-  assert.equal(result, snap);
+  expect(result).toBe(snap);
 });
 
 test("CompositeQuotaSource returns first source's snapshot without consulting later ones", async () => {
@@ -61,8 +60,8 @@ test("CompositeQuotaSource returns first source's snapshot without consulting la
     },
   ]);
   const result = await composite.queryCurrentUsage("provider/model");
-  assert.equal(result, snap);
-  assert.equal(secondConsulted, false);
+  expect(result).toBe(snap);
+  expect(secondConsulted).toBe(false);
 });
 
 test("CompositeQuotaSource skips a synchronously throwing source and tries the next", async () => {
@@ -72,7 +71,7 @@ test("CompositeQuotaSource skips a synchronously throwing source and tries the n
     snapshotSource("second", snap),
   ]);
   const result = await composite.queryCurrentUsage("provider/model");
-  assert.equal(result, snap);
+  expect(result).toBe(snap);
 });
 
 test("CompositeQuotaSource skips a rejecting source and tries the next", async () => {
@@ -85,7 +84,7 @@ test("CompositeQuotaSource skips a rejecting source and tries the next", async (
     snapshotSource("second", snap),
   ]);
   const result = await composite.queryCurrentUsage("provider/model");
-  assert.equal(result, snap);
+  expect(result).toBe(snap);
 });
 
 test("CompositeQuotaSource returns null when all sources throw", async () => {
@@ -94,7 +93,7 @@ test("CompositeQuotaSource returns null when all sources throw", async () => {
     throwingSource("second"),
   ]);
   const result = await composite.queryCurrentUsage("provider/model");
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("CompositeQuotaSource returns null when all sources return null", async () => {
@@ -103,12 +102,12 @@ test("CompositeQuotaSource returns null when all sources return null", async () 
     nullSource("second"),
   ]);
   const result = await composite.queryCurrentUsage("provider/model");
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("buildQuotaSource returns a composite named 'composite'", () => {
   const source = buildQuotaSource();
-  assert.equal(source.name, "composite");
+  expect(source.name).toBe("composite");
 });
 
 test("buildQuotaSource consults additional sources ahead of the learned source", async () => {
@@ -120,7 +119,7 @@ test("buildQuotaSource consults additional sources ahead of the learned source",
     additionalSources: [throwingSource("custom-throws"), snapshotSource("custom-snap", snap)],
   });
   const result = await source.queryCurrentUsage("provider/model-that-has-no-state");
-  assert.equal(result, snap);
+  expect(result).toBe(snap);
 });
 
 test("buildQuotaSource consults the injected claudeOAuth source first", async () => {
@@ -130,7 +129,7 @@ test("buildQuotaSource consults the injected claudeOAuth source first", async ()
     additionalSources: [snapshotSource("other", makeSnapshot("other"))],
   });
   const result = await source.queryCurrentUsage("claude-code/x");
-  assert.equal(result, snap); // proactive Claude source wins over additional + learned
+  expect(result).toBe(snap); // proactive Claude source wins over additional + learned
 });
 
 test("buildQuotaSource omits the claude source when claudeOAuth is false", async () => {
@@ -140,7 +139,7 @@ test("buildQuotaSource omits the claude source when claudeOAuth is false", async
     additionalSources: [snapshotSource("other", snap)],
   });
   const result = await source.queryCurrentUsage("claude-code/x");
-  assert.equal(result, snap); // no claude source intercepts; additional source answers
+  expect(result).toBe(snap); // no claude source intercepts; additional source answers
 });
 
 test("logs a structured error event via RunLogger when a quota source throws", async () => {
@@ -148,8 +147,8 @@ test("logs a structured error event via RunLogger when a quota source throws", a
   const logPath = join(dir, "run.log");
   const logger = new RunLogger(logPath);
 
-  const eventSpy = mock.method(logger, "event");
-  const warnSpy = mock.method(console, "warn", () => {});
+  const eventSpy = vi.spyOn(logger, "event");
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   const snap = makeSnapshot("good");
   const composite = new CompositeQuotaSource(
@@ -159,22 +158,22 @@ test("logs a structured error event via RunLogger when a quota source throws", a
   const result = await composite.queryCurrentUsage("provider/model");
 
   // Skip behaviour preserved: returns the good source's snapshot
-  assert.equal(result, snap);
+  expect(result).toBe(snap);
 
   // RunLogger.event was called once for the throwing source
-  assert.equal(eventSpy.mock.calls.length, 1);
-  const [evt] = eventSpy.mock.calls[0].arguments;
-  assert.equal(evt.kind, "error");
-  assert.equal(evt.phase, "quota");
-  assert.ok(evt.note.includes("bad-source"), `note should include source name, got: ${evt.note}`);
-  assert.ok(evt.note.includes("bad-source boom"), `note should include error message, got: ${evt.note}`);
+  expect(eventSpy.mock.calls.length).toBe(1);
+  const [evt] = eventSpy.mock.calls[0];
+  expect(evt.kind).toBe("error");
+  expect(evt.phase).toBe("quota");
+  expect(evt.note.includes("bad-source"), `note should include source name, got: ${evt.note}`).toBeTruthy();
+  expect(evt.note.includes("bad-source boom"), `note should include error message, got: ${evt.note}`).toBeTruthy();
   // OBS-9ae1a228: the note must name the providerModelKey being queried so an
   // operator can tell which provider/model combination triggered the failure.
-  assert.ok(
+  expect(
     evt.note.includes("provider/model"),
     `note should include the providerModelKey, got: ${evt.note}`,
-  );
+  ).toBeTruthy();
 
   // console.warn is NOT called
-  assert.equal(warnSpy.mock.calls.length, 0);
+  expect(warnSpy.mock.calls.length).toBe(0);
 });

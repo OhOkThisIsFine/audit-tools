@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.ts");
 
@@ -46,7 +45,7 @@ await test("FINDING-013: deferred tasks are excluded so audit_tasks_completed is
       deferred_task_ids: ["d", "e"],
     },
   };
-  assert.equal(obligationState(bundle, "audit_tasks_completed"), "satisfied");
+  expect(obligationState(bundle, "audit_tasks_completed")).toBe("satisfied");
 });
 
 await test("FINDING-013: without the deferred exemption the same state is missing", () => {
@@ -55,7 +54,7 @@ await test("FINDING-013: without the deferred exemption the same state is missin
     audit_tasks: ["a", "b", "c", "d", "e"].map(task),
     audit_results: ["a", "b", "c"].map(result),
   };
-  assert.equal(obligationState(bundle, "audit_tasks_completed"), "missing");
+  expect(obligationState(bundle, "audit_tasks_completed")).toBe("missing");
 });
 
 await test("FINDING-013: with active_dispatch but no deferred ids, logic is unchanged (all must complete)", () => {
@@ -71,7 +70,7 @@ await test("FINDING-013: with active_dispatch but no deferred ids, logic is unch
       // no deferred_task_ids
     },
   };
-  assert.equal(obligationState(bundle, "audit_tasks_completed"), "missing");
+  expect(obligationState(bundle, "audit_tasks_completed")).toBe("missing");
 });
 
 await test("FINDING-013: all non-deferred tasks complete → satisfied even with deferred set", () => {
@@ -87,7 +86,7 @@ await test("FINDING-013: all non-deferred tasks complete → satisfied even with
       deferred_task_ids: [],
     },
   };
-  assert.equal(obligationState(bundle, "audit_tasks_completed"), "satisfied");
+  expect(obligationState(bundle, "audit_tasks_completed")).toBe("satisfied");
 });
 
 // ── COR-61819bae: runtime_validation_current obligation distinguishes stale vs missing ─
@@ -115,11 +114,7 @@ await test("runtime_validation_current: stale when report exists but tasks incom
       ],
     },
   };
-  assert.equal(
-    obligationState(bundle, "runtime_validation_current"),
-    "stale",
-    "should be stale when report exists but task result is pending",
-  );
+  expect(obligationState(bundle, "runtime_validation_current"), "should be stale when report exists but task result is pending").toBe("stale");
 });
 
 await test("runtime_validation_current: missing when no report at all", () => {
@@ -137,35 +132,25 @@ await test("runtime_validation_current: missing when no report at all", () => {
     },
     // no runtime_validation_report
   };
-  assert.equal(
-    obligationState(bundle, "runtime_validation_current"),
-    "missing",
-    "should be missing when no runtime_validation_report exists",
-  );
+  expect(obligationState(bundle, "runtime_validation_current"), "should be missing when no runtime_validation_report exists").toBe("missing");
 });
 
 // ── Additional obligation coverage ────────────────────────────────────────────
 
 await test("repo_manifest: satisfied when bundle contains repo_manifest", () => {
-  assert.equal(obligationState({ repo_manifest: { files: [] } }, "repo_manifest"), "satisfied");
+  expect(obligationState({ repo_manifest: { files: [] } }, "repo_manifest")).toBe("satisfied");
 });
 
 await test("repo_manifest: missing when bundle lacks repo_manifest", () => {
-  assert.equal(obligationState({}, "repo_manifest"), "missing");
+  expect(obligationState({}, "repo_manifest")).toBe("missing");
 });
 
 await test("file_disposition: satisfied when bundle contains file_disposition", () => {
-  assert.equal(
-    obligationState({ repo_manifest: { files: [] }, file_disposition: {} }, "file_disposition"),
-    "satisfied",
-  );
+  expect(obligationState({ repo_manifest: { files: [] }, file_disposition: {} }, "file_disposition")).toBe("satisfied");
 });
 
 await test("file_disposition: missing when bundle lacks file_disposition but has repo_manifest", () => {
-  assert.equal(
-    obligationState({ repo_manifest: { files: [] } }, "file_disposition"),
-    "missing",
-  );
+  expect(obligationState({ repo_manifest: { files: [] } }, "file_disposition")).toBe("missing");
 });
 
 await test("planning_artifacts: satisfied when the full planning artifact set is present and fresh", () => {
@@ -198,33 +183,27 @@ await test("planning_artifacts: satisfied when the full planning artifact set is
     audit_tasks: [task("x")],
     requeue_tasks: [],
   };
-  assert.equal(obligationState(bundle, "planning_artifacts"), "satisfied");
+  expect(obligationState(bundle, "planning_artifacts")).toBe("satisfied");
 });
 
 await test("planning_artifacts: missing when only audit_tasks is present", () => {
   // audit_tasks alone is insufficient — the rest of the planning set is absent.
-  assert.equal(obligationState({ audit_tasks: [task("x")] }, "planning_artifacts"), "missing");
+  expect(obligationState({ audit_tasks: [task("x")] }, "planning_artifacts")).toBe("missing");
 });
 
 await test("planning_artifacts: missing when bundle lacks audit_tasks", () => {
-  assert.equal(obligationState({}, "planning_artifacts"), "missing");
+  expect(obligationState({}, "planning_artifacts")).toBe("missing");
 });
 
 await test("audit_results_ingested: satisfied when all tasks have results and no active dispatch", () => {
-  assert.equal(
-    obligationState(
+  expect(obligationState(
       { audit_tasks: ["a", "b"].map(task), audit_results: ["a", "b"].map(result) },
       "audit_results_ingested",
-    ),
-    "satisfied",
-  );
+    )).toBe("satisfied");
 });
 
 await test("audit_results_ingested: missing when audit_tasks are present but audit_results is absent", () => {
-  assert.equal(
-    obligationState({ audit_tasks: ["a", "b"].map(task) }, "audit_results_ingested"),
-    "missing",
-  );
+  expect(obligationState({ audit_tasks: ["a", "b"].map(task) }, "audit_results_ingested")).toBe("missing");
 });
 
 await test("runtime_validation_current: satisfied when task has non-pending result", () => {
@@ -250,9 +229,5 @@ await test("runtime_validation_current: satisfied when task has non-pending resu
       ],
     },
   };
-  assert.equal(
-    obligationState(bundle, "runtime_validation_current"),
-    "satisfied",
-    "should be satisfied when task has a non-pending result",
-  );
+  expect(obligationState(bundle, "runtime_validation_current"), "should be satisfied when task has a non-pending result").toBe("satisfied");
 });

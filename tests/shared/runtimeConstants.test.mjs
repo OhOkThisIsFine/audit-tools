@@ -1,117 +1,116 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, describe, it, expect } from "vitest";
 
 const { PROVIDER_NAMES, SESSION_UI_MODES, ANALYZER_SETTINGS } = await import("../../src/shared/types/sessionConfig.ts");
 const { SURFACE_KINDS } = await import("../../src/shared/types/surfaces.ts");
 
-test("PROVIDER_NAMES contains the expected provider strings", async (t) => {
-  await t.test("is an array", () => {
-    assert.ok(Array.isArray(PROVIDER_NAMES));
+describe("PROVIDER_NAMES contains the expected provider strings", () => {
+  it("is an array", () => {
+    expect(Array.isArray(PROVIDER_NAMES)).toBeTruthy();
   });
 
-  await t.test("contains 'auto'", () => {
-    assert.ok(PROVIDER_NAMES.includes("auto"));
+  it("contains 'auto'", () => {
+    expect(PROVIDER_NAMES.includes("auto")).toBeTruthy();
   });
 
-  await t.test("contains 'local-subprocess'", () => {
-    assert.ok(PROVIDER_NAMES.includes("local-subprocess"));
+  it("contains 'local-subprocess'", () => {
+    expect(PROVIDER_NAMES.includes("local-subprocess")).toBeTruthy();
   });
 
-  await t.test("contains 'subprocess-template'", () => {
-    assert.ok(PROVIDER_NAMES.includes("subprocess-template"));
+  it("contains 'subprocess-template'", () => {
+    expect(PROVIDER_NAMES.includes("subprocess-template")).toBeTruthy();
   });
 
-  await t.test("contains 'claude-code'", () => {
-    assert.ok(PROVIDER_NAMES.includes("claude-code"));
+  it("contains 'claude-code'", () => {
+    expect(PROVIDER_NAMES.includes("claude-code")).toBeTruthy();
   });
 
-  await t.test("contains 'codex'", () => {
-    assert.ok(PROVIDER_NAMES.includes("codex"));
+  it("contains 'codex'", () => {
+    expect(PROVIDER_NAMES.includes("codex")).toBeTruthy();
   });
 
-  await t.test("contains 'opencode'", () => {
-    assert.ok(PROVIDER_NAMES.includes("opencode"));
+  it("contains 'opencode'", () => {
+    expect(PROVIDER_NAMES.includes("opencode")).toBeTruthy();
   });
 
-  await t.test("contains 'openai-compatible'", () => {
-    assert.ok(PROVIDER_NAMES.includes("openai-compatible"));
+  it("contains 'openai-compatible'", () => {
+    expect(PROVIDER_NAMES.includes("openai-compatible")).toBeTruthy();
   });
 
-  await t.test("contains 'vscode-task'", () => {
-    assert.ok(PROVIDER_NAMES.includes("vscode-task"));
+  it("contains 'vscode-task'", () => {
+    expect(PROVIDER_NAMES.includes("vscode-task")).toBeTruthy();
   });
 
-  await t.test("contains 'antigravity'", () => {
-    assert.ok(PROVIDER_NAMES.includes("antigravity"));
+  it("contains 'antigravity'", () => {
+    expect(PROVIDER_NAMES.includes("antigravity")).toBeTruthy();
   });
 
-  await t.test("has exactly 9 entries", () => {
-    assert.equal(PROVIDER_NAMES.length, 9);
-  });
-});
-
-test("SESSION_UI_MODES contains the expected UI mode strings", async (t) => {
-  await t.test("is an array", () => {
-    assert.ok(Array.isArray(SESSION_UI_MODES));
-  });
-
-  await t.test("contains 'visible'", () => {
-    assert.ok(SESSION_UI_MODES.includes("visible"));
-  });
-
-  await t.test("contains 'headless'", () => {
-    assert.ok(SESSION_UI_MODES.includes("headless"));
-  });
-
-  await t.test("has exactly 2 entries", () => {
-    assert.equal(SESSION_UI_MODES.length, 2);
+  it("has exactly 9 entries", () => {
+    expect(PROVIDER_NAMES.length).toBe(9);
   });
 });
 
-test("ANALYZER_SETTINGS contains the expected analyzer setting strings", async (t) => {
-  await t.test("is an array", () => {
-    assert.ok(Array.isArray(ANALYZER_SETTINGS));
+describe("SESSION_UI_MODES contains the expected UI mode strings", () => {
+  it("is an array", () => {
+    expect(Array.isArray(SESSION_UI_MODES)).toBeTruthy();
   });
 
-  await t.test("contains 'repo'", () => {
-    assert.ok(ANALYZER_SETTINGS.includes("repo"));
+  it("contains 'visible'", () => {
+    expect(SESSION_UI_MODES.includes("visible")).toBeTruthy();
   });
 
-  await t.test("contains 'ephemeral'", () => {
-    assert.ok(ANALYZER_SETTINGS.includes("ephemeral"));
+  it("contains 'headless'", () => {
+    expect(SESSION_UI_MODES.includes("headless")).toBeTruthy();
   });
 
-  await t.test("contains 'permanent'", () => {
-    assert.ok(ANALYZER_SETTINGS.includes("permanent"));
-  });
-
-  await t.test("contains 'skip'", () => {
-    assert.ok(ANALYZER_SETTINGS.includes("skip"));
-  });
-
-  await t.test("contains 'auto'", () => {
-    assert.ok(ANALYZER_SETTINGS.includes("auto"));
-  });
-
-  await t.test("has exactly 5 entries", () => {
-    assert.equal(ANALYZER_SETTINGS.length, 5);
+  it("has exactly 2 entries", () => {
+    expect(SESSION_UI_MODES.length).toBe(2);
   });
 });
 
-test("SURFACE_KINDS contains the expected surface kind strings", async (t) => {
-  await t.test("is an array", () => {
-    assert.ok(Array.isArray(SURFACE_KINDS));
+describe("ANALYZER_SETTINGS contains the expected analyzer setting strings", () => {
+  it("is an array", () => {
+    expect(Array.isArray(ANALYZER_SETTINGS)).toBeTruthy();
   });
 
-  await t.test("contains 'interface'", () => {
-    assert.ok(SURFACE_KINDS.includes("interface"));
+  it("contains 'repo'", () => {
+    expect(ANALYZER_SETTINGS.includes("repo")).toBeTruthy();
   });
 
-  await t.test("contains 'background'", () => {
-    assert.ok(SURFACE_KINDS.includes("background"));
+  it("contains 'ephemeral'", () => {
+    expect(ANALYZER_SETTINGS.includes("ephemeral")).toBeTruthy();
   });
 
-  await t.test("has exactly 2 entries", () => {
-    assert.equal(SURFACE_KINDS.length, 2);
+  it("contains 'permanent'", () => {
+    expect(ANALYZER_SETTINGS.includes("permanent")).toBeTruthy();
+  });
+
+  it("contains 'skip'", () => {
+    expect(ANALYZER_SETTINGS.includes("skip")).toBeTruthy();
+  });
+
+  it("contains 'auto'", () => {
+    expect(ANALYZER_SETTINGS.includes("auto")).toBeTruthy();
+  });
+
+  it("has exactly 5 entries", () => {
+    expect(ANALYZER_SETTINGS.length).toBe(5);
+  });
+});
+
+describe("SURFACE_KINDS contains the expected surface kind strings", () => {
+  it("is an array", () => {
+    expect(Array.isArray(SURFACE_KINDS)).toBeTruthy();
+  });
+
+  it("contains 'interface'", () => {
+    expect(SURFACE_KINDS.includes("interface")).toBeTruthy();
+  });
+
+  it("contains 'background'", () => {
+    expect(SURFACE_KINDS.includes("background")).toBeTruthy();
+  });
+
+  it("has exactly 2 entries", () => {
+    expect(SURFACE_KINDS.length).toBe(2);
   });
 });

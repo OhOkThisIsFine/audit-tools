@@ -1,17 +1,17 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { UnionFind } = await import("../../src/audit/orchestrator/unionFind.ts");
 
 test("UnionFind: find() returns the key itself when it is its own root", () => {
   const uf = new UnionFind(["a", "b"]);
-  assert.equal(uf.find("a"), "a");
-  assert.equal(uf.find("b"), "b");
+  expect(uf.find("a")).toBe("a");
+  expect(uf.find("b")).toBe("b");
 });
 
 test("UnionFind: find() returns the passed key for an unknown key (fallback ?? key)", () => {
   const uf = new UnionFind([]);
-  assert.equal(uf.find("unknown"), "unknown");
+  expect(uf.find("unknown")).toBe("unknown");
 });
 
 test("UnionFind: find() applies path compression so intermediate nodes point directly to root", () => {
@@ -19,65 +19,65 @@ test("UnionFind: find() applies path compression so intermediate nodes point dir
   uf.union("a", "b");
   uf.union("b", "c");
   // After chained unions, find('c') must return 'a' (the lex-smallest root).
-  assert.equal(uf.find("c"), "a");
+  expect(uf.find("c")).toBe("a");
   // Path compression: a second call is O(1) because intermediates now point directly to root.
-  assert.equal(uf.find("c"), "a");
+  expect(uf.find("c")).toBe("a");
 });
 
 test("UnionFind: union() picks the lexicographically smaller root as canonical", () => {
   // union('b', 'a') → 'a' < 'b' so 'a' is kept as root
   const uf1 = new UnionFind(["a", "b"]);
   uf1.union("b", "a");
-  assert.equal(uf1.find("b"), "a");
+  expect(uf1.find("b")).toBe("a");
 
   // union('a', 'b') → same result regardless of argument order
   const uf2 = new UnionFind(["a", "b"]);
   uf2.union("a", "b");
-  assert.equal(uf2.find("b"), "a");
+  expect(uf2.find("b")).toBe("a");
 
   // union('z', 'm') → 'm' < 'z' so 'm' is kept as root
   const uf3 = new UnionFind(["z", "m"]);
   uf3.union("z", "m");
-  assert.equal(uf3.find("z"), "m");
+  expect(uf3.find("z")).toBe("m");
 });
 
 test("UnionFind: union() is idempotent — calling it twice on the same pair does not change the root", () => {
   const uf = new UnionFind(["a", "b"]);
   uf.union("a", "b");
   uf.union("a", "b");
-  assert.equal(uf.find("b"), "a");
+  expect(uf.find("b")).toBe("a");
 });
 
 test("UnionFind: groups() returns a Map where each entry's key is the canonical root and the value array contains all members", () => {
   // No unions → 3 singleton groups
   const uf1 = new UnionFind(["a", "b", "c"]);
   const g1 = uf1.groups();
-  assert.equal(g1.size, 3);
-  assert.ok(g1.has("a"));
-  assert.ok(g1.has("b"));
-  assert.ok(g1.has("c"));
+  expect(g1.size).toBe(3);
+  expect(g1.has("a")).toBeTruthy();
+  expect(g1.has("b")).toBeTruthy();
+  expect(g1.has("c")).toBeTruthy();
 
   // After union('a', 'b') → 2 groups: root 'a' has ['a','b'], root 'c' has ['c']
   const uf2 = new UnionFind(["a", "b", "c"]);
   uf2.union("a", "b");
   const g2 = uf2.groups();
-  assert.equal(g2.size, 2);
+  expect(g2.size).toBe(2);
   const groupA = g2.get("a");
-  assert.ok(groupA !== undefined);
-  assert.deepEqual([...groupA].sort(), ["a", "b"]);
+  expect(groupA !== undefined).toBeTruthy();
+  expect([...groupA].sort()).toEqual(["a", "b"]);
   const groupC = g2.get("c");
-  assert.ok(groupC !== undefined);
-  assert.deepEqual(groupC, ["c"]);
+  expect(groupC !== undefined).toBeTruthy();
+  expect(groupC).toEqual(["c"]);
 
   // After union('a','b') and union('b','c') → 1 group containing all three
   const uf3 = new UnionFind(["a", "b", "c"]);
   uf3.union("a", "b");
   uf3.union("b", "c");
   const g3 = uf3.groups();
-  assert.equal(g3.size, 1);
+  expect(g3.size).toBe(1);
   const groupAll = g3.get("a");
-  assert.ok(groupAll !== undefined);
-  assert.deepEqual([...groupAll].sort(), ["a", "b", "c"]);
+  expect(groupAll !== undefined).toBeTruthy();
+  expect([...groupAll].sort()).toEqual(["a", "b", "c"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -96,15 +96,15 @@ test("COR-b6f68ad7: find() handles deep chains (1000 items) without stack overfl
   // find on any key must return "0" without stack overflow.
   assert.doesNotThrow(() => {
     for (const key of keys) {
-      assert.equal(uf.find(key), "0");
+      expect(uf.find(key)).toBe("0");
     }
   }, "find() on a 1000-item chain must not throw (no stack overflow)");
   // groups() must also complete and return exactly 1 group.
   const groups = uf.groups();
-  assert.equal(groups.size, 1, "1000-item chain must produce a single group");
+  expect(groups.size, "1000-item chain must produce a single group").toBe(1);
   const allMembers = groups.get("0");
-  assert.ok(allMembers !== undefined, "root must be '0'");
-  assert.equal(allMembers.length, 1000, "all 1000 members must be in the group");
+  expect(allMembers !== undefined, "root must be '0'").toBeTruthy();
+  expect(allMembers.length, "all 1000 members must be in the group").toBe(1000);
 });
 
 test("UnionFind: groups() root keys are lexicographically smallest in their group", () => {
@@ -114,14 +114,14 @@ test("UnionFind: groups() root keys are lexicographically smallest in their grou
   uf.union("m", "a");
   const g = uf.groups();
   // The group containing 'z' must be keyed by 'a' (lex smallest)
-  assert.ok(g.has("a"));
+  expect(g.has("a")).toBeTruthy();
   const groupZMA = g.get("a");
-  assert.ok(groupZMA !== undefined);
-  assert.ok([...groupZMA].includes("z"));
-  assert.ok([...groupZMA].includes("m"));
-  assert.ok([...groupZMA].includes("a"));
+  expect(groupZMA !== undefined).toBeTruthy();
+  expect([...groupZMA].includes("z")).toBeTruthy();
+  expect([...groupZMA].includes("m")).toBeTruthy();
+  expect([...groupZMA].includes("a")).toBeTruthy();
   // Every key in groups() satisfies key === find(key)
   for (const key of g.keys()) {
-    assert.equal(key, uf.find(key));
+    expect(key).toBe(uf.find(key));
   }
 });

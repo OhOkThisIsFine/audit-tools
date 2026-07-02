@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,45 +9,39 @@ const { severityRank, confidenceRank, severityCompare, SEVERITIES, CONFIDENCES }
 test("severityRank is 1-based, critical=5..info=1, derived from SEVERITIES", () => {
   // The 1-based scale is load-bearing: remediate dispatch tiering compares the
   // rank against literal thresholds (critical === 5, low <= 2).
-  assert.equal(severityRank("critical"), 5);
-  assert.equal(severityRank("high"), 4);
-  assert.equal(severityRank("medium"), 3);
-  assert.equal(severityRank("low"), 2);
-  assert.equal(severityRank("info"), 1);
+  expect(severityRank("critical")).toBe(5);
+  expect(severityRank("high")).toBe(4);
+  expect(severityRank("medium")).toBe(3);
+  expect(severityRank("low")).toBe(2);
+  expect(severityRank("info")).toBe(1);
   // No level ranks at 0 (the agentReflections off-by-one we collapsed).
-  for (const s of SEVERITIES) assert.ok(severityRank(s) >= 1, `${s} >= 1`);
+  for (const s of SEVERITIES) expect(severityRank(s) >= 1, `${s} >= 1`).toBeTruthy();
 });
 
 test("severityRank is strictly monotonic over the canonical order", () => {
   // SEVERITIES is most-severe-first; each step down must strictly decrease.
   for (let i = 1; i < SEVERITIES.length; i++) {
-    assert.ok(
-      severityRank(SEVERITIES[i - 1]) > severityRank(SEVERITIES[i]),
-      `rank(${SEVERITIES[i - 1]}) > rank(${SEVERITIES[i]})`,
-    );
+    expect(severityRank(SEVERITIES[i - 1]) > severityRank(SEVERITIES[i]), `rank(${SEVERITIES[i - 1]}) > rank(${SEVERITIES[i]})`).toBeTruthy();
   }
 });
 
 test("confidenceRank is strictly monotonic, high=3..low=1", () => {
-  assert.equal(confidenceRank("high"), 3);
-  assert.equal(confidenceRank("medium"), 2);
-  assert.equal(confidenceRank("low"), 1);
+  expect(confidenceRank("high")).toBe(3);
+  expect(confidenceRank("medium")).toBe(2);
+  expect(confidenceRank("low")).toBe(1);
   for (let i = 1; i < CONFIDENCES.length; i++) {
-    assert.ok(
-      confidenceRank(CONFIDENCES[i - 1]) > confidenceRank(CONFIDENCES[i]),
-      `rank(${CONFIDENCES[i - 1]}) > rank(${CONFIDENCES[i]})`,
-    );
+    expect(confidenceRank(CONFIDENCES[i - 1]) > confidenceRank(CONFIDENCES[i]), `rank(${CONFIDENCES[i - 1]}) > rank(${CONFIDENCES[i]})`).toBeTruthy();
   }
 });
 
 test("severityCompare orders most-severe-first (critical before info)", () => {
   const shuffled = ["low", "critical", "info", "high", "medium"];
   const sorted = [...shuffled].sort((a, b) => severityCompare(a, b));
-  assert.deepEqual(sorted, ["critical", "high", "medium", "low", "info"]);
+  expect(sorted).toEqual(["critical", "high", "medium", "low", "info"]);
   // Negative when the first arg is more severe; positive when less; 0 when equal.
-  assert.ok(severityCompare("critical", "info") < 0);
-  assert.ok(severityCompare("info", "critical") > 0);
-  assert.equal(severityCompare("high", "high"), 0);
+  expect(severityCompare("critical", "info") < 0).toBeTruthy();
+  expect(severityCompare("info", "critical") > 0).toBeTruthy();
+  expect(severityCompare("high", "high")).toBe(0);
 });
 
 // ── Guard: no hand-copied severity/confidence rank table survives in src ───────
@@ -104,12 +97,8 @@ test("no severity/confidence rank-table literal exists outside the shared single
       }
     }
   }
-  assert.equal(
-    hits.length,
-    0,
-    "Severity rank tables are single-sourced in audit-tools/shared " +
+  expect(hits.length, "Severity rank tables are single-sourced in audit-tools/shared " +
       "(severityRank/confidenceRank/severityCompare, derived from SEVERITIES/CONFIDENCES). " +
       "Do not re-introduce a literal rank table; import the shared functions instead.\n" +
-      hits.join("\n"),
-  );
+      hits.join("\n")).toBe(0);
 });

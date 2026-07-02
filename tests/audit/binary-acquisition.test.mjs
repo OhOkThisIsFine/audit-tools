@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,8 +71,8 @@ function pathRunner() {
 
 test("expectedSha256For parses the matching asset line, ignores others", () => {
   const text = "abc123" + "0".repeat(58) + "  asset-a.tar.gz\n" + "f".repeat(64) + "  asset-b.zip";
-  assert.equal(expectedSha256For(text, "asset-b.zip"), "f".repeat(64));
-  assert.equal(expectedSha256For(text, "missing"), null);
+  expect(expectedSha256For(text, "asset-b.zip")).toBe("f".repeat(64));
+  expect(expectedSha256For(text, "missing")).toBe(null);
 });
 
 test("resolveBinary returns PATH when the tool is already installed", async () => {
@@ -82,8 +81,8 @@ test("resolveBinary returns PATH when the tool is already installed", async () =
     platform: "linux",
     arch: "x64",
   });
-  assert.equal(res.status, "path");
-  assert.equal(res.command, "gitleaks");
+  expect(res.status).toBe("path");
+  expect(res.command).toBe("gitleaks");
 });
 
 test("resolveBinary downloads + checksum-verifies + extracts when absent", async () => {
@@ -96,8 +95,8 @@ test("resolveBinary downloads + checksum-verifies + extracts when absent", async
       platform: "linux",
       arch: "x64",
     });
-    assert.equal(res.status, "downloaded");
-    assert.ok(res.command && existsSync(res.command), "extracted binary should exist");
+    expect(res.status).toBe("downloaded");
+    expect(res.command && existsSync(res.command), "extracted binary should exist").toBeTruthy();
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
@@ -114,9 +113,9 @@ test("resolveBinary refuses to extract/execute on a checksum mismatch", async ()
       platform: "linux",
       arch: "x64",
     });
-    assert.equal(res.status, "unavailable");
-    assert.match(res.note ?? "", /checksum mismatch/);
-    assert.equal(res.command, null);
+    expect(res.status).toBe("unavailable");
+    expect(res.note ?? "").toMatch(/checksum mismatch/);
+    expect(res.command).toBe(null);
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
@@ -128,8 +127,8 @@ test("resolveBinary degrades to unavailable with no fetcher (offline) and no PAT
     platform: "linux",
     arch: "x64",
   });
-  assert.equal(res.status, "unavailable");
-  assert.equal(res.command, null);
+  expect(res.status).toBe("unavailable");
+  expect(res.command).toBe(null);
 });
 
 test("resolveBinary(archived:false) writes the verified bytes directly as the executable, no tar", async () => {
@@ -166,10 +165,10 @@ test("resolveBinary(archived:false) writes the verified bytes directly as the ex
       platform: "linux",
       arch: "x64",
     });
-    assert.equal(res.status, "downloaded");
-    assert.ok(res.command && existsSync(res.command), "raw binary should be written to the cache");
+    expect(res.status).toBe("downloaded");
+    expect(res.command && existsSync(res.command), "raw binary should be written to the cache").toBeTruthy();
     const { readFileSync } = await import("node:fs");
-    assert.equal(readFileSync(res.command, "utf8"), "FAKE-RAW-EXECUTABLE-BYTES");
+    expect(readFileSync(res.command, "utf8")).toBe("FAKE-RAW-EXECUTABLE-BYTES");
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
@@ -194,8 +193,8 @@ test("resolveBinary(archived:false) still refuses a checksum mismatch", async ()
       platform: "linux",
       arch: "x64",
     });
-    assert.equal(res.status, "unavailable");
-    assert.match(res.note ?? "", /checksum mismatch/);
+    expect(res.status).toBe("unavailable");
+    expect(res.note ?? "").toMatch(/checksum mismatch/);
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
@@ -208,8 +207,8 @@ test("resolveBinary returns unavailable when the os/arch has no asset", async ()
     platform: "sunos",
     arch: "mips",
   });
-  assert.equal(res.status, "unavailable");
-  assert.match(res.note ?? "", /no release asset/);
+  expect(res.status).toBe("unavailable");
+  expect(res.note ?? "").toMatch(/no release asset/);
 });
 
 const binaryCandidate = (overrides = {}) => ({
@@ -230,15 +229,15 @@ test("resolveBinaryCandidates resolves a present tool and records gaps for absen
     const present = await resolveBinaryCandidates([binaryCandidate()], dir, {
       run: pathRunner(),
     });
-    assert.equal(present.resolvedBinaries.gitleaks, "gitleaks");
-    assert.equal(present.unresolvedStatuses.length, 0);
+    expect(present.resolvedBinaries.gitleaks).toBe("gitleaks");
+    expect(present.unresolvedStatuses.length).toBe(0);
 
     // Offline + no fetcher ⇒ not_resolved status, no silent drop.
     const absent = await resolveBinaryCandidates([binaryCandidate()], dir, {
       run: offlineRunnerExtractingTo("gitleaks"),
     });
-    assert.equal(Object.keys(absent.resolvedBinaries).length, 0);
-    assert.equal(absent.unresolvedStatuses[0].status, "not_resolved");
+    expect(Object.keys(absent.resolvedBinaries).length).toBe(0);
+    expect(absent.unresolvedStatuses[0].status).toBe("not_resolved");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -252,8 +251,8 @@ test("resolveBinaryCandidates skips a non-default binary without a consent token
       dir,
       { run: pathRunner() },
     );
-    assert.equal(Object.keys(out.resolvedBinaries).length, 0);
-    assert.equal(out.unresolvedStatuses[0].status, "skipped");
+    expect(Object.keys(out.resolvedBinaries).length).toBe(0);
+    expect(out.unresolvedStatuses[0].status).toBe("skipped");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -268,8 +267,8 @@ test("runExternalAnalyzer runs a binary candidate via its resolved path", () => 
       return { status: 0, stdout: "[]", stderr: "", argv, duration_ms: 1 };
     },
   });
-  assert.equal(out.status.status, "success");
-  assert.deepEqual(captured[0], ["/cache/gitleaks", "detect", "--source", "/repo"]);
+  expect(out.status.status).toBe("success");
+  expect(captured[0]).toEqual(["/cache/gitleaks", "detect", "--source", "/repo"]);
 });
 
 test("runExternalAnalyzer reports not_resolved when a binary was not acquired", () => {
@@ -277,6 +276,6 @@ test("runExternalAnalyzer reports not_resolved when a binary was not acquired", 
     resolvedBinaries: {},
     run: () => ({ status: 0, stdout: "", stderr: "", argv: [], duration_ms: 1 }),
   });
-  assert.equal(out.status.status, "not_resolved");
-  assert.equal(out.results.results.length, 0);
+  expect(out.status.status).toBe("not_resolved");
+  expect(out.results.results.length).toBe(0);
 });

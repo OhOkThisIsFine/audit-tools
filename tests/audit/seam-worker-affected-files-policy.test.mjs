@@ -44,8 +44,7 @@
  *     not invent a separate allowed-paths list independent of file_coverage.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // ── Import live modules ───────────────────────────────────────────────────────
 
@@ -142,16 +141,10 @@ test("SCOPE-CONSTRAINT-1: renderWorkerPrompt (agent mode) prompt explicitly refe
 
   // The prompt must refer to file_paths and the scope restriction so workers
   // know that affected_files must reference only their assigned files.
-  assert.ok(
-    typeof prompt === "string" && prompt.length > 0,
-    "renderWorkerPrompt must return a non-empty string for agent-mode tasks",
-  );
+  expect(typeof prompt === "string" && prompt.length > 0, "renderWorkerPrompt must return a non-empty string for agent-mode tasks").toBeTruthy();
 
   // The worker prompt must reference "file_paths" to establish the scope contract.
-  assert.ok(
-    prompt.includes("file_paths"),
-    "renderWorkerPrompt must mention 'file_paths' to establish the affected_files scope contract for workers",
-  );
+  expect(prompt.includes("file_paths"), "renderWorkerPrompt must mention 'file_paths' to establish the affected_files scope contract for workers").toBeTruthy();
 });
 
 // ── SCOPE-CONSTRAINT-2: prompt includes file_coverage instruction ─────────────
@@ -162,16 +155,10 @@ test("SCOPE-CONSTRAINT-2: renderWorkerPrompt (agent mode) instructs workers to d
 
   // The prompt must mention file_coverage to close the loop between the
   // task's assigned files and the finding's affected_files scope.
-  assert.ok(
-    prompt.includes("file_coverage"),
-    "renderWorkerPrompt must mention 'file_coverage' — workers scope findings via coverage of assigned files",
-  );
+  expect(prompt.includes("file_coverage"), "renderWorkerPrompt must mention 'file_coverage' — workers scope findings via coverage of assigned files").toBeTruthy();
 
   // The prompt must mention affected_files so workers know how to structure findings.
-  assert.ok(
-    prompt.includes("affected_files"),
-    "renderWorkerPrompt must mention 'affected_files' so workers understand the finding structure",
-  );
+  expect(prompt.includes("affected_files"), "renderWorkerPrompt must mention 'affected_files' so workers understand the finding structure").toBeTruthy();
 });
 
 // ── STRIP-AND-WARN-1: out-of-scope affected_files produces a WARNING ──────────
@@ -184,23 +171,13 @@ test("STRIP-AND-WARN-1: validateAuditResults emits a warning (not error) for an 
   const affectedFileIssues = issues.filter(
     (i) => i.field && i.field.includes("affected_files") && i.field.includes("path"),
   );
-  assert.ok(
-    affectedFileIssues.length > 0,
-    "validateAuditResults must produce at least one issue for out-of-scope affected_files path",
-  );
+  expect(affectedFileIssues.length > 0, "validateAuditResults must produce at least one issue for out-of-scope affected_files path").toBeTruthy();
 
   // All affected_files path issues for this case must be warnings, not errors.
   const errors = affectedFileIssues.filter((i) => i.severity === "error");
-  assert.equal(
-    errors.length,
-    0,
-    `Out-of-scope affected_files must produce warning(s), not error(s). Got: ${JSON.stringify(errors.map((e) => e.message))}`,
-  );
+  expect(errors.length, `Out-of-scope affected_files must produce warning(s), not error(s). Got: ${JSON.stringify(errors.map((e) => e.message))}`).toBe(0);
   const warnings = affectedFileIssues.filter((i) => i.severity === "warning");
-  assert.ok(
-    warnings.length > 0,
-    "validateAuditResults must emit a warning for out-of-scope affected_files path (strip-and-warn policy)",
-  );
+  expect(warnings.length > 0, "validateAuditResults must emit a warning for out-of-scope affected_files path (strip-and-warn policy)").toBeTruthy();
 });
 
 // ── STRIP-AND-WARN-2: no error-severity issues from an out-of-scope path ──────
@@ -221,12 +198,8 @@ test("STRIP-AND-WARN-2: validateAuditResults produces NO error-severity issue fo
       i.message &&
       i.message.includes("src/other.ts"),
   );
-  assert.equal(
-    outOfScopeErrors.length,
-    0,
-    "No error-severity issue must be emitted for the out-of-scope path itself; found: " +
-      JSON.stringify(outOfScopeErrors.map((e) => e.message)),
-  );
+  expect(outOfScopeErrors.length, "No error-severity issue must be emitted for the out-of-scope path itself; found: " +
+      JSON.stringify(outOfScopeErrors.map((e) => e.message))).toBe(0);
 });
 
 // ── STRIP-AND-WARN-3: finding with out-of-scope path is retained ──────────────
@@ -239,13 +212,9 @@ test("STRIP-AND-WARN-3: a result with an out-of-scope affected_files path passes
   // The result must pass the error gate: zero error-severity issues overall
   // (the out-of-scope path triggers warnings only, so the result is accepted).
   const errors = issues.filter((i) => i.severity === "error");
-  assert.equal(
-    errors.length,
-    0,
-    "A result with an out-of-scope affected_files path must pass the error gate " +
+  expect(errors.length, "A result with an out-of-scope affected_files path must pass the error gate " +
       "(finding retained, not stranded); errors: " +
-      JSON.stringify(errors.map((e) => e.message)),
-  );
+      JSON.stringify(errors.map((e) => e.message))).toBe(0);
 });
 
 // ── STRIP-AND-WARN-4: happy path — in-scope affected_files produces no issues ──
@@ -256,12 +225,8 @@ test("STRIP-AND-WARN-4: validateAuditResults produces no errors or affected_file
   const issues = validateAuditResults([result], [task]);
 
   const errors = issues.filter((i) => i.severity === "error");
-  assert.equal(
-    errors.length,
-    0,
-    "A fully in-scope result must pass with no errors; found: " +
-      JSON.stringify(errors.map((e) => e.message)),
-  );
+  expect(errors.length, "A fully in-scope result must pass with no errors; found: " +
+      JSON.stringify(errors.map((e) => e.message))).toBe(0);
 
   // No affected_files path warnings either — in-scope is the clean path.
   const affectedPathWarnings = issues.filter(
@@ -271,12 +236,8 @@ test("STRIP-AND-WARN-4: validateAuditResults produces no errors or affected_file
       i.field.includes("affected_files") &&
       i.field.includes("path"),
   );
-  assert.equal(
-    affectedPathWarnings.length,
-    0,
-    "In-scope affected_files must not trigger path warnings; got: " +
-      JSON.stringify(affectedPathWarnings.map((w) => w.message)),
-  );
+  expect(affectedPathWarnings.length, "In-scope affected_files must not trigger path warnings; got: " +
+      JSON.stringify(affectedPathWarnings.map((w) => w.message))).toBe(0);
 });
 
 // ── STRIP-AND-WARN-5: all affected_files out-of-scope → result still passes ───
@@ -311,22 +272,15 @@ test("STRIP-AND-WARN-5: result with every affected_files entry out-of-scope pass
   const issues = validateAuditResults([result], [task]);
 
   const errors = issues.filter((i) => i.severity === "error");
-  assert.equal(
-    errors.length,
-    0,
-    "Result with all out-of-scope affected_files must still pass the error gate; errors: " +
-      JSON.stringify(errors.map((e) => e.message)),
-  );
+  expect(errors.length, "Result with all out-of-scope affected_files must still pass the error gate; errors: " +
+      JSON.stringify(errors.map((e) => e.message))).toBe(0);
 
   // Warnings ARE expected — one per out-of-scope path.
   const affectedPathWarnings = issues.filter(
     (i) => i.severity === "warning" && i.field && i.field.includes("affected_files"),
   );
-  assert.ok(
-    affectedPathWarnings.length >= 2,
-    "Each out-of-scope affected_files path must produce at least one warning; " +
-      `got ${affectedPathWarnings.length}`,
-  );
+  expect(affectedPathWarnings.length >= 2, "Each out-of-scope affected_files path must produce at least one warning; " +
+      `got ${affectedPathWarnings.length}`).toBeTruthy();
 });
 
 // ── INTERFACE-PARITY: scope authority is file_coverage (from task's file_paths) ─
@@ -365,11 +319,7 @@ test("INTERFACE-PARITY: the file_coverage paths from the assigned task are the s
   const inScopeAffectedErrors = inScopeIssues.filter(
     (i) => i.severity === "error" && i.field && i.field.includes("affected_files"),
   );
-  assert.equal(
-    inScopeAffectedErrors.length,
-    0,
-    `Path '${assignedPath}' declared in file_coverage must be in-scope for affected_files`,
-  );
+  expect(inScopeAffectedErrors.length, `Path '${assignedPath}' declared in file_coverage must be in-scope for affected_files`).toBe(0);
 
   // Out-of-scope: affected_files path NOT in file_coverage.
   const outOfScopeResult = {
@@ -392,11 +342,7 @@ test("INTERFACE-PARITY: the file_coverage paths from the assigned task are the s
       i.message &&
       i.message.includes(unassignedPath),
   );
-  assert.equal(
-    outOfScopeErrors.length,
-    0,
-    `Path '${unassignedPath}' absent from file_coverage must not produce an error (strip-and-warn policy)`,
-  );
+  expect(outOfScopeErrors.length, `Path '${unassignedPath}' absent from file_coverage must not produce an error (strip-and-warn policy)`).toBe(0);
 
   const outOfScopeWarnings = outOfScopeIssues.filter(
     (i) =>
@@ -404,8 +350,5 @@ test("INTERFACE-PARITY: the file_coverage paths from the assigned task are the s
       i.field &&
       i.field.includes("affected_files"),
   );
-  assert.ok(
-    outOfScopeWarnings.length > 0,
-    `Path '${unassignedPath}' absent from file_coverage must produce a warning (strip-and-warn policy)`,
-  );
+  expect(outOfScopeWarnings.length > 0, `Path '${unassignedPath}' absent from file_coverage must produce a warning (strip-and-warn policy)`).toBeTruthy();
 });

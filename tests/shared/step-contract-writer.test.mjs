@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,20 +33,20 @@ test("writeStepContract writes prompt + atomic current-step.json and returns the
     const artifactsDir = join(dir, "artifacts");
     const step = await writeStepContract(baseInput(artifactsDir));
 
-    assert.equal(step.contract_version, "test-step/v1");
-    assert.equal(step.step_kind, "demo_step");
-    assert.equal(step.status, "ready");
-    assert.equal(step.run_id, "RUN-1");
-    assert.deepEqual(step.allowed_commands, ["some-cmd"]);
-    assert.equal(step.stop_condition, "Stop when done.");
+    expect(step.contract_version).toBe("test-step/v1");
+    expect(step.step_kind).toBe("demo_step");
+    expect(step.status).toBe("ready");
+    expect(step.run_id).toBe("RUN-1");
+    expect(step.allowed_commands).toEqual(["some-cmd"]);
+    expect(step.stop_condition).toBe("Stop when done.");
 
     // current-prompt.md holds the verbatim prompt.
     const promptOnDisk = await readFile(currentPromptPath(artifactsDir), "utf8");
-    assert.equal(promptOnDisk, "Do the step.");
+    expect(promptOnDisk).toBe("Do the step.");
 
     // current-step.json round-trips to the returned object.
     const raw = await readFile(currentStepPath(artifactsDir), "utf8");
-    assert.deepEqual(JSON.parse(raw), step);
+    expect(JSON.parse(raw)).toEqual(step);
   } finally {
     await cleanup();
   }
@@ -70,21 +69,18 @@ test("writeStepContract normalizes ALL host-facing path fields to forward slashe
     );
 
     // No backslashes anywhere in any path field.
-    assert.ok(!step.prompt_path.includes("\\"), "prompt_path has no backslash");
-    assert.ok(!step.repo_root.includes("\\"), "repo_root has no backslash");
-    assert.ok(!step.artifacts_dir.includes("\\"), "artifacts_dir has no backslash");
-    assert.equal(step.repo_root, "C:/Code/my-repo");
+    expect(!step.prompt_path.includes("\\"), "prompt_path has no backslash").toBeTruthy();
+    expect(!step.repo_root.includes("\\"), "repo_root has no backslash").toBeTruthy();
+    expect(!step.artifacts_dir.includes("\\"), "artifacts_dir has no backslash").toBeTruthy();
+    expect(step.repo_root).toBe("C:/Code/my-repo");
     for (const value of Object.values(step.artifact_paths)) {
       if (value !== null) {
-        assert.ok(!value.includes("\\"), `artifact_paths value has no backslash: ${value}`);
+        expect(!value.includes("\\"), `artifact_paths value has no backslash: ${value}`).toBeTruthy();
       }
     }
-    assert.equal(
-      step.artifact_paths.source_manifest,
-      "C:/Code/my-repo/.audit-tools/remediation/intake/source-manifest.json",
-    );
+    expect(step.artifact_paths.source_manifest).toBe("C:/Code/my-repo/.audit-tools/remediation/intake/source-manifest.json");
     // null entries are preserved (audit allows not-yet-materialized artifacts).
-    assert.equal(step.artifact_paths.not_yet, null);
+    expect(step.artifact_paths.not_yet).toBe(null);
   } finally {
     await cleanup();
   }
@@ -105,18 +101,12 @@ test("writeStepContract canonical current_step/current_prompt always win over ca
       }),
     );
 
-    assert.ok(
-      step.artifact_paths.current_step.endsWith("current-step.json"),
-      "current_step must be the canonical computed path",
-    );
-    assert.ok(
-      step.artifact_paths.current_prompt.endsWith("current-prompt.md"),
-      "current_prompt must be the canonical computed path",
-    );
-    assert.ok(!step.artifact_paths.current_step.includes("attacker"));
-    assert.ok(!step.artifact_paths.current_prompt.includes("attacker"));
+    expect(step.artifact_paths.current_step.endsWith("current-step.json"), "current_step must be the canonical computed path").toBeTruthy();
+    expect(step.artifact_paths.current_prompt.endsWith("current-prompt.md"), "current_prompt must be the canonical computed path").toBeTruthy();
+    expect(!step.artifact_paths.current_step.includes("attacker")).toBeTruthy();
+    expect(!step.artifact_paths.current_prompt.includes("attacker")).toBeTruthy();
     // Non-canonical caller keys survive (normalized).
-    assert.equal(step.artifact_paths.my_artifact, "C:/repo/foo.json");
+    expect(step.artifact_paths.my_artifact).toBe("C:/repo/foo.json");
   } finally {
     await cleanup();
   }
@@ -139,12 +129,12 @@ test("writeStepContract spreads extraFields but they cannot clobber the normaliz
       }),
     );
 
-    assert.deepEqual(step.progress, { summary: "halfway" });
+    expect(step.progress).toEqual({ summary: "halfway" });
     // Canonical fields written AFTER extraFields win and are normalized.
-    assert.equal(step.repo_root, "C:/Code/my-repo");
-    assert.ok(!step.prompt_path.includes("attacker"));
-    assert.ok(step.artifact_paths.current_step.endsWith("current-step.json"));
-    assert.ok(!step.artifact_paths.current_step.includes("attacker"));
+    expect(step.repo_root).toBe("C:/Code/my-repo");
+    expect(!step.prompt_path.includes("attacker")).toBeTruthy();
+    expect(step.artifact_paths.current_step.endsWith("current-step.json")).toBeTruthy();
+    expect(!step.artifact_paths.current_step.includes("attacker")).toBeTruthy();
   } finally {
     await cleanup();
   }
@@ -157,13 +147,13 @@ test("writeStepContract trimPromptStart trims leading whitespace only when reque
 
     // Default: verbatim.
     await writeStepContract(baseInput(artifactsDir, { prompt: "\n  hi" }));
-    assert.equal(await readFile(currentPromptPath(artifactsDir), "utf8"), "\n  hi");
+    expect(await readFile(currentPromptPath(artifactsDir), "utf8")).toBe("\n  hi");
 
     // trimPromptStart: true → leading whitespace stripped.
     await writeStepContract(
       baseInput(artifactsDir, { prompt: "\n  hi", trimPromptStart: true }),
     );
-    assert.equal(await readFile(currentPromptPath(artifactsDir), "utf8"), "hi");
+    expect(await readFile(currentPromptPath(artifactsDir), "utf8")).toBe("hi");
   } finally {
     await cleanup();
   }
@@ -171,20 +161,14 @@ test("writeStepContract trimPromptStart trims leading whitespace only when reque
 
 test("currentStepPath/currentPromptPath live under the shared stepsDir", () => {
   const artifactsDir = join(tmpdir(), "some-artifacts");
-  assert.equal(currentStepPath(artifactsDir), join(stepsDir(artifactsDir), "current-step.json"));
-  assert.equal(currentPromptPath(artifactsDir), join(stepsDir(artifactsDir), "current-prompt.md"));
+  expect(currentStepPath(artifactsDir)).toBe(join(stepsDir(artifactsDir), "current-step.json"));
+  expect(currentPromptPath(artifactsDir)).toBe(join(stepsDir(artifactsDir), "current-prompt.md"));
 });
 
 test("currentStepPath/currentPromptPath insert a per-agent subdir when given an agentId", () => {
   const artifactsDir = join(tmpdir(), "some-artifacts");
-  assert.equal(
-    currentStepPath(artifactsDir, "a-1"),
-    join(stepsDir(artifactsDir), "a-1", "current-step.json"),
-  );
-  assert.equal(
-    currentPromptPath(artifactsDir, "a-1"),
-    join(stepsDir(artifactsDir), "a-1", "current-prompt.md"),
-  );
+  expect(currentStepPath(artifactsDir, "a-1")).toBe(join(stepsDir(artifactsDir), "a-1", "current-step.json"));
+  expect(currentPromptPath(artifactsDir, "a-1")).toBe(join(stepsDir(artifactsDir), "a-1", "current-prompt.md"));
 });
 
 test("writeStepContract returns a PER-AGENT prompt_path and also mirrors a shared latest pointer", async () => {
@@ -195,27 +179,16 @@ test("writeStepContract returns a PER-AGENT prompt_path and also mirrors a share
     const agentId = processAgentId();
 
     // Returned/canonical paths are the per-agent slot (concurrency-safe handoff).
-    assert.ok(step.agent_id === agentId, "contract carries the process agent id");
-    assert.ok(
-      step.prompt_path.includes(agentId),
-      "returned prompt_path points at the per-agent slot",
-    );
-    assert.equal(
-      await readFile(currentPromptPath(artifactsDir, agentId), "utf8"),
-      "AGENT PROMPT",
-      "per-agent prompt file has the content",
-    );
+    expect(step.agent_id === agentId, "contract carries the process agent id").toBeTruthy();
+    expect(step.prompt_path.includes(agentId), "returned prompt_path points at the per-agent slot").toBeTruthy();
+    expect(await readFile(currentPromptPath(artifactsDir, agentId), "utf8"), "per-agent prompt file has the content").toBe("AGENT PROMPT");
 
     // Shared latest pointer is ALSO written (single-agent back-compat / helpers).
-    assert.equal(
-      await readFile(currentPromptPath(artifactsDir), "utf8"),
-      "AGENT PROMPT",
-      "shared latest current-prompt.md mirrors the step",
-    );
+    expect(await readFile(currentPromptPath(artifactsDir), "utf8"), "shared latest current-prompt.md mirrors the step").toBe("AGENT PROMPT");
     const sharedStep = JSON.parse(
       await readFile(currentStepPath(artifactsDir), "utf8"),
     );
-    assert.equal(sharedStep.agent_id, agentId, "shared latest current-step.json mirrors the step");
+    expect(sharedStep.agent_id, "shared latest current-step.json mirrors the step").toBe(agentId);
   } finally {
     await cleanup();
   }

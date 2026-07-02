@@ -1,15 +1,11 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { resolveOpenCodeSpawnCommand, resolveWindowsShimSpawnCommand } = await import(
   "../../src/shared/providers/opencodeLaunch.ts"
 );
 
 test("resolveOpenCodeSpawnCommand passes through on non-win32", () => {
-  assert.deepEqual(
-    resolveOpenCodeSpawnCommand("opencode", ["run", "--model", "x"], "linux"),
-    { command: "opencode", args: ["run", "--model", "x"] },
-  );
+  expect(resolveOpenCodeSpawnCommand("opencode", ["run", "--model", "x"], "linux")).toEqual({ command: "opencode", args: ["run", "--model", "x"] });
 });
 
 test("resolveOpenCodeSpawnCommand wraps opencode through cmd.exe on win32", () => {
@@ -19,8 +15,8 @@ test("resolveOpenCodeSpawnCommand wraps opencode through cmd.exe on win32", () =
     "win32",
     "cmd.exe",
   );
-  assert.equal(resolved.command, "cmd.exe");
-  assert.deepEqual(resolved.args, [
+  expect(resolved.command).toBe("cmd.exe");
+  expect(resolved.args).toEqual([
     "/d",
     "/s",
     "/c",
@@ -29,22 +25,13 @@ test("resolveOpenCodeSpawnCommand wraps opencode through cmd.exe on win32", () =
 });
 
 test("resolveOpenCodeSpawnCommand wraps npx and explicit .cmd shims on win32", () => {
-  assert.equal(
-    resolveOpenCodeSpawnCommand("npx", ["opencode"], "win32", "cmd.exe").command,
-    "cmd.exe",
-  );
-  assert.equal(
-    resolveOpenCodeSpawnCommand("opencode.cmd", ["run"], "win32", "cmd.exe")
-      .command,
-    "cmd.exe",
-  );
+  expect(resolveOpenCodeSpawnCommand("npx", ["opencode"], "win32", "cmd.exe").command).toBe("cmd.exe");
+  expect(resolveOpenCodeSpawnCommand("opencode.cmd", ["run"], "win32", "cmd.exe")
+      .command).toBe("cmd.exe");
 });
 
 test("resolveOpenCodeSpawnCommand leaves unrelated win32 commands untouched", () => {
-  assert.deepEqual(
-    resolveOpenCodeSpawnCommand("node.exe", ["run"], "win32", "cmd.exe"),
-    { command: "node.exe", args: ["run"] },
-  );
+  expect(resolveOpenCodeSpawnCommand("node.exe", ["run"], "win32", "cmd.exe")).toEqual({ command: "node.exe", args: ["run"] });
 });
 
 test("resolveWindowsShimSpawnCommand wraps a bare command outside the allowlist when the PATH probe finds a .cmd shim", () => {
@@ -57,23 +44,20 @@ test("resolveWindowsShimSpawnCommand wraps a bare command outside the allowlist 
     "cmd.exe",
     probe,
   );
-  assert.equal(resolved.command, "cmd.exe");
-  assert.deepEqual(resolved.args, ["/d", "/s", "/c", "sometool --flag"]);
+  expect(resolved.command).toBe("cmd.exe");
+  expect(resolved.args).toEqual(["/d", "/s", "/c", "sometool --flag"]);
 });
 
 test("resolveWindowsShimSpawnCommand leaves a bare command untouched when the PATH probe finds no shim", () => {
   const probe = () => undefined;
-  assert.deepEqual(
-    resolveWindowsShimSpawnCommand(
+  expect(resolveWindowsShimSpawnCommand(
       "sometool",
       ["--flag"],
       ["opencode", "npx"],
       "win32",
       "cmd.exe",
       probe,
-    ),
-    { command: "sometool", args: ["--flag"] },
-  );
+    )).toEqual({ command: "sometool", args: ["--flag"] });
 });
 
 test("resolveWindowsShimSpawnCommand never invokes the probe for a command with a recognized extension", () => {
@@ -90,5 +74,5 @@ test("resolveWindowsShimSpawnCommand never invokes the probe for a command with 
     "cmd.exe",
     probe,
   );
-  assert.equal(probeCalled, false, "probe must be short-circuited for a recognized extension");
+  expect(probeCalled, "probe must be short-circuited for a recognized extension").toBe(false);
 });

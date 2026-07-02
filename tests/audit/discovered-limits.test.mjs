@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,14 +8,14 @@ const { mergeDiscoveredLimits } = await import("../../src/audit/quota/discovered
 // ── mergeDiscoveredLimits ───────────────────────────────────────────────────
 
 test("mergeDiscoveredLimits returns null for no sources", () => {
-  assert.equal(mergeDiscoveredLimits(), null);
-  assert.equal(mergeDiscoveredLimits(null, undefined), null);
+  expect(mergeDiscoveredLimits()).toBe(null);
+  expect(mergeDiscoveredLimits(null, undefined)).toBe(null);
 });
 
 test("mergeDiscoveredLimits returns single source unchanged", () => {
   const source = { requests_per_minute: 50, source: "provider_query" };
   const result = mergeDiscoveredLimits(source);
-  assert.deepEqual(result, { ...source });
+  expect(result).toEqual({ ...source });
 });
 
 test("mergeDiscoveredLimits prefers earlier sources", () => {
@@ -28,8 +27,8 @@ test("mergeDiscoveredLimits prefers earlier sources", () => {
   };
 
   const result = mergeDiscoveredLimits(provider, cached);
-  assert.equal(result.requests_per_minute, 50);
-  assert.equal(result.input_tokens_per_minute, 100000);
+  expect(result.requests_per_minute).toBe(50);
+  expect(result.input_tokens_per_minute).toBe(100000);
 });
 
 test("mergeDiscoveredLimits fills nulls from later sources", () => {
@@ -41,8 +40,8 @@ test("mergeDiscoveredLimits fills nulls from later sources", () => {
   };
 
   const result = mergeDiscoveredLimits(provider, cached);
-  assert.equal(result.requests_per_minute, 30);
-  assert.equal(result.input_tokens_per_minute, 100000);
+  expect(result.requests_per_minute).toBe(30);
+  expect(result.input_tokens_per_minute).toBe(100000);
 });
 
 test("mergeDiscoveredLimits skips null sources in the chain", () => {
@@ -53,7 +52,7 @@ test("mergeDiscoveredLimits skips null sources in the chain", () => {
   };
 
   const result = mergeDiscoveredLimits(provider, cached);
-  assert.equal(result.requests_per_minute, 30);
+  expect(result.requests_per_minute).toBe(30);
 });
 
 // ── scheduleWave with discoveredLimits ──────────────────────────────────────
@@ -69,7 +68,7 @@ test("scheduleWave caps by discovered RPM", () => {
     discoveredLimits: { requests_per_minute: 10, source: "header_extraction" },
   });
   // 10 * 0.8 safety margin = 8
-  assert.equal(schedule.max_concurrent, 8);
+  expect(schedule.max_concurrent).toBe(8);
 });
 
 test("scheduleWave caps by discovered TPM", () => {
@@ -85,7 +84,7 @@ test("scheduleWave caps by discovered TPM", () => {
     },
   });
   // sumTopN of 5 slots (50000) > 40000 budget, sumTopN of 4 slots (40000) <= 40000 → wave = 4
-  assert.equal(schedule.max_concurrent, 4);
+  expect(schedule.max_concurrent).toBe(4);
 });
 
 test("scheduleWave explicit config overrides discovered limits", () => {
@@ -103,7 +102,7 @@ test("scheduleWave explicit config overrides discovered limits", () => {
     discoveredLimits: { requests_per_minute: 50, source: "header_extraction" },
   });
   // explicit config RPM (5) wins: 5 * 0.8 = 4
-  assert.equal(schedule.max_concurrent, 4);
+  expect(schedule.max_concurrent).toBe(4);
 });
 
 test("scheduleWave first-contact cap does not fire when discoveredLimits provide RPM", () => {
@@ -116,7 +115,7 @@ test("scheduleWave first-contact cap does not fire when discoveredLimits provide
     discoveredLimits: { requests_per_minute: 100, source: "header_extraction" },
   });
   // RPM cap: 100 * 0.8 = 80, requestedConcurrency = 22 → wave = 22 (no first-contact)
-  assert.equal(schedule.max_concurrent, 22);
+  expect(schedule.max_concurrent).toBe(22);
 });
 
 test("scheduleWave leaves an unconfigured provider uncapped (no cold-start floor)", () => {
@@ -127,8 +126,8 @@ test("scheduleWave leaves an unconfigured provider uncapped (no cold-start floor
     requestedConcurrency: 22,
     quotaStateEntry: null,
   });
-  assert.equal(schedule.max_concurrent, 22);
-  assert.equal(schedule.binding_cap, "none");
+  expect(schedule.max_concurrent).toBe(22);
+  expect(schedule.binding_cap).toBe("none");
 });
 
 // ── File-backed I/O functions ────────────────────────────────────────────────
@@ -154,8 +153,8 @@ async function withTempQuotaDir(fn) {
 test("readDiscoveredLimitsCache returns empty cache when file is absent", async () => {
   await withTempQuotaDir(async () => {
     const result = await readDiscoveredLimitsCache();
-    assert.equal(result.version, 1);
-    assert.equal(Object.keys(result.entries).length, 0);
+    expect(result.version).toBe(1);
+    expect(Object.keys(result.entries).length).toBe(0);
   });
 });
 
@@ -173,9 +172,9 @@ test("readDiscoveredLimitsCache returns parsed cache for valid version-1 file", 
     };
     await writeFile(join(dir, "discovered-limits.json"), JSON.stringify(cache) + "\n", "utf8");
     const result = await readDiscoveredLimitsCache();
-    assert.ok(result.entries["provider:model"], "entry should exist");
-    assert.equal(result.entries["provider:model"].requests_per_minute, 60);
-    assert.equal(result.entries["provider:model"].source, "header_extraction");
+    expect(result.entries["provider:model"], "entry should exist").toBeTruthy();
+    expect(result.entries["provider:model"].requests_per_minute).toBe(60);
+    expect(result.entries["provider:model"].source).toBe("header_extraction");
   });
 });
 
@@ -183,8 +182,8 @@ test("readDiscoveredLimitsCache returns empty cache and does not throw for malfo
   await withTempQuotaDir(async (dir) => {
     await writeFile(join(dir, "discovered-limits.json"), "not valid json", "utf8");
     const result = await readDiscoveredLimitsCache();
-    assert.equal(result.version, 1);
-    assert.equal(Object.keys(result.entries).length, 0);
+    expect(result.version).toBe(1);
+    expect(Object.keys(result.entries).length).toBe(0);
   });
 });
 
@@ -203,19 +202,13 @@ test("readDiscoveredLimitsCache logs path when cache file is unreadable", async 
       process.stderr.write = origWrite;
     }
     // Should still return empty cache
-    assert.equal(result.version, 1);
-    assert.equal(Object.keys(result.entries).length, 0);
+    expect(result.version).toBe(1);
+    expect(Object.keys(result.entries).length).toBe(0);
     // Diagnostic must include the cache file path
     const combined = chunks.join("");
-    assert.ok(
-      combined.includes("discovered-limits.json"),
-      `expected cache path in stderr diagnostic, got: ${combined}`,
-    );
+    expect(combined.includes("discovered-limits.json"), `expected cache path in stderr diagnostic, got: ${combined}`).toBeTruthy();
     // Diagnostic must also include the error message text
-    assert.ok(
-      combined.includes("[quota] ignoring unreadable discovered-limits cache"),
-      `expected diagnostic prefix in stderr, got: ${combined}`,
-    );
+    expect(combined.includes("[quota] ignoring unreadable discovered-limits cache"), `expected diagnostic prefix in stderr, got: ${combined}`).toBeTruthy();
   });
 });
 
@@ -224,8 +217,8 @@ test("readDiscoveredLimitsCache returns empty cache for file with wrong version"
     const wrongVersion = { version: 2, entries: { "x:y": { source: "s" } } };
     await writeFile(join(dir, "discovered-limits.json"), JSON.stringify(wrongVersion) + "\n", "utf8");
     const result = await readDiscoveredLimitsCache();
-    assert.equal(result.version, 1);
-    assert.equal(Object.keys(result.entries).length, 0);
+    expect(result.version).toBe(1);
+    expect(Object.keys(result.entries).length).toBe(0);
   });
 });
 
@@ -243,10 +236,10 @@ test("writeDiscoveredLimitsCache writes valid JSON that round-trips through read
     };
     await writeDiscoveredLimitsCache(cache);
     const roundTripped = await readDiscoveredLimitsCache();
-    assert.equal(roundTripped.version, 1);
-    assert.equal(roundTripped.entries["provider:model"].requests_per_minute, 30);
+    expect(roundTripped.version).toBe(1);
+    expect(roundTripped.entries["provider:model"].requests_per_minute).toBe(30);
     const raw = await readFile(join(dir, "discovered-limits.json"), "utf8");
-    assert.ok(raw.endsWith("\n"), "file content should end with newline");
+    expect(raw.endsWith("\n"), "file content should end with newline").toBeTruthy();
   });
 });
 
@@ -257,9 +250,9 @@ test("updateDiscoveredLimits writes a new entry when none exists", async () => {
       source: "header_extraction",
     });
     const result = await lookupDiscoveredLimits("new:model");
-    assert.ok(result !== null, "lookup should return non-null");
-    assert.equal(result.requests_per_minute, 50);
-    assert.equal(result.source, "header_extraction");
+    expect(result !== null, "lookup should return non-null").toBeTruthy();
+    expect(result.requests_per_minute).toBe(50);
+    expect(result.source).toBe("header_extraction");
   });
 });
 
@@ -274,10 +267,10 @@ test("updateDiscoveredLimits merges into existing entry, carrying forward untouc
       source: "provider_query",
     });
     const result = await lookupDiscoveredLimits("prov:m");
-    assert.ok(result !== null);
-    assert.equal(result.requests_per_minute, 40, "requests_per_minute from prior entry should be preserved");
-    assert.equal(result.input_tokens_per_minute, 100000, "input_tokens_per_minute should be updated");
-    assert.equal(result.source, "provider_query", "source should be updated to new value");
+    expect(result !== null).toBeTruthy();
+    expect(result.requests_per_minute, "requests_per_minute from prior entry should be preserved").toBe(40);
+    expect(result.input_tokens_per_minute, "input_tokens_per_minute should be updated").toBe(100000);
+    expect(result.source, "source should be updated to new value").toBe("provider_query");
   });
 });
 
@@ -294,16 +287,16 @@ test("updateDiscoveredLimits does not overwrite existing fields when incoming va
       source: "provider_query",
     });
     const result = await lookupDiscoveredLimits("prov:m");
-    assert.ok(result !== null);
-    assert.equal(result.requests_per_minute, 60, "existing requests_per_minute should be preserved when incoming is null");
-    assert.equal(result.input_tokens_per_minute, 50000, "existing input_tokens_per_minute should be preserved when incoming is null");
+    expect(result !== null).toBeTruthy();
+    expect(result.requests_per_minute, "existing requests_per_minute should be preserved when incoming is null").toBe(60);
+    expect(result.input_tokens_per_minute, "existing input_tokens_per_minute should be preserved when incoming is null").toBe(50000);
   });
 });
 
 test("lookupDiscoveredLimits returns null for unknown providerModelKey", async () => {
   await withTempQuotaDir(async () => {
     const result = await lookupDiscoveredLimits("no:such:key");
-    assert.equal(result, null);
+    expect(result).toBe(null);
   });
 });
 
@@ -321,7 +314,7 @@ test("lookupDiscoveredLimits returns null when all three limit fields are null/u
     };
     await writeFile(join(dir, "discovered-limits.json"), JSON.stringify(cache) + "\n", "utf8");
     const result = await lookupDiscoveredLimits("prov:m");
-    assert.equal(result, null);
+    expect(result).toBe(null);
   });
 });
 
@@ -332,11 +325,11 @@ test("lookupDiscoveredLimits returns DiscoveredRateLimits when at least one fiel
       source: "header_extraction",
     });
     const result = await lookupDiscoveredLimits("prov:m");
-    assert.ok(result !== null);
-    assert.equal(result.requests_per_minute, 60);
-    assert.equal(result.input_tokens_per_minute, null);
-    assert.equal(result.output_tokens_per_minute, null);
-    assert.equal(result.source, "header_extraction");
+    expect(result !== null).toBeTruthy();
+    expect(result.requests_per_minute).toBe(60);
+    expect(result.input_tokens_per_minute).toBe(null);
+    expect(result.output_tokens_per_minute).toBe(null);
+    expect(result.source).toBe("header_extraction");
   });
 });
 
@@ -353,7 +346,7 @@ test("getCachePath returns a path distinct from getQuotaStatePath", async () => 
     await writeDiscoveredLimitsCache(cache);
     const statePath = getQuotaStatePath();
     const expectedCachePath = join(dir, "discovered-limits.json");
-    assert.notEqual(expectedCachePath, statePath);
+    expect(expectedCachePath).not.toBe(statePath);
   });
 });
 
@@ -364,18 +357,18 @@ test("getCachePath ends with discovered-limits.json", async () => {
     await writeDiscoveredLimitsCache(cache);
     // After a write, discovered-limits.json must exist in the temp dir.
     const raw = await readFile(expectedCachePath, "utf8");
-    assert.ok(raw.includes('"version"'), "cache file should contain JSON with version field");
+    expect(raw.includes('"version"'), "cache file should contain JSON with version field").toBeTruthy();
   });
 });
 
 test("getCachePath shares the same dirname as getQuotaStatePath", async () => {
   await withTempQuotaDir(async (dir) => {
     const statePath = getQuotaStatePath();
-    assert.equal(dirname(statePath), dir, "quota state dirname should equal the temp dir");
+    expect(dirname(statePath), "quota state dirname should equal the temp dir").toBe(dir);
     // The cache file is written inside the same dir — confirm by writing and reading.
     const cache = { version: /** @type {1} */ (1), entries: {} };
     await writeDiscoveredLimitsCache(cache);
     const cacheContents = await readFile(join(dir, "discovered-limits.json"), "utf8");
-    assert.ok(cacheContents.length > 0, "discovered-limits.json should be non-empty");
+    expect(cacheContents.length > 0, "discovered-limits.json should be non-empty").toBeTruthy();
   });
 });

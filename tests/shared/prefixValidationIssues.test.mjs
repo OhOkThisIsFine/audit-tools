@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, describe, it, expect } from "vitest";
 
 const { prefixValidationIssues } = await import("../../src/shared/validation/basic.ts");
 
@@ -7,29 +6,29 @@ test("prefixValidationIssues: empty path is replaced by the prefix", () => {
   const result = prefixValidationIssues("foo", [
     { path: "", message: "bad", severity: "error" },
   ]);
-  assert.deepEqual(result, [{ path: "foo", message: "bad", severity: "error" }]);
+  expect(result).toEqual([{ path: "foo", message: "bad", severity: "error" }]);
 });
 
 test("prefixValidationIssues: path that exactly equals the prefix is left unchanged (de-dup guard)", () => {
   const result = prefixValidationIssues("foo", [
     { path: "foo", message: "bad", severity: "error" },
   ]);
-  assert.deepEqual(result, [{ path: "foo", message: "bad", severity: "error" }]);
+  expect(result).toEqual([{ path: "foo", message: "bad", severity: "error" }]);
 });
 
-test("prefixValidationIssues: path that starts with prefix + '.' is left unchanged (de-dup guard)", async (t) => {
-  await t.test("one level deep", () => {
+describe("prefixValidationIssues: path that starts with prefix + '.' is left unchanged (de-dup guard)", () => {
+  it("one level deep", () => {
     const result = prefixValidationIssues("foo", [
       { path: "foo.bar", message: "bad", severity: "error" },
     ]);
-    assert.deepEqual(result, [{ path: "foo.bar", message: "bad", severity: "error" }]);
+    expect(result).toEqual([{ path: "foo.bar", message: "bad", severity: "error" }]);
   });
 
-  await t.test("two levels deep", () => {
+  it("two levels deep", () => {
     const result = prefixValidationIssues("foo", [
       { path: "foo.bar.baz", message: "bad", severity: "error" },
     ]);
-    assert.deepEqual(result, [{ path: "foo.bar.baz", message: "bad", severity: "error" }]);
+    expect(result).toEqual([{ path: "foo.bar.baz", message: "bad", severity: "error" }]);
   });
 });
 
@@ -38,14 +37,14 @@ test("prefixValidationIssues: path that shares a string prefix but is not dot-se
   const result = prefixValidationIssues("foo", [
     { path: "foobar", message: "bad", severity: "error" },
   ]);
-  assert.deepEqual(result, [{ path: "foo.foobar", message: "bad", severity: "error" }]);
+  expect(result).toEqual([{ path: "foo.foobar", message: "bad", severity: "error" }]);
 });
 
 test("prefixValidationIssues: normal non-empty path that does not start with prefix is prepended", () => {
   const result = prefixValidationIssues("root", [
     { path: "child", message: "bad", severity: "warning" },
   ]);
-  assert.deepEqual(result, [{ path: "root.child", message: "bad", severity: "warning" }]);
+  expect(result).toEqual([{ path: "root.child", message: "bad", severity: "warning" }]);
 });
 
 test("prefixValidationIssues: mixed issues in a single call are all handled correctly", () => {
@@ -56,7 +55,7 @@ test("prefixValidationIssues: mixed issues in a single call are all handled corr
     { path: "other", message: "m4", severity: "error" },
   ];
   const result = prefixValidationIssues("root", issues);
-  assert.deepEqual(result, [
+  expect(result).toEqual([
     { path: "root", message: "m1", severity: "error" },
     { path: "root", message: "m2", severity: "error" },
     { path: "root.nested", message: "m3", severity: "warning" },
@@ -70,11 +69,11 @@ test("prefixValidationIssues: returns a new array and does not mutate the input"
   const result = prefixValidationIssues("pfx", issues);
 
   // Different array reference
-  assert.notEqual(result, issues);
+  expect(result).not.toBe(issues);
   // Original issue object is unchanged
-  assert.equal(issues[0].path, "x");
-  assert.equal(original.path, "x");
+  expect(issues[0].path).toBe("x");
+  expect(original.path).toBe("x");
   // The returned object is a new reference
-  assert.notEqual(result[0], original);
-  assert.equal(result[0].path, "pfx.x");
+  expect(result[0]).not.toBe(original);
+  expect(result[0].path).toBe("pfx.x");
 });

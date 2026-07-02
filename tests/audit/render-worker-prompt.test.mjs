@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { renderWorkerPrompt } = await import("../../src/audit/prompts/renderWorkerPrompt.ts");
 const { usesDeferredWorkerCommand } = await import("../../src/audit/types/workerSession.ts");
@@ -24,27 +23,21 @@ test("renderWorkerPrompt uses argv JSON for agent tasks and falls back to the de
   max_retries: 0,
   });
 
-  assert.match(
-  prompt,
-  /Read: \/repo\/\.audit-tools\/audit\/audit_tasks\.json/,
-  );
-  assert.doesNotMatch(prompt, /\.schema\.json/);
-  assert.match(prompt, /review only the tasks listed/i);
-  assert.match(prompt, /Repository root: \/repo/);
-  assert.match(prompt, /Set the shell\/tool workdir to the repository root/i);
-  assert.match(prompt, /Do not add tasks/i);
-  assert.match(prompt, /Do not use shell search commands/i);
-  assert.match(prompt, /do not[\s\S]*write result_path/i);
-  assert.match(prompt, /tasks tagged lens_verification/i);
-  assert.match(prompt, /Write only the JSON array of AuditResult objects to:/i);
-  assert.match(prompt, /do not pipe an inline foreach statement directly into ConvertTo-Json/i);
-  assert.match(prompt, /Assign the foreach output to a variable first/i);
-  assert.match(prompt, /unwraps single-element arrays/i);
-  assert.match(prompt, /worker command ingests audit_results_path and writes result_path/i);
-  assert.match(
-  prompt,
-  /Command: \["node","\/repo\/bin\/worker\.js","--task","\/tmp\/task with spaces\.json"\]/,
-  );
+  expect(prompt).toMatch(/Read: \/repo\/\.audit-tools\/audit\/audit_tasks\.json/);
+  expect(prompt).not.toMatch(/\.schema\.json/);
+  expect(prompt).toMatch(/review only the tasks listed/i);
+  expect(prompt).toMatch(/Repository root: \/repo/);
+  expect(prompt).toMatch(/Set the shell\/tool workdir to the repository root/i);
+  expect(prompt).toMatch(/Do not add tasks/i);
+  expect(prompt).toMatch(/Do not use shell search commands/i);
+  expect(prompt).toMatch(/do not[\s\S]*write result_path/i);
+  expect(prompt).toMatch(/tasks tagged lens_verification/i);
+  expect(prompt).toMatch(/Write only the JSON array of AuditResult objects to:/i);
+  expect(prompt).toMatch(/do not pipe an inline foreach statement directly into ConvertTo-Json/i);
+  expect(prompt).toMatch(/Assign the foreach output to a variable first/i);
+  expect(prompt).toMatch(/unwraps single-element arrays/i);
+  expect(prompt).toMatch(/worker command ingests audit_results_path and writes result_path/i);
+  expect(prompt).toMatch(/Command: \["node","\/repo\/bin\/worker\.js","--task","\/tmp\/task with spaces\.json"\]/);
 });
 
 test("renderWorkerPrompt suppresses worker_command execution when the task uses deferred ingestion", () => {
@@ -63,19 +56,12 @@ test("renderWorkerPrompt suppresses worker_command execution when the task uses 
   worker_command_mode: "deferred",
   });
 
-  assert.match(
-  prompt,
-  /Read: \/repo\/\.audit-tools\/audit\/runs\/run-2\/pending-audit-tasks\.json/,
-  );
-  assert.match(prompt, /Deferred mode: write results, do not execute worker_command\./i);
-  assert.doesNotMatch(prompt, /Then execute worker_command/i);
+  expect(prompt).toMatch(/Read: \/repo\/\.audit-tools\/audit\/runs\/run-2\/pending-audit-tasks\.json/);
+  expect(prompt).toMatch(/Deferred mode: write results, do not execute worker_command\./i);
+  expect(prompt).not.toMatch(/Then execute worker_command/i);
   // OBL-INV-APR-09: deferred mode must NOT embed the Command: [argv] execution line
   // (the worker writes its own results file; no inlined execution instruction).
-  assert.doesNotMatch(
-    prompt,
-    /Command: \[/,
-    "deferred-mode prompt must not contain an embedded Command: argv execution line",
-  );
+  expect(prompt, "deferred-mode prompt must not contain an embedded Command: argv execution line").not.toMatch(/Command: \[/);
 });
 
 test("renderWorkerPrompt renders a ## File access section when the task includes an access property", () => {
@@ -95,14 +81,10 @@ test("renderWorkerPrompt renders a ## File access section when the task includes
     },
   });
 
-  assert.match(prompt, /## File access/i, "section heading is present");
+  expect(prompt, "section heading is present").toMatch(/## File access/i);
   // read_paths render as a single comma-joined "Read:" line.
-  assert.match(
-    prompt,
-    /Read: \/repo\/src\/foo\.ts, \/repo\/src\/bar\.ts/,
-    "both read paths are listed on the Read line",
-  );
-  assert.match(prompt, /Write: \/repo\/out\/result\.json/, "write path is listed");
+  expect(prompt, "both read paths are listed on the Read line").toMatch(/Read: \/repo\/src\/foo\.ts, \/repo\/src\/bar\.ts/);
+  expect(prompt, "write path is listed").toMatch(/Write: \/repo\/out\/result\.json/);
 });
 
 test("renderWorkerPrompt omits the ## File access section when no access property is supplied", () => {
@@ -118,16 +100,13 @@ test("renderWorkerPrompt omits the ## File access section when no access propert
     audit_results_path: "/repo/.audit-tools/audit/runs/run-no-access/run-results.json",
   });
 
-  assert.doesNotMatch(prompt, /## File access/i, "section heading is absent when access is not provided");
+  expect(prompt, "section heading is absent when access is not provided").not.toMatch(/## File access/i);
 });
 
 test("usesDeferredWorkerCommand keys solely on worker_command_mode", () => {
-  assert.equal(
-    usesDeferredWorkerCommand({ worker_command_mode: "deferred" }),
-    true,
-  );
-  assert.equal(usesDeferredWorkerCommand({ worker_command_mode: "run" }), false);
-  assert.equal(usesDeferredWorkerCommand({}), false);
+  expect(usesDeferredWorkerCommand({ worker_command_mode: "deferred" })).toBe(true);
+  expect(usesDeferredWorkerCommand({ worker_command_mode: "run" })).toBe(false);
+  expect(usesDeferredWorkerCommand({})).toBe(false);
 });
 
 test("renderWorkerPrompt renders bounded executor prompts from argv data instead of shell-quoted strings", () => {
@@ -149,18 +128,9 @@ test("renderWorkerPrompt renders bounded executor prompts from argv data instead
   timeout_ms: 60000,
   });
 
-  assert.match(
-  prompt,
-  /Execute worker_command from task\.json exactly\./,
-  );
-  assert.match(
-  prompt,
-  /Command: \["node","\/repo\/audit-code\.mjs","worker-run","--task","\/repo\/\.audit-tools\/audit\/runs\/run-3\/task\.json"\]/,
-  );
-  assert.match(
-  prompt,
-  /Write result to: \/repo\/\.audit-tools\/audit\/runs\/run-3\/result\.json/,
-  );
+  expect(prompt).toMatch(/Execute worker_command from task\.json exactly\./);
+  expect(prompt).toMatch(/Command: \["node","\/repo\/audit-code\.mjs","worker-run","--task","\/repo\/\.audit-tools\/audit\/runs\/run-3\/task\.json"\]/);
+  expect(prompt).toMatch(/Write result to: \/repo\/\.audit-tools\/audit\/runs\/run-3\/result\.json/);
 });
 
 test("renderWorkerPrompt invites an optional agent reflection inline, without referencing a schema file", () => {
@@ -176,13 +146,9 @@ test("renderWorkerPrompt invites an optional agent reflection inline, without re
     audit_results_path: "/repo/.audit-tools/audit/runs/run-reflect/run-results.json",
   });
 
-  assert.match(prompt, /agent-feedback\.jsonl/, "points at the feedback artifact");
-  assert.match(prompt, /instruction_clarity/, "describes the reflection shape inline");
-  assert.match(
-    prompt,
-    /never let this delay or replace the audit result/i,
-    "frames the reflection as strictly optional",
-  );
+  expect(prompt, "points at the feedback artifact").toMatch(/agent-feedback\.jsonl/);
+  expect(prompt, "describes the reflection shape inline").toMatch(/instruction_clarity/);
+  expect(prompt, "frames the reflection as strictly optional").toMatch(/never let this delay or replace the audit result/i);
   // The reflection invitation must not reintroduce a schema-file reference.
-  assert.doesNotMatch(prompt, /\.schema\.json/);
+  expect(prompt).not.toMatch(/\.schema\.json/);
 });

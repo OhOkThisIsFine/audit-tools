@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -269,13 +269,13 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     const step = await advanceToDispatchReady(root);
-    assert.equal(step.contract_version, "audit-code-step/v1alpha1");
-    assert.equal(step.status, "ready");
+    expect(step.contract_version).toBe("audit-code-step/v1alpha1");
+    expect(step.status).toBe("ready");
 
     const tasks = JSON.parse(
       await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"),
     );
-    assert.ok(tasks.length > 0);
+    expect(tasks.length > 0).toBeTruthy();
     const resultsPath = join(root, "audit_results.json");
     await writeFile(
       resultsPath,
@@ -299,10 +299,10 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
         )
       ).stdout,
     );
-    assert.equal(ingested.selected_executor, "result_ingestion_executor");
+    expect(ingested.selected_executor).toBe("result_ingestion_executor");
 
     const presented = await nextStepUntilPresentReport(root);
-    assert.equal(presented.status, "complete");
+    expect(presented.status).toBe("complete");
 
     // Completion promotes the machine contract and the human render to the
     // artifacts dir's parent (.audit-tools/).
@@ -310,7 +310,7 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
       join(root, ".audit-tools", "audit-report.md"),
       "utf8",
     );
-    assert.match(auditReport, /# Audit Report/);
+    expect(auditReport).toMatch(/# Audit Report/);
     await access(join(root, ".audit-tools", "audit-findings.json"));
 
     // The audit working state is cleaned out (promotion removes the artifact
@@ -320,7 +320,7 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
       () => access(join(artifactsDir, "audit_tasks.json")),
       /ENOENT/i,
     );
-    assert.match(await readFile(presented.prompt_path, "utf8"), /present report/i);
+    expect(await readFile(presented.prompt_path, "utf8")).toMatch(/present report/i);
   });
 });
 
@@ -383,42 +383,24 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
         presented = step;
         break;
       }
-      assert.equal(
-        step.step_kind,
-        "blocked",
-        `expected only blocked/present_report while finalizing, got ${step.step_kind}`,
-      );
-      assert.equal(
-        await reportExists(),
-        false,
-        "a rendered report must be presented, never surfaced as a run-limit block",
-      );
+      expect(step.step_kind, `expected only blocked/present_report while finalizing, got ${step.step_kind}`).toBe("blocked");
+      expect(await reportExists(), "a rendered report must be presented, never surfaced as a run-limit block").toBe(false);
     }
 
-    assert.ok(presented, "next-step must reach present_report");
-    assert.equal(presented.status, "complete");
+    expect(presented, "next-step must reach present_report").toBeTruthy();
+    expect(presented.status).toBe("complete");
     // Completion promotes the canonical report to .audit-tools/ (parent of the
     // artifacts dir). The step contract normalizes the path to forward slashes.
-    assert.equal(
-      presented.artifact_paths.final_report,
-      toPromptPathToken(join(root, ".audit-tools", "audit-report.md")),
-    );
-    assert.match(
-      await readFile(presented.artifact_paths.final_report, "utf8"),
-      /# Audit Report/,
-    );
+    expect(presented.artifact_paths.final_report).toBe(toPromptPathToken(join(root, ".audit-tools", "audit-report.md")));
+    expect(await readFile(presented.artifact_paths.final_report, "utf8")).toMatch(/# Audit Report/);
     // The audit working state is cleaned out (promotion removes the artifact
     // bundle), but next-step still leaves the present_report step scaffolding so
     // the host can read and follow `prompt_path`. Assert the working artifacts
     // are gone while the prompt the host must follow remains readable.
-    assert.equal(
-      await access(join(artifactsDir, "audit_tasks.json"))
+    expect(await access(join(artifactsDir, "audit_tasks.json"))
         .then(() => true)
-        .catch(() => false),
-      false,
-      "audit working artifacts must be cleaned on completion",
-    );
-    assert.match(await readFile(presented.prompt_path, "utf8"), /present report/i);
+        .catch(() => false), "audit working artifacts must be cleaned on completion").toBe(false);
+    expect(await readFile(presented.prompt_path, "utf8")).toMatch(/present report/i);
   });
 });
 
@@ -462,13 +444,10 @@ test("ingest-results accepts a directory of batch result files and next-step sti
         )
       ).stdout,
     );
-    assert.equal(ingested.imported_files.length, 2);
+    expect(ingested.imported_files.length).toBe(2);
 
     const presented = await nextStepUntilPresentReport(root);
-    assert.equal(presented.status, "complete");
-    assert.match(
-      await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8"),
-      /## Work Blocks/,
-    );
+    expect(presented.status).toBe("complete");
+    expect(await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8")).toMatch(/## Work Blocks/);
   });
 });

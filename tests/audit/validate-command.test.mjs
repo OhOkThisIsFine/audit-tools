@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -141,47 +141,38 @@ test("audit-code validate exits non-zero when validation issues exist", async ()
     const result = await runValidate(root);
     const parsed = parseJsonOutput(result);
 
-    assert.notEqual(result.code, 0);
+    expect(result.code).not.toBe(0);
     // The fixture intentionally also seeds src/ghost.ts / ghost-unit in the
     // coverage matrix without backing repo_manifest / unit_manifest entries,
     // which yields two further coverage-integrity issues on top of the four
     // asserted below (6 total).
-    assert.equal(parsed.issue_count, 6);
-    assert.ok(
-      parsed.issues.some(
+    expect(parsed.issue_count).toBe(6);
+    expect(parsed.issues.some(
         (issue) =>
           issue.path === "file_disposition" &&
           /missing disposition entry for src\/lib\/session\.ts/i.test(
             issue.message,
           ),
-      ),
-    );
-    assert.ok(
-      parsed.issues.some(
+      )).toBeTruthy();
+    expect(parsed.issues.some(
         (issue) =>
           issue.path === "coverage_matrix" &&
           /missing coverage entry for src\/lib\/session\.ts/i.test(
             issue.message,
           ),
-      ),
-    );
-    assert.ok(
-      parsed.issues.some(
+      )).toBeTruthy();
+    expect(parsed.issues.some(
         (issue) =>
           issue.path === "unit_manifest:auth-unit" &&
           /unknown file src\/ghost\.ts/i.test(issue.message),
-      ),
-    );
-    assert.ok(
-      parsed.issues.some(
+      )).toBeTruthy();
+    expect(parsed.issues.some(
         (issue) =>
           issue.path === "coverage_matrix:src/api/auth.ts" &&
           /completed lens tests is not listed in required_lenses/i.test(
             issue.message,
           ),
-      ),
-      "expected a completed_lenses superset violation issue for src/api/auth.ts",
-    );
+      ), "expected a completed_lenses superset violation issue for src/api/auth.ts").toBeTruthy();
   });
 });
 
@@ -206,14 +197,13 @@ test("audit-code validate exits zero when no validation issues exist", async () 
     const result = await runValidate(root);
     const parsed = parseJsonOutput(result);
 
-    assert.equal(result.code, 0);
-    assert.equal(parsed.issue_count, 0);
-    assert.equal(parsed.session_config_present, false);
+    expect(result.code).toBe(0);
+    expect(parsed.issue_count).toBe(0);
+    expect(parsed.session_config_present).toBe(false);
     // TST-c0432a78-3: do not pin the provider name — auto-resolution picks the
     // contextually appropriate fallback; verify only that a name is returned.
-    assert.ok(typeof parsed.resolved_provider === "string" && parsed.resolved_provider.length > 0,
-      "resolved_provider must be a non-empty string");
-    assert.deepEqual(parsed.issues, []);
+    expect(typeof parsed.resolved_provider === "string" && parsed.resolved_provider.length > 0, "resolved_provider must be a non-empty string").toBeTruthy();
+    expect(parsed.issues).toEqual([]);
   });
 });
 
@@ -242,26 +232,22 @@ test("audit-code validate exits non-zero when session-config has provider issues
     const result = await runValidate(root);
     const parsed = parseJsonOutput(result);
 
-    assert.notEqual(result.code, 0);
-    assert.equal(parsed.session_config_present, true);
-    assert.equal(parsed.resolved_provider, null);
-    assert.equal(parsed.artifact_issue_count, 0);
-    assert.equal(parsed.session_config_issue_count, parsed.issue_count);
-    assert.ok(
-      parsed.issues.some(
+    expect(result.code).not.toBe(0);
+    expect(parsed.session_config_present).toBe(true);
+    expect(parsed.resolved_provider).toBe(null);
+    expect(parsed.artifact_issue_count).toBe(0);
+    expect(parsed.session_config_issue_count).toBe(parsed.issue_count);
+    expect(parsed.issues.some(
         (issue) =>
           issue.path ===
             "session_config.subprocess_template.command_template" &&
           /must not be empty/i.test(issue.message),
-      ),
-    );
-    assert.ok(
-      parsed.issues.some(
+      )).toBeTruthy();
+    expect(parsed.issues.some(
         (issue) =>
           issue.path === "session_config.subprocess_template.env.AUDIT_TOKEN" &&
           /must be strings/i.test(issue.message),
-      ),
-    );
+      )).toBeTruthy();
   });
 });
 

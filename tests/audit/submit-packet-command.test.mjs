@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, onTestFinished, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -186,7 +185,7 @@ function makeArgv(artifactsDir, packetId, payload) {
 await test("packet-id normalization resolves case/whitespace variants", async (t) => {
   const task = makeTask("task-norm-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Submit with wrong case and surrounding whitespace
   const weirdId = `  ${PACKET_ID.toUpperCase()}  `;
@@ -195,15 +194,12 @@ await test("packet-id normalization resolves case/whitespace variants", async (t
 
   const { stdout, stderr, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
-  assert.ok(
-    stderr.includes("normalization") || stderr.includes("Resolved"),
-    `Expected normalization warning in stderr, got: ${stderr}`,
-  );
-  assert.ok(stdout.length > 0, "Expected JSON output on stdout");
+  expect(error, `Should not throw; got: ${error?.message}`).toBe(null);
+  expect(stderr.includes("normalization") || stderr.includes("Resolved"), `Expected normalization warning in stderr, got: ${stderr}`).toBeTruthy();
+  expect(stdout.length > 0, "Expected JSON output on stdout").toBeTruthy();
   // The resolved packet_id in the output JSON must match the canonical (un-normalized) value
   const parsed = JSON.parse(stdout.trim());
-  assert.equal(parsed.packet_id, PACKET_ID, `Expected canonical packet_id '${PACKET_ID}' in output, got '${parsed.packet_id}'`);
+  expect(parsed.packet_id, `Expected canonical packet_id '${PACKET_ID}' in output, got '${parsed.packet_id}'`).toBe(PACKET_ID);
 });
 
 // ── 2. Unknown packet-id ───────────────────────────────────────────────────────
@@ -211,16 +207,13 @@ await test("packet-id normalization resolves case/whitespace variants", async (t
 await test("unknown packet-id throws with valid id list", async (t) => {
   const task = makeTask("task-unk-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const argv = makeArgv(artifactsDir, "completely-unknown-id", [makeResult(task)]);
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Expected an error to be thrown");
-  assert.ok(
-    error.message.includes("Valid packet IDs"),
-    `Expected 'Valid packet IDs' in error message, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Expected an error to be thrown").toBeTruthy();
+  expect(error.message.includes("Valid packet IDs"), `Expected 'Valid packet IDs' in error message, got: ${error.message}`).toBeTruthy();
 });
 
 // ── 3. Duplicate task_id in payload ───────────────────────────────────────────
@@ -228,19 +221,16 @@ await test("unknown packet-id throws with valid id list", async (t) => {
 await test("duplicate task_id in payload is rejected", async (t) => {
   const task = makeTask("task-dup-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const result = makeResult(task);
   // Submit the same result twice → duplicate task_id
   const argv = makeArgv(artifactsDir, PACKET_ID, [result, result]);
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Expected an error to be thrown");
-  assert.ok(
-    error.message.includes(task.task_id) ||
-      error.message.toLowerCase().includes("duplicate"),
-    `Expected duplicate mention in error message, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Expected an error to be thrown").toBeTruthy();
+  expect(error.message.includes(task.task_id) ||
+      error.message.toLowerCase().includes("duplicate"), `Expected duplicate mention in error message, got: ${error.message}`).toBeTruthy();
 });
 
 // ── 4. Unassigned task_id in payload ──────────────────────────────────────────
@@ -248,7 +238,7 @@ await test("duplicate task_id in payload is rejected", async (t) => {
 await test("unassigned task_id in payload is rejected", async (t) => {
   const task = makeTask("task-assigned-1");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Submit a result with a task_id that is NOT in the packet's assigned list
   const unassignedResult = makeResult(makeTask("task-NOT-in-packet"));
@@ -256,12 +246,9 @@ await test("unassigned task_id in payload is rejected", async (t) => {
   const argv = makeArgv(artifactsDir, PACKET_ID, [assignedResult, unassignedResult]);
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Expected an error to be thrown");
-  assert.ok(
-    error.message.includes("task-NOT-in-packet") ||
-      error.message.toLowerCase().includes("not assigned"),
-    `Expected task_id or 'not assigned' in error, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Expected an error to be thrown").toBeTruthy();
+  expect(error.message.includes("task-NOT-in-packet") ||
+      error.message.toLowerCase().includes("not assigned"), `Expected task_id or 'not assigned' in error, got: ${error.message}`).toBeTruthy();
 });
 
 // ── 5. Missing assigned task in payload ───────────────────────────────────────
@@ -273,17 +260,14 @@ await test("missing assigned task in payload is rejected", async (t) => {
     tasks: [task1, task2],
     packetTaskIds: [task1.task_id, task2.task_id],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Submit only task1, omitting task2
   const argv = makeArgv(artifactsDir, PACKET_ID, [makeResult(task1)]);
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Expected an error to be thrown");
-  assert.ok(
-    error.message.includes(task2.task_id),
-    `Expected missing task_id ${task2.task_id} in error, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Expected an error to be thrown").toBeTruthy();
+  expect(error.message.includes(task2.task_id), `Expected missing task_id ${task2.task_id} in error, got: ${error.message}`).toBeTruthy();
 });
 
 // ── 6. Cross-packet duplicate-finding: submit-packet does NOT warn (handled at merge-and-ingest) ─
@@ -321,7 +305,7 @@ await test("cross-packet duplicate finding does NOT emit a warning at submit tim
       },
     ],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Submit a result for pkt-alpha that contains the same finding key.
   // submit-packet no longer performs cross-packet dedup scanning — that
@@ -335,20 +319,16 @@ await test("cross-packet duplicate finding does NOT emit a warning at submit tim
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
+  expect(error, `Should not throw; got: ${error?.message}`).toBe(null);
   // No cross-packet dedup warning at submit time
-  assert.ok(
-    !stderr.toLowerCase().includes("duplicate"),
-    `Did not expect cross-packet duplicate warning in stderr at submit time, got: ${stderr}`,
-  );
+  expect(!stderr.toLowerCase().includes("duplicate"), `Did not expect cross-packet duplicate warning in stderr at submit time, got: ${stderr}`).toBeTruthy();
   // No duplicate_warning_count in stdout
   const parsedOut = JSON.parse(stdout.trim());
-  assert.equal(parsedOut.duplicate_warning_count, undefined,
-    `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsedOut)}`);
+  expect(parsedOut.duplicate_warning_count, `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsedOut)}`).toBe(undefined);
   // Result files should still be written
   const resultPath = join(runDir, "task-results", `${task1.task_id}.json`);
   const written = JSON.parse(await readFile(resultPath, "utf8"));
-  assert.equal(written.task_id, task1.task_id);
+  expect(written.task_id).toBe(task1.task_id);
 });
 
 // ── 7. Happy path — persistence gate ──────────────────────────────────────────
@@ -360,27 +340,27 @@ await test("happy path writes per-task result files and outputs accepted count",
     tasks: [task1, task2],
     packetTaskIds: [task1.task_id, task2.task_id],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const payload = [makeResult(task1), makeResult(task2)];
   const argv = makeArgv(artifactsDir, PACKET_ID, payload);
   const { stdout, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
+  expect(error, `Should not throw; got: ${error?.message}`).toBe(null);
 
   // Each task should have a result file written
   for (const task of [task1, task2]) {
     const resultPath = join(runDir, "task-results", `${task.task_id}.json`);
     const written = JSON.parse(await readFile(resultPath, "utf8"));
-    assert.equal(written.task_id, task.task_id);
+    expect(written.task_id).toBe(task.task_id);
   }
 
   // stdout should be valid JSON with the expected fields
   const parsed = JSON.parse(stdout.trim());
-  assert.equal(parsed.run_id, RUN_ID);
-  assert.equal(parsed.packet_id, PACKET_ID);
-  assert.equal(parsed.accepted_count, 2);
-  assert.equal(typeof parsed.finding_count, "number");
+  expect(parsed.run_id).toBe(RUN_ID);
+  expect(parsed.packet_id).toBe(PACKET_ID);
+  expect(parsed.accepted_count).toBe(2);
+  expect(typeof parsed.finding_count).toBe("number");
 });
 
 // -- 8. Happy path stamps run metadata ----------------------------------------
@@ -392,13 +372,13 @@ await test("happy path stamps run_id and one submitted_at value on each result",
     tasks: [task1, task2],
     packetTaskIds: [task1.task_id, task2.task_id],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const payload = [makeResult(task1), makeResult(task2)];
   const argv = makeArgv(artifactsDir, PACKET_ID, payload);
   const { error } = await runSubmit(argv);
 
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
+  expect(error, `Should not throw; got: ${error?.message}`).toBe(null);
 
   const writtenResults = [];
   for (const task of [task1, task2]) {
@@ -407,20 +387,20 @@ await test("happy path stamps run_id and one submitted_at value on each result",
   }
 
   const submittedAtValues = new Set(writtenResults.map((result) => result.submitted_at));
-  assert.equal(submittedAtValues.size, 1, "all files should share one submitted_at value");
+  expect(submittedAtValues.size, "all files should share one submitted_at value").toBe(1);
   const submittedAt = writtenResults[0].submitted_at;
-  assert.equal(typeof submittedAt, "string");
-  assert.equal(new Date(submittedAt).toISOString(), submittedAt);
+  expect(typeof submittedAt).toBe("string");
+  expect(new Date(submittedAt).toISOString()).toBe(submittedAt);
 
   for (const [index, written] of writtenResults.entries()) {
     const original = payload[index];
-    assert.equal(written.run_id, RUN_ID);
-    assert.equal(written.task_id, original.task_id);
-    assert.equal(written.unit_id, original.unit_id);
-    assert.equal(written.pass_id, original.pass_id);
-    assert.equal(written.lens, original.lens);
-    assert.deepEqual(written.file_coverage, original.file_coverage);
-    assert.deepEqual(written.findings, original.findings);
+    expect(written.run_id).toBe(RUN_ID);
+    expect(written.task_id).toBe(original.task_id);
+    expect(written.unit_id).toBe(original.unit_id);
+    expect(written.pass_id).toBe(original.pass_id);
+    expect(written.lens).toBe(original.lens);
+    expect(written.file_coverage).toEqual(original.file_coverage);
+    expect(written.findings).toEqual(original.findings);
   }
 });
 
@@ -455,7 +435,7 @@ await test("findingKey dedup: same finding in two packets is accepted without wa
       { packetId: "pkt-other", taskId: otherTask.task_id, result: otherResult },
     ],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Submit same finding (different id, same key fields) in pkt-alpha.
   // No cross-packet dedup warning expected at submit time.
@@ -463,14 +443,10 @@ await test("findingKey dedup: same finding in two packets is accepted without wa
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
-  assert.ok(
-    !stderr.toLowerCase().includes("duplicate"),
-    `Did not expect cross-packet duplicate warning at submit time, got: ${stderr}`,
-  );
+  expect(error, `Should not throw; got: ${error?.message}`).toBe(null);
+  expect(!stderr.toLowerCase().includes("duplicate"), `Did not expect cross-packet duplicate warning at submit time, got: ${stderr}`).toBeTruthy();
   const parsed = JSON.parse(stdout.trim());
-  assert.equal(parsed.duplicate_warning_count, undefined,
-    `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsed)}`);
+  expect(parsed.duplicate_warning_count, `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsed)}`).toBe(undefined);
 });
 
 await test("findingKey dedup: finding differing in any key field is NOT a duplicate (submit-packet never warns either way)", async (t) => {
@@ -497,7 +473,7 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
       { packetId: "pkt-diff-other", taskId: otherTask.task_id, result: otherResult },
     ],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Finding differs only in affected_files path
   const newResult = {
@@ -507,14 +483,11 @@ await test("findingKey dedup: finding differing in any key field is NOT a duplic
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
+  expect(error, `Should not throw; got: ${error?.message}`).toBe(null);
   // No cross-packet warning expected (submit-packet delegates this to merge-and-ingest)
-  assert.ok(
-    !stderr.toLowerCase().includes("duplicate"),
-    `Did not expect any duplicate warning at submit time, got: ${stderr}`,
-  );
+  expect(!stderr.toLowerCase().includes("duplicate"), `Did not expect any duplicate warning at submit time, got: ${stderr}`).toBeTruthy();
   const parsed = JSON.parse(stdout.trim());
-  assert.equal(parsed.duplicate_warning_count, undefined);
+  expect(parsed.duplicate_warning_count).toBe(undefined);
 });
 
 // ── 10b. COR-d31ca6b5: cross-packet dedup is at merge-and-ingest, not submit-packet ─
@@ -549,7 +522,7 @@ await test("submit-packet accepts without warning even when prior result is arra
       { packetId: "pkt-arr-other", taskId: otherTask.task_id, result: priorResultArray },
     ],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Submit a result for pkt-alpha containing the same finding key.
   // No cross-packet dedup at submit time — this is now merge-and-ingest's concern.
@@ -557,14 +530,10 @@ await test("submit-packet accepts without warning even when prior result is arra
   const argv = makeArgv(artifactsDir, PACKET_ID, [newResult]);
   const { stdout, stderr, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `Should not throw; got: ${error?.message}`);
-  assert.ok(
-    !stderr.toLowerCase().includes("duplicate"),
-    `Did not expect cross-packet duplicate warning at submit time, got: ${stderr}`,
-  );
+  expect(error, `Should not throw; got: ${error?.message}`).toBe(null);
+  expect(!stderr.toLowerCase().includes("duplicate"), `Did not expect cross-packet duplicate warning at submit time, got: ${stderr}`).toBeTruthy();
   const parsed = JSON.parse(stdout.trim());
-  assert.equal(parsed.duplicate_warning_count, undefined,
-    `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsed)}`);
+  expect(parsed.duplicate_warning_count, `Expected no duplicate_warning_count in output, got: ${JSON.stringify(parsed)}`).toBe(undefined);
 });
 
 // ── 11. Missing --run-id flag ─────────────────────────────────────────────────
@@ -572,7 +541,7 @@ await test("submit-packet accepts without warning even when prior result is arra
 await test("throws when --run-id is missing", async (t) => {
   const task = makeTask("task-no-runid");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const payloadB64 = Buffer.from(JSON.stringify([makeResult(task)])).toString("base64url");
   // Omit --run-id entirely
@@ -589,11 +558,8 @@ await test("throws when --run-id is missing", async (t) => {
   ];
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Expected an error to be thrown");
-  assert.ok(
-    /--run-id/i.test(error.message),
-    `Expected '--run-id' in error message, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Expected an error to be thrown").toBeTruthy();
+  expect(/--run-id/i.test(error.message), `Expected '--run-id' in error message, got: ${error.message}`).toBeTruthy();
 });
 
 // ── 12. Missing --packet-id flag ─────────────────────────────────────────────
@@ -601,7 +567,7 @@ await test("throws when --run-id is missing", async (t) => {
 await test("throws when --packet-id is missing", async (t) => {
   const task = makeTask("task-no-packetid");
   const { artifactsDir } = await makeArtifactsDir({ tasks: [task] });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const payloadB64 = Buffer.from(JSON.stringify([makeResult(task)])).toString("base64url");
   // Omit --packet-id entirely
@@ -618,11 +584,8 @@ await test("throws when --packet-id is missing", async (t) => {
   ];
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Expected an error to be thrown");
-  assert.ok(
-    /--packet-id/i.test(error.message),
-    `Expected '--packet-id' in error message, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Expected an error to be thrown").toBeTruthy();
+  expect(/--packet-id/i.test(error.message), `Expected '--packet-id' in error message, got: ${error.message}`).toBeTruthy();
 });
 
 // ── 13. F-6: packet/unit boundary widens the file_coverage hard-reject gate ────
@@ -641,7 +604,7 @@ await test("F-6: file_coverage of an in-boundary (sibling-assigned) file is acce
     tasks: [taskA, taskB],
     packetTaskIds: [taskA.task_id, taskB.task_id],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // taskA's result declares coverage of BOTH its own file and taskB's file.
   // taskB's file is unassigned to taskA but lives inside the packet boundary.
@@ -657,14 +620,14 @@ await test("F-6: file_coverage of an in-boundary (sibling-assigned) file is acce
   const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
   const { stdout, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `In-boundary coverage should be accepted; got: ${error?.message}`);
+  expect(error, `In-boundary coverage should be accepted; got: ${error?.message}`).toBe(null);
   const parsed = JSON.parse(stdout.trim());
-  assert.equal(parsed.accepted_count, 2);
+  expect(parsed.accepted_count).toBe(2);
   // Result files still written.
   const written = JSON.parse(
     await readFile(join(runDir, "task-results", `${taskA.task_id}.json`), "utf8"),
   );
-  assert.equal(written.task_id, taskA.task_id);
+  expect(written.task_id).toBe(taskA.task_id);
 });
 
 await test("F-6: file_coverage of an out-of-boundary file is still hard-rejected", async (t) => {
@@ -674,7 +637,7 @@ await test("F-6: file_coverage of an out-of-boundary file is still hard-rejected
     tasks: [taskA, taskB],
     packetTaskIds: [taskA.task_id, taskB.task_id],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // taskA declares coverage of a file NOT assigned to any sibling in the packet.
   const resultA = {
@@ -689,11 +652,8 @@ await test("F-6: file_coverage of an out-of-boundary file is still hard-rejected
   const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Out-of-boundary coverage must be rejected");
-  assert.ok(
-    error.message.includes("src/totally-outside.ts"),
-    `Expected out-of-boundary path in error, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Out-of-boundary coverage must be rejected").toBeTruthy();
+  expect(error.message.includes("src/totally-outside.ts"), `Expected out-of-boundary path in error, got: ${error.message}`).toBeTruthy();
 });
 
 // ── 14. F-6: boundary widens the verification.followup_tasks.file_paths gate ───
@@ -714,7 +674,7 @@ await test("F-6: followup_tasks targeting an in-boundary file is accepted", asyn
     tasks: [taskA, taskB],
     packetTaskIds: [taskA.task_id, taskB.task_id],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const resultA = {
     ...makeResult(taskA),
@@ -739,9 +699,9 @@ await test("F-6: followup_tasks targeting an in-boundary file is accepted", asyn
   const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
   const { stdout, error } = await runSubmit(argv);
 
-  assert.equal(error, null, `In-boundary followup file should be accepted; got: ${error?.message}`);
+  expect(error, `In-boundary followup file should be accepted; got: ${error?.message}`).toBe(null);
   const parsed = JSON.parse(stdout.trim());
-  assert.equal(parsed.accepted_count, 2);
+  expect(parsed.accepted_count).toBe(2);
 });
 
 await test("F-6: followup_tasks targeting an out-of-boundary file is still hard-rejected", async (t) => {
@@ -751,7 +711,7 @@ await test("F-6: followup_tasks targeting an out-of-boundary file is still hard-
     tasks: [taskA, taskB],
     packetTaskIds: [taskA.task_id, taskB.task_id],
   });
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const resultA = {
     ...makeResult(taskA),
@@ -776,9 +736,6 @@ await test("F-6: followup_tasks targeting an out-of-boundary file is still hard-
   const argv = makeArgv(artifactsDir, PACKET_ID, [resultA, resultB]);
   const { error } = await runSubmit(argv);
 
-  assert.ok(error instanceof Error, "Out-of-boundary followup file must be rejected");
-  assert.ok(
-    error.message.includes("src/way-outside.ts"),
-    `Expected out-of-boundary followup path in error, got: ${error.message}`,
-  );
+  expect(error instanceof Error, "Out-of-boundary followup file must be rejected").toBeTruthy();
+  expect(error.message.includes("src/way-outside.ts"), `Expected out-of-boundary followup path in error, got: ${error.message}`).toBeTruthy();
 });

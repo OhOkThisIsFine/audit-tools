@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, onTestFinished, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -100,7 +99,7 @@ async function acceptPacketTasks(runDir, taskIds) {
 
 await test("FINDING-009: prepareDispatchArtifacts writes the three schema files into task-results/", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(multiPacketTasks());
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
   const taskResultsDir = join(runDir, "task-results");
 
@@ -110,15 +109,15 @@ await test("FINDING-009: prepareDispatchArtifacts writes the three schema files 
     "audit_task.schema.json",
   ]) {
     const p = join(taskResultsDir, name);
-    assert.ok(await exists(p), `${name} should exist`);
+    expect(await exists(p), `${name} should exist`).toBeTruthy();
     const parsed = await readJson(p); // throws if not valid JSON
-    assert.equal(typeof parsed, "object");
+    expect(typeof parsed).toBe("object");
   }
 });
 
 await test("FINDING-009: the task-results schema files are byte-for-byte equal to the canonical sources", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(multiPacketTasks());
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
   const taskResultsDir = join(runDir, "task-results");
 
@@ -129,30 +128,27 @@ await test("FINDING-009: the task-results schema files are byte-for-byte equal t
   ]) {
     const copied = await readFile(join(taskResultsDir, name), "utf8");
     const canonical = await readFile(join(packageRoot, "schemas", name), "utf8");
-    assert.equal(copied, canonical, `${name} should match canonical source`);
+    expect(copied, `${name} should match canonical source`).toBe(canonical);
   }
 });
 
 await test("FINDING-009: the packet prompt references the schema file and retains existing constraints", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
-  assert.equal(plan.length, 1);
+  expect(plan.length).toBe(1);
   const prompt = await readFile(plan[0].prompt_path, "utf8");
 
-  assert.match(prompt, /audit_result\.schema\.json/);
-  assert.ok(
-    prompt.includes("finding.schema.json") ||
-      prompt.includes("audit_task.schema.json"),
-    "prompt should reference at least one $ref sibling schema",
-  );
+  expect(prompt).toMatch(/audit_result\.schema\.json/);
+  expect(prompt.includes("finding.schema.json") ||
+      prompt.includes("audit_task.schema.json"), "prompt should reference at least one $ref sibling schema").toBeTruthy();
   // Existing prose retained verbatim.
-  assert.match(prompt, /Required AuditResult fields:/);
-  assert.match(prompt, /1\. line_end must not exceed the file's actual line count\./);
-  assert.match(prompt, /2\. affected_files entries are objects with a path key/);
-  assert.match(prompt, /3\. Only reference files from the packet/);
-  assert.match(prompt, /4\. findings: \[\] is correct when you find nothing genuine\./);
+  expect(prompt).toMatch(/Required AuditResult fields:/);
+  expect(prompt).toMatch(/1\. line_end must not exceed the file's actual line count\./);
+  expect(prompt).toMatch(/2\. affected_files entries are objects with a path key/);
+  expect(prompt).toMatch(/3\. Only reference files from the packet/);
+  expect(prompt).toMatch(/4\. findings: \[\] is correct when you find nothing genuine\./);
 });
 
 // ── All packets dispatched in one round (canary removed) ──────────────────────
@@ -160,16 +156,16 @@ await test("FINDING-009: the packet prompt references the schema file and retain
 await test("all packets dispatched in one round on first contact", async (t) => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
-  assert.equal(result.packet_count, tasks.length);
+  expect(result.packet_count).toBe(tasks.length);
 });
 
 await test("single packet on first contact dispatches normally", async (t) => {
   const { artifactsDir } = await makeArtifactsDir(singlePacketTask());
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
-  assert.equal(result.packet_count, 1);
+  expect(result.packet_count).toBe(1);
 });
 
 // ── JIT graph partition drives packetization (N4b keystone) ──────────────────
@@ -198,26 +194,18 @@ function sharedFileTasks(tokenEstimate) {
 await test("JIT partition merges affinity-linked tasks under the context budget", async (t) => {
   // 2 × 4000 + prompt overhead sits well under the ~28k default input budget.
   const { artifactsDir } = await makeArtifactsDir(sharedFileTasks(4000));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
-  assert.equal(
-    result.packet_count,
-    1,
-    "small same-file tasks pack into one coherent packet",
-  );
+  expect(result.packet_count, "small same-file tasks pack into one coherent packet").toBe(1);
 });
 
 await test("JIT partition splits a cluster that exceeds the context budget", async (t) => {
   // 2 × 20000 = 40000 exceeds the ~28k default input budget → cannot merge even
   // across a strong edge; the partition keeps them as separate packets.
   const { artifactsDir } = await makeArtifactsDir(sharedFileTasks(20000));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
-  assert.equal(
-    result.packet_count,
-    2,
-    "an oversized cluster splits along its weakest edge under the budget",
-  );
+  expect(result.packet_count, "an oversized cluster splits along its weakest edge under the budget").toBe(2);
 });
 
 await test("capability handshake: host-reported context window collapses the split (N5b)", async (t) => {
@@ -226,7 +214,7 @@ await test("capability handshake: host-reported context window collapses the spl
   // in one packet — the budget now reflects the real dispatch model.
   const tasks = sharedFileTasks(20000);
   const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await prepareDispatchArtifacts({
     packageRoot,
     runId: RUN_ID,
@@ -237,15 +225,11 @@ await test("capability handshake: host-reported context window collapses the spl
     hostContextTokens: 200_000,
     hostOutputTokens: 32_000,
   });
-  assert.equal(
-    result.packet_count,
-    1,
-    "a 200k host window packs the cluster the 32k default would split",
-  );
+  expect(result.packet_count, "a 200k host window packs the cluster the 32k default would split").toBe(1);
   // The dispatch-quota records the discovered budget for this session.
   const quota = await readJson(join(artifactsDir, "runs", RUN_ID, "dispatch-quota.json"));
-  assert.equal(quota.resolved_limits.context_tokens, 200_000);
-  assert.equal(quota.source, "discovered_capability");
+  expect(quota.resolved_limits.context_tokens).toBe(200_000);
+  expect(quota.source).toBe("discovered_capability");
 });
 
 await test("JIT partition splits a coherent cluster at the risk-mass ceiling", async (t) => {
@@ -256,13 +240,9 @@ await test("JIT partition splits a coherent cluster at the risk-mass ceiling", a
     risk_estimate: 0.9,
   }));
   const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir, { dispatch: { risk_mass_budget: 1.0 } });
-  assert.equal(
-    result.packet_count,
-    2,
-    "0.9 + 0.9 = 1.8 exceeds the 1.0 risk-mass ceiling → no merge",
-  );
+  expect(result.packet_count, "0.9 + 0.9 = 1.8 exceeds the 1.0 risk-mass ceiling → no merge").toBe(2);
 });
 
 // ── FINDING-012: confirmation threshold + dispatch summary ───────────────────
@@ -270,35 +250,35 @@ await test("JIT partition splits a coherent cluster at the risk-mass ceiling", a
 await test("FINDING-012: confirmation_recommended and dispatch_summary on the result", async (t) => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
 
-  assert.equal(result.agent_count, tasks.length);
-  assert.equal(typeof result.confirmation_recommended, "boolean");
+  expect(result.agent_count).toBe(tasks.length);
+  expect(typeof result.confirmation_recommended).toBe("boolean");
   // Below the default threshold of 10 → not recommended.
-  assert.equal(result.confirmation_recommended, false);
-  assert.equal(typeof result.dispatch_summary, "string");
-  assert.match(result.dispatch_summary, /agent.* max .* concurrent/);
-  assert.equal(typeof result.max_concurrent_agents, "number");
+  expect(result.confirmation_recommended).toBe(false);
+  expect(typeof result.dispatch_summary).toBe("string");
+  expect(result.dispatch_summary).toMatch(/agent.* max .* concurrent/);
+  expect(typeof result.max_concurrent_agents).toBe("number");
 });
 
 await test("FINDING-012: confirmation_recommended flips when agent_count exceeds confirm_threshold", async (t) => {
   const tasks = multiPacketTasks(); // 3 packets
   const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // threshold 2, agent_count 3 → recommended.
   const above = await run(artifactsDir, {
     dispatch: { confirm_threshold: 2 },
   });
-  assert.equal(above.agent_count, 3);
-  assert.equal(above.confirmation_recommended, true);
+  expect(above.agent_count).toBe(3);
+  expect(above.confirmation_recommended).toBe(true);
 
   // threshold 3, agent_count 3 → NOT recommended (strictly greater-than).
   const at = await run(artifactsDir, {
     dispatch: { confirm_threshold: 3 },
   });
-  assert.equal(at.confirmation_recommended, false);
+  expect(at.confirmation_recommended).toBe(false);
 });
 
 // ── FINDING-013: top-K coverage budget ──────────────────────────────────────
@@ -306,127 +286,100 @@ await test("FINDING-012: confirmation_recommended flips when agent_count exceeds
 await test("FINDING-013: max_packets caps emitted packets and records deferred ids", async (t) => {
   const tasks = multiPacketTasks(); // 3 packets
   const { artifactsDir, runDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Cap at 2 of 3.
   const result = await run(artifactsDir, {
     dispatch: { max_packets: 2 },
   });
-  assert.equal(result.budget_capped, true);
-  assert.equal(result.packet_count, 2);
-  assert.equal(result.deferred_packet_count, 1);
+  expect(result.budget_capped).toBe(true);
+  expect(result.packet_count).toBe(2);
+  expect(result.deferred_packet_count).toBe(1);
 
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
-  assert.equal(plan.length, 2);
+  expect(plan.length).toBe(2);
 
   const active = await readActiveDispatch(artifactsDir);
-  assert.equal(active.budget_packet_count, 3, "total before cap");
-  assert.equal(active.deferred_packet_ids.length, 1);
-  assert.equal(active.deferred_task_ids.length, 1);
+  expect(active.budget_packet_count, "total before cap").toBe(3);
+  expect(active.deferred_packet_ids.length).toBe(1);
+  expect(active.deferred_task_ids.length).toBe(1);
   // The deferred packet id must be the one NOT in the plan.
   const planIds = new Set(plan.map((p) => p.packet_id));
-  assert.ok(!planIds.has(active.deferred_packet_ids[0]));
+  expect(!planIds.has(active.deferred_packet_ids[0])).toBeTruthy();
 });
 
 await test("FINDING-013: max_packets >= packet count is no cap (budget off)", async (t) => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir, {
     dispatch: { max_packets: 99 },
   });
-  assert.equal(result.budget_capped, false);
-  assert.equal(result.packet_count, tasks.length);
-  assert.equal(result.deferred_packet_count, 0);
+  expect(result.budget_capped).toBe(false);
+  expect(result.packet_count).toBe(tasks.length);
+  expect(result.deferred_packet_count).toBe(0);
   const active = await readActiveDispatch(artifactsDir);
-  assert.equal(active.deferred_packet_ids, undefined);
-  assert.equal(active.budget_packet_count, undefined);
+  expect(active.deferred_packet_ids).toBe(undefined);
+  expect(active.budget_packet_count).toBe(undefined);
 });
 
 await test("FINDING-013: budget defaults OFF — all packets emitted when max_packets is unset", async (t) => {
   const tasks = multiPacketTasks();
   const { artifactsDir } = await makeArtifactsDir(tasks);
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await run(artifactsDir);
-  assert.equal(result.budget_capped, false);
-  assert.equal(result.packet_count, tasks.length);
+  expect(result.budget_capped).toBe(false);
+  expect(result.packet_count).toBe(tasks.length);
 });
 
 // ── FINDING-018: per-packet access metadata ──────────────────────────────────
 
 await test("FINDING-018: dispatch plan entries include access.read_paths with prompt path and source files", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
 
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
-  assert.equal(plan.length, 1);
+  expect(plan.length).toBe(1);
   const entry = plan[0];
 
-  assert.ok(entry.access, "plan entry should have access object");
-  assert.ok(Array.isArray(entry.access.read_paths), "access.read_paths should be an array");
-  assert.ok(
-    entry.access.read_paths.some((p) => p === entry.prompt_path),
-    "access.read_paths should include the prompt path",
-  );
-  assert.ok(
-    entry.access.read_paths.some((p) => p.includes("only.ts")),
-    "access.read_paths should include the packet's source file path",
-  );
+  expect(entry.access, "plan entry should have access object").toBeTruthy();
+  expect(Array.isArray(entry.access.read_paths), "access.read_paths should be an array").toBeTruthy();
+  expect(entry.access.read_paths.some((p) => p === entry.prompt_path), "access.read_paths should include the prompt path").toBeTruthy();
+  expect(entry.access.read_paths.some((p) => p.includes("only.ts")), "access.read_paths should include the packet's source file path").toBeTruthy();
 });
 
 await test("FINDING-018: dispatch plan entries access.write_paths contains only task result paths, not directories", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
 
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
   const entry = plan[0];
   const taskResultsDir = join(runDir, "task-results");
 
-  assert.ok(Array.isArray(entry.access.write_paths), "access.write_paths should be an array");
+  expect(Array.isArray(entry.access.write_paths), "access.write_paths should be an array").toBeTruthy();
   // Per-task canonical ingestion target(s) plus the per-packet result file the
   // worker actually writes (packetResultPath) — both pre-approved so hosts that
   // enforce write_paths don't block the result write. For a single-task packet
   // that is 2 entries: one per-task path + the inline-result.json packet file.
-  assert.equal(entry.access.write_paths.length, 2, "single-task packet has one per-task path + the packet result file");
-  assert.ok(
-    entry.access.write_paths.every((p) => p.startsWith(taskResultsDir)),
-    "every write_path should be a file inside task-results/",
-  );
-  assert.ok(
-    entry.access.write_paths.some((p) => p.endsWith("inline-result.json")),
-    "write_paths should include the per-packet result file the worker writes",
-  );
-  assert.ok(
-    !entry.access.write_paths.includes(taskResultsDir),
-    "write_paths should not contain the task-results directory itself",
-  );
-  assert.ok(
-    !entry.access.write_paths.includes(runDir),
-    "write_paths should not contain the run directory",
-  );
-  assert.ok(
-    !entry.access.write_paths.includes(artifactsDir),
-    "write_paths should not contain the repo root or artifacts dir",
-  );
+  expect(entry.access.write_paths.length, "single-task packet has one per-task path + the packet result file").toBe(2);
+  expect(entry.access.write_paths.every((p) => p.startsWith(taskResultsDir)), "every write_path should be a file inside task-results/").toBeTruthy();
+  expect(entry.access.write_paths.some((p) => p.endsWith("inline-result.json")), "write_paths should include the per-packet result file the worker writes").toBeTruthy();
+  expect(!entry.access.write_paths.includes(taskResultsDir), "write_paths should not contain the task-results directory itself").toBeTruthy();
+  expect(!entry.access.write_paths.includes(runDir), "write_paths should not contain the run directory").toBeTruthy();
+  expect(!entry.access.write_paths.includes(artifactsDir), "write_paths should not contain the repo root or artifacts dir").toBeTruthy();
 });
 
 await test("FINDING-018: dispatch plan entries include forbidden_patterns for common stray filenames", async (t) => {
   const { artifactsDir } = await makeArtifactsDir(singlePacketTask());
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await run(artifactsDir);
 
   const plan = await readJson(join(join(artifactsDir, "runs", RUN_ID), "dispatch-plan.json"));
   const entry = plan[0];
 
-  assert.ok(Array.isArray(entry.access.forbidden_patterns), "access.forbidden_patterns should be an array");
-  assert.ok(
-    entry.access.forbidden_patterns.some((p) => p.includes("packet-") && p.includes("result")),
-    "forbidden_patterns should include a packet-result glob",
-  );
-  assert.ok(
-    entry.access.forbidden_patterns.some((p) => p.includes("audit_result")),
-    "forbidden_patterns should include an audit_result glob",
-  );
+  expect(Array.isArray(entry.access.forbidden_patterns), "access.forbidden_patterns should be an array").toBeTruthy();
+  expect(entry.access.forbidden_patterns.some((p) => p.includes("packet-") && p.includes("result")), "forbidden_patterns should include a packet-result glob").toBeTruthy();
+  expect(entry.access.forbidden_patterns.some((p) => p.includes("audit_result")), "forbidden_patterns should include an audit_result glob").toBeTruthy();
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.ts");
 const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.ts");
@@ -48,28 +47,25 @@ function validCheckpoint() {
 // ── Obligation reachability ─────────────────────────────────────────────────
 
 await test("intent_checkpoint_current: missing when the checkpoint is absent", () => {
-  assert.equal(
-    obligationState(readyForIntentBundle(), "intent_checkpoint_current"),
-    "missing",
-  );
+  expect(obligationState(readyForIntentBundle(), "intent_checkpoint_current")).toBe("missing");
 });
 
 await test("intent_checkpoint_current: satisfied once the checkpoint is present", () => {
   const bundle = { ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() };
-  assert.equal(obligationState(bundle, "intent_checkpoint_current"), "satisfied");
+  expect(obligationState(bundle, "intent_checkpoint_current")).toBe("satisfied");
 });
 
 // ── Priority ordering: after design_assessment_current, before design_review_contract_completed ───────
 
 await test("decideNextStep selects intent_checkpoint after design assessment, before design review", () => {
   const decision = decideNextStep(readyForIntentBundle());
-  assert.equal(decision.selected_obligation, "intent_checkpoint_current");
-  assert.equal(decision.selected_executor, "intent_checkpoint_executor");
+  expect(decision.selected_obligation).toBe("intent_checkpoint_current");
+  expect(decision.selected_executor).toBe("intent_checkpoint_executor");
 });
 
 await test("decideNextStep advances to design_review_contract_completed once the checkpoint exists", () => {
   const bundle = { ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() };
-  assert.equal(decideNextStep(bundle).selected_obligation, "design_review_contract_completed");
+  expect(decideNextStep(bundle).selected_obligation).toBe("design_review_contract_completed");
 });
 
 // ── Deterministic scope pre-digest ──────────────────────────────────────────
@@ -96,10 +92,10 @@ await test("computeScopePreDigest counts auditable files and surfaces auto-exclu
     },
   };
   const pre = computeScopePreDigest(bundle, "/repo");
-  assert.equal(pre.mode, "full");
-  assert.equal(pre.since, null);
-  assert.equal(pre.files_in_scope, 3);
-  assert.deepEqual(pre.scope_dirs, [
+  expect(pre.mode).toBe("full");
+  expect(pre.since).toBe(null);
+  expect(pre.files_in_scope).toBe(3);
+  expect(pre.scope_dirs).toEqual([
     { dir: "src", files: 2 },
     { dir: "lib", files: 1 },
   ]);
@@ -109,17 +105,14 @@ await test("computeScopePreDigest counts auditable files and surfaces auto-exclu
     (acc, row) => acc + ("prefix" in row ? row.file_count : 1),
     0,
   );
-  assert.equal(totalExcluded, 2);
+  expect(totalExcluded).toBe(2);
   // node_modules/ is a single-file vendor exclusion in this fixture — appears as individual row
-  assert.ok(
-    pre.excluded_summary.some(
+  expect(pre.excluded_summary.some(
       (e) => "path" in e && e.path === "node_modules/x/y.js" && e.status === "vendor",
     ) ||
     pre.excluded_summary.some(
       (e) => "prefix" in e && e.prefix === "node_modules" && e.status === "vendor",
-    ),
-    "node_modules vendor file should appear in excluded_summary",
-  );
+    ), "node_modules vendor file should appear in excluded_summary").toBeTruthy();
 });
 
 // ── Confirm-intent prompt rendering ─────────────────────────────────────────
@@ -140,13 +133,13 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
       continueCommand: "audit-code next-step",
     },
   );
-  assert.match(prompt, /Confirm Audit Scope and Intent/);
-  assert.match(prompt, /\*\*Files in scope:\*\* 3/);
-  assert.match(prompt, /`src` — 2 file/);
-  assert.match(prompt, /dist\/out\.js/);
-  assert.match(prompt, /intent_checkpoint\.json/);
-  assert.match(prompt, /"excluded_scope"/);
-  assert.match(prompt, /audit-code next-step/);
+  expect(prompt).toMatch(/Confirm Audit Scope and Intent/);
+  expect(prompt).toMatch(/\*\*Files in scope:\*\* 3/);
+  expect(prompt).toMatch(/`src` — 2 file/);
+  expect(prompt).toMatch(/dist\/out\.js/);
+  expect(prompt).toMatch(/intent_checkpoint\.json/);
+  expect(prompt).toMatch(/"excluded_scope"/);
+  expect(prompt).toMatch(/audit-code next-step/);
 });
 
 await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDATORY_LENSES, not hardcoded (MNT-df8c4551)", () => {
@@ -169,13 +162,10 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
   // Every mandatory lens name must appear verbatim in the rendered guidance;
   // if MANDATORY_LENSES changes, this fails unless the prose follows.
   for (const lens of MANDATORY_LENSES) {
-    assert.ok(
-      prompt.includes(lens),
-      `rendered prompt must name mandatory lens "${lens}"`,
-    );
+    expect(prompt.includes(lens), `rendered prompt must name mandatory lens "${lens}"`).toBeTruthy();
   }
   // The exact joined list rendered in both prose locations.
-  assert.match(prompt, new RegExp(`Mandatory lenses \\(${MANDATORY_LENSES.join(", ")}\\)`));
+  expect(prompt).toMatch(new RegExp(`Mandatory lenses \\(${MANDATORY_LENSES.join(", ")}\\)`));
 });
 
 await test("renderConfirmIntentPrompt asks for conceptual design-review depth (default shallow) and offers it in the JSON shape", () => {
@@ -194,12 +184,12 @@ await test("renderConfirmIntentPrompt asks for conceptual design-review depth (d
       continueCommand: "audit-code next-step",
     },
   );
-  assert.match(prompt, /Conceptual design-review depth/);
-  assert.match(prompt, /shallow.*\(default\)/);
-  assert.match(prompt, /\bdeep\b/);
+  expect(prompt).toMatch(/Conceptual design-review depth/);
+  expect(prompt).toMatch(/shallow.*\(default\)/);
+  expect(prompt).toMatch(/\bdeep\b/);
   // The depth choice is part of the single confirmation round, and offered in the JSON shape.
-  assert.match(prompt, /Ask the conceptual design-review depth/);
-  assert.match(prompt, /"design_review":\s*\{\s*"conceptual_depth":\s*"shallow",\s*"perspectives":\s*5\s*\}/);
+  expect(prompt).toMatch(/Ask the conceptual design-review depth/);
+  expect(prompt).toMatch(/"design_review":\s*\{\s*"conceptual_depth":\s*"shallow",\s*"perspectives":\s*5\s*\}/);
 });
 
 // ── Validation ──────────────────────────────────────────────────────────────
@@ -208,7 +198,7 @@ await test("validateArtifactBundle accepts a well-formed checkpoint", () => {
   const issues = validateArtifactBundle({
     intent_checkpoint: validCheckpoint(),
   }).filter((i) => JSON.stringify(i).includes("intent_checkpoint"));
-  assert.equal(issues.length, 0);
+  expect(issues.length).toBe(0);
 });
 
 await test("validateArtifactBundle rejects a checkpoint missing a required key", () => {
@@ -216,7 +206,7 @@ await test("validateArtifactBundle rejects a checkpoint missing a required key",
   const issues = validateArtifactBundle({
     intent_checkpoint: missingConfirmedBy,
   }).filter((i) => JSON.stringify(i).includes("intent_checkpoint"));
-  assert.ok(issues.length > 0);
+  expect(issues.length > 0).toBeTruthy();
 });
 
 // ── A2: consume the accepted scope ──────────────────────────────────────────
@@ -244,22 +234,19 @@ await test("applyIntentExclusionsToCoverage prunes matching files with directory
     { path: "scratch", reason: "scratch dir" },
   ]);
   // `scratch` matches the scratch/ directory, NOT the sibling src/scratchpad.ts.
-  assert.deepEqual(excluded, ["scratch/tmp.ts"]);
+  expect(excluded).toEqual(["scratch/tmp.ts"]);
   const pruned = coverage.files.find((f) => f.path === "scratch/tmp.ts");
-  assert.equal(pruned.audit_status, "excluded");
-  assert.equal(pruned.classification_status, "out_of_scope_intent");
-  assert.deepEqual(pruned.required_lenses, []);
-  assert.equal(
-    coverage.files.find((f) => f.path === "src/scratchpad.ts").audit_status,
-    "pending",
-  );
+  expect(pruned.audit_status).toBe("excluded");
+  expect(pruned.classification_status).toBe("out_of_scope_intent");
+  expect(pruned.required_lenses).toEqual([]);
+  expect(coverage.files.find((f) => f.path === "src/scratchpad.ts").audit_status).toBe("pending");
 });
 
 await test("applyIntentExclusionsToCoverage is a no-op without exclusions", () => {
   const coverage = { files: [coverageFile("src/a.ts")] };
-  assert.deepEqual(applyIntentExclusionsToCoverage(coverage, undefined), []);
-  assert.deepEqual(applyIntentExclusionsToCoverage(coverage, []), []);
-  assert.equal(coverage.files[0].audit_status, "pending");
+  expect(applyIntentExclusionsToCoverage(coverage, undefined)).toEqual([]);
+  expect(applyIntentExclusionsToCoverage(coverage, [])).toEqual([]);
+  expect(coverage.files[0].audit_status).toBe("pending");
 });
 
 function emptyRenderableReport() {
@@ -284,13 +271,13 @@ await test("renderAuditReportMarkdown surfaces excluded scope when the checkpoin
       excluded_scope: [{ path: "dist", reason: "build output" }],
     },
   });
-  assert.match(md, /## Excluded \/ Out-of-Scope/);
-  assert.match(md, /`dist` — build output/);
+  expect(md).toMatch(/## Excluded \/ Out-of-Scope/);
+  expect(md).toMatch(/`dist` — build output/);
 });
 
 await test("renderAuditReportMarkdown omits the excluded section without exclusions", () => {
   const md = renderAuditReportMarkdown(emptyRenderableReport(), {});
-  assert.doesNotMatch(md, /Excluded \/ Out-of-Scope/);
+  expect(md).not.toMatch(/Excluded \/ Out-of-Scope/);
 });
 
 function minimalPacket() {
@@ -318,5 +305,5 @@ await test("buildPacketPrompt never threads free_form_intent into the worker pro
     resultPath: "/artifacts/runs/run-1/task-results/inline-result.json",
     repoRoot: "/repo",
   });
-  assert.doesNotMatch(prompt, /## Audit intent/);
+  expect(prompt).not.toMatch(/## Audit intent/);
 });

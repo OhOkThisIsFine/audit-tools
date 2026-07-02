@@ -14,7 +14,7 @@
  * Both paths exit before runAuditStep, so no full audit bundle is needed —
  * keeping the test deterministic and bundle-independent.
  */
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
@@ -92,16 +92,16 @@ test("cmdMergeAndIngest replays a completed run's summary without re-ingesting (
       cmdMergeAndIngest(["--artifacts-dir", artifactsDir, "--run-id", RUN_ID]),
     );
 
-    assert.equal(code, 0, "idempotent replay must exit 0");
+    expect(code, "idempotent replay must exit 0").toBe(0);
     const payload = JSON.parse(stdout.trim());
-    assert.equal(payload.idempotent_replay, true, "must mark the replay");
-    assert.equal(payload.status, "completed");
-    assert.equal(payload.finding_count, 5, "must replay the prior summary verbatim");
-    assert.equal(payload.accepted_count, 3);
+    expect(payload.idempotent_replay, "must mark the replay").toBe(true);
+    expect(payload.status).toBe("completed");
+    expect(payload.finding_count, "must replay the prior summary verbatim").toBe(5);
+    expect(payload.accepted_count).toBe(3);
 
     // The completion marker is untouched (no re-processing happened).
     const marker = JSON.parse(await readFile(mergeCompletePath, "utf8"));
-    assert.equal(marker.finding_count, 5);
+    expect(marker.finding_count).toBe(5);
   });
 });
 
@@ -131,14 +131,11 @@ test("cmdMergeAndIngest blocks (throws + writes failed-tasks.json) when every as
 
     // failed-tasks.json records both missing assignments for retry.
     const failed = JSON.parse(await readFile(failedTasksPath, "utf8"));
-    assert.equal(failed.length, 2);
+    expect(failed.length).toBe(2);
     const ids = failed.map((f) => f.task_id).sort();
-    assert.deepEqual(ids, ["u1:security", "u2:correctness"]);
+    expect(ids).toEqual(["u1:security", "u2:correctness"]);
     for (const entry of failed) {
-      assert.ok(
-        entry.errors.some((e) => /missing audit result/i.test(e)),
-        `expected a missing-result error for ${entry.task_id}`,
-      );
+      expect(entry.errors.some((e) => /missing audit result/i.test(e)), `expected a missing-result error for ${entry.task_id}`).toBeTruthy();
     }
   });
 });

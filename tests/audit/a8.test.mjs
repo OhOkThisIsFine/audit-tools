@@ -3,20 +3,9 @@
  *
  * The coordinator is a SHARED module both dispatch drivers drive identically, so
  * the audit side asserts the same four invariants the remediate suite does,
- * through the audit-side relative import path:
- *
- *  1. Two-loop single-assignment — two coordinators sharing ONE on-disk
- *     ClaimRegistry never both hand back the same node (CE-001).
- *  2. Healthy-before-degraded split — the degraded pool's share stays smaller.
- *  3. Silent-degrade byte-estimate — a quotaSignalDegraded pool still gets a
- *     floored slot via the S4 fold (not dropped by the coordinator).
- *  4. Global budget — the TOTAL across pools never exceeds the shared host budget.
- *
- *  + terminalStatus: the sole 'all pools exhausted' pause authorization.
+ * through the audit-side relative import path.
  */
-
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,8 +101,8 @@ test("A8: two-loop single-assignment — exactly one claimant across a shared re
     ]);
     const all = [...fromA, ...fromB].map((a) => a.nodeId);
     // Every claimed node is unique across BOTH loops.
-    assert.equal(new Set(all).size, all.length);
-    assert.ok(all.length > 0);
+    expect(new Set(all).size).toBe(all.length);
+    expect(all.length > 0).toBeTruthy();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -143,8 +132,8 @@ test("A8: healthy-before-degraded split — degraded pool's share stays smaller"
   const byPool = countByPool(assignments);
   const healthyCount = byPool.get("pool/healthy") ?? 0;
   const degradedCount = byPool.get("pool/degraded") ?? 0;
-  assert.ok(healthyCount > 0);
-  assert.ok(healthyCount > degradedCount);
+  expect(healthyCount > 0).toBeTruthy();
+  expect(healthyCount > degradedCount).toBeTruthy();
 });
 
 test("A8: silent-degrade byte-estimate — a quotaSignalDegraded pool still gets a floored slot", async () => {
@@ -163,8 +152,8 @@ test("A8: silent-degrade byte-estimate — a quotaSignalDegraded pool still gets
   });
 
   const assignments = await coord.planAssignments(nodes(3, 500));
-  assert.ok(assignments.length >= 1);
-  assert.ok(assignments.every((a) => a.poolId === "pool/silent"));
+  expect(assignments.length >= 1).toBeTruthy();
+  expect(assignments.every((a) => a.poolId === "pool/silent")).toBeTruthy();
 });
 
 test("A8: global budget — total across pools never exceeds the shared host budget", async () => {
@@ -187,8 +176,8 @@ test("A8: global budget — total across pools never exceeds the shared host bud
   });
 
   const assignments = await coord.planAssignments(nodes(12));
-  assert.ok(assignments.length <= 2);
-  assert.ok(assignments.length > 0);
+  expect(assignments.length <= 2).toBeTruthy();
+  expect(assignments.length > 0).toBeTruthy();
 });
 
 test("A8: terminalStatus — dispatchable until every pool settled, then the sole pause terminal", async () => {
@@ -202,17 +191,17 @@ test("A8: terminalStatus — dispatchable until every pool settled, then the sol
     onSettle: store.onSettle,
   });
 
-  assert.equal(coord.terminalStatus(["n-0"]).kind, "dispatchable");
+  expect(coord.terminalStatus(["n-0"]).kind).toBe("dispatchable");
 
   await coord.settlePool("pool/0");
-  assert.equal(coord.terminalStatus(["n-0"]).kind, "dispatchable");
+  expect(coord.terminalStatus(["n-0"]).kind).toBe("dispatchable");
   const onlyP1 = await coord.planAssignments(nodes(4));
-  assert.ok(onlyP1.every((a) => a.poolId === "pool/1"));
+  expect(onlyP1.every((a) => a.poolId === "pool/1")).toBeTruthy();
 
   await coord.settlePool("pool/1");
   const status = coord.terminalStatus(["n-0", "n-1"]);
-  assert.equal(status.kind, "all_pools_exhausted");
-  assert.equal(status.terminal.reason, "empty_pool");
-  assert.deepEqual(status.terminal.stranded_ids, ["n-0", "n-1"]);
-  assert.deepEqual(await coord.planAssignments(nodes(4)), []);
+  expect(status.kind).toBe("all_pools_exhausted");
+  expect(status.terminal.reason).toBe("empty_pool");
+  expect(status.terminal.stranded_ids).toEqual(["n-0", "n-1"]);
+  expect(await coord.planAssignments(nodes(4))).toEqual([]);
 });

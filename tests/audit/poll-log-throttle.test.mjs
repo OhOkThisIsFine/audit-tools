@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,15 +79,15 @@ test("constant-status churn logs only first attempt, every-Nth heartbeat, and fi
 
   // Exactly: first attempt, every-Nth heartbeat, final outcome. Everything
   // else in the sequence is suppressed (deepEqual covers both directions).
-  assert.deepEqual(loggedAttempts, expected);
+  expect(loggedAttempts).toEqual(expected);
 
   // The heartbeat is driven by the attempt counter, not volatile-field churn:
   // identical decisions for the same attempt/enum, regardless of volatile data.
   for (let attempt = 2; attempt < POLL_LOG_EVERY_N_ATTEMPTS; attempt += 1) {
     const a = normalizeStatusKey(makeResponse("in_progress", null, attempt));
     const b = normalizeStatusKey(makeResponse("in_progress", null, attempt + 1000));
-    assert.equal(a, b, "normalized key must ignore volatile fields");
-    assert.equal(shouldLogPollAttempt(attempt, a, a), false);
+    expect(a, "normalized key must ignore volatile fields").toBe(b);
+    expect(shouldLogPollAttempt(attempt, a, a)).toBe(false);
   }
 });
 
@@ -118,7 +117,7 @@ test("genuine status transitions log exactly once each, immediately", () => {
   // (heartbeat), 17 (in_progress -> completed/success, off-heartbeat), 24
   // (heartbeat). Repeated polls of the same enum after each transition are
   // suppressed until the next heartbeat.
-  assert.deepEqual(logged, [
+  expect(logged).toEqual([
     { attempt: 1, statusKey: "queued/pending" },
     { attempt: 6, statusKey: "in_progress/pending" },
     { attempt: 12, statusKey: "in_progress/pending" },
@@ -131,7 +130,7 @@ test("genuine status transitions log exactly once each, immediately", () => {
   const transitionLogs = logged.filter(
     (entry, index) => index > 0 && entry.statusKey !== logged[index - 1].statusKey,
   );
-  assert.equal(transitionLogs.length, 2);
+  expect(transitionLogs.length).toBe(2);
 });
 
 test("volatile-field churn alone never triggers a log", () => {
@@ -140,13 +139,13 @@ test("volatile-field churn alone never triggers a log", () => {
   const key = normalizeStatusKey(makeResponse("in_progress", null, 1));
   for (let attempt = 2; attempt <= POLL_LOG_EVERY_N_ATTEMPTS * 2; attempt += 1) {
     if (attempt % POLL_LOG_EVERY_N_ATTEMPTS === 0) continue;
-    assert.equal(shouldLogPollAttempt(attempt, key, key), false);
+    expect(shouldLogPollAttempt(attempt, key, key)).toBe(false);
   }
 });
 
 test("final outcome always logs, even off-heartbeat with an unchanged enum", () => {
   const totalPolls = POLL_LOG_EVERY_N_ATTEMPTS + 2; // 14 with N = 12: not a heartbeat attempt
-  assert.notEqual(totalPolls % POLL_LOG_EVERY_N_ATTEMPTS, 0);
+  expect(totalPolls % POLL_LOG_EVERY_N_ATTEMPTS).not.toBe(0);
 
   const driver = createThrottleDriver();
   const loggedAttempts = [];
@@ -158,20 +157,20 @@ test("final outcome always logs, even off-heartbeat with an unchanged enum", () 
     }
   }
 
-  assert.deepEqual(loggedAttempts, [1, POLL_LOG_EVERY_N_ATTEMPTS, totalPolls]);
+  expect(loggedAttempts).toEqual([1, POLL_LOG_EVERY_N_ATTEMPTS, totalPolls]);
 });
 
 test("helper module is pure and instances do not share state", async () => {
   // The import at the top of this file completed synchronously with no main()
   // execution; the module surface is exactly the pure helper and its constant.
-  assert.equal(typeof shouldLogPollAttempt, "function");
-  assert.ok(Number.isInteger(POLL_LOG_EVERY_N_ATTEMPTS));
-  assert.ok(POLL_LOG_EVERY_N_ATTEMPTS > 1);
+  expect(typeof shouldLogPollAttempt).toBe("function");
+  expect(Number.isInteger(POLL_LOG_EVERY_N_ATTEMPTS)).toBeTruthy();
+  expect(POLL_LOG_EVERY_N_ATTEMPTS > 1).toBeTruthy();
 
   // Source-level guard: no process spawns, timers, or release-script imports.
   const source = await readFile(moduleSourcePath, "utf8");
-  assert.doesNotMatch(source, /child_process|spawnSync|setTimeout|setInterval/);
-  assert.doesNotMatch(source, /import .*release-and-publish/);
+  expect(source).not.toMatch(/child_process|spawnSync|setTimeout|setInterval/);
+  expect(source).not.toMatch(/import .*release-and-publish/);
 
   // Two independently created throttle loops do not share state: advancing one
   // deep into its sequence does not change a fresh instance's decisions.
@@ -182,16 +181,13 @@ test("helper module is pure and instances do not share state", async () => {
 
   const driverB = createThrottleDriver();
   const first = driverB.poll(makeResponse("in_progress", null, 1));
-  assert.equal(first.logged, true, "fresh instance still logs its first attempt");
+  expect(first.logged, "fresh instance still logs its first attempt").toBe(true);
   const second = driverB.poll(makeResponse("in_progress", null, 2));
-  assert.equal(second.logged, false, "fresh instance suppresses its second attempt");
+  expect(second.logged, "fresh instance suppresses its second attempt").toBe(false);
 
   // And the pure function itself is deterministic for fixed arguments.
   for (let repeat = 0; repeat < 3; repeat += 1) {
-    assert.equal(shouldLogPollAttempt(5, "pending", "pending"), false);
-    assert.equal(
-      shouldLogPollAttempt(POLL_LOG_EVERY_N_ATTEMPTS, "pending", "pending"),
-      true,
-    );
+    expect(shouldLogPollAttempt(5, "pending", "pending")).toBe(false);
+    expect(shouldLogPollAttempt(POLL_LOG_EVERY_N_ATTEMPTS, "pending", "pending")).toBe(true);
   }
 });

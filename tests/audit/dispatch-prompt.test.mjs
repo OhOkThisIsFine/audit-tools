@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { DISPATCH_PROMPT_HANDOFF_NOTE } = await import("audit-tools/shared");
 const { renderDispatchReviewPrompt, renderEdgeReasoningDispatchPrompt } =
@@ -24,10 +23,7 @@ test("renderDispatchReviewPrompt includes DISPATCH_PROMPT_HANDOFF_NOTE", () => {
     hostCanSelectSubagentModel: false,
   });
 
-  assert.ok(
-    prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE),
-    "dispatch review prompt must contain DISPATCH_PROMPT_HANDOFF_NOTE",
-  );
+  expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "dispatch review prompt must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();
 });
 
 test("renderDispatchReviewPrompt without quota path includes DISPATCH_PROMPT_HANDOFF_NOTE", () => {
@@ -41,10 +37,7 @@ test("renderDispatchReviewPrompt without quota path includes DISPATCH_PROMPT_HAN
     hostCanSelectSubagentModel: false,
   });
 
-  assert.ok(
-    prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE),
-    "dispatch review prompt (no-quota variant) must contain DISPATCH_PROMPT_HANDOFF_NOTE",
-  );
+  expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "dispatch review prompt (no-quota variant) must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();
 });
 
 test("renderEdgeReasoningDispatchPrompt includes DISPATCH_PROMPT_HANDOFF_NOTE", () => {
@@ -56,8 +49,5 @@ test("renderEdgeReasoningDispatchPrompt includes DISPATCH_PROMPT_HANDOFF_NOTE", 
     candidateCount: 3,
   });
 
-  assert.ok(
-    prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE),
-    "edge reasoning dispatch prompt must contain DISPATCH_PROMPT_HANDOFF_NOTE",
-  );
+  expect(prompt.includes(DISPATCH_PROMPT_HANDOFF_NOTE), "edge reasoning dispatch prompt must contain DISPATCH_PROMPT_HANDOFF_NOTE").toBeTruthy();
 });

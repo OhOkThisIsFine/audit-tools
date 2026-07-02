@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildRiskRegister } = await import(
   "../../src/audit/extractors/risk.ts"
@@ -64,20 +63,14 @@ test("complexity / duplication / seams each reach buildRiskRegister output", () 
   const byUnit = new Map(register.items.map((i) => [i.unit_id, i]));
 
   // complexity → high_complexity on the unit owning a.ts
-  assert.ok(
-    byUnit.get("u-a").signals.includes("high_complexity"),
-    "unit owning high-complexity node should carry high_complexity",
-  );
+  expect(byUnit.get("u-a").signals.includes("high_complexity"), "unit owning high-complexity node should carry high_complexity").toBeTruthy();
   // duplication → duplicated_code on the unit owning b.ts
-  assert.ok(
-    byUnit.get("u-b").signals.includes("duplicated_code"),
-    "unit owning duplicated node should carry duplicated_code",
-  );
+  expect(byUnit.get("u-b").signals.includes("duplicated_code"), "unit owning duplicated node should carry duplicated_code").toBeTruthy();
   // seam → seam_endpoint on a unit owning a seam endpoint
   const anySeamEndpoint = register.items.some((i) =>
     i.signals.includes("seam_endpoint"),
   );
-  assert.ok(anySeamEndpoint, "a seam endpoint should be flagged on some unit");
+  expect(anySeamEndpoint, "a seam endpoint should be flagged on some unit").toBeTruthy();
 });
 
 test("complexity / duplication / seams each reach a design-assessment finding", () => {
@@ -96,18 +89,9 @@ test("complexity / duplication / seams each reach a design-assessment finding", 
   });
 
   const categories = assessment.findings.map((f) => f.category);
-  assert.ok(
-    categories.includes("complexity_hotspot"),
-    "should surface a complexity_hotspot finding",
-  );
-  assert.ok(
-    categories.includes("code_duplication"),
-    "should surface a code_duplication finding",
-  );
-  assert.ok(
-    categories.includes("architectural_seam"),
-    "should surface an architectural_seam finding",
-  );
+  expect(categories.includes("complexity_hotspot"), "should surface a complexity_hotspot finding").toBeTruthy();
+  expect(categories.includes("code_duplication"), "should surface a code_duplication finding").toBeTruthy();
+  expect(categories.includes("architectural_seam"), "should surface an architectural_seam finding").toBeTruthy();
 });
 
 test("a node owned by NO unit still surfaces as a node-keyed finding", () => {
@@ -125,20 +109,14 @@ test("a node owned by NO unit still surfaces as a node-keyed finding", () => {
       f.category === "complexity_hotspot" &&
       f.affected_files.some((af) => af.path === "orphan.ts"),
   );
-  assert.ok(
-    orphanComplexity,
-    "complexity finding for the unit-less orphan node must surface",
-  );
+  expect(orphanComplexity, "complexity finding for the unit-less orphan node must surface").toBeTruthy();
 
   const orphanSeam = assessment.findings.find(
     (f) =>
       f.category === "architectural_seam" &&
       f.affected_files.some((af) => af.path === "orphan.ts"),
   );
-  assert.ok(
-    orphanSeam,
-    "seam finding for the unit-less orphan endpoint must surface",
-  );
+  expect(orphanSeam, "seam finding for the unit-less orphan endpoint must surface").toBeTruthy();
 });
 
 test("appended detectors do not renumber existing DA-### ids", () => {
@@ -171,7 +149,7 @@ test("appended detectors do not renumber existing DA-### ids", () => {
   const baselineCycle = baseline.findings.find(
     (f) => f.category === "dependency_cycle",
   );
-  assert.ok(baselineCycle, "baseline should have a cycle finding");
+  expect(baselineCycle, "baseline should have a cycle finding").toBeTruthy();
 
   // With node_metrics added, the cycle finding must keep its original id.
   const withMetrics = buildDesignAssessment({
@@ -183,22 +161,15 @@ test("appended detectors do not renumber existing DA-### ids", () => {
   const withMetricsCycle = withMetrics.findings.find(
     (f) => f.category === "dependency_cycle",
   );
-  assert.equal(
-    withMetricsCycle.id,
-    baselineCycle.id,
-    "appended detectors must not renumber the existing cycle finding's id",
-  );
+  expect(withMetricsCycle.id, "appended detectors must not renumber the existing cycle finding's id").toBe(baselineCycle.id);
 
   // The new findings must come AFTER the existing ones (higher id ordinals).
   const cycleOrdinal = Number(withMetricsCycle.id.slice(3));
   const complexityFinding = withMetrics.findings.find(
     (f) => f.category === "complexity_hotspot",
   );
-  assert.ok(complexityFinding, "complexity finding should exist");
-  assert.ok(
-    Number(complexityFinding.id.slice(3)) > cycleOrdinal,
-    "appended complexity finding id must be greater than the existing cycle id",
-  );
+  expect(complexityFinding, "complexity finding should exist").toBeTruthy();
+  expect(Number(complexityFinding.id.slice(3)) > cycleOrdinal, "appended complexity finding id must be greater than the existing cycle id").toBeTruthy();
 });
 
 test("correlated cycle+hub+seam family cannot alone drive risk_score to 10", () => {
@@ -224,12 +195,9 @@ test("correlated cycle+hub+seam family cannot alone drive risk_score to 10", () 
   const signals = deriveGraphSignals(bundle);
 
   // Sanity: hub.ts is in all three structural sets.
-  assert.ok(signals.hubs.has("hub.ts"), "hub.ts should be a hub");
-  assert.ok(signals.nodesInCycles.has("hub.ts"), "hub.ts should be in a cycle");
-  assert.ok(
-    signals.seams.some((s) => s.from === "hub.ts" || s.to === "hub.ts"),
-    "hub.ts should be a seam endpoint",
-  );
+  expect(signals.hubs.has("hub.ts"), "hub.ts should be a hub").toBeTruthy();
+  expect(signals.nodesInCycles.has("hub.ts"), "hub.ts should be in a cycle").toBeTruthy();
+  expect(signals.seams.some((s) => s.from === "hub.ts" || s.to === "hub.ts"), "hub.ts should be a seam endpoint").toBeTruthy();
 
   const register = buildRiskRegister(
     {
@@ -245,11 +213,8 @@ test("correlated cycle+hub+seam family cannot alone drive risk_score to 10", () 
   );
 
   const hubItem = register.items.find((i) => i.unit_id === "u-hub");
-  assert.ok(hubItem.signals.includes("member_of_cycle"));
-  assert.ok(hubItem.signals.includes("is_hub"));
-  assert.ok(hubItem.signals.includes("seam_endpoint"));
-  assert.ok(
-    hubItem.risk_score < 10,
-    `correlated structural family alone must not saturate risk_score to 10 (got ${hubItem.risk_score})`,
-  );
+  expect(hubItem.signals.includes("member_of_cycle")).toBeTruthy();
+  expect(hubItem.signals.includes("is_hub")).toBeTruthy();
+  expect(hubItem.signals.includes("seam_endpoint")).toBeTruthy();
+  expect(hubItem.risk_score < 10, `correlated structural family alone must not saturate risk_score to 10 (got ${hubItem.risk_score})`).toBeTruthy();
 });

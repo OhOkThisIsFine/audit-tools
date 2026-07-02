@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const {
@@ -39,8 +39,8 @@ test("filterPackets — all packets emitted when no budget cap", () => {
   const packets = [makePacket("p1"), makePacket("p2"), makePacket("p3")];
 
   const r1 = filterPackets(packets, makeSessionConfig());
-  assert.equal(r1.emitPackets.length, 3);
-  assert.equal(r1.deferredPackets.length, 0);
+  expect(r1.emitPackets.length).toBe(3);
+  expect(r1.deferredPackets.length).toBe(0);
 });
 
 test("filterPackets — budget cap slices emitPackets and populates deferredPackets", () => {
@@ -48,23 +48,23 @@ test("filterPackets — budget cap slices emitPackets and populates deferredPack
 
   // max_packets=2 → emit first 2, defer remaining 3
   const r1 = filterPackets(packets, makeSessionConfig({ max_packets: 2 }));
-  assert.equal(r1.emitPackets.length, 2);
-  assert.equal(r1.deferredPackets.length, 3);
+  expect(r1.emitPackets.length).toBe(2);
+  expect(r1.deferredPackets.length).toBe(3);
 
   // max_packets=0 → emit nothing, defer all
   const r2 = filterPackets(packets, makeSessionConfig({ max_packets: 0 }));
-  assert.equal(r2.emitPackets.length, 0);
-  assert.equal(r2.deferredPackets.length, 5);
+  expect(r2.emitPackets.length).toBe(0);
+  expect(r2.deferredPackets.length).toBe(5);
 
   // max_packets >= length → no deferral
   const r3 = filterPackets(packets, makeSessionConfig({ max_packets: 10 }));
-  assert.equal(r3.deferredPackets.length, 0);
-  assert.equal(r3.emitPackets.length, 5);
+  expect(r3.deferredPackets.length).toBe(0);
+  expect(r3.emitPackets.length).toBe(5);
 
   // Budget cap + multiple packets: only cap applies
   const r4 = filterPackets(packets, makeSessionConfig({ max_packets: 2 }));
-  assert.equal(r4.emitPackets.length, 2);
-  assert.equal(r4.deferredPackets.length, 3);
+  expect(r4.emitPackets.length).toBe(2);
+  expect(r4.deferredPackets.length).toBe(3);
 });
 
 // ── buildPacketPrompt ─────────────────────────────────────────────────────────
@@ -92,19 +92,19 @@ test("buildPacketPrompt — assembles expected prompt sections", () => {
 
   const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection: [], taskSections, resultPath });
 
-  assert.ok(typeof prompt === "string");
-  assert.match(prompt, /packet_id: abc/);
-  assert.match(prompt, /result_path:/);
-  assert.match(prompt, /Repository root:/);
-  assert.match(prompt, /Set the shell\/tool workdir to the repository root/i);
-  assert.doesNotMatch(prompt, /submit-packet/, "prompt must NOT contain submit-packet");
-  assert.ok(prompt.includes(fileList));
-  assert.ok(prompt.includes("### task-abc"));
-  assert.match(prompt, /do not pipe an inline foreach statement directly into ConvertTo-Json/i);
-  assert.match(prompt, /Assign the foreach output to a variable first/i);
-  assert.match(prompt, /unwraps single-element arrays/i);
-  assert.doesNotMatch(prompt, /current working directory/);
-  assert.match(prompt, /valid: abc, findings=/);
+  expect(typeof prompt === "string").toBeTruthy();
+  expect(prompt).toMatch(/packet_id: abc/);
+  expect(prompt).toMatch(/result_path:/);
+  expect(prompt).toMatch(/Repository root:/);
+  expect(prompt).toMatch(/Set the shell\/tool workdir to the repository root/i);
+  expect(prompt, "prompt must NOT contain submit-packet").not.toMatch(/submit-packet/);
+  expect(prompt.includes(fileList)).toBeTruthy();
+  expect(prompt.includes("### task-abc")).toBeTruthy();
+  expect(prompt).toMatch(/do not pipe an inline foreach statement directly into ConvertTo-Json/i);
+  expect(prompt).toMatch(/Assign the foreach output to a variable first/i);
+  expect(prompt).toMatch(/unwraps single-element arrays/i);
+  expect(prompt).not.toMatch(/current working directory/);
+  expect(prompt).toMatch(/valid: abc, findings=/);
 });
 
 test("N-worker-prompt-and-result-contract: buildPacketPrompt — writes to result_path, requires quoted_text, no submit-packet command", () => {
@@ -117,30 +117,22 @@ test("N-worker-prompt-and-result-contract: buildPacketPrompt — writes to resul
   const prompt = buildPacketPrompt({ packet, packetTasks, fileList, largeFileSection: [], taskSections, resultPath });
 
   // No submit-packet shell command
-  assert.doesNotMatch(prompt, /submit-packet/, "prompt must NOT contain submit-packet");
-  assert.doesNotMatch(prompt, /Get-Content.*\|.*&/, "prompt must NOT contain PowerShell Get-Content pipe workaround");
+  expect(prompt, "prompt must NOT contain submit-packet").not.toMatch(/submit-packet/);
+  expect(prompt, "prompt must NOT contain PowerShell Get-Content pipe workaround").not.toMatch(/Get-Content.*\|.*&/);
 
   // result_path is present and the worker is told to WRITE it (not emit inline)
-  assert.ok(prompt.includes(resultPath), "prompt must include the result_path value");
-  assert.match(prompt, /result_path:/, "prompt must have result_path field in header");
-  assert.match(
-    prompt,
-    /WRITE that array[\s\S]*to your result_path/i,
-    "prompt must instruct the worker to write the array to result_path",
-  );
+  expect(prompt.includes(resultPath), "prompt must include the result_path value").toBeTruthy();
+  expect(prompt, "prompt must have result_path field in header").toMatch(/result_path:/);
+  expect(prompt, "prompt must instruct the worker to write the array to result_path").toMatch(/WRITE that array[\s\S]*to your result_path/i);
 
   // Must NOT forbid writes or instruct inline-only emission (the data-loss bug)
-  assert.doesNotMatch(prompt, /Do not write files/i, "prompt must NOT forbid file writes");
-  assert.doesNotMatch(prompt, /emit it INLINE/i, "prompt must NOT instruct inline-only emission");
-  assert.doesNotMatch(prompt, /skill captures/i, "prompt must NOT defer capture to a skill");
+  expect(prompt, "prompt must NOT forbid file writes").not.toMatch(/Do not write files/i);
+  expect(prompt, "prompt must NOT instruct inline-only emission").not.toMatch(/emit it INLINE/i);
+  expect(prompt, "prompt must NOT defer capture to a skill").not.toMatch(/skill captures/i);
 
   // quoted_text grounding is effectively mandatory (the 174-ungrounded root cause)
-  assert.match(prompt, /quoted_text/, "prompt must reference quoted_text in the finding schema");
-  assert.match(
-    prompt,
-    /Grounding \(required\)/i,
-    "prompt must include a required grounding instruction",
-  );
+  expect(prompt, "prompt must reference quoted_text in the finding schema").toMatch(/quoted_text/);
+  expect(prompt, "prompt must include a required grounding instruction").toMatch(/Grounding \(required\)/i);
 });
 
 // ── step-prompt ↔ packet-prompt result contract (no drift) ─────────────────────
@@ -172,31 +164,15 @@ test("N-worker-prompt-and-result-contract: rolling-dispatch step prompt and pack
 
   // Step prompt side: workers write their own result_path; pre-approval grants
   // write to that path; no "they do not write files" contradiction.
-  assert.match(
-    stepPrompt,
-    /writes? its own AuditResult\[\] (JSON )?array to its assigned\s+`entry\.result_path`/i,
-    "step prompt must state workers write to entry.result_path",
-  );
-  assert.match(
-    stepPrompt,
-    /grant write access to that subagent's `entry\.result_path`/i,
-    "step prompt pre-approval must grant write to entry.result_path",
-  );
-  assert.doesNotMatch(
-    stepPrompt,
-    /read-only; they do not write files/i,
-    "step prompt must not say workers are read-only / do not write files",
-  );
+  expect(stepPrompt, "step prompt must state workers write to entry.result_path").toMatch(/writes? its own AuditResult\[\] (JSON )?array to its assigned\s+`entry\.result_path`/i);
+  expect(stepPrompt, "step prompt pre-approval must grant write to entry.result_path").toMatch(/grant write access to that subagent's `entry\.result_path`/i);
+  expect(stepPrompt, "step prompt must not say workers are read-only / do not write files").not.toMatch(/read-only; they do not write files/i);
 
   // Packet prompt side: the worker is told to WRITE the same result_path and is
   // never told to emit inline or forbidden from writing.
-  assert.match(
-    packetPrompt,
-    /WRITE that array[\s\S]*to your result_path/i,
-    "packet prompt must instruct the worker to write to result_path",
-  );
-  assert.doesNotMatch(packetPrompt, /emit it INLINE/i, "packet prompt must not instruct inline emission");
-  assert.doesNotMatch(packetPrompt, /Do not write files/i, "packet prompt must not forbid file writes");
+  expect(packetPrompt, "packet prompt must instruct the worker to write to result_path").toMatch(/WRITE that array[\s\S]*to your result_path/i);
+  expect(packetPrompt, "packet prompt must not instruct inline emission").not.toMatch(/emit it INLINE/i);
+  expect(packetPrompt, "packet prompt must not forbid file writes").not.toMatch(/Do not write files/i);
 });
 
 // ── buildTaskSections ─────────────────────────────────────────────────────────
@@ -215,11 +191,11 @@ test("buildTaskSections — produces one section per task with correct fields", 
   const sections = buildTaskSections(tasks, lensDefs, lineIndex);
   const joined = sections.join("\n");
 
-  assert.match(joined, /### task-t1/);
-  assert.match(joined, /### task-t2/);
-  assert.match(joined, /unit_id: unit-t1/);
-  assert.match(joined, /pass_id: pass:correctness/);
-  assert.match(joined, /lens: correctness/);
+  expect(joined).toMatch(/### task-t1/);
+  expect(joined).toMatch(/### task-t2/);
+  expect(joined).toMatch(/unit_id: unit-t1/);
+  expect(joined).toMatch(/pass_id: pass:correctness/);
+  expect(joined).toMatch(/lens: correctness/);
 });
 
 test("buildTaskSections — uses lens name as fallback when lensDef is missing", () => {
@@ -230,8 +206,8 @@ test("buildTaskSections — uses lens name as fallback when lensDef is missing",
   const sections = buildTaskSections([task], lensDefs, lineIndex);
   const joined = sections.join("\n");
 
-  assert.match(joined, /Lens guidance: security/);
-  assert.match(joined, /Do NOT report: N\/A/);
+  expect(joined).toMatch(/Lens guidance: security/);
+  expect(joined).toMatch(/Do NOT report: N\/A/);
 });
 
 test("buildTaskSections — lens_verification tasks include the verification mode instruction block", () => {
@@ -242,8 +218,8 @@ test("buildTaskSections — lens_verification tasks include the verification mod
   const sections = buildTaskSections([task], lensDefs, lineIndex);
   const joined = sections.join("\n");
 
-  assert.match(joined, /Lens verification mode/);
-  assert.match(joined, /Return findings: \[\]/);
+  expect(joined).toMatch(/Lens verification mode/);
+  expect(joined).toMatch(/Return findings: \[\]/);
 });
 
 test("buildTaskSections — coverageTemplate JSON is embedded verbatim", () => {
@@ -254,10 +230,7 @@ test("buildTaskSections — coverageTemplate JSON is embedded verbatim", () => {
   const sections = buildTaskSections([task], lensDefs, lineIndex);
   const joined = sections.join("\n");
 
-  assert.ok(
-    joined.includes(JSON.stringify([{ path: "src/t1.ts", total_lines: 50 }])),
-    "coverage template JSON should be embedded verbatim",
-  );
+  expect(joined.includes(JSON.stringify([{ path: "src/t1.ts", total_lines: 50 }])), "coverage template JSON should be embedded verbatim").toBeTruthy();
 });
 
 test("buildTaskSections — renders external analyzer signal detail for tagged tasks, not just the generic tag", () => {
@@ -284,8 +257,8 @@ test("buildTaskSections — renders external analyzer signal detail for tagged t
   const sections = buildTaskSections([task], lensDefs, lineIndex, buildAnalyzerSignalAnchorIndex(externalAnalyzerResults));
   const joined = sections.join("\n");
 
-  assert.match(joined, /External analyzer signals for this task/);
-  assert.match(joined, /src\/t1\.ts:12 \[exports\] Unused export 'helper'/);
+  expect(joined).toMatch(/External analyzer signals for this task/);
+  expect(joined).toMatch(/src\/t1\.ts:12 \[exports\] Unused export 'helper'/);
 });
 
 test("buildTaskSections — caps analyzer signal lines at 24 with an omitted-count footer (N4)", () => {
@@ -307,8 +280,8 @@ test("buildTaskSections — caps analyzer signal lines at 24 with an omitted-cou
   const joined = sections.join("\n");
   const shown = sections.filter((line) => /^- src\/t1\.ts:\d+ \[exports\]/.test(line));
 
-  assert.equal(shown.length, 24);
-  assert.match(joined, /…and 6 more analyzer signal\(s\); see the full set in packet\.json\./);
+  expect(shown.length).toBe(24);
+  expect(joined).toMatch(/…and 6 more analyzer signal\(s\); see the full set in packet\.json\./);
 });
 
 test("buildTaskSections — omits the analyzer signal section for tasks without the tag, even when results exist", () => {
@@ -327,7 +300,7 @@ test("buildTaskSections — omits the analyzer signal section for tasks without 
   const sections = buildTaskSections([task], lensDefs, lineIndex, buildAnalyzerSignalAnchorIndex(externalAnalyzerResults));
   const joined = sections.join("\n");
 
-  assert.doesNotMatch(joined, /External analyzer signals for this task/);
+  expect(joined).not.toMatch(/External analyzer signals for this task/);
 });
 
 test("buildTaskSections — omits the analyzer signal section when tagged but no results match this task's files", () => {
@@ -346,7 +319,7 @@ test("buildTaskSections — omits the analyzer signal section when tagged but no
   const sections = buildTaskSections([task], lensDefs, lineIndex, buildAnalyzerSignalAnchorIndex(externalAnalyzerResults));
   const joined = sections.join("\n");
 
-  assert.doesNotMatch(joined, /External analyzer signals for this task/);
+  expect(joined).not.toMatch(/External analyzer signals for this task/);
 });
 
 test("buildTaskSections — renders the knip↔graph cross-check tag inline for a knip lead (CP-NODE-2)", async () => {
@@ -389,7 +362,7 @@ test("buildTaskSections — renders the knip↔graph cross-check tag inline for 
   );
   const joined = sections.join("\n");
 
-  assert.match(joined, /\[knip-exports\] \{graph-crosscheck: LIKELY-DEAD\}/);
+  expect(joined).toMatch(/\[knip-exports\] \{graph-crosscheck: LIKELY-DEAD\}/);
 });
 
 // ── collectOversizedWarnings ──────────────────────────────────────────────────
@@ -411,24 +384,24 @@ function makePlanEntry(packetId, estimatedTokens) {
 test("collectOversizedWarnings — returns empty array when confidence is 'low'", () => {
   const plan = [makePlanEntry("p1", 99999)];
   const warnings = collectOversizedWarnings(plan, makeWaveSchedule("low"));
-  assert.deepEqual(warnings, []);
+  expect(warnings).toEqual([]);
 });
 
 test("collectOversizedWarnings — emits warning when packet estimated_tokens exceed context budget", () => {
   const contextBudget = 10000 - 2000; // 8000
   const plan = [makePlanEntry("p1", 9000), makePlanEntry("p2", 100)];
   const warnings = collectOversizedWarnings(plan, makeWaveSchedule("high"));
-  assert.equal(warnings.length, 1);
-  assert.equal(warnings[0].code, "oversized_packet");
-  assert.match(warnings[0].message, /p1/);
-  assert.match(warnings[0].message, new RegExp(String(9000)));
-  assert.match(warnings[0].message, new RegExp(String(contextBudget)));
+  expect(warnings.length).toBe(1);
+  expect(warnings[0].code).toBe("oversized_packet");
+  expect(warnings[0].message).toMatch(/p1/);
+  expect(warnings[0].message).toMatch(new RegExp(String(9000)));
+  expect(warnings[0].message).toMatch(new RegExp(String(contextBudget)));
 });
 
 test("collectOversizedWarnings — returns empty array when all packets are within budget", () => {
   const plan = [makePlanEntry("p1", 100), makePlanEntry("p2", 200)];
   const warnings = collectOversizedWarnings(plan, makeWaveSchedule("medium"));
-  assert.deepEqual(warnings, []);
+  expect(warnings).toEqual([]);
 });
 
 // ── resolveTierBudgets (COR-0e031ac0) ─────────────────────────────────────────
@@ -436,9 +409,9 @@ test("collectOversizedWarnings — returns empty array when all packets are with
 test("resolveTierBudgets — direct entries survive unchanged", () => {
   const perRank = new Map([["small", 1000], ["standard", 2000], ["deep", 4000]]);
   const out = resolveTierBudgets(perRank);
-  assert.equal(out.small, 1000);
-  assert.equal(out.standard, 2000);
-  assert.equal(out.deep, 4000);
+  expect(out.small).toBe(1000);
+  expect(out.standard).toBe(2000);
+  expect(out.deep).toBe(4000);
 });
 
 test("resolveTierBudgets — missing tier falls back to lower rank (not higher) when both equidistant", () => {
@@ -446,7 +419,7 @@ test("resolveTierBudgets — missing tier falls back to lower rank (not higher) 
   // Must prefer 'small' (lower / less capable) to avoid over-budgeting (COR-0e031ac0).
   const perRank = new Map([["small", 1000], ["deep", 4000]]);
   const out = resolveTierBudgets(perRank);
-  assert.equal(out.standard, 1000, "standard should inherit from small (lower tier), not deep (higher tier)");
+  expect(out.standard, "standard should inherit from small (lower tier), not deep (higher tier)").toBe(1000);
 });
 
 test("resolveTierBudgets — missing 'small' takes the nearest lower rank and does not inherit deep (COR-0e031ac0)", () => {
@@ -459,8 +432,8 @@ test("resolveTierBudgets — missing 'small' takes the nearest lower rank and do
   const out = resolveTierBudgets(perRank);
   // 'small' is below 'standard'; nearest is 'standard' (up at distance 1). It should
   // prefer down first, but there is no lower rank, so it must use 'standard', NOT 'deep'.
-  assert.equal(out.small, 2000, "small must use standard's budget (not deep's) when standard is the nearest reported");
-  assert.notEqual(out.small, 4000, "small must NOT inherit deep's over-sized budget");
+  expect(out.small, "small must use standard's budget (not deep's) when standard is the nearest reported").toBe(2000);
+  expect(out.small, "small must NOT inherit deep's over-sized budget").not.toBe(4000);
 });
 
 test("resolveTierBudgets — missing 'deep' takes the nearest higher rank (standard, not small)", () => {
@@ -468,7 +441,7 @@ test("resolveTierBudgets — missing 'deep' takes the nearest higher rank (stand
   // should take the nearest lower = 'standard', NOT 'small'.
   const perRank = new Map([["small", 1000], ["standard", 2000]]);
   const out = resolveTierBudgets(perRank);
-  assert.equal(out.deep, 2000, "deep should fall back to standard (nearest), not small");
+  expect(out.deep, "deep should fall back to standard (nearest), not small").toBe(2000);
 });
 
 test("resolveTierBudgets — throws on empty map", () => {

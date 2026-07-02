@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,11 +19,11 @@ test("runAutoFixExecutor is a no-op and records an empty result when no formatte
       file_disposition: { files: [{ path: "notes/readme.txt", status: "audit" }] },
     };
     const result = await runAutoFixExecutor(bundle, root);
-    assert.deepEqual(result.artifacts_written, ["auto_fixes_applied.json"]);
-    assert.deepEqual(result.updated.auto_fixes_applied.executed_tools, []);
-    assert.deepEqual(result.updated.auto_fixes_applied.tool_timings, []);
-    assert.ok(result.updated.auto_fixes_applied.timestamp);
-    assert.match(result.progress_summary, /Formatters executed: None/);
+    expect(result.artifacts_written).toEqual(["auto_fixes_applied.json"]);
+    expect(result.updated.auto_fixes_applied.executed_tools).toEqual([]);
+    expect(result.updated.auto_fixes_applied.tool_timings).toEqual([]);
+    expect(result.updated.auto_fixes_applied.timestamp).toBeTruthy();
+    expect(result.progress_summary).toMatch(/Formatters executed: None/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -41,12 +41,12 @@ test("runAutoFixExecutor ignores audit-excluded files when collecting extensions
     };
     const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
-    assert.deepEqual(applied.executed_tools, []);
-    assert.equal(applied.tool_timings.length, applied.executed_tools.length);
+    expect(applied.executed_tools).toEqual([]);
+    expect(applied.tool_timings.length).toBe(applied.executed_tools.length);
     applied.tool_timings.forEach((entry, i) => {
-      assert.equal(entry.tool, applied.executed_tools[i]);
-      assert.equal(typeof entry.duration_ms, "number");
-      assert.ok(entry.duration_ms >= 0);
+      expect(entry.tool).toBe(applied.executed_tools[i]);
+      expect(typeof entry.duration_ms).toBe("number");
+      expect(entry.duration_ms >= 0).toBeTruthy();
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -73,30 +73,13 @@ test("runAutoFixExecutor surfaces failed formatters in progress_summary", async 
     const applied = result.updated.auto_fixes_applied;
 
     // Tool was attempted but failed — it must NOT appear in executed_tools.
-    assert.ok(
-      !applied.executed_tools.includes("prettier"),
-      "prettier must not appear in executed_tools when it exits non-zero",
-    );
+    expect(!applied.executed_tools.includes("prettier"), "prettier must not appear in executed_tools when it exits non-zero").toBeTruthy();
     // It MUST appear in failed_tools.
-    assert.ok(
-      Array.isArray(applied.failed_tools),
-      "failed_tools must be an array",
-    );
-    assert.ok(
-      applied.failed_tools.includes("prettier"),
-      "prettier must appear in failed_tools when it exits non-zero",
-    );
+    expect(Array.isArray(applied.failed_tools), "failed_tools must be an array").toBeTruthy();
+    expect(applied.failed_tools.includes("prettier"), "prettier must appear in failed_tools when it exits non-zero").toBeTruthy();
     // progress_summary must distinguish this from the 'no formatter applicable' case.
-    assert.match(
-      result.progress_summary,
-      /Formatters failed:/,
-      "progress_summary must mention 'Formatters failed:' when a formatter exits non-zero",
-    );
-    assert.match(
-      result.progress_summary,
-      /prettier/,
-      "progress_summary must name the failed formatter",
-    );
+    expect(result.progress_summary, "progress_summary must mention 'Formatters failed:' when a formatter exits non-zero").toMatch(/Formatters failed:/);
+    expect(result.progress_summary, "progress_summary must name the failed formatter").toMatch(/prettier/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -119,13 +102,10 @@ test("runAutoFixExecutor progress_summary shows 'Formatters executed: None' with
     const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
 
-    assert.deepEqual(applied.executed_tools, [], "executed_tools must be empty when all fail");
-    assert.ok(
-      applied.failed_tools.includes("prettier"),
-      "failed_tools must contain prettier",
-    );
-    assert.match(result.progress_summary, /Formatters executed: None/);
-    assert.match(result.progress_summary, /Formatters failed:/);
+    expect(applied.executed_tools, "executed_tools must be empty when all fail").toEqual([]);
+    expect(applied.failed_tools.includes("prettier"), "failed_tools must contain prettier").toBeTruthy();
+    expect(result.progress_summary).toMatch(/Formatters executed: None/);
+    expect(result.progress_summary).toMatch(/Formatters failed:/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -141,14 +121,10 @@ test("runAutoFixExecutor progress_summary shows 'Formatters executed: None' with
     const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
 
-    assert.deepEqual(applied.executed_tools, []);
-    assert.deepEqual(applied.failed_tools, [], "failed_tools must be empty when no formatter was applicable");
-    assert.match(result.progress_summary, /Formatters executed: None/);
-    assert.doesNotMatch(
-      result.progress_summary,
-      /Formatters failed:/,
-      "progress_summary must NOT mention 'Formatters failed:' when no formatter was applicable",
-    );
+    expect(applied.executed_tools).toEqual([]);
+    expect(applied.failed_tools, "failed_tools must be empty when no formatter was applicable").toEqual([]);
+    expect(result.progress_summary).toMatch(/Formatters executed: None/);
+    expect(result.progress_summary, "progress_summary must NOT mention 'Formatters failed:' when no formatter was applicable").not.toMatch(/Formatters failed:/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -164,11 +140,8 @@ test("auto_fixes_applied artifact includes a failed_tools field", async () => {
     const result = await runAutoFixExecutor(bundle, root);
     const applied = result.updated.auto_fixes_applied;
 
-    assert.ok(
-      Object.prototype.hasOwnProperty.call(applied, "failed_tools"),
-      "auto_fixes_applied must always contain a failed_tools field",
-    );
-    assert.ok(Array.isArray(applied.failed_tools), "failed_tools must be an array");
+    expect(Object.prototype.hasOwnProperty.call(applied, "failed_tools"), "auto_fixes_applied must always contain a failed_tools field").toBeTruthy();
+    expect(Array.isArray(applied.failed_tools), "failed_tools must be an array").toBeTruthy();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -199,16 +172,13 @@ test("runAutoFixExecutor enters the formatter branch when a prettier config and 
     const result = await runAutoFixExecutor(bundle, root);
 
     // Distinct from the no-formatter no-op: prettier was actually executed.
-    assert.ok(
-      result.updated.auto_fixes_applied.executed_tools.includes("prettier"),
-      "executed_tools should contain prettier",
-    );
+    expect(result.updated.auto_fixes_applied.executed_tools.includes("prettier"), "executed_tools should contain prettier").toBeTruthy();
     const timing = result.updated.auto_fixes_applied.tool_timings.find(
       (entry) => entry.tool === "prettier",
     );
-    assert.ok(timing, "tool_timings should have a prettier entry");
-    assert.equal(typeof timing.duration_ms, "number");
-    assert.match(result.progress_summary, /prettier/);
+    expect(timing, "tool_timings should have a prettier entry").toBeTruthy();
+    expect(typeof timing.duration_ms).toBe("number");
+    expect(result.progress_summary).toMatch(/prettier/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

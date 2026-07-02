@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   deriveLiveResultKeys,
@@ -41,24 +40,20 @@ function ledgerResult(over = {}) {
 test("benign edit: idempotent re-ingest is a no-op AND staleness fires", () => {
   const sigC1 = buildTaskContentSignature({ goal: "audit auth", body: "v1" });
   const sigC2 = buildTaskContentSignature({ goal: "audit auth", body: "v2" });
-  assert.notEqual(sigC1, sigC2, "benign edit moves the live task_content_signature");
+  expect(sigC1, "benign edit moves the live task_content_signature").not.toBe(sigC2);
 
   // --- First ingest: establish the ledger record + the baseline (C1). ---
   const ledger1 = appendResultsToLedger([], [ledgerResult()]);
-  assert.equal(ledger1.length, 1);
+  expect(ledger1.length).toBe(1);
 
   const keysC1 = deriveLiveResultKeys({
     ...coordinate,
     task_content_signature: sigC1,
   });
   // No baseline yet → not stale (first ingest establishes it, never compares).
-  assert.equal(
-    isResultStaleAgainstBaseline(undefined, keysC1),
-    false,
-    "first ingest is not stale",
-  );
+  expect(isResultStaleAgainstBaseline(undefined, keysC1), "first ingest is not stale").toBe(false);
   let baselines = recordResultBaseline(undefined, keysC1);
-  assert.equal(baselines[keysC1.idempotency_key], keysC1.content_key);
+  expect(baselines[keysC1.idempotency_key]).toBe(keysC1.content_key);
 
   // --- Benign edit: live signature C1 → C2, then re-ingest the same result. ---
   const keysC2 = deriveLiveResultKeys({
@@ -67,41 +62,21 @@ test("benign edit: idempotent re-ingest is a no-op AND staleness fires", () => {
   });
 
   // idempotencyKey is signature-STABLE → the baseline store key is unchanged.
-  assert.equal(
-    keysC2.idempotency_key,
-    keysC1.idempotency_key,
-    "idempotencyKey fixed across a benign edit",
-  );
+  expect(keysC2.idempotency_key, "idempotencyKey fixed across a benign edit").toBe(keysC1.idempotency_key);
   // contentKey is signature-SENSITIVE → it bumped (C1 → C2).
-  assert.notEqual(
-    keysC2.content_key,
-    keysC1.content_key,
-    "contentKey bumped on the benign edit",
-  );
+  expect(keysC2.content_key, "contentKey bumped on the benign edit").not.toBe(keysC1.content_key);
 
   // (1) Idempotent re-ingest is a NO-OP — no duplicate ledger record appended.
   const ledger2 = appendResultsToLedger(ledger1, [ledgerResult()]);
-  assert.equal(ledger2.length, 1, "re-ingest did not append a duplicate");
-  assert.equal(
-    ledger2[0].instance_id,
-    ledger1[0].instance_id,
-    "existing ledger record untouched (append-only)",
-  );
+  expect(ledger2.length, "re-ingest did not append a duplicate").toBe(1);
+  expect(ledger2[0].instance_id, "existing ledger record untouched (append-only)").toBe(ledger1[0].instance_id);
 
   // (2) Staleness FIRES — live C2 != baseline C1, compared OUTSIDE the ledger.
-  assert.equal(
-    isResultStaleAgainstBaseline(baselines, keysC2),
-    true,
-    "staleness fires on the benign edit",
-  );
+  expect(isResultStaleAgainstBaseline(baselines, keysC2), "staleness fires on the benign edit").toBe(true);
 
   // Refreshing the baseline to C2 clears staleness (advance recorded the move).
   baselines = recordResultBaseline(baselines, keysC2);
-  assert.equal(
-    isResultStaleAgainstBaseline(baselines, keysC2),
-    false,
-    "baseline refresh clears staleness",
-  );
+  expect(isResultStaleAgainstBaseline(baselines, keysC2), "baseline refresh clears staleness").toBe(false);
 });
 
 test("staleness reads a freshly-computed live contentKey, never one off the ledger record", () => {
@@ -116,8 +91,8 @@ test("staleness reads a freshly-computed live contentKey, never one off the ledg
     ...coordinate,
     task_content_signature: buildTaskContentSignature({ x: 2 }),
   });
-  assert.equal(a.idempotency_key, b.idempotency_key);
-  assert.notEqual(a.content_key, b.content_key);
+  expect(a.idempotency_key).toBe(b.idempotency_key);
+  expect(a.content_key).not.toBe(b.content_key);
 });
 
 test("no recorded baseline → not stale (never-compared, not a false positive)", () => {
@@ -125,8 +100,8 @@ test("no recorded baseline → not stale (never-compared, not a false positive)"
     ...coordinate,
     task_content_signature: buildTaskContentSignature({ x: 1 }),
   });
-  assert.equal(isResultStaleAgainstBaseline({}, keys), false);
-  assert.equal(isResultStaleAgainstBaseline(undefined, keys), false);
+  expect(isResultStaleAgainstBaseline({}, keys)).toBe(false);
+  expect(isResultStaleAgainstBaseline(undefined, keys)).toBe(false);
 });
 
 test("recordResultBaseline is pure (no input mutation) and idempotent", () => {
@@ -136,10 +111,10 @@ test("recordResultBaseline is pure (no input mutation) and idempotent", () => {
   });
   const before = {};
   const after = recordResultBaseline(before, keys);
-  assert.deepEqual(before, {}, "input not mutated");
-  assert.equal(after[keys.idempotency_key], keys.content_key);
+  expect(before, "input not mutated").toEqual({});
+  expect(after[keys.idempotency_key]).toBe(keys.content_key);
   // Recording the same content_key again yields an equal store.
-  assert.deepEqual(recordResultBaseline(after, keys), after);
+  expect(recordResultBaseline(after, keys)).toEqual(after);
 });
 
 test("redispatch attempt feeds a distinct idempotencyKey baseline slot", () => {
@@ -160,10 +135,10 @@ test("redispatch attempt feeds a distinct idempotencyKey baseline slot", () => {
     attempt: 2,
     task_content_signature: sig,
   });
-  assert.notEqual(a1.idempotency_key, a2.idempotency_key);
+  expect(a1.idempotency_key).not.toBe(a2.idempotency_key);
   const baselines = recordResultBaseline(
     recordResultBaseline(undefined, a1),
     a2,
   );
-  assert.equal(Object.keys(baselines).length, 2);
+  expect(Object.keys(baselines).length).toBe(2);
 });

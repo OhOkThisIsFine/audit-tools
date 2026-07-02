@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -46,8 +45,8 @@ test("buildLineIndex returns an empty object for a manifest with zero files", as
     const manifest = { files: [] };
     const result = await buildLineIndex(dir, manifest);
 
-    assert.ok(typeof result === "object" && result !== null, "result should be an object");
-    assert.equal(Object.keys(result).length, 0, "empty manifest should produce empty line-count record");
+    expect(typeof result === "object" && result !== null, "result should be an object").toBeTruthy();
+    expect(Object.keys(result).length, "empty manifest should produce empty line-count record").toBe(0);
   } finally {
     teardown();
   }
@@ -68,13 +67,13 @@ test("buildLineIndex returns a line-count record keyed by file path", async (t) 
 
     const result = await buildLineIndex(dir, manifest);
 
-    assert.ok(typeof result === "object" && result !== null, "result should be an object");
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "a.ts"), "result should contain a.ts");
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "b.ts"), "result should contain b.ts");
-    assert.ok(result["a.ts"] > 0, "a.ts should have a positive line count");
-    assert.ok(result["b.ts"] > 0, "b.ts should have a positive line count");
-    assert.equal(typeof result["a.ts"], "number", "line count should be a number");
-    assert.equal(typeof result["b.ts"], "number", "line count should be a number");
+    expect(typeof result === "object" && result !== null, "result should be an object").toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(result, "a.ts"), "result should contain a.ts").toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(result, "b.ts"), "result should contain b.ts").toBeTruthy();
+    expect(result["a.ts"] > 0, "a.ts should have a positive line count").toBeTruthy();
+    expect(result["b.ts"] > 0, "b.ts should have a positive line count").toBeTruthy();
+    expect(typeof result["a.ts"], "line count should be a number").toBe("number");
+    expect(typeof result["b.ts"], "line count should be a number").toBe("number");
   } finally {
     teardown();
   }
@@ -91,8 +90,8 @@ test("buildLineIndex maps a non-existent file path to 0 rather than throwing", a
 
     const result = await buildLineIndex(dir, manifest);
 
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "does-not-exist.ts"), "missing file should be present in result");
-    assert.equal(result["does-not-exist.ts"], 0, "missing file should map to 0");
+    expect(Object.prototype.hasOwnProperty.call(result, "does-not-exist.ts"), "missing file should be present in result").toBeTruthy();
+    expect(result["does-not-exist.ts"], "missing file should map to 0").toBe(0);
   } finally {
     teardown();
   }
@@ -111,9 +110,9 @@ test("buildLineIndex processes files in batches without losing entries (>25 file
     const manifest = { files: paths.map((p) => ({ path: p })) };
     const result = await buildLineIndex(dir, manifest);
 
-    assert.equal(Object.keys(result).length, count, `Expected ${count} entries in result`);
+    expect(Object.keys(result).length, `Expected ${count} entries in result`).toBe(count);
     for (const p of paths) {
-      assert.ok(Object.prototype.hasOwnProperty.call(result, p), `Expected entry for ${p}`);
+      expect(Object.prototype.hasOwnProperty.call(result, p), `Expected entry for ${p}`).toBeTruthy();
     }
   } finally {
     teardown();
@@ -131,8 +130,8 @@ test("buildLineIndexForPaths deduplicates duplicate paths", async (t) => {
 
     const result = await buildLineIndexForPaths(dir, ["shared.ts", "shared.ts", "shared.ts"]);
 
-    assert.equal(Object.keys(result).length, 1, "Duplicate paths should produce a single entry");
-    assert.ok(result["shared.ts"] > 0, "Entry should have a positive line count");
+    expect(Object.keys(result).length, "Duplicate paths should produce a single entry").toBe(1);
+    expect(result["shared.ts"] > 0, "Entry should have a positive line count").toBeTruthy();
   } finally {
     teardown();
   }
@@ -147,10 +146,10 @@ test("buildLineIndexForPaths contains every unique path regardless of input orde
 
     const result = await buildLineIndexForPaths(dir, ["z.ts", "a.ts", "m.ts"]);
 
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "z.ts"), "z.ts should be present");
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "a.ts"), "a.ts should be present");
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "m.ts"), "m.ts should be present");
-    assert.equal(Object.keys(result).length, 3, "Should have exactly 3 entries");
+    expect(Object.prototype.hasOwnProperty.call(result, "z.ts"), "z.ts should be present").toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(result, "a.ts"), "a.ts should be present").toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(result, "m.ts"), "m.ts should be present").toBeTruthy();
+    expect(Object.keys(result).length, "Should have exactly 3 entries").toBe(3);
   } finally {
     teardown();
   }
@@ -161,8 +160,8 @@ test("buildLineIndexForPaths maps a non-existent path to 0 rather than throwing"
   try {
     const result = await buildLineIndexForPaths(dir, ["missing.ts"]);
 
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "missing.ts"), "missing path should be present");
-    assert.equal(result["missing.ts"], 0, "missing path should map to 0");
+    expect(Object.prototype.hasOwnProperty.call(result, "missing.ts"), "missing path should be present").toBeTruthy();
+    expect(result["missing.ts"], "missing path should map to 0").toBe(0);
   } finally {
     teardown();
   }
@@ -184,13 +183,13 @@ test("addFileLineCountHints annotates each task with per-file line counts", asyn
 
     const result = await addFileLineCountHints(dir, tasks);
 
-    assert.equal(result.length, 1, "Should return one task");
+    expect(result.length, "Should return one task").toBe(1);
     const annotated = result[0];
-    assert.ok(annotated.file_line_counts, "Task should have file_line_counts");
-    assert.ok(Object.prototype.hasOwnProperty.call(annotated.file_line_counts, "src/a.ts"), "file_line_counts should have src/a.ts");
-    assert.ok(Object.prototype.hasOwnProperty.call(annotated.file_line_counts, "src/b.ts"), "file_line_counts should have src/b.ts");
-    assert.ok(annotated.file_line_counts["src/a.ts"] > 0, "src/a.ts should have positive line count");
-    assert.ok(annotated.file_line_counts["src/b.ts"] > 0, "src/b.ts should have positive line count");
+    expect(annotated.file_line_counts, "Task should have file_line_counts").toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(annotated.file_line_counts, "src/a.ts"), "file_line_counts should have src/a.ts").toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(annotated.file_line_counts, "src/b.ts"), "file_line_counts should have src/b.ts").toBeTruthy();
+    expect(annotated.file_line_counts["src/a.ts"] > 0, "src/a.ts should have positive line count").toBeTruthy();
+    expect(annotated.file_line_counts["src/b.ts"] > 0, "src/b.ts should have positive line count").toBeTruthy();
   } finally {
     teardown();
   }
@@ -205,7 +204,7 @@ test("addFileLineCountHints maps a missing file to 0 in file_line_counts", async
 
     const result = await addFileLineCountHints(dir, tasks);
 
-    assert.equal(result[0].file_line_counts["ghost.ts"], 0, "Missing file should map to 0");
+    expect(result[0].file_line_counts["ghost.ts"], "Missing file should map to 0").toBe(0);
   } finally {
     teardown();
   }
@@ -229,15 +228,15 @@ test("addFileLineCountHints preserves original task fields (no mutation of input
     const result = await addFileLineCountHints(dir, input);
 
     // Original must not be mutated
-    assert.equal(original.file_line_counts, undefined, "Input task should not be mutated");
+    expect(original.file_line_counts, "Input task should not be mutated").toBe(undefined);
 
     // Returned task preserves all original fields
     const annotated = result[0];
-    assert.equal(annotated.task_id, "t1", "task_id should be preserved");
-    assert.equal(annotated.unit_id, "u1", "unit_id should be preserved");
-    assert.equal(annotated.lens, "security", "lens should be preserved");
-    assert.equal(annotated.custom_field, "keep-me", "custom_field should be preserved");
-    assert.ok(annotated.file_line_counts, "Annotated task should have file_line_counts");
+    expect(annotated.task_id, "task_id should be preserved").toBe("t1");
+    expect(annotated.unit_id, "unit_id should be preserved").toBe("u1");
+    expect(annotated.lens, "lens should be preserved").toBe("security");
+    expect(annotated.custom_field, "custom_field should be preserved").toBe("keep-me");
+    expect(annotated.file_line_counts, "Annotated task should have file_line_counts").toBeTruthy();
   } finally {
     teardown();
   }
@@ -259,10 +258,10 @@ test("buildLineIndexForPaths resolves all entries correctly for > LINE_COUNT_BAT
 
     const result = await buildLineIndexForPaths(dir, paths);
 
-    assert.equal(Object.keys(result).length, count, `Expected ${count} entries`);
+    expect(Object.keys(result).length, `Expected ${count} entries`).toBe(count);
     for (const p of paths) {
-      assert.ok(Object.prototype.hasOwnProperty.call(result, p), `Expected entry for ${p}`);
-      assert.ok(typeof result[p] === "number" && result[p] > 0, `Expected positive count for ${p}`);
+      expect(Object.prototype.hasOwnProperty.call(result, p), `Expected entry for ${p}`).toBeTruthy();
+      expect(typeof result[p] === "number" && result[p] > 0, `Expected positive count for ${p}`).toBeTruthy();
     }
   } finally {
     teardown();
@@ -285,7 +284,7 @@ test("buildLineIndexForPaths concurrent countLines calls never exceed LINE_COUNT
     // Since we can't intercept countLines from here without module mocking,
     // we verify the correctness property: result has all paths and no more.
     const result = await buildLineIndexForPaths(dir, paths);
-    assert.equal(Object.keys(result).length, count, "All paths should be in result");
+    expect(Object.keys(result).length, "All paths should be in result").toBe(count);
   } finally {
     teardown();
   }
@@ -299,9 +298,9 @@ test("buildLineIndexForPaths deduplicates input paths (fewer result keys than in
 
     const result = await buildLineIndexForPaths(dir, input);
 
-    assert.ok(Object.keys(result).length < input.length, "Result should have fewer keys than duplicate input");
-    assert.equal(Object.keys(result).length, 1, "Should deduplicate to a single entry");
-    assert.ok(result["dup.ts"] > 0, "Entry should have a positive line count");
+    expect(Object.keys(result).length < input.length, "Result should have fewer keys than duplicate input").toBeTruthy();
+    expect(Object.keys(result).length, "Should deduplicate to a single entry").toBe(1);
+    expect(result["dup.ts"] > 0, "Entry should have a positive line count").toBeTruthy();
   } finally {
     teardown();
   }
@@ -312,8 +311,8 @@ test("buildLineIndexForPaths maps a path that throws countLines to 0", async (t)
   try {
     const result = await buildLineIndexForPaths(dir, ["this-does-not-exist.ts"]);
 
-    assert.ok(Object.prototype.hasOwnProperty.call(result, "this-does-not-exist.ts"), "Error path should still appear as a key");
-    assert.equal(result["this-does-not-exist.ts"], 0, "Error path should map to 0");
+    expect(Object.prototype.hasOwnProperty.call(result, "this-does-not-exist.ts"), "Error path should still appear as a key").toBeTruthy();
+    expect(result["this-does-not-exist.ts"], "Error path should map to 0").toBe(0);
   } finally {
     teardown();
   }
@@ -334,9 +333,9 @@ test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, retur
   };
   try {
     const result = await buildLineIndexForPaths(dir, ["definitely-missing-abc123.ts"]);
-    assert.equal(result["definitely-missing-abc123.ts"], 0, "missing path maps to 0");
+    expect(result["definitely-missing-abc123.ts"], "missing path maps to 0").toBe(0);
     const combined = stderrChunks.join("");
-    assert.ok(combined.includes("file not found"), `expected 'file not found' in stderr; got: ${combined}`);
+    expect(combined.includes("file not found"), `expected 'file not found' in stderr; got: ${combined}`).toBeTruthy();
   } finally {
     process.stderr.write = origWrite;
     teardown();
@@ -360,16 +359,9 @@ test("addFileLineCountHints keys in file_line_counts match task file_paths array
 
     for (const task of result) {
       for (const fp of task.file_paths) {
-        assert.ok(
-          Object.prototype.hasOwnProperty.call(task.file_line_counts, fp),
-          `file_line_counts should contain key '${fp}' matching file_paths`,
-        );
+        expect(Object.prototype.hasOwnProperty.call(task.file_line_counts, fp), `file_line_counts should contain key '${fp}' matching file_paths`).toBeTruthy();
       }
-      assert.equal(
-        Object.keys(task.file_line_counts).length,
-        task.file_paths.length,
-        "file_line_counts should have exactly as many keys as file_paths",
-      );
+      expect(Object.keys(task.file_line_counts).length, "file_line_counts should have exactly as many keys as file_paths").toBe(task.file_paths.length);
     }
   } finally {
     teardown();

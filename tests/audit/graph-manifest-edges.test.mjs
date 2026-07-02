@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } =
   await import("../../src/audit/extractors/graphManifestEdges/jsonc.ts");
@@ -21,64 +20,64 @@ const {
 
 test("stripJsonComments strips // line comments", () => {
   const result = stripJsonComments('{ "a": 1 // comment\n}');
-  assert.ok(!result.includes("// comment"));
-  assert.ok(result.includes('"a": 1'));
+  expect(!result.includes("// comment")).toBeTruthy();
+  expect(result.includes('"a": 1')).toBeTruthy();
 });
 
 test("stripJsonComments strips /* block comments */", () => {
   const result = stripJsonComments('{ /* block */ "b": 2 }');
-  assert.ok(!result.includes("block"));
-  assert.ok(result.includes('"b": 2'));
+  expect(!result.includes("block")).toBeTruthy();
+  expect(result.includes('"b": 2')).toBeTruthy();
 });
 
 test("stripJsonComments leaves string content with embedded slashes intact", () => {
   const result = stripJsonComments('{ "url": "http://x" }');
-  assert.ok(result.includes('"http://x"'));
+  expect(result.includes('"http://x"')).toBeTruthy();
 });
 
 test("parseJsoncObject returns undefined for unparseable input", () => {
-  assert.equal(parseJsoncObject("not json at all :::"), undefined);
+  expect(parseJsoncObject("not json at all :::")).toBe(undefined);
 });
 
 test("parseJsoncObject parses JSONC with trailing commas and comments", () => {
   const input = '{ "a": 1, // comment\n"b": 2, }';
   const result = parseJsoncObject(input);
-  assert.deepEqual(result, { a: 1, b: 2 });
+  expect(result).toEqual({ a: 1, b: 2 });
 });
 
 // ── TOML parser (vetted: smol-toml) ──────────────────────────────────────────
 
 test("parseTomlSafe parses a table and degrades to {} on malformed input", () => {
-  assert.deepEqual(parseTomlSafe('[workspace]\nmembers = ["a", "b"]\n').workspace, {
+  expect(parseTomlSafe('[workspace]\nmembers = ["a", "b"]\n').workspace).toEqual({
     members: ["a", "b"],
   });
   // Malformed TOML must never throw — the graph builder treats it as no edges.
-  assert.deepEqual(parseTomlSafe("this is = = not toml ["), {});
+  expect(parseTomlSafe("this is = = not toml [")).toEqual({});
 });
 
 test("tomlStringArray coerces a scalar, an array, and rejects non-strings", () => {
-  assert.deepEqual(tomlStringArray("tests"), ["tests"]); // bare scalar → [s]
-  assert.deepEqual(tomlStringArray([" a ", "b", 3, null]), ["a", "b"]); // trims, drops non-strings
-  assert.deepEqual(tomlStringArray(undefined), []);
+  expect(tomlStringArray("tests")).toEqual(["tests"]); // bare scalar → [s]
+  expect(tomlStringArray([" a ", "b", 3, null])).toEqual(["a", "b"]); // trims, drops non-strings
+  expect(tomlStringArray(undefined)).toEqual([]);
 });
 
 // ── YAML utilities (vetted: yaml) ────────────────────────────────────────────
 
 test("parseYamlSafe parses a document and degrades to undefined on malformed input", () => {
-  assert.deepEqual(parseYamlSafe("packages:\n  - packages/a\n").packages, ["packages/a"]);
+  expect(parseYamlSafe("packages:\n  - packages/a\n").packages).toEqual(["packages/a"]);
   // A tab-indented block is invalid YAML; must degrade, never throw.
-  assert.equal(parseYamlSafe("packages:\n\t- bad-tab-indent"), undefined);
+  expect(parseYamlSafe("packages:\n\t- bad-tab-indent")).toBe(undefined);
 });
 
 test("yamlStringArray coerces a scalar, a sequence, and rejects non-strings", () => {
-  assert.deepEqual(yamlStringArray("packages/*"), ["packages/*"]);
-  assert.deepEqual(yamlStringArray([" a ", "b", 3]), ["a", "b"]);
-  assert.deepEqual(yamlStringArray(undefined), []);
+  expect(yamlStringArray("packages/*")).toEqual(["packages/*"]);
+  expect(yamlStringArray([" a ", "b", 3])).toEqual(["a", "b"]);
+  expect(yamlStringArray(undefined)).toEqual([]);
 });
 
 test("collectYamlStringScalars walks maps and sequences depth-first (values only)", () => {
   const root = parseYamlSafe("a: top\nb:\n  - one\n  - nested: deep\nc: { d: flow }\n");
-  assert.deepEqual(collectYamlStringScalars(root).sort(), ["deep", "flow", "one", "top"]);
+  expect(collectYamlStringScalars(root).sort()).toEqual(["deep", "flow", "one", "top"]);
 });
 
 // ── Format modules: each extract function returns [] for non-matching fromPath ─
@@ -87,38 +86,23 @@ const emptyLookup = new Map();
 const dummyContent = "";
 
 test("extractCargoWorkspaceMemberEdges returns [] for package.json fromPath", () => {
-  assert.deepEqual(
-    extractCargoWorkspaceMemberEdges("package.json", dummyContent, emptyLookup),
-    [],
-  );
+  expect(extractCargoWorkspaceMemberEdges("package.json", dummyContent, emptyLookup)).toEqual([]);
 });
 
 test("extractGoWorkspaceModuleEdges returns [] for Cargo.toml fromPath", () => {
-  assert.deepEqual(
-    extractGoWorkspaceModuleEdges("Cargo.toml", dummyContent, emptyLookup),
-    [],
-  );
+  expect(extractGoWorkspaceModuleEdges("Cargo.toml", dummyContent, emptyLookup)).toEqual([]);
 });
 
 test("extractMavenModuleEdges returns [] for go.work fromPath", () => {
-  assert.deepEqual(
-    extractMavenModuleEdges("go.work", dummyContent, emptyLookup),
-    [],
-  );
+  expect(extractMavenModuleEdges("go.work", dummyContent, emptyLookup)).toEqual([]);
 });
 
 test("extractPyprojectTestpathLinks returns [] for pom.xml fromPath", () => {
-  assert.deepEqual(
-    extractPyprojectTestpathLinks("pom.xml", dummyContent, emptyLookup),
-    [],
-  );
+  expect(extractPyprojectTestpathLinks("pom.xml", dummyContent, emptyLookup)).toEqual([]);
 });
 
 test("extractYamlPathReferenceEdges returns [] for Cargo.toml fromPath", () => {
-  assert.deepEqual(
-    extractYamlPathReferenceEdges("Cargo.toml", dummyContent, emptyLookup),
-    [],
-  );
+  expect(extractYamlPathReferenceEdges("Cargo.toml", dummyContent, emptyLookup)).toEqual([]);
 });
 
 // ── MNT-0fde1a49: regression tests for scanStringAware-refactored functions ──
@@ -126,37 +110,37 @@ test("extractYamlPathReferenceEdges returns [] for Cargo.toml fromPath", () => {
 // stripJsonComments regressions
 test("stripJsonComments (via scanStringAware) — // comment after a JSON value is removed", () => {
   const result = stripJsonComments('{ "a": 1 // line comment\n}');
-  assert.ok(!result.includes("// line comment"), "comment should be removed");
-  assert.ok(result.includes('"a": 1'), "value should be preserved");
+  expect(!result.includes("// line comment"), "comment should be removed").toBeTruthy();
+  expect(result.includes('"a": 1'), "value should be preserved").toBeTruthy();
 });
 
 test("stripJsonComments (via scanStringAware) — /* block comment */ is removed, preserving newlines", () => {
   const result = stripJsonComments('{ /* line1\nline2 */ "b": 2 }');
-  assert.ok(!result.includes("line1"), "block comment content should be removed");
-  assert.ok(result.includes('"b": 2'), "value after comment should be preserved");
-  assert.ok(result.includes("\n"), "newline inside block comment should be preserved");
+  expect(!result.includes("line1"), "block comment content should be removed").toBeTruthy();
+  expect(result.includes('"b": 2'), "value after comment should be preserved").toBeTruthy();
+  expect(result.includes("\n"), "newline inside block comment should be preserved").toBeTruthy();
 });
 
 test("stripJsonComments (via scanStringAware) — // sequence inside a string literal is preserved", () => {
   const result = stripJsonComments('{ "url": "http://example.com" }');
-  assert.ok(result.includes('"http://example.com"'), "URL inside string should be preserved verbatim");
+  expect(result.includes('"http://example.com"'), "URL inside string should be preserved verbatim").toBeTruthy();
 });
 
 // removeTrailingJsonCommas regressions
 test("removeTrailingJsonCommas (via scanStringAware) — trailing comma before } is removed", () => {
   const result = removeTrailingJsonCommas('{ "a": 1, }');
-  assert.ok(!result.includes(","), "trailing comma before } should be removed");
+  expect(!result.includes(","), "trailing comma before } should be removed").toBeTruthy();
 });
 
 test("removeTrailingJsonCommas (via scanStringAware) — trailing comma before ] is removed", () => {
   const result = removeTrailingJsonCommas('["a", "b", ]');
   const parsed = JSON.parse(result);
-  assert.deepEqual(parsed, ["a", "b"]);
+  expect(parsed).toEqual(["a", "b"]);
 });
 
 test("removeTrailingJsonCommas (via scanStringAware) — comma inside a string literal is preserved", () => {
   const result = removeTrailingJsonCommas('{ "key": "a,b" }');
-  assert.ok(result.includes('"a,b"'), "comma inside string should not be removed");
+  expect(result.includes('"a,b"'), "comma inside string should not be removed").toBeTruthy();
 });
 
 // TST-b29c9d4f: jsonc edge cases — adjacent comments, deeply nested trailing comma, string with /*
@@ -164,16 +148,16 @@ test("stripJsonComments (TST-b29c9d4f) — adjacent block and line comments both
   // A block comment immediately followed by a line comment — both must be removed.
   const input = '{ /* block comment */ // line comment\n"a": 1 }';
   const result = stripJsonComments(input);
-  assert.ok(!result.includes("block comment"), "block comment content must be removed");
-  assert.ok(!result.includes("line comment"), "line comment content must be removed");
-  assert.ok(result.includes('"a": 1'), "value after both comments must be preserved");
+  expect(!result.includes("block comment"), "block comment content must be removed").toBeTruthy();
+  expect(!result.includes("line comment"), "line comment content must be removed").toBeTruthy();
+  expect(result.includes('"a": 1'), "value after both comments must be preserved").toBeTruthy();
 });
 
 test("stripJsonComments (TST-b29c9d4f) — string containing /* is not treated as a block comment", () => {
   // A string value that contains the literal characters /* and */ must be left unchanged.
   const input = '{ "pattern": "/* not a comment */" }';
   const result = stripJsonComments(input);
-  assert.equal(result, input, "string containing /* must be preserved verbatim");
+  expect(result, "string containing /* must be preserved verbatim").toBe(input);
 });
 
 test("removeTrailingJsonCommas (TST-b29c9d4f) — trailing comma in deeply nested object is removed", () => {
@@ -181,7 +165,7 @@ test("removeTrailingJsonCommas (TST-b29c9d4f) — trailing comma in deeply neste
   const input = '{"a":{"b":{"c":1,}}}';
   const result = removeTrailingJsonCommas(input);
   const parsed = JSON.parse(result);
-  assert.deepEqual(parsed, { a: { b: { c: 1 } } });
+  expect(parsed).toEqual({ a: { b: { c: 1 } } });
 });
 
 // A5+A11 dropped-edge regressions: the vetted parser recovers Cargo/pyproject
@@ -194,8 +178,8 @@ test("cargo: dotted-key `workspace.members` is recovered (old scanner needed a [
     'workspace.members = ["crates/a"]\n',
     new Map([["crates/a/Cargo.toml", "crates/a/Cargo.toml"]]),
   );
-  assert.equal(edges.length, 1);
-  assert.equal(edges[0].to, "crates/a/Cargo.toml");
+  expect(edges.length).toBe(1);
+  expect(edges[0].to).toBe("crates/a/Cargo.toml");
 });
 
 test("cargo: inline-table `workspace = { members, exclude }` is parsed and exclude is honored", () => {
@@ -208,54 +192,54 @@ test("cargo: inline-table `workspace = { members, exclude }` is parsed and exclu
     ]),
   );
   const targets = edges.map((e) => e.to);
-  assert.ok(targets.includes("crates/x/Cargo.toml"), "included member resolves");
-  assert.ok(!targets.includes("crates/y/Cargo.toml"), "excluded member is dropped");
+  expect(targets.includes("crates/x/Cargo.toml"), "included member resolves").toBeTruthy();
+  expect(!targets.includes("crates/y/Cargo.toml"), "excluded member is dropped").toBeTruthy();
 });
 
 test("pyproject: scalar `testpaths = \"tests\"` and dotted header both resolve", () => {
   const lookup = new Map([["tests/conftest.py", "tests/conftest.py"]]);
   const scalar = extractPyprojectTestpathLinks("pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = "tests"\n', lookup);
-  assert.equal(scalar.length, 1);
-  assert.equal(scalar[0].to, "tests/conftest.py");
+  expect(scalar.length).toBe(1);
+  expect(scalar[0].to).toBe("tests/conftest.py");
   // Dotted-key form (no explicit section header) resolves to the same path.
   const dotted = extractPyprojectTestpathLinks("pyproject.toml", 'tool.pytest.ini_options.testpaths = ["tests"]\n', lookup);
-  assert.equal(dotted.length, 1);
-  assert.equal(dotted[0].to, "tests/conftest.py");
+  expect(dotted.length).toBe(1);
+  expect(dotted[0].to).toBe("tests/conftest.py");
 });
 
 test("toml extractors degrade to [] on malformed TOML (never throw)", () => {
-  assert.deepEqual(extractCargoWorkspaceMemberEdges("Cargo.toml", "not [valid toml = =", new Map()), []);
-  assert.deepEqual(extractPyprojectTestpathLinks("pyproject.toml", "not [valid toml = =", new Map()), []);
+  expect(extractCargoWorkspaceMemberEdges("Cargo.toml", "not [valid toml = =", new Map())).toEqual([]);
+  expect(extractPyprojectTestpathLinks("pyproject.toml", "not [valid toml = =", new Map())).toEqual([]);
 });
 
 // stripGoLineComment regressions
 test("stripGoLineComment (via scanStringAware) — // outside a string truncates the line", () => {
   const result = stripGoLineComment('x := 1 // comment');
-  assert.ok(!result.includes("comment"), "comment should be stripped");
-  assert.ok(result.includes("x := 1"), "code before comment should be preserved");
+  expect(!result.includes("comment"), "comment should be stripped").toBeTruthy();
+  expect(result.includes("x := 1"), "code before comment should be preserved").toBeTruthy();
 });
 
 test("stripGoLineComment (via scanStringAware) — // inside a double-quoted Go string is preserved", () => {
   const result = stripGoLineComment('"http://example.com"');
-  assert.equal(result, '"http://example.com"');
+  expect(result).toBe('"http://example.com"');
 });
 
 test("stripGoLineComment (via scanStringAware) — // inside a backtick Go string is preserved", () => {
   const result = stripGoLineComment("`http://example.com`");
-  assert.equal(result, "`http://example.com`");
+  expect(result).toBe("`http://example.com`");
 });
 
 // splitGoWorkspaceSpecifiers regressions
 test("splitGoWorkspaceSpecifiers (via scanStringAware) — splits whitespace-separated bare tokens correctly", () => {
-  assert.deepEqual(splitGoWorkspaceSpecifiers("./a ./b ./c"), ["./a", "./b", "./c"]);
+  expect(splitGoWorkspaceSpecifiers("./a ./b ./c")).toEqual(["./a", "./b", "./c"]);
 });
 
 test("splitGoWorkspaceSpecifiers (via scanStringAware) — splits double-quoted tokens and unquotes them", () => {
-  assert.deepEqual(splitGoWorkspaceSpecifiers('"./module a" "./module b"'), ["./module a", "./module b"]);
+  expect(splitGoWorkspaceSpecifiers('"./module a" "./module b"')).toEqual(["./module a", "./module b"]);
 });
 
 test("splitGoWorkspaceSpecifiers (via scanStringAware) — splits backtick-quoted tokens and unquotes them", () => {
-  assert.deepEqual(splitGoWorkspaceSpecifiers("`./mod a` `./mod b`"), ["./mod a", "./mod b"]);
+  expect(splitGoWorkspaceSpecifiers("`./mod a` `./mod b`")).toEqual(["./mod a", "./mod b"]);
 });
 
 // ── MNT-8a93521a: per-submodule export and public API surface tests ────────
@@ -268,15 +252,15 @@ const {
 } = await import("../../src/audit/extractors/graphManifestEdges/packageJson.ts");
 
 test("packageJson submodule: extractPackageEntrypointEdges is exported", () => {
-  assert.equal(typeof pkgEntrypoint, "function");
+  expect(typeof pkgEntrypoint).toBe("function");
 });
 
 test("packageJson submodule: extractPackageScriptEdges is exported", () => {
-  assert.equal(typeof pkgScript, "function");
+  expect(typeof pkgScript).toBe("function");
 });
 
 test("packageJson submodule: extractWorkspacePackageEdges is exported", () => {
-  assert.equal(typeof pkgWorkspace, "function");
+  expect(typeof pkgWorkspace).toBe("function");
 });
 
 test("packageJson submodule: extractPackageEntrypointEdges returns consistent results with graphManifestEdges index", async () => {
@@ -285,7 +269,7 @@ test("packageJson submodule: extractPackageEntrypointEdges returns consistent re
   const lookup = new Map([["src/index.ts", "src/index.ts"]]);
   const directResult = pkgEntrypoint("package.json", content, lookup);
   const indexResult = indexFn("package.json", content, lookup);
-  assert.deepEqual(directResult, indexResult);
+  expect(directResult).toEqual(indexResult);
 });
 
 // jsonc submodule exports TypeScript project reference extractor
@@ -295,17 +279,17 @@ const { parseJsoncObject: parseJsonc } =
   await import("../../src/audit/extractors/graphManifestEdges/jsonc.ts");
 
 test("typescript submodule: extractTypescriptProjectReferenceEdges is exported", () => {
-  assert.equal(typeof tsRefEdges, "function");
+  expect(typeof tsRefEdges).toBe("function");
 });
 
 test("jsonc submodule: parseJsoncObject strips // comments and trailing commas", () => {
   const result = parseJsonc('{ "a": 1, // comment\n"b": 2, }');
-  assert.deepEqual(result, { a: 1, b: 2 });
+  expect(result).toEqual({ a: 1, b: 2 });
 });
 
 test("jsonc submodule: parseJsoncObject strips /* */ block comments", () => {
   const result = parseJsonc('{ /* block comment */ "x": 3 }');
-  assert.deepEqual(result, { x: 3 });
+  expect(result).toEqual({ x: 3 });
 });
 
 // pnpm submodule exports pnpmWorkspacePatterns
@@ -313,7 +297,7 @@ const { pnpmWorkspacePatterns: pnpmPatterns } =
   await import("../../src/audit/extractors/graphManifestEdges/pnpm.ts");
 
 test("pnpm submodule: pnpmWorkspacePatterns is exported", () => {
-  assert.equal(typeof pnpmPatterns, "function");
+  expect(typeof pnpmPatterns).toBe("function");
 });
 
 // yamlPaths submodule exports extractYamlPathReferenceEdges
@@ -321,7 +305,7 @@ const { extractYamlPathReferenceEdges: yamlPathEdges } =
   await import("../../src/audit/extractors/graphManifestEdges/yamlPaths.ts");
 
 test("yamlPaths submodule: extractYamlPathReferenceEdges is exported", () => {
-  assert.equal(typeof yamlPathEdges, "function");
+  expect(typeof yamlPathEdges).toBe("function");
 });
 
 // graphManifestEdges/index.ts aggregates every submodule extractor. Import it
@@ -337,8 +321,8 @@ test("graphManifestEdges/index.ts: extractWorkspacePackageEdges returns correct 
     ["packages/b/package.json", "packages/b/package.json"],
   ]);
   const edges = allFromIndex.extractWorkspacePackageEdges("pnpm-workspace.yaml", content, lookup);
-  assert.ok(edges.length >= 1, "expected at least one workspace-package edge");
-  assert.ok(edges.every((e) => e.kind === "workspace-package-link"));
+  expect(edges.length >= 1, "expected at least one workspace-package edge").toBeTruthy();
+  expect(edges.every((e) => e.kind === "workspace-package-link")).toBeTruthy();
 });
 
 // A5+A11 YAML dropped-edge regressions: the vetted parser recovers pnpm/YAML
@@ -354,8 +338,8 @@ test("pnpm: inline-flow `packages: [a, b]` is recovered (old scanner only had th
     "packages: [packages/a, packages/b]\n",
     lookup,
   );
-  assert.ok(edges.length >= 1, "inline-flow packages list must yield workspace edges");
-  assert.ok(edges.every((e) => e.kind === "workspace-package-link"));
+  expect(edges.length >= 1, "inline-flow packages list must yield workspace edges").toBeTruthy();
+  expect(edges.every((e) => e.kind === "workspace-package-link")).toBeTruthy();
 });
 
 test("yamlPaths: a path reference nested under a map is recovered (not just top-level lines)", () => {
@@ -365,14 +349,14 @@ test("yamlPaths: a path reference nested under a map is recovered (not just top-
     "jobs:\n  build:\n    uses: ci/shared.yml\n",
     lookup,
   );
-  assert.equal(edges.length, 1);
-  assert.equal(edges[0].to, "ci/shared.yml");
+  expect(edges.length).toBe(1);
+  expect(edges[0].to).toBe("ci/shared.yml");
 });
 
 test("yaml extractors degrade to [] on malformed YAML (never throw)", () => {
   const bad = "packages:\n\t- tab-indented-is-invalid";
-  assert.deepEqual(allFromIndex.extractWorkspacePackageEdges("pnpm-workspace.yaml", bad, new Map()), []);
-  assert.deepEqual(allFromIndex.extractYamlPathReferenceEdges("config.yaml", bad, new Map()), []);
+  expect(allFromIndex.extractWorkspacePackageEdges("pnpm-workspace.yaml", bad, new Map())).toEqual([]);
+  expect(allFromIndex.extractYamlPathReferenceEdges("config.yaml", bad, new Map())).toEqual([]);
 });
 
 // toml submodule exports Cargo and pyproject extractors
@@ -384,11 +368,11 @@ const { extractPyprojectTestpathLinks: pyprojectLinks } =
   await import("../../src/audit/extractors/graphManifestEdges/pyproject.ts");
 
 test("cargo submodule: extractCargoWorkspaceMemberEdges is exported", () => {
-  assert.equal(typeof cargoEdges, "function");
+  expect(typeof cargoEdges).toBe("function");
 });
 
 test("pyproject submodule: extractPyprojectTestpathLinks is exported", () => {
-  assert.equal(typeof pyprojectLinks, "function");
+  expect(typeof pyprojectLinks).toBe("function");
 });
 
 test("cargo submodule: cargoWorkspacePatterns correctly parses multi-line TOML arrays", () => {
@@ -400,9 +384,9 @@ test("cargo submodule: cargoWorkspacePatterns correctly parses multi-line TOML a
     "]",
   ].join("\n");
   const patterns = cargoPatterns(content);
-  assert.equal(patterns.length, 2);
-  assert.ok(patterns.some((p) => p.pattern === "crates/a"));
-  assert.ok(patterns.some((p) => p.pattern === "crates/b"));
+  expect(patterns.length).toBe(2);
+  expect(patterns.some((p) => p.pattern === "crates/a")).toBeTruthy();
+  expect(patterns.some((p) => p.pattern === "crates/b")).toBeTruthy();
 });
 
 // go submodule exports Go workspace extractor
@@ -410,7 +394,7 @@ const { extractGoWorkspaceModuleEdges: goEdges } =
   await import("../../src/audit/extractors/graphManifestEdges/go.ts");
 
 test("go submodule: extractGoWorkspaceModuleEdges is exported", () => {
-  assert.equal(typeof goEdges, "function");
+  expect(typeof goEdges).toBe("function");
 });
 
 test("go submodule: goWorkspaceUseSpecifiers parses single-line use directive (via extractGoWorkspaceModuleEdges)", () => {
@@ -420,7 +404,7 @@ test("go submodule: goWorkspaceUseSpecifiers parses single-line use directive (v
     ["module-b/go.mod", "module-b/go.mod"],
   ]);
   const edges = goEdges("go.work", content, lookup);
-  assert.ok(edges.length >= 1, "expected at least one go-workspace-module-link edge");
+  expect(edges.length >= 1, "expected at least one go-workspace-module-link edge").toBeTruthy();
 });
 
 test("go submodule: extractGoWorkspaceModuleEdges handles block use directives", () => {
@@ -430,7 +414,7 @@ test("go submodule: extractGoWorkspaceModuleEdges handles block use directives",
     ["mod-d/go.mod", "mod-d/go.mod"],
   ]);
   const edges = goEdges("go.work", content, lookup);
-  assert.ok(edges.length >= 1, "expected edges from block use directive");
+  expect(edges.length >= 1, "expected edges from block use directive").toBeTruthy();
 });
 
 // maven submodule exports Maven module extractor
@@ -438,7 +422,7 @@ const { extractMavenModuleEdges: mavenEdges } =
   await import("../../src/audit/extractors/graphManifestEdges/maven.ts");
 
 test("maven submodule: extractMavenModuleEdges is exported", () => {
-  assert.equal(typeof mavenEdges, "function");
+  expect(typeof mavenEdges).toBe("function");
 });
 
 test("maven submodule: extractMavenModuleEdges strips XML comments before parsing <module> elements", () => {
@@ -452,60 +436,60 @@ test("maven submodule: extractMavenModuleEdges strips XML comments before parsin
   ].join("\n");
   const lookup = new Map([["child-a/pom.xml", "child-a/pom.xml"]]);
   const edges = mavenEdges("pom.xml", content, lookup);
-  assert.equal(edges.length, 1);
-  assert.equal(edges[0].to, "child-a/pom.xml");
+  expect(edges.length).toBe(1);
+  expect(edges[0].to).toBe("child-a/pom.xml");
 });
 
 // graphManifestEdges/index.ts public API is unchanged (allFromIndex imported above)
 
 test("graphManifestEdges index: extractPackageEntrypointEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractPackageEntrypointEdges, "function");
+  expect(typeof allFromIndex.extractPackageEntrypointEdges).toBe("function");
 });
 
 test("graphManifestEdges index: extractPackageScriptEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractPackageScriptEdges, "function");
+  expect(typeof allFromIndex.extractPackageScriptEdges).toBe("function");
 });
 
 test("graphManifestEdges index: extractWorkspacePackageEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractWorkspacePackageEdges, "function");
+  expect(typeof allFromIndex.extractWorkspacePackageEdges).toBe("function");
 });
 
 test("graphManifestEdges index: extractCargoWorkspaceMemberEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractCargoWorkspaceMemberEdges, "function");
+  expect(typeof allFromIndex.extractCargoWorkspaceMemberEdges).toBe("function");
 });
 
 test("graphManifestEdges index: extractTypescriptProjectReferenceEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractTypescriptProjectReferenceEdges, "function");
+  expect(typeof allFromIndex.extractTypescriptProjectReferenceEdges).toBe("function");
 });
 
 test("graphManifestEdges index: extractGoWorkspaceModuleEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractGoWorkspaceModuleEdges, "function");
+  expect(typeof allFromIndex.extractGoWorkspaceModuleEdges).toBe("function");
 });
 
 test("graphManifestEdges index: extractMavenModuleEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractMavenModuleEdges, "function");
+  expect(typeof allFromIndex.extractMavenModuleEdges).toBe("function");
 });
 
 test("graphManifestEdges index: extractPyprojectTestpathLinks is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractPyprojectTestpathLinks, "function");
+  expect(typeof allFromIndex.extractPyprojectTestpathLinks).toBe("function");
 });
 
 test("graphManifestEdges index: extractYamlPathReferenceEdges is re-exported", () => {
-  assert.equal(typeof allFromIndex.extractYamlPathReferenceEdges, "function");
+  expect(typeof allFromIndex.extractYamlPathReferenceEdges).toBe("function");
 });
 
 test("graphManifestEdges index: isCargoManifestPath is re-exported", () => {
-  assert.equal(typeof allFromIndex.isCargoManifestPath, "function");
+  expect(typeof allFromIndex.isCargoManifestPath).toBe("function");
 });
 
 test("graphManifestEdges index: isGoWorkspaceManifestPath is re-exported", () => {
-  assert.equal(typeof allFromIndex.isGoWorkspaceManifestPath, "function");
+  expect(typeof allFromIndex.isGoWorkspaceManifestPath).toBe("function");
 });
 
 test("graphManifestEdges index: isMavenPomPath is re-exported", () => {
-  assert.equal(typeof allFromIndex.isMavenPomPath, "function");
+  expect(typeof allFromIndex.isMavenPomPath).toBe("function");
 });
 
 test("graphManifestEdges index: isPyprojectPath is re-exported", () => {
-  assert.equal(typeof allFromIndex.isPyprojectPath, "function");
+  expect(typeof allFromIndex.isPyprojectPath).toBe("function");
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -32,19 +31,16 @@ function score() {
 test("scoreAudit is a pure function: twice-run byte-identical (determinism)", () => {
   const a = JSON.stringify(scoreAudit(FINDINGS, LABELS));
   const b = JSON.stringify(scoreAudit(FINDINGS, LABELS));
-  assert.equal(a, b, "two runs over the same inputs must be byte-identical");
+  expect(a, "two runs over the same inputs must be byte-identical").toBe(b);
 
   // Input ORDER must not change the scorecard either (signatures are sorted).
   const shuffledFindings = [...FINDINGS].reverse();
   const shuffledLabels = { ...LABELS, labels: [...LABELS.labels].reverse() };
   const c = JSON.stringify(scoreAudit(shuffledFindings, shuffledLabels));
-  assert.equal(a, c, "reordering findings/labels must not change the scorecard");
+  expect(a, "reordering findings/labels must not change the scorecard").toBe(c);
 
   // The rendered markdown is likewise deterministic.
-  assert.equal(
-    renderScorecardMarkdown(scoreAudit(FINDINGS, LABELS)),
-    renderScorecardMarkdown(scoreAudit(FINDINGS, LABELS)),
-  );
+  expect(renderScorecardMarkdown(scoreAudit(FINDINGS, LABELS))).toBe(renderScorecardMarkdown(scoreAudit(FINDINGS, LABELS)));
 });
 
 test("a reworded re-emission of a labeled finding still matches its label", () => {
@@ -52,15 +48,11 @@ test("a reworded re-emission of a labeled finding still matches its label", () =
   // title; its label was applied under different wording. Matching is by
   // signature only, so it must still resolve to the true_positive label.
   const auth = FINDINGS.find((f) => f.id === "SEC-001");
-  assert.match(auth.title, /v2, line 88/, "fixture must use a reworded title");
-  assert.equal(
-    findingSignature(auth),
-    "anchor|src/api/auth.ts|login",
-    "the volatile title must not reach the signature",
-  );
+  expect(auth.title, "fixture must use a reworded title").toMatch(/v2, line 88/);
+  expect(findingSignature(auth), "the volatile title must not reach the signature").toBe("anchor|src/api/auth.ts|login");
 
   const card = score();
-  assert.equal(card.counts.true_positives, 1, "the reworded TP must be re-found");
+  expect(card.counts.true_positives, "the reworded TP must be re-found").toBe(1);
 
   // An even-more-reworded variant of the SAME finding still matches the label.
   const reworded = {
@@ -69,13 +61,9 @@ test("a reworded re-emission of a labeled finding still matches its label", () =
     title: "Totally different headline about 999 things",
     affected_files: [{ path: "src/api/auth.ts", symbol: "login", line_start: 1, line_end: 2 }],
   };
-  assert.equal(findingSignature(reworded), findingSignature(auth));
+  expect(findingSignature(reworded)).toBe(findingSignature(auth));
   const single = scoreAudit([reworded], LABELS);
-  assert.equal(
-    single.counts.true_positives,
-    1,
-    "a reworded finding alone must still match its label",
-  );
+  expect(single.counts.true_positives, "a reworded finding alone must still match its label").toBe(1);
 });
 
 test("unmatched accounting is explicit — nothing is silently scored", () => {
@@ -83,40 +71,36 @@ test("unmatched accounting is explicit — nothing is silently scored", () => {
   const c = card.counts;
 
   // Cleanly-matched 1:1 verdicts (auth=TP, hash=FP, query=hallucinated).
-  assert.equal(c.findings_emitted, 6);
-  assert.equal(c.labels_total, 5);
-  assert.equal(c.matched, 3);
-  assert.equal(c.true_positives, 1);
-  assert.equal(c.false_positives, 1);
-  assert.equal(c.hallucinated, 1);
+  expect(c.findings_emitted).toBe(6);
+  expect(c.labels_total).toBe(5);
+  expect(c.matched).toBe(3);
+  expect(c.true_positives).toBe(1);
+  expect(c.false_positives).toBe(1);
+  expect(c.hallucinated).toBe(1);
 
   // precision / recall_against_known / hallucination_rate.
-  assert.equal(card.precision, 1 / 3, "precision = TP / (TP + FP + hallucinated)");
-  assert.equal(
-    card.recall_against_known,
-    1 / 3,
-    "recall = re-found labeled TP / all labeled TP (3 labeled TP, 2 missed)",
-  );
-  assert.equal(c.known_true_positives_missed, 2);
-  assert.equal(card.hallucination_rate, 1 / 6, "hallucinated / findings_emitted");
+  expect(card.precision, "precision = TP / (TP + FP + hallucinated)").toBe(1 / 3);
+  expect(card.recall_against_known, "recall = re-found labeled TP / all labeled TP (3 labeled TP, 2 missed)").toBe(1 / 3);
+  expect(c.known_true_positives_missed).toBe(2);
+  expect(card.hallucination_rate, "hallucinated / findings_emitted").toBe(1 / 6);
 
   // Every input that could not be cleanly scored is surfaced — and the count of
   // unmatched entries exactly accounts for them (no silent drops).
-  assert.equal(c.unmatched, card.unmatched.length);
-  assert.equal(c.unmatched, 3);
+  expect(c.unmatched).toBe(card.unmatched.length);
+  expect(c.unmatched).toBe(3);
 
   const byReason = (reason) =>
     card.unmatched.filter((u) => u.reason === reason);
 
   const unlabeled = byReason("finding_unlabeled");
-  assert.equal(unlabeled.length, 1, "the emitted-but-unlabeled finding is surfaced");
-  assert.deepEqual(unlabeled[0].finding_ids, ["SEC-004"]);
-  assert.deepEqual(unlabeled[0].labels, []);
+  expect(unlabeled.length, "the emitted-but-unlabeled finding is surfaced").toBe(1);
+  expect(unlabeled[0].finding_ids).toEqual(["SEC-004"]);
+  expect(unlabeled[0].labels).toEqual([]);
 
   const labelMiss = byReason("label_unmatched");
-  assert.equal(labelMiss.length, 1, "the not-re-found labeled TP is surfaced");
-  assert.equal(labelMiss[0].signature, "anchor|src/db/missing.ts|gone");
-  assert.deepEqual(labelMiss[0].labels, ["true_positive"]);
+  expect(labelMiss.length, "the not-re-found labeled TP is surfaced").toBe(1);
+  expect(labelMiss[0].signature).toBe("anchor|src/db/missing.ts|gone");
+  expect(labelMiss[0].labels).toEqual(["true_positive"]);
 
   // Conservation: every emitted finding lands in exactly one bucket
   // (matched-clean, unlabeled, or a collision group) — none vanish.
@@ -124,11 +108,7 @@ test("unmatched accounting is explicit — nothing is silently scored", () => {
     .filter((u) => u.reason === "ambiguous_signature_collision")
     .flatMap((u) => u.finding_ids);
   const emittedUnlabeled = unlabeled.flatMap((u) => u.finding_ids);
-  assert.equal(
-    c.matched + emittedUnlabeled.length + emittedInCollisions.length,
-    c.findings_emitted,
-    "every emitted finding is accounted for exactly once",
-  );
+  expect(c.matched + emittedUnlabeled.length + emittedInCollisions.length, "every emitted finding is accounted for exactly once").toBe(c.findings_emitted);
 });
 
 test("a signature collision (CE-010) is surfaced as ambiguous — never scored under one verdict", () => {
@@ -139,57 +119,50 @@ test("a signature collision (CE-010) is surfaced as ambiguous — never scored u
   const collisions = card.unmatched.filter(
     (u) => u.reason === "ambiguous_signature_collision",
   );
-  assert.equal(card.counts.collisions, 1);
-  assert.equal(collisions.length, 1);
+  expect(card.counts.collisions).toBe(1);
+  expect(collisions.length).toBe(1);
 
   const collision = collisions[0];
-  assert.equal(collision.signature, "rule|operability|ci");
-  assert.deepEqual(
-    collision.finding_ids,
-    ["OPS-001", "OPS-002"],
-    "both colliding findings are surfaced (stable id order)",
-  );
-  assert.deepEqual(collision.labels, ["true_positive"]);
+  expect(collision.signature).toBe("rule|operability|ci");
+  expect(collision.finding_ids, "both colliding findings are surfaced (stable id order)").toEqual(["OPS-001", "OPS-002"]);
+  expect(collision.labels).toEqual(["true_positive"]);
 
   // The colliding findings/label are excluded from EVERY verdict: neither is
   // counted as matched, and the colliding TP label is counted as NOT re-found
   // (we cannot prove which finding satisfied it).
-  assert.equal(card.counts.matched, 3, "colliding findings are not in matched");
-  assert.ok(
-    card.counts.known_true_positives_missed >= 1,
-    "the colliding TP label is treated as a recall miss, not silently re-found",
-  );
+  expect(card.counts.matched, "colliding findings are not in matched").toBe(3);
+  expect(card.counts.known_true_positives_missed >= 1, "the colliding TP label is treated as a recall miss, not silently re-found").toBeTruthy();
 
   // Two findings + label that collide on a signature: a clean single match at
   // that signature would have made matched=4 — it must not.
-  assert.notEqual(card.counts.matched, 4);
+  expect(card.counts.matched).not.toBe(4);
 });
 
 test("the exit gate is wired SOLELY to a hallucination-rate regression", () => {
   const baseline = score(); // hallucination_rate = 1/6
 
   // No baseline → nothing can regress (first run establishes it).
-  assert.equal(hallucinationRegressed(baseline, null), false);
-  assert.equal(hallucinationRegressed(baseline, undefined), false);
+  expect(hallucinationRegressed(baseline, null)).toBe(false);
+  expect(hallucinationRegressed(baseline, undefined)).toBe(false);
 
   // Equal rate → not a regression (a byte-identical re-run never trips).
-  assert.equal(hallucinationRegressed(baseline, baseline), false);
+  expect(hallucinationRegressed(baseline, baseline)).toBe(false);
 
   // Higher current rate → regression.
   const worse = { ...baseline, hallucination_rate: 0.5 };
-  assert.equal(hallucinationRegressed(worse, baseline), true);
+  expect(hallucinationRegressed(worse, baseline)).toBe(true);
 
   // Lower current rate → improvement, not a regression.
   const better = { ...baseline, hallucination_rate: 0.0 };
-  assert.equal(hallucinationRegressed(better, baseline), false);
+  expect(hallucinationRegressed(better, baseline)).toBe(false);
 
   // A null current rate (run emitted no findings) cannot regress.
   const noFindings = { ...baseline, hallucination_rate: null };
-  assert.equal(hallucinationRegressed(noFindings, baseline), false);
+  expect(hallucinationRegressed(noFindings, baseline)).toBe(false);
 
   // A null baseline rate is treated as 0 — any positive current rate regresses.
   const nullBaseline = { ...baseline, hallucination_rate: null };
-  assert.equal(hallucinationRegressed(worse, nullBaseline), true);
+  expect(hallucinationRegressed(worse, nullBaseline)).toBe(true);
 
   // Precision / recall regressions DO NOT gate: a scorecard whose precision and
   // recall collapse but whose hallucination rate is unchanged never trips.
@@ -199,9 +172,5 @@ test("the exit gate is wired SOLELY to a hallucination-rate regression", () => {
     recall_against_known: 0.0,
     hallucination_rate: baseline.hallucination_rate,
   };
-  assert.equal(
-    hallucinationRegressed(precisionCollapsed, baseline),
-    false,
-    "precision/recall must track, not gate",
-  );
+  expect(hallucinationRegressed(precisionCollapsed, baseline), "precision/recall must track, not gate").toBe(false);
 });

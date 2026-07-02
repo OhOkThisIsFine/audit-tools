@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdir, writeFile, readFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -31,7 +30,7 @@ const REFLECTION = {
 test("loadArtifactBundle parses agent-feedback.jsonl leniently and persist never touches it", async () => {
   await withTempDir("audit-code-feedback-", async (dir) => {
     // Absent file → no bundle key (normal, non-meta-audit runs unaffected).
-    assert.equal((await loadArtifactBundle(dir)).agent_reflections, undefined);
+    expect((await loadArtifactBundle(dir)).agent_reflections).toBe(undefined);
 
     const raw =
       JSON.stringify(REFLECTION) +
@@ -42,21 +41,18 @@ test("loadArtifactBundle parses agent-feedback.jsonl leniently and persist never
     await writeFile(join(dir, FEEDBACK_FILE), raw);
 
     const bundle = await loadArtifactBundle(dir);
-    assert.equal(bundle.agent_reflections?.length, 2);
-    assert.equal(bundle.agent_reflections[0].task_id, "u:security");
+    expect(bundle.agent_reflections?.length).toBe(2);
+    expect(bundle.agent_reflections[0].task_id).toBe("u:security");
 
     // The staleness machinery resolves the pseudo-artifact by file name.
-    assert.equal(
-      getArtifactValue(bundle, FEEDBACK_FILE),
-      bundle.agent_reflections,
-    );
+    expect(getArtifactValue(bundle, FEEDBACK_FILE)).toBe(bundle.agent_reflections);
 
     // Workers own the file: a full persist — even pruning, even with the key
     // absent from the written bundle — must leave the raw bytes untouched
     // (a rewrite would drop the malformed-but-human-readable line; a prune
     // would delete lines appended after load).
     await writeCoreArtifacts(dir, { repo_manifest: { repository: { name: "t" }, generated_at: "t", files: [] } }, { prune: true });
-    assert.equal(await readFile(join(dir, FEEDBACK_FILE), "utf8"), raw);
+    expect(await readFile(join(dir, FEEDBACK_FILE), "utf8")).toBe(raw);
   });
 });
 
@@ -65,16 +61,13 @@ test("synthesis renders Process Feedback from bundle reflections; machine contra
     { coverage_matrix: { files: [] }, agent_reflections: [REFLECTION] },
     undefined,
   );
-  assert.match(run.updated.audit_report, /## Process Feedback/);
-  assert.match(run.updated.audit_report, /packet path was stale/);
+  expect(run.updated.audit_report).toMatch(/## Process Feedback/);
+  expect(run.updated.audit_report).toMatch(/packet path was stale/);
   // audit-findings.json is the machine contract — reflections are render-only.
-  assert.ok(
-    !JSON.stringify(run.updated.audit_findings).includes("packet path was stale"),
-    "reflections must not leak into audit-findings.json",
-  );
+  expect(!JSON.stringify(run.updated.audit_findings).includes("packet path was stale"), "reflections must not leak into audit-findings.json").toBeTruthy();
 
   const without = runSynthesisExecutor({ coverage_matrix: { files: [] } }, undefined);
-  assert.doesNotMatch(without.updated.audit_report, /## Process Feedback/);
+  expect(without.updated.audit_report).not.toMatch(/## Process Feedback/);
 });
 
 test("changed reflections re-stale audit-report.md exactly once; unchanged reflections never churn", () => {
@@ -84,19 +77,12 @@ test("changed reflections re-stale audit-report.md exactly once; unchanged refle
 
   const synthesized = { audit_report: "# Audit Report\n", agent_reflections: [REFLECTION] };
   const metadata = computeArtifactMetadata(synthesized, undefined, alwaysUpdated);
-  assert.ok(metadata.artifacts[FEEDBACK_FILE], "feedback gets a metadata entry when present");
+  expect(metadata.artifacts[FEEDBACK_FILE], "feedback gets a metadata entry when present").toBeTruthy();
 
   // Converged: same content re-hashed on a later advance → nothing stale.
   const settled = computeArtifactMetadata({ ...synthesized, artifact_metadata: metadata }, metadata, [FEEDBACK_FILE]);
-  assert.equal(
-    settled.artifacts[FEEDBACK_FILE].revision,
-    metadata.artifacts[FEEDBACK_FILE].revision,
-    "unchanged feedback must keep its revision",
-  );
-  assert.equal(
-    computeStaleArtifacts({ ...synthesized, artifact_metadata: metadata }).size,
-    0,
-  );
+  expect(settled.artifacts[FEEDBACK_FILE].revision, "unchanged feedback must keep its revision").toBe(metadata.artifacts[FEEDBACK_FILE].revision);
+  expect(computeStaleArtifacts({ ...synthesized, artifact_metadata: metadata }).size).toBe(0);
 
   // A worker appends a reflection → only the report re-stales.
   const appended = {
@@ -108,28 +94,18 @@ test("changed reflections re-stale audit-report.md exactly once; unchanged refle
     artifact_metadata: metadata,
   };
   const stale = computeStaleArtifacts(appended);
-  assert.deepEqual([...stale], ["audit-report.md"]);
+  expect([...stale]).toEqual(["audit-report.md"]);
 
   // Re-synthesis records the new feedback revision → converged again.
   const afterResynthesis = computeArtifactMetadata(appended, metadata, alwaysUpdated);
-  assert.equal(
-    computeStaleArtifacts({ ...appended, artifact_metadata: afterResynthesis }).size,
-    0,
-    "one re-synthesis must fully converge",
-  );
+  expect(computeStaleArtifacts({ ...appended, artifact_metadata: afterResynthesis }).size, "one re-synthesis must fully converge").toBe(0);
 
   // No feedback file at all: the report records the dependency at revision 0
   // and stays satisfied (normal runs see zero behavior change).
   const noFeedback = { audit_report: "# Audit Report\n" };
   const noFeedbackMetadata = computeArtifactMetadata(noFeedback, undefined, alwaysUpdated);
-  assert.equal(
-    noFeedbackMetadata.artifacts["audit-report.md"].dependency_revisions[FEEDBACK_FILE],
-    0,
-  );
-  assert.equal(
-    computeStaleArtifacts({ ...noFeedback, artifact_metadata: noFeedbackMetadata }).size,
-    0,
-  );
+  expect(noFeedbackMetadata.artifacts["audit-report.md"].dependency_revisions[FEEDBACK_FILE]).toBe(0);
+  expect(computeStaleArtifacts({ ...noFeedback, artifact_metadata: noFeedbackMetadata }).size).toBe(0);
 });
 
 // The real persist/reload loop. A reflection appended mid-run AFTER the first
@@ -194,19 +170,12 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
     const preTrail = [];
     for (let i = 0; i < 25; i++) {
       const obligation = await step();
-      assert.notEqual(obligation, null, `run completed before synthesis? trail: ${preTrail.join(" -> ")}`);
+      expect(obligation, `run completed before synthesis? trail: ${preTrail.join(" -> ")}`).not.toBe(null);
       preTrail.push(obligation);
       if (obligation === "synthesis_current") break;
     }
-    assert.ok(
-      preTrail.includes("synthesis_current"),
-      `synthesis should have run; trail: ${preTrail.join(" -> ")}`,
-    );
-    assert.doesNotMatch(
-      await readFile(join(artDir, "audit-report.md"), "utf8"),
-      /## Process Feedback/,
-      "no reflections yet → no Process Feedback section",
-    );
+    expect(preTrail.includes("synthesis_current"), `synthesis should have run; trail: ${preTrail.join(" -> ")}`).toBeTruthy();
+    expect(await readFile(join(artDir, "audit-report.md"), "utf8"), "no reflections yet → no Process Feedback section").not.toMatch(/## Process Feedback/);
 
     // Worker appends a reflection while the run is still active, then a
     // malformed line (which must parse away to nothing).
@@ -219,17 +188,13 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
       if (obligation === null) break;
       postTrail.push(obligation);
     }
-    assert.equal(
-      postTrail.filter((o) => o === "synthesis_current").length,
-      1,
-      `the appended reflection must trigger exactly one re-synthesis; post trail: ${postTrail.join(" -> ")}`,
-    );
+    expect(postTrail.filter((o) => o === "synthesis_current").length, `the appended reflection must trigger exactly one re-synthesis; post trail: ${postTrail.join(" -> ")}`).toBe(1);
     const report = await readFile(join(artDir, "audit-report.md"), "utf8");
-    assert.match(report, /## Process Feedback/);
-    assert.match(report, /packet path was stale/);
+    expect(report).toMatch(/## Process Feedback/);
+    expect(report).toMatch(/packet path was stale/);
 
     // Converged: the loop reached complete and stays complete.
     const finalBundle = await loadArtifactBundle(artDir);
-    assert.equal(decideNextStep(finalBundle).state.status, "complete");
+    expect(decideNextStep(finalBundle).state.status).toBe("complete");
   });
 });

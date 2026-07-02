@@ -7,8 +7,7 @@
  *  - runPlanningExecutor lens_selection wiring
  *  - IntentCheckpoint round-trip (disposition_overrides + lens_selection)
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { computeScopePreDigest } = await import("../../src/audit/orchestrator/intentCheckpointExecutor.ts");
 const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.ts");
@@ -56,16 +55,12 @@ test("computeScopePreDigest collapses all-same-status excluded dir into aggregat
   const distRows = digest.excluded_summary.filter(
     (r) => "prefix" in r && r.prefix === "dist",
   );
-  assert.equal(distRows.length, 1, "should produce exactly one aggregate row for dist/");
-  assert.equal(distRows[0].file_count, 3);
-  assert.equal(distRows[0].status, "generated");
+  expect(distRows.length, "should produce exactly one aggregate row for dist/").toBe(1);
+  expect(distRows[0].file_count).toBe(3);
+  expect(distRows[0].status).toBe("generated");
 
   // Total files represented must equal total excluded count
-  assert.equal(
-    countTotalFiles(digest.excluded_summary),
-    files.length,
-    "total files represented must equal excluded count",
-  );
+  expect(countTotalFiles(digest.excluded_summary), "total files represented must equal excluded count").toBe(files.length);
 });
 
 test("computeScopePreDigest emits individual rows for oddballs in mixed dir", () => {
@@ -83,8 +78,8 @@ test("computeScopePreDigest emits individual rows for oddballs in mixed dir", ()
   const oddballRows = digest.excluded_summary.filter(
     (r) => "path" in r && r.path === "src/oddball.ts",
   );
-  assert.equal(oddballRows.length, 1, "oddball excluded file should appear as individual row");
-  assert.equal(oddballRows[0].status, "excluded");
+  expect(oddballRows.length, "oddball excluded file should appear as individual row").toBe(1);
+  expect(oddballRows[0].status).toBe("excluded");
 });
 
 test("computeScopePreDigest total files matches total excluded count", () => {
@@ -99,11 +94,7 @@ test("computeScopePreDigest total files matches total excluded count", () => {
   const digest = computeScopePreDigest(bundle, "/repo");
 
   const excludedCount = files.filter((f) => f.status !== "included").length;
-  assert.equal(
-    countTotalFiles(digest.excluded_summary),
-    excludedCount,
-    "total files represented should equal total excluded",
-  );
+  expect(countTotalFiles(digest.excluded_summary), "total files represented should equal total excluded").toBe(excludedCount);
 });
 
 // ---------------------------------------------------------------------------
@@ -119,8 +110,8 @@ test("computeScopePreDigest emits proposal for build-output file with status inc
 
   const proposals = digest.disposition_override_proposals;
   const distProposal = proposals.find((p) => p.path === "dist/index.js");
-  assert.ok(distProposal, "should propose override for dist/ file with included status");
-  assert.equal(distProposal.proposed_status, "generated");
+  expect(distProposal, "should propose override for dist/ file with included status").toBeTruthy();
+  expect(distProposal.proposed_status).toBe("generated");
 });
 
 test("computeScopePreDigest emits proposal for vendor file with status included", () => {
@@ -132,8 +123,8 @@ test("computeScopePreDigest emits proposal for vendor file with status included"
 
   const proposals = digest.disposition_override_proposals;
   const vendorProposal = proposals.find((p) => p.path === "vendor/lib.js");
-  assert.ok(vendorProposal, "should propose override for vendor/ file with included status");
-  assert.equal(vendorProposal.proposed_status, "vendor");
+  expect(vendorProposal, "should propose override for vendor/ file with included status").toBeTruthy();
+  expect(vendorProposal.proposed_status).toBe("vendor");
 });
 
 test("computeScopePreDigest does NOT propose override for correctly excluded file", () => {
@@ -144,7 +135,7 @@ test("computeScopePreDigest does NOT propose override for correctly excluded fil
   const digest = computeScopePreDigest(bundle, "/repo");
 
   const proposals = digest.disposition_override_proposals;
-  assert.equal(proposals.length, 0, "correctly excluded file should not appear in proposals");
+  expect(proposals.length, "correctly excluded file should not appear in proposals").toBe(0);
 });
 
 test("computeScopePreDigest does NOT propose override for clean included source file", () => {
@@ -154,11 +145,7 @@ test("computeScopePreDigest does NOT propose override for clean included source 
   const bundle = makeBaseBundle({ file_disposition: { files } });
   const digest = computeScopePreDigest(bundle, "/repo");
 
-  assert.equal(
-    digest.disposition_override_proposals.length,
-    0,
-    "clean included source file should not appear in proposals",
-  );
+  expect(digest.disposition_override_proposals.length, "clean included source file should not appear in proposals").toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -173,16 +160,13 @@ test("computeScopePreDigest emits one proposition per canonical lens", () => {
 
   // 11 canonical lenses, each appears exactly once.
   const lenses = digest.lens_propositions.map((p) => p.lens);
-  assert.equal(new Set(lenses).size, lenses.length, "no duplicate lens rows");
+  expect(new Set(lenses).size, "no duplicate lens rows").toBe(lenses.length);
   for (const m of MANDATORY) {
-    assert.ok(lenses.includes(m), `${m} should appear in the table`);
+    expect(lenses.includes(m), `${m} should appear in the table`).toBeTruthy();
   }
   for (const p of digest.lens_propositions) {
-    assert.ok(
-      ["mandatory", "recommend_include", "recommend_exclude"].includes(p.disposition),
-      `disposition must be one of the three, got ${p.disposition}`,
-    );
-    assert.ok(p.reason, "every proposition has a reason");
+    expect(["mandatory", "recommend_include", "recommend_exclude"].includes(p.disposition), `disposition must be one of the three, got ${p.disposition}`).toBeTruthy();
+    expect(p.reason, "every proposition has a reason").toBeTruthy();
   }
 });
 
@@ -191,7 +175,7 @@ test("computeScopePreDigest recommends excluding operability when no network-sur
   const digest = computeScopePreDigest(bundle, "/repo");
 
   const operability = digest.lens_propositions.find((p) => p.lens === "operability");
-  assert.equal(operability?.disposition, "recommend_exclude");
+  expect(operability?.disposition).toBe("recommend_exclude");
 });
 
 test("computeScopePreDigest recommends excluding tests when no test units", () => {
@@ -199,7 +183,7 @@ test("computeScopePreDigest recommends excluding tests when no test units", () =
   const digest = computeScopePreDigest(bundle, "/repo");
 
   const tests = digest.lens_propositions.find((p) => p.lens === "tests");
-  assert.equal(tests?.disposition, "recommend_exclude");
+  expect(tests?.disposition).toBe("recommend_exclude");
 });
 
 test("computeScopePreDigest marks mandatory lenses as mandatory, never recommend_exclude", () => {
@@ -208,7 +192,7 @@ test("computeScopePreDigest marks mandatory lenses as mandatory, never recommend
 
   for (const m of MANDATORY) {
     const row = digest.lens_propositions.find((p) => p.lens === m);
-    assert.equal(row?.disposition, "mandatory", `${m} must be disposition=mandatory`);
+    expect(row?.disposition, `${m} must be disposition=mandatory`).toBe("mandatory");
   }
 });
 
@@ -228,13 +212,9 @@ test("COR-2e048b54: excluded-summary includes ALL files when every file in a pre
   const digest = computeScopePreDigest(bundle, "/repo");
 
   // All three files have unique status+reason → majorityCount===1 → must emit all 3 individually.
-  assert.equal(
-    countTotalFiles(digest.excluded_summary),
-    3,
-    "all 3 files must appear in excluded_summary (COR-2e048b54 drop regression)",
-  );
+  expect(countTotalFiles(digest.excluded_summary), "all 3 files must appear in excluded_summary (COR-2e048b54 drop regression)").toBe(3);
   const paths = digest.excluded_summary.filter((r) => "path" in r).map((r) => r.path).sort();
-  assert.deepEqual(paths, ["src/a.ts", "src/b.ts", "src/c.ts"].sort());
+  expect(paths).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"].sort());
 });
 
 test("COR-2e048b54: excluded-summary includes the majority file when it is a genuine majority of 2+", () => {
@@ -248,17 +228,13 @@ test("COR-2e048b54: excluded-summary includes the majority file when it is a gen
   const bundle = makeBaseBundle({ file_disposition: { files } });
   const digest = computeScopePreDigest(bundle, "/repo");
 
-  assert.equal(
-    countTotalFiles(digest.excluded_summary),
-    3,
-    "aggregate + oddball must total 3 files",
-  );
+  expect(countTotalFiles(digest.excluded_summary), "aggregate + oddball must total 3 files").toBe(3);
   const aggregateRows = digest.excluded_summary.filter((r) => "prefix" in r && r.prefix === "src");
-  assert.equal(aggregateRows.length, 1, "should produce 1 aggregate row for the 2-file majority");
-  assert.equal(aggregateRows[0].file_count, 2);
+  expect(aggregateRows.length, "should produce 1 aggregate row for the 2-file majority").toBe(1);
+  expect(aggregateRows[0].file_count).toBe(2);
   const individualRows = digest.excluded_summary.filter((r) => "path" in r);
-  assert.equal(individualRows.length, 1, "oddball should appear as an individual row");
-  assert.equal(individualRows[0].path, "src/c.ts");
+  expect(individualRows.length, "oddball should appear as an individual row").toBe(1);
+  expect(individualRows[0].path).toBe("src/c.ts");
 });
 
 // ---------------------------------------------------------------------------
@@ -322,10 +298,7 @@ test("runPlanningExecutor applies disposition_overrides before coverage initiali
   const result = await runPlanningExecutor(bundle, nonExistentRoot, TEST_LINE_INDEX);
   const tasks = result.updated.audit_tasks ?? [];
   const distTaskPaths = tasks.flatMap((task) => task.file_paths ?? []);
-  assert.ok(
-    !distTaskPaths.includes("dist/index.js"),
-    "dist/index.js should not appear in any audit task after disposition override",
-  );
+  expect(!distTaskPaths.includes("dist/index.js"), "dist/index.js should not appear in any audit task after disposition override").toBeTruthy();
 });
 
 test("runPlanningExecutor does not affect files without a disposition_override", async () => {
@@ -358,10 +331,7 @@ test("runPlanningExecutor does not affect files without a disposition_override",
   const tasks = result.updated.audit_tasks ?? [];
   // src/app.ts should produce tasks since line count is non-trivial
   const srcPaths = tasks.flatMap((t) => t.file_paths ?? []);
-  assert.ok(
-    srcPaths.includes("src/app.ts"),
-    "src/app.ts should appear in tasks when not overridden and line count is non-trivial",
-  );
+  expect(srcPaths.includes("src/app.ts"), "src/app.ts should appear in tasks when not overridden and line count is non-trivial").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -409,14 +379,8 @@ test("runPlanningExecutor lens_selection.include limits task lenses", async () =
   const result = await runPlanningExecutor(bundle, nonExistentRoot, TEST_LINE_INDEX);
   const tasks = result.updated.audit_tasks ?? [];
   const lensesUsed = new Set(tasks.map((t) => t.lens));
-  assert.ok(
-    !lensesUsed.has("operability"),
-    "operability should not appear in tasks when not in lens_selection.include",
-  );
-  assert.ok(
-    !lensesUsed.has("maintainability"),
-    "maintainability should not appear in tasks when not in lens_selection.include",
-  );
+  expect(!lensesUsed.has("operability"), "operability should not appear in tasks when not in lens_selection.include").toBeTruthy();
+  expect(!lensesUsed.has("maintainability"), "maintainability should not appear in tasks when not in lens_selection.include").toBeTruthy();
 });
 
 test("runPlanningExecutor lens_selection.exclude removes non-mandatory lenses", async () => {
@@ -451,10 +415,7 @@ test("runPlanningExecutor lens_selection.exclude removes non-mandatory lenses", 
   const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
   const tasks = result.updated.audit_tasks ?? [];
   const lensesUsed = new Set(tasks.map((t) => t.lens));
-  assert.ok(
-    !lensesUsed.has("performance"),
-    "performance should not appear in tasks when in lens_selection.exclude",
-  );
+  expect(!lensesUsed.has("performance"), "performance should not appear in tasks when in lens_selection.exclude").toBeTruthy();
 });
 
 test("runPlanningExecutor mandatory lenses always included regardless of lens_selection.exclude", async () => {
@@ -495,10 +456,7 @@ test("runPlanningExecutor mandatory lenses always included regardless of lens_se
   // should both appear as tasks.
   const lensesFromRequiredUnits = ["security", "correctness"];
   for (const lens of lensesFromRequiredUnits) {
-    assert.ok(
-      lensesUsed.has(lens),
-      `mandatory lens ${lens} must be present in tasks even when in lens_selection.exclude`,
-    );
+    expect(lensesUsed.has(lens), `mandatory lens ${lens} must be present in tasks even when in lens_selection.exclude`).toBeTruthy();
   }
 });
 
@@ -527,9 +485,9 @@ test("runPlanningExecutor with no lens_selection includes all lenses (existing b
   const tasks = result.updated.audit_tasks ?? [];
   const lensesUsed = new Set(tasks.map((t) => t.lens));
   // All lenses derived from the path should be present when no lens_selection is set
-  assert.ok(lensesUsed.has("correctness"), "correctness should be in tasks");
-  assert.ok(lensesUsed.has("performance"), "performance should be in tasks");
-  assert.ok(lensesUsed.has("reliability"), "reliability should be in tasks");
+  expect(lensesUsed.has("correctness"), "correctness should be in tasks").toBeTruthy();
+  expect(lensesUsed.has("performance"), "performance should be in tasks").toBeTruthy();
+  expect(lensesUsed.has("reliability"), "reliability should be in tasks").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -549,7 +507,7 @@ test("IntentCheckpoint with disposition_overrides round-trips through JSON witho
     ],
   };
   const roundTripped = JSON.parse(JSON.stringify(checkpoint));
-  assert.deepEqual(roundTripped.disposition_overrides, checkpoint.disposition_overrides);
+  expect(roundTripped.disposition_overrides).toEqual(checkpoint.disposition_overrides);
 });
 
 test("IntentCheckpoint with lens_selection round-trips through JSON without loss", () => {
@@ -562,7 +520,7 @@ test("IntentCheckpoint with lens_selection round-trips through JSON without loss
     lens_selection: { include: ["security", "correctness"], exclude: ["performance"] },
   };
   const roundTripped = JSON.parse(JSON.stringify(checkpoint));
-  assert.deepEqual(roundTripped.lens_selection, checkpoint.lens_selection);
+  expect(roundTripped.lens_selection).toEqual(checkpoint.lens_selection);
 });
 
 test("IntentCheckpoint without optional fields is still valid (backward compat)", () => {
@@ -575,7 +533,7 @@ test("IntentCheckpoint without optional fields is still valid (backward compat)"
   };
   // Should not throw; just needs to be a valid object
   const roundTripped = JSON.parse(JSON.stringify(checkpoint));
-  assert.equal(roundTripped.schema_version, "intent-checkpoint/v1");
-  assert.equal(roundTripped.disposition_overrides, undefined);
-  assert.equal(roundTripped.lens_selection, undefined);
+  expect(roundTripped.schema_version).toBe("intent-checkpoint/v1");
+  expect(roundTripped.disposition_overrides).toBe(undefined);
+  expect(roundTripped.lens_selection).toBe(undefined);
 });

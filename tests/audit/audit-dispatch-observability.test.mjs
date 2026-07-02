@@ -7,8 +7,7 @@
  *   FND-OBS-6e84f23c — dispatchStatusCommand run log entry
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,19 +102,19 @@ test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary st
       return obj.event === "strategy_summary";
     } catch { return false; }
   });
-  assert.equal(summaryLines.length, 1, "expected exactly one strategy_summary log line");
+  expect(summaryLines.length, "expected exactly one strategy_summary log line").toBe(1);
   const parsed = JSON.parse(summaryLines[0].trim());
-  assert.equal(parsed.source, "audit-code:selectiveDeepening");
-  assert.equal(parsed.level, "info");
-  assert.ok(typeof parsed.created === "number", "created is a number");
-  assert.ok(typeof parsed.strategy_contributions === "object", "strategy_contributions is an object");
-  assert.ok("finding_followup" in parsed.strategy_contributions);
-  assert.ok("conflict" in parsed.strategy_contributions);
-  assert.ok("steward_followup" in parsed.strategy_contributions);
-  assert.ok("runtime_validation" in parsed.strategy_contributions);
-  assert.ok("lens_verification" in parsed.strategy_contributions);
-  assert.ok("high_risk_clean" in parsed.strategy_contributions);
-  assert.ok(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp");
+  expect(parsed.source).toBe("audit-code:selectiveDeepening");
+  expect(parsed.level).toBe("info");
+  expect(typeof parsed.created === "number", "created is a number").toBeTruthy();
+  expect(typeof parsed.strategy_contributions === "object", "strategy_contributions is an object").toBeTruthy();
+  expect("finding_followup" in parsed.strategy_contributions).toBeTruthy();
+  expect("conflict" in parsed.strategy_contributions).toBeTruthy();
+  expect("steward_followup" in parsed.strategy_contributions).toBeTruthy();
+  expect("runtime_validation" in parsed.strategy_contributions).toBeTruthy();
+  expect("lens_verification" in parsed.strategy_contributions).toBeTruthy();
+  expect("high_risk_clean" in parsed.strategy_contributions).toBeTruthy();
+  expect(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp").toBeTruthy();
 });
 
 test("buildSelectiveDeepeningTasks is self-bounding: each qualifying finding is deepened at most once (converges, no count cap)", () => {
@@ -138,7 +137,7 @@ test("buildSelectiveDeepeningTasks is self-bounding: each qualifying finding is 
   const existingTasks = [makeTask("t1")];
 
   const first = buildSelectiveDeepeningTasks({ results, existingTasks, lineIndex: {} });
-  assert.ok(first.length >= 1, "a high-severity finding produces a deepening task");
+  expect(first.length >= 1, "a high-severity finding produces a deepening task").toBeTruthy();
 
   // Feed the created deepening tasks back in as existing tasks; the same results
   // must now produce zero new tasks — the qualifying set is deepened at most once,
@@ -148,7 +147,7 @@ test("buildSelectiveDeepeningTasks is self-bounding: each qualifying finding is 
     existingTasks: [...existingTasks, ...first],
     lineIndex: {},
   });
-  assert.equal(second.length, 0, "no new deepening tasks on the second pass — converges");
+  expect(second.length, "no new deepening tasks on the second pass — converges").toBe(0);
 });
 
 // ── FND-OBS-99e3a861: rollingDispatch packet_result progress events ───────────
@@ -187,26 +186,26 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
     process.stderr.write = origWrite;
   }
 
-  assert.equal(dispatchCount, 2, "both packets were dispatched");
+  expect(dispatchCount, "both packets were dispatched").toBe(2);
   const resultLines = stderrLines.filter((l) => {
     try {
       const obj = JSON.parse(l.trim());
       return obj.event === "packet_result";
     } catch { return false; }
   });
-  assert.equal(resultLines.length, 2, "expected one packet_result log line per packet");
+  expect(resultLines.length, "expected one packet_result log line per packet").toBe(2);
   for (const line of resultLines) {
     const parsed = JSON.parse(line.trim());
-    assert.equal(parsed.source, "audit-code:rollingDispatch");
-    assert.ok(typeof parsed.packet_id === "string", "packet_id present");
-    assert.equal(parsed.outcome, "success");
-    assert.ok(typeof parsed.completed === "number", "completed count present");
-    assert.ok(typeof parsed.total === "number", "total count present");
-    assert.ok(typeof parsed.ts === "string", "ts present");
+    expect(parsed.source).toBe("audit-code:rollingDispatch");
+    expect(typeof parsed.packet_id === "string", "packet_id present").toBeTruthy();
+    expect(parsed.outcome).toBe("success");
+    expect(typeof parsed.completed === "number", "completed count present").toBeTruthy();
+    expect(typeof parsed.total === "number", "total count present").toBeTruthy();
+    expect(typeof parsed.ts === "string", "ts present").toBeTruthy();
   }
   // completed count should be monotonically increasing
   const counts = resultLines.map((l) => JSON.parse(l.trim()).completed).sort((a, b) => a - b);
-  assert.deepEqual(counts, [1, 2]);
+  expect(counts).toEqual([1, 2]);
 });
 
 // ── FND-OBS-48c05a13: mergeAndIngestCommand logs notDispatched task IDs ──────
@@ -304,8 +303,8 @@ test("FND-OBS-48c05a13: mergeAndIngestCommand logs notDispatched task IDs to std
     const notDispatchedLine = stderrLines.find((l) =>
       l.includes("[merge-and-ingest]") && l.includes("not dispatched") && l.includes("task-obs-b"),
     );
-    assert.ok(notDispatchedLine, "expected stderr log of notDispatched task IDs containing 'task-obs-b'");
-    assert.match(notDispatchedLine, /1 task\(s\) not dispatched/);
+    expect(notDispatchedLine, "expected stderr log of notDispatched task IDs containing 'task-obs-b'").toBeTruthy();
+    expect(notDispatchedLine).toMatch(/1 task\(s\) not dispatched/);
   });
 });
 
@@ -353,7 +352,7 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary 
       "--run-id", runId,
       "--artifacts-dir", artifactsDir,
     ]);
-    assert.equal(result.status, 0, `expected clean exit; stderr: ${result.stderr}`);
+    expect(result.status, `expected clean exit; stderr: ${result.stderr}`).toBe(0);
 
     // stdout must contain a parseable JSON line with event=merge_summary
     const stdoutLines = result.stdout.split("\n").filter((l) => l.trim().length > 0);
@@ -363,23 +362,23 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary 
         return obj.event === "merge_summary";
       } catch { return false; }
     });
-    assert.ok(summaryLine, "expected a JSON merge_summary line on stdout");
+    expect(summaryLine, "expected a JSON merge_summary line on stdout").toBeTruthy();
     const parsed = JSON.parse(summaryLine.trim());
-    assert.equal(parsed.source, "audit-code:merge-results");
-    assert.equal(parsed.total, 1);
-    assert.equal(parsed.accepted, 1);
-    assert.equal(parsed.rejected, 0);
-    assert.ok(typeof parsed.audit_results_path === "string");
-    assert.ok(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp");
+    expect(parsed.source).toBe("audit-code:merge-results");
+    expect(parsed.total).toBe(1);
+    expect(parsed.accepted).toBe(1);
+    expect(parsed.rejected).toBe(0);
+    expect(typeof parsed.audit_results_path === "string").toBeTruthy();
+    expect(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp").toBeTruthy();
 
     // The JSON summary line must appear before the plain text line
     const summaryIdx = stdoutLines.findIndex((l) => {
       try { return JSON.parse(l.trim()).event === "merge_summary"; } catch { return false; }
     });
     const textIdx = stdoutLines.findIndex((l) => l.includes("tasks valid"));
-    assert.ok(summaryIdx !== -1, "JSON summary line present");
-    assert.ok(textIdx !== -1, "plain text line present");
-    assert.ok(summaryIdx < textIdx, "JSON summary comes before plain text");
+    expect(summaryIdx !== -1, "JSON summary line present").toBeTruthy();
+    expect(textIdx !== -1, "plain text line present").toBeTruthy();
+    expect(summaryIdx < textIdx, "JSON summary comes before plain text").toBeTruthy();
   } finally {
     rmSync(artifactsDir, { recursive: true, force: true });
   }
@@ -398,15 +397,15 @@ test("FND-OBS-bf5c7331: merge-results.mjs JSON summary includes failed_tasks_pat
       "--run-id", runId,
       "--artifacts-dir", artifactsDir,
     ]);
-    assert.equal(result.status, 1, "expected non-zero exit on validation failure");
+    expect(result.status, "expected non-zero exit on validation failure").toBe(1);
 
     const summaryLine = result.stdout.split("\n").find((l) => {
       try { return JSON.parse(l.trim()).event === "merge_summary"; } catch { return false; }
     });
-    assert.ok(summaryLine, "expected a JSON merge_summary line on stdout");
+    expect(summaryLine, "expected a JSON merge_summary line on stdout").toBeTruthy();
     const parsed = JSON.parse(summaryLine.trim());
-    assert.equal(parsed.rejected, 1);
-    assert.ok(typeof parsed.failed_tasks_path === "string", "failed_tasks_path present when rejections > 0");
+    expect(parsed.rejected).toBe(1);
+    expect(typeof parsed.failed_tasks_path === "string", "failed_tasks_path present when rejections > 0").toBeTruthy();
   } finally {
     rmSync(artifactsDir, { recursive: true, force: true });
   }

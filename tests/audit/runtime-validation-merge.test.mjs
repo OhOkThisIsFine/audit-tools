@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { mergeRuntimeValidationReport } = await import("../../src/audit/orchestrator/runtimeValidation.ts");
 
@@ -37,24 +36,12 @@ test("mergeRuntimeValidationReport preserves a prior result when task_id matches
 
   const report = mergeRuntimeValidationReport(tasks, existing);
 
-  assert.equal(report.results.length, 1, "should return exactly one result");
-  assert.equal(
-    report.results[0].status,
-    "passed",
-    "prior result status must be preserved",
-  );
-  assert.equal(
-    report.results[0].summary,
-    "Prior result",
-    "prior result summary must be preserved",
-  );
+  expect(report.results.length, "should return exactly one result").toBe(1);
+  expect(report.results[0].status, "prior result status must be preserved").toBe("passed");
+  expect(report.results[0].summary, "prior result summary must be preserved").toBe("Prior result");
   // The returned entry must be the same object reference as the prior result
   // (not a freshly-synthesised stub whose status would default to 'pending').
-  assert.strictEqual(
-    report.results[0],
-    existing.results[0],
-    "returned entry must be the prior result object",
-  );
+  expect(report.results[0], "returned entry must be the prior result object").toBe(existing.results[0]);
 });
 
 // ---------------------------------------------------------------------------
@@ -77,17 +64,9 @@ test("mergeRuntimeValidationReport emits a pending stub for a task with no prior
 
   const report = mergeRuntimeValidationReport(tasks, existing);
 
-  assert.equal(report.results.length, 1, "should return exactly one result");
-  assert.equal(
-    report.results[0].status,
-    "pending",
-    "result must be pending when no prior entry matches",
-  );
-  assert.equal(
-    report.results[0].task_id,
-    "runtime:unit:bar",
-    "result task_id must match the task",
-  );
+  expect(report.results.length, "should return exactly one result").toBe(1);
+  expect(report.results[0].status, "result must be pending when no prior entry matches").toBe("pending");
+  expect(report.results[0].task_id, "result task_id must match the task").toBe("runtime:unit:bar");
 });
 
 // ---------------------------------------------------------------------------
@@ -107,15 +86,7 @@ test("mergeRuntimeValidationReport with no existing report produces all pending 
   // Call with no second argument (existing is undefined).
   const report = mergeRuntimeValidationReport(tasks);
 
-  assert.equal(report.results.length, 1, "should return exactly one result");
-  assert.equal(
-    report.results[0].status,
-    "pending",
-    "result must be pending when no existing report is supplied",
-  );
-  assert.equal(
-    report.results[0].task_id,
-    "runtime:unit:baz",
-    "result task_id must match the task",
-  );
+  expect(report.results.length, "should return exactly one result").toBe(1);
+  expect(report.results[0].status, "result must be pending when no existing report is supplied").toBe("pending");
+  expect(report.results[0].task_id, "result task_id must match the task").toBe("runtime:unit:baz");
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { scanStringAware } = await import("../../src/shared/parsing/stringAwareScanner.ts");
 
@@ -12,7 +11,7 @@ test("scanStringAware — JSON: chars inside a double-quoted string are not pass
     { quoteChars: ['"'], escapedQuotes: ['"'] },
     { onUnquoted: (c) => { seen.push(c); } },
   );
-  assert.deepEqual(seen, ["w", "o", "r", "l", "d"]);
+  expect(seen).toEqual(["w", "o", "r", "l", "d"]);
 });
 
 test("scanStringAware — JSON: escaped quote inside a string does not close the string", () => {
@@ -22,7 +21,7 @@ test("scanStringAware — JSON: escaped quote inside a string does not close the
     { quoteChars: ['"'], escapedQuotes: ['"'] },
     { onUnquoted: (c) => { seen.push(c); } },
   );
-  assert.deepEqual(seen, ["X"]);
+  expect(seen).toEqual(["X"]);
 });
 
 test("scanStringAware — JSON: characters after the closing quote are passed to onUnquoted", () => {
@@ -32,7 +31,7 @@ test("scanStringAware — JSON: characters after the closing quote are passed to
     { quoteChars: ['"'], escapedQuotes: ['"'] },
     { onUnquoted: (c) => { seen.push(c); } },
   );
-  assert.deepEqual(seen, ["a", "f", "t", "e", "r"]);
+  expect(seen).toEqual(["a", "f", "t", "e", "r"]);
 });
 
 // ── TOML single-quote string (no escape processing) ───────────────────────────
@@ -61,7 +60,7 @@ test("scanStringAware — TOML: backslash inside a single-quoted string does not
   // char[5] = '  → opens string
   // char[6] = X  → inside string (skipped)
   // → seen = ['b']
-  assert.deepEqual(seen, ["b"]);
+  expect(seen).toEqual(["b"]);
 });
 
 test("scanStringAware — TOML: hash inside a single-quoted string is not passed to onUnquoted", () => {
@@ -72,7 +71,7 @@ test("scanStringAware — TOML: hash inside a single-quoted string is not passed
     { onUnquoted: (c) => { if (c === "#") hashes.push(c); } },
   );
   // '#' at index 4 is inside the string (skipped), '#' at index 8 is outside.
-  assert.deepEqual(hashes, ["#"]);
+  expect(hashes).toEqual(["#"]);
 });
 
 // ── Go backtick raw string ─────────────────────────────────────────────────────
@@ -84,7 +83,7 @@ test("scanStringAware — Go backtick: chars inside a backtick string are not pa
     { quoteChars: ['"', "`"], escapedQuotes: ['"'] },
     { onUnquoted: (c) => { seen.push(c); } },
   );
-  assert.deepEqual(seen, ["o", "u", "t", "s", "i", "d", "e"]);
+  expect(seen).toEqual(["o", "u", "t", "s", "i", "d", "e"]);
 });
 
 test("scanStringAware — Go backtick: backslash inside a backtick string does not trigger escape processing", () => {
@@ -96,7 +95,7 @@ test("scanStringAware — Go backtick: backslash inside a backtick string does n
   );
   // ` opens at 0, a and \ are inside, ` at index 3 closes (no escape on backtick).
   // Then b, `, X: ` at 5 opens again (never closed), X is inside.
-  assert.deepEqual(seen, ["b"]);
+  expect(seen).toEqual(["b"]);
 });
 
 // ── onQuoteOpen / onQuoteClose callbacks ──────────────────────────────────────
@@ -108,9 +107,9 @@ test("scanStringAware — onQuoteOpen is called with correct quoteChar and index
     { quoteChars: ['"'], escapedQuotes: ['"'] },
     { onQuoteOpen: (q, i) => { opens.push({ q, i }); } },
   );
-  assert.equal(opens.length, 1);
-  assert.equal(opens[0].q, '"');
-  assert.equal(opens[0].i, 6);
+  expect(opens.length).toBe(1);
+  expect(opens[0].q).toBe('"');
+  expect(opens[0].i).toBe(6);
 });
 
 test("scanStringAware — onQuoteClose is called with correct quoteChar and index", () => {
@@ -120,9 +119,9 @@ test("scanStringAware — onQuoteClose is called with correct quoteChar and inde
     { quoteChars: ['"'], escapedQuotes: ['"'] },
     { onQuoteClose: (q, i) => { closes.push({ q, i }); } },
   );
-  assert.equal(closes.length, 1);
-  assert.equal(closes[0].q, '"');
-  assert.equal(closes[0].i, 13);
+  expect(closes.length).toBe(1);
+  expect(closes[0].q).toBe('"');
+  expect(closes[0].i).toBe(13);
 });
 
 // ── Early scan termination (FND-TST-2bc16ad1) ─────────────────────────────────
@@ -141,7 +140,7 @@ test("scanStringAware — returning false from onUnquoted stops the scan early",
       },
     },
   );
-  assert.deepEqual(seen, ["a", "b", "c"], "scan must stop after onUnquoted returns false");
+  expect(seen, "scan must stop after onUnquoted returns false").toEqual(["a", "b", "c"]);
 });
 
 test("scanStringAware — early termination does not fire inside a string (only outside)", () => {
@@ -160,5 +159,5 @@ test("scanStringAware — early termination does not fire inside a string (only 
     },
   );
   // Scan stops at 'a'; 'b' (outside, after the string) is never reached.
-  assert.deepEqual(seen, ["a"]);
+  expect(seen).toEqual(["a"]);
 });

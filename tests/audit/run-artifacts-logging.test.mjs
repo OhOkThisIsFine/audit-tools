@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -47,11 +47,11 @@ await test("OBS-226efbae: writeWorkerTaskFiles emits log event with run_id when 
     () => writeWorkerTaskFiles(task, "prompt text", paths, tmpdir(), undefined, {}, log),
   );
 
-  assert.equal(events.length, 1, "exactly one log event emitted");
-  assert.equal(events[0].name, "dispatch_io_error");
-  assert.equal(events[0].data.run_id, task.run_id);
-  assert.equal(events[0].data.function, "writeWorkerTaskFiles");
-  assert.ok(typeof events[0].data.error === "string" && events[0].data.error.length > 0);
+  expect(events.length, "exactly one log event emitted").toBe(1);
+  expect(events[0].name).toBe("dispatch_io_error");
+  expect(events[0].data.run_id).toBe(task.run_id);
+  expect(events[0].data.function).toBe("writeWorkerTaskFiles");
+  expect(typeof events[0].data.error === "string" && events[0].data.error.length > 0).toBeTruthy();
 });
 
 await test("OBS-226efbae: writeWorkerTaskFiles with no log parameter succeeds on valid paths", async () => {
@@ -82,8 +82,8 @@ await test("OBS-226efbae: clearDispatchFiles emits log event with function name 
     () => clearDispatchFiles(badArtifactsDir, log),
   );
 
-  assert.equal(events.length, 1, "exactly one log event emitted");
-  assert.equal(events[0].name, "dispatch_io_error");
-  assert.equal(events[0].data.function, "clearDispatchFiles");
-  assert.ok(typeof events[0].data.error === "string" && events[0].data.error.length > 0);
+  expect(events.length, "exactly one log event emitted").toBe(1);
+  expect(events[0].name).toBe("dispatch_io_error");
+  expect(events[0].data.function).toBe("clearDispatchFiles");
+  expect(typeof events[0].data.error === "string" && events[0].data.error.length > 0).toBeTruthy();
 });

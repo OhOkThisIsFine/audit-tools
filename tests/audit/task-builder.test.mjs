@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildChunkedAuditTasks } = await import("../../src/audit/orchestrator/taskBuilder.ts");
 
@@ -39,8 +38,8 @@ test("DEFAULT_MAX_TASK_FILES is 0: 20-file unit produces a single task (not spli
   // 20 files × 10 lines = 200 lines total, well under max_task_lines=3000, so no line-budget split
   const tasks = buildChunkedAuditTasks(coverage, lineIndex, {});
   const corrTasks = tasks.filter((t) => t.lens === "correctness");
-  assert.strictEqual(corrTasks.length, 1, "should produce exactly 1 task for 20 small-line files");
-  assert.strictEqual(corrTasks[0].file_paths.length, 20);
+  expect(corrTasks.length, "should produce exactly 1 task for 20 small-line files").toBe(1);
+  expect(corrTasks[0].file_paths.length).toBe(20);
 });
 
 test("DEFAULT_MAX_TASK_FILES=0 does not split; explicit max_task_files=5 does split", () => {
@@ -53,12 +52,12 @@ test("DEFAULT_MAX_TASK_FILES=0 does not split; explicit max_task_files=5 does sp
   // Default: no file-count split
   const defaultTasks = buildChunkedAuditTasks(coverage, lineIndex, {});
   const defaultCorr = defaultTasks.filter((t) => t.lens === "correctness");
-  assert.strictEqual(defaultCorr.length, 1, "default: 10 files → 1 task");
+  expect(defaultCorr.length, "default: 10 files → 1 task").toBe(1);
 
   // Explicit cap: split by 5
   const cappedTasks = buildChunkedAuditTasks(coverage, lineIndex, { max_task_files: 5 });
   const cappedCorr = cappedTasks.filter((t) => t.lens === "correctness");
-  assert.ok(cappedCorr.length >= 2, "capped: 10 files / 5 → at least 2 tasks");
+  expect(cappedCorr.length >= 2, "capped: 10 files / 5 → at least 2 tasks").toBeTruthy();
 });
 
 test("buildChunkedAuditTasks still splits when max_task_lines is exceeded", () => {
@@ -71,7 +70,7 @@ test("buildChunkedAuditTasks still splits when max_task_lines is exceeded", () =
   const tasks = buildChunkedAuditTasks(coverage, lineIndex, {});
   const corrTasks = tasks.filter((t) => t.lens === "correctness");
   // 5000 total lines, 3000 budget → must produce > 1 task
-  assert.ok(corrTasks.length > 1, `line-budget split should produce >1 task; got ${corrTasks.length}`);
+  expect(corrTasks.length > 1, `line-budget split should produce >1 task; got ${corrTasks.length}`).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -85,13 +84,13 @@ test("intent_priority_boost: low lens (architecture) → medium when boosted", (
 
   const unboosted = buildChunkedAuditTasks(coverage, lineIndex, {});
   const archUnboosted = unboosted.filter((t) => t.lens === "architecture");
-  assert.ok(archUnboosted.length > 0, "should have architecture task");
-  assert.strictEqual(archUnboosted[0].priority, "low", "architecture without boost should be low");
+  expect(archUnboosted.length > 0, "should have architecture task").toBeTruthy();
+  expect(archUnboosted[0].priority, "architecture without boost should be low").toBe("low");
 
   const boosted = buildChunkedAuditTasks(coverage, lineIndex, { intent_priority_boost: ["architecture"] });
   const archBoosted = boosted.filter((t) => t.lens === "architecture");
-  assert.ok(archBoosted.length > 0, "should have architecture task after boost");
-  assert.strictEqual(archBoosted[0].priority, "medium", "architecture boosted should become medium");
+  expect(archBoosted.length > 0, "should have architecture task after boost").toBeTruthy();
+  expect(archBoosted[0].priority, "architecture boosted should become medium").toBe("medium");
 });
 
 test("intent_priority_boost: medium lens (security) → high when boosted", () => {
@@ -101,14 +100,14 @@ test("intent_priority_boost: medium lens (security) → high when boosted", () =
 
   const unboosted = buildChunkedAuditTasks(coverage, lineIndex, {});
   const secUnboosted = unboosted.filter((t) => t.lens === "security");
-  assert.ok(secUnboosted.length > 0, "should have security task");
+  expect(secUnboosted.length > 0, "should have security task").toBeTruthy();
   // security without external signal → medium
-  assert.strictEqual(secUnboosted[0].priority, "medium", "security without signal should be medium");
+  expect(secUnboosted[0].priority, "security without signal should be medium").toBe("medium");
 
   const boosted = buildChunkedAuditTasks(coverage, lineIndex, { intent_priority_boost: ["security"] });
   const secBoosted = boosted.filter((t) => t.lens === "security");
-  assert.ok(secBoosted.length > 0, "should have security task after boost");
-  assert.strictEqual(secBoosted[0].priority, "high", "security boosted from medium → high");
+  expect(secBoosted.length > 0, "should have security task after boost").toBeTruthy();
+  expect(secBoosted[0].priority, "security boosted from medium → high").toBe("high");
 });
 
 test("intent_priority_boost: high lens stays high (no promotion above high)", () => {
@@ -131,8 +130,8 @@ test("intent_priority_boost: high lens stays high (no promotion above high)", ()
     }],
   });
   const secTasks = tasks.filter((t) => t.lens === "security");
-  assert.ok(secTasks.length > 0, "should have security task");
-  assert.strictEqual(secTasks[0].priority, "high", "already high should stay high");
+  expect(secTasks.length > 0, "should have security task").toBeTruthy();
+  expect(secTasks[0].priority, "already high should stay high").toBe("high");
 });
 
 test("intent_priority_boost: unrelated lens not in boost list is unaffected", () => {
@@ -145,6 +144,6 @@ test("intent_priority_boost: unrelated lens not in boost list is unaffected", ()
 
   const tasks = buildChunkedAuditTasks(coverage, lineIndex, { intent_priority_boost: ["security"] });
   const archTask = tasks.find((t) => t.lens === "architecture");
-  assert.ok(archTask, "architecture task should exist");
-  assert.strictEqual(archTask.priority, "low", "architecture should remain low when not in boost list");
+  expect(archTask, "architecture task should exist").toBeTruthy();
+  expect(archTask.priority, "architecture should remain low when not in boost list").toBe("low");
 });

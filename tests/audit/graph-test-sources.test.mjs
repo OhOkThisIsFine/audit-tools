@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { extractTestSourceEdges } = await import("../../src/audit/extractors/graphTestSources.ts");
 
@@ -31,10 +30,7 @@ function resolvedTargets(fromPath, lookupPaths) {
 // ── extractTestSourceEdges: non-test path ─────────────────────────────────────
 
 test("extractTestSourceEdges returns [] for a non-test path", () => {
-  assert.deepEqual(
-    extractTestSourceEdges("src/utils/helper.ts", new Map()),
-    [],
-  );
+  expect(extractTestSourceEdges("src/utils/helper.ts", new Map())).toEqual([]);
 });
 
 // ── stripPythonTestPrefix via testSourceCandidates ───────────────────────────
@@ -45,26 +41,17 @@ test("stripPythonTestPrefix: test_foo.py strips prefix and links to foo.py", () 
   // resolves to src/foo.py. (The source must live outside a test directory; a
   // candidate under tests/ would be filtered out by isTestPath.)
   const targets = resolvedTargets("tests/test_foo.py", ["src/foo.py"]);
-  assert.ok(
-    targets.some((t) => t.endsWith("foo.py")),
-    `Expected a target ending in foo.py, got: ${JSON.stringify(targets)}`,
-  );
+  expect(targets.some((t) => t.endsWith("foo.py")), `Expected a target ending in foo.py, got: ${JSON.stringify(targets)}`).toBeTruthy();
 });
 
 test("stripPythonTestPrefix: test-bar.py derives candidate from 'bar'", () => {
   const targets = resolvedTargets("tests/test-bar.py", ["src/bar.py"]);
-  assert.ok(
-    targets.some((t) => t.endsWith("bar.py")),
-    `Expected target ending in bar.py, got: ${JSON.stringify(targets)}`,
-  );
+  expect(targets.some((t) => t.endsWith("bar.py")), `Expected target ending in bar.py, got: ${JSON.stringify(targets)}`).toBeTruthy();
 });
 
 test("stripPythonTestPrefix: test.bar.py derives candidate from 'bar'", () => {
   const targets = resolvedTargets("tests/test.bar.py", ["src/bar.py"]);
-  assert.ok(
-    targets.some((t) => t.endsWith("bar.py")),
-    `Expected target ending in bar.py, got: ${JSON.stringify(targets)}`,
-  );
+  expect(targets.some((t) => t.endsWith("bar.py")), `Expected target ending in bar.py, got: ${JSON.stringify(targets)}`).toBeTruthy();
 });
 
 test("stripPythonTestPrefix: non-prefixed Python file does not produce prefix-derived candidate", () => {
@@ -75,7 +62,7 @@ test("stripPythonTestPrefix: non-prefixed Python file does not produce prefix-de
   const targets = resolvedTargets("tests/foo_test.py", ["src/foo.py"]);
   // We are not asserting the prefix path fired — just that a non-prefixed path
   // doesn't cause errors and does NOT emit a spurious prefix-strip-derived edge.
-  assert.ok(Array.isArray(targets));
+  expect(Array.isArray(targets)).toBeTruthy();
 });
 
 // ── addTestSourceCandidatesForBase: top-level tests/ mirrors to src/ ─────────
@@ -86,20 +73,14 @@ test("addTestSourceCandidatesForBase: tests/ top-level segment mirrors to src/",
   const targets = resolvedTargets("tests/utils/helper.test.ts", [
     "src/utils/helper.ts",
   ]);
-  assert.ok(
-    targets.includes("src/utils/helper.ts"),
-    `Expected src/utils/helper.ts in ${JSON.stringify(targets)}`,
-  );
+  expect(targets.includes("src/utils/helper.ts"), `Expected src/utils/helper.ts in ${JSON.stringify(targets)}`).toBeTruthy();
 });
 
 test("addTestSourceCandidatesForBase: spec/ top-level segment mirrors to src/", () => {
   const targets = resolvedTargets("spec/utils/helper.test.ts", [
     "src/utils/helper.ts",
   ]);
-  assert.ok(
-    targets.includes("src/utils/helper.ts"),
-    `Expected src/utils/helper.ts in ${JSON.stringify(targets)}`,
-  );
+  expect(targets.includes("src/utils/helper.ts"), `Expected src/utils/helper.ts in ${JSON.stringify(targets)}`).toBeTruthy();
 });
 
 // ── addTestSourceCandidatesForBase: colocated __tests__ segment removed ───────
@@ -111,10 +92,7 @@ test("addTestSourceCandidatesForBase: colocated __tests__ segment is removed", (
   const targets = resolvedTargets("src/__tests__/helper.test.ts", [
     "src/helper.ts",
   ]);
-  assert.ok(
-    targets.some((t) => t === "src/helper.ts"),
-    `Expected src/helper.ts in ${JSON.stringify(targets)}`,
-  );
+  expect(targets.some((t) => t === "src/helper.ts"), `Expected src/helper.ts in ${JSON.stringify(targets)}`).toBeTruthy();
 });
 
 // ── testSourceCandidates: no known source extension ──────────────────────────
@@ -125,7 +103,7 @@ test("testSourceCandidates: file with no known source extension returns no edges
     "tests/foo.unknownext",
     makeLookup(["src/foo.ts"]),
   );
-  assert.deepEqual(edges, []);
+  expect(edges).toEqual([]);
 });
 
 // ── extractTestSourceEdges: edge shape ───────────────────────────────────────
@@ -135,12 +113,12 @@ test("extractTestSourceEdges: emits a test-source-link edge with correct shape",
   const lookup = makeLookup(["src/utils/helper.ts"]);
   const edges = extractTestSourceEdges(fromPath, lookup);
 
-  assert.ok(edges.length > 0, "Expected at least one edge");
+  expect(edges.length > 0, "Expected at least one edge").toBeTruthy();
   const edge = edges.find((e) => e.kind === "test-source-link");
-  assert.ok(edge, "Expected an edge with kind test-source-link");
-  assert.equal(edge.from, fromPath);
-  assert.equal(edge.to, "src/utils/helper.ts");
-  assert.equal(edge.confidence, 0.88);
+  expect(edge, "Expected an edge with kind test-source-link").toBeTruthy();
+  expect(edge.from).toBe(fromPath);
+  expect(edge.to).toBe("src/utils/helper.ts");
+  expect(edge.confidence).toBe(0.88);
 });
 
 test("extractTestSourceEdges: candidate resolves but target is itself a test path — edge skipped", () => {
@@ -154,12 +132,9 @@ test("extractTestSourceEdges: candidate resolves but target is itself a test pat
     ["src/utils/helper", "tests/other.test.ts"],
   ]);
   const edges = extractTestSourceEdges(fromPath, lookup);
-  assert.deepEqual(edges, [], "Should emit no edges when target is a test path");
+  expect(edges, "Should emit no edges when target is a test path").toEqual([]);
 });
 
 test("extractTestSourceEdges: returns [] for a plain non-test source path (no isTestPath match)", () => {
-  assert.deepEqual(
-    extractTestSourceEdges("src/utils/helper.ts", makeLookup(["src/other.ts"])),
-    [],
-  );
+  expect(extractTestSourceEdges("src/utils/helper.ts", makeLookup(["src/other.ts"]))).toEqual([]);
 });

@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import {
   mkdtemp,
@@ -51,12 +51,9 @@ const wrapperPath = join(repoRoot, "audit-code.mjs");
 const packageJsonPath = join(repoRoot, "package.json");
 function assertMatchesResponseSchema(value, label) {
   const result = AuditCodeResponseSchema.safeParse(value);
-  assert.ok(
-    result.success,
-    `${label} should satisfy AuditCodeResponseSchema: ${
+  expect(result.success, `${label} should satisfy AuditCodeResponseSchema: ${
       result.success ? "" : JSON.stringify(result.error.issues)
-    }`,
-  );
+    }`).toBeTruthy();
 }
 const packageVersion = JSON.parse(
   await readFile(packageJsonPath, "utf8"),
@@ -180,31 +177,31 @@ function runWrapperJsonOutput(args, options = {}) {
 }
 
 function assertOpenCodeAuditPermissions(config) {
-  assert.equal(config.permission?.read, "allow");
-  assert.equal(config.permission?.glob, "allow");
-  assert.equal(config.permission?.grep, "allow");
-  assert.equal(typeof config.permission?.external_directory, "object");
-  assert.equal(config.permission?.edit?.[".audit-code/**"], "allow");
-  assert.equal(config.permission?.edit?.[".audit-tools/**"], "allow");
-  assert.equal(config.permission?.bash?.["audit-code"], "allow");
-  assert.equal(config.permission?.bash?.["audit-code ensure*"], "allow");
-  assert.equal(config.permission?.bash?.["audit-code next-step*"], "allow");
-  assert.equal(config.permission?.bash?.["audit-code synthesize*"], "deny");
-  assert.equal(config.permission?.bash?.["audit-code cleanup*"], "deny");
-  assert.equal(config.permission?.bash?.["audit-code requeue*"], "deny");
-  assert.equal(config.permission?.bash?.["audit-code ingest-results*"], "deny");
-  assert.equal(config.permission?.bash?.["*audit-code.mjs* submit-packet*"], "allow");
-  assert.equal(config.permission?.bash?.["*audit-code.mjs* worker-run*"], "allow");
-  assert.equal(config.permission?.bash?.["*audit-code.mjs* synthesize*"], "deny");
-  assert.equal(config.permission?.bash?.["Select-String *"], "allow");
-  assert.equal(config.agent?.auditor?.permission?.read, "allow");
-  assert.equal(config.agent?.auditor?.permission?.glob, "allow");
-  assert.equal(config.agent?.auditor?.permission?.grep, "allow");
-  assert.equal(typeof config.agent?.auditor?.permission?.external_directory, "object");
-  assert.equal(config.agent?.auditor?.permission?.edit?.[".audit-tools/**"], "allow");
-  assert.equal(config.agent?.auditor?.permission?.bash?.["audit-code next-step*"], "allow");
-  assert.equal(config.agent?.auditor?.permission?.bash?.["*audit-code.mjs* merge-and-ingest*"], "allow");
-  assert.equal(config.agent?.auditor?.permission?.bash?.["audit-code synthesize*"], "deny");
+  expect(config.permission?.read).toBe("allow");
+  expect(config.permission?.glob).toBe("allow");
+  expect(config.permission?.grep).toBe("allow");
+  expect(typeof config.permission?.external_directory).toBe("object");
+  expect(config.permission?.edit?.[".audit-code/**"]).toBe("allow");
+  expect(config.permission?.edit?.[".audit-tools/**"]).toBe("allow");
+  expect(config.permission?.bash?.["audit-code"]).toBe("allow");
+  expect(config.permission?.bash?.["audit-code ensure*"]).toBe("allow");
+  expect(config.permission?.bash?.["audit-code next-step*"]).toBe("allow");
+  expect(config.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
+  expect(config.permission?.bash?.["audit-code cleanup*"]).toBe("deny");
+  expect(config.permission?.bash?.["audit-code requeue*"]).toBe("deny");
+  expect(config.permission?.bash?.["audit-code ingest-results*"]).toBe("deny");
+  expect(config.permission?.bash?.["*audit-code.mjs* submit-packet*"]).toBe("allow");
+  expect(config.permission?.bash?.["*audit-code.mjs* worker-run*"]).toBe("allow");
+  expect(config.permission?.bash?.["*audit-code.mjs* synthesize*"]).toBe("deny");
+  expect(config.permission?.bash?.["Select-String *"]).toBe("allow");
+  expect(config.agent?.auditor?.permission?.read).toBe("allow");
+  expect(config.agent?.auditor?.permission?.glob).toBe("allow");
+  expect(config.agent?.auditor?.permission?.grep).toBe("allow");
+  expect(typeof config.agent?.auditor?.permission?.external_directory).toBe("object");
+  expect(config.agent?.auditor?.permission?.edit?.[".audit-tools/**"]).toBe("allow");
+  expect(config.agent?.auditor?.permission?.bash?.["audit-code next-step*"]).toBe("allow");
+  expect(config.agent?.auditor?.permission?.bash?.["*audit-code.mjs* merge-and-ingest*"]).toBe("allow");
+  expect(config.agent?.auditor?.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
 }
 
 async function withTempRepo(fn) {
@@ -363,8 +360,8 @@ async function setupDispatchFixture(root) {
   const runId = step.run_id;
   const artifactsDir = step.artifacts_dir;
 
-  assert.ok(runId);
-  assert.ok(artifactsDir);
+  expect(runId).toBeTruthy();
+  expect(artifactsDir).toBeTruthy();
 
   await runWrapper(
     ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
@@ -411,16 +408,12 @@ async function setupSubmitPacketFixture(root) {
       resultMap.entries.filter((entry) => entry.packet_id === candidate.packet_id)
         .length >= 2,
   );
-  assert.ok(packet, "expected a dispatch packet with at least two tasks");
+  expect(packet, "expected a dispatch packet with at least two tasks").toBeTruthy();
   const entries = resultMap.entries.filter(
     (entry) => entry.packet_id === packet.packet_id,
   );
   const packetTasks = entries.map((entry) => taskById.get(entry.task_id));
-  assert.equal(
-    packetTasks.every(Boolean),
-    true,
-    "expected task metadata for every packet entry",
-  );
+  expect(packetTasks.every(Boolean), "expected task metadata for every packet entry").toBe(true);
 
   return { runId, artifactsDir, packet, entries, packetTasks, tasks };
 }
@@ -453,7 +446,7 @@ function repoLocalHostInstallPaths(root) {
 
 function hostGuidance(parsed, host) {
   const guidance = parsed.host_guidance.find((entry) => entry.host === host);
-  assert.ok(guidance, `expected guidance for ${host}`);
+  expect(guidance, `expected guidance for ${host}`).toBeTruthy();
   return guidance;
 }
 
@@ -468,26 +461,20 @@ async function setupRepoLocalHostInstallFixture(root) {
 }
 
 function assertSharedHostInstallResponse(parsed, root, paths) {
-  assert.equal(parsed.host, "all");
-  assert.equal(parsed.repo_root, root);
-  assert.equal(parsed.installed_prompt_path, paths.installedPromptPath);
-  assert.equal(parsed.install_guide_path, paths.installGuidePath);
-  assert.equal(parsed.install_manifest_path, paths.installManifestPath);
+  expect(parsed.host).toBe("all");
+  expect(parsed.repo_root).toBe(root);
+  expect(parsed.installed_prompt_path).toBe(paths.installedPromptPath);
+  expect(parsed.install_guide_path).toBe(paths.installGuidePath);
+  expect(parsed.install_manifest_path).toBe(paths.installManifestPath);
   // The MCP surface was removed: install no longer emits an MCP server launcher.
-  assert.equal(parsed.mcp_server_launcher_path, undefined);
-  assert.equal(parsed.slash_command_surfaces.vscode_prompt, paths.vscodePromptPath);
-  assert.equal(parsed.slash_command_surfaces.opencode_config, paths.opencodeConfigPath);
-  assert.equal(parsed.instruction_surfaces.agents, paths.agentsPath);
-  assert.equal(
-    parsed.instruction_surfaces.copilot_instructions,
-    paths.copilotInstructionsPath,
-  );
-  assert.equal(parsed.host_guidance.length, 4);
-  assert.deepEqual(
-    parsed.host_guidance.map((entry) => entry.host),
-    ["codex", "opencode", "vscode", "antigravity"],
-  );
-  assert.equal(parsed.unsupported_hosts.length, 0);
+  expect(parsed.mcp_server_launcher_path).toBe(undefined);
+  expect(parsed.slash_command_surfaces.vscode_prompt).toBe(paths.vscodePromptPath);
+  expect(parsed.slash_command_surfaces.opencode_config).toBe(paths.opencodeConfigPath);
+  expect(parsed.instruction_surfaces.agents).toBe(paths.agentsPath);
+  expect(parsed.instruction_surfaces.copilot_instructions).toBe(paths.copilotInstructionsPath);
+  expect(parsed.host_guidance.length).toBe(4);
+  expect(parsed.host_guidance.map((entry) => entry.host)).toEqual(["codex", "opencode", "vscode", "antigravity"]);
+  expect(parsed.unsupported_hosts.length).toBe(0);
 }
 
 test("audit-code wrapper advance-audit runs one bounded deterministic advance and prints the execution envelope", async () => {
@@ -498,24 +485,24 @@ test("audit-code wrapper advance-audit runs one bounded deterministic advance an
     const step0 = JSON.parse(stdout0);
 
     const info = await stat(artifactsDir);
-    assert.equal(info.isDirectory(), true);
+    expect(info.isDirectory()).toBe(true);
     assertMatchesResponseSchema(step0, "auditCodeResponse");
-    assert.equal(step0.contract_version, "audit-code/v1alpha1");
-    assert.equal(step0.selected_executor, "provider_confirmation_executor");
-    assert.equal(step0.progress_made, true);
-    assert.equal(step0.next_likely_step, "repo_manifest");
-    assert.equal(step0.handoff.status, "active");
+    expect(step0.contract_version).toBe("audit-code/v1alpha1");
+    expect(step0.selected_executor).toBe("provider_confirmation_executor");
+    expect(step0.progress_made).toBe(true);
+    expect(step0.next_likely_step).toBe("repo_manifest");
+    expect(step0.handoff.status).toBe("active");
 
     // Second advance: intake executor runs.
     const { stdout: stdout1 } = await runWrapper(["advance-audit"], { cwd: root });
     const step1 = JSON.parse(stdout1);
 
     assertMatchesResponseSchema(step1, "auditCodeResponse");
-    assert.equal(step1.selected_executor, "intake_executor");
-    assert.equal(step1.progress_made, true);
-    assert.equal(step1.next_likely_step, "auto_fixes_applied");
-    assert.equal(step1.handoff.status, "active");
-    assert.equal(step1.handoff.suggested_commands.length, 0);
+    expect(step1.selected_executor).toBe("intake_executor");
+    expect(step1.progress_made).toBe(true);
+    expect(step1.next_likely_step).toBe("auto_fixes_applied");
+    expect(step1.handoff.status).toBe("active");
+    expect(step1.handoff.suggested_commands.length).toBe(0);
   });
 });
 
@@ -531,9 +518,9 @@ test("audit-code wrapper can explain a resolved task id", async () => {
       (await runWrapper(["explain-task", taskId], { cwd: root })).stdout,
     );
 
-    assert.equal(explained.task_id, taskId);
-    assert.ok(Array.isArray(explained.coverage_entries));
-    assert.ok(explained.coverage_entries.length > 0);
+    expect(explained.task_id).toBe(taskId);
+    expect(Array.isArray(explained.coverage_entries)).toBeTruthy();
+    expect(explained.coverage_entries.length > 0).toBeTruthy();
   });
 });
 
@@ -541,15 +528,12 @@ test("next-step reaches a ready review dispatch step from repo root under local-
   await withTempRepo(async (root) => {
     const step = await startDispatchRun(root);
 
-    assert.equal(step.contract_version, "audit-code-step/v1alpha1");
-    assert.equal(step.status, "ready");
-    assert.match(step.step_kind, /^(dispatch_review|single_task_fallback)$/);
-    assert.ok(step.run_id);
-    assert.equal(step.repo_root, toPromptPathToken(root));
-    assert.equal(
-      step.artifacts_dir,
-      toPromptPathToken(join(root, ".audit-tools/audit")),
-    );
+    expect(step.contract_version).toBe("audit-code-step/v1alpha1");
+    expect(step.status).toBe("ready");
+    expect(step.step_kind).toMatch(/^(dispatch_review|single_task_fallback)$/);
+    expect(step.run_id).toBeTruthy();
+    expect(step.repo_root).toBe(toPromptPathToken(root));
+    expect(step.artifacts_dir).toBe(toPromptPathToken(join(root, ".audit-tools/audit")));
 
     // The printed contract matches the persisted current-step.json, so the host
     // can act on steps/current-step.json without a second next-step round-trip.
@@ -559,25 +543,25 @@ test("next-step reaches a ready review dispatch step from repo root under local-
         "utf8",
       ),
     );
-    assert.equal(currentStep.step_kind, step.step_kind);
-    assert.equal(currentStep.run_id, step.run_id);
+    expect(currentStep.step_kind).toBe(step.step_kind);
+    expect(currentStep.run_id).toBe(step.run_id);
 
     // The dispatch run covers every planned audit task.
     const allAuditTasks = JSON.parse(
       await readFile(join(root, ".audit-tools/audit", "audit_tasks.json"), "utf8"),
     );
-    assert.ok(allAuditTasks.length > 0);
+    expect(allAuditTasks.length > 0).toBeTruthy();
     const pendingRunTasks = JSON.parse(
       await readFile(
         join(root, ".audit-tools/audit", "runs", step.run_id, "pending-audit-tasks.json"),
         "utf8",
       ),
     );
-    assert.equal(pendingRunTasks.length, allAuditTasks.length);
+    expect(pendingRunTasks.length).toBe(allAuditTasks.length);
 
     // The step prompt is the host's sole instruction surface.
     const prompt = await readFile(step.prompt_path, "utf8");
-    assert.match(prompt, /merge-and-ingest|exactly one AuditResult/i);
+    expect(prompt).toMatch(/merge-and-ingest|exactly one AuditResult/i);
   });
 });
 
@@ -587,8 +571,8 @@ test("merge-and-ingest blocks when assigned task results are missing", async () 
     const runId = step.run_id;
     const artifactsDir = step.artifacts_dir;
 
-    assert.ok(runId);
-    assert.ok(artifactsDir);
+    expect(runId).toBeTruthy();
+    expect(artifactsDir).toBeTruthy();
 
     await runWrapper(
       ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
@@ -617,27 +601,24 @@ test("merge-and-ingest accepts packet task result files as the legacy result arr
       { cwd: root },
     );
     const mergeSummary = JSON.parse(merge.stdout);
-    assert.equal(mergeSummary.status, "completed");
-    assert.equal(mergeSummary.accepted_count, tasks.length);
-    assert.equal(mergeSummary.rejected_count, 0);
-    assert.equal(mergeSummary.finding_count, 0);
-    assert.equal(mergeSummary.selected_executor, "result_ingestion_executor");
-    assert.ok("next_likely_step" in mergeSummary);
+    expect(mergeSummary.status).toBe("completed");
+    expect(mergeSummary.accepted_count).toBe(tasks.length);
+    expect(mergeSummary.rejected_count).toBe(0);
+    expect(mergeSummary.finding_count).toBe(0);
+    expect(mergeSummary.selected_executor).toBe("result_ingestion_executor");
+    expect("next_likely_step" in mergeSummary).toBeTruthy();
 
     const merged = JSON.parse(
       await readFile(join(runDir, "run-results.json"), "utf8"),
     );
-    assert.deepEqual(
-      merged.map((result) => result.task_id).sort(),
-      tasks.map((task) => task.task_id).sort(),
-    );
+    expect(merged.map((result) => result.task_id).sort()).toEqual(tasks.map((task) => task.task_id).sort());
     // Structured observability logs (e.g. selectiveDeepening strategy_summary) are
     // emitted to stderr at info level; only reject lines that indicate actual errors.
     const stderrLines = merge.stderr.split("\n").filter((l) => l.trim());
     for (const line of stderrLines) {
       try {
         const parsed = JSON.parse(line);
-        assert.notEqual(parsed.level, "error", `Unexpected error-level stderr: ${line}`);
+        expect(parsed.level, `Unexpected error-level stderr: ${line}`).not.toBe("error");
       } catch {
         assert.fail(`Unexpected non-JSON stderr from merge-and-ingest: ${line}`);
       }
@@ -656,7 +637,7 @@ test("merge-and-ingest is idempotent on re-run and never truncates results", asy
       ["merge-and-ingest", "--run-id", runId, "--artifacts-dir", artifactsDir],
       { cwd: root },
     );
-    assert.equal(JSON.parse(first.stdout).status, "completed");
+    expect(JSON.parse(first.stdout).status).toBe("completed");
     const resultsPath = join(runDir, "run-results.json");
     const mergedAfterFirst = await readFile(resultsPath, "utf8");
 
@@ -669,14 +650,10 @@ test("merge-and-ingest is idempotent on re-run and never truncates results", asy
       { cwd: root },
     );
     const replaySummary = JSON.parse(second.stdout);
-    assert.equal(replaySummary.idempotent_replay, true);
-    assert.equal(replaySummary.status, "completed");
-    assert.equal(replaySummary.accepted_count, tasks.length);
-    assert.equal(
-      await readFile(resultsPath, "utf8"),
-      mergedAfterFirst,
-      "the second merge must not rewrite the transient results file",
-    );
+    expect(replaySummary.idempotent_replay).toBe(true);
+    expect(replaySummary.status).toBe("completed");
+    expect(replaySummary.accepted_count).toBe(tasks.length);
+    expect(await readFile(resultsPath, "utf8"), "the second merge must not rewrite the transient results file").toBe(mergedAfterFirst);
   });
 });
 
@@ -723,11 +700,8 @@ test("merge-and-ingest self-heals a stale completion marker by re-ingesting a st
         { cwd: root },
       )).stdout,
     );
-    assert.equal(first.status, "completed");
-    assert.ok(
-      await fileExists(markerPath),
-      "a fully-merged round writes the completion marker",
-    );
+    expect(first.status).toBe("completed");
+    expect(await fileExists(markerPath), "a fully-merged round writes the completion marker").toBeTruthy();
 
     // Reproduce the no-progress-loop precondition: selective deepening re-derives
     // follow-up tasks onto the SAME run-id, so an already-answered task is
@@ -736,20 +710,14 @@ test("merge-and-ingest self-heals a stale completion marker by re-ingesting a st
     // next merge replays idempotently and strands that answer forever.
     const victim = tasks[0];
     const victimEntry = resultMap.entries.find((e) => e.task_id === victim.task_id);
-    assert.ok(victimEntry, "victim task was dispatched in round 1");
-    assert.ok(
-      await fileExists(victimEntry.result_path),
-      "victim's answer is on disk",
-    );
+    expect(victimEntry, "victim task was dispatched in round 1").toBeTruthy();
+    expect(await fileExists(victimEntry.result_path), "victim's answer is on disk").toBeTruthy();
     await writeFile(pendingPath, JSON.stringify([victim], null, 2));
     await writeFile(
       resultMapPath,
       JSON.stringify({ ...resultMap, entries: [] }, null, 2),
     );
-    assert.ok(
-      await fileExists(markerPath),
-      "the completion marker persists into the stuck state",
-    );
+    expect(await fileExists(markerPath), "the completion marker persists into the stuck state").toBeTruthy();
 
     const reheal = JSON.parse(
       (await runWrapper(
@@ -757,15 +725,8 @@ test("merge-and-ingest self-heals a stale completion marker by re-ingesting a st
         { cwd: root },
       )).stdout,
     );
-    assert.notEqual(
-      reheal.idempotent_replay,
-      true,
-      "a stale completion marker must re-process, not replay",
-    );
-    assert.ok(
-      reheal.accepted_count >= 1,
-      "the stranded on-disk result is recovered by task_id and ingested",
-    );
+    expect(reheal.idempotent_replay, "a stale completion marker must re-process, not replay").not.toBe(true);
+    expect(reheal.accepted_count >= 1, "the stranded on-disk result is recovered by task_id and ingested").toBeTruthy();
   });
 });
 
@@ -774,8 +735,8 @@ test("all packets dispatched in one round, merge ingests everything", async () =
     const dispatchStep = await startDispatchRun(root);
     const runId = dispatchStep.run_id;
     const artifactsDir = dispatchStep.artifacts_dir;
-    assert.ok(runId);
-    assert.ok(artifactsDir);
+    expect(runId).toBeTruthy();
+    expect(artifactsDir).toBeTruthy();
     await runWrapper(
       ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
       { cwd: root },
@@ -810,7 +771,7 @@ test("all packets dispatched in one round, merge ingests everything", async () =
     const active = JSON.parse(
       await readFile(join(artifactsDir, "active-dispatch.json"), "utf8"),
     );
-    assert.ok(active.packet_count >= 1);
+    expect(active.packet_count >= 1).toBeTruthy();
     await submitPlannedPackets();
 
     // Merge ingests everything, no tasks held back.
@@ -819,9 +780,9 @@ test("all packets dispatched in one round, merge ingests everything", async () =
       { cwd: root },
     );
     const summary = JSON.parse(mergeResult.stdout);
-    assert.equal(summary.rejected_count, 0);
-    assert.equal(summary.not_dispatched_count, 0, "no tasks held back");
-    assert.ok(summary.accepted_count >= 1);
+    expect(summary.rejected_count).toBe(0);
+    expect(summary.not_dispatched_count, "no tasks held back").toBe(0);
+    expect(summary.accepted_count >= 1).toBeTruthy();
   });
 });
 
@@ -861,7 +822,7 @@ test("submit-packet rejects task results outside the packet", async () => {
     const outsideTask = tasks.find(
       (task) => !entries.some((entry) => entry.task_id === task.task_id),
     );
-    assert.ok(outsideTask, "expected a task outside the selected packet");
+    expect(outsideTask, "expected a task outside the selected packet").toBeTruthy();
     const packetResults = [
       validAuditResultForTask(packetTasks[0]),
       validAuditResultForTask(outsideTask),
@@ -930,27 +891,24 @@ test("merge-and-ingest proceeds despite unexpected files in task-results/", asyn
       { cwd: root },
     );
     const mergeSummary = JSON.parse(merge.stdout);
-    assert.equal(mergeSummary.status, "completed");
-    assert.equal(mergeSummary.accepted_count, tasks.length);
-    assert.equal(mergeSummary.rejected_count, 0);
-    assert.equal(mergeSummary.spurious_file_count, 1);
-    assert.match(merge.stderr, /unexpected file.*packet_spurious_results\.json/i);
+    expect(mergeSummary.status).toBe("completed");
+    expect(mergeSummary.accepted_count).toBe(tasks.length);
+    expect(mergeSummary.rejected_count).toBe(0);
+    expect(mergeSummary.spurious_file_count).toBe(1);
+    expect(merge.stderr).toMatch(/unexpected file.*packet_spurious_results\.json/i);
   });
 });
 
 test("isCanonicalResultFilename separates canonical results from stray files", () => {
   // Canonical per-task result name: <stem>_<12-hex digest>.json (artifactNameForId).
-  assert.equal(isCanonicalResultFilename("unit_foo_0123456789ab.json"), true);
-  assert.equal(
-    isCanonicalResultFilename("lens_security_packet-1_a1b2c3d4e5f6.json"),
-    true,
-  );
+  expect(isCanonicalResultFilename("unit_foo_0123456789ab.json")).toBe(true);
+  expect(isCanonicalResultFilename("lens_security_packet-1_a1b2c3d4e5f6.json")).toBe(true);
   // Stray files a subagent might leave — no _<12hex> suffix, so a prior round's
   // canonical results never inflate spurious_file_count while these still do.
-  assert.equal(isCanonicalResultFilename("packet-23-results.json"), false);
-  assert.equal(isCanonicalResultFilename("packet_spurious_results.json"), false);
-  assert.equal(isCanonicalResultFilename("tmp-packet-87-result.json"), false);
-  assert.equal(isCanonicalResultFilename("audit_result_packet1.json"), false);
+  expect(isCanonicalResultFilename("packet-23-results.json")).toBe(false);
+  expect(isCanonicalResultFilename("packet_spurious_results.json")).toBe(false);
+  expect(isCanonicalResultFilename("tmp-packet-87-result.json")).toBe(false);
+  expect(isCanonicalResultFilename("audit_result_packet1.json")).toBe(false);
 });
 
 test("merge-and-ingest rejects swapped task result files", async () => {
@@ -959,8 +917,8 @@ test("merge-and-ingest rejects swapped task result files", async () => {
     const runId = dispatchStep.run_id;
     const artifactsDir = dispatchStep.artifacts_dir;
 
-    assert.ok(runId);
-    assert.ok(artifactsDir);
+    expect(runId).toBeTruthy();
+    expect(artifactsDir).toBeTruthy();
 
     await runWrapper(
       ["prepare-dispatch", "--run-id", runId, "--artifacts-dir", artifactsDir],
@@ -971,7 +929,7 @@ test("merge-and-ingest rejects swapped task result files", async () => {
     const tasks = JSON.parse(
       await readFile(join(runDir, "pending-audit-tasks.json"), "utf8"),
     );
-    assert.ok(tasks.length >= 2);
+    expect(tasks.length >= 2).toBeTruthy();
     const resultMap = JSON.parse(
       await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
     );
@@ -1031,7 +989,7 @@ test("wrapper build freshness ignores package metadata churn when dist is newer 
       tsconfigPath: tsconfigFile,
     });
 
-    assert.equal(shouldBuild, false);
+    expect(shouldBuild).toBe(false);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -1080,25 +1038,25 @@ test("assertWorkspaceInstalled flags missing or foreign audit-tools/shared", () 
 
 test("audit-code wrapper prints help text", async () => {
   const { stdout } = await runWrapper(["--help"]);
-  assert.ok(stdout.includes("Usage: node audit-code.mjs <command>"));
-  assert.ok(stdout.includes("Primary usage (conversation-first):"));
-  assert.ok(stdout.includes("next-step advances deterministic audit state"));
-  assert.ok(stdout.includes("advance-audit runs exactly one deterministic advance"));
-  assert.ok(stdout.includes("explain-task <task_id>"));
-  assert.ok(stdout.includes("ensure lazily bootstraps repo-local"));
-  assert.ok(stdout.includes("install bootstraps /audit-code"));
-  assert.ok(stdout.includes("install-host --host copilot"));
+  expect(stdout.includes("Usage: node audit-code.mjs <command>")).toBeTruthy();
+  expect(stdout.includes("Primary usage (conversation-first):")).toBeTruthy();
+  expect(stdout.includes("next-step advances deterministic audit state")).toBeTruthy();
+  expect(stdout.includes("advance-audit runs exactly one deterministic advance")).toBeTruthy();
+  expect(stdout.includes("explain-task <task_id>")).toBeTruthy();
+  expect(stdout.includes("ensure lazily bootstraps repo-local")).toBeTruthy();
+  expect(stdout.includes("install bootstraps /audit-code")).toBeTruthy();
+  expect(stdout.includes("install-host --host copilot")).toBeTruthy();
   // The batch loop and its flags are gone from the product surface.
-  assert.ok(!stdout.includes("--single-step"));
-  assert.ok(!stdout.includes("run-to-completion"));
+  expect(!stdout.includes("--single-step")).toBeTruthy();
+  expect(!stdout.includes("run-to-completion")).toBeTruthy();
 });
 
 test("audit-code wrapper bare invocation prints help and exits 0 without starting an audit", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-bare-help-"));
   try {
     const { stdout } = await runWrapper([], { cwd: tempDir });
-    assert.ok(stdout.includes("Usage: node audit-code.mjs <command>"));
-    assert.ok(stdout.includes("next-step advances deterministic audit state"));
+    expect(stdout.includes("Usage: node audit-code.mjs <command>")).toBeTruthy();
+    expect(stdout.includes("next-step advances deterministic audit state")).toBeTruthy();
     // The help path must not create audit state.
     await assert.rejects(() => stat(join(tempDir, ".audit-tools")));
   } finally {
@@ -1116,10 +1074,10 @@ test("audit-code wrapper rejects unknown commands with exit 1 and help text", as
       child.on("error", reject);
       child.on("exit", resolve);
     });
-    assert.equal(code, 1);
-    assert.match(stderrRef.value, /Unknown command: definitely-not-a-command/);
+    expect(code).toBe(1);
+    expect(stderrRef.value).toMatch(/Unknown command: definitely-not-a-command/);
     // Usage guidance accompanies the failure.
-    assert.ok(stdoutRef.value.includes("Usage: node audit-code.mjs <command>"));
+    expect(stdoutRef.value.includes("Usage: node audit-code.mjs <command>")).toBeTruthy();
     // The failure path must not create audit state.
     await assert.rejects(() => stat(join(tempDir, ".audit-tools")));
   } finally {
@@ -1129,21 +1087,18 @@ test("audit-code wrapper rejects unknown commands with exit 1 and help text", as
 
 test("audit-code wrapper prints package version", async () => {
   const { stdout } = await runWrapper(["--version"]);
-  assert.equal(stdout.trim(), packageVersion);
+  expect(stdout.trim()).toBe(packageVersion);
 });
 
 test("audit-code wrapper prints the canonical prompt asset path", async () => {
   const { stdout } = await runWrapper(["prompt-path"]);
   const promptPath = stdout.trim();
 
-  assert.ok(promptPath.length > 0);
-  assert.match(
-    promptPath.replaceAll("\\", "/"),
-    /skills\/audit-code\/audit-code\.prompt\.md$/,
-  );
+  expect(promptPath.length > 0).toBeTruthy();
+  expect(promptPath.replaceAll("\\", "/")).toMatch(/skills\/audit-code\/audit-code\.prompt\.md$/);
 
   const info = await stat(promptPath);
-  assert.equal(info.isFile(), true);
+  expect(info.isFile()).toBe(true);
 });
 
 test("slash prompt is a tiny next-step loader without dispatch branches", async () => {
@@ -1152,19 +1107,19 @@ test("slash prompt is a tiny next-step loader without dispatch branches", async 
     "utf8",
   );
 
-  assert.match(prompt, /audit-code ensure --quiet/);
-  assert.match(prompt, /audit-code next-step/);
-  assert.match(prompt, /follow only.*prompt_path/is);
-  assert.doesNotMatch(prompt, /prepare-dispatch/);
-  assert.doesNotMatch(prompt, /single-task fallback/i);
-  assert.doesNotMatch(prompt, /Step 2/i);
+  expect(prompt).toMatch(/audit-code ensure --quiet/);
+  expect(prompt).toMatch(/audit-code next-step/);
+  expect(prompt).toMatch(/follow only.*prompt_path/is);
+  expect(prompt).not.toMatch(/prepare-dispatch/);
+  expect(prompt).not.toMatch(/single-task fallback/i);
+  expect(prompt).not.toMatch(/Step 2/i);
 });
 
 test("audit-code ensure lazily bootstraps and refreshes repo-local host assets", async () => {
   await withTempRepo(async (root) => {
     const quiet = await runWrapper(["ensure", "--quiet"], { cwd: root });
-    assert.equal(quiet.stdout, "");
-    assert.equal(quiet.stderr, "");
+    expect(quiet.stdout).toBe("");
+    expect(quiet.stderr).toBe("");
 
     const installManifestPath = join(
       root,
@@ -1175,14 +1130,14 @@ test("audit-code ensure lazily bootstraps and refreshes repo-local host assets",
     const installManifest = JSON.parse(
       await readFile(installManifestPath, "utf8"),
     );
-    assert.equal(installManifest.contract_version, "audit-code-install/v1alpha1");
-    assert.equal(installManifest.hosts.length, 4);
+    expect(installManifest.contract_version).toBe("audit-code-install/v1alpha1");
+    expect(installManifest.hosts.length).toBe(4);
 
     const skipped = JSON.parse(
       (await runWrapper(["ensure"], { cwd: root })).stdout,
     );
-    assert.equal(skipped.status, "ok");
-    assert.equal(skipped.action, "skipped");
+    expect(skipped.status).toBe("ok");
+    expect(skipped.action).toBe("skipped");
 
     const installedPromptPath =
       installManifest.asset_paths.installedPromptPath;
@@ -1191,16 +1146,16 @@ test("audit-code ensure lazily bootstraps and refreshes repo-local host assets",
     const refreshed = JSON.parse(
       (await runWrapper(["ensure"], { cwd: root })).stdout,
     );
-    assert.equal(refreshed.status, "ok");
-    assert.equal(refreshed.action, "installed");
-    assert.equal(refreshed.reason, "stale_installed_prompt");
-    assert.equal(refreshed.host_count, 4);
+    expect(refreshed.status).toBe("ok");
+    expect(refreshed.action).toBe("installed");
+    expect(refreshed.reason).toBe("stale_installed_prompt");
+    expect(refreshed.host_count).toBe(4);
 
     const sourcePrompt = await readFile(
       join(repoRoot, "skills", "audit-code", "audit-code.prompt.md"),
       "utf8",
     );
-    assert.equal(await readFile(installedPromptPath, "utf8"), sourcePrompt);
+    expect(await readFile(installedPromptPath, "utf8")).toBe(sourcePrompt);
 
   });
 });
@@ -1229,9 +1184,9 @@ test("audit-code ensure refreshes stale OpenCode audit permissions", async () =>
     const refreshed = JSON.parse(
       (await runWrapper(["ensure"], { cwd: root })).stdout,
     );
-    assert.equal(refreshed.status, "ok");
-    assert.equal(refreshed.action, "installed");
-    assert.equal(refreshed.reason, "stale_host_asset:opencode:permissions");
+    expect(refreshed.status).toBe("ok");
+    expect(refreshed.action).toBe("installed");
+    expect(refreshed.reason).toBe("stale_host_asset:opencode:permissions");
 
     const repairedConfig = JSON.parse(await readFile(opencodeConfigPath, "utf8"));
     assertOpenCodeAuditPermissions(repairedConfig);
@@ -1243,59 +1198,42 @@ const repoLocalHostCases = [
     name: "Codex",
     host: "codex",
     async assertHost(root, parsed, paths) {
-      assert.equal(hostGuidance(parsed, "codex").primary_path, paths.agentsPath);
-      assert.match(
-        await readFile(paths.agentsPath, "utf8"),
-        /When the user enters `\/audit-code`/,
-      );
-      assert.match(await readFile(paths.installGuidePath, "utf8"), /## Codex/);
+      expect(hostGuidance(parsed, "codex").primary_path).toBe(paths.agentsPath);
+      expect(await readFile(paths.agentsPath, "utf8")).toMatch(/When the user enters `\/audit-code`/);
+      expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/## Codex/);
     },
   },
   {
     name: "VS Code",
     host: "vscode",
     async assertHost(root, parsed, paths) {
-      assert.equal(hostGuidance(parsed, "vscode").primary_path, paths.vscodePromptPath);
-      assert.match(
-        await readFile(paths.vscodePromptPath, "utf8"),
-        /^---\nname: audit-code\ndescription: Autonomous local loop code auditing\nagent: auditor/m,
-      );
-      assert.match(await readFile(paths.vscodePromptPath, "utf8"), /\/audit-code/);
+      expect(hostGuidance(parsed, "vscode").primary_path).toBe(paths.vscodePromptPath);
+      expect(await readFile(paths.vscodePromptPath, "utf8")).toMatch(/^---\nname: audit-code\ndescription: Autonomous local loop code auditing\nagent: auditor/m);
+      expect(await readFile(paths.vscodePromptPath, "utf8")).toMatch(/\/audit-code/);
       // The VS Code agent file now derives from the one canonical loader body
       // (E1 single-source), so it carries the next-step capability handshake
       // including --host-models rather than bespoke abbreviated prose.
       const vscodeAgent = await readFile(paths.vscodeAgentPath, "utf8");
-      assert.match(vscodeAgent, /# Audit Code Agent/);
-      assert.match(vscodeAgent, /--host-models/);
-      assert.match(vscodeAgent, /node audit-code\.mjs/);
+      expect(vscodeAgent).toMatch(/# Audit Code Agent/);
+      expect(vscodeAgent).toMatch(/--host-models/);
+      expect(vscodeAgent).toMatch(/node audit-code\.mjs/);
       // The MCP surface was removed: install no longer writes .vscode/mcp.json.
       await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));
-      assert.match(await readFile(paths.installGuidePath, "utf8"), /## VS Code/);
+      expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/## VS Code/);
     },
   },
   {
     name: "OpenCode",
     host: "opencode",
     async assertHost(root, parsed, paths) {
-      assert.equal(
-        hostGuidance(parsed, "opencode").primary_path,
-        paths.opencodeConfigPath,
-      );
+      expect(hostGuidance(parsed, "opencode").primary_path).toBe(paths.opencodeConfigPath);
       const opencodeConfig = JSON.parse(
         await readFile(paths.opencodeConfigPath, "utf8"),
       );
-      assert.equal(
-        opencodeConfig.command?.["audit-code"],
-        undefined,
-        "project opencode.json must not define the global /audit-code command",
-      );
-      assert.equal(
-        opencodeConfig.mcp?.auditor,
-        undefined,
-        "project opencode.json must not define mcp.auditor (global config owns it)",
-      );
+      expect(opencodeConfig.command?.["audit-code"], "project opencode.json must not define the global /audit-code command").toBe(undefined);
+      expect(opencodeConfig.mcp?.auditor, "project opencode.json must not define mcp.auditor (global config owns it)").toBe(undefined);
       assertOpenCodeAuditPermissions(opencodeConfig);
-      assert.match(await readFile(paths.installGuidePath, "utf8"), /## OpenCode/);
+      expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/## OpenCode/);
     },
   },
   {
@@ -1303,12 +1241,10 @@ const repoLocalHostCases = [
     host: "antigravity",
     async assertHost(root, parsed, paths) {
       const guidance = hostGuidance(parsed, "antigravity");
-      assert.equal(guidance.primary_path, paths.antigravitySkillPath);
-      assert.ok(guidance.supporting_paths.includes(paths.geminiCommandPath));
-      assert.ok(
-        guidance.supporting_paths.includes(paths.antigravityPlanningGuidePath),
-      );
-      assert.match(await readFile(paths.installGuidePath, "utf8"), /## Antigravity/);
+      expect(guidance.primary_path).toBe(paths.antigravitySkillPath);
+      expect(guidance.supporting_paths.includes(paths.geminiCommandPath)).toBeTruthy();
+      expect(guidance.supporting_paths.includes(paths.antigravityPlanningGuidePath)).toBeTruthy();
+      expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/## Antigravity/);
     },
   },
 ];
@@ -1341,12 +1277,9 @@ test("repo-local host install writes shared manifest and cleanup behavior", asyn
     );
 
     assertSharedHostInstallResponse(parsed, root, paths);
-    assert.equal(installedPromptContent, promptContent);
-    assert.equal(
-      (await readFile(join(root, ".audit-code", "install", "SKILL.md"), "utf8"))
-        .replace(/\r\n/g, "\n"),
-      skillContent.replace(/\r\n/g, "\n"),
-    );
+    expect(installedPromptContent).toBe(promptContent);
+    expect((await readFile(join(root, ".audit-code", "install", "SKILL.md"), "utf8"))
+        .replace(/\r\n/g, "\n")).toBe(skillContent.replace(/\r\n/g, "\n"));
     // The MCP surface was removed: install must not write the MCP server
     // launcher or the Claude Desktop bundle.
     await assert.rejects(() =>
@@ -1359,24 +1292,12 @@ test("repo-local host install writes shared manifest and cleanup behavior", asyn
     await assert.rejects(() => stat(paths.legacyOpenCodeCommandPath));
     await assert.rejects(() => stat(paths.legacyCodexSkillPath));
     await assert.rejects(() => stat(paths.legacyCodexPromptPath));
-    assert.equal(installManifest.contract_version, "audit-code-install/v1alpha1");
-    assert.equal(
-      installManifest.source_prompt_path,
-      join(repoRoot, "skills", "audit-code", "audit-code.prompt.md"),
-    );
-    assert.equal(
-      installManifest.source_skill_path,
-      join(repoRoot, "skills", "audit-code", "SKILL.md"),
-    );
-    assert.equal(installManifest.hosts.length, 4);
-    assert.deepEqual(
-      installManifest.hosts.map((entry) => entry.host),
-      parsed.host_guidance.map((entry) => entry.host),
-    );
-    assert.match(
-      await readFile(paths.installGuidePath, "utf8"),
-      /refresh every generated host surface from the shared prompt and skill assets together/,
-    );
+    expect(installManifest.contract_version).toBe("audit-code-install/v1alpha1");
+    expect(installManifest.source_prompt_path).toBe(join(repoRoot, "skills", "audit-code", "audit-code.prompt.md"));
+    expect(installManifest.source_skill_path).toBe(join(repoRoot, "skills", "audit-code", "SKILL.md"));
+    expect(installManifest.hosts.length).toBe(4);
+    expect(installManifest.hosts.map((entry) => entry.host)).toEqual(parsed.host_guidance.map((entry) => entry.host));
+    expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/refresh every generated host surface from the shared prompt and skill assets together/);
   });
 });
 
@@ -1388,15 +1309,12 @@ test("verify-install summarizes repo-local host integration status", async () =>
       { cwd: root },
     );
 
-    assert.equal(verifiedInstall.status, "ok");
-    assert.equal(verifiedInstall.issue_count, 0);
-    assert.equal(verifiedInstall.hosts.length, 4);
-    assert.deepEqual(
-      verifiedInstall.hosts.map((entry) => entry.host),
-      parsed.host_guidance.map((entry) => entry.host),
-    );
+    expect(verifiedInstall.status).toBe("ok");
+    expect(verifiedInstall.issue_count).toBe(0);
+    expect(verifiedInstall.hosts.length).toBe(4);
+    expect(verifiedInstall.hosts.map((entry) => entry.host)).toEqual(parsed.host_guidance.map((entry) => entry.host));
     for (const host of verifiedInstall.hosts) {
-      assert.equal(host.status, "ok");
+      expect(host.status).toBe("ok");
     }
   });
 });
@@ -1427,18 +1345,12 @@ test("audit-code install removes legacy generated repo-local Codex skill copies"
       (await runWrapper(["install", "--host", "codex"], { cwd: root })).stdout,
     );
 
-    assert.equal(
-      parsed.files.some(
+    expect(parsed.files.some(
         (file) => file.path === legacySkillPath && file.mode === "removed",
-      ),
-      true,
-    );
-    assert.equal(
-      parsed.files.some(
+      )).toBe(true);
+    expect(parsed.files.some(
         (file) => file.path === legacyPromptPath && file.mode === "removed",
-      ),
-      true,
-    );
+      )).toBe(true);
     await assert.rejects(() => stat(legacySkillPath));
     await assert.rejects(() => stat(legacyPromptPath));
   });
@@ -1524,37 +1436,34 @@ test("audit-code installer merges existing host config instead of clobbering it"
     const opencodeConfig = JSON.parse(
       await readFile(join(root, "opencode.json"), "utf8"),
     );
-    assert.equal(opencodeConfig.customSetting, true);
-    assert.equal(opencodeConfig.permission.webfetch, "deny");
-    assert.equal(opencodeConfig.permission.bash["npm test*"], "allow");
-    assert.equal(opencodeConfig.permission.edit["docs/**"], "allow");
-    assert.equal(opencodeConfig.command["audit-code"], undefined);
-    assert.equal(opencodeConfig.command.keepMe.template, "custom command");
+    expect(opencodeConfig.customSetting).toBe(true);
+    expect(opencodeConfig.permission.webfetch).toBe("deny");
+    expect(opencodeConfig.permission.bash["npm test*"]).toBe("allow");
+    expect(opencodeConfig.permission.edit["docs/**"]).toBe("allow");
+    expect(opencodeConfig.command["audit-code"]).toBe(undefined);
+    expect(opencodeConfig.command.keepMe.template).toBe("custom command");
     assertOpenCodeAuditPermissions(opencodeConfig);
-    assert.deepEqual(opencodeConfig.mcp.existing.command, [
+    expect(opencodeConfig.mcp.existing.command).toEqual([
       "node",
       "existing-server.mjs",
     ]);
-    assert.equal(opencodeConfig.mcp.auditor, undefined, "project config must not define mcp.auditor after install");
-    assert.equal(opencodeConfig.agent.existingAgent.description, "Keep me");
-    assert.equal(
-      opencodeConfig.agent.auditor.description,
-      "Read-heavy audit orchestration agent for the /audit-code workflow.",
-    );
-    assert.equal(opencodeConfig.agent.auditor.customAgentSetting, true);
-    assert.equal(opencodeConfig.agent.auditor.permission.bash["git log*"], "allow");
-    assert.equal(opencodeConfig.agent.auditor.permission.edit["docs/notes.md"], "allow");
+    expect(opencodeConfig.mcp.auditor, "project config must not define mcp.auditor after install").toBe(undefined);
+    expect(opencodeConfig.agent.existingAgent.description).toBe("Keep me");
+    expect(opencodeConfig.agent.auditor.description).toBe("Read-heavy audit orchestration agent for the /audit-code workflow.");
+    expect(opencodeConfig.agent.auditor.customAgentSetting).toBe(true);
+    expect(opencodeConfig.agent.auditor.permission.bash["git log*"]).toBe("allow");
+    expect(opencodeConfig.agent.auditor.permission.edit["docs/notes.md"]).toBe("allow");
 
     // The MCP surface was removed: install no longer touches .vscode/mcp.json,
     // so a pre-existing file is left untouched and no auditor server is injected.
     const vscodeConfig = JSON.parse(
       await readFile(join(root, ".vscode", "mcp.json"), "utf8"),
     );
-    assert.deepEqual(vscodeConfig.servers.existing.args, [
+    expect(vscodeConfig.servers.existing.args).toEqual([
       "existing-server.mjs",
     ]);
-    assert.equal(vscodeConfig.servers.auditor, undefined);
-    assert.deepEqual(vscodeConfig.inputs, []);
+    expect(vscodeConfig.servers.auditor).toBe(undefined);
+    expect(vscodeConfig.inputs).toEqual([]);
   });
 });
 
@@ -1565,8 +1474,8 @@ test("audit-code wrapper updates managed compatibility blocks without clobbering
 
     await runWrapper(["install", "--host", "opencode"], { cwd: root });
     const firstPass = await readFile(agentsPath, "utf8");
-    assert.match(firstPass, /Existing Team Instructions/);
-    assert.match(firstPass, /audit-code:begin/);
+    expect(firstPass).toMatch(/Existing Team Instructions/);
+    expect(firstPass).toMatch(/audit-code:begin/);
 
     await writeFile(
       agentsPath,
@@ -1578,15 +1487,9 @@ test("audit-code wrapper updates managed compatibility blocks without clobbering
 
     await runWrapper(["install", "--host", "opencode"], { cwd: root });
     const secondPass = await readFile(agentsPath, "utf8");
-    assert.match(secondPass, /Existing Team Instructions/);
-    assert.equal(
-      (secondPass.match(/audit-code:begin/g) ?? []).length,
-      1,
-    );
-    assert.match(
-      secondPass,
-      /When the user enters `\/audit-code`, treat it as this repository's autonomous audit workflow\./,
-    );
+    expect(secondPass).toMatch(/Existing Team Instructions/);
+    expect((secondPass.match(/audit-code:begin/g) ?? []).length).toBe(1);
+    expect(secondPass).toMatch(/When the user enters `\/audit-code`, treat it as this repository's autonomous audit workflow\./);
   });
 });
 
@@ -1598,28 +1501,22 @@ test("audit-code wrapper keeps the Copilot-specific installer as a compatibility
     );
     const parsed = JSON.parse(stdout);
 
-    assert.equal(parsed.host, "copilot");
-    assert.equal(
-      parsed.slash_command_surfaces.vscode_prompt,
-      join(root, ".github", "prompts", "audit-code.prompt.md"),
-    );
-    assert.equal(
-      parsed.instruction_surfaces.copilot_instructions,
-      join(root, ".github", "copilot-instructions.md"),
-    );
-    assert.equal(parsed.instruction_surfaces.agents, null);
-    assert.equal(parsed.slash_command_surfaces.opencode_config, null);
-    assert.equal(parsed.host_guidance.length, 1);
-    assert.equal(parsed.host_guidance[0].host, "vscode");
+    expect(parsed.host).toBe("copilot");
+    expect(parsed.slash_command_surfaces.vscode_prompt).toBe(join(root, ".github", "prompts", "audit-code.prompt.md"));
+    expect(parsed.instruction_surfaces.copilot_instructions).toBe(join(root, ".github", "copilot-instructions.md"));
+    expect(parsed.instruction_surfaces.agents).toBe(null);
+    expect(parsed.slash_command_surfaces.opencode_config).toBe(null);
+    expect(parsed.host_guidance.length).toBe(1);
+    expect(parsed.host_guidance[0].host).toBe("vscode");
 
     const verified = JSON.parse(
       (await runWrapper(["verify-install", "--host", "copilot"], { cwd: root }))
         .stdout,
     );
-    assert.equal(verified.status, "ok");
-    assert.equal(verified.issue_count, 0);
-    assert.equal(verified.hosts.length, 1);
-    assert.equal(verified.hosts[0].host, "vscode");
+    expect(verified.status).toBe("ok");
+    expect(verified.issue_count).toBe(0);
+    expect(verified.hosts.length).toBe(1);
+    expect(verified.hosts[0].host).toBe("vscode");
   });
 });
 
@@ -1659,8 +1556,8 @@ test("build helpers are isolated from install helpers", async () => {
       sourceRootPath: sourceDir,
       tsconfigPath: tsconfigFile,
     });
-    assert.equal(resultDirect, false);
-    assert.equal(resultDirect, resultViaLib);
+    expect(resultDirect).toBe(false);
+    expect(resultDirect).toBe(resultViaLib);
 
     // assertWorkspaceInstalled direct import behaves identically to the lib re-export.
     const checkoutRoot = join(tempDir, "checkout");
@@ -1679,10 +1576,10 @@ test("build helpers are isolated from install helpers", async () => {
   // INSTALL_HOST_DEFINITIONS, INSTALL_HOST_ORDER, getInstallHostKeys,
   // getInstallProfile are importable directly from install-hosts and match the
   // underscore-aliased re-exports from wrapper-lib.
-  assert.deepEqual(INSTALL_HOST_ORDER, _INSTALL_HOST_ORDER);
-  assert.deepEqual(INSTALL_HOST_DEFINITIONS, _INSTALL_HOST_DEFINITIONS);
-  assert.deepEqual(getInstallHostKeys("all"), _getInstallHostKeys("all"));
-  assert.deepEqual(getInstallProfile("opencode"), _getInstallProfile("opencode"));
+  expect(INSTALL_HOST_ORDER).toEqual(_INSTALL_HOST_ORDER);
+  expect(INSTALL_HOST_DEFINITIONS).toEqual(_INSTALL_HOST_DEFINITIONS);
+  expect(getInstallHostKeys("all")).toEqual(_getInstallHostKeys("all"));
+  expect(getInstallProfile("opencode")).toEqual(_getInstallProfile("opencode"));
 });
 
 test("OpenCode permission helpers are importable from the dedicated module", () => {
@@ -1706,76 +1603,62 @@ test("OpenCode permission helpers are importable from the dedicated module", () 
   // buildMergedOpenCodeProjectConfig with an empty existing config preserves
   // the generated values for read/glob/grep and sets external_directory allow.
   const builtFromEmpty = buildMergedOpenCodeProjectConfig({}, "/tmp/repo");
-  assert.equal(builtFromEmpty.permission?.read, "allow");
-  assert.equal(builtFromEmpty.permission?.glob, "allow");
-  assert.equal(builtFromEmpty.permission?.grep, "allow");
-  assert.equal(builtFromEmpty.permission?.external_directory?.["*"], "allow");
-  assert.equal(builtFromEmpty.agent?.auditor?.permission?.read, "allow");
+  expect(builtFromEmpty.permission?.read).toBe("allow");
+  expect(builtFromEmpty.permission?.glob).toBe("allow");
+  expect(builtFromEmpty.permission?.grep).toBe("allow");
+  expect(builtFromEmpty.permission?.external_directory?.["*"]).toBe("allow");
+  expect(builtFromEmpty.agent?.auditor?.permission?.read).toBe("allow");
 
   // buildMergedOpenCodeProjectConfig produces a config with the required
   // permission structure even when called with an empty existing config.
   const built = buildMergedOpenCodeProjectConfig({}, "/tmp/repo");
-  assert.equal(built.permission?.read, "allow");
-  assert.equal(built.permission?.glob, "allow");
-  assert.equal(built.permission?.grep, "allow");
-  assert.equal(built.permission?.external_directory?.["*"], "allow");
-  assert.equal(built.agent?.auditor?.permission?.read, "allow");
+  expect(built.permission?.read).toBe("allow");
+  expect(built.permission?.glob).toBe("allow");
+  expect(built.permission?.grep).toBe("allow");
+  expect(built.permission?.external_directory?.["*"]).toBe("allow");
+  expect(built.agent?.auditor?.permission?.read).toBe("allow");
 });
 
 test("OPENCODE_AUDIT_BASH_PERMISSION includes Select-String", () => {
-  assert.equal(
-    OPENCODE_AUDIT_BASH_PERMISSION["Select-String *"],
-    "allow",
-    "OPENCODE_AUDIT_BASH_PERMISSION must include 'Select-String *': 'allow' as the source of truth",
-  );
+  expect(OPENCODE_AUDIT_BASH_PERMISSION["Select-String *"], "OPENCODE_AUDIT_BASH_PERMISSION must include 'Select-String *': 'allow' as the source of truth").toBe("allow");
 });
 
 test("renderOpenCodePermissionConfig bash block includes Select-String", () => {
   const config = renderOpenCodePermissionConfig();
-  assert.equal(
-    config.bash["Select-String *"],
-    "allow",
-    "renderOpenCodePermissionConfig() must return a bash block containing 'Select-String *': 'allow'",
-  );
+  expect(config.bash["Select-String *"], "renderOpenCodePermissionConfig() must return a bash block containing 'Select-String *': 'allow'").toBe("allow");
 });
 
 test("buildMergedOpenCodeProjectConfig preserves '*': 'allow' on external_directory even when existing config has a more restrictive value", () => {
   // User had '*': 'ask' on external_directory — managed rule must override to 'allow'
   const askExisting = { permission: { external_directory: { "*": "ask" } } };
   const mergedAsk = buildMergedOpenCodeProjectConfig(askExisting, "/tmp/repo");
-  assert.equal(mergedAsk.permission.external_directory["*"], "allow",
-    "managed rule must override user '*': 'ask' to 'allow' on external_directory");
+  expect(mergedAsk.permission.external_directory["*"], "managed rule must override user '*': 'ask' to 'allow' on external_directory").toBe("allow");
 
   // User had '*': 'deny' on external_directory — managed rule must override to 'allow'
   const denyExisting = { permission: { external_directory: { "*": "deny" } } };
   const mergedDeny = buildMergedOpenCodeProjectConfig(denyExisting, "/tmp/repo");
-  assert.equal(mergedDeny.permission.external_directory["*"], "allow",
-    "managed rule must override user '*': 'deny' to 'allow' on external_directory");
+  expect(mergedDeny.permission.external_directory["*"], "managed rule must override user '*': 'deny' to 'allow' on external_directory").toBe("allow");
 
   // Undefined existing external_directory — managed rule must still produce 'allow'
   const undefinedExisting = { permission: {} };
   const mergedUndefined = buildMergedOpenCodeProjectConfig(undefinedExisting, "/tmp/repo");
-  assert.equal(mergedUndefined.permission.external_directory["*"], "allow",
-    "managed rule must produce 'allow' even when existing external_directory is undefined");
+  expect(mergedUndefined.permission.external_directory["*"], "managed rule must produce 'allow' even when existing external_directory is undefined").toBe("allow");
 });
 
 test("buildMergedOpenCodeProjectConfig does not let user external_directory override the managed allow rule (parity with edit/bash behavior)", () => {
   // A user-owned external_directory object with no '*' key still gets '*': 'allow'
   const noStarExisting = { permission: { external_directory: { "some/path/**": "ask" } } };
   const mergedNoStar = buildMergedOpenCodeProjectConfig(noStarExisting, "/tmp/repo");
-  assert.equal(mergedNoStar.permission.external_directory["*"], "allow",
-    "managed rule must add '*': 'allow' even when existing object has no '*' key");
+  expect(mergedNoStar.permission.external_directory["*"], "managed rule must add '*': 'allow' even when existing object has no '*' key").toBe("allow");
 
   // Parity with edit: a user '*': 'deny' on edit is preserved for '*' key (managed rules use withoutOpenCodeWildcard for edit)
   const editDenyExisting = { permission: { edit: { "*": "deny" } } };
   const mergedEditDeny = buildMergedOpenCodeProjectConfig(editDenyExisting, "/tmp/repo");
   // The '*' key on edit comes from the generated permission (OPENCODE_AUDIT_EDIT_PERMISSION has '*': 'ask')
   // mergeOpenCodeAgentPermissionRule: existing '*' wins over generated '*', but managed rules (without wildcard) override specifics
-  assert.equal(mergedEditDeny.permission.edit["*"], "deny",
-    "user '*': 'deny' on edit is preserved (agent-scope merge keeps existing wildcard)");
+  expect(mergedEditDeny.permission.edit["*"], "user '*': 'deny' on edit is preserved (agent-scope merge keeps existing wildcard)").toBe("deny");
   // Same behavior must hold for external_directory: managed OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION includes '*'
   const extDenyExisting = { permission: { external_directory: { "*": "deny" } } };
   const mergedExtDeny = buildMergedOpenCodeProjectConfig(extDenyExisting, "/tmp/repo");
-  assert.equal(mergedExtDeny.permission.external_directory["*"], "allow",
-    "OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION must override user '*': 'deny' on external_directory");
+  expect(mergedExtDeny.permission.external_directory["*"], "OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION must override user '*': 'deny' on external_directory").toBe("allow");
 });

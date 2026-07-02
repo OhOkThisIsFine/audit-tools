@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import {
   mkdtemp,
@@ -77,12 +77,12 @@ test("next-step emits present_report for a complete audit", async () => {
 
     const step = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
 
-    assert.equal(step.contract_version, "audit-code-step/v1alpha1");
-    assert.equal(step.step_kind, "present_report");
-    assert.equal(step.status, "complete");
-    assert.match(step.artifact_paths.final_report, /audit-report\.md$/);
-    assert.equal((await stat(join(root, ".audit-tools", "audit-report.md"))).isFile(), true);
-    assert.match(await readFile(step.prompt_path, "utf8"), /present report/i);
+    expect(step.contract_version).toBe("audit-code-step/v1alpha1");
+    expect(step.step_kind).toBe("present_report");
+    expect(step.status).toBe("complete");
+    expect(step.artifact_paths.final_report).toMatch(/audit-report\.md$/);
+    expect((await stat(join(root, ".audit-tools", "audit-report.md"))).isFile()).toBe(true);
+    expect(await readFile(step.prompt_path, "utf8")).toMatch(/present report/i);
   });
 });
 
@@ -215,11 +215,11 @@ test("next-step proposes an analyzer install, then proceeds after a skip decisio
     const proposed = JSON.parse(
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
-    assert.equal(proposed.step_kind, "analyzer_install");
-    assert.match(proposed.artifact_paths.analyzer_decisions, /analyzer-decisions\.json$/);
+    expect(proposed.step_kind).toBe("analyzer_install");
+    expect(proposed.artifact_paths.analyzer_decisions).toMatch(/analyzer-decisions\.json$/);
     const prompt = await readFile(proposed.prompt_path, "utf8");
-    assert.match(prompt, /typescript/);
-    assert.match(prompt, /ephemeral/);
+    expect(prompt).toMatch(/typescript/);
+    expect(prompt).toMatch(/ephemeral/);
 
     // Host declines the install.
     await mkdir(join(root, ".audit-tools/audit", "incoming"), { recursive: true });
@@ -231,13 +231,13 @@ test("next-step proposes an analyzer install, then proceeds after a skip decisio
     const next = JSON.parse(
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,
     );
-    assert.notEqual(next.step_kind, "analyzer_install");
+    expect(next.step_kind).not.toBe("analyzer_install");
 
     // The decision is persisted durably to session config.
     const config = JSON.parse(
       await readFile(join(root, ".audit-tools/audit", "session-config.json"), "utf8"),
     );
-    assert.equal(config.analyzers.typescript, "skip");
+    expect(config.analyzers.typescript).toBe("skip");
   });
 });
 
@@ -249,11 +249,11 @@ test("next-step defaults to dispatch_review when host dispatch capability is not
     );
     const prompt = await readFile(step.prompt_path, "utf8");
 
-    assert.equal(step.step_kind, "dispatch_review");
-    assert.equal(currentStep.step_kind, "dispatch_review");
-    assert.ok(step.run_id);
-    assert.match(prompt, /merge-and-ingest/);
-    assert.doesNotMatch(prompt, /single-task fallback/i);
+    expect(step.step_kind).toBe("dispatch_review");
+    expect(currentStep.step_kind).toBe("dispatch_review");
+    expect(step.run_id).toBeTruthy();
+    expect(prompt).toMatch(/merge-and-ingest/);
+    expect(prompt).not.toMatch(/single-task fallback/i);
   });
 });
 
@@ -275,8 +275,8 @@ test("next-step reads host_can_dispatch_subagents from session-config", async ()
 
     const step = await advancePastDesignReview(root);
 
-    assert.equal(step.step_kind, "dispatch_review");
-    assert.match(step.artifact_paths.dispatch_plan, /dispatch-plan\.json$/);
+    expect(step.step_kind).toBe("dispatch_review");
+    expect(step.artifact_paths.dispatch_plan).toMatch(/dispatch-plan\.json$/);
   });
 });
 
@@ -288,7 +288,7 @@ test("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or session value
       { env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" } },
     );
 
-    assert.equal(step.step_kind, "dispatch_review");
+    expect(step.step_kind).toBe("dispatch_review");
   });
 });
 
@@ -301,13 +301,13 @@ test("next-step true emits dispatch_review and prepares dispatch artifacts", asy
     const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
     const prompt = await readFile(step.prompt_path, "utf8");
 
-    assert.equal(step.step_kind, "dispatch_review");
-    assert.equal(Array.isArray(plan), true);
-    assert.ok(plan.length > 0);
-    assert.match(prompt, /dispatch-quota\.json/);
-    assert.match(prompt, /max_concurrent_agents/);
-    assert.match(prompt, /merge-and-ingest/);
-    assert.doesNotMatch(prompt, /single-task fallback/i);
+    expect(step.step_kind).toBe("dispatch_review");
+    expect(Array.isArray(plan)).toBe(true);
+    expect(plan.length > 0).toBeTruthy();
+    expect(prompt).toMatch(/dispatch-quota\.json/);
+    expect(prompt).toMatch(/max_concurrent_agents/);
+    expect(prompt).toMatch(/merge-and-ingest/);
+    expect(prompt).not.toMatch(/single-task fallback/i);
   });
 });
 
@@ -319,12 +319,9 @@ test("next-step false emits single_task_fallback and does not prepare dispatch",
     );
     const prompt = await readFile(step.prompt_path, "utf8");
 
-    assert.equal(step.step_kind, "single_task_fallback");
-    assert.match(prompt, /exactly one AuditResult/i);
-    assert.match(
-      await readFile(step.artifact_paths.single_task_prompt, "utf8"),
-      /single-task fallback/i,
-    );
+    expect(step.step_kind).toBe("single_task_fallback");
+    expect(prompt).toMatch(/exactly one AuditResult/i);
+    expect(await readFile(step.artifact_paths.single_task_prompt, "utf8")).toMatch(/single-task fallback/i);
     await assert.rejects(() =>
       stat(join(root, ".audit-tools/audit", "runs", step.run_id, "dispatch-plan.json")),
     );
@@ -394,8 +391,8 @@ test("advancePastDesignReview throws on unknown pause kind", async () => {
     await assert.rejects(
       () => helperUnderTest(),
       (err) => {
-        assert.match(err.message, /unexpected pause kind/);
-        assert.match(err.message, /unknown_future_pause/);
+        expect(err.message).toMatch(/unexpected pause kind/);
+        expect(err.message).toMatch(/unknown_future_pause/);
         return true;
       },
     );

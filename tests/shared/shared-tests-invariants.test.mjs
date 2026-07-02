@@ -6,8 +6,7 @@
  * contracts: coverage completeness, framework consistency, and stable
  * export shape of the shared public API.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,34 +36,25 @@ test("INV-shared-tests-01: all files in tests/ with .test.mjs extension are at t
     const hidden = subEntries.filter(
       (e) => e.isFile() && e.name.endsWith(".test.mjs"),
     );
-    assert.equal(
-      hidden.length,
-      0,
-      `Found ${hidden.length} .test.mjs file(s) in subdirectory '${dir.name}' — these are NOT covered by the package.json test glob (tests/*.test.mjs). Move them to the top-level tests/ directory.`,
-    );
+    expect(hidden.length, `Found ${hidden.length} .test.mjs file(s) in subdirectory '${dir.name}' — these are NOT covered by the package.json test glob (tests/*.test.mjs). Move them to the top-level tests/ directory.`).toBe(0);
   }
 
   // At least one test file must be present (sanity).
-  assert.ok(testFiles.length > 0, "tests/ must contain at least one .test.mjs file");
+  expect(testFiles.length > 0, "tests/ must contain at least one .test.mjs file").toBeTruthy();
 });
 
-test("INV-shared-tests-01: package.json test pipeline runs the shared node:test glob", () => {
-  const pkgPath = resolve(TESTS_DIR, "../../package.json");
-  assert.ok(existsSync(pkgPath), "root package.json must exist two levels up from tests/shared");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-  // Single-package layout: `test` chains the node:test subsystems + vitest. The
-  // shared suite is picked up by the `test:node` script's `tests/shared/*.test.mjs` glob.
-  const scripts = pkg.scripts ?? {};
-  const pipeline = `${scripts.test ?? ""} ${scripts["test:node"] ?? ""}`;
-  assert.ok(
-    pipeline.includes("tests/shared/*.test.mjs"),
-    `package.json test pipeline must run the glob 'tests/shared/*.test.mjs'. Got test="${scripts.test}", test:node="${scripts["test:node"]}" — INV-shared-tests-01`,
-  );
+test("INV-shared-tests-01: vitest config picks up the shared .test.mjs glob", () => {
+  const configPath = resolve(TESTS_DIR, "../../vitest.config.ts");
+  expect(existsSync(configPath), "vitest.config.ts must exist at the repo root").toBeTruthy();
+  const config = readFileSync(configPath, "utf8");
+  // Single runner: vitest picks up all three areas. The shared suite is included
+  // via the `tests/shared/**/*.test.mjs` glob (node:test was retired).
+  expect(config.includes("tests/shared/**/*.test.mjs"), `vitest.config.ts must include the glob 'tests/shared/**/*.test.mjs' — INV-shared-tests-01`).toBeTruthy();
 });
 
-// ── INV-shared-tests-02: Test files use consistent framework (node:test + node:assert/strict) ─
+// ── INV-shared-tests-02: Test files use the single canonical runner (vitest) ──
 
-test("INV-shared-tests-02: every .test.mjs file imports node:test or node:assert/strict", () => {
+test("INV-shared-tests-02: every .test.mjs file imports vitest", () => {
   const testFiles = readdirSync(TESTS_DIR).filter((f) =>
     f.endsWith(".test.mjs"),
   );
@@ -72,25 +62,21 @@ test("INV-shared-tests-02: every .test.mjs file imports node:test or node:assert
   const violations = [];
   for (const file of testFiles) {
     const content = readFileSync(resolve(TESTS_DIR, file), "utf8");
-    // Must reference node:test or node:assert/strict — the two canonical modules.
-    const usesNodeTest = content.includes("node:test") || content.includes("node:assert");
-    if (!usesNodeTest) {
+    // Must reference vitest — the single canonical runner. node:assert is still
+    // permitted as an assertion library, but the runner must be vitest.
+    if (!content.includes("from \"vitest\"") && !content.includes("from 'vitest'")) {
       violations.push(file);
     }
   }
 
-  assert.deepEqual(
-    violations,
-    [],
-    `The following test files do not import node:test or node:assert — non-canonical test frameworks are not allowed in shared: ${violations.join(", ")} — INV-shared-tests-02`,
-  );
+  expect(violations, `The following test files do not import vitest — vitest is the single canonical runner in shared: ${violations.join(", ")} — INV-shared-tests-02`).toEqual([]);
 });
 
-test("INV-shared-tests-02: no .test.mjs file imports vitest, jest, mocha, or jasmine", () => {
+test("INV-shared-tests-02: no .test.mjs file imports node:test, jest, mocha, or jasmine", () => {
   const testFiles = readdirSync(TESTS_DIR).filter((f) =>
     f.endsWith(".test.mjs"),
   );
-  const disallowed = ["vitest", "jest", "mocha", "jasmine"];
+  const disallowed = ["node:test", "jest", "mocha", "jasmine"];
 
   const violations = [];
   for (const file of testFiles) {
@@ -102,11 +88,7 @@ test("INV-shared-tests-02: no .test.mjs file imports vitest, jest, mocha, or jas
     }
   }
 
-  assert.deepEqual(
-    violations,
-    [],
-    `Third-party test framework found in shared test file(s) — only node:test is allowed: ${violations.join(", ")} — INV-shared-tests-02`,
-  );
+  expect(violations, `Non-canonical test runner found in shared test file(s) — only vitest is allowed: ${violations.join(", ")} — INV-shared-tests-02`).toEqual([]);
 });
 
 // ── INV-shared-tests-03: Schema invariant coverage is present ─────────────────
@@ -116,20 +98,11 @@ test("INV-shared-tests-02: no .test.mjs file imports vitest, jest, mocha, or jas
 
 test("INV-shared-tests-03: shared-core-invariants.test.mjs exists and covers schema drift (INV-shared-core-01)", () => {
   const filePath = resolve(TESTS_DIR, "shared-core-invariants.test.mjs");
-  assert.ok(
-    existsSync(filePath),
-    "shared-core-invariants.test.mjs must exist in tests/ — INV-shared-tests-03 (schema invariant coverage)",
-  );
+  expect(existsSync(filePath), "shared-core-invariants.test.mjs must exist in tests/ — INV-shared-tests-03 (schema invariant coverage)").toBeTruthy();
   const content = readFileSync(filePath, "utf8");
-  assert.ok(
-    content.includes("INV-shared-core-01"),
-    "shared-core-invariants.test.mjs must contain INV-shared-core-01 (schema drift detection) — INV-shared-tests-03",
-  );
+  expect(content.includes("INV-shared-core-01"), "shared-core-invariants.test.mjs must contain INV-shared-core-01 (schema drift detection) — INV-shared-tests-03").toBeTruthy();
   // Must reference the actual schema files under audit-code/schemas.
-  assert.ok(
-    content.includes("finding.schema.json") || content.includes("audit_result.schema.json"),
-    "shared-core-invariants.test.mjs must reference at least one audit-code schema file — INV-shared-tests-03",
-  );
+  expect(content.includes("finding.schema.json") || content.includes("audit_result.schema.json"), "shared-core-invariants.test.mjs must reference at least one audit-code schema file — INV-shared-tests-03").toBeTruthy();
 });
 
 test("INV-shared-tests-03: validateAuditFindingsReport is importable and validates contract_version", async () => {
@@ -138,10 +111,7 @@ test("INV-shared-tests-03: validateAuditFindingsReport is importable and validat
   const { validateAuditFindingsReport } = await import("../../src/shared/validation/findingsReport.ts");
   const issues = validateAuditFindingsReport({ findings: [], work_blocks: [] });
   const errors = issues.filter((i) => i.severity === "error");
-  assert.ok(
-    errors.some((i) => i.message.includes("contract_version")),
-    "validateAuditFindingsReport must flag missing contract_version as an error — INV-shared-tests-03 schema guard",
-  );
+  expect(errors.some((i) => i.message.includes("contract_version")), "validateAuditFindingsReport must flag missing contract_version as an error — INV-shared-tests-03 schema guard").toBeTruthy();
 });
 
 // ── INV-shared-tests-04: Lock invariant coverage is present ──────────────────
@@ -150,33 +120,20 @@ test("INV-shared-tests-03: validateAuditFindingsReport is importable and validat
 
 test("INV-shared-tests-04: shared-quota-invariants.test.mjs exists and covers lock token invariant (INV-shared-quota-06)", () => {
   const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.mjs");
-  assert.ok(
-    existsSync(filePath),
-    "shared-quota-invariants.test.mjs must exist — INV-shared-tests-04 (lock invariant coverage)",
-  );
+  expect(existsSync(filePath), "shared-quota-invariants.test.mjs must exist — INV-shared-tests-04 (lock invariant coverage)").toBeTruthy();
   const content = readFileSync(filePath, "utf8");
-  assert.ok(
-    content.includes("INV-shared-quota-06"),
-    "shared-quota-invariants.test.mjs must cover INV-shared-quota-06 (lock token contract) — INV-shared-tests-04",
-  );
+  expect(content.includes("INV-shared-quota-06"), "shared-quota-invariants.test.mjs must cover INV-shared-quota-06 (lock token contract) — INV-shared-tests-04").toBeTruthy();
   // Must reference acquireLock / releaseLock.
-  assert.ok(
-    content.includes("acquireLock") && content.includes("releaseLock"),
-    "INV-shared-quota-06 tests must exercise acquireLock and releaseLock — INV-shared-tests-04",
-  );
+  expect(content.includes("acquireLock") && content.includes("releaseLock"), "INV-shared-quota-06 tests must exercise acquireLock and releaseLock — INV-shared-tests-04").toBeTruthy();
 });
 
 test("INV-shared-tests-04: fileLock.ts exports acquireLock, releaseLock, withFileLock, and FileLockTimeoutError", async () => {
   const { acquireLock, releaseLock, withFileLock, FileLockTimeoutError } =
     await import("../../src/shared/quota/fileLock.ts");
-  assert.equal(typeof acquireLock, "function", "acquireLock must be exported — INV-shared-tests-04");
-  assert.equal(typeof releaseLock, "function", "releaseLock must be exported — INV-shared-tests-04");
-  assert.equal(typeof withFileLock, "function", "withFileLock must be exported — INV-shared-tests-04");
-  assert.equal(
-    typeof FileLockTimeoutError,
-    "function",
-    "FileLockTimeoutError must be exported as a class — INV-shared-tests-04",
-  );
+  expect(typeof acquireLock, "acquireLock must be exported — INV-shared-tests-04").toBe("function");
+  expect(typeof releaseLock, "releaseLock must be exported — INV-shared-tests-04").toBe("function");
+  expect(typeof withFileLock, "withFileLock must be exported — INV-shared-tests-04").toBe("function");
+  expect(typeof FileLockTimeoutError, "FileLockTimeoutError must be exported as a class — INV-shared-tests-04").toBe("function");
 });
 
 // ── INV-shared-tests-05: Concurrency invariant coverage is present ────────────
@@ -186,14 +143,8 @@ test("INV-shared-tests-04: fileLock.ts exports acquireLock, releaseLock, withFil
 test("INV-shared-tests-05: shared-quota-invariants.test.mjs covers concurrency invariants (INV-shared-quota-01 and -10)", () => {
   const filePath = resolve(TESTS_DIR, "shared-quota-invariants.test.mjs");
   const content = readFileSync(filePath, "utf8");
-  assert.ok(
-    content.includes("INV-shared-quota-01"),
-    "shared-quota-invariants.test.mjs must cover INV-shared-quota-01 (host limit partitioning) — INV-shared-tests-05",
-  );
-  assert.ok(
-    content.includes("INV-shared-quota-10"),
-    "shared-quota-invariants.test.mjs must cover INV-shared-quota-10 (parallel recordWaveOutcome convergence) — INV-shared-tests-05",
-  );
+  expect(content.includes("INV-shared-quota-01"), "shared-quota-invariants.test.mjs must cover INV-shared-quota-01 (host limit partitioning) — INV-shared-tests-05").toBeTruthy();
+  expect(content.includes("INV-shared-quota-10"), "shared-quota-invariants.test.mjs must cover INV-shared-quota-10 (parallel recordWaveOutcome convergence) — INV-shared-tests-05").toBeTruthy();
 });
 
 test("INV-shared-tests-05: computeDispatchCapacity partitions shared host limit correctly (spot-check)", async () => {
@@ -218,10 +169,7 @@ test("INV-shared-tests-05: computeDispatchCapacity partitions shared host limit 
     sessionConfig: {},
     pendingItemTokens: new Array(10).fill(5_000),
   });
-  assert.ok(
-    capacity.total_slots <= 2,
-    `total_slots ${capacity.total_slots} must not exceed shared host limit 2 (concurrent over-dispatch guard) — INV-shared-tests-05`,
-  );
+  expect(capacity.total_slots <= 2, `total_slots ${capacity.total_slots} must not exceed shared host limit 2 (concurrent over-dispatch guard) — INV-shared-tests-05`).toBeTruthy();
 });
 
 // ── INV-shared-tests-06: Cycle detection invariant coverage is present ────────
@@ -230,28 +178,14 @@ test("INV-shared-tests-05: computeDispatchCapacity partitions shared host limit 
 test("INV-shared-tests-06: shared-core-invariants.test.mjs covers obligation cycle detection (INV-shared-core-07)", () => {
   const filePath = resolve(TESTS_DIR, "shared-core-invariants.test.mjs");
   const content = readFileSync(filePath, "utf8");
-  assert.ok(
-    content.includes("INV-shared-core-07"),
-    "shared-core-invariants.test.mjs must cover INV-shared-core-07 (cycle detection at construction) — INV-shared-tests-06",
-  );
-  assert.ok(
-    content.includes("cycle"),
-    "INV-shared-core-07 tests must contain the word 'cycle' — INV-shared-tests-06",
-  );
+  expect(content.includes("INV-shared-core-07"), "shared-core-invariants.test.mjs must cover INV-shared-core-07 (cycle detection at construction) — INV-shared-tests-06").toBeTruthy();
+  expect(content.includes("cycle"), "INV-shared-core-07 tests must contain the word 'cycle' — INV-shared-tests-06").toBeTruthy();
 });
 
 test("INV-shared-tests-06: detectObligationCycle and buildObligationLedger are both exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
-  assert.equal(
-    typeof shared.detectObligationCycle,
-    "function",
-    "detectObligationCycle must be exported from shared index — INV-shared-tests-06",
-  );
-  assert.equal(
-    typeof shared.buildObligationLedger,
-    "function",
-    "buildObligationLedger must be exported from shared index — INV-shared-tests-06",
-  );
+  expect(typeof shared.detectObligationCycle, "detectObligationCycle must be exported from shared index — INV-shared-tests-06").toBe("function");
+  expect(typeof shared.buildObligationLedger, "buildObligationLedger must be exported from shared index — INV-shared-tests-06").toBe("function");
 });
 
 test("INV-shared-tests-06: detectObligationCycle returns a non-null result for a direct cycle", async () => {
@@ -260,8 +194,8 @@ test("INV-shared-tests-06: detectObligationCycle returns a non-null result for a
     { id: "X", description: "x", kind: "behavioral", depends_on: ["Y"], status: "pending" },
     { id: "Y", description: "y", kind: "behavioral", depends_on: ["X"], status: "pending" },
   ]);
-  assert.ok(Array.isArray(cycle) && cycle.length > 0, "direct cycle X→Y→X must be detected — INV-shared-tests-06");
-  assert.ok(cycle.includes("X") && cycle.includes("Y"), "cycle result must name both participants — INV-shared-tests-06");
+  expect(Array.isArray(cycle) && cycle.length > 0, "direct cycle X→Y→X must be detected — INV-shared-tests-06").toBeTruthy();
+  expect(cycle.includes("X") && cycle.includes("Y"), "cycle result must name both participants — INV-shared-tests-06").toBeTruthy();
 });
 
 test("INV-shared-tests-06: detectObligationCycle returns null for an acyclic graph", async () => {
@@ -271,7 +205,7 @@ test("INV-shared-tests-06: detectObligationCycle returns null for an acyclic gra
     { id: "B", description: "b", kind: "behavioral", depends_on: ["A"], status: "pending" },
     { id: "C", description: "c", kind: "behavioral", depends_on: ["A", "B"], status: "pending" },
   ]);
-  assert.equal(result, null, "valid DAG must return null from detectObligationCycle — INV-shared-tests-06");
+  expect(result, "valid DAG must return null from detectObligationCycle — INV-shared-tests-06").toBe(null);
 });
 
 // ── INV-shared-tests-07: Key shared exports are stable ───────────────────────
@@ -283,88 +217,80 @@ test("INV-shared-tests-07: core validation symbols exported from shared index", 
   const shared = await import("../../src/shared/index.ts");
 
   // Validation.
-  assert.equal(typeof shared.validateAuditFindingsReport, "function", "validateAuditFindingsReport — INV-shared-tests-07");
-  assert.equal(typeof shared.isValidAuditFindingsReport, "function", "isValidAuditFindingsReport — INV-shared-tests-07");
-  assert.equal(typeof shared.validateSessionConfig, "function", "validateSessionConfig — INV-shared-tests-07");
-  assert.equal(typeof shared.prefixValidationIssues, "function", "prefixValidationIssues — INV-shared-tests-07");
-  assert.equal(typeof shared.requireKeys, "function", "requireKeys — INV-shared-tests-07");
-  assert.equal(typeof shared.AUDIT_FINDINGS_CONTRACT_VERSION, "string", "AUDIT_FINDINGS_CONTRACT_VERSION — INV-shared-tests-07");
+  expect(typeof shared.validateAuditFindingsReport, "validateAuditFindingsReport — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.isValidAuditFindingsReport, "isValidAuditFindingsReport — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.validateSessionConfig, "validateSessionConfig — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.prefixValidationIssues, "prefixValidationIssues — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.requireKeys, "requireKeys — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.AUDIT_FINDINGS_CONTRACT_VERSION, "AUDIT_FINDINGS_CONTRACT_VERSION — INV-shared-tests-07").toBe("string");
 });
 
 test("INV-shared-tests-07: quota symbols exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
 
   // Quota state.
-  assert.equal(typeof shared.setQuotaStateDir, "function", "setQuotaStateDir — INV-shared-tests-07");
-  assert.equal(typeof shared.readQuotaState, "function", "readQuotaState — INV-shared-tests-07");
-  assert.equal(typeof shared.writeQuotaState, "function", "writeQuotaState — INV-shared-tests-07");
-  assert.equal(typeof shared.recordWaveOutcome, "function", "recordWaveOutcome — INV-shared-tests-07");
-  assert.equal(typeof shared.computeMaxSafeConcurrency, "function", "computeMaxSafeConcurrency — INV-shared-tests-07");
+  expect(typeof shared.setQuotaStateDir, "setQuotaStateDir — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.readQuotaState, "readQuotaState — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.writeQuotaState, "writeQuotaState — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.recordWaveOutcome, "recordWaveOutcome — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.computeMaxSafeConcurrency, "computeMaxSafeConcurrency — INV-shared-tests-07").toBe("function");
 
   // Capacity.
-  assert.equal(typeof shared.computeDispatchCapacity, "function", "computeDispatchCapacity — INV-shared-tests-07");
-  assert.equal(typeof shared.detectLivelock, "function", "detectLivelock — INV-shared-tests-07");
-  assert.equal(typeof shared.buildEmptyPoolTerminal, "function", "buildEmptyPoolTerminal — INV-shared-tests-07");
+  expect(typeof shared.computeDispatchCapacity, "computeDispatchCapacity — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.detectLivelock, "detectLivelock — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.buildEmptyPoolTerminal, "buildEmptyPoolTerminal — INV-shared-tests-07").toBe("function");
 
   // Scheduler.
-  assert.equal(typeof shared.scheduleWave, "function", "scheduleWave — INV-shared-tests-07");
-  assert.equal(typeof shared.parseHostModelRoster, "function", "parseHostModelRoster — INV-shared-tests-07");
+  expect(typeof shared.scheduleWave, "scheduleWave — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.parseHostModelRoster, "parseHostModelRoster — INV-shared-tests-07").toBe("function");
 
   // Lock.
-  assert.equal(typeof shared.acquireLock, "function", "acquireLock — INV-shared-tests-07");
-  assert.equal(typeof shared.releaseLock, "function", "releaseLock — INV-shared-tests-07");
-  assert.equal(typeof shared.withFileLock, "function", "withFileLock — INV-shared-tests-07");
+  expect(typeof shared.acquireLock, "acquireLock — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.releaseLock, "releaseLock — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.withFileLock, "withFileLock — INV-shared-tests-07").toBe("function");
 });
 
 test("INV-shared-tests-07: provider factory symbols exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
 
-  assert.equal(typeof shared.createFreshSessionProvider, "function", "createFreshSessionProvider — INV-shared-tests-07");
-  assert.equal(typeof shared.resolveFreshSessionProviderName, "function", "resolveFreshSessionProviderName — INV-shared-tests-07");
-  assert.equal(typeof shared.spawnLoggedCommand, "function", "spawnLoggedCommand — INV-shared-tests-07");
+  expect(typeof shared.createFreshSessionProvider, "createFreshSessionProvider — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.resolveFreshSessionProviderName, "resolveFreshSessionProviderName — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.spawnLoggedCommand, "spawnLoggedCommand — INV-shared-tests-07").toBe("function");
 });
 
 test("INV-shared-tests-07: obligation ledger symbols exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
 
-  assert.equal(typeof shared.buildObligationLedger, "function", "buildObligationLedger — INV-shared-tests-07");
-  assert.equal(typeof shared.detectObligationCycle, "function", "detectObligationCycle — INV-shared-tests-07");
-  assert.equal(
-    typeof shared.CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-    "string",
-    "CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION — INV-shared-tests-07",
-  );
+  expect(typeof shared.buildObligationLedger, "buildObligationLedger — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.detectObligationCycle, "detectObligationCycle — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION, "CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION — INV-shared-tests-07").toBe("string");
 });
 
 test("INV-shared-tests-07: finding identity and lens vocabulary exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
 
-  assert.equal(typeof shared.findingIdentity, "function", "findingIdentity — INV-shared-tests-07");
-  assert.ok(Array.isArray(shared.LENSES) || shared.LENSES instanceof Set, "LENSES must be exported — INV-shared-tests-07");
-  assert.ok(shared.VALID_LENSES instanceof Set, "VALID_LENSES must be a Set — INV-shared-tests-07");
-  assert.ok(shared.VALID_SEVERITIES instanceof Set, "VALID_SEVERITIES must be a Set — INV-shared-tests-07");
-  assert.ok(shared.VALID_CONFIDENCES instanceof Set, "VALID_CONFIDENCES must be a Set — INV-shared-tests-07");
+  expect(typeof shared.findingIdentity, "findingIdentity — INV-shared-tests-07").toBe("function");
+  expect(Array.isArray(shared.LENSES) || shared.LENSES instanceof Set, "LENSES must be exported — INV-shared-tests-07").toBeTruthy();
+  expect(shared.VALID_LENSES instanceof Set, "VALID_LENSES must be a Set — INV-shared-tests-07").toBeTruthy();
+  expect(shared.VALID_SEVERITIES instanceof Set, "VALID_SEVERITIES must be a Set — INV-shared-tests-07").toBeTruthy();
+  expect(shared.VALID_CONFIDENCES instanceof Set, "VALID_CONFIDENCES must be a Set — INV-shared-tests-07").toBeTruthy();
 });
 
 test("INV-shared-tests-07: rolling dispatch symbols exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
 
-  assert.equal(typeof shared.createRollingDispatcher, "function", "createRollingDispatcher — INV-shared-tests-07");
-  assert.equal(typeof shared.selectProvider, "function", "selectProvider — INV-shared-tests-07");
-  assert.equal(typeof shared.InFlightTokenTracker, "function", "InFlightTokenTracker (class) — INV-shared-tests-07");
-  assert.equal(
-    typeof shared.ROLLING_DISPATCH_ENGINE_VERSION,
-    "string",
-    "ROLLING_DISPATCH_ENGINE_VERSION — INV-shared-tests-07",
-  );
+  expect(typeof shared.createRollingDispatcher, "createRollingDispatcher — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.selectProvider, "selectProvider — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.InFlightTokenTracker, "InFlightTokenTracker (class) — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.ROLLING_DISPATCH_ENGINE_VERSION, "ROLLING_DISPATCH_ENGINE_VERSION — INV-shared-tests-07").toBe("string");
 });
 
 test("INV-shared-tests-07: observability and IO symbols exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
 
-  assert.equal(typeof shared.RunLogger, "function", "RunLogger (class) — INV-shared-tests-07");
-  assert.equal(typeof shared.readJsonFile, "function", "readJsonFile — INV-shared-tests-07");
-  assert.equal(typeof shared.writeJsonFile, "function", "writeJsonFile — INV-shared-tests-07");
-  assert.equal(typeof shared.appendNdjsonFile, "function", "appendNdjsonFile — INV-shared-tests-07");
-  assert.equal(typeof shared.estimateTokensFromBytes, "function", "estimateTokensFromBytes — INV-shared-tests-07");
+  expect(typeof shared.RunLogger, "RunLogger (class) — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.readJsonFile, "readJsonFile — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.writeJsonFile, "writeJsonFile — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.appendNdjsonFile, "appendNdjsonFile — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.estimateTokensFromBytes, "estimateTokensFromBytes — INV-shared-tests-07").toBe("function");
 });

@@ -12,7 +12,7 @@
  *    artifact so the pipeline can proceed to synthesis on partial coverage.
  */
 
-import test from "node:test";
+import { test, onTestFinished, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -29,31 +29,31 @@ const { ACTIVE_DISPATCH_FILENAME } = await import("../../src/audit/cli/dispatch.
 // ── 0. Routing predicates ─────────────────────────────────────────────────────
 
 test("A8a: resolvesToInProcessDispatchProvider is true only for explicit programmatic backends", () => {
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "openai-compatible" }), true);
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "codex" }), true);
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "opencode" }), true);
+  expect(resolvesToInProcessDispatchProvider({ provider: "openai-compatible" })).toBe(true);
+  expect(resolvesToInProcessDispatchProvider({ provider: "codex" })).toBe(true);
+  expect(resolvesToInProcessDispatchProvider({ provider: "opencode" })).toBe(true);
   // The conversation host + IDE backends never engage the in-process driver.
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "claude-code" }), false);
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "vscode-task" }), false);
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "antigravity" }), false);
+  expect(resolvesToInProcessDispatchProvider({ provider: "claude-code" })).toBe(false);
+  expect(resolvesToInProcessDispatchProvider({ provider: "vscode-task" })).toBe(false);
+  expect(resolvesToInProcessDispatchProvider({ provider: "antigravity" })).toBe(false);
   // local-subprocess / subprocess-template are NOT in-process for audit: they need a
   // per-worker command a read-only review packet lacks, and local-subprocess is the
   // conventional host-dispatch default (routing it in-process would hijack the
   // host-subagent dispatch_review path).
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "local-subprocess" }), false);
-  assert.equal(resolvesToInProcessDispatchProvider({ provider: "subprocess-template" }), false);
+  expect(resolvesToInProcessDispatchProvider({ provider: "local-subprocess" })).toBe(false);
+  expect(resolvesToInProcessDispatchProvider({ provider: "subprocess-template" })).toBe(false);
   // No explicit provider → host-subagent default (auto-resolution is NOT in-process).
-  assert.equal(resolvesToInProcessDispatchProvider({}), false);
-  assert.equal(resolvesToInProcessDispatchProvider(undefined), false);
+  expect(resolvesToInProcessDispatchProvider({})).toBe(false);
+  expect(resolvesToInProcessDispatchProvider(undefined)).toBe(false);
 });
 
 test("A8a: resolveAuditRollingEngineEnabled resolution order — explicit > session > env > default true", () => {
-  assert.equal(resolveAuditRollingEngineEnabled({ rollingEngine: false, sessionConfig: { dispatch: { rolling_engine: true } } }), false);
-  assert.equal(resolveAuditRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: false } } }), false);
-  assert.equal(resolveAuditRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: true } } }), true);
-  assert.equal(resolveAuditRollingEngineEnabled({ env: { AUDIT_CODE_ROLLING_ENGINE: "false" } }), false);
-  assert.equal(resolveAuditRollingEngineEnabled({ env: { AUDIT_CODE_ROLLING_ENGINE: "true" } }), true);
-  assert.equal(resolveAuditRollingEngineEnabled({ env: {} }), true);
+  expect(resolveAuditRollingEngineEnabled({ rollingEngine: false, sessionConfig: { dispatch: { rolling_engine: true } } })).toBe(false);
+  expect(resolveAuditRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: false } } })).toBe(false);
+  expect(resolveAuditRollingEngineEnabled({ sessionConfig: { dispatch: { rolling_engine: true } } })).toBe(true);
+  expect(resolveAuditRollingEngineEnabled({ env: { AUDIT_CODE_ROLLING_ENGINE: "false" } })).toBe(false);
+  expect(resolveAuditRollingEngineEnabled({ env: { AUDIT_CODE_ROLLING_ENGINE: "true" } })).toBe(true);
+  expect(resolveAuditRollingEngineEnabled({ env: {} })).toBe(true);
 });
 
 const RUN_ID = "rolling-audit-run";
@@ -150,7 +150,7 @@ function makeWritingDispatcher(runDir, taskList) {
 
 test("A8a: makeAuditProviderPacketDispatcher launches read-only against the repo root and returns success when the worker wrote a result", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const resultPath = join(runDir, "task-results", "pkt-1-inline-result.json");
   await mkdir(join(runDir, "task-results"), { recursive: true });
@@ -187,17 +187,17 @@ test("A8a: makeAuditProviderPacketDispatcher launches read-only against the repo
   };
 
   const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
-  assert.equal(outcome.outcome, "success");
-  assert.equal(captured.length, 1);
-  assert.equal(captured[0].repoRoot, artifactsDir, "must launch read-only against the real repo root (no worktree)");
-  assert.equal(captured[0].promptPath, packet.payload.prompt_path);
-  assert.equal(captured[0].resultPath, resultPath);
-  assert.equal(captured[0].uiMode, "headless");
+  expect(outcome.outcome).toBe("success");
+  expect(captured.length).toBe(1);
+  expect(captured[0].repoRoot, "must launch read-only against the real repo root (no worktree)").toBe(artifactsDir);
+  expect(captured[0].promptPath).toBe(packet.payload.prompt_path);
+  expect(captured[0].resultPath).toBe(resultPath);
+  expect(captured[0].uiMode).toBe("headless");
 });
 
 test("A8a: makeAuditProviderPacketDispatcher returns error when the provider rejects the launch", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await mkdir(join(runDir, "task-results"), { recursive: true });
 
   const dispatcher = makeAuditProviderPacketDispatcher({
@@ -227,13 +227,13 @@ test("A8a: makeAuditProviderPacketDispatcher returns error when the provider rej
     complexity: 0.5,
   };
   const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
-  assert.equal(outcome.outcome, "error");
-  assert.match(String(outcome.error), /no api key/);
+  expect(outcome.outcome).toBe("error");
+  expect(String(outcome.error)).toMatch(/no api key/);
 });
 
 test("A8a: makeAuditProviderPacketDispatcher returns error when the worker wrote no result file", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await mkdir(join(runDir, "task-results"), { recursive: true });
 
   const dispatcher = makeAuditProviderPacketDispatcher({
@@ -263,15 +263,15 @@ test("A8a: makeAuditProviderPacketDispatcher returns error when the worker wrote
     complexity: 0.5,
   };
   const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
-  assert.equal(outcome.outcome, "error");
-  assert.match(String(outcome.error), /wrote no result/);
+  expect(outcome.outcome).toBe("error");
+  expect(String(outcome.error)).toMatch(/wrote no result/);
 });
 
 // ── 2. driveRollingAuditDispatch happy path ───────────────────────────────────
 
 test("A8a: driveRollingAuditDispatch drives every packet, writes results, and folds them in via the terminal ingestor", async (t) => {
   const { artifactsDir, runDir, taskList } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // The deterministic ingestion is exercised in full by merge-and-ingest /
   // result-ingestion tests; here we inject a stub to assert the driver hands it
@@ -286,10 +286,7 @@ test("A8a: driveRollingAuditDispatch drives every packet, writes results, and fo
     );
     for (const entry of plan) {
       const arr = JSON.parse(await readFile(entry.result_path, "utf8"));
-      assert.ok(
-        Array.isArray(arr) && arr.length > 0,
-        `worker wrote results to ${entry.result_path}`,
-      );
+      expect(Array.isArray(arr) && arr.length > 0, `worker wrote results to ${entry.result_path}`).toBeTruthy();
     }
     return { summary: { run_id: runId, accepted_count: 3 }, has_failures: false };
   };
@@ -304,18 +301,18 @@ test("A8a: driveRollingAuditDispatch drives every packet, writes results, and fo
     ingest: ingestStub,
   });
 
-  assert.equal(result.status, "complete");
-  assert.equal(result.packet_count, 3, "three distinct units → three packets");
-  assert.equal(result.stranded_ids.length, 0);
-  assert.equal(ingestCalls, 1, "ingestion runs exactly once after dispatch");
-  assert.equal(result.ingest.summary.accepted_count, 3);
+  expect(result.status).toBe("complete");
+  expect(result.packet_count, "three distinct units → three packets").toBe(3);
+  expect(result.stranded_ids.length).toBe(0);
+  expect(ingestCalls, "ingestion runs exactly once after dispatch").toBe(1);
+  expect(result.ingest.summary.accepted_count).toBe(3);
 });
 
 // ── 3. driveRollingAuditDispatch strand path ──────────────────────────────────
 
 test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) when packets strand (DC-4)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // A dispatcher that always rate-limits exhausts the single host pool, so the
   // rolling engine strands every packet (INV-QD-07). Per DC-4, a full strand now
@@ -337,22 +334,16 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
     ingest: ingestStub,
   });
 
-  assert.equal(result.status, "paused", "a full strand pauses resumably, not terminal");
-  assert.ok(result.stranded_ids.length > 0, "packets stranded on an exhausted pool");
-  assert.equal(result.ingest, null, "no ingestion on a full strand");
-  assert.ok(result.paused_state, "a resumable paused state is surfaced");
+  expect(result.status, "a full strand pauses resumably, not terminal").toBe("paused");
+  expect(result.stranded_ids.length > 0, "packets stranded on an exhausted pool").toBeTruthy();
+  expect(result.ingest, "no ingestion on a full strand").toBe(null);
+  expect(result.paused_state, "a resumable paused state is surfaced").toBeTruthy();
 
   const activeDispatch = JSON.parse(
     await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
   );
-  assert.ok(
-    activeDispatch.paused_state,
-    "the resumable paused state must be persisted onto the active-dispatch artifact",
-  );
-  assert.ok(
-    !activeDispatch.partial_completion_terminal,
-    "a first strand is a resumable pause, NOT yet a partial-completion terminal",
-  );
+  expect(activeDispatch.paused_state, "the resumable paused state must be persisted onto the active-dispatch artifact").toBeTruthy();
+  expect(!activeDispatch.partial_completion_terminal, "a first strand is a resumable pause, NOT yet a partial-completion terminal").toBeTruthy();
 });
 
 // ── 4. Regressions found by the live NIM e2e ──────────────────────────────────
@@ -364,7 +355,7 @@ test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-saf
   // the write threw before launch, erroring EVERY packet. The sidecars must use the
   // canonical FS-safe stem instead.
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await mkdir(join(runDir, "task-results"), { recursive: true });
 
   const colonId = "flow:flow:surface:src-api-auth-ts:security-correctness:packet-1-58b5a59ccd";
@@ -399,14 +390,11 @@ test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-saf
   };
 
   const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
-  assert.equal(outcome.outcome, "success", "must not error on a colon-bearing packet id");
-  assert.equal(captured.length, 1, "the worker must actually launch (the sidecar write must not throw)");
+  expect(outcome.outcome, "must not error on a colon-bearing packet id").toBe("success");
+  expect(captured.length, "the worker must actually launch (the sidecar write must not throw)").toBe(1);
   // Every sidecar filename the dispatcher derives must be free of ':' (FS-safe).
   for (const key of ["stdoutPath", "stderrPath"]) {
-    assert.ok(
-      !basename(captured[0][key]).includes(":"),
-      `${key} basename must be colon-free, got ${basename(captured[0][key])}`,
-    );
+    expect(!basename(captured[0][key]).includes(":"), `${key} basename must be colon-free, got ${basename(captured[0][key])}`).toBeTruthy();
   }
 });
 
@@ -417,7 +405,7 @@ test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) wh
   // absorbed into a no-progress pass (ingest:null) so the fold blocks cleanly instead
   // of crashing next-step (robustness to any-strength provider).
   const { artifactsDir, runDir, taskList } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Workers "succeed" (write a result file) but ingestion is stubbed to throw the
   // same all-invalid error mergeAndIngest raises.
@@ -438,6 +426,6 @@ test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) wh
     });
   }, "an all-invalid ingestion must not propagate out of the driver");
 
-  assert.equal(result.ingest, null, "no usable ingest result is recorded (no-progress pass)");
-  assert.equal(result.packet_count, 3, "the packets were still dispatched");
+  expect(result.ingest, "no usable ingest result is recorded (no-progress pass)").toBe(null);
+  expect(result.packet_count, "the packets were still dispatched").toBe(3);
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,15 +55,8 @@ test("no opentoken references remain anywhere in src", () => {
   // Guard against the guard going vacuous: if SRC_DIRS ever stops resolving to
   // the real source tree (e.g. a layout move), walk() returns nothing and the
   // hits-are-zero check would pass while scanning nothing. Require real coverage.
-  assert.ok(
-    scanned > 50,
-    `opentoken guard scanned only ${scanned} files — SRC_DIRS no longer points at the source tree; ` +
-      `update it or this guard silently protects nothing.`,
-  );
-  assert.equal(
-    hits.length,
-    0,
-    `opentoken is removed (superseded by headroom) — no references may remain in src.\n` +
-      hits.join("\n"),
-  );
+  expect(scanned > 50, `opentoken guard scanned only ${scanned} files — SRC_DIRS no longer points at the source tree; ` +
+      `update it or this guard silently protects nothing.`).toBeTruthy();
+  expect(hits.length, `opentoken is removed (superseded by headroom) — no references may remain in src.\n` +
+      hits.join("\n")).toBe(0);
 });

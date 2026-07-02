@@ -3,8 +3,7 @@
  * repository root and must tell workers to set the shell/tool workdir
  * explicitly, not rely on leaked cwd state from prior shell calls.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { renderWorkerPrompt } = await import("../../src/audit/prompts/renderWorkerPrompt.ts");
 const { renderDispatchReviewPrompt, nextStepCommand, mergeAndIngestCommand } =
@@ -46,22 +45,15 @@ function makeReviewRunParams(overrides = {}) {
 test("audit worker prompt includes the repository root", () => {
   const task = makeAgentTask({ repo_root: "/my/repo" });
   const prompt = renderWorkerPrompt(task);
-  assert.match(prompt, /Repository root:/i);
-  assert.ok(
-    prompt.includes("/my/repo"),
-    `Expected prompt to contain /my/repo, got: ${prompt.slice(0, 200)}`,
-  );
+  expect(prompt).toMatch(/Repository root:/i);
+  expect(prompt.includes("/my/repo"), `Expected prompt to contain /my/repo, got: ${prompt.slice(0, 200)}`).toBeTruthy();
 });
 
 test("audit worker prompt tells the host to set workdir to the repository root", () => {
   const task = makeAgentTask();
   const prompt = renderWorkerPrompt(task);
   // Must explicitly direct the host to set the workdir, NOT just reference cwd.
-  assert.match(
-    prompt,
-    /workdir|working.?dir/i,
-    "Expected prompt to mention workdir setting",
-  );
+  expect(prompt, "Expected prompt to mention workdir setting").toMatch(/workdir|working.?dir/i);
 });
 
 test("audit worker prompt does not say 'current working directory' for path resolution", () => {
@@ -69,22 +61,14 @@ test("audit worker prompt does not say 'current working directory' for path reso
   const prompt = renderWorkerPrompt(task);
   // The phrase "current working directory" leaks shell cwd assumptions;
   // use explicit repo root instead.
-  assert.doesNotMatch(
-    prompt,
-    /current working directory/i,
-    "Prompt must not rely on 'current working directory' for path resolution",
-  );
+  expect(prompt, "Prompt must not rely on 'current working directory' for path resolution").not.toMatch(/current working directory/i);
 });
 
 test("audit worker prompt does not instruct workers to use `cd` to establish context", () => {
   const task = makeAgentTask({ repo_root: "/my/repo" });
   const prompt = renderWorkerPrompt(task);
   // `cd /path` should never be the recommended way to set context.
-  assert.doesNotMatch(
-    prompt,
-    /\bcd\s+["'`]?\//,
-    "Prompt must not instruct workers to use `cd /path` to set shell context",
-  );
+  expect(prompt, "Prompt must not instruct workers to use `cd /path` to set shell context").not.toMatch(/\bcd\s+["'`]?\//);
 });
 
 // ── dispatch review prompts — root and workdir guidance ──────────────────────
@@ -95,31 +79,20 @@ test("dispatch review prompt includes repository root path in continuation comma
   // The generated merge-and-ingest and next-step commands should carry
   // --artifacts-dir that includes the repo root so a host can run them
   // without a specific cwd.
-  assert.ok(
-    prompt.includes("/my/repo") || prompt.includes("merge-and-ingest"),
-    `Expected prompt to include root or merge command: ${prompt.slice(0, 300)}`,
-  );
+  expect(prompt.includes("/my/repo") || prompt.includes("merge-and-ingest"), `Expected prompt to include root or merge command: ${prompt.slice(0, 300)}`).toBeTruthy();
 });
 
 // ── nextStepCommand / mergeAndIngestCommand — slash-safe paths ───────────────
 
 test("nextStepCommand normalizes Windows absolute path tokens to forward slashes", () => {
   const cmd = nextStepCommand("C:\\Code\\my-repo", "C:\\Code\\my-repo\\.audit-tools\\audit");
-  assert.doesNotMatch(
-    cmd,
-    /C:\\|\\audit/,
-    `Expected forward slashes in nextStepCommand output: ${cmd}`,
-  );
-  assert.match(cmd, /C:\/Code\/my-repo/);
+  expect(cmd, `Expected forward slashes in nextStepCommand output: ${cmd}`).not.toMatch(/C:\\|\\audit/);
+  expect(cmd).toMatch(/C:\/Code\/my-repo/);
 });
 
 test("mergeAndIngestCommand normalizes Windows absolute path tokens to forward slashes", () => {
   const cmd = mergeAndIngestCommand("C:\\Code\\my-repo\\.audit-tools\\audit", "RUN-001");
-  assert.doesNotMatch(
-    cmd,
-    /\\audit/,
-    `Expected forward slashes in mergeAndIngestCommand output: ${cmd}`,
-  );
+  expect(cmd, `Expected forward slashes in mergeAndIngestCommand output: ${cmd}`).not.toMatch(/\\audit/);
 });
 
 // ── non-agent task prompt — workdir guidance ─────────────────────────────────
@@ -131,6 +104,6 @@ test("non-agent worker prompt includes repository root and workdir guidance", ()
     audit_results_path: undefined,
   });
   const prompt = renderWorkerPrompt(task);
-  assert.match(prompt, /Repository root:/i);
-  assert.match(prompt, /workdir|working.?dir/i);
+  expect(prompt).toMatch(/Repository root:/i);
+  expect(prompt).toMatch(/workdir|working.?dir/i);
 });

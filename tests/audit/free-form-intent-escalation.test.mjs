@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,32 +67,28 @@ function bundleWithCheckpoint(checkpointExtra = {}) {
 
 await test("unencodable clause produces a blocking checkpoint question", () => {
   const result = interpretFreeFormIntentForAudit(UNENCODABLE);
-  assert.equal(result.has_unencodable, true, "should flag an unencodable clause");
-  assert.equal(
-    result.checkpoint_questions.length,
-    1,
-    `expected one checkpoint question, got ${result.checkpoint_questions.length}`,
-  );
-  assert.match(result.checkpoint_questions[0], /could not be encoded/i);
+  expect(result.has_unencodable, "should flag an unencodable clause").toBe(true);
+  expect(result.checkpoint_questions.length, `expected one checkpoint question, got ${result.checkpoint_questions.length}`).toBe(1);
+  expect(result.checkpoint_questions[0]).toMatch(/could not be encoded/i);
 });
 
 await test("unencodable clause keeps intent_checkpoint_current unsatisfied (re-fires confirm_intent)", () => {
   const bundle = bundleWithCheckpoint({ free_form_intent: UNENCODABLE });
   const ob = obligationState(bundle, "intent_checkpoint_current");
-  assert.equal(ob.state, "missing", "obligation must be unmet so confirm_intent re-fires");
-  assert.match(ob.reason ?? "", /could not be encoded/i);
+  expect(ob.state, "obligation must be unmet so confirm_intent re-fires").toBe("missing");
+  expect(ob.reason ?? "").toMatch(/could not be encoded/i);
 
   // And the next-step decision routes back to the intent checkpoint executor.
   const decision = decideNextStep(bundle);
-  assert.equal(decision.selected_obligation, "intent_checkpoint_current");
-  assert.equal(decision.selected_executor, "intent_checkpoint_executor");
+  expect(decision.selected_obligation).toBe("intent_checkpoint_current");
+  expect(decision.selected_executor).toBe("intent_checkpoint_executor");
 });
 
 await test("confirm_intent prompt surfaces the blocking question and constraint_clauses shape", () => {
   const unresolved = unresolvedConstraintClauses(
     bundleWithCheckpoint({ free_form_intent: UNENCODABLE }).intent_checkpoint,
   );
-  assert.equal(unresolved.length, 1);
+  expect(unresolved.length).toBe(1);
 
   const prompt = renderConfirmIntentPrompt(
     {
@@ -111,33 +106,27 @@ await test("confirm_intent prompt surfaces the blocking question and constraint_
       unresolvedConstraintClauses: unresolved,
     },
   );
-  assert.match(prompt, /Blocking: unencodable intent clauses/);
-  assert.match(prompt, /ensure the mascot stays cheerful/);
-  assert.match(prompt, /"constraint_clauses"/);
+  expect(prompt).toMatch(/Blocking: unencodable intent clauses/);
+  expect(prompt).toMatch(/ensure the mascot stays cheerful/);
+  expect(prompt).toMatch(/"constraint_clauses"/);
 });
 
 // ── 2. Encodable clause → encoded, NOT silently dropped ─────────────────────
 
 await test("encodable clause is encoded and does not block (no silent drop)", () => {
   const result = interpretFreeFormIntentForAudit(ENCODABLE);
-  assert.equal(result.has_unencodable, false, "encodable clause must not be flagged");
-  assert.ok(
-    result.encoded_clauses.some((c) => c.kind === "lens_weight" && c.lens === "security"),
-    "security clause must be encoded as a lens_weight",
-  );
+  expect(result.has_unencodable, "encodable clause must not be flagged").toBe(false);
+  expect(result.encoded_clauses.some((c) => c.kind === "lens_weight" && c.lens === "security"), "security clause must be encoded as a lens_weight").toBeTruthy();
 
   // The gate stays satisfied for a purely-encodable intent.
   const bundle = bundleWithCheckpoint({ free_form_intent: ENCODABLE });
-  assert.equal(
-    obligationState(bundle, "intent_checkpoint_current").state,
-    "satisfied",
-  );
+  expect(obligationState(bundle, "intent_checkpoint_current").state).toBe("satisfied");
 });
 
 await test("planning interprets free_form_intent via the shared authority (encodable → lens boost)", () => {
   // The planning-path helper is now a thin wrapper over the shared interpreter.
-  assert.deepEqual(interpretFreeFormIntent(ENCODABLE), ["security"]);
-  assert.deepEqual(interpretFreeFormIntent(""), []);
+  expect(interpretFreeFormIntent(ENCODABLE)).toEqual(["security"]);
+  expect(interpretFreeFormIntent("")).toEqual([]);
 });
 
 await test("free_form_intent='security audit' still boosts security tasks end-to-end", async () => {
@@ -178,9 +167,9 @@ await test("free_form_intent='security audit' still boosts security tasks end-to
     lineIndex,
   );
   const secTasks = result.updated.audit_tasks.filter((t) => t.lens === "security");
-  assert.ok(secTasks.length > 0, "should produce security tasks");
+  expect(secTasks.length > 0, "should produce security tasks").toBeTruthy();
   for (const task of secTasks) {
-    assert.equal(task.priority, "high", "security task should be boosted to high");
+    expect(task.priority, "security task should be boosted to high").toBe("high");
   }
 });
 
@@ -198,10 +187,7 @@ await test("answering the checkpoint question via constraint_clauses satisfies t
       },
     ],
   });
-  assert.equal(
-    obligationState(bundle, "intent_checkpoint_current").state,
-    "satisfied",
-  );
+  expect(obligationState(bundle, "intent_checkpoint_current").state).toBe("satisfied");
 });
 
 await test("an empty host_answer does NOT resolve the blocking clause", () => {
@@ -212,10 +198,7 @@ await test("an empty host_answer does NOT resolve the blocking clause", () => {
       { text: UNENCODABLE, checkpoint_question: question, host_answer: "   " },
     ],
   });
-  assert.equal(
-    obligationState(bundle, "intent_checkpoint_current").state,
-    "missing",
-  );
+  expect(obligationState(bundle, "intent_checkpoint_current").state).toBe("missing");
 });
 
 // ── Headless fallback: escalate (record), never silently drop, and converge ──
@@ -224,15 +207,15 @@ await test("headless auto-complete records unencodable clauses instead of droppi
   const bundle = bundleWithCheckpoint({ free_form_intent: UNENCODABLE });
   const run = runIntentCheckpointAutoComplete(bundle, "/repo");
   const recorded = run.updated.intent_checkpoint.constraint_clauses ?? [];
-  assert.equal(recorded.length, 1, "the unencodable clause must be recorded");
-  assert.ok(recorded[0].host_answer && recorded[0].host_answer.length > 0);
+  expect(recorded.length, "the unencodable clause must be recorded").toBe(1);
+  expect(recorded[0].host_answer && recorded[0].host_answer.length > 0).toBeTruthy();
 });
 
 await test("headless auto-complete leaves an already-current checkpoint unchanged", () => {
   const bundle = bundleWithCheckpoint({ free_form_intent: ENCODABLE });
   const run = runIntentCheckpointAutoComplete(bundle, "/repo");
-  assert.deepEqual(run.artifacts_written, []);
-  assert.equal(run.updated.intent_checkpoint, bundle.intent_checkpoint);
+  expect(run.artifacts_written).toEqual([]);
+  expect(run.updated.intent_checkpoint).toBe(bundle.intent_checkpoint);
 });
 
 // ── 4. Single interpreter authority guard ───────────────────────────────────
@@ -247,20 +230,13 @@ await test("single authority: only the shared module defines a LENS_KEYWORD_MAP"
   const { LENS_KEYWORD_MAP } = await import(
     "../../src/shared/intent/sharedIntentData.ts"
   );
-  assert.ok(
-    Array.isArray(LENS_KEYWORD_MAP) && LENS_KEYWORD_MAP.length > 0,
-    "the shared LENS_KEYWORD_MAP must be the single, non-empty authority",
-  );
+  expect(Array.isArray(LENS_KEYWORD_MAP) && LENS_KEYWORD_MAP.length > 0, "the shared LENS_KEYWORD_MAP must be the single, non-empty authority").toBeTruthy();
 
   const planningSrc = readFileSync(
     join(auditCodeRoot, "src", "audit", "orchestrator", "planningExecutors.ts"),
     "utf8",
   );
-  assert.doesNotMatch(
-    planningSrc,
-    /\b(?:const|let|var|export\s+const)\s+LENS_KEYWORD_MAP\b/,
-    "audit planning interpreter must delegate to the shared LENS_KEYWORD_MAP, never declare its own",
-  );
+  expect(planningSrc, "audit planning interpreter must delegate to the shared LENS_KEYWORD_MAP, never declare its own").not.toMatch(/\b(?:const|let|var|export\s+const)\s+LENS_KEYWORD_MAP\b/);
 });
 
 await test("single authority: audit-code planning interpreter delegates to interpretFreeFormIntentForAudit", () => {
@@ -270,14 +246,6 @@ await test("single authority: audit-code planning interpreter delegates to inter
     join(auditCodeRoot, "src", "audit", "orchestrator", "planningExecutors.ts"),
     "utf8",
   );
-  assert.match(
-    src,
-    /interpretFreeFormIntentForAudit/,
-    "planningExecutors must delegate to interpretFreeFormIntentForAudit",
-  );
-  assert.doesNotMatch(
-    src,
-    /KEYWORD_LENS_MAP/,
-    "planningExecutors must not declare its own keyword→lens map",
-  );
+  expect(src, "planningExecutors must delegate to interpretFreeFormIntentForAudit").toMatch(/interpretFreeFormIntentForAudit/);
+  expect(src, "planningExecutors must not declare its own keyword→lens map").not.toMatch(/KEYWORD_LENS_MAP/);
 });

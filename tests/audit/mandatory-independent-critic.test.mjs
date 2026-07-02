@@ -2,8 +2,7 @@
 // design-review prompt MANDATES dispatch to an independent sub-agent reviewer
 // when the host can dispatch one, and degrades to an explicit inline self-review
 // instruction when it cannot. Fail-safe: mandate when the flag is missing.
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { renderDesignReviewPrompt } = await import(
   "../../src/audit/orchestrator/designReviewPrompt.ts"
@@ -23,21 +22,21 @@ function minimalBundle() {
 
 test("POSITIVE: design review MANDATES an independent sub-agent when host can dispatch", () => {
   const p = renderDesignReviewPrompt(minimalBundle(), { hostCanDispatchSubagents: true });
-  assert.match(p, /Independent review — MANDATORY/);
-  assert.match(p, /MUST dispatch/);
-  assert.match(p, /independent sub-agent/);
-  assert.doesNotMatch(p, /degraded to inline self-review/);
+  expect(p).toMatch(/Independent review — MANDATORY/);
+  expect(p).toMatch(/MUST dispatch/);
+  expect(p).toMatch(/independent sub-agent/);
+  expect(p).not.toMatch(/degraded to inline self-review/);
 });
 
 test("NEGATIVE: design review degrades to inline (no hard mandate) when host cannot dispatch", () => {
   const p = renderDesignReviewPrompt(minimalBundle(), { hostCanDispatchSubagents: false });
-  assert.match(p, /degraded to inline self-review/);
-  assert.doesNotMatch(p, /Independent review — MANDATORY/);
-  assert.doesNotMatch(p, /MUST dispatch/);
+  expect(p).toMatch(/degraded to inline self-review/);
+  expect(p).not.toMatch(/Independent review — MANDATORY/);
+  expect(p).not.toMatch(/MUST dispatch/);
 });
 
 test("FAIL-SAFE: design review defaults to MANDATE when the flag is missing", () => {
   const p = renderDesignReviewPrompt(minimalBundle());
-  assert.match(p, /Independent review — MANDATORY/);
-  assert.doesNotMatch(p, /degraded to inline self-review/);
+  expect(p).toMatch(/Independent review — MANDATORY/);
+  expect(p).not.toMatch(/degraded to inline self-review/);
 });

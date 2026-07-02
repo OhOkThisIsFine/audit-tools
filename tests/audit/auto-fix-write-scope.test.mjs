@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildInScopePathsByExtension } = await import(
   "../../src/audit/orchestrator/autoFixExecutor.ts"
@@ -26,13 +25,10 @@ test("CP-NODE-10: buildInScopePathsByExtension groups only non-excluded files by
     },
   };
   const byExt = buildInScopePathsByExtension(bundle);
-  assert.deepEqual(byExt.get("ts"), ["src/a.ts", "src/b.ts"]);
-  assert.deepEqual(byExt.get("py"), ["scripts/d.py"]);
+  expect(byExt.get("ts")).toEqual(["src/a.ts", "src/b.ts"]);
+  expect(byExt.get("py")).toEqual(["scripts/d.py"]);
   // The excluded file must NOT appear under any extension.
-  assert.ok(
-    !(byExt.get("ts") ?? []).includes("vendor/c.ts"),
-    "excluded files must never be passed to a formatter",
-  );
+  expect(!(byExt.get("ts") ?? []).includes("vendor/c.ts"), "excluded files must never be passed to a formatter").toBeTruthy();
 });
 
 test("CP-NODE-10: no in-scope path is the whole-repo token '.'", () => {
@@ -43,10 +39,7 @@ test("CP-NODE-10: no in-scope path is the whole-repo token '.'", () => {
   };
   const byExt = buildInScopePathsByExtension(bundle);
   for (const paths of byExt.values()) {
-    assert.ok(
-      !paths.includes("."),
-      "formatter must never be invoked over '.' (whole repo)",
-    );
+    expect(!paths.includes("."), "formatter must never be invoked over '.' (whole repo)").toBeTruthy();
   }
 });
 
@@ -63,11 +56,8 @@ test("CP-NODE-10: win32 wraps a package-manager shim given by absolute path", ()
   );
   // Before the fix, the directory prefix defeated the includes() check and the
   // shim ran unwrapped (npm.cmd is not directly spawnable on win32 → ENOENT).
-  assert.strictEqual(resolved.command, "cmd.exe");
-  assert.ok(
-    resolved.args.includes("/c"),
-    `expected cmd.exe /c wrapping, got: ${JSON.stringify(resolved.args)}`,
-  );
+  expect(resolved.command).toBe("cmd.exe");
+  expect(resolved.args.includes("/c"), `expected cmd.exe /c wrapping, got: ${JSON.stringify(resolved.args)}`).toBeTruthy();
 });
 
 test("CP-NODE-10: win32 wraps a package-manager shim given by relative path", () => {
@@ -76,8 +66,8 @@ test("CP-NODE-10: win32 wraps a package-manager shim given by relative path", ()
     "win32",
     "cmd.exe",
   );
-  assert.strictEqual(resolved.command, "cmd.exe");
-  assert.ok(resolved.args.includes("/c"));
+  expect(resolved.command).toBe("cmd.exe");
+  expect(resolved.args.includes("/c")).toBeTruthy();
 });
 
 test("CP-NODE-10: win32 still wraps a bare package-manager name", () => {
@@ -86,7 +76,7 @@ test("CP-NODE-10: win32 still wraps a bare package-manager name", () => {
     "win32",
     "cmd.exe",
   );
-  assert.strictEqual(resolved.command, "cmd.exe");
+  expect(resolved.command).toBe("cmd.exe");
 });
 
 test("CP-NODE-10: win32 does not wrap a non-package-manager executable", () => {
@@ -95,5 +85,5 @@ test("CP-NODE-10: win32 does not wrap a non-package-manager executable", () => {
     "win32",
     "cmd.exe",
   );
-  assert.strictEqual(resolved.command, "node");
+  expect(resolved.command).toBe("node");
 });

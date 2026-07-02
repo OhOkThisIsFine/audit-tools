@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, describe, it, expect } from "vitest";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
 
 const { resolvePythonImportTarget, resolvePythonFromImportTargets, extractPythonImportEdges } =
@@ -18,59 +17,44 @@ function makeLookup(paths) {
 
 // ── resolvePythonImportTarget ─────────────────────────────────────────────────
 
-await test("resolvePythonImportTarget returns undefined for a relative specifier", async (t) => {
+describe("resolvePythonImportTarget returns undefined for a relative specifier", () => {
   const lookup = makeLookup(["src/app/models.py"]);
 
-  await t.test("dot-prefixed relative specifier", () => {
-    assert.equal(
-      resolvePythonImportTarget("src/app/api.py", ".models", lookup),
-      undefined,
-    );
+  it("dot-prefixed relative specifier", () => {
+    expect(resolvePythonImportTarget("src/app/api.py", ".models", lookup)).toBe(undefined);
   });
 
-  await t.test("double-dot relative specifier", () => {
-    assert.equal(
-      resolvePythonImportTarget("src/app/api.py", "..utils", lookup),
-      undefined,
-    );
+  it("double-dot relative specifier", () => {
+    expect(resolvePythonImportTarget("src/app/api.py", "..utils", lookup)).toBe(undefined);
   });
 });
 
-await test("resolvePythonImportTarget resolves a simple absolute specifier to a single matching file", async (t) => {
+describe("resolvePythonImportTarget resolves a simple absolute specifier to a single matching file", () => {
   const lookup = makeLookup([
     "src/app/models.py",
     "src/app/services/auth.py",
   ]);
 
-  await t.test("single-segment module path", () => {
+  it("single-segment module path", () => {
     // 'app.models' → should resolve to src/app/models.py
     const result = resolvePythonImportTarget("src/app/api.py", "app.models", lookup);
-    assert.ok(
-      result !== undefined && result.endsWith("models.py"),
-      `Expected to resolve to models.py, got ${result}`,
-    );
+    expect(result !== undefined && result.endsWith("models.py"), `Expected to resolve to models.py, got ${result}`).toBeTruthy();
   });
 
-  await t.test("multi-segment module path", () => {
+  it("multi-segment module path", () => {
     // 'app.services.auth' → should resolve to src/app/services/auth.py
     const result = resolvePythonImportTarget(
       "src/app/api.py",
       "app.services.auth",
       lookup,
     );
-    assert.ok(
-      result !== undefined && result.endsWith("auth.py"),
-      `Expected to resolve to auth.py, got ${result}`,
-    );
+    expect(result !== undefined && result.endsWith("auth.py"), `Expected to resolve to auth.py, got ${result}`).toBeTruthy();
   });
 });
 
 await test("resolvePythonImportTarget returns undefined for an unresolvable specifier", () => {
   const lookup = makeLookup(["src/app/models.py"]);
-  assert.equal(
-    resolvePythonImportTarget("src/app/api.py", "nonexistent.module", lookup),
-    undefined,
-  );
+  expect(resolvePythonImportTarget("src/app/api.py", "nonexistent.module", lookup)).toBe(undefined);
 });
 
 // ── resolvePythonFromImportTargets ────────────────────────────────────────────
@@ -87,12 +71,9 @@ await test("resolvePythonFromImportTargets returns submodule targets when submod
     ["auth"],
     lookup,
   );
-  assert.equal(results.length, 1);
-  assert.ok(results[0].specifier.endsWith("auth"));
-  assert.ok(
-    results[0].target.endsWith("auth.py"),
-    `Expected submodule target auth.py, got ${results[0].target}`,
-  );
+  expect(results.length).toBe(1);
+  expect(results[0].specifier.endsWith("auth")).toBeTruthy();
+  expect(results[0].target.endsWith("auth.py"), `Expected submodule target auth.py, got ${results[0].target}`).toBeTruthy();
 });
 
 await test("resolvePythonFromImportTargets falls back to the module target when no submodule files resolve", () => {
@@ -104,28 +85,25 @@ await test("resolvePythonFromImportTargets falls back to the module target when 
     ["SomeClass"],
     lookup,
   );
-  assert.equal(results.length, 1);
-  assert.equal(results[0].specifier, "app.handlers");
-  assert.ok(
-    results[0].target.endsWith("handlers.py"),
-    `Expected handlers.py, got ${results[0].target}`,
-  );
+  expect(results.length).toBe(1);
+  expect(results[0].specifier).toBe("app.handlers");
+  expect(results[0].target.endsWith("handlers.py"), `Expected handlers.py, got ${results[0].target}`).toBeTruthy();
 });
 
-await test("resolvePythonFromImportTargets returns empty array for an invalid module specifier", async (t) => {
+describe("resolvePythonFromImportTargets returns empty array for an invalid module specifier", () => {
   const lookup = makeLookup(["src/app/models.py"]);
 
-  await t.test("invalid specifier starting with a digit", () => {
+  it("invalid specifier starting with a digit", () => {
     const results = resolvePythonFromImportTargets(
       "src/app/api.py",
       "123invalid",
       ["foo"],
       lookup,
     );
-    assert.deepEqual(results, []);
+    expect(results).toEqual([]);
   });
 
-  await t.test("empty importedNames array falls back to the module target", () => {
+  it("empty importedNames array falls back to the module target", () => {
     // No submodule names resolve, so per the documented contract ("prefer
     // submodule files, else the module itself") the result is the module-level
     // target. This mirrors the wildcard `import *` fallback.
@@ -135,16 +113,16 @@ await test("resolvePythonFromImportTargets returns empty array for an invalid mo
       [],
       lookup,
     );
-    assert.deepEqual(results, [
+    expect(results).toEqual([
       { specifier: "app.models", target: "src/app/models.py" },
     ]);
   });
 });
 
-await test("resolvePythonFromImportTargets skips star imports and non-identifier names", async (t) => {
+describe("resolvePythonFromImportTargets skips star imports and non-identifier names", () => {
   const lookup = makeLookup(["src/app/models.py"]);
 
-  await t.test("star import is excluded from results", () => {
+  it("star import is excluded from results", () => {
     const results = resolvePythonFromImportTargets(
       "src/app/api.py",
       "app.models",
@@ -153,10 +131,10 @@ await test("resolvePythonFromImportTargets skips star imports and non-identifier
     );
     // '*' should be filtered out; only 'User' (if it resolves) or module fallback
     const hasStarEntry = results.some((r) => r.specifier.endsWith(".*"));
-    assert.equal(hasStarEntry, false);
+    expect(hasStarEntry).toBe(false);
   });
 
-  await t.test("non-identifier name is excluded from results", () => {
+  it("non-identifier name is excluded from results", () => {
     const results = resolvePythonFromImportTargets(
       "src/app/api.py",
       "app.models",
@@ -164,7 +142,7 @@ await test("resolvePythonFromImportTargets skips star imports and non-identifier
       lookup,
     );
     const has123 = results.some((r) => r.specifier.includes("123bad"));
-    assert.equal(has123, false);
+    expect(has123).toBe(false);
   });
 });
 
@@ -185,14 +163,8 @@ await test("resolvePythonAbsoluteModuleSpecifier disambiguation: score-based uni
   );
   // The src/app/models.py candidate shares "src/app" with the fromPath directory
   // and should win the common-prefix disambiguation.
-  assert.ok(
-    result !== undefined,
-    "expected a resolved path, got undefined",
-  );
-  assert.ok(
-    result.includes("src/app/models"),
-    `Expected src/app/models.py, got ${result}`,
-  );
+  expect(result !== undefined, "expected a resolved path, got undefined").toBeTruthy();
+  expect(result.includes("src/app/models"), `Expected src/app/models.py, got ${result}`).toBeTruthy();
 });
 
 await test("resolvePythonAbsoluteModuleSpecifier disambiguation: src/ tiebreak when scores are tied and one candidate is under src/", () => {
@@ -208,7 +180,7 @@ await test("resolvePythonAbsoluteModuleSpecifier disambiguation: src/ tiebreak w
     "utils",
     lookup,
   );
-  assert.equal(result, "src/utils.py");
+  expect(result).toBe("src/utils.py");
 });
 
 await test("resolvePythonAbsoluteModuleSpecifier disambiguation: returns undefined when score tie and src/ tiebreak is ambiguous", () => {
@@ -222,7 +194,7 @@ await test("resolvePythonAbsoluteModuleSpecifier disambiguation: returns undefin
     "utils",
     lookup,
   );
-  assert.equal(result, undefined);
+  expect(result).toBe(undefined);
 });
 
 // ── extractPythonImportEdges: from-import delegation ──────────────────────────
@@ -238,18 +210,12 @@ await test("extractPythonImportEdges delegates from-import resolution to resolve
     "from app.services import auth\n",
     lookup,
   );
-  assert.equal(edges.length, 1);
-  assert.ok(edges[0].kind === "python-from-import");
+  expect(edges.length).toBe(1);
+  expect(edges[0].kind === "python-from-import").toBeTruthy();
   // The resolved specifier is recorded in the edge `reason` (GraphEdge has no
   // `specifier` field); the submodule specifier should be `app.services.auth`.
-  assert.ok(
-    edges[0].reason.includes("app.services.auth"),
-    `Expected submodule specifier in reason, got ${edges[0].reason}`,
-  );
-  assert.ok(
-    edges[0].to.endsWith("auth.py"),
-    `Expected submodule target auth.py, got ${edges[0].to}`,
-  );
+  expect(edges[0].reason.includes("app.services.auth"), `Expected submodule specifier in reason, got ${edges[0].reason}`).toBeTruthy();
+  expect(edges[0].to.endsWith("auth.py"), `Expected submodule target auth.py, got ${edges[0].to}`).toBeTruthy();
 });
 
 await test("extractPythonImportEdges delegates from-import resolution: falls back to module when no submodule resolves", () => {
@@ -260,18 +226,12 @@ await test("extractPythonImportEdges delegates from-import resolution: falls bac
     "from app.handlers import SomeClass\n",
     lookup,
   );
-  assert.equal(edges.length, 1);
-  assert.equal(edges[0].kind, "python-from-import");
+  expect(edges.length).toBe(1);
+  expect(edges[0].kind).toBe("python-from-import");
   // Module-level fallback: the resolved specifier (recorded in `reason`) is the
   // module itself, `app.handlers`, not a submodule.
-  assert.ok(
-    edges[0].reason.includes("app.handlers"),
-    `Expected module specifier app.handlers in reason, got ${edges[0].reason}`,
-  );
-  assert.ok(
-    edges[0].to.endsWith("handlers.py"),
-    `Expected handlers.py, got ${edges[0].to}`,
-  );
+  expect(edges[0].reason.includes("app.handlers"), `Expected module specifier app.handlers in reason, got ${edges[0].reason}`).toBeTruthy();
+  expect(edges[0].to.endsWith("handlers.py"), `Expected handlers.py, got ${edges[0].to}`).toBeTruthy();
 });
 
 await test("extractPythonImportEdges delegates from-import resolution: self-reference produces no edge", () => {
@@ -283,7 +243,7 @@ await test("extractPythonImportEdges delegates from-import resolution: self-refe
     lookup,
   );
   // The only candidate (app.models → src/app/models.py) is the file itself — no edge.
-  assert.equal(edges.length, 0);
+  expect(edges.length).toBe(0);
 });
 
 await test("extractPythonImportEdges delegates from-import resolution: wildcard import falls back to module", () => {
@@ -295,18 +255,12 @@ await test("extractPythonImportEdges delegates from-import resolution: wildcard 
     "from app.utils import *\n",
     lookup,
   );
-  assert.equal(edges.length, 1);
-  assert.equal(edges[0].kind, "python-from-import");
+  expect(edges.length).toBe(1);
+  expect(edges[0].kind).toBe("python-from-import");
   // '*' is filtered out, so the only resolved specifier (recorded in `reason`)
   // is the module-level fallback `app.utils`.
-  assert.ok(
-    edges[0].reason.includes("app.utils"),
-    `Expected module specifier app.utils in reason, got ${edges[0].reason}`,
-  );
-  assert.ok(
-    edges[0].to.endsWith("utils.py"),
-    `Expected utils.py, got ${edges[0].to}`,
-  );
+  expect(edges[0].reason.includes("app.utils"), `Expected module specifier app.utils in reason, got ${edges[0].reason}`).toBeTruthy();
+  expect(edges[0].to.endsWith("utils.py"), `Expected utils.py, got ${edges[0].to}`).toBeTruthy();
 });
 
 // ── Backslash continuation ────────────────────────────────────────────────────
@@ -318,8 +272,8 @@ await test("pythonLogicalLines merges backslash-continued import lines", () => {
   const lookup = makeLookup(["os.py", "sys.py"]);
   const edges = extractPythonImportEdges("src/main.py", content, lookup);
   const targets = edges.map((e) => e.to);
-  assert.ok(targets.includes("os.py"), "should resolve os after backslash merge");
-  assert.ok(targets.includes("sys.py"), "should resolve sys after backslash merge");
+  expect(targets.includes("os.py"), "should resolve os after backslash merge").toBeTruthy();
+  expect(targets.includes("sys.py"), "should resolve sys after backslash merge").toBeTruthy();
 });
 
 // ── Unbalanced close paren (parenDepth goes negative) ─────────────────────────
@@ -333,15 +287,9 @@ await test("pythonLogicalLines flushes a line with unbalanced close paren rather
   const edges = extractPythonImportEdges("src/main.py", content, lookup);
   const targets = edges.map((e) => e.to);
   // `from pkg import foo` must produce an edge to pkg/foo.py
-  assert.ok(
-    targets.includes("pkg/foo.py"),
-    "from-import line after unbalanced `)` is parsed correctly",
-  );
+  expect(targets.includes("pkg/foo.py"), "from-import line after unbalanced `)` is parsed correctly").toBeTruthy();
   // A stray `)` must not be appended to the module name
-  assert.ok(
-    !targets.some((t) => t.includes("os)")),
-    "stray `)` is not part of a resolved module name",
-  );
+  expect(!targets.some((t) => t.includes("os)")), "stray `)` is not part of a resolved module name").toBeTruthy();
 });
 
 // ── Comment character outside a string ───────────────────────────────────────
@@ -351,8 +299,8 @@ await test("stripPythonLineComment preserves import name before # outside a stri
   const content = "from pkg import foo  # a comment";
   const lookup = makeLookup(["pkg/foo.py"]);
   const edges = extractPythonImportEdges("src/main.py", content, lookup);
-  assert.equal(edges.length, 1, "one edge resolved");
-  assert.ok(edges[0].to.endsWith("foo.py"), `Expected foo.py, got ${edges[0].to}`);
+  expect(edges.length, "one edge resolved").toBe(1);
+  expect(edges[0].to.endsWith("foo.py"), `Expected foo.py, got ${edges[0].to}`).toBeTruthy();
 });
 
 // ── Comment character inside a single-quoted string ──────────────────────────
@@ -363,11 +311,8 @@ await test("stripPythonLineComment skips # inside a single-quoted string on an i
   const content = "from pkg import foo  # don't touch 'x#y'";
   const lookup = makeLookup(["pkg/foo.py"]);
   const edges = extractPythonImportEdges("src/main.py", content, lookup);
-  assert.equal(edges.length, 1, "one edge resolved");
-  assert.ok(
-    edges[0].to.endsWith("foo.py"),
-    `imported name is foo, not affected by quoted fragment: got ${edges[0].to}`,
-  );
+  expect(edges.length, "one edge resolved").toBe(1);
+  expect(edges[0].to.endsWith("foo.py"), `imported name is foo, not affected by quoted fragment: got ${edges[0].to}`).toBeTruthy();
 });
 
 // ── Triple-quoted string (known limitation) ───────────────────────────────────
@@ -381,6 +326,6 @@ await test("stripPythonLineComment known limitation: triple-quoted string is not
   const content = "from pkg import foo  # '''not a comment'''";
   const lookup = makeLookup(["pkg/foo.py"]);
   const edges = extractPythonImportEdges("src/main.py", content, lookup);
-  assert.equal(edges.length, 1, "foo is extracted correctly despite trailing triple-quote fragment");
-  assert.ok(edges[0].to.endsWith("foo.py"), `Expected foo.py, got ${edges[0].to}`);
+  expect(edges.length, "foo is extracted correctly despite trailing triple-quote fragment").toBe(1);
+  expect(edges[0].to.endsWith("foo.py"), `Expected foo.py, got ${edges[0].to}`).toBeTruthy();
 });

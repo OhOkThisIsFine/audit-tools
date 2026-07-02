@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,40 +31,22 @@ test("publish contract uses public access and GitHub OIDC trusted publishing", a
   const packageJson = JSON.parse(await readText("package.json"));
   const workflow = await readWorkflow("publish-package.yml");
 
-  assert.equal(packageJson.publishConfig?.access, "public");
-  assert.equal(
-    packageJson.scripts?.["release:patch"],
-    "node scripts/release-and-publish.mjs patch --bump-only",
-  );
-  assert.equal(
-    packageJson.scripts?.["release:minor"],
-    "node scripts/release-and-publish.mjs minor --bump-only",
-  );
-  assert.equal(
-    packageJson.scripts?.["release:major"],
-    "node scripts/release-and-publish.mjs major --bump-only",
-  );
-  assert.equal(
-    packageJson.scripts?.["release:patch:publish"],
-    "node scripts/release-and-publish.mjs patch",
-  );
-  assert.equal(
-    packageJson.scripts?.["release:minor:publish"],
-    "node scripts/release-and-publish.mjs minor",
-  );
-  assert.equal(
-    packageJson.scripts?.["release:major:publish"],
-    "node scripts/release-and-publish.mjs major",
-  );
-  assert.match(workflow, /id-token: write/);
-  assert.match(workflow, /npm install -g npm@11\.5\.1 --ignore-scripts/);
-  assert.match(workflow, /npm pack --dry-run/);
-  assert.match(workflow, /Registry propagation succeeded after/);
-  assert.match(workflow, /for attempt in \{1\.\.24\}/);
-  assert.match(workflow, /publish_tag/);
-  assert.match(workflow, /publish-npm-logs/);
-  assert.match(workflow, /Upload npm debug logs/);
-  assert.doesNotMatch(workflow, /NPM_TOKEN/);
+  expect(packageJson.publishConfig?.access).toBe("public");
+  expect(packageJson.scripts?.["release:patch"]).toBe("node scripts/release-and-publish.mjs patch --bump-only");
+  expect(packageJson.scripts?.["release:minor"]).toBe("node scripts/release-and-publish.mjs minor --bump-only");
+  expect(packageJson.scripts?.["release:major"]).toBe("node scripts/release-and-publish.mjs major --bump-only");
+  expect(packageJson.scripts?.["release:patch:publish"]).toBe("node scripts/release-and-publish.mjs patch");
+  expect(packageJson.scripts?.["release:minor:publish"]).toBe("node scripts/release-and-publish.mjs minor");
+  expect(packageJson.scripts?.["release:major:publish"]).toBe("node scripts/release-and-publish.mjs major");
+  expect(workflow).toMatch(/id-token: write/);
+  expect(workflow).toMatch(/npm install -g npm@11\.5\.1 --ignore-scripts/);
+  expect(workflow).toMatch(/npm pack --dry-run/);
+  expect(workflow).toMatch(/Registry propagation succeeded after/);
+  expect(workflow).toMatch(/for attempt in \{1\.\.24\}/);
+  expect(workflow).toMatch(/publish_tag/);
+  expect(workflow).toMatch(/publish-npm-logs/);
+  expect(workflow).toMatch(/Upload npm debug logs/);
+  expect(workflow).not.toMatch(/NPM_TOKEN/);
 });
 
 test("release docs point at trusted publishing instead of token-based npm auth", async () => {
@@ -78,22 +59,22 @@ test("release docs point at trusted publishing instead of token-based npm auth",
   ]);
 
   for (const content of releaseDocs) {
-    assert.doesNotMatch(content, /secrets\.NPM_TOKEN/i);
-    assert.doesNotMatch(content, /NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\./i);
+    expect(content).not.toMatch(/secrets\.NPM_TOKEN/i);
+    expect(content).not.toMatch(/NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\./i);
   }
 
   const releasing = releaseDocs[0];
-  assert.match(releasing, /Trusted Publishing/i);
-  assert.match(releasing, /publish-package\.yml/);
-  assert.match(releasing, /workflow_dispatch/);
-  assert.match(releasing, /Node `20` and Node `22`/);
-  assert.match(releasing, /dry_run=true/);
-  assert.match(releasing, /\*-npm-logs/);
-  assert.match(releasing, /npm run release:patch/);
-  assert.match(releasing, /npm run release:patch:publish/);
-  assert.match(releasing, /release:minor/);
-  assert.match(releasing, /release:major/);
-  assert.match(releasing, /publish-package\.yml/);
+  expect(releasing).toMatch(/Trusted Publishing/i);
+  expect(releasing).toMatch(/publish-package\.yml/);
+  expect(releasing).toMatch(/workflow_dispatch/);
+  expect(releasing).toMatch(/Node `20` and Node `22`/);
+  expect(releasing).toMatch(/dry_run=true/);
+  expect(releasing).toMatch(/\*-npm-logs/);
+  expect(releasing).toMatch(/npm run release:patch/);
+  expect(releasing).toMatch(/npm run release:patch:publish/);
+  expect(releasing).toMatch(/release:minor/);
+  expect(releasing).toMatch(/release:major/);
+  expect(releasing).toMatch(/publish-package\.yml/);
 });
 
 test("one-command release helper wires the trusted publishing path", async () => {
@@ -101,22 +82,22 @@ test("one-command release helper wires the trusted publishing path", async () =>
     await readText("scripts/release-and-publish.mjs"),
   );
 
-  assert.match(helper, /--bump-only/);
-  assert.match(helper, /verify:release/);
-  assert.match(helper, /run\(npm, \["version", bump, "--no-git-tag-version"\]\)/);
-  assert.match(helper, /run\("git", \["add", "package\.json", "package-lock\.json"\]\)/);
-  assert.match(helper, /run\("git", \["commit", "-m", `release: \$\{tag\}`\]\)/);
-  assert.match(helper, /run\("git", \["tag", "-a", tag, "-m", tag\]\)/);
-  assert.match(helper, /const releaseBranch = bumpOnly \? null : ensureMainBranch\(\)/);
-  assert.match(helper, /run\("git", \["push", remoteName, releaseBranch\]\)/);
-  assert.match(helper, /waiting for publish run/);
-  assert.match(helper, /waiting for npm registry/);
-  assert.match(helper, /run\("git", \["push", remoteName, tag\]\)/);
-  assert.match(helper, /run\("gh", \["release", "create", tag, "--title", tag, "--generate-notes"\]\)/);
-  assert.match(helper, /publish-package\.yml/);
-  assert.match(helper, /waitForRegistryVersion/);
-  assert.match(helper, /commandName\("npm"\)/);
-  assert.match(helper, /`\$\{packageName\}@\$\{version\}`/);
+  expect(helper).toMatch(/--bump-only/);
+  expect(helper).toMatch(/verify:release/);
+  expect(helper).toMatch(/run\(npm, \["version", bump, "--no-git-tag-version"\]\)/);
+  expect(helper).toMatch(/run\("git", \["add", "package\.json", "package-lock\.json"\]\)/);
+  expect(helper).toMatch(/run\("git", \["commit", "-m", `release: \$\{tag\}`\]\)/);
+  expect(helper).toMatch(/run\("git", \["tag", "-a", tag, "-m", tag\]\)/);
+  expect(helper).toMatch(/const releaseBranch = bumpOnly \? null : ensureMainBranch\(\)/);
+  expect(helper).toMatch(/run\("git", \["push", remoteName, releaseBranch\]\)/);
+  expect(helper).toMatch(/waiting for publish run/);
+  expect(helper).toMatch(/waiting for npm registry/);
+  expect(helper).toMatch(/run\("git", \["push", remoteName, tag\]\)/);
+  expect(helper).toMatch(/run\("gh", \["release", "create", tag, "--title", tag, "--generate-notes"\]\)/);
+  expect(helper).toMatch(/publish-package\.yml/);
+  expect(helper).toMatch(/waitForRegistryVersion/);
+  expect(helper).toMatch(/commandName\("npm"\)/);
+  expect(helper).toMatch(/`\$\{packageName\}@\$\{version\}`/);
 });
 
 test("the single release script imports the pure poll-log throttle helper", async () => {
@@ -131,33 +112,24 @@ test("the single release script imports the pure poll-log throttle helper", asyn
   const constantPattern = /const POLL_LOG_EVERY_N_ATTEMPTS = \d+;/;
   const helperPattern = /function shouldLogPollAttempt\([^)]*\) \{[\s\S]*?\n\}/;
 
-  assert.ok(
-    canonicalSource.match(constantPattern)?.[0],
-    "scripts/poll-log-throttle.mjs should declare POLL_LOG_EVERY_N_ATTEMPTS",
-  );
-  assert.ok(
-    canonicalSource.match(helperPattern)?.[0],
-    "scripts/poll-log-throttle.mjs should define shouldLogPollAttempt",
-  );
+  expect(canonicalSource.match(constantPattern)?.[0], "scripts/poll-log-throttle.mjs should declare POLL_LOG_EVERY_N_ATTEMPTS").toBeTruthy();
+  expect(canonicalSource.match(helperPattern)?.[0], "scripts/poll-log-throttle.mjs should define shouldLogPollAttempt").toBeTruthy();
 
   // The helper module is pure: no process spawns, timers, or release-script imports.
-  assert.doesNotMatch(canonicalSource, /child_process|spawnSync|setTimeout|setInterval/);
-  assert.doesNotMatch(canonicalSource, /import .*release-and-publish/);
+  expect(canonicalSource).not.toMatch(/child_process|spawnSync|setTimeout|setInterval/);
+  expect(canonicalSource).not.toMatch(/import .*release-and-publish/);
 
   // The release script imports the helper instead of redefining it.
   const releaseScript = normalizeLineEndings(
     await readText("scripts/release-and-publish.mjs"),
   );
-  assert.match(
-    releaseScript,
-    /import \{[^}]*shouldLogPollAttempt[^}]*\} from "\.\/poll-log-throttle\.mjs"/,
-  );
-  assert.doesNotMatch(releaseScript, /function shouldLogPollAttempt/);
-  assert.doesNotMatch(releaseScript, /const POLL_LOG_EVERY_N_ATTEMPTS =/);
+  expect(releaseScript).toMatch(/import \{[^}]*shouldLogPollAttempt[^}]*\} from "\.\/poll-log-throttle\.mjs"/);
+  expect(releaseScript).not.toMatch(/function shouldLogPollAttempt/);
+  expect(releaseScript).not.toMatch(/const POLL_LOG_EVERY_N_ATTEMPTS =/);
 
   // The legacy time-modulo throttle must not survive.
-  assert.doesNotMatch(releaseScript, /pollLogIntervalMs/);
-  assert.doesNotMatch(releaseScript, /shouldLogPoll\(/);
+  expect(releaseScript).not.toMatch(/pollLogIntervalMs/);
+  expect(releaseScript).not.toMatch(/shouldLogPoll\(/);
 });
 
 test("shouldLogPollAttempt throttle behavior (pure-function table test)", async () => {
@@ -171,44 +143,41 @@ test("shouldLogPollAttempt throttle behavior (pure-function table test)", async 
     /function shouldLogPollAttempt\([^)]*\) \{[\s\S]*?\n\}/,
   )?.[0];
 
-  assert.ok(constantDeclaration, "expected POLL_LOG_EVERY_N_ATTEMPTS declaration");
-  assert.ok(helperSource, "expected shouldLogPollAttempt definition");
+  expect(constantDeclaration, "expected POLL_LOG_EVERY_N_ATTEMPTS declaration").toBeTruthy();
+  expect(helperSource, "expected shouldLogPollAttempt definition").toBeTruthy();
 
   const everyN = Number(constantDeclaration[1]);
-  assert.ok(everyN > 1, "heartbeat cadence should be greater than one attempt");
+  expect(everyN > 1, "heartbeat cadence should be greater than one attempt").toBeTruthy();
 
   // The helper must be pure: no clock reads or I/O inside its source.
-  assert.doesNotMatch(helperSource, /Date\.now/);
-  assert.doesNotMatch(helperSource, /process\./);
-  assert.doesNotMatch(helperSource, /readFile|spawnSync|console\./);
+  expect(helperSource).not.toMatch(/Date\.now/);
+  expect(helperSource).not.toMatch(/process\./);
+  expect(helperSource).not.toMatch(/readFile|spawnSync|console\./);
 
   const shouldLogPollAttempt = new Function(
     `${constantDeclaration[0]}\n${helperSource}\nreturn shouldLogPollAttempt;`,
   )();
 
   // First attempt always logs, regardless of status keys.
-  assert.equal(shouldLogPollAttempt(1, "pending", null), true);
-  assert.equal(shouldLogPollAttempt(1, "queued/pending", "queued/pending"), true);
+  expect(shouldLogPollAttempt(1, "pending", null)).toBe(true);
+  expect(shouldLogPollAttempt(1, "queued/pending", "queued/pending")).toBe(true);
 
   // A genuine status/conclusion enum transition always logs.
-  assert.equal(
-    shouldLogPollAttempt(5, "in_progress/pending", "queued/pending"),
-    true,
-  );
-  assert.equal(shouldLogPollAttempt(2, "pending", null), true);
+  expect(shouldLogPollAttempt(5, "in_progress/pending", "queued/pending")).toBe(true);
+  expect(shouldLogPollAttempt(2, "pending", null)).toBe(true);
 
   // Steady state: a non-first, non-transition, non-Nth attempt is silent.
-  assert.equal(shouldLogPollAttempt(5, "pending", "pending"), false);
-  assert.equal(shouldLogPollAttempt(everyN + 1, "pending", "pending"), false);
+  expect(shouldLogPollAttempt(5, "pending", "pending")).toBe(false);
+  expect(shouldLogPollAttempt(everyN + 1, "pending", "pending")).toBe(false);
 
   // Every-Nth-attempt heartbeat logs even with an unchanged status key.
-  assert.equal(shouldLogPollAttempt(everyN, "pending", "pending"), true);
-  assert.equal(shouldLogPollAttempt(everyN * 2, "pending", "pending"), true);
+  expect(shouldLogPollAttempt(everyN, "pending", "pending")).toBe(true);
+  expect(shouldLogPollAttempt(everyN * 2, "pending", "pending")).toBe(true);
 
   // Deterministic for fixed arguments (no hidden clock/state dependence).
   for (let repeat = 0; repeat < 3; repeat += 1) {
-    assert.equal(shouldLogPollAttempt(5, "pending", "pending"), false);
-    assert.equal(shouldLogPollAttempt(everyN, "pending", "pending"), true);
+    expect(shouldLogPollAttempt(5, "pending", "pending")).toBe(false);
+    expect(shouldLogPollAttempt(everyN, "pending", "pending")).toBe(true);
   }
 });
 
@@ -221,21 +190,18 @@ test("primary CI workflows validate the lockfile, preserve diagnostics, and make
   const testSuite = await readWorkflow("audit-code-test-suite.yml");
 
   for (const workflow of [ci, testSuite]) {
-    assert.match(workflow, /Validate package-lock\.json/);
-    assert.match(
-      workflow,
-      /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/,
-    );
-    assert.match(workflow, /npm-debug\.log\*/);
+    expect(workflow).toMatch(/Validate package-lock\.json/);
+    expect(workflow).toMatch(/actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
+    expect(workflow).toMatch(/npm-debug\.log\*/);
   }
 
-  assert.match(ci, /CI_NODE_VERSION: "22\.14\.0"/);
+  expect(ci).toMatch(/CI_NODE_VERSION: "22\.14\.0"/);
 
-  assert.match(testSuite, /name: Orchestration tests \(Node \$\{\{ matrix\.node-version \}\}\)/);
-  assert.match(testSuite, /fail-fast: false/);
-  assert.ok(testSuite.includes('- "20.19.2"'));
-  assert.ok(testSuite.includes('- "22.14.0"'));
-  assert.match(testSuite, /audit-code-test-suite-npm-logs-node-\$\{\{ matrix\.node-version \}\}/);
+  expect(testSuite).toMatch(/name: Orchestration tests \(Node \$\{\{ matrix\.node-version \}\}\)/);
+  expect(testSuite).toMatch(/fail-fast: false/);
+  expect(testSuite.includes('- "20.19.2"')).toBeTruthy();
+  expect(testSuite.includes('- "22.14.0"')).toBeTruthy();
+  expect(testSuite).toMatch(/audit-code-test-suite-npm-logs-node-\$\{\{ matrix\.node-version \}\}/);
 });
 
 test("test-suite workflow pins external GitHub Actions to commit SHAs", async () => {
@@ -243,28 +209,15 @@ test("test-suite workflow pins external GitHub Actions to commit SHAs", async ()
   const usesValues = collectWorkflowUses(testSuite);
   const externalActions = usesValues.filter((uses) => !uses.startsWith("./"));
 
-  assert.ok(externalActions.length > 0, "expected workflow uses entries");
+  expect(externalActions.length > 0, "expected workflow uses entries").toBeTruthy();
 
   for (const uses of externalActions) {
-    assert.match(
-      uses,
-      /^[^@\s]+@[0-9a-f]{40}$/i,
-      `${uses} should be pinned to a full commit SHA`,
-    );
+    expect(uses, `${uses} should be pinned to a full commit SHA`).toMatch(/^[^@\s]+@[0-9a-f]{40}$/i);
   }
 
-  assert.ok(
-    usesValues.some((uses) => uses.startsWith("actions/checkout@")),
-    "expected checkout action to remain referenced",
-  );
-  assert.ok(
-    usesValues.some((uses) => uses.startsWith("actions/setup-node@")),
-    "expected setup-node action to remain referenced",
-  );
-  assert.ok(
-    usesValues.some((uses) => uses.startsWith("actions/upload-artifact@")),
-    "expected upload-artifact action to remain referenced",
-  );
+  expect(usesValues.some((uses) => uses.startsWith("actions/checkout@")), "expected checkout action to remain referenced").toBeTruthy();
+  expect(usesValues.some((uses) => uses.startsWith("actions/setup-node@")), "expected setup-node action to remain referenced").toBeTruthy();
+  expect(usesValues.some((uses) => uses.startsWith("actions/upload-artifact@")), "expected upload-artifact action to remain referenced").toBeTruthy();
 });
 
 test("linked and packaged smoke contracts preserve operator diagnostics and isolate inherited npm publish env where needed", async () => {
@@ -276,20 +229,20 @@ test("linked and packaged smoke contracts preserve operator diagnostics and isol
   );
   const packagingDoc = await readText("docs/audit-pkg/release.md");
 
-  assert.match(packagedScript, /const liveCommandOutput = true;/);
-  assert.match(linkedScript, /const liveCommandOutput = true;/);
-  assert.match(packagedScript, /function createIsolatedNpmEnv/);
-  assert.match(packagedScript, /normalizedKey === "node_auth_token"/);
-  assert.match(packagedScript, /normalizedKey === "npm_token"/);
-  assert.match(packagedScript, /\[smoke:packaged\] success:/);
-  assert.match(linkedScript, /\[smoke:linked\] success:/);
-  assert.match(linkedScript, /label: "npm link"/);
+  expect(packagedScript).toMatch(/const liveCommandOutput = true;/);
+  expect(linkedScript).toMatch(/const liveCommandOutput = true;/);
+  expect(packagedScript).toMatch(/function createIsolatedNpmEnv/);
+  expect(packagedScript).toMatch(/normalizedKey === "node_auth_token"/);
+  expect(packagedScript).toMatch(/normalizedKey === "npm_token"/);
+  expect(packagedScript).toMatch(/\[smoke:packaged\] success:/);
+  expect(linkedScript).toMatch(/\[smoke:linked\] success:/);
+  expect(linkedScript).toMatch(/label: "npm link"/);
 
-  assert.match(packagingDoc, /AUDIT_CODE_VERBOSE=1 npm run smoke:packaged-audit-code/);
-  assert.match(packagingDoc, /AUDIT_CODE_VERBOSE=1 npm run smoke:linked-audit-code/);
-  assert.match(packagingDoc, /npm_config_\*/, "expected packaging docs to mention npm_config_* isolation");
-  assert.match(packagingDoc, /NODE_AUTH_TOKEN/);
-  assert.match(packagingDoc, /NPM_TOKEN/);
+  expect(packagingDoc).toMatch(/AUDIT_CODE_VERBOSE=1 npm run smoke:packaged-audit-code/);
+  expect(packagingDoc).toMatch(/AUDIT_CODE_VERBOSE=1 npm run smoke:linked-audit-code/);
+  expect(packagingDoc, "expected packaging docs to mention npm_config_* isolation").toMatch(/npm_config_\*/);
+  expect(packagingDoc).toMatch(/NODE_AUTH_TOKEN/);
+  expect(packagingDoc).toMatch(/NPM_TOKEN/);
 });
 
 test("update-languages writes the real extractor map path and the header points back at the script", async () => {
@@ -298,25 +251,21 @@ test("update-languages writes the real extractor map path and the header points 
   // A stale ../src/extractors target silently writes scripts/src/extractors and
   // never regenerates the real file.
   const script = normalizeLineEndings(await readText("scripts/audit/update-languages.mjs"));
-  assert.match(
-    script,
-    /"\.\.\/\.\.\/src\/audit\/extractors\/languageMap\.generated\.ts"/,
-    "update-languages must target src/audit/extractors/languageMap.generated.ts",
-  );
-  assert.doesNotMatch(script, /"\.\.\/src\/extractors\//);
-  assert.match(script, /scripts\/audit\/update-languages\.mjs/);
+  expect(script, "update-languages must target src/audit/extractors/languageMap.generated.ts").toMatch(/"\.\.\/\.\.\/src\/audit\/extractors\/languageMap\.generated\.ts"/);
+  expect(script).not.toMatch(/"\.\.\/src\/extractors\//);
+  expect(script).toMatch(/scripts\/audit\/update-languages\.mjs/);
 
   // The real generated file exists at the targeted location.
   const generated = await readText("src/audit/extractors/languageMap.generated.ts");
-  assert.match(generated, /LANGUAGE_BY_EXTENSION/);
+  expect(generated).toMatch(/LANGUAGE_BY_EXTENSION/);
 });
 
 test("audit-code test-suite CI triggers on package.json and the workflow file itself", async () => {
   const testSuite = await readWorkflow("audit-code-test-suite.yml");
   // A package.json change (scripts/deps) or a workflow change must re-run CI;
   // otherwise a broken script/dep edit ships without a gate.
-  assert.match(testSuite, /- package\.json\n/);
-  assert.match(testSuite, /- \.github\/workflows\/audit-code-test-suite\.yml\n/);
+  expect(testSuite).toMatch(/- package\.json\n/);
+  expect(testSuite).toMatch(/- \.github\/workflows\/audit-code-test-suite\.yml\n/);
 });
 
 test("audit-code postinstall fails non-zero when an install step fails (parity with remediate)", async () => {
@@ -327,22 +276,14 @@ test("audit-code postinstall fails non-zero when an install step fails (parity w
     await readText("scripts/remediate/postinstall.mjs"),
   );
   for (const source of [auditPostinstall, remediatePostinstall]) {
-    assert.match(
-      source,
-      /if \(failed > 0\) \{\s*process\.exitCode = 1;\s*\}/,
-      "postinstall must surface failures as a non-zero exit",
-    );
+    expect(source, "postinstall must surface failures as a non-zero exit").toMatch(/if \(failed > 0\) \{\s*process\.exitCode = 1;\s*\}/);
   }
 });
 
 test("dead-code gate config is single-sourced in knip.json, not split into the npm script", async () => {
   const knip = JSON.parse(await readText("knip.json"));
-  assert.deepEqual(knip.include, ["exports", "types", "nsExports", "nsTypes"]);
+  expect(knip.include).toEqual(["exports", "types", "nsExports", "nsTypes"]);
   const packageJson = JSON.parse(await readText("package.json"));
-  assert.equal(packageJson.scripts?.["check:deadcode"], "knip --no-config-hints");
-  assert.doesNotMatch(
-    packageJson.scripts?.["check:deadcode"] ?? "",
-    /--include/,
-    "issue-type filter must live in knip.json, not inline in the script",
-  );
+  expect(packageJson.scripts?.["check:deadcode"]).toBe("knip --no-config-hints");
+  expect(packageJson.scripts?.["check:deadcode"] ?? "", "issue-type filter must live in knip.json, not inline in the script").not.toMatch(/--include/);
 });

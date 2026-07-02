@@ -1,5 +1,4 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,14 +16,14 @@ function withQuotaFile(contract, fn) {
 }
 
 test("renderTokenBudgetView: empty for missing/unreadable path", () => {
-  assert.equal(renderTokenBudgetView(null), "");
-  assert.equal(renderTokenBudgetView(undefined), "");
-  assert.equal(renderTokenBudgetView("/no/such/dispatch-quota.json"), "");
+  expect(renderTokenBudgetView(null)).toBe("");
+  expect(renderTokenBudgetView(undefined)).toBe("");
+  expect(renderTokenBudgetView("/no/such/dispatch-quota.json")).toBe("");
 });
 
 test("renderTokenBudgetView: empty when no pool carries a snapshot or budget", () => {
   withQuotaFile({ capacity_pools: [{ pool_id: "claude-code/*", slots: 4 }] }, (file) => {
-    assert.equal(renderTokenBudgetView(file), "");
+    expect(renderTokenBudgetView(file)).toBe("");
   });
 });
 
@@ -48,14 +47,14 @@ test("renderTokenBudgetView: renders per-pool budget, remaining %, in-flight, bo
     },
     (file) => {
       const out = renderTokenBudgetView(file);
-      assert.match(out, /Dispatch token budget/);
-      assert.match(out, /claude-code\/\*/);
-      assert.match(out, /59%/);
-      assert.match(out, /120,000/); // remaining budget, localized
-      assert.match(out, /4,000/); // in-flight
-      assert.match(out, /token_budget/);
-      assert.match(out, /2026-07-01T01:59:59Z/);
-      assert.match(out, /~12,000 tok/); // upcoming wave load
+      expect(out).toMatch(/Dispatch token budget/);
+      expect(out).toMatch(/claude-code\/\*/);
+      expect(out).toMatch(/59%/);
+      expect(out).toMatch(/120,000/); // remaining budget, localized
+      expect(out).toMatch(/4,000/); // in-flight
+      expect(out).toMatch(/token_budget/);
+      expect(out).toMatch(/2026-07-01T01:59:59Z/);
+      expect(out).toMatch(/~12,000 tok/); // upcoming wave load
     },
   );
 });
@@ -76,7 +75,7 @@ test("renderTokenBudgetView: shows cold-start when budget is unknown", () => {
     },
     (file) => {
       const out = renderTokenBudgetView(file);
-      assert.match(out, /cold-start/);
+      expect(out).toMatch(/cold-start/);
     },
   );
 });
@@ -104,8 +103,8 @@ test("renderTokenBudgetView: multi-window snapshot renders a per-window breakdow
     },
     (file) => {
       const out = renderTokenBudgetView(file);
-      assert.match(out, /session: 40%/);
-      assert.match(out, /weekly: 86%/);
+      expect(out).toMatch(/session: 40%/);
+      expect(out).toMatch(/weekly: 86%/);
     },
   );
 });
@@ -127,9 +126,9 @@ test("scheduleWave stamps remaining_token_budget + in_flight_tokens on the sched
       source: "test",
     },
   });
-  assert.equal(schedule.remaining_token_budget, 5000);
-  assert.equal(schedule.in_flight_tokens, 2000);
+  expect(schedule.remaining_token_budget).toBe(5000);
+  expect(schedule.in_flight_tokens).toBe(2000);
   // 5000 budget − 2000 in-flight = 3000 → only 3 slots of 1000 fit.
-  assert.equal(schedule.max_concurrent, 3);
-  assert.equal(schedule.binding_cap, "token_budget");
+  expect(schedule.max_concurrent).toBe(3);
+  expect(schedule.binding_cap).toBe("token_budget");
 });

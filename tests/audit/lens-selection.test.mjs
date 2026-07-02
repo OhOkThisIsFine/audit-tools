@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   resolveEffectiveLenses,
@@ -12,10 +11,10 @@ const { LENSES } = await import("audit-tools/shared");
 
 test("MANDATORY_LENSES includes security, correctness, reliability, data_integrity", () => {
   const mandatory = new Set(MANDATORY_LENSES);
-  assert.ok(mandatory.has("security"));
-  assert.ok(mandatory.has("correctness"));
-  assert.ok(mandatory.has("reliability"));
-  assert.ok(mandatory.has("data_integrity"));
+  expect(mandatory.has("security")).toBeTruthy();
+  expect(mandatory.has("correctness")).toBeTruthy();
+  expect(mandatory.has("reliability")).toBeTruthy();
+  expect(mandatory.has("data_integrity")).toBeTruthy();
 });
 
 // ── resolveEffectiveLenses — defaults ────────────────────────────────────────
@@ -24,15 +23,15 @@ test("omitted selection resolves to the full all-lenses set", () => {
   const lenses = resolveEffectiveLenses(undefined);
   const set = new Set(lenses);
   for (const mandatory of MANDATORY_LENSES) {
-    assert.ok(set.has(mandatory), `missing mandatory lens: ${mandatory}`);
+    expect(set.has(mandatory), `missing mandatory lens: ${mandatory}`).toBeTruthy();
   }
   // Full set == the shared canonical lens vocabulary (no magic literal).
-  assert.equal(lenses.length, LENSES.length);
+  expect(lenses.length).toBe(LENSES.length);
 });
 
 test("null selection also resolves to the full set", () => {
   const lenses = resolveEffectiveLenses(null);
-  assert.equal(lenses.length, LENSES.length);
+  expect(lenses.length).toBe(LENSES.length);
 });
 
 // ── resolveEffectiveLenses — focused selection ────────────────────────────────
@@ -40,9 +39,9 @@ test("null selection also resolves to the full set", () => {
 test("focused selection includes requested lens plus mandatory base lenses", () => {
   const lenses = resolveEffectiveLenses(["performance"]);
   const set = new Set(lenses);
-  assert.ok(set.has("performance"));
+  expect(set.has("performance")).toBeTruthy();
   for (const mandatory of MANDATORY_LENSES) {
-    assert.ok(set.has(mandatory), `missing mandatory lens: ${mandatory}`);
+    expect(set.has(mandatory), `missing mandatory lens: ${mandatory}`).toBeTruthy();
   }
 });
 
@@ -51,7 +50,7 @@ test("focused selection de-duplicates lenses", () => {
   const lenses = resolveEffectiveLenses(["correctness", "correctness", "security"]);
   const seen = new Set();
   for (const lens of lenses) {
-    assert.ok(!seen.has(lens), `duplicate lens: ${lens}`);
+    expect(!seen.has(lens), `duplicate lens: ${lens}`).toBeTruthy();
     seen.add(lens);
   }
 });
@@ -61,33 +60,33 @@ test("resolved lenses are sorted in canonical LENSES registry order", () => {
   // performance comes before tests in the canonical order.
   const perfIdx = lenses.indexOf("performance");
   const testsIdx = lenses.indexOf("tests");
-  assert.ok(perfIdx < testsIdx, "performance should precede tests in canonical order");
+  expect(perfIdx < testsIdx, "performance should precede tests in canonical order").toBeTruthy();
 });
 
 test("custom (non-canonical) lenses in selection are preserved after canonical lenses", () => {
   const lenses = resolveEffectiveLenses(["performance", "whimsy"]);
-  assert.ok(lenses.includes("whimsy"));
-  assert.ok(lenses.includes("performance"));
-  assert.ok(lenses.indexOf("performance") < lenses.indexOf("whimsy"));
+  expect(lenses.includes("whimsy")).toBeTruthy();
+  expect(lenses.includes("performance")).toBeTruthy();
+  expect(lenses.indexOf("performance") < lenses.indexOf("whimsy")).toBeTruthy();
 });
 
 test("custom lenses are de-duplicated", () => {
   const lenses = resolveEffectiveLenses(["whimsy", "whimsy", "performance"]);
-  assert.equal(lenses.filter((l) => l === "whimsy").length, 1);
+  expect(lenses.filter((l) => l === "whimsy").length).toBe(1);
 });
 
 // ── isMandatoryLens ───────────────────────────────────────────────────────────
 
 test("isMandatoryLens returns true for mandatory lenses", () => {
-  assert.ok(isMandatoryLens("security"));
-  assert.ok(isMandatoryLens("correctness"));
-  assert.ok(isMandatoryLens("reliability"));
-  assert.ok(isMandatoryLens("data_integrity"));
+  expect(isMandatoryLens("security")).toBeTruthy();
+  expect(isMandatoryLens("correctness")).toBeTruthy();
+  expect(isMandatoryLens("reliability")).toBeTruthy();
+  expect(isMandatoryLens("data_integrity")).toBeTruthy();
 });
 
 test("isMandatoryLens returns false for non-mandatory lenses", () => {
-  assert.ok(!isMandatoryLens("performance"));
-  assert.ok(!isMandatoryLens("tests"));
+  expect(!isMandatoryLens("performance")).toBeTruthy();
+  expect(!isMandatoryLens("tests")).toBeTruthy();
 });
 
 // ── TST-4510f094: exclude-then-re-union round-trip ────────────────────────────
@@ -103,18 +102,12 @@ test("TST-4510f094: resolveEffectiveLenses restores mandatory lenses stripped by
   // it back into the result.
   const first = resolveEffectiveLenses(null); // all lenses
   const afterExclude = first.filter((l) => l !== "security");
-  assert.ok(!afterExclude.includes("security"), "afterExclude must not contain security");
+  expect(!afterExclude.includes("security"), "afterExclude must not contain security").toBeTruthy();
 
   const second = resolveEffectiveLenses(afterExclude);
-  assert.ok(
-    second.includes("security"),
-    "second resolveEffectiveLenses call must restore mandatory 'security' lens",
-  );
+  expect(second.includes("security"), "second resolveEffectiveLenses call must restore mandatory 'security' lens").toBeTruthy();
   for (const mandatory of MANDATORY_LENSES) {
-    assert.ok(
-      second.includes(mandatory),
-      `mandatory lens '${mandatory}' must be present after exclude-then-re-union round-trip`,
-    );
+    expect(second.includes(mandatory), `mandatory lens '${mandatory}' must be present after exclude-then-re-union round-trip`).toBeTruthy();
   }
 });
 
@@ -125,9 +118,6 @@ test("TST-4510f094: excluding all non-mandatory lenses does not drop mandatory l
   const afterExclude = onlyOptional.filter((l) => !MANDATORY_LENSES.includes(l));
   const second = resolveEffectiveLenses(afterExclude);
   for (const mandatory of MANDATORY_LENSES) {
-    assert.ok(
-      second.includes(mandatory),
-      `mandatory lens '${mandatory}' must be present even when all other lenses are excluded`,
-    );
+    expect(second.includes(mandatory), `mandatory lens '${mandatory}' must be present even when all other lenses are excluded`).toBeTruthy();
   }
 });

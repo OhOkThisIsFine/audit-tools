@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,15 +131,8 @@ test("runPlanningExecutor omits runtime_validation_report when no tasks are prod
   // → buildRuntimeValidationTasks({ command: undefined }) → { tasks: [] }
   const result = await runPlanningExecutor(makeFullBundle(), nonExistentRoot);
 
-  assert.strictEqual(
-    result.updated.runtime_validation_report,
-    undefined,
-    "runtime_validation_report must be undefined when tasks.length === 0",
-  );
-  assert.ok(
-    !result.artifacts_written.includes("runtime_validation_report.json"),
-    "runtime_validation_report.json must not appear in artifacts_written when no tasks",
-  );
+  expect(result.updated.runtime_validation_report, "runtime_validation_report must be undefined when tasks.length === 0").toBe(undefined);
+  expect(!result.artifacts_written.includes("runtime_validation_report.json"), "runtime_validation_report.json must not appear in artifacts_written when no tasks").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -167,15 +160,8 @@ test("runPlanningExecutor includes runtime_validation_report when tasks are pres
 
   const result = await runPlanningExecutor(bundle, packageRoot);
 
-  assert.notStrictEqual(
-    result.updated.runtime_validation_report,
-    undefined,
-    "runtime_validation_report must be defined when tasks.length > 0",
-  );
-  assert.ok(
-    result.artifacts_written.includes("runtime_validation_report.json"),
-    "runtime_validation_report.json must appear in artifacts_written when tasks are present",
-  );
+  expect(result.updated.runtime_validation_report, "runtime_validation_report must be defined when tasks.length > 0").not.toBe(undefined);
+  expect(result.artifacts_written.includes("runtime_validation_report.json"), "runtime_validation_report.json must appear in artifacts_written when tasks are present").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -199,18 +185,9 @@ test("runPlanningExecutor includes delta scope summary in progress_summary", asy
     scope,
   );
 
-  assert.ok(
-    result.progress_summary.includes("Delta scope since abc123"),
-    `progress_summary should contain 'Delta scope since abc123' but was: ${result.progress_summary}`,
-  );
-  assert.ok(
-    result.progress_summary.includes("1 changed file"),
-    `progress_summary should mention seed_files count (1) but was: ${result.progress_summary}`,
-  );
-  assert.ok(
-    result.progress_summary.includes("1 graph neighbour"),
-    `progress_summary should mention expanded_files count (1) but was: ${result.progress_summary}`,
-  );
+  expect(result.progress_summary.includes("Delta scope since abc123"), `progress_summary should contain 'Delta scope since abc123' but was: ${result.progress_summary}`).toBeTruthy();
+  expect(result.progress_summary.includes("1 changed file"), `progress_summary should mention seed_files count (1) but was: ${result.progress_summary}`).toBeTruthy();
+  expect(result.progress_summary.includes("1 graph neighbour"), `progress_summary should mention expanded_files count (1) but was: ${result.progress_summary}`).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -282,8 +259,8 @@ test("disposition_overrides exact-path match excludes the file from audit tasks"
   const lineIndex = makeLineIndex(fileEntries);
   const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
   const taskPaths = result.updated.audit_tasks.flatMap((t) => t.file_paths);
-  assert.ok(!taskPaths.includes("src/gen.ts"), "overridden file must not appear in audit tasks");
-  assert.ok(taskPaths.includes("src/real.ts"), "non-overridden file must still appear");
+  expect(!taskPaths.includes("src/gen.ts"), "overridden file must not appear in audit tasks").toBeTruthy();
+  expect(taskPaths.includes("src/real.ts"), "non-overridden file must still appear").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -311,9 +288,9 @@ test("disposition_overrides prefix match excludes all files under the prefix", a
   const lineIndex = makeLineIndex(fileEntries);
   const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
   const taskPaths = result.updated.audit_tasks.flatMap((t) => t.file_paths);
-  assert.ok(!taskPaths.includes("vendor/a.ts"), "vendor/a.ts must be excluded via prefix");
-  assert.ok(!taskPaths.includes("vendor/b.ts"), "vendor/b.ts must be excluded via prefix");
-  assert.ok(taskPaths.includes("src/main.ts"), "src/main.ts must not be excluded");
+  expect(!taskPaths.includes("vendor/a.ts"), "vendor/a.ts must be excluded via prefix").toBeTruthy();
+  expect(!taskPaths.includes("vendor/b.ts"), "vendor/b.ts must be excluded via prefix").toBeTruthy();
+  expect(taskPaths.includes("src/main.ts"), "src/main.ts must not be excluded").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -327,7 +304,7 @@ test("disposition_overrides absent: initializeCoverageFromPlan receives original
   const lineIndex = makeLineIndex(fileEntries);
   const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
   const taskPaths = result.updated.audit_tasks.flatMap((t) => t.file_paths);
-  assert.ok(taskPaths.includes("src/a.ts"), "file must appear in tasks when no overrides");
+  expect(taskPaths.includes("src/a.ts"), "file must appear in tasks when no overrides").toBeTruthy();
 });
 
 test("disposition_overrides empty array is a no-op", async () => {
@@ -344,7 +321,7 @@ test("disposition_overrides empty array is a no-op", async () => {
   const lineIndex = makeLineIndex(fileEntries);
   const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
   const taskPaths = result.updated.audit_tasks.flatMap((t) => t.file_paths);
-  assert.ok(taskPaths.includes("src/a.ts"), "file must appear in tasks when overrides is empty");
+  expect(taskPaths.includes("src/a.ts"), "file must appear in tasks when overrides is empty").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -353,27 +330,27 @@ test("disposition_overrides empty array is a no-op", async () => {
 
 test("interpretFreeFormIntent: security keywords map to security lens", () => {
   const lenses = interpretFreeFormIntent("focus on auth and security issues");
-  assert.ok(lenses.includes("security"), "should include security lens");
+  expect(lenses.includes("security"), "should include security lens").toBeTruthy();
 });
 
 test("interpretFreeFormIntent: data integrity keywords map to data_integrity lens", () => {
   const lenses = interpretFreeFormIntent("check data integrity and validation");
-  assert.ok(lenses.includes("data_integrity"), "should include data_integrity lens");
+  expect(lenses.includes("data_integrity"), "should include data_integrity lens").toBeTruthy();
 });
 
 test("interpretFreeFormIntent: empty string returns empty array", () => {
   const lenses = interpretFreeFormIntent("");
-  assert.deepStrictEqual(lenses, [], "empty input must return empty array");
+  expect(lenses, "empty input must return empty array").toEqual([]);
 });
 
 test("interpretFreeFormIntent: undefined-like blank input returns empty array", () => {
   const lenses = interpretFreeFormIntent("   ");
-  assert.deepStrictEqual(lenses, [], "whitespace-only input must return empty array");
+  expect(lenses, "whitespace-only input must return empty array").toEqual([]);
 });
 
 test("interpretFreeFormIntent: performance keywords map to performance lens", () => {
   const lenses = interpretFreeFormIntent("improve perf and latency");
-  assert.ok(lenses.includes("performance"), "should include performance lens for perf/latency");
+  expect(lenses.includes("performance"), "should include performance lens for perf/latency").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -395,10 +372,10 @@ test("free_form_intent='security audit' promotes security lens tasks in runPlann
   const lineIndex = makeLineIndex(fileEntries);
   const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
   const secTasks = result.updated.audit_tasks.filter((t) => t.lens === "security");
-  assert.ok(secTasks.length > 0, "should produce security tasks");
+  expect(secTasks.length > 0, "should produce security tasks").toBeTruthy();
   // Without external signal, security base priority is 'medium'; boosted → 'high'
   for (const task of secTasks) {
-    assert.strictEqual(task.priority, "high", `security task should be 'high' after intent boost, got '${task.priority}'`);
+    expect(task.priority, `security task should be 'high' after intent boost, got '${task.priority}'`).toBe("high");
   }
 });
 
@@ -420,6 +397,6 @@ test("free_form_intent boost does not affect unrelated lens tasks", async () => 
   const corrTasks = result.updated.audit_tasks.filter((t) => t.lens === "correctness");
   if (corrTasks.length > 0) {
     // base correctness priority without signal is 'low', not boosted
-    assert.strictEqual(corrTasks[0].priority, "low", "correctness task should stay low priority");
+    expect(corrTasks[0].priority, "correctness task should stay low priority").toBe("low");
   }
 });

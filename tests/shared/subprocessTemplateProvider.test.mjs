@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { applyTemplate, SubprocessTemplateProvider } = await import("../../src/shared/providers/subprocessTemplateProvider.ts");
 const { RunLogger } = await import("../../src/shared/observability/runLog.ts");
@@ -39,7 +38,7 @@ test("applyTemplate wholePlaceholder: single-token template returns value raw, w
   // The raw value is shellQuote("cmd") + " " + shellQuote("--flag").
   // Under non-win32 that's: "cmd --flag" (single-quotes around each).
   // The whole-placeholder path must NOT add another layer of quoting.
-  assert.ok(typeof result === "string" && result.length > 0);
+  expect(typeof result === "string" && result.length > 0).toBeTruthy();
   // The result must equal what the raw workerCommandShell value is —
   // it must NOT be additionally shell-quoted (no surrounding single/double quotes wrapping the whole string).
   const task2 = buildTask(["my script"]);
@@ -54,7 +53,7 @@ test("applyTemplate wholePlaceholder: single-token template returns value raw, w
   );
   // In a multi-token template the workerCommandShell key still bypasses shellQuote
   // (Shell-suffix rule), so the last part of shellJoined equals raw.
-  assert.ok(shellJoined.endsWith(raw), "Shell-suffix bypass holds in multi-token template too");
+  expect(shellJoined.endsWith(raw), "Shell-suffix bypass holds in multi-token template too").toBeTruthy();
 });
 
 test("applyTemplate wholePlaceholder: repoRoot with spaces IS shell-quoted in multi-token template, but not when sole token", () => {
@@ -62,12 +61,12 @@ test("applyTemplate wholePlaceholder: repoRoot with spaces IS shell-quoted in mu
   const task = buildTask(["node", "worker.js"]);
   // Whole placeholder → raw (no extra quoting)
   const whole = applyTemplate("{repoRoot}", input, task, CTX);
-  assert.equal(whole, "/path with spaces");
+  expect(whole).toBe("/path with spaces");
 
   // Multi-token template → shellQuoted because repoRoot does not end in Shell
   const multi = applyTemplate("cmd --root {repoRoot}", input, task, CTX);
-  assert.ok(multi.includes("path with spaces"), "value appears in output");
-  assert.notEqual(multi, "cmd --root /path with spaces");
+  expect(multi.includes("path with spaces"), "value appears in output").toBeTruthy();
+  expect(multi).not.toBe("cmd --root /path with spaces");
 });
 
 // ── Shell-suffix bypass ──────────────────────────────────────────────────────
@@ -85,8 +84,8 @@ test("applyTemplate Shell-suffix bypass: keys ending in Shell are not shellQuote
   // double-quote escaping both round-trip the same way; a leading/trailing
   // quote on the value itself is not "outer" quoting).
   const raw = applyTemplate("{workerCommandShell}", input, task, CTX);
-  assert.ok(raw.length > 0);
-  assert.equal(result, `run ${raw} --done`, "workerCommandShell is substituted raw, not re-quoted");
+  expect(raw.length > 0).toBeTruthy();
+  expect(result, "workerCommandShell is substituted raw, not re-quoted").toBe(`run ${raw} --done`);
 });
 
 // ── Unknown placeholder: routes to RunLogger, not console.warn ───────────────
@@ -118,19 +117,16 @@ test("applyTemplate unknown placeholder: routes to RunLogger instead of console.
     console.warn = originalWarn;
   }
 
-  assert.equal(warnings.length, 0, "console.warn must not be called");
-  assert.equal(result, "cmd  --flag", "unknown placeholder substitutes empty string");
+  expect(warnings.length, "console.warn must not be called").toBe(0);
+  expect(result, "unknown placeholder substitutes empty string").toBe("cmd  --flag");
 
   // The log file should contain exactly one event line with kind=error and the placeholder.
   const lines = readFileSync(logPath, "utf8").trim().split("\n");
-  assert.equal(lines.length, 1, "exactly one log event emitted");
+  expect(lines.length, "exactly one log event emitted").toBe(1);
   const event = JSON.parse(lines[0]);
-  assert.equal(event.kind, "error");
-  assert.ok(
-    event.note.includes("applyTemplate: unknown placeholder {noSuchKey}"),
-    `note contains placeholder: ${event.note}`,
-  );
-  assert.equal(event.provider, "test-provider");
+  expect(event.kind).toBe("error");
+  expect(event.note.includes("applyTemplate: unknown placeholder {noSuchKey}"), `note contains placeholder: ${event.note}`).toBeTruthy();
+  expect(event.provider).toBe("test-provider");
 
   rmSync(tmpDir, { recursive: true, force: true });
 });
@@ -145,7 +141,7 @@ test("applyTemplate unknown placeholder: no error thrown and no log event when R
     entryIndex: 0,
     log: logger,
   });
-  assert.equal(result, "cmd  --flag");
+  expect(result).toBe("cmd  --flag");
 });
 
 // ── Known non-Shell placeholder: shellQuoted in multi-token template ─────────
@@ -158,12 +154,12 @@ test("applyTemplate known non-Shell placeholder: value is shellQuoted in multi-t
   // On POSIX, shellQuote wraps in single quotes; on win32 it uses cmd escaping.
   // Either way the raw unquoted value "/root with spaces" must not appear verbatim
   // as a bare unquoted token (i.e. the output must differ from the unquoted form).
-  assert.notEqual(result, "launch /root with spaces --go");
+  expect(result).not.toBe("launch /root with spaces --go");
   // The root does appear (possibly quoted) in the output.
-  assert.ok(result.includes("root with spaces"), "value appears in output");
+  expect(result.includes("root with spaces"), "value appears in output").toBeTruthy();
   // Whole-placeholder test: {repoRoot} alone returns the raw value (no quoting).
   const wholeResult = applyTemplate("{repoRoot}", input, task, CTX);
-  assert.equal(wholeResult, "/root with spaces");
+  expect(wholeResult).toBe("/root with spaces");
 });
 
 // ── SubprocessTemplateProvider RunLogger constructor integration ──────────────
@@ -226,16 +222,13 @@ test("SubprocessTemplateProvider: unknown placeholder routes to RunLogger, not c
     console.warn = originalWarn;
   }
 
-  assert.equal(warnings.length, 0, "console.warn must not be called");
+  expect(warnings.length, "console.warn must not be called").toBe(0);
 
   const lines = readFileSync(logPath, "utf8").trim().split("\n");
-  assert.equal(lines.length, 1, "exactly one log event emitted");
+  expect(lines.length, "exactly one log event emitted").toBe(1);
   const event = JSON.parse(lines[0]);
-  assert.equal(event.kind, "error");
-  assert.ok(
-    event.note.includes("applyTemplate: unknown placeholder {unknownKey}"),
-    `note contains placeholder: ${event.note}`,
-  );
+  expect(event.kind).toBe("error");
+  expect(event.note.includes("applyTemplate: unknown placeholder {unknownKey}"), `note contains placeholder: ${event.note}`).toBeTruthy();
 
   rmSync(tmpDir, { recursive: true, force: true });
 });

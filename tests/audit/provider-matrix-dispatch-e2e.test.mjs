@@ -17,12 +17,9 @@
  * (codex CLI auth, the configured NIM endpoint + NVIDIA_API_KEY, …), so it must
  * never run in the normal suite / CI. Run it with:
  *   RUN_PROVIDER_MATRIX_E2E=1 [NVIDIA_API_KEY=…] \
- *     node --import tsx/esm --test tests/audit/provider-matrix-dispatch-e2e.test.mjs
- * from the repo root.
+ *     node --import tsx --test tests/audit/provider-matrix-dispatch-e2e.test.mjs
  */
-
-import test from "node:test";
-import assert from "node:assert/strict";
+import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 
 import { discoverProviders } from "audit-tools/shared";
@@ -86,33 +83,27 @@ function availability(candidate) {
   };
 }
 
-test(
+describe.skipIf(!RUN)(
   "provider-matrix: in-process audit dispatch round-trips for every available provider",
-  {
-    skip: RUN
-      ? false
-      : "set RUN_PROVIDER_MATRIX_E2E=1 (+ provider creds) to run the live provider-matrix dispatch e2e",
-  },
-  async (t) => {
-    const { runInProcessAuditDispatch } = await import(
-      "../../src/audit/cli/nextStepCommand.ts"
-    );
-    const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.ts");
-
+  () => {
     const availabilities = CANDIDATES.map((c) => ({ c, ...availability(c) }));
+
     // A gate that ran but exercised no provider validated nothing — fail loudly
     // rather than read green when no live backend was reachable.
-    assert.ok(
-      availabilities.some((a) => a.available),
-      "no in-process dispatch provider was available — the matrix validated nothing " +
-        `(${availabilities.map((a) => `${a.c.name}: ${a.reason}`).join("; ")})`,
-    );
+    it("has at least one available in-process dispatch provider", () => {
+      expect(availabilities.some((a) => a.available), "no in-process dispatch provider was available — the matrix validated nothing " +
+          `(${availabilities.map((a) => `${a.c.name}: ${a.reason}`).join("; ")})`).toBeTruthy();
+    });
 
     for (const { c, available, reason } of availabilities) {
-      await t.test(
+      it.skipIf(!available)(
         available ? c.name : `${c.name} (skipped: ${reason})`,
-        { skip: available ? false : reason },
         async () => {
+          const { runInProcessAuditDispatch } = await import(
+            "../../src/audit/cli/nextStepCommand.ts"
+          );
+          const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.ts");
+
           await withTempDir(`provider-matrix-${c.name}-`, async (root) => {
             // Advance the deterministic chain to planning so the next obligation
             // is the host-delegation dispatch (audit_tasks_completed) — the only
@@ -126,10 +117,7 @@ test(
               root,
               sessionConfig: c.build(),
             });
-            assert.ok(
-              outcome && outcome.dispatched,
-              `${c.name} in-process dispatch must round-trip one bounded audit step`,
-            );
+            expect(outcome && outcome.dispatched, `${c.name} in-process dispatch must round-trip one bounded audit step`).toBeTruthy();
           });
         },
       );

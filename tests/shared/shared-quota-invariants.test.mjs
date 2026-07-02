@@ -4,7 +4,7 @@
  *
  * Each test block is tagged with the invariant ID it covers.
  */
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 // ── INV-shared-quota-01: Global host limit partitioned across pools ──────────
@@ -28,16 +28,9 @@ test("INV-shared-quota-01: shared global host limit is partitioned across pools 
     sessionConfig: {},
     pendingItemTokens: new Array(20).fill(30_000),
   });
-  assert.ok(
-    capacity.total_slots <= 2,
-    `total_slots ${capacity.total_slots} must not exceed shared host limit 2 — FRIC-001 regression`,
-  );
-  assert.equal(capacity.total_slots, 2, "total_slots must equal the shared global limit of 2");
-  assert.equal(
-    capacity.binding_cap,
-    "host_concurrency",
-    "binding_cap must record host_concurrency when the global limit binds",
-  );
+  expect(capacity.total_slots <= 2, `total_slots ${capacity.total_slots} must not exceed shared host limit 2 — FRIC-001 regression`).toBeTruthy();
+  expect(capacity.total_slots, "total_slots must equal the shared global limit of 2").toBe(2);
+  expect(capacity.binding_cap, "binding_cap must record host_concurrency when the global limit binds").toBe("host_concurrency");
 });
 
 test("INV-shared-quota-01: shared limit 1 with 3 pools dispatches exactly 1 total slot", async () => {
@@ -54,7 +47,7 @@ test("INV-shared-quota-01: shared limit 1 with 3 pools dispatches exactly 1 tota
     sessionConfig: {},
     pendingItemTokens: new Array(10).fill(5_000),
   });
-  assert.equal(capacity.total_slots, 1, "shared limit of 1 must not over-dispatch");
+  expect(capacity.total_slots, "shared limit of 1 must not over-dispatch").toBe(1);
 });
 
 // ── INV-shared-quota-02: Pool ID as lane identity — different limits = independent ─
@@ -74,11 +67,8 @@ test("INV-shared-quota-02: independent pools with different limits sum independe
     pendingItemTokens: [900, 800, 700, 600, 500, 400],
   });
   // cli gets 2 slots, ide gets 3 — independent, so total is 5.
-  assert.equal(capacity.total_slots, 5, "independent pools with limits 2+3 must sum to 5");
-  assert.deepEqual(
-    capacity.pools.map((p) => [p.pool_id, p.slots]),
-    [["cli", 2], ["ide", 3]],
-  );
+  expect(capacity.total_slots, "independent pools with limits 2+3 must sum to 5").toBe(5);
+  expect(capacity.pools.map((p) => [p.pool_id, p.slots])).toEqual([["cli", 2], ["ide", 3]]);
 });
 
 test("INV-shared-quota-02: pools with no host limits are fully independent — no global cap applied", async () => {
@@ -93,7 +83,7 @@ test("INV-shared-quota-02: pools with no host limits are fully independent — n
     pendingItemTokens: new Array(20).fill(1_000),
   });
   // No global limit and no invented floor: each pool fans out independently.
-  assert.ok(capacity.total_slots > 1, "pools with no host limit must fan out, not serialize");
+  expect(capacity.total_slots > 1, "pools with no host limit must fan out, not serialize").toBeTruthy();
 });
 
 test("INV-shared-quota-02: mixed pools (one with limit, one without) are independent — no global cap", async () => {
@@ -113,10 +103,7 @@ test("INV-shared-quota-02: mixed pools (one with limit, one without) are indepen
     pendingItemTokens: new Array(20).fill(1_000),
   });
   // Mixed: no global cap — each pool uses its own per-slot limit.
-  assert.ok(
-    capacity.total_slots >= 4,
-    "mixed pools (one with limit, one without) must not be artificially capped by the limited pool's value",
-  );
+  expect(capacity.total_slots >= 4, "mixed pools (one with limit, one without) must not be artificially capped by the limited pool's value").toBeTruthy();
 });
 
 // ── INV-shared-quota-03: detectLivelock returns null for empty pending set ────
@@ -126,21 +113,21 @@ test("INV-shared-quota-02: mixed pools (one with limit, one without) are indepen
 test("INV-shared-quota-03: detectLivelock returns null when pendingIds is empty", async () => {
   const { detectLivelock } = await import("../../src/shared/quota/capacity.ts");
   const result = detectLivelock({ pendingIds: [], consecutiveNoProgressWaves: 99 });
-  assert.equal(result, null, "empty pending set must not produce a terminal");
+  expect(result, "empty pending set must not produce a terminal").toBe(null);
 });
 
 test("INV-shared-quota-03: detectLivelock returns null before noProgressLimit is reached", async () => {
   const { detectLivelock } = await import("../../src/shared/quota/capacity.ts");
   const result = detectLivelock({ pendingIds: ["a", "b"], consecutiveNoProgressWaves: 2, noProgressLimit: 3 });
-  assert.equal(result, null, "below noProgressLimit must return null");
+  expect(result, "below noProgressLimit must return null").toBe(null);
 });
 
 test("INV-shared-quota-03: detectLivelock returns terminal at noProgressLimit", async () => {
   const { detectLivelock } = await import("../../src/shared/quota/capacity.ts");
   const result = detectLivelock({ pendingIds: ["x", "y"], consecutiveNoProgressWaves: 3, noProgressLimit: 3 });
-  assert.ok(result !== null, "at noProgressLimit must return a terminal");
-  assert.equal(result.reason, "livelock_guard");
-  assert.deepEqual(result.stranded_ids, ["x", "y"]);
+  expect(result !== null, "at noProgressLimit must return a terminal").toBeTruthy();
+  expect(result.reason).toBe("livelock_guard");
+  expect(result.stranded_ids).toEqual(["x", "y"]);
 });
 
 // ── INV-shared-quota-04: buildEmptyPoolTerminal produces correct terminal ─────
@@ -148,8 +135,8 @@ test("INV-shared-quota-03: detectLivelock returns terminal at noProgressLimit", 
 test("INV-shared-quota-04: buildEmptyPoolTerminal constructs correct terminal", async () => {
   const { buildEmptyPoolTerminal } = await import("../../src/shared/quota/capacity.ts");
   const terminal = buildEmptyPoolTerminal(["task-1", "task-2"]);
-  assert.equal(terminal.reason, "empty_pool");
-  assert.deepEqual(terminal.stranded_ids, ["task-1", "task-2"]);
+  expect(terminal.reason).toBe("empty_pool");
+  expect(terminal.stranded_ids).toEqual(["task-1", "task-2"]);
 });
 
 test("INV-shared-quota-04: buildEmptyPoolTerminal does not mutate input array", async () => {
@@ -157,7 +144,7 @@ test("INV-shared-quota-04: buildEmptyPoolTerminal does not mutate input array", 
   const ids = ["a", "b"];
   const terminal = buildEmptyPoolTerminal(ids);
   ids.push("c");
-  assert.equal(terminal.stranded_ids.length, 2, "terminal must not share the input array reference");
+  expect(terminal.stranded_ids.length, "terminal must not share the input array reference").toBe(2);
 });
 
 // ── INV-shared-quota-05: QuotaState schema version is 1 or 2 ─────────────────
@@ -174,8 +161,8 @@ test("INV-shared-quota-05: readQuotaState defaults to version:2 empty state when
   try {
     setQuotaStateDir(dir);
     const state = await readQuotaState();
-    assert.equal(state.version, 2, "default state must have version 2");
-    assert.deepEqual(state.entries, {}, "default state entries must be empty");
+    expect(state.version, "default state must have version 2").toBe(2);
+    expect(state.entries, "default state entries must be empty").toEqual({});
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -193,7 +180,7 @@ test("INV-shared-quota-05: writeQuotaState always normalizes to version 2", asyn
     // Write a version:1 state.
     await writeQuotaState({ version: 1, entries: {} });
     const state = await readQuotaState();
-    assert.equal(state.version, 2, "writeQuotaState must normalize version to 2");
+    expect(state.version, "writeQuotaState must normalize version to 2").toBe(2);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -214,11 +201,11 @@ test("INV-shared-quota-06: acquireLock writes a unique token each time", async (
   try {
     const token1 = await acquireLock(lockPath);
     const content = await readFile(lockPath, "utf8");
-    assert.equal(content, token1, "lock file must contain the owner token");
+    expect(content, "lock file must contain the owner token").toBe(token1);
     await releaseLock(lockPath, token1);
 
     const token2 = await acquireLock(lockPath);
-    assert.notEqual(token1, token2, "each acquisition must produce a unique token");
+    expect(token1, "each acquisition must produce a unique token").not.toBe(token2);
     await releaseLock(lockPath, token2);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -238,7 +225,7 @@ test("INV-shared-quota-06: releaseLock does not delete when token does not match
     // Try to release with a wrong token — must NOT delete the lock.
     await releaseLock(lockPath, "wrong-token");
     const content = await readFile(lockPath, "utf8");
-    assert.equal(content, token, "lock must still exist after wrong-token release attempt");
+    expect(content, "lock must still exist after wrong-token release attempt").toBe(token);
     // Clean up properly.
     await releaseLock(lockPath, token);
   } finally {
@@ -262,8 +249,8 @@ test("INV-shared-quota-07: DispatchModelTier canonical values are small, standar
     { rank: "deep", context_tokens: 200_000, output_tokens: 32_000 },
   ]);
   const roster = parseHostModelRoster(valid);
-  assert.equal(roster.length, 3);
-  assert.deepEqual(roster.map((e) => e.rank), ["small", "standard", "deep"]);
+  expect(roster.length).toBe(3);
+  expect(roster.map((e) => e.rank)).toEqual(["small", "standard", "deep"]);
 
   // Unknown tier must throw.
   const invalid = JSON.stringify([{ rank: "ultra", context_tokens: 1000, output_tokens: 100 }]);
@@ -294,10 +281,7 @@ test("INV-shared-quota-07: CapacityPool.rank is typed as DispatchModelTier (smal
   // rank fields must survive through allocations.
   const ranks = capacity.pools.filter((p) => p.rank != null).map((p) => p.rank);
   for (const rank of ranks) {
-    assert.ok(
-      ["small", "standard", "deep"].includes(rank),
-      `PoolDispatchAllocation.rank ${rank} must be a DispatchModelTier value`,
-    );
+    expect(["small", "standard", "deep"].includes(rank), `PoolDispatchAllocation.rank ${rank} must be a DispatchModelTier value`).toBeTruthy();
   }
 });
 
@@ -332,10 +316,7 @@ test("INV-shared-quota-09: scheduleWave max_concurrent is always >= 1", async ()
       hostConcurrencyLimit: null,
       ...overrides,
     });
-    assert.ok(
-      schedule.max_concurrent >= 1,
-      `max_concurrent must be >= 1, got ${schedule.max_concurrent} with ${JSON.stringify(overrides)}`,
-    );
+    expect(schedule.max_concurrent >= 1, `max_concurrent must be >= 1, got ${schedule.max_concurrent} with ${JSON.stringify(overrides)}`).toBeTruthy();
   }
 });
 
@@ -349,7 +330,7 @@ test("INV-shared-quota-09: scheduleWave with quota disabled still respects max_c
     quotaStateEntry: null,
     hostConcurrencyLimit: { active_subagents: 1, source: "cli_flags", description: "t" },
   });
-  assert.ok(schedule.max_concurrent >= 1, `max_concurrent must be >= 1`);
+  expect(schedule.max_concurrent >= 1, `max_concurrent must be >= 1`).toBeTruthy();
 });
 
 // ── INV-shared-quota-10: recordWaveOutcome persists state under lock ──────────
@@ -371,13 +352,10 @@ test("INV-shared-quota-10: parallel recordWaveOutcome calls converge to a consis
     ));
     const state = await readQuotaState();
     const entry = state.entries[key];
-    assert.ok(entry !== undefined, "entry must exist after concurrent writes");
+    expect(entry !== undefined, "entry must exist after concurrent writes").toBeTruthy();
     // Each success adds 1.0 to buckets 1..3. 5 calls → success_weight should be ~5.
     for (const n of [1, 2, 3]) {
-      assert.ok(
-        entry.buckets[String(n)]?.success_weight > 0,
-        `bucket ${n} must have positive success_weight after concurrent writes`,
-      );
+      expect(entry.buckets[String(n)]?.success_weight > 0, `bucket ${n} must have positive success_weight after concurrent writes`).toBeTruthy();
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -407,14 +385,8 @@ test("INV-shared-quota-11: CRIT-name-canonical-tier-field — capacity module ra
 
   for (const alloc of capacity.pools) {
     if (alloc.rank != null) {
-      assert.ok(
-        !NON_CANONICAL.has(alloc.rank),
-        `PoolDispatchAllocation.rank "${alloc.rank}" must not use a CapabilityTier value — CRIT-name-canonical-tier-field`,
-      );
-      assert.ok(
-        ["small", "standard", "deep"].includes(alloc.rank),
-        `PoolDispatchAllocation.rank "${alloc.rank}" must be a canonical DispatchModelTier value`,
-      );
+      expect(!NON_CANONICAL.has(alloc.rank), `PoolDispatchAllocation.rank "${alloc.rank}" must not use a CapabilityTier value — CRIT-name-canonical-tier-field`).toBeTruthy();
+      expect(["small", "standard", "deep"].includes(alloc.rank), `PoolDispatchAllocation.rank "${alloc.rank}" must be a canonical DispatchModelTier value`).toBeTruthy();
     }
   }
 });
@@ -426,7 +398,7 @@ test("INV-shared-quota-11: CRIT-name-canonical-tier-field — HostModelRosterEnt
   for (const tier of ["small", "standard", "deep"]) {
     const json = JSON.stringify([{ rank: tier, context_tokens: 32_000, output_tokens: 4_096 }]);
     const roster = parseHostModelRoster(json);
-    assert.equal(roster[0].rank, tier, `canonical tier '${tier}' must be accepted`);
+    expect(roster[0].rank, `canonical tier '${tier}' must be accepted`).toBe(tier);
   }
 
   // CapabilityTier values must all be rejected.
@@ -452,11 +424,11 @@ test("INV-shared-quota-12: parseHostModelRoster preserves opaque model_id verbat
     { rank: "deep", context_tokens: 200_000, output_tokens: 64_000, model_id: "vendor::opaque/Build-2026.06" },
   ]);
   const roster = parseHostModelRoster(withId);
-  assert.equal(roster[0].model_id, "vendor::opaque/Build-2026.06", "model_id must be preserved verbatim");
+  expect(roster[0].model_id, "model_id must be preserved verbatim").toBe("vendor::opaque/Build-2026.06");
 
   // Absent model_id is allowed (optional).
   const noId = JSON.stringify([{ rank: "small", context_tokens: 32_000, output_tokens: 4_096 }]);
-  assert.equal(parseHostModelRoster(noId)[0].model_id, undefined, "model_id is optional");
+  expect(parseHostModelRoster(noId)[0].model_id, "model_id is optional").toBe(undefined);
 
   // Empty/whitespace model_id is rejected.
   for (const bad of ["", "   "]) {
@@ -541,11 +513,7 @@ test("INV-shared-quota-13: INV-QD-04 — no model-name literals in quota/ or dis
     });
   }
 
-  assert.deepEqual(
-    hits,
-    [],
-    `No hardcoded model identities / tier→model maps allowed in quota|dispatch (INV-QD-04):\n${hits.join("\n")}`,
-  );
+  expect(hits, `No hardcoded model identities / tier→model maps allowed in quota|dispatch (INV-QD-04):\n${hits.join("\n")}`).toEqual([]);
 });
 
 // ── INV-shared-quota-14: INV-QD-02 — total_slots is always >= 1 (property) ────
@@ -602,9 +570,6 @@ test("INV-shared-quota-14: INV-QD-02 — total_slots >= 1 across pool/quota conf
 
   for (const cfg of configs) {
     const capacity = computeDispatchCapacity(cfg);
-    assert.ok(
-      capacity.total_slots >= 1,
-      `total_slots must be >= 1, got ${capacity.total_slots} for ${JSON.stringify(cfg.pendingItemTokens.length)} items`,
-    );
+    expect(capacity.total_slots >= 1, `total_slots must be >= 1, got ${capacity.total_slots} for ${JSON.stringify(cfg.pendingItemTokens.length)} items`).toBeTruthy();
   }
 });

@@ -5,8 +5,7 @@
 // rank maps (audit TIER_RANK / quotaPool rankOrder, shared rollingDispatch
 // DISPATCH_TIER_RANK, remediate RANK_ORDER ×2) now all source from here.
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   DISPATCH_TIER_RANK,
   DISPATCH_TIER_ORDER,
@@ -17,43 +16,38 @@ import {
 } from "../../dist/shared/index.js";
 
 test("DISPATCH_TIER_RANK orders small < standard < deep", () => {
-  assert.ok(DISPATCH_TIER_RANK.small < DISPATCH_TIER_RANK.standard);
-  assert.ok(DISPATCH_TIER_RANK.standard < DISPATCH_TIER_RANK.deep);
+  expect(DISPATCH_TIER_RANK.small < DISPATCH_TIER_RANK.standard).toBeTruthy();
+  expect(DISPATCH_TIER_RANK.standard < DISPATCH_TIER_RANK.deep).toBeTruthy();
 });
 
 test("DISPATCH_TIER_RANK covers exactly the three canonical tiers", () => {
-  assert.deepEqual(Object.keys(DISPATCH_TIER_RANK).sort(), ["deep", "small", "standard"]);
+  expect(Object.keys(DISPATCH_TIER_RANK).sort()).toEqual(["deep", "small", "standard"]);
 });
 
 test("DISPATCH_TIER_ORDER is derived ascending capability order", () => {
-  assert.deepEqual(DISPATCH_TIER_ORDER, ["small", "standard", "deep"]);
+  expect(DISPATCH_TIER_ORDER).toEqual(["small", "standard", "deep"]);
   // Derived from the rank map — every adjacent pair strictly increases.
   for (let i = 1; i < DISPATCH_TIER_ORDER.length; i++) {
-    assert.ok(
-      DISPATCH_TIER_RANK[DISPATCH_TIER_ORDER[i]] >
-        DISPATCH_TIER_RANK[DISPATCH_TIER_ORDER[i - 1]],
-    );
+    expect(DISPATCH_TIER_RANK[DISPATCH_TIER_ORDER[i]] >
+        DISPATCH_TIER_RANK[DISPATCH_TIER_ORDER[i - 1]]).toBeTruthy();
   }
 });
 
 test("tierRank maps an absent/unknown tier to the neutral middle (standard)", () => {
-  assert.equal(tierRank(undefined), DISPATCH_TIER_RANK.standard);
-  assert.equal(tierRank(null), DISPATCH_TIER_RANK.standard);
-  assert.equal(DISPATCH_TIER_RANK_FALLBACK, DISPATCH_TIER_RANK.standard);
-  assert.equal(tierRank("deep"), DISPATCH_TIER_RANK.deep);
+  expect(tierRank(undefined)).toBe(DISPATCH_TIER_RANK.standard);
+  expect(tierRank(null)).toBe(DISPATCH_TIER_RANK.standard);
+  expect(DISPATCH_TIER_RANK_FALLBACK).toBe(DISPATCH_TIER_RANK.standard);
+  expect(tierRank("deep")).toBe(DISPATCH_TIER_RANK.deep);
 });
 
 test("compareTier sorts ascending; negate for most-capable-first", () => {
   const tiers = ["deep", "small", "standard"];
-  assert.deepEqual([...tiers].sort(compareTier), ["small", "standard", "deep"]);
-  assert.deepEqual(
-    [...tiers].sort((a, b) => compareTier(b, a)),
-    ["deep", "standard", "small"],
-  );
+  expect([...tiers].sort(compareTier)).toEqual(["small", "standard", "deep"]);
+  expect([...tiers].sort((a, b) => compareTier(b, a))).toEqual(["deep", "standard", "small"]);
 });
 
 test("mostCapableTier picks the highest rank, undefined for empty", () => {
-  assert.equal(mostCapableTier(["small", "deep", "standard"]), "deep");
-  assert.equal(mostCapableTier(["small"]), "small");
-  assert.equal(mostCapableTier([]), undefined);
+  expect(mostCapableTier(["small", "deep", "standard"])).toBe("deep");
+  expect(mostCapableTier(["small"])).toBe("small");
+  expect(mostCapableTier([])).toBe(undefined);
 });

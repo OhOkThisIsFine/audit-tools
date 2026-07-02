@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, onTestFinished, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,11 +20,11 @@ const VALID_ROSTER = [
 
 test("getHostModelRoster parses a valid ordered roster", () => {
   const argv = ["node", "cli", "--host-models", JSON.stringify(VALID_ROSTER)];
-  assert.deepEqual(getHostModelRoster(argv), VALID_ROSTER);
+  expect(getHostModelRoster(argv)).toEqual(VALID_ROSTER);
 });
 
 test("getHostModelRoster returns null when the flag is absent", () => {
-  assert.equal(getHostModelRoster(["node", "cli"]), null);
+  expect(getHostModelRoster(["node", "cli"])).toBe(null);
 });
 
 test("getHostModelRoster rejects malformed input", () => {
@@ -55,23 +55,17 @@ test("resolveTierBudgets maps reported ranks directly", () => {
       ["deep", 3000],
     ]),
   );
-  assert.deepEqual(budgets, { small: 1000, standard: 2000, deep: 3000 });
+  expect(budgets).toEqual({ small: 1000, standard: 2000, deep: 3000 });
 });
 
 test("resolveTierBudgets fills missing ranks from the nearest reported rank", () => {
   // missing small → nearest is standard
-  assert.deepEqual(
-    resolveTierBudgets(new Map([["standard", 2000], ["deep", 3000]])),
-    { small: 2000, standard: 2000, deep: 3000 },
-  );
+  expect(resolveTierBudgets(new Map([["standard", 2000], ["deep", 3000]]))).toEqual({ small: 2000, standard: 2000, deep: 3000 });
   // missing standard, equidistant from both neighbors → prefers the LOWER
   // (less capable) rank so a tier is never over-budgeted (COR-0e031ac0).
-  assert.deepEqual(
-    resolveTierBudgets(new Map([["small", 1000], ["deep", 3000]])),
-    { small: 1000, standard: 1000, deep: 3000 },
-  );
+  expect(resolveTierBudgets(new Map([["small", 1000], ["deep", 3000]]))).toEqual({ small: 1000, standard: 1000, deep: 3000 });
   // single reported rank serves every tier
-  assert.deepEqual(resolveTierBudgets(new Map([["deep", 3000]])), {
+  expect(resolveTierBudgets(new Map([["deep", 3000]]))).toEqual({
     small: 3000,
     standard: 3000,
     deep: 3000,
@@ -133,7 +127,7 @@ const SPLIT_ROSTER = [
 
 await test("a low-risk packet routed to a small window re-splits to fit (design a)", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await prepareDispatchArtifacts({
     packageRoot,
     runId: RUN_ID,
@@ -143,21 +137,17 @@ await test("a low-risk packet routed to a small window re-splits to fit (design 
     hostModel: null,
     hostModelRoster: SPLIT_ROSTER,
   });
-  assert.equal(
-    result.packet_count,
-    2,
-    "the merged low-risk packet exceeds the small rank's window and re-splits",
-  );
+  expect(result.packet_count, "the merged low-risk packet exceeds the small rank's window and re-splits").toBe(2);
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
   for (const entry of plan) {
-    assert.equal(entry.model_hint.tier, "small");
+    expect(entry.model_hint.tier).toBe("small");
   }
-  assert.equal(result.warning_count, 0, "re-split packets fit their budgets");
+  expect(result.warning_count, "re-split packets fit their budgets").toBe(0);
 });
 
 await test("the same packet at high risk routes to the deep window and stays whole", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.9));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await prepareDispatchArtifacts({
     packageRoot,
     runId: RUN_ID,
@@ -167,18 +157,14 @@ await test("the same packet at high risk routes to the deep window and stays who
     hostModel: null,
     hostModelRoster: SPLIT_ROSTER,
   });
-  assert.equal(
-    result.packet_count,
-    1,
-    "deep-routed packets size against the deep rank's window",
-  );
+  expect(result.packet_count, "deep-routed packets size against the deep rank's window").toBe(1);
   const plan = await readJson(join(runDir, "dispatch-plan.json"));
-  assert.equal(plan[0].model_hint.tier, "deep");
+  expect(plan[0].model_hint.tier).toBe("deep");
 });
 
 await test("dispatch-quota carries the roster echo, tier budgets, and per-rank pools", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await prepareDispatchArtifacts({
     packageRoot,
     runId: RUN_ID,
@@ -189,19 +175,19 @@ await test("dispatch-quota carries the roster echo, tier budgets, and per-rank p
     hostModelRoster: SPLIT_ROSTER,
   });
   const quota = await readJson(join(runDir, "dispatch-quota.json"));
-  assert.deepEqual(quota.host_model_roster, SPLIT_ROSTER);
+  expect(quota.host_model_roster).toEqual(SPLIT_ROSTER);
   // standard was not reported and is equidistant from small and deep → falls
   // back to the LOWER (small) budget so it is never over-budgeted (COR-0e031ac0).
-  assert.deepEqual(quota.tier_budgets, {
+  expect(quota.tier_budgets).toEqual({
     small: 6000,
     standard: 6000,
     deep: 168000,
   });
-  assert.ok(Array.isArray(quota.capacity_pools));
-  assert.ok(quota.capacity_pools.length >= 1);
+  expect(Array.isArray(quota.capacity_pools)).toBeTruthy();
+  expect(quota.capacity_pools.length >= 1).toBeTruthy();
   // Pools are ordered most-capable first and carry their rank.
-  assert.equal(quota.capacity_pools[0].rank, "deep");
-  assert.equal(quota.capacity_pools[0].resolved_limits.context_tokens, 200000);
+  expect(quota.capacity_pools[0].rank).toBe("deep");
+  expect(quota.capacity_pools[0].resolved_limits.context_tokens).toBe(200000);
 });
 
 // ── opaque model identity → quota key (F3) ───────────────────────────────────
@@ -212,7 +198,7 @@ await test("--host-model-id keys the quota pool as provider/<id>; absent → pro
     [null, "/*"],
   ]) {
     const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
-    t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+    onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
     await prepareDispatchArtifacts({
       packageRoot,
       runId: RUN_ID,
@@ -223,16 +209,13 @@ await test("--host-model-id keys the quota pool as provider/<id>; absent → pro
       hostModelId,
     });
     const quota = await readJson(join(runDir, "dispatch-quota.json"));
-    assert.ok(
-      quota.capacity_pools[0].pool_id.endsWith(suffix),
-      `pool_id ${quota.capacity_pools[0].pool_id} should end with ${suffix}`,
-    );
+    expect(quota.capacity_pools[0].pool_id.endsWith(suffix), `pool_id ${quota.capacity_pools[0].pool_id} should end with ${suffix}`).toBeTruthy();
   }
 });
 
 await test("per-rank model_id keys each roster pool's quota independently", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.9));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   await prepareDispatchArtifacts({
     packageRoot,
     runId: RUN_ID,
@@ -247,17 +230,14 @@ await test("per-rank model_id keys each roster pool's quota independently", asyn
   });
   const quota = await readJson(join(runDir, "dispatch-quota.json"));
   const poolIds = quota.capacity_pools.map((pool) => pool.pool_id);
-  assert.ok(poolIds[0].endsWith("/rank-d"), `deep pool keys its own id: ${poolIds[0]}`);
+  expect(poolIds[0].endsWith("/rank-d"), `deep pool keys its own id: ${poolIds[0]}`).toBeTruthy();
   // The roster echo retains each rank's opaque id for downstream consumers.
-  assert.deepEqual(
-    quota.host_model_roster.map((entry) => entry.model_id),
-    ["rank-s", "rank-d"],
-  );
+  expect(quota.host_model_roster.map((entry) => entry.model_id)).toEqual(["rank-s", "rank-d"]);
 });
 
 await test("scalar handshake without a roster keeps the single-pool path (no tier budgets)", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(linkedTasks(0.1));
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
   const result = await prepareDispatchArtifacts({
     packageRoot,
     runId: RUN_ID,
@@ -268,9 +248,9 @@ await test("scalar handshake without a roster keeps the single-pool path (no tie
     hostContextTokens: 200000,
     hostOutputTokens: 32000,
   });
-  assert.equal(result.packet_count, 1, "one window, one merged packet");
+  expect(result.packet_count, "one window, one merged packet").toBe(1);
   const quota = await readJson(join(runDir, "dispatch-quota.json"));
-  assert.equal(quota.host_model_roster, undefined);
-  assert.equal(quota.tier_budgets, undefined);
-  assert.equal(quota.resolved_limits.context_tokens, 200000);
+  expect(quota.host_model_roster).toBe(undefined);
+  expect(quota.tier_budgets).toBe(undefined);
+  expect(quota.resolved_limits.context_tokens).toBe(200000);
 });

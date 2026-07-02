@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -65,8 +65,8 @@ async function withTempQuotaDir(fn) {
 }
 
 test("DISCOVERED_LIMIT_FIELDS includes the capability-handshake fields", () => {
-  assert.ok(DISCOVERED_LIMIT_FIELDS.includes("context_tokens"));
-  assert.ok(DISCOVERED_LIMIT_FIELDS.includes("output_tokens"));
+  expect(DISCOVERED_LIMIT_FIELDS.includes("context_tokens")).toBeTruthy();
+  expect(DISCOVERED_LIMIT_FIELDS.includes("output_tokens")).toBeTruthy();
 });
 
 test("updateDiscoveredLimits persists context_tokens/output_tokens through the cache round-trip", async () => {
@@ -79,9 +79,9 @@ test("updateDiscoveredLimits persists context_tokens/output_tokens through the c
       source: "capability_handshake",
     });
     const result = await lookupDiscoveredLimits("prov:m");
-    assert.ok(result !== null, "lookup should return non-null");
-    assert.equal(result.context_tokens, 200000);
-    assert.equal(result.output_tokens, 8192);
+    expect(result !== null, "lookup should return non-null").toBeTruthy();
+    expect(result.context_tokens).toBe(200000);
+    expect(result.output_tokens).toBe(8192);
   });
 });
 
@@ -90,7 +90,7 @@ test("mergeDiscoveredLimits fills context_tokens/output_tokens from later source
     { requests_per_minute: 50, source: "provider_query" },
     { context_tokens: 128000, output_tokens: 4096, source: "handshake" },
   );
-  assert.equal(result.requests_per_minute, 50);
-  assert.equal(result.context_tokens, 128000);
-  assert.equal(result.output_tokens, 4096);
+  expect(result.requests_per_minute).toBe(50);
+  expect(result.context_tokens).toBe(128000);
+  expect(result.output_tokens).toBe(4096);
 });

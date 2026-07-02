@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { computeArtifactMetadata, computeArtifactStateSignature } =
@@ -115,54 +115,40 @@ test("computeArtifactStateSignature ignores revision churn but tracks content", 
     "repo_manifest.json": { revision: 9, content_hash: "aaa", dependency_revisions: {} },
     "audit-report.md": { revision: 42, content_hash: "bbb", dependency_revisions: {} },
   };
-  assert.equal(sigOf(base), sigOf(bumpedRevisions));
+  expect(sigOf(base)).toBe(sigOf(bumpedRevisions));
   // A genuine content change -> different signature (real progress).
   const changedContent = {
     ...base,
     "audit-report.md": { revision: 3, content_hash: "ccc", dependency_revisions: {} },
   };
-  assert.notEqual(sigOf(base), sigOf(changedContent));
+  expect(sigOf(base)).not.toBe(sigOf(changedContent));
   // Order-independent, and no metadata -> a stable sentinel.
-  assert.equal(
-    sigOf(base),
-    sigOf({
+  expect(sigOf(base)).toBe(sigOf({
       "audit-report.md": base["audit-report.md"],
       "repo_manifest.json": base["repo_manifest.json"],
-    }),
-  );
-  assert.equal(computeArtifactStateSignature({}), "no-metadata");
+    }));
+  expect(computeArtifactStateSignature({})).toBe("no-metadata");
 });
 
 test("artifact freshness helpers normalize deterministic metadata hashes", () => {
-  assert.equal(
-    stableStringify({ b: [2, { d: 4, c: 3 }], a: 1 }),
-    stableStringify({ a: 1, b: [2, { c: 3, d: 4 }] }),
-  );
-  assert.equal(
-    hashArtifactValue("repo_manifest.json", {
+  expect(stableStringify({ b: [2, { d: 4, c: 3 }], a: 1 })).toBe(stableStringify({ a: 1, b: [2, { c: 3, d: 4 }] }));
+  expect(hashArtifactValue("repo_manifest.json", {
       generated_at: "a",
       files: [],
-    }),
-    hashArtifactValue("repo_manifest.json", {
+    })).toBe(hashArtifactValue("repo_manifest.json", {
       generated_at: "b",
       files: [],
-    }),
-  );
-  assert.notEqual(
-    hashArtifactValue("coverage_matrix.json", {
+    }));
+  expect(hashArtifactValue("coverage_matrix.json", {
       generated_at: "a",
       files: [],
-    }),
-    hashArtifactValue("coverage_matrix.json", {
+    })).not.toBe(hashArtifactValue("coverage_matrix.json", {
       generated_at: "b",
       files: [],
-    }),
-  );
-  assert.ok(
-    ARTIFACT_DEPENDS_ON_MAP["coverage_matrix.json"].includes(
+    }));
+  expect(ARTIFACT_DEPENDS_ON_MAP["coverage_matrix.json"].includes(
       "external_analyzer_results.json",
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("dependency revision changes mark downstream artifacts stale under the new audit-report model", () => {
@@ -182,28 +168,16 @@ test("dependency revision changes mark downstream artifacts stale under the new 
   };
 
   const stale = computeStaleArtifacts(revisedBundle);
-  assert.ok(stale.has("file_disposition.json"));
-  assert.ok(stale.has("unit_manifest.json"));
-  assert.ok(stale.has("coverage_matrix.json"));
-  assert.ok(stale.has("audit-report.md"));
+  expect(stale.has("file_disposition.json")).toBeTruthy();
+  expect(stale.has("unit_manifest.json")).toBeTruthy();
+  expect(stale.has("coverage_matrix.json")).toBeTruthy();
+  expect(stale.has("audit-report.md")).toBeTruthy();
 
   const state = deriveAuditState(revisedBundle);
-  assert.equal(
-    state.obligations.find((item) => item.id === "file_disposition")?.state,
-    "stale",
-  );
-  assert.equal(
-    state.obligations.find((item) => item.id === "structure_artifacts")?.state,
-    "stale",
-  );
-  assert.equal(
-    state.obligations.find((item) => item.id === "planning_artifacts")?.state,
-    "stale",
-  );
-  assert.equal(
-    state.obligations.find((item) => item.id === "synthesis_current")?.state,
-    "stale",
-  );
+  expect(state.obligations.find((item) => item.id === "file_disposition")?.state).toBe("stale");
+  expect(state.obligations.find((item) => item.id === "structure_artifacts")?.state).toBe("stale");
+  expect(state.obligations.find((item) => item.id === "planning_artifacts")?.state).toBe("stale");
+  expect(state.obligations.find((item) => item.id === "synthesis_current")?.state).toBe("stale");
 });
 
 test("new dependency inputs invalidate previously derived artifacts", () => {
@@ -223,14 +197,11 @@ test("new dependency inputs invalidate previously derived artifacts", () => {
   };
 
   const stale = computeStaleArtifacts(revisedBundle);
-  assert.ok(stale.has("repo_manifest.json"));
-  assert.ok(stale.has("file_disposition.json"));
+  expect(stale.has("repo_manifest.json")).toBeTruthy();
+  expect(stale.has("file_disposition.json")).toBeTruthy();
 
   const state = deriveAuditState(revisedBundle);
-  assert.equal(
-    state.obligations.find((item) => item.id === "file_disposition")?.state,
-    "stale",
-  );
+  expect(state.obligations.find((item) => item.id === "file_disposition")?.state).toBe("stale");
 });
 
 test("runtime_validation_current obligation: stale when report exists but tasks incomplete", () => {
@@ -244,11 +215,7 @@ test("runtime_validation_current obligation: stale when report exists but tasks 
     },
   };
   const stateStale = deriveAuditState(bundleWithPendingResult);
-  assert.equal(
-    stateStale.obligations.find((o) => o.id === "runtime_validation_current")?.state,
-    "stale",
-    "obligation should be 'stale' when report exists but result is pending",
-  );
+  expect(stateStale.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'stale' when report exists but result is pending").toBe("stale");
 
   // Case 2: no report at all -> obligation is 'missing'.
   const bundleNoReport = {
@@ -257,11 +224,7 @@ test("runtime_validation_current obligation: stale when report exists but tasks 
     },
   };
   const stateMissing = deriveAuditState(bundleNoReport);
-  assert.equal(
-    stateMissing.obligations.find((o) => o.id === "runtime_validation_current")?.state,
-    "missing",
-    "obligation should be 'missing' when no report exists",
-  );
+  expect(stateMissing.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'missing' when no report exists").toBe("missing");
 
   // Case 3: report exists and result has a non-pending status -> obligation is 'satisfied'.
   const bundleComplete = {
@@ -273,11 +236,7 @@ test("runtime_validation_current obligation: stale when report exists but tasks 
     },
   };
   const stateSatisfied = deriveAuditState(bundleComplete);
-  assert.equal(
-    stateSatisfied.obligations.find((o) => o.id === "runtime_validation_current")?.state,
-    "satisfied",
-    "obligation should be 'satisfied' when all tasks have non-pending results",
-  );
+  expect(stateSatisfied.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'satisfied' when all tasks have non-pending results").toBe("satisfied");
 });
 
 test("external analyzer results invalidate planning-derived artifacts", () => {
@@ -287,10 +246,7 @@ test("external analyzer results invalidate planning-derived artifacts", () => {
     "requeue_tasks.json",
     "audit-report.md",
   ]) {
-    assert.ok(
-      ARTIFACT_DEPENDENTS_MAP["external_analyzer_results.json"].includes(artifact),
-      `${artifact} should depend on external analyzer results`,
-    );
+    expect(ARTIFACT_DEPENDENTS_MAP["external_analyzer_results.json"].includes(artifact), `${artifact} should depend on external analyzer results`).toBeTruthy();
   }
 
   const initialBundle = {
@@ -306,10 +262,10 @@ test("external analyzer results invalidate planning-derived artifacts", () => {
   };
   const stale = computeStaleArtifacts(bundle);
 
-  assert.ok(stale.has("coverage_matrix.json"));
-  assert.ok(stale.has("audit_tasks.json"));
-  assert.ok(stale.has("requeue_tasks.json"));
-  assert.ok(stale.has("audit-report.md"));
+  expect(stale.has("coverage_matrix.json")).toBeTruthy();
+  expect(stale.has("audit_tasks.json")).toBeTruthy();
+  expect(stale.has("requeue_tasks.json")).toBeTruthy();
+  expect(stale.has("audit-report.md")).toBeTruthy();
 });
 
 test("absent dependency with recordedRevision > 0 marks artifact stale", async () => {
@@ -332,13 +288,10 @@ test("absent dependency with recordedRevision > 0 marks artifact stale", async (
   // and that the recorded revision is > 0 (meaning it was computed after repo_manifest
   // was present).
   const fileDispositionEntry = metadata.artifacts["file_disposition.json"];
-  assert.ok(fileDispositionEntry, "file_disposition.json must have a metadata entry");
+  expect(fileDispositionEntry, "file_disposition.json must have a metadata entry").toBeTruthy();
   const recordedRevision =
     fileDispositionEntry.dependency_revisions["repo_manifest.json"];
-  assert.ok(
-    recordedRevision > 0,
-    `recordedRevision for repo_manifest must be > 0 (got ${recordedRevision})`,
-  );
+  expect(recordedRevision > 0, `recordedRevision for repo_manifest must be > 0 (got ${recordedRevision})`).toBeTruthy();
 
   // Now build a revised bundle that keeps artifact_metadata but OMITS repo_manifest,
   // simulating it being removed after having been recorded. file_disposition is still
@@ -350,10 +303,7 @@ test("absent dependency with recordedRevision > 0 marks artifact stale", async (
     // repo_manifest intentionally omitted
   };
   const stale = computeStaleArtifacts(revisedBundle);
-  assert.ok(
-    stale.has("file_disposition.json"),
-    "file_disposition.json must be stale when its dep repo_manifest is absent but recordedRevision > 0",
-  );
+  expect(stale.has("file_disposition.json"), "file_disposition.json must be stale when its dep repo_manifest is absent but recordedRevision > 0").toBeTruthy();
 
   // Also verify the continue branch: when a dependency appears in dependency_revisions
   // with revision 0 and is absent, the artifact should NOT be stale from this branch.
@@ -376,10 +326,7 @@ test("absent dependency with recordedRevision > 0 marks artifact stale", async (
     // repo_manifest absent, but recordedRevision === 0 → continue branch, NOT stale
   };
   const staleZero = computeStaleArtifacts(bundleWithZeroRevision);
-  assert.ok(
-    !staleZero.has("file_disposition.json"),
-    "file_disposition.json must NOT be stale when absent dep has recordedRevision === 0 (continue branch)",
-  );
+  expect(!staleZero.has("file_disposition.json"), "file_disposition.json must NOT be stale when absent dep has recordedRevision === 0 (continue branch)").toBeTruthy();
 });
 
 test("external analyzer results do not falsely mark unrelated upstream artifacts stale", () => {
@@ -413,12 +360,12 @@ test("external analyzer results do not falsely mark unrelated upstream artifacts
   const stale = computeStaleArtifacts(bundle);
 
   // Upstream artifacts must NOT be marked stale.
-  assert.ok(!stale.has("graph_bundle.json"), "graph_bundle.json should not be stale");
-  assert.ok(!stale.has("unit_manifest.json"), "unit_manifest.json should not be stale");
+  expect(!stale.has("graph_bundle.json"), "graph_bundle.json should not be stale").toBeTruthy();
+  expect(!stale.has("unit_manifest.json"), "unit_manifest.json should not be stale").toBeTruthy();
 
   // Downstream artifacts must still be stale (positive path).
-  assert.ok(stale.has("coverage_matrix.json"), "coverage_matrix.json should be stale");
-  assert.ok(stale.has("audit_tasks.json"), "audit_tasks.json should be stale");
+  expect(stale.has("coverage_matrix.json"), "coverage_matrix.json should be stale").toBeTruthy();
+  expect(stale.has("audit_tasks.json"), "audit_tasks.json should be stale").toBeTruthy();
 });
 
 // TST-aa3c406e: computeStaleArtifacts must handle an absent artifact_metadata field
@@ -426,14 +373,14 @@ test("external analyzer results do not falsely mark unrelated upstream artifacts
 // freshness → nothing is stale by comparison).
 test("computeStaleArtifacts returns empty set when artifact_metadata is absent", () => {
   const stale = computeStaleArtifacts({});
-  assert.ok(stale instanceof Set, "must return a Set");
-  assert.equal(stale.size, 0, "empty bundle → no artifact_metadata → no stale artifacts");
+  expect(stale instanceof Set, "must return a Set").toBeTruthy();
+  expect(stale.size, "empty bundle → no artifact_metadata → no stale artifacts").toBe(0);
 });
 
 test("computeStaleArtifacts returns empty set when artifact_metadata key is present but undefined", () => {
   const stale = computeStaleArtifacts({ artifact_metadata: undefined });
-  assert.ok(stale instanceof Set, "must return a Set");
-  assert.equal(stale.size, 0, "undefined artifact_metadata → no stale artifacts");
+  expect(stale instanceof Set, "must return a Set").toBeTruthy();
+  expect(stale.size, "undefined artifact_metadata → no stale artifacts").toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -457,8 +404,8 @@ const { METADATA_SCHEMA_VERSION } = await import(
 
 test("F1 inv: computeArtifactMetadata stamps the current metadata_schema_version", () => {
   const metadata = computeArtifactMetadata(makeBaseBundle());
-  assert.equal(metadata.metadata_schema_version, METADATA_SCHEMA_VERSION);
-  assert.ok(METADATA_SCHEMA_VERSION >= 1);
+  expect(metadata.metadata_schema_version).toBe(METADATA_SCHEMA_VERSION);
+  expect(METADATA_SCHEMA_VERSION >= 1).toBeTruthy();
 });
 
 test("F1 seam-equality: per-element verdict equals the verdict from the contentKey seam directly", () => {
@@ -485,8 +432,8 @@ test("F1 seam-equality: per-element verdict equals the verdict from the contentK
     task_content_signature: coordinate.task_content_signature,
   });
   const liveKeys = deriveLiveResultKeys(coordinate);
-  assert.equal(liveKeys.idempotency_key, seamIk, "idempotency_key from the seam");
-  assert.equal(liveKeys.content_key, seamCk, "content_key from the seam");
+  expect(liveKeys.idempotency_key, "idempotency_key from the seam").toBe(seamIk);
+  expect(liveKeys.content_key, "content_key from the seam").toBe(seamCk);
 });
 
 test("F1 inv-1 [CP-NODE-2]: per-element identity comes only from contentKey seam (seam-equality + discriminator-in-key)", () => {
@@ -520,16 +467,8 @@ test("F1 inv-1 [CP-NODE-2]: per-element identity comes only from contentKey seam
     task_content_signature: coordinate.task_content_signature,
   });
   const liveKeys = deriveLiveResultKeys(coordinate);
-  assert.equal(
-    liveKeys.idempotency_key,
-    seamIk,
-    "idempotency_key MUST come from the contentKey seam (no parallel hashing)",
-  );
-  assert.equal(
-    liveKeys.content_key,
-    seamCk,
-    "content_key MUST come from the contentKey seam (no parallel hashing)",
-  );
+  expect(liveKeys.idempotency_key, "idempotency_key MUST come from the contentKey seam (no parallel hashing)").toBe(seamIk);
+  expect(liveKeys.content_key, "content_key MUST come from the contentKey seam (no parallel hashing)").toBe(seamCk);
 
   // task_id is stripped from the signature (FC-002): renumbering task_id alone
   // must NOT move the seam keys — identity is the discriminated coordinate, not
@@ -542,11 +481,7 @@ test("F1 inv-1 [CP-NODE-2]: per-element identity comes only from contentKey seam
       goal: "confirm seam is the only source of identity",
     }),
   });
-  assert.equal(
-    renumbered.content_key,
-    seamCk,
-    "task_id is stripped by the seam — renumbering must not move the contentKey",
-  );
+  expect(renumbered.content_key, "task_id is stripped by the seam — renumbering must not move the contentKey").toBe(seamCk);
 
   // Discriminator-in-key: the result_content_discriminator is a key input, so a
   // distinct same-grouping-coordinate result is NEVER collapsed onto the base.
@@ -555,16 +490,8 @@ test("F1 inv-1 [CP-NODE-2]: per-element identity comes only from contentKey seam
     source: "redispatch",
     attempt: 1,
   });
-  assert.notEqual(
-    liveKeys.idempotency_key,
-    redispatch.idempotency_key,
-    "discriminator must be in the idempotencyKey",
-  );
-  assert.notEqual(
-    liveKeys.content_key,
-    redispatch.content_key,
-    "discriminator must be in the contentKey",
-  );
+  expect(liveKeys.idempotency_key, "discriminator must be in the idempotencyKey").not.toBe(redispatch.idempotency_key);
+  expect(liveKeys.content_key, "discriminator must be in the contentKey").not.toBe(redispatch.content_key);
 });
 
 test("F1 discriminator-in-key: two same-grouping-coordinate results with distinct sources produce DISTINCT contentKeys → not collapsed", () => {
@@ -585,8 +512,8 @@ test("F1 discriminator-in-key: two same-grouping-coordinate results with distinc
     task_content_signature: sig,
   });
   // Same {unit_id,lens,pass_id} grouping coordinate, different discriminator.
-  assert.notEqual(base.idempotency_key, redispatch.idempotency_key);
-  assert.notEqual(base.content_key, redispatch.content_key);
+  expect(base.idempotency_key).not.toBe(redispatch.idempotency_key);
+  expect(base.content_key).not.toBe(redispatch.content_key);
 });
 
 test("F1 inv-2 [CP-NODE-3]: distinct discriminator yields a distinct contentKey (incl. O3 re-dispatch)", () => {
@@ -612,11 +539,7 @@ test("F1 inv-2 [CP-NODE-3]: distinct discriminator yields a distinct contentKey 
     task_content_signature: sig,
   };
   const redispatchKeys = deriveLiveResultKeys(redispatchCoord);
-  assert.notEqual(
-    redispatchKeys.content_key,
-    baseKeys.content_key,
-    "O3 re-dispatch must have a distinct contentKey from the base result",
-  );
+  expect(redispatchKeys.content_key, "O3 re-dispatch must have a distinct contentKey from the base result").not.toBe(baseKeys.content_key);
 });
 
 test("F1 metadata-migration fail-safe: old-shape (pre-F1) manifest → ALL present artifacts stale, no throw", () => {
@@ -638,7 +561,7 @@ test("F1 metadata-migration fail-safe: old-shape (pre-F1) manifest → ALL prese
     ),
   };
   delete preF1Manifest.metadata_schema_version;
-  assert.equal(isMetadataManifestCurrent(preF1Manifest), false);
+  expect(isMetadataManifestCurrent(preF1Manifest)).toBe(false);
 
   const bundle = { ...initialBundle, artifact_metadata: preF1Manifest };
   let stale;
@@ -647,7 +570,7 @@ test("F1 metadata-migration fail-safe: old-shape (pre-F1) manifest → ALL prese
   }, "old-shape manifest must degrade, never throw");
   // Every present DAG artifact is stale (no false-skip off matching hashes).
   for (const name of ["repo_manifest.json", "file_disposition.json", "unit_manifest.json", "audit-report.md"]) {
-    assert.ok(stale.has(name), `${name} must be all-stale under migration fail-safe`);
+    expect(stale.has(name), `${name} must be all-stale under migration fail-safe`).toBeTruthy();
   }
 });
 
@@ -661,8 +584,8 @@ test("F1 metadata-migration fail-safe: strict-decode-mismatch manifest → all-s
   assert.doesNotThrow(() => {
     stale = computeStaleArtifacts(bundle);
   });
-  assert.ok(stale.has("repo_manifest.json"));
-  assert.ok(stale.size > 0, "must degrade to a non-empty stale set");
+  expect(stale.has("repo_manifest.json")).toBeTruthy();
+  expect(stale.size > 0, "must degrade to a non-empty stale set").toBeTruthy();
 });
 
 test("F1 reproducible DAG: persist/reload cycle yields identical stale set + per-element verdicts", () => {
@@ -670,11 +593,11 @@ test("F1 reproducible DAG: persist/reload cycle yields identical stale set + per
   const metadata = computeArtifactMetadata(initialBundle);
   // Round-trip the manifest through JSON (persist/reload).
   const reloaded = JSON.parse(JSON.stringify(metadata));
-  assert.equal(reloaded.metadata_schema_version, METADATA_SCHEMA_VERSION);
+  expect(reloaded.metadata_schema_version).toBe(METADATA_SCHEMA_VERSION);
 
   const stale1 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: metadata });
   const stale2 = computeStaleArtifacts({ ...initialBundle, artifact_metadata: reloaded });
-  assert.deepEqual([...stale1].sort(), [...stale2].sort());
+  expect([...stale1].sort()).toEqual([...stale2].sort());
 });
 
 test("F1 single-adjacency: ARTIFACT_DEPENDENTS_MAP is the derived inversion of the one canonical table", () => {
@@ -692,7 +615,7 @@ test("F1 single-adjacency: ARTIFACT_DEPENDENTS_MAP is the derived inversion of t
         .map(([k, v]) => [k, [...v].sort()])
         .sort(([a], [b]) => a.localeCompare(b)),
     );
-  assert.deepEqual(norm(ARTIFACT_DEPENDENTS_MAP), norm(rebuilt));
+  expect(norm(ARTIFACT_DEPENDENTS_MAP)).toEqual(norm(rebuilt));
 });
 
 test("F1 inv-5 [CP-NODE-6]: dependents map is the derived inversion of the single adjacency table", () => {
@@ -706,20 +629,14 @@ test("F1 inv-5 [CP-NODE-6]: dependents map is the derived inversion of the singl
         .map(([k, v]) => [k, [...v].sort()])
         .sort(([a], [b]) => a.localeCompare(b)),
     );
-  assert.deepEqual(
-    norm(ARTIFACT_DEPENDENTS_MAP),
-    norm(invertDependencyMap(ARTIFACT_DEPENDS_ON_MAP)),
-  );
+  expect(norm(ARTIFACT_DEPENDENTS_MAP)).toEqual(norm(invertDependencyMap(ARTIFACT_DEPENDS_ON_MAP)));
 });
 
 // F1 inv-7: transcription-not-authorship. The git_history.json upstream edge
 // set F1 registers MUST be EXACTLY F6's declared {repo_manifest, file_disposition}
 // — F1 neither guesses nor infers. Pinning the set so any divergence fails.
 test("inv-7: git_history.json upstream set is exactly F6's declared {repo_manifest, file_disposition}", () => {
-  assert.deepEqual(
-    [...ARTIFACT_DEPENDS_ON_MAP["git_history.json"]].sort(),
-    ["file_disposition.json", "repo_manifest.json"],
-  );
+  expect([...ARTIFACT_DEPENDS_ON_MAP["git_history.json"]].sort()).toEqual(["file_disposition.json", "repo_manifest.json"]);
 });
 
 // F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw (CE-007).
@@ -730,7 +647,7 @@ test("inv-7: git_history.json upstream set is exactly F6's declared {repo_manife
 test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
   const initialBundle = makeBaseBundle();
   const metadata = computeArtifactMetadata(initialBundle);
-  assert.ok(METADATA_SCHEMA_VERSION >= 1);
+  expect(METADATA_SCHEMA_VERSION >= 1).toBeTruthy();
 
   // Pre-F1 manifest: an EXPLICIT older schema version (current - 1, floored at 0)
   // with whole-artifact hashes that still MATCH the live artifacts. A naive
@@ -749,7 +666,7 @@ test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
     ),
   };
   // Not recognized as F1-current → fail-safe path engages.
-  assert.equal(isMetadataManifestCurrent(olderShapeManifest), false);
+  expect(isMetadataManifestCurrent(olderShapeManifest)).toBe(false);
 
   const bundle = { ...initialBundle, artifact_metadata: olderShapeManifest };
   let stale;
@@ -765,14 +682,10 @@ test("F1 inv-4 [CP-NODE-5]: old-shape manifest => all-stale, no throw", () => {
     "unit_manifest.json",
     "audit-report.md",
   ]) {
-    assert.ok(stale.has(name), `${name} must be all-stale under inv-4 fail-safe`);
+    expect(stale.has(name), `${name} must be all-stale under inv-4 fail-safe`).toBeTruthy();
   }
-  assert.ok(stale.size > 0, "fail-safe must yield a non-empty stale set");
-  assert.equal(
-    stale.has("artifact_metadata.json"),
-    false,
-    "the manifest artifact itself is never marked stale by the gate",
-  );
+  expect(stale.size > 0, "fail-safe must yield a non-empty stale set").toBeTruthy();
+  expect(stale.has("artifact_metadata.json"), "the manifest artifact itself is never marked stale by the gate").toBe(false);
 });
 
 // F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json upstream
@@ -824,27 +737,16 @@ test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json ups
   ].sort();
 
   // (a) The TS table records git_history.json's declared upstream set.
-  assert.deepEqual(
-    tsGitHistoryUpstreams,
-    ["file_disposition.json", "repo_manifest.json"],
-    "ARTIFACT_DEPENDS_ON_MAP git_history.json upstreams must be exactly {file_disposition, repo_manifest}",
-  );
+  expect(tsGitHistoryUpstreams, "ARTIFACT_DEPENDS_ON_MAP git_history.json upstreams must be exactly {file_disposition, repo_manifest}").toEqual(["file_disposition.json", "repo_manifest.json"]);
 
   // (b) Literal parity, .md ⟺ TS, over the git_history.json edge set: every TS
   // upstream is reflected in the .md and vice versa (no dropped/extra edge).
-  assert.deepEqual(
-    mdGitHistoryUpstreams,
-    tsGitHistoryUpstreams,
-    "dependency-map.md and ARTIFACT_DEPENDS_ON_MAP must agree literally on git_history.json's upstream edges",
-  );
+  expect(mdGitHistoryUpstreams, "dependency-map.md and ARTIFACT_DEPENDS_ON_MAP must agree literally on git_history.json's upstream edges").toEqual(tsGitHistoryUpstreams);
 
   // And the .md's git_history.json row actually carries BOTH upstreams (guards
   // a regression that drops one edge while leaving the other).
   for (const upstream of tsGitHistoryUpstreams) {
-    assert.ok(
-      mdDependsOn["git_history.json"]?.has(upstream),
-      `dependency-map.md must list ${upstream} as a git_history.json dependency`,
-    );
+    expect(mdDependsOn["git_history.json"]?.has(upstream), `dependency-map.md must list ${upstream} as a git_history.json dependency`).toBeTruthy();
   }
 });
 
@@ -867,7 +769,7 @@ test("F1 inv-8 [CP-NODE-9 r2]: persist/reload recomputes identical stale set (pr
   const manifest1 = computeArtifactMetadata(run1Bundle);
   const persisted = JSON.stringify(manifest1);
   const reloaded = JSON.parse(persisted);
-  assert.equal(reloaded.metadata_schema_version, METADATA_SCHEMA_VERSION);
+  expect(reloaded.metadata_schema_version).toBe(METADATA_SCHEMA_VERSION);
 
   // Run 2: a LATER run with identical content but a different wall-clock stamp
   // (provenance only). recompute metadata against the reloaded baseline.
@@ -883,28 +785,13 @@ test("F1 inv-8 [CP-NODE-9 r2]: persist/reload recomputes identical stale set (pr
   const norm2 = stableStringify(
     normalizeForMetadataHash("repo_manifest.json", run2Bundle.repo_manifest),
   );
-  assert.equal(
-    norm1,
-    norm2,
-    "normalizeForMetadataHash must strip generated_at so provenance does not leak into the hash",
-  );
-  assert.ok(
-    !norm2.includes("2026-12-31"),
-    "stripped normalized form must not carry the wall-clock provenance stamp",
-  );
+  expect(norm1, "normalizeForMetadataHash must strip generated_at so provenance does not leak into the hash").toBe(norm2);
+  expect(!norm2.includes("2026-12-31"), "stripped normalized form must not carry the wall-clock provenance stamp").toBeTruthy();
 
   // (b) No revision churn: the provenance-only delta must NOT bump repo_manifest's
   // revision, so the recomputed content hash is identical across runs.
-  assert.equal(
-    manifest2.artifacts["repo_manifest.json"].content_hash,
-    reloaded.artifacts["repo_manifest.json"].content_hash,
-    "content hash must be reproducible across runs (no wall-clock leakage)",
-  );
-  assert.equal(
-    manifest2.artifacts["repo_manifest.json"].revision,
-    reloaded.artifacts["repo_manifest.json"].revision,
-    "a provenance-only change must not churn the revision",
-  );
+  expect(manifest2.artifacts["repo_manifest.json"].content_hash, "content hash must be reproducible across runs (no wall-clock leakage)").toBe(reloaded.artifacts["repo_manifest.json"].content_hash);
+  expect(manifest2.artifacts["repo_manifest.json"].revision, "a provenance-only change must not churn the revision").toBe(reloaded.artifacts["repo_manifest.json"].revision);
 
   // (c) The recomputed stale set is IDENTICAL to the persisted/reloaded run's —
   // the DAG is reproducible across runs.
@@ -916,19 +803,11 @@ test("F1 inv-8 [CP-NODE-9 r2]: persist/reload recomputes identical stale set (pr
     ...run2Bundle,
     artifact_metadata: manifest2,
   });
-  assert.deepEqual(
-    [...staleRecomputed].sort(),
-    [...stalePersisted].sort(),
-    "persisted + recomputed runs must yield an identical stale set",
-  );
+  expect([...staleRecomputed].sort(), "persisted + recomputed runs must yield an identical stale set").toEqual([...stalePersisted].sort());
 
   // (d) The overall state signature (content-hash basis) is identical across the
   // two runs — a final reproducibility anchor with no run-id/wall-clock leakage.
-  assert.equal(
-    computeArtifactStateSignature({ ...run2Bundle, artifact_metadata: manifest2 }),
-    computeArtifactStateSignature({ ...run1Bundle, artifact_metadata: reloaded }),
-    "artifact state signature must be reproducible across runs",
-  );
+  expect(computeArtifactStateSignature({ ...run2Bundle, artifact_metadata: manifest2 }), "artifact state signature must be reproducible across runs").toBe(computeArtifactStateSignature({ ...run1Bundle, artifact_metadata: reloaded }));
 });
 
 test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into per-element hash", async () => {
@@ -964,11 +843,7 @@ test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into
   // differing wall-clock provenance — no leakage into the digest.
   const hashEarly = hashArtifactValue("repo_manifest.json", earlyRun);
   const hashLate = hashArtifactValue("repo_manifest.json", lateRun);
-  assert.equal(
-    hashEarly,
-    hashLate,
-    "per-element content hash must not change when only the wall-clock provenance stamp differs",
-  );
+  expect(hashEarly, "per-element content hash must not change when only the wall-clock provenance stamp differs").toBe(hashLate);
 
   // (b) The normalized + serialized form carries NO trace of either wall-clock
   // stamp — the stripped bytes never reach stableStringify, so they cannot
@@ -979,16 +854,9 @@ test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into
   const serializedLate = stableStringify(
     normalizeForMetadataHash("repo_manifest.json", lateRun),
   );
-  assert.equal(
-    serializedEarly,
-    serializedLate,
-    "stripped normalized forms must be byte-identical across provenance-only deltas",
-  );
-  assert.ok(
-    !serializedEarly.includes("2026-01-01") &&
-      !serializedEarly.includes("2026-12-31"),
-    "stripped normalized form must not carry any wall-clock provenance stamp",
-  );
+  expect(serializedEarly, "stripped normalized forms must be byte-identical across provenance-only deltas").toBe(serializedLate);
+  expect(!serializedEarly.includes("2026-01-01") &&
+      !serializedEarly.includes("2026-12-31"), "stripped normalized form must not carry any wall-clock provenance stamp").toBeTruthy();
 
   // (c) Negative control: a real CONTENT change (not provenance) DOES move the
   // per-element hash — proving the stripping is surgical, not a blanket no-op.
@@ -997,11 +865,7 @@ test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into
     repository: { name: "fixture" },
     files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 101 }],
   });
-  assert.notEqual(
-    hashEarly,
-    contentChanged,
-    "a genuine content change must still move the per-element hash",
-  );
+  expect(hashEarly, "a genuine content change must still move the per-element hash").not.toBe(contentChanged);
 
   // (d) Provenance-stripping holds even for an artifact whose stamp is the ONLY
   // top-level non-content field, simulating a run-id-bearing element: the same
@@ -1016,11 +880,7 @@ test("F1 fail-8 [CP-NODE-19 r2]: provenance (wall-clock/run-id) never leaks into
     theme_count: 3,
     finding_count: 7,
   });
-  assert.equal(
-    runIdEarly,
-    runIdLate,
-    "run-id-bearing provenance stamp must not leak into a narrative element's per-element hash",
-  );
+  expect(runIdEarly, "run-id-bearing provenance stamp must not leak into a narrative element's per-element hash").toBe(runIdLate);
 });
 
 test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.ts AND dependency-map.md", async () => {
@@ -1037,18 +897,12 @@ test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.
   const { dirname, join } = await import("node:path");
 
   // (a) Side 1 — the canonical TS adjacency table keys git_history.json.
-  assert.ok(
-    Object.prototype.hasOwnProperty.call(
+  expect(Object.prototype.hasOwnProperty.call(
       ARTIFACT_DEPENDS_ON_MAP,
       "git_history.json",
-    ),
-    "git_history.json MUST be registered as a key in ARTIFACT_DEPENDS_ON_MAP (dependencyMap.ts)",
-  );
-  assert.ok(
-    Array.isArray(ARTIFACT_DEPENDS_ON_MAP["git_history.json"]) &&
-      ARTIFACT_DEPENDS_ON_MAP["git_history.json"].length > 0,
-    "git_history.json's TS registration must carry its upstream edge set, not an empty stub",
-  );
+    ), "git_history.json MUST be registered as a key in ARTIFACT_DEPENDS_ON_MAP (dependencyMap.ts)").toBeTruthy();
+  expect(Array.isArray(ARTIFACT_DEPENDS_ON_MAP["git_history.json"]) &&
+      ARTIFACT_DEPENDS_ON_MAP["git_history.json"].length > 0, "git_history.json's TS registration must carry its upstream edge set, not an empty stub").toBeTruthy();
 
   // (b) Side 2 — the declarative reference (.md) carries git_history.json as a
   // backticked artifact token. Parse for the literal `git_history.json` bullet so
@@ -1059,19 +913,13 @@ test("F1 inv-9 [CP-NODE-10 r2]: git_history.json co-registered in dependencyMap.
   const mdHasGitHistory = md
     .split(/\r?\n/)
     .some((line) => /`git_history\.json`/.test(line));
-  assert.ok(
-    mdHasGitHistory,
-    "git_history.json MUST be registered in spec/audit/dependency-map.md (co-commit with the TS table)",
-  );
+  expect(mdHasGitHistory, "git_history.json MUST be registered in spec/audit/dependency-map.md (co-commit with the TS table)").toBeTruthy();
 
   // (c) Atomicity: BOTH sides present together — the co-commit unit landed whole.
-  assert.ok(
-    Object.prototype.hasOwnProperty.call(
+  expect(Object.prototype.hasOwnProperty.call(
       ARTIFACT_DEPENDS_ON_MAP,
       "git_history.json",
-    ) && mdHasGitHistory,
-    "F1+F6 co-commit unit requires git_history.json in BOTH dependencyMap.ts and dependency-map.md — neither half may land alone",
-  );
+    ) && mdHasGitHistory, "F1+F6 co-commit unit requires git_history.json in BOTH dependencyMap.ts and dependency-map.md — neither half may land alone").toBeTruthy();
 });
 
 test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present in dependencyMap.ts iff present in dependency-map.md)", async () => {
@@ -1100,11 +948,7 @@ test("F1 fail-7 [CP-NODE-18 r2]: git_history.json never half-registered (present
     .split(/\r?\n/)
     .some((line) => /`git_history\.json`/.test(line));
 
-  assert.equal(
-    presentInTs,
-    presentInMd,
-    `git_history.json must be co-registered: present in dependencyMap.ts (${presentInTs}) iff present in dependency-map.md (${presentInMd}) — a mismatch is a half-registered DAG node from a non-atomic commit`,
-  );
+  expect(presentInTs, `git_history.json must be co-registered: present in dependencyMap.ts (${presentInTs}) iff present in dependency-map.md (${presentInMd}) — a mismatch is a half-registered DAG node from a non-atomic commit`).toBe(presentInMd);
 });
 
 test("F1 fail-9 [CP-NODE-20 r2]: per-element verdicts are order-canonicalized => key-order-independent stable hash", async () => {
@@ -1147,25 +991,13 @@ test("F1 fail-9 [CP-NODE-20 r2]: per-element verdicts are order-canonicalized =>
   ];
 
   // Raw JSON serialization differs byte-for-byte (the failure mode)...
-  assert.notEqual(
-    JSON.stringify(verdictsForward),
-    JSON.stringify(verdictsShuffled),
-    "precondition: the two verdict lists must differ in raw key order, else the test proves nothing",
-  );
+  expect(JSON.stringify(verdictsForward), "precondition: the two verdict lists must differ in raw key order, else the test proves nothing").not.toBe(JSON.stringify(verdictsShuffled));
 
   // ...but canonicalization collapses them to an identical serialization...
-  assert.equal(
-    stableStringify(verdictsForward),
-    stableStringify(verdictsShuffled),
-    "stableStringify must order-canonicalize per-element verdicts (and nested keys) so insertion order does not leak",
-  );
+  expect(stableStringify(verdictsForward), "stableStringify must order-canonicalize per-element verdicts (and nested keys) so insertion order does not leak").toBe(stableStringify(verdictsShuffled));
 
   // ...and therefore to an identical artifact hash (no spurious staleness).
-  assert.equal(
-    hashArtifactValue("audit_results.jsonl", verdictsForward),
-    hashArtifactValue("audit_results.jsonl", verdictsShuffled),
-    "key-order-only differences in persisted verdicts must not change the artifact hash",
-  );
+  expect(hashArtifactValue("audit_results.jsonl", verdictsForward), "key-order-only differences in persisted verdicts must not change the artifact hash").toBe(hashArtifactValue("audit_results.jsonl", verdictsShuffled));
 });
 
 // F1 fail-2 [CP-NODE-13]: a per-element verdict must NEVER be keyed on the bare
@@ -1182,6 +1014,6 @@ test("F1 fail-2 [CP-NODE-13]: per-element verdict never keyed on the bare groupi
   const redispatch = deriveLiveResultKeys({ ...grouping, source: "redispatch", attempt: 2, stage: "O3" });
 
   // Distinct keys: the discriminator is part of identity, not the bare coordinate.
-  assert.notEqual(base.content_key, redispatch.content_key, "discriminator distinguishes the contentKey");
-  assert.notEqual(base.idempotency_key, redispatch.idempotency_key, "discriminator distinguishes the idempotencyKey");
+  expect(base.content_key, "discriminator distinguishes the contentKey").not.toBe(redispatch.content_key);
+  expect(base.idempotency_key, "discriminator distinguishes the idempotencyKey").not.toBe(redispatch.idempotency_key);
 });

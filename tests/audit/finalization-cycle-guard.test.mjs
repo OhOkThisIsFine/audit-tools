@@ -12,8 +12,7 @@
  * state (audit-report.md present) to confirm the final step_kind routing.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -147,7 +146,7 @@ test("checkFinalizationCycle returns undefined while loop is still progressing",
       result,
       selectedObligation: "synthesis_current",
     });
-    assert.equal(outcome, undefined, "should return undefined when not cycling");
+    expect(outcome, "should return undefined when not cycling").toBe(undefined);
   });
 });
 
@@ -174,14 +173,11 @@ test("checkFinalizationCycle fires and writes deterministic-progress.json with c
       selectedObligation: "synthesis_current",
     });
 
-    assert.ok(outcome !== undefined, "checkFinalizationCycle should fire");
+    expect(outcome !== undefined, "checkFinalizationCycle should fire").toBeTruthy();
     const progressPath = join(artDir, "steps", "deterministic-progress.json");
     const progress = JSON.parse(await readFile(progressPath, "utf8"));
-    assert.equal(progress.cycle_detected, true, "cycle_detected must be true");
-    assert.ok(
-      Array.isArray(progress.cycling_obligations) && progress.cycling_obligations.length > 0,
-      "cycling_obligations must be a non-empty array",
-    );
+    expect(progress.cycle_detected, "cycle_detected must be true").toBe(true);
+    expect(Array.isArray(progress.cycling_obligations) && progress.cycling_obligations.length > 0, "cycling_obligations must be a non-empty array").toBeTruthy();
   });
 });
 
@@ -208,8 +204,8 @@ test("checkFinalizationCycle routes to blocked when no report is present", async
       selectedObligation: "synthesis_current",
     });
 
-    assert.ok(outcome !== undefined, "guard should fire");
-    assert.equal(outcome.kind, "blocked", "routes to blocked when no audit_report in bundle");
+    expect(outcome !== undefined, "guard should fire").toBeTruthy();
+    expect(outcome.kind, "routes to blocked when no audit_report in bundle").toBe("blocked");
   });
 });
 
@@ -238,13 +234,10 @@ test("checkFinalizationCycle routes to complete when audit_report is present in 
       selectedObligation: "synthesis_current",
     });
 
-    assert.ok(outcome !== undefined, "guard should fire");
+    expect(outcome !== undefined, "guard should fire").toBeTruthy();
     // With audit_report present, buildTerminalStep routes to complete (not blocked).
-    assert.equal(outcome.kind, "complete", "routes to complete when audit_report is present");
-    assert.ok(
-      typeof outcome.finalReportPath === "string" && outcome.finalReportPath.includes("audit-report.md"),
-      "finalReportPath resolves to audit-report.md",
-    );
+    expect(outcome.kind, "routes to complete when audit_report is present").toBe("complete");
+    expect(typeof outcome.finalReportPath === "string" && outcome.finalReportPath.includes("audit-report.md"), "finalReportPath resolves to audit-report.md").toBeTruthy();
   });
 });
 
@@ -267,9 +260,9 @@ test("next-step CLI routes to present_report when audit is complete and report e
 
     const { stdout } = await runWrapper(["next-step"], { cwd: root });
     const step = JSON.parse(stdout);
-    assert.equal(step.contract_version, "audit-code-step/v1alpha1");
-    assert.equal(step.step_kind, "present_report");
-    assert.match(step.artifact_paths.final_report, /audit-report\.md$/);
+    expect(step.contract_version).toBe("audit-code-step/v1alpha1");
+    expect(step.step_kind).toBe("present_report");
+    expect(step.artifact_paths.final_report).toMatch(/audit-report\.md$/);
   });
 });
 
@@ -301,11 +294,11 @@ test("deterministic-progress.json written by checkFinalizationCycle has required
     const progressPath = join(artDir, "steps", "deterministic-progress.json");
     const progress = JSON.parse(await readFile(progressPath, "utf8"));
 
-    assert.equal(progress.cycle_detected, true);
-    assert.ok(Array.isArray(progress.cycling_obligations), "cycling_obligations is an array");
-    assert.ok(progress.cycling_obligations.length > 0, "cycling_obligations is non-empty");
-    assert.ok(typeof progress.iteration === "number", "iteration is a number");
-    assert.ok(typeof progress.summary === "string", "summary is a string");
-    assert.ok(typeof progress.timestamp === "string", "timestamp is a string");
+    expect(progress.cycle_detected).toBe(true);
+    expect(Array.isArray(progress.cycling_obligations), "cycling_obligations is an array").toBeTruthy();
+    expect(progress.cycling_obligations.length > 0, "cycling_obligations is non-empty").toBeTruthy();
+    expect(typeof progress.iteration === "number", "iteration is a number").toBeTruthy();
+    expect(typeof progress.summary === "string", "summary is a string").toBeTruthy();
+    expect(typeof progress.timestamp === "string", "timestamp is a string").toBeTruthy();
   });
 });

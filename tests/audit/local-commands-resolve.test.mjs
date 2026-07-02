@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,7 +44,7 @@ test("resolveFromPath returns null for command not found in PATH", () => {
     const result = withEnv({ PATH: dir, PATHEXT: ".EXE;.CMD" }, () =>
       __resolveFromPathForTests("definitely-not-a-real-command-xyz")
     );
-    assert.equal(result, null);
+    expect(result).toBe(null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -62,7 +61,7 @@ test("resolveFromPath finds bare command name in PATH dir on current platform", 
     const result = withEnv({ PATH: dir, ...(pathext ? { PATHEXT: pathext } : {}) }, () =>
       __resolveFromPathForTests(lookupName)
     );
-    assert.equal(result, cmdPath);
+    expect(result).toBe(cmdPath);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -72,17 +71,17 @@ test("resolveFromPath returns null when PATH is empty", () => {
   const result = withEnv({ PATH: "" }, () =>
     __resolveFromPathForTests("node")
   );
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("resolveFromPath returns null for empty command string", () => {
   const result = __resolveFromPathForTests("");
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("resolveFromPath returns null for whitespace-only command string", () => {
   const result = __resolveFromPathForTests("   ");
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("resolveFromPath resolves an absolute path that exists", () => {
@@ -91,7 +90,7 @@ test("resolveFromPath resolves an absolute path that exists", () => {
   writeFileSync(cmdPath, "");
   try {
     const result = __resolveFromPathForTests(cmdPath);
-    assert.equal(result, cmdPath);
+    expect(result).toBe(cmdPath);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -99,7 +98,7 @@ test("resolveFromPath resolves an absolute path that exists", () => {
 
 test("resolveFromPath returns null for an absolute path that does not exist", () => {
   const result = __resolveFromPathForTests("/definitely/not/real/path/xyz");
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 // Win32-specific: extension probing order ─────────────────────────────────────
@@ -116,7 +115,7 @@ if (process.platform === "win32") {
         __resolveFromPathForTests("mycommand")
       );
       // Extensions are probed before the bare name (empty-string suffix is last)
-      assert.equal(result, cmdPath);
+      expect(result).toBe(cmdPath);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -130,7 +129,7 @@ if (process.platform === "win32") {
       const result = withEnv({ PATH: dir, PATHEXT: ".EXE;.CMD" }, () =>
         __resolveFromPathForTests("mycommand.exe")
       );
-      assert.equal(result, cmdPath);
+      expect(result).toBe(cmdPath);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -144,7 +143,7 @@ if (process.platform === "win32") {
       const result = withEnv({ PATH: dir, PATHEXT: ".EXE;.CMD" }, () =>
         __resolveFromPathForTests("mycommand")
       );
-      assert.equal(result, barePath);
+      expect(result).toBe(barePath);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

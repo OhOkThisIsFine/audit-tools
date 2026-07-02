@@ -26,7 +26,7 @@
  * runner NO real network call is made (the default-fetch hermeticity guard, and
  * every fetch here is INJECTED). The fixtures are the captured real payload shapes.
  */
-import test from "node:test";
+import { test, onTestFinished, expect } from "vitest";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,97 +144,97 @@ const PROVIDERS = [
 
 // ── inv-2 + the four real-endpoint mappings: validate each against its live shape ─
 test("inv-2: every provider maps its LIVE payload to a 0–1 remaining_pct", async (t) => {
-  t.after(cleanup);
+  onTestFinished(cleanup);
   for (const p of PROVIDERS) {
     const fetchImpl = recordingFetch(ok(p.live));
     const snap = await p.source(fetchImpl).queryCurrentUsage(p.key);
-    assert.ok(snap, `${p.name}: a live payload must map to a snapshot`);
-    assert.equal(snap.remaining_pct, p.expectRemaining, `${p.name}: remaining_pct fold`);
-    assert.ok(snap.remaining_pct >= 0 && snap.remaining_pct <= 1, `${p.name}: remaining_pct in [0,1]`);
-    assert.equal(snap.source, snap.source, `${p.name}: source tag set`);
-    assert.equal(fetchImpl.calls.length, 1, `${p.name}: exactly one live probe`);
+    expect(snap, `${p.name}: a live payload must map to a snapshot`).toBeTruthy();
+    expect(snap.remaining_pct, `${p.name}: remaining_pct fold`).toBe(p.expectRemaining);
+    expect(snap.remaining_pct >= 0 && snap.remaining_pct <= 1, `${p.name}: remaining_pct in [0,1]`).toBeTruthy();
+    expect(snap.source, `${p.name}: source tag set`).toBe(snap.source);
+    expect(fetchImpl.calls.length, `${p.name}: exactly one live probe`).toBe(1);
   }
 });
 
 // remainingFromUsedPercent is the exact integer primitive: (100-used)/100.
 test("inv-2: remainingFromUsedPercent is exact for integer percents", () => {
-  assert.equal(remainingFromUsedPercent(0), 1);
-  assert.equal(remainingFromUsedPercent(40), 0.6);
-  assert.equal(remainingFromUsedPercent(100), 0);
-  assert.equal(remainingFromUsedPercent(130), 0); // over-cap clamps to 0
-  assert.equal(remainingFromUsedPercent(-10), 1); // under-0 clamps to 1
+  expect(remainingFromUsedPercent(0)).toBe(1);
+  expect(remainingFromUsedPercent(40)).toBe(0.6);
+  expect(remainingFromUsedPercent(100)).toBe(0);
+  expect(remainingFromUsedPercent(130)).toBe(0); // over-cap clamps to 0
+  expect(remainingFromUsedPercent(-10)).toBe(1); // under-0 clamps to 1
 });
 
 // ── inv-4: own-provider-only — a non-matching key does NO I/O ─────────────────
 test("inv-4: each source ignores a non-matching provider key with no network call", async (t) => {
-  t.after(cleanup);
+  onTestFinished(cleanup);
   for (const p of PROVIDERS) {
     const fetchImpl = recordingFetch(ok(p.live));
     // Probe every OTHER provider's key against this source — must be inert.
     for (const other of PROVIDERS) {
       if (other.name === p.name) continue;
       const snap = await p.source(fetchImpl).queryCurrentUsage(other.key);
-      assert.equal(snap, null, `${p.name} must not answer for ${other.name}'s key`);
+      expect(snap, `${p.name} must not answer for ${other.name}'s key`).toBe(null);
     }
-    assert.equal(fetchImpl.calls.length, 0, `${p.name}: gated keys must do zero I/O`);
+    expect(fetchImpl.calls.length, `${p.name}: gated keys must do zero I/O`).toBe(0);
   }
 });
 
 // ── inv-1 + inv-9: tri-state probe via the cascade ────────────────────────────
 test("inv-1: probeUsage reports ok / degraded / not_applicable", async (t) => {
-  t.after(cleanup);
+  onTestFinished(cleanup);
   // ok — a live snapshot.
   const okProbe = await codexSource(recordingFetch(ok(CODEX_LIVE))).probeUsage("codex/*");
-  assert.equal(okProbe.status, "ok");
-  assert.ok(okProbe.snapshot);
+  expect(okProbe.status).toBe("ok");
+  expect(okProbe.snapshot).toBeTruthy();
 
   // degraded — handled provider, queried, 401 → null snapshot but EXPECTED a reading.
   const degradedProbe = await codexSource(recordingFetch(status(401))).probeUsage("codex/*");
-  assert.equal(degradedProbe.status, "degraded");
-  assert.equal(degradedProbe.snapshot, null);
+  expect(degradedProbe.status).toBe("degraded");
+  expect(degradedProbe.snapshot).toBe(null);
 
   // not_applicable — the source does not answer for this provider (no I/O).
   const naProbe = await codexSource(recordingFetch(ok(CODEX_LIVE))).probeUsage("claude-code/*");
-  assert.equal(naProbe.status, "not_applicable");
-  assert.equal(naProbe.snapshot, null);
+  expect(naProbe.status).toBe("not_applicable");
+  expect(naProbe.snapshot).toBe(null);
 });
 
 test("inv-9: a degraded proactive source composes to a `degraded` cascade (degrade-to-null)", async (t) => {
-  t.after(cleanup);
+  onTestFinished(cleanup);
   // Codex source degrades (401); composite reports degraded since no later source matched.
   const composite = new CompositeQuotaSource([codexSource(recordingFetch(status(401)))]);
   const probe = await composite.probeUsage("codex/*");
-  assert.equal(probe.snapshot, null);
-  assert.equal(probe.status, "degraded", "an expected-but-lost reading must surface as degraded, not silently swallowed");
+  expect(probe.snapshot).toBe(null);
+  expect(probe.status, "an expected-but-lost reading must surface as degraded, not silently swallowed").toBe("degraded");
 });
 
 // ── inv-3 + fail-1..4: read-only tokens — expiry / missing / 401 / throw → null ─
 test("inv-3 / fail-1..4: tokens are read-only — expiry, missing creds, 401, network throw all degrade to null", async (t) => {
-  t.after(cleanup);
+  onTestFinished(cleanup);
   const fetchImpl = recordingFetch(ok(CLAUDE_LIVE));
 
   // fail-1: missing credential file → null, no I/O.
   const missing = new ClaudeOAuthQuotaSource({
     credentialsPath: join(tmpdir(), "nope", ".credentials.json"), fetchImpl, now: () => NOW,
   });
-  assert.equal(await missing.queryCurrentUsage("claude-code/*"), null);
+  expect(await missing.queryCurrentUsage("claude-code/*")).toBe(null);
 
   // fail-2 / inv-3: expired token → null WITHOUT any fetch (no refresh attempt).
   const expired = new ClaudeOAuthQuotaSource({
     credentialsPath: writeCreds(".credentials.json", { claudeAiOauth: { accessToken: "tok", expiresAt: NOW - 1 } }),
     fetchImpl, now: () => NOW,
   });
-  assert.equal(await expired.queryCurrentUsage("claude-code/*"), null);
-  assert.equal(fetchImpl.calls.length, 0, "expiry/missing must not trigger a network call (read-only, no refresh)");
+  expect(await expired.queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(fetchImpl.calls.length, "expiry/missing must not trigger a network call (read-only, no refresh)").toBe(0);
 
   // fail-3: 401 → null (token NOT rewritten).
   const f401 = recordingFetch(status(401));
-  assert.equal(await claudeSource(f401).queryCurrentUsage("claude-code/*"), null);
-  assert.equal(f401.calls.length, 1);
+  expect(await claudeSource(f401).queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(f401.calls.length).toBe(1);
 
   // fail-4: network throw → null.
   const fThrow = recordingFetch(() => Promise.reject(new Error("ECONNREFUSED")));
-  assert.equal(await claudeSource(fThrow).queryCurrentUsage("claude-code/*"), null);
+  expect(await claudeSource(fThrow).queryCurrentUsage("claude-code/*")).toBe(null);
 });
 
 // ── inv-5: data-driven model scope — no hardcoded model-family name ───────────
@@ -245,10 +245,10 @@ test("inv-5: per-model constraint is driven by payload scope, not a hardcoded mo
   };
   // Known model whose id contains the scoped display_name → the 85% window binds.
   const known = mapUsageToSnapshot(body, "claude-sonnet-4-6", NOW);
-  assert.equal(known.remaining_pct, clamp(0.15), "scoped window binds for the matching model");
+  expect(known.remaining_pct, "scoped window binds for the matching model").toBe(clamp(0.15));
   // Unknown model → the model-scoped window is skipped; five_hour(10) binds.
   const unknown = mapUsageToSnapshot(body, null, NOW);
-  assert.equal(unknown.remaining_pct, 0.9, "unknown model skips the scoped window");
+  expect(unknown.remaining_pct, "unknown model skips the scoped window").toBe(0.9);
 });
 function clamp(n) { return Math.max(0, Math.min(1, n)); }
 
@@ -261,12 +261,12 @@ test("inv-6 / fail-5,7: every mapper degrades a malformed payload to null and ne
     assert.doesNotThrow(() => mapCopilotUsage(g, NOW));
     assert.doesNotThrow(() => mapAntigravityUsage(g, NOW));
     // No mapped window/snapshot → null (never a partial/garbage snapshot).
-    assert.equal(mapCodexUsage(g, NOW) ?? null, mapCodexUsage(g, NOW) ?? null);
+    expect(mapCodexUsage(g, NOW) ?? null).toBe(mapCodexUsage(g, NOW) ?? null);
   }
   // A payload with no usable window must be null, not a fabricated snapshot.
-  assert.equal(mapCodexUsage({ rate_limit: { primary_window: { used_percent: null } } }, NOW), null);
-  assert.equal(mapAntigravityUsage({ models: [{ quotaInfo: {} }] }, NOW), null);
-  assert.equal(mapCopilotUsage({ quota_snapshots: { premium_interactions: {} } }, NOW), null);
+  expect(mapCodexUsage({ rate_limit: { primary_window: { used_percent: null } } }, NOW)).toBe(null);
+  expect(mapAntigravityUsage({ models: [{ quotaInfo: {} }] }, NOW)).toBe(null);
+  expect(mapCopilotUsage({ quota_snapshots: { premium_interactions: {} } }, NOW)).toBe(null);
 });
 
 // ── inv-7 + inv-8: the capacity FOLD — learned entry + handshake snapshot → one DispatchCapacity ─
@@ -295,12 +295,12 @@ test("inv-7: learned quotaStateEntry + handshake quotaSourceSnapshot fold into O
     pendingItemTokens: new Array(12).fill(4000),
   });
   // One folded capacity for the one provider+model pool.
-  assert.equal(capacity.pools.length, 1, "exactly one folded pool capacity");
-  assert.equal(capacity.pools[0].pool_id, "codex/standard");
-  assert.ok(capacity.total_slots >= 1, "folded capacity yields at least one slot");
+  expect(capacity.pools.length, "exactly one folded pool capacity").toBe(1);
+  expect(capacity.pools[0].pool_id).toBe("codex/standard");
+  expect(capacity.total_slots >= 1, "folded capacity yields at least one slot").toBeTruthy();
   // The fold consults both signals: the snapshot+learned+rpm produce a resolved schedule.
-  assert.ok(capacity.primary.schedule.resolved_limits.context_tokens > 0, "resolved limits present from the fold");
-  assert.equal(capacity.primary.pool_id, "codex/standard");
+  expect(capacity.primary.schedule.resolved_limits.context_tokens > 0, "resolved limits present from the fold").toBeTruthy();
+  expect(capacity.primary.pool_id).toBe("codex/standard");
 });
 
 test("inv-8: computeDispatchCapacity always returns >= 1 slot, even when the handshake snapshot is exhausted", () => {
@@ -319,14 +319,14 @@ test("inv-8: computeDispatchCapacity always returns >= 1 slot, even when the han
     sessionConfig: { quota: { enabled: true } },
     pendingItemTokens: new Array(8).fill(5000),
   });
-  assert.ok(capacity.total_slots >= 1, `folded capacity must floor at 1 slot, got ${capacity.total_slots}`);
+  expect(capacity.total_slots >= 1, `folded capacity must floor at 1 slot, got ${capacity.total_slots}`).toBeTruthy();
 });
 
 // fail-6: a source with no resolvable token does no I/O and degrades to null.
 test("fail-6: a provider with no resolvable token degrades to null (no fetch)", async (t) => {
-  t.after(cleanup);
+  onTestFinished(cleanup);
   const fetchImpl = recordingFetch(ok(COPILOT_LIVE));
   const noToken = new CopilotQuotaSource({ copilotConfigPath: NOPATH, ghHostsPath: NOPATH, env: {}, fetchImpl, now: () => NOW });
-  assert.equal(await noToken.queryCurrentUsage("copilot/*"), null);
-  assert.equal(fetchImpl.calls.length, 0, "no token → no live probe");
+  expect(await noToken.queryCurrentUsage("copilot/*")).toBe(null);
+  expect(fetchImpl.calls.length, "no token → no live probe").toBe(0);
 });

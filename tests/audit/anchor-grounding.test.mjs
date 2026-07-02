@@ -3,8 +3,7 @@
 // model's word — grounds or quarantines the finding. Safety: inspection-only
 // allowlist, timeout, env kill-switch, no shell. Tested with an injected runner
 // for deterministic logic plus one real allowlisted spawn end-to-end.
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,12 +14,12 @@ const { verifyFindingAnchor, combineGroundingWithAnchor, isAllowedAnchorCommand,
   await import("../../src/audit/validation/anchorGrounding.ts");
 
 test("resolveAnchorTimeoutMs honors AUDIT_CODE_ANCHOR_TIMEOUT_MS and falls back to the default (B1)", () => {
-  assert.equal(resolveAnchorTimeoutMs({}), ANCHOR_TIMEOUT_MS, "no override → default");
-  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "120000" }), 120000, "positive int override is used");
+  expect(resolveAnchorTimeoutMs({}), "no override → default").toBe(ANCHOR_TIMEOUT_MS);
+  expect(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "120000" }), "positive int override is used").toBe(120000);
   // Non-positive / non-numeric overrides fall back to the default (never 0/NaN).
-  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "0" }), ANCHOR_TIMEOUT_MS);
-  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "-5" }), ANCHOR_TIMEOUT_MS);
-  assert.equal(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "abc" }), ANCHOR_TIMEOUT_MS);
+  expect(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "0" })).toBe(ANCHOR_TIMEOUT_MS);
+  expect(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "-5" })).toBe(ANCHOR_TIMEOUT_MS);
+  expect(resolveAnchorTimeoutMs({ AUDIT_CODE_ANCHOR_TIMEOUT_MS: "abc" })).toBe(ANCHOR_TIMEOUT_MS);
 });
 
 function findingWithAnchor(anchor) {
@@ -55,10 +54,10 @@ test("isAllowedAnchorCommand allows inspection tools + read-only git, rejects th
     ["/usr/bin/grep", "x"],
     ["grep.exe", "x"],
   ]) {
-    assert.equal(isAllowedAnchorCommand(cmd), true, `should allow ${cmd.join(" ")}`);
+    expect(isAllowedAnchorCommand(cmd), `should allow ${cmd.join(" ")}`).toBe(true);
   }
   for (const sub of ["grep", "log", "diff", "show", "ls-files", "cat-file", "blame", "rev-parse", "status"]) {
-    assert.equal(isAllowedAnchorCommand(["git", sub, "x"]), true, `should allow git ${sub}`);
+    expect(isAllowedAnchorCommand(["git", sub, "x"]), `should allow git ${sub}`).toBe(true);
   }
   for (const cmd of [
     ["node", "-e", "x"],
@@ -74,61 +73,46 @@ test("isAllowedAnchorCommand allows inspection tools + read-only git, rejects th
     [""],
     [],
   ]) {
-    assert.equal(isAllowedAnchorCommand(cmd), false, `should reject ${cmd.join(" ") || "(empty)"}`);
+    expect(isAllowedAnchorCommand(cmd), `should reject ${cmd.join(" ") || "(empty)"}`).toBe(false);
   }
 });
 
 test("verifyFindingAnchor returns undefined when the finding has no anchor", async () => {
-  assert.equal(await verifyFindingAnchor("/repo", findingWithAnchor(null)), undefined);
+  expect(await verifyFindingAnchor("/repo", findingWithAnchor(null))).toBe(undefined);
 });
 
 test("verifyFindingAnchor confirms/refutes by exit code", async () => {
   const f = findingWithAnchor({ command: ["madge", "--circular", "src"], confirm_if: { kind: "exit_nonzero" } });
-  assert.equal(
-    (await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: 1, timed_out: false, output: "cycle" }))).status,
-    "confirmed",
-  );
-  assert.equal(
-    (await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: 0, timed_out: false, output: "" }))).status,
-    "refuted",
-  );
+  expect((await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: 1, timed_out: false, output: "cycle" }))).status).toBe("confirmed");
+  expect((await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: 0, timed_out: false, output: "" }))).status).toBe("refuted");
 });
 
 test("verifyFindingAnchor confirms/refutes by output match (both polarities)", async () => {
   const inc = findingWithAnchor({ command: ["grep", "x", "f"], confirm_if: { kind: "output_includes", text: "needle" } });
-  assert.equal((await verifyFindingAnchor("/repo", inc, fixedRunner({ exit_code: 0, timed_out: false, output: "has needle here" }))).status, "confirmed");
-  assert.equal((await verifyFindingAnchor("/repo", inc, fixedRunner({ exit_code: 0, timed_out: false, output: "nope" }))).status, "refuted");
+  expect((await verifyFindingAnchor("/repo", inc, fixedRunner({ exit_code: 0, timed_out: false, output: "has needle here" }))).status).toBe("confirmed");
+  expect((await verifyFindingAnchor("/repo", inc, fixedRunner({ exit_code: 0, timed_out: false, output: "nope" }))).status).toBe("refuted");
 
   const exc = findingWithAnchor({ command: ["grep", "x", "f"], confirm_if: { kind: "output_excludes", text: "needle" } });
-  assert.equal((await verifyFindingAnchor("/repo", exc, fixedRunner({ exit_code: 0, timed_out: false, output: "needle" }))).status, "refuted");
-  assert.equal((await verifyFindingAnchor("/repo", exc, fixedRunner({ exit_code: 0, timed_out: false, output: "clean" }))).status, "confirmed");
+  expect((await verifyFindingAnchor("/repo", exc, fixedRunner({ exit_code: 0, timed_out: false, output: "needle" }))).status).toBe("refuted");
+  expect((await verifyFindingAnchor("/repo", exc, fixedRunner({ exit_code: 0, timed_out: false, output: "clean" }))).status).toBe("confirmed");
 });
 
 test("verifyFindingAnchor is inconclusive on spawn error, timeout, or malformed predicate", async () => {
   const f = findingWithAnchor({ command: ["madge", "src"], confirm_if: { kind: "exit_zero" } });
-  assert.equal(
-    (await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: null, timed_out: false, output: "", spawn_error: "ENOENT" }))).status,
-    "inconclusive",
-  );
-  assert.equal(
-    (await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: null, timed_out: true, output: "" }))).status,
-    "inconclusive",
-  );
+  expect((await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: null, timed_out: false, output: "", spawn_error: "ENOENT" }))).status).toBe("inconclusive");
+  expect((await verifyFindingAnchor("/repo", f, fixedRunner({ exit_code: null, timed_out: true, output: "" }))).status).toBe("inconclusive");
   const bad = findingWithAnchor({ command: ["grep", "x", "f"], confirm_if: { kind: "output_includes", text: "" } });
-  assert.equal(
-    (await verifyFindingAnchor("/repo", bad, fixedRunner({ exit_code: 0, timed_out: false, output: "x" }))).status,
-    "inconclusive",
-  );
+  expect((await verifyFindingAnchor("/repo", bad, fixedRunner({ exit_code: 0, timed_out: false, output: "x" }))).status).toBe("inconclusive");
 });
 
 test("verifyFindingAnchor skips off-allowlist and disabled anchors without running them", async () => {
   const offlist = findingWithAnchor({ command: ["node", "-e", "1"], confirm_if: { kind: "exit_zero" } });
-  assert.equal((await verifyFindingAnchor("/repo", offlist, throwRunner)).status, "skipped");
+  expect((await verifyFindingAnchor("/repo", offlist, throwRunner)).status).toBe("skipped");
 
   const allowed = findingWithAnchor({ command: ["grep", "x", "f"], confirm_if: { kind: "exit_zero" } });
   process.env.AUDIT_CODE_DISABLE_ANCHORS = "1";
   try {
-    assert.equal((await verifyFindingAnchor("/repo", allowed, throwRunner)).status, "skipped");
+    expect((await verifyFindingAnchor("/repo", allowed, throwRunner)).status).toBe("skipped");
   } finally {
     delete process.env.AUDIT_CODE_DISABLE_ANCHORS;
   }
@@ -139,16 +123,16 @@ test("combineGroundingWithAnchor: the anchor verdict overrides tier-1 correctly"
   const ungrounded = { status: "ungrounded", reason: "no quote" };
 
   // A confirming run grounds a finding even if its quote was missing.
-  assert.deepEqual(combineGroundingWithAnchor(ungrounded, { status: "confirmed", summary: "x" }), { status: "grounded" });
+  expect(combineGroundingWithAnchor(ungrounded, { status: "confirmed", summary: "x" })).toEqual({ status: "grounded" });
   // A refuting run DISPROVES a finding even if its quote matched — distinct
   // `refuted` status (B4: quarantined-excluded, not merely ungrounded).
   const refuted = combineGroundingWithAnchor(grounded, { status: "refuted", summary: "REFUTED by `madge`" });
-  assert.equal(refuted.status, "refuted");
-  assert.match(refuted.reason, /refuted the claim/);
+  expect(refuted.status).toBe("refuted");
+  expect(refuted.reason).toMatch(/refuted the claim/);
   // Inconclusive / skipped / absent leave tier-1 in place.
-  assert.deepEqual(combineGroundingWithAnchor(grounded, { status: "inconclusive", summary: "x" }), grounded);
-  assert.deepEqual(combineGroundingWithAnchor(ungrounded, { status: "skipped", summary: "x" }), ungrounded);
-  assert.deepEqual(combineGroundingWithAnchor(grounded, undefined), grounded);
+  expect(combineGroundingWithAnchor(grounded, { status: "inconclusive", summary: "x" })).toEqual(grounded);
+  expect(combineGroundingWithAnchor(ungrounded, { status: "skipped", summary: "x" })).toEqual(ungrounded);
+  expect(combineGroundingWithAnchor(grounded, undefined)).toEqual(grounded);
 });
 
 test("verifyFindingAnchor runs a real allowlisted command (git rev-parse) end-to-end", async () => {
@@ -157,5 +141,5 @@ test("verifyFindingAnchor runs a real allowlisted command (git rev-parse) end-to
     confirm_if: { kind: "exit_zero" },
   });
   const r = await verifyFindingAnchor(packageDir, f);
-  assert.equal(r.status, "confirmed", `expected confirmed, got ${r?.status}: ${r?.summary}`);
+  expect(r.status, `expected confirmed, got ${r?.status}: ${r?.summary}`).toBe("confirmed");
 });

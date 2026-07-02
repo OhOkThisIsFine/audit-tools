@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { runGraphEnrichmentExecutor } = await import("../../src/audit/orchestrator/graphEnrichmentExecutor.ts");
 
@@ -91,17 +90,10 @@ test("graphEnrichmentExecutor emits a structured stderr event when an analyzer t
     }),
   );
 
-  assert.equal(events.length, 1, "should emit exactly one structured stderr event for one throwing analyzer");
-  assert.equal(
-    events[0].analyzer_id,
-    "ts-tree-sitter",
-    `event should carry the analyzer id; got: ${JSON.stringify(events[0])}`,
-  );
-  assert.ok(
-    String(events[0].note).includes("deliberate test failure") ||
-      String(events[0].note).includes("Analyzer failed"),
-    `event note should include the error summary; got: ${JSON.stringify(events[0])}`,
-  );
+  expect(events.length, "should emit exactly one structured stderr event for one throwing analyzer").toBe(1);
+  expect(events[0].analyzer_id, `event should carry the analyzer id; got: ${JSON.stringify(events[0])}`).toBe("ts-tree-sitter");
+  expect(String(events[0].note).includes("deliberate test failure") ||
+      String(events[0].note).includes("Analyzer failed"), `event note should include the error summary; got: ${JSON.stringify(events[0])}`).toBeTruthy();
 });
 
 test("graphEnrichmentExecutor structured stderr event includes the analyzer id", async () => {
@@ -113,12 +105,8 @@ test("graphEnrichmentExecutor structured stderr event includes the analyzer id",
     }),
   );
 
-  assert.ok(events.length >= 1, "should have at least one structured stderr event");
-  assert.equal(
-    events[0].analyzer_id,
-    "py-tree-sitter",
-    `event should carry the analyzer id 'py-tree-sitter'; got: ${JSON.stringify(events[0])}`,
-  );
+  expect(events.length >= 1, "should have at least one structured stderr event").toBeTruthy();
+  expect(events[0].analyzer_id, `event should carry the analyzer id 'py-tree-sitter'; got: ${JSON.stringify(events[0])}`).toBe("py-tree-sitter");
 });
 
 test("graphEnrichmentExecutor structured stderr event includes the error summary text", async () => {
@@ -130,12 +118,9 @@ test("graphEnrichmentExecutor structured stderr event includes the error summary
     }),
   );
 
-  assert.ok(events.length >= 1, "should have at least one structured stderr event");
+  expect(events.length >= 1, "should have at least one structured stderr event").toBeTruthy();
   // The note starts with "Analyzer failed" and should include the error message.
-  assert.ok(
-    String(events[0].note).includes("deliberate test failure"),
-    `event note should include the original error text; got: ${JSON.stringify(events[0])}`,
-  );
+  expect(String(events[0].note).includes("deliberate test failure"), `event note should include the original error text; got: ${JSON.stringify(events[0])}`).toBeTruthy();
 });
 
 // ── omitted progress_summary includes failed analyzer ids ──────────────────
@@ -149,10 +134,7 @@ test("graphEnrichmentExecutor omitted progress_summary includes failed analyzer 
     }),
   );
 
-  assert.ok(
-    result.progress_summary.includes("ts-tree-sitter"),
-    `progress_summary should name the failed analyzer; got: ${result.progress_summary}`,
-  );
+  expect(result.progress_summary.includes("ts-tree-sitter"), `progress_summary should name the failed analyzer; got: ${result.progress_summary}`).toBeTruthy();
 });
 
 test("graphEnrichmentExecutor omitted progress_summary stays clean when no analyzers throw", async () => {
@@ -164,12 +146,8 @@ test("graphEnrichmentExecutor omitted progress_summary stays clean when no analy
     }),
   );
 
-  assert.equal(
-    result.progress_summary,
-    "Graph enrichment omitted; deterministic regex graph retained.",
-    "progress_summary should be unmodified when no analyzer throws",
-  );
-  assert.equal(events.length, 0, "no analyzer-failed events should be emitted for skip resolutions");
+  expect(result.progress_summary, "progress_summary should be unmodified when no analyzer throws").toBe("Graph enrichment omitted; deterministic regex graph retained.");
+  expect(events.length, "no analyzer-failed events should be emitted for skip resolutions").toBe(0);
 });
 
 test("graphEnrichmentExecutor does NOT emit a structured stderr event for skip resolutions", async () => {
@@ -181,5 +159,5 @@ test("graphEnrichmentExecutor does NOT emit a structured stderr event for skip r
     }),
   );
 
-  assert.equal(events.length, 0, "no analyzer-failed event should be emitted for skipped analyzers");
+  expect(events.length, "no analyzer-failed event should be emitted for skipped analyzers").toBe(0);
 });

@@ -20,8 +20,7 @@
  *      narrative signature (the convergence guarantee).
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,29 +111,17 @@ test("OBL-C006: audit-findings hash is invariant under theme/top-risk reorder an
 
   // The two enriched reports differ byte-wise (theme/top_risk array order), but
   // are semantically identical. The canonical hash must collapse them.
-  assert.notDeepEqual(
-    forward.themes.map((t) => t.theme_id),
-    reversed.themes.map((t) => t.theme_id),
-    "precondition: the two narratives are supplied in different array order",
-  );
-  assert.equal(
-    hashArtifactValue("audit-findings.json", forward),
-    hashArtifactValue("audit-findings.json", reversed),
-    "reordered-but-equivalent narrative must hash identically",
-  );
+  expect(forward.themes.map((t) => t.theme_id), "precondition: the two narratives are supplied in different array order").not.toEqual(reversed.themes.map((t) => t.theme_id));
+  expect(hashArtifactValue("audit-findings.json", forward), "reordered-but-equivalent narrative must hash identically").toBe(hashArtifactValue("audit-findings.json", reversed));
 
   // Adding a non-semantic generated_at must not change the hash either.
-  assert.equal(
-    hashArtifactValue("audit-findings.json", {
+  expect(hashArtifactValue("audit-findings.json", {
       ...forward,
       generated_at: "2026-06-14T00:00:00Z",
-    }),
-    hashArtifactValue("audit-findings.json", {
+    }), "generated_at is provenance, not content — must be stripped before hashing").toBe(hashArtifactValue("audit-findings.json", {
       ...forward,
       generated_at: "1999-01-01T00:00:00Z",
-    }),
-    "generated_at is provenance, not content — must be stripped before hashing",
-  );
+    }));
 });
 
 test("OBL-C006: a GENUINE narrative content change still changes the hash", () => {
@@ -143,11 +130,7 @@ test("OBL-C006: a GENUINE narrative content change still changes the hash", () =
     ...narrative("forward"),
     executive_summary: "a materially different executive summary",
   });
-  assert.notEqual(
-    hashArtifactValue("audit-findings.json", forward),
-    hashArtifactValue("audit-findings.json", changed),
-    "real semantic change must produce a different hash (no false convergence)",
-  );
+  expect(hashArtifactValue("audit-findings.json", forward), "real semantic change must produce a different hash (no false convergence)").not.toBe(hashArtifactValue("audit-findings.json", changed));
 });
 
 // ── 2. state-signature stability across non-semantic narrative variance ───────
@@ -179,11 +162,7 @@ test("OBL-C006: computeArtifactStateSignature is stable across non-semantic narr
       },
     });
 
-  assert.equal(
-    sigOf(forward),
-    sigOf(reversed),
-    "semantically-stable narrative must yield a stable state signature",
-  );
+  expect(sigOf(forward), "semantically-stable narrative must yield a stable state signature").toBe(sigOf(reversed));
 });
 
 // ── 3. synthesis-narrative marker canonicalization ────────────────────────────
@@ -195,14 +174,10 @@ test("OBL-C006: synthesis-narrative marker hash strips non-semantic fields", () 
     executive_summary_present: true,
     top_risk_count: 2,
   };
-  assert.equal(
-    hashArtifactValue("synthesis-narrative.json", {
+  expect(hashArtifactValue("synthesis-narrative.json", {
       ...record,
       generated_at: "2026-06-14T00:00:00Z",
-    }),
-    hashArtifactValue("synthesis-narrative.json", record),
-    "synthesis-narrative marker must hash equal with/without a provenance stamp",
-  );
+    }), "synthesis-narrative marker must hash equal with/without a provenance stamp").toBe(hashArtifactValue("synthesis-narrative.json", record));
 });
 
 // ── 4. no-progress guard fires on a recurring stable signature ────────────────
@@ -263,19 +238,15 @@ test("CE-005 convergence: no-progress guard fires when a stable narrative signat
     // First encounter: records the signature, does NOT fire (legitimate first
     // dispatch from this state).
     const first = await checkNoProgressBeforeDispatch({ index: 0, ...baseCtx });
-    assert.equal(first, undefined, "first dispatch from a fresh state must proceed");
+    expect(first, "first dispatch from a fresh state must proceed").toBe(undefined);
 
     // The state signature did not change (a byte-varying-but-semantically-stable
     // re-render of the same narrative leaves the canonical hash unchanged), so on
     // the SECOND encounter of the same signature the guard must fire and stop the
     // loop instead of re-dispatching.
     const second = await checkNoProgressBeforeDispatch({ index: 1, ...baseCtx });
-    assert.ok(second !== undefined, "guard must fire on the recurring stable signature");
-    assert.equal(
-      second.kind,
-      "complete",
-      "with the report already rendered, convergence resolves to complete (report promoted, working dir cleaned)",
-    );
+    expect(second !== undefined, "guard must fire on the recurring stable signature").toBeTruthy();
+    expect(second.kind, "with the report already rendered, convergence resolves to complete (report promoted, working dir cleaned)").toBe("complete");
   });
 });
 
@@ -314,21 +285,17 @@ test("CE-005: no-progress guard records no_progress_detected and stays blocked w
       selectedExecutor: "synthesis_narrative_executor",
     };
 
-    assert.equal(
-      await checkNoProgressBeforeDispatch({ index: 0, ...baseCtx }),
-      undefined,
-      "first dispatch proceeds",
-    );
+    expect(await checkNoProgressBeforeDispatch({ index: 0, ...baseCtx }), "first dispatch proceeds").toBe(undefined);
     const fired = await checkNoProgressBeforeDispatch({ index: 1, ...baseCtx });
-    assert.ok(fired !== undefined, "guard fires on recurrence");
-    assert.equal(fired.kind, "blocked", "no report → blocked terminal step");
+    expect(fired !== undefined, "guard fires on recurrence").toBeTruthy();
+    expect(fired.kind, "no report → blocked terminal step").toBe("blocked");
 
     const progress = JSON.parse(
       await readFile(join(artDir, "steps", "deterministic-progress.json"), "utf8"),
     );
-    assert.equal(progress.no_progress_detected, true, "no_progress_detected must be recorded");
-    assert.equal(progress.repeated_executor, "synthesis_narrative_executor");
-    assert.equal(progress.repeated_obligation, "synthesis_narrative_current");
+    expect(progress.no_progress_detected, "no_progress_detected must be recorded").toBe(true);
+    expect(progress.repeated_executor).toBe("synthesis_narrative_executor");
+    expect(progress.repeated_obligation).toBe("synthesis_narrative_current");
   });
 });
 
@@ -351,8 +318,8 @@ test("ARC-b8fed771: no-progress guard does NOT fire on the bootstrap no-metadata
     };
     // The bootstrap "no-metadata" signature is legitimately revisited by many
     // early deterministic steps; the guard must never fire on it.
-    assert.equal(await checkNoProgressBeforeDispatch({ index: 0, ...ctx }), undefined);
-    assert.equal(await checkNoProgressBeforeDispatch({ index: 1, ...ctx }), undefined);
-    assert.equal(await checkNoProgressBeforeDispatch({ index: 2, ...ctx }), undefined);
+    expect(await checkNoProgressBeforeDispatch({ index: 0, ...ctx })).toBe(undefined);
+    expect(await checkNoProgressBeforeDispatch({ index: 1, ...ctx })).toBe(undefined);
+    expect(await checkNoProgressBeforeDispatch({ index: 2, ...ctx })).toBe(undefined);
   });
 });

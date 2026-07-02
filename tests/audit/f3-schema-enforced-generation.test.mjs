@@ -9,8 +9,7 @@
 //     (refused/cooled broker ⟹ no LLM touch).
 //   - STRUCTURAL guard: F3's files contain no hardcoded model literal.
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile, mkdtemp } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -69,31 +68,31 @@ test("F3: discovery is provider-agnostic — agentic CLIs degrade to 'none'", ()
     "antigravity",
   ]) {
     const cap = discoverOutputConstraintCapability(name, {});
-    assert.equal(cap.mode, "none", `${name} should have no API-level output constraint`);
-    assert.ok(cap.reason.length > 0, `${name} descriptor carries a reason`);
+    expect(cap.mode, `${name} should have no API-level output constraint`).toBe("none");
+    expect(cap.reason.length > 0, `${name} descriptor carries a reason`).toBeTruthy();
   }
 });
 
 test("F3: openai-compatible discovers structured_output by default, none when disabled", () => {
   const on = discoverOutputConstraintCapability("openai-compatible", {});
-  assert.equal(on.mode, "structured_output");
+  expect(on.mode).toBe("structured_output");
   const off = discoverOutputConstraintCapability("openai-compatible", {
     openai_compatible: { response_format_json: false },
   });
-  assert.equal(off.mode, "none");
+  expect(off.mode).toBe("none");
 });
 
 test("F3: descriptor is discovered ONCE and stamped on the constructed provider", () => {
   const provider = createFreshSessionProvider("local-subprocess", {}, noopDeps);
-  assert.ok(provider.outputConstraint, "provider carries a discovered descriptor");
-  assert.equal(provider.outputConstraint.mode, "none");
+  expect(provider.outputConstraint, "provider carries a discovered descriptor").toBeTruthy();
+  expect(provider.outputConstraint.mode).toBe("none");
 
   const oai = createFreshSessionProvider(
     "openai-compatible",
     { openai_compatible: { base_url: "https://x/v1", model: "m" } },
     noopDeps,
   );
-  assert.equal(oai.outputConstraint.mode, "structured_output");
+  expect(oai.outputConstraint.mode).toBe("structured_output");
 });
 
 test("F3 inv-2: descriptor is output-constraint-scoped only — no concurrency/agent-nesting field (CP-NODE-23)", () => {
@@ -109,29 +108,26 @@ test("F3 inv-2: descriptor is output-constraint-scoped only — no concurrency/a
   ]) {
     const provider = createFreshSessionProvider(name, config, noopDeps);
     const descriptor = provider.outputConstraint;
-    assert.ok(descriptor, `${name} carries a discovered descriptor`);
+    expect(descriptor, `${name} carries a discovered descriptor`).toBeTruthy();
     const keys = Object.keys(descriptor);
     for (const key of keys) {
-      assert.ok(allowedKeys.has(key), `${name} descriptor has unexpected key '${key}' — output-constraint-scoped only`);
-      assert.ok(!forbiddenKeyPattern.test(key), `${name} descriptor must not carry a concurrency/agent-nesting key '${key}'`);
+      expect(allowedKeys.has(key), `${name} descriptor has unexpected key '${key}' — output-constraint-scoped only`).toBeTruthy();
+      expect(!forbiddenKeyPattern.test(key), `${name} descriptor must not carry a concurrency/agent-nesting key '${key}'`).toBeTruthy();
     }
   }
 });
 
 test("F3: resolveEmitConstraint treats an absent descriptor as 'none'", () => {
-  assert.equal(resolveEmitConstraint({}).mode, "none");
-  assert.equal(
-    resolveEmitConstraint({ outputConstraint: { mode: "forced_tool_call", reason: "r" } }).mode,
-    "forced_tool_call",
-  );
+  expect(resolveEmitConstraint({}).mode).toBe("none");
+  expect(resolveEmitConstraint({ outputConstraint: { mode: "forced_tool_call", reason: "r" } }).mode).toBe("forced_tool_call");
 });
 
 test("F3: buildWorkerRepairContract validates a clean payload and reports errors otherwise", () => {
   const contract = buildWorkerRepairContract("audit_results", WorkerAuditResultsSchema);
-  assert.equal(contract.validate(validWorkerResults()).errors.length, 0);
+  expect(contract.validate(validWorkerResults()).errors.length).toBe(0);
   const bad = contract.validate([{ task_id: "T1" }]);
-  assert.ok(bad.errors.length > 0, "invalid payload yields validation errors");
-  assert.ok(bad.errors.every((e) => e.required), "worker-schema errors gate escalation");
+  expect(bad.errors.length > 0, "invalid payload yields validation errors").toBeTruthy();
+  expect(bad.errors.every((e) => e.required), "worker-schema errors gate escalation").toBeTruthy();
 });
 
 test("F3: a clean emit passes through with status 'clean' and no LLM touch", async () => {
@@ -151,8 +147,8 @@ test("F3: a clean emit passes through with status 'clean' and no LLM touch", asy
       return p;
     },
   });
-  assert.equal(result.repair.status, "clean");
-  assert.equal(patcherCalls, 0, "no LLM patch for a clean payload");
+  expect(result.repair.status).toBe("clean");
+  expect(patcherCalls, "no LLM patch for a clean payload").toBe(0);
 });
 
 test("F3 inv-4: an advertised constraint mode + conforming payload validates with zero repair stages", async () => {
@@ -177,14 +173,10 @@ test("F3 inv-4: an advertised constraint mode + conforming payload validates wit
         return p;
       },
     });
-    assert.equal(result.mode, mode, `emit reports the advertised mode (${mode})`);
-    assert.equal(result.repair.status, "clean", `${mode}: conforming payload is clean`);
-    assert.deepEqual(
-      result.repair.stages_applied,
-      ["validate"],
-      `${mode}: zero repair stages — only the initial validate`,
-    );
-    assert.equal(patcherCalls, 0, `${mode}: no LLM touch on a conforming payload`);
+    expect(result.mode, `emit reports the advertised mode (${mode})`).toBe(mode);
+    expect(result.repair.status, `${mode}: conforming payload is clean`).toBe("clean");
+    expect(result.repair.stages_applied, `${mode}: zero repair stages — only the initial validate`).toEqual(["validate"]);
+    expect(patcherCalls, `${mode}: no LLM touch on a conforming payload`).toBe(0);
   }
 });
 
@@ -205,9 +197,9 @@ test("F3: capability 'none' + invalid payload degrades via O3, patch routed thro
       return validWorkerResults(); // the LLM fixes it
     },
   });
-  assert.equal(patcherCalls, 1, "broker admitted the repair slot → patcher ran once");
-  assert.equal(result.repair.status, "patched");
-  assert.equal(result.repair.repaired_payload.length, 1);
+  expect(patcherCalls, "broker admitted the repair slot → patcher ran once").toBe(1);
+  expect(result.repair.status).toBe("patched");
+  expect(result.repair.repaired_payload.length).toBe(1);
 });
 
 test("F3: a refused broker means no LLM touch — O3 falls to the re-dispatch signal", async () => {
@@ -241,9 +233,9 @@ test("F3: a refused broker means no LLM touch — O3 falls to the re-dispatch si
       return validWorkerResults();
     },
   });
-  assert.equal(patcherCalls, 0, "refused broker → no LLM touch");
-  assert.equal(result.repair.status, "unrepairable");
-  assert.ok(result.repair.redispatch, "re-dispatch signal surfaced");
+  expect(patcherCalls, "refused broker → no LLM touch").toBe(0);
+  expect(result.repair.status).toBe("unrepairable");
+  expect(result.repair.redispatch, "re-dispatch signal surfaced").toBeTruthy();
 });
 
 test("F3 inv-5 [CP-NODE-26]: capability 'none' degrades through the brokered repair seam", async () => {
@@ -292,11 +284,11 @@ test("F3 inv-5 [CP-NODE-26]: capability 'none' degrades through the brokered rep
     },
   });
   // The degrade path went through the SHARED broker, not a direct spawn.
-  assert.equal(brokerCalls, 1, "stage-2 patch was gated by the shared broker exactly once");
-  assert.equal(awaitCalls, 1, "patched result flowed back through the broker's awaitNextCompletion");
-  assert.equal(patcherCalls, 1, "broker admitted the slot → bounded LLM patch ran once");
-  assert.equal(result.mode, "none", "emit reports capability 'none'");
-  assert.equal(result.repair.status, "patched", "invalid 'none' payload is salvaged via the brokered repair seam");
+  expect(brokerCalls, "stage-2 patch was gated by the shared broker exactly once").toBe(1);
+  expect(awaitCalls, "patched result flowed back through the broker's awaitNextCompletion").toBe(1);
+  expect(patcherCalls, "broker admitted the slot → bounded LLM patch ran once").toBe(1);
+  expect(result.mode, "emit reports capability 'none'").toBe("none");
+  expect(result.repair.status, "invalid 'none' payload is salvaged via the brokered repair seam").toBe("patched");
 });
 
 test("F3 inv-3: discovery runs exactly ONCE per constructed provider, ZERO per emit/dispatch", async () => {
@@ -314,15 +306,12 @@ test("F3 inv-3: discovery runs exactly ONCE per constructed provider, ZERO per e
     join(repoRoot, "src/audit/contracts/schemaEnforcedEmit.ts"),
     "utf8",
   );
-  assert.ok(
-    !/discoverOutputConstraintCapability/.test(emitSrc),
-    "emit path must READ the stamped descriptor, never re-discover per emit",
-  );
+  expect(!/discoverOutputConstraintCapability/.test(emitSrc), "emit path must READ the stamped descriptor, never re-discover per emit").toBeTruthy();
 
   // (b) One construction → one descriptor object reused across many emits.
   const provider = createFreshSessionProvider("local-subprocess", {}, noopDeps);
   const stamped = provider.outputConstraint;
-  assert.ok(stamped, "construction stamps a descriptor exactly once");
+  expect(stamped, "construction stamps a descriptor exactly once").toBeTruthy();
 
   for (let i = 0; i < 3; i += 1) {
     const result = await enforceSchemaAtEmit({
@@ -337,13 +326,9 @@ test("F3 inv-3: discovery runs exactly ONCE per constructed provider, ZERO per e
       tool: "audit-code",
       patcher: async (p) => p,
     });
-    assert.equal(result.repair.status, "clean");
+    expect(result.repair.status).toBe("clean");
     // resolveEmitConstraint must hand back the SAME object the constructor stamped.
-    assert.strictEqual(
-      resolveEmitConstraint(provider),
-      stamped,
-      "every emit reads the once-discovered descriptor; no re-discovery",
-    );
+    expect(resolveEmitConstraint(provider), "every emit reads the once-discovered descriptor; no re-discovery").toBe(stamped);
   }
 });
 
@@ -357,12 +342,8 @@ test("F3 inv-7: enforced schema + registered RepairContract validator both resol
   //     as the exported canonical schema (a second definition would be a
   //     different object).
   const registered = WORKER_SCHEMA_SOURCES["audit_results.schema.json"];
-  assert.ok(registered, "audit_results schema is registered in WORKER_SCHEMA_SOURCES");
-  assert.strictEqual(
-    registered.schema,
-    WorkerAuditResultsSchema,
-    "registry source === canonical exported schema (one definition, not a copy)",
-  );
+  expect(registered, "audit_results schema is registered in WORKER_SCHEMA_SOURCES").toBeTruthy();
+  expect(registered.schema, "registry source === canonical exported schema (one definition, not a copy)").toBe(WorkerAuditResultsSchema);
 
   // (b) The RepairContract validator is built FROM that single source — and a
   //     contract built from the registry entry validates byte-for-byte the same
@@ -372,21 +353,17 @@ test("F3 inv-7: enforced schema + registered RepairContract validator both resol
 
   // Clean payload: both contract validators AND the raw schema agree (0 errors).
   const clean = validWorkerResults();
-  assert.equal(fromExport.validate(clean).errors.length, 0);
-  assert.equal(fromRegistry.validate(clean).errors.length, 0);
-  assert.equal(WorkerAuditResultsSchema.safeParse(clean).success, true);
+  expect(fromExport.validate(clean).errors.length).toBe(0);
+  expect(fromRegistry.validate(clean).errors.length).toBe(0);
+  expect(WorkerAuditResultsSchema.safeParse(clean).success).toBe(true);
 
   // Invalid payload: both contract validators AND the raw schema agree it fails,
   // proving the enforced schema and the registered validator are one and the same.
   const bad = [{ task_id: "T1" }];
-  assert.ok(fromExport.validate(bad).errors.length > 0);
-  assert.ok(fromRegistry.validate(bad).errors.length > 0);
-  assert.equal(WorkerAuditResultsSchema.safeParse(bad).success, false);
-  assert.deepEqual(
-    fromRegistry.validate(bad).errors,
-    fromExport.validate(bad).errors,
-    "registry-sourced and export-sourced validators report identical errors — one schema",
-  );
+  expect(fromExport.validate(bad).errors.length > 0).toBeTruthy();
+  expect(fromRegistry.validate(bad).errors.length > 0).toBeTruthy();
+  expect(WorkerAuditResultsSchema.safeParse(bad).success).toBe(false);
+  expect(fromRegistry.validate(bad).errors, "registry-sourced and export-sourced validators report identical errors — one schema").toEqual(fromExport.validate(bad).errors);
 });
 
 test("F3 STRUCTURAL guard: F3 source files contain no hardcoded model literal", async () => {
@@ -407,11 +384,7 @@ test("F3 STRUCTURAL guard: F3 source files contain no hardcoded model literal", 
     if (modelNamePattern.test(src)) violations.push(`${rel}: hardcoded model name literal`);
     if (knownLimitsPattern.test(src)) violations.push(`${rel}: references KNOWN_MODEL_LIMITS`);
   }
-  assert.equal(
-    violations.length,
-    0,
-    `F3 files must not hardcode model identities. Violations:\n${violations.join("\n")}`,
-  );
+  expect(violations.length, `F3 files must not hardcode model identities. Violations:\n${violations.join("\n")}`).toBe(0);
 });
 
 test("F3 inv-1 [CP-NODE-22]: structural guard rejects hardcoded model literals in F3 files", async () => {
@@ -464,11 +437,7 @@ test("F3 inv-1 [CP-NODE-22]: structural guard rejects hardcoded model literals i
     visit(sourceFile);
   }
 
-  assert.deepEqual(
-    violations,
-    [],
-    `F3 files must discover capability at runtime — no hardcoded model id / capability constant (CE-003). Violations:\n${violations.join("\n")}`,
-  );
+  expect(violations, `F3 files must discover capability at runtime — no hardcoded model id / capability constant (CE-003). Violations:\n${violations.join("\n")}`).toEqual([]);
 });
 
 test("F3 inv-6 [CP-NODE-27]: enforcement core has no per-backend branching (parametrized over all providers)", async () => {
@@ -524,22 +493,10 @@ test("F3 inv-6 [CP-NODE-27]: enforcement core has no per-backend branching (para
         return p;
       },
     });
-    assert.equal(
-      result.mode,
-      'structured_output',
-      `${providerName}: emit reports the descriptor mode, not the backend name`,
-    );
-    assert.equal(
-      result.repair.status,
-      'clean',
-      `${providerName}: identical clean path for a conforming payload`,
-    );
-    assert.deepEqual(
-      result.repair.stages_applied,
-      ['validate'],
-      `${providerName}: one shared validate stage — no backend-specific stages`,
-    );
-    assert.equal(patcherCalls, 0, `${providerName}: no LLM touch on a conforming payload`);
+    expect(result.mode, `${providerName}: emit reports the descriptor mode, not the backend name`).toBe('structured_output');
+    expect(result.repair.status, `${providerName}: identical clean path for a conforming payload`).toBe('clean');
+    expect(result.repair.stages_applied, `${providerName}: one shared validate stage — no backend-specific stages`).toEqual(['validate']);
+    expect(patcherCalls, `${providerName}: no LLM touch on a conforming payload`).toBe(0);
   }
 
   // (b) Structural: the enforcement core branches on the descriptor `mode` only,
@@ -593,11 +550,7 @@ test("F3 inv-6 [CP-NODE-27]: enforcement core has no per-backend branching (para
   };
   visit(sourceFile);
 
-  assert.deepEqual(
-    branchViolations,
-    [],
-    `Enforcement core must be provider-agnostic — no branch keyed on a backend name (inv-6). Violations:\n${branchViolations.join('\n')}`,
-  );
+  expect(branchViolations, `Enforcement core must be provider-agnostic — no branch keyed on a backend name (inv-6). Violations:\n${branchViolations.join('\n')}`).toEqual([]);
 });
 
 test("F3 fail-1 [CP-NODE-29]: mis-advertised mode + invalid emit => degrade to repair, never accept", async () => {
@@ -661,41 +614,13 @@ test("F3 fail-1 [CP-NODE-29]: mis-advertised mode + invalid emit => degrade to r
     });
     // The mis-advertised mode is recorded, but the invalid payload was NOT accepted
     // on the strength of the advertised mode — it degraded through the brokered seam.
-    assert.equal(
-      result.mode,
-      advertisedMode,
-      `${advertisedMode}: emit records the advertised mode for the audit trail`,
-    );
-    assert.equal(
-      result.repair.status,
-      "patched",
-      `${advertisedMode}: invalid payload degraded + salvaged via repair — never accepted`,
-    );
-    assert.notEqual(
-      result.repair.status,
-      "clean",
-      `${advertisedMode}: a mis-advertised mode must NOT short-circuit to clean on an invalid payload`,
-    );
-    assert.equal(
-      brokerCalls,
-      1,
-      `${advertisedMode}: the degrade patch was gated by the shared broker exactly once`,
-    );
-    assert.equal(
-      awaitCalls,
-      1,
-      `${advertisedMode}: the patched result flowed back through the broker's awaitNextCompletion`,
-    );
-    assert.equal(
-      patcherCalls,
-      1,
-      `${advertisedMode}: broker admitted the slot → bounded LLM patch ran once`,
-    );
-    assert.equal(
-      result.repair.repaired_payload.length,
-      1,
-      `${advertisedMode}: the repaired payload is the salvaged valid worker result`,
-    );
+    expect(result.mode, `${advertisedMode}: emit records the advertised mode for the audit trail`).toBe(advertisedMode);
+    expect(result.repair.status, `${advertisedMode}: invalid payload degraded + salvaged via repair — never accepted`).toBe("patched");
+    expect(result.repair.status, `${advertisedMode}: a mis-advertised mode must NOT short-circuit to clean on an invalid payload`).not.toBe("clean");
+    expect(brokerCalls, `${advertisedMode}: the degrade patch was gated by the shared broker exactly once`).toBe(1);
+    expect(awaitCalls, `${advertisedMode}: the patched result flowed back through the broker's awaitNextCompletion`).toBe(1);
+    expect(patcherCalls, `${advertisedMode}: broker admitted the slot → bounded LLM patch ran once`).toBe(1);
+    expect(result.repair.repaired_payload.length, `${advertisedMode}: the repaired payload is the salvaged valid worker result`).toBe(1);
   }
 });
 
@@ -725,27 +650,13 @@ test("F3 fail-4 [CP-NODE-32]: tool-owned identity strip handled by O3 stage-1 co
     },
   ];
   const coerced = contract.coercion.coerce(stripped);
-  assert.deepEqual(
-    coerced.payload,
-    stripped,
-    "F3 coercion is a NO-OP — it does NOT re-implement identity restore",
-  );
-  assert.equal(coerced.drops.length, 0, "F3 coercion drops nothing of its own");
-  assert.equal(coerced.backfills.length, 0, "F3 coercion backfills no identity itself");
-  assert.equal(
-    coerced.unrecoverableIdentity,
-    false,
-    "F3 coercion does not own the unrecoverable-identity verdict — that is O3's escalation",
-  );
+  expect(coerced.payload, "F3 coercion is a NO-OP — it does NOT re-implement identity restore").toEqual(stripped);
+  expect(coerced.drops.length, "F3 coercion drops nothing of its own").toBe(0);
+  expect(coerced.backfills.length, "F3 coercion backfills no identity itself").toBe(0);
+  expect(coerced.unrecoverableIdentity, "F3 coercion does not own the unrecoverable-identity verdict — that is O3's escalation").toBe(false);
   const validation = contract.validate(stripped);
-  assert.ok(
-    validation.errors.some((e) => e.path === "0.task_id"),
-    "stripped tool-owned identity surfaces as a canonical-zod REQUIRED error on task_id",
-  );
-  assert.ok(
-    validation.errors.every((e) => e.required),
-    "the identity-strip error gates escalation (required), not silently optional",
-  );
+  expect(validation.errors.some((e) => e.path === "0.task_id"), "stripped tool-owned identity surfaces as a canonical-zod REQUIRED error on task_id").toBeTruthy();
+  expect(validation.errors.every((e) => e.required), "the identity-strip error gates escalation (required), not silently optional").toBeTruthy();
 
   // Now: prove the strip degrades through the SHARED O3 seam broker — the restore is
   // a brokered stage-2 LLM touch, not an F3-local fix-up.
@@ -790,27 +701,11 @@ test("F3 fail-4 [CP-NODE-32]: tool-owned identity strip handled by O3 stage-1 co
       return validWorkerResults(); // the brokered O3 stage restores the tool-owned identity
     },
   });
-  assert.equal(
-    result.mode,
-    "structured_output",
-    "the honored mode is recorded — the failure is the stripped identity, not the mode",
-  );
-  assert.equal(
-    result.repair.status,
-    "patched",
-    "the identity strip degraded + was salvaged via the O3 seam, never accepted as-is",
-  );
-  assert.notEqual(
-    result.repair.status,
-    "clean",
-    "a conforming SHAPE must not short-circuit to clean when a tool-owned identity is stripped",
-  );
-  assert.equal(brokerCalls, 1, "the identity-strip restore was gated by the shared broker exactly once");
-  assert.equal(awaitCalls, 1, "the restored result flowed back through the broker's awaitNextCompletion");
-  assert.equal(patcherCalls, 1, "broker admitted the slot → the bounded O3 restore ran once (not in F3)");
-  assert.equal(
-    result.repair.repaired_payload[0].task_id,
-    "T1",
-    "the tool-owned identity is restored by the O3 brokered stage, not by F3",
-  );
+  expect(result.mode, "the honored mode is recorded — the failure is the stripped identity, not the mode").toBe("structured_output");
+  expect(result.repair.status, "the identity strip degraded + was salvaged via the O3 seam, never accepted as-is").toBe("patched");
+  expect(result.repair.status, "a conforming SHAPE must not short-circuit to clean when a tool-owned identity is stripped").not.toBe("clean");
+  expect(brokerCalls, "the identity-strip restore was gated by the shared broker exactly once").toBe(1);
+  expect(awaitCalls, "the restored result flowed back through the broker's awaitNextCompletion").toBe(1);
+  expect(patcherCalls, "broker admitted the slot → the bounded O3 restore ran once (not in F3)").toBe(1);
+  expect(result.repair.repaired_payload[0].task_id, "the tool-owned identity is restored by the O3 brokered stage, not by F3").toBe("T1");
 });

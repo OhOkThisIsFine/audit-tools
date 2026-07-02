@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,15 +46,9 @@ test("E1: every IDE host asset embeds the canonical loader body verbatim", () =>
   // embed the body unescaped. Spot-check structural anchors that only exist in
   // the canonical body so we know each asset actually wrapped it.
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
-    assert.ok(
-      asset.includes("# `/audit-code` Loader"),
-      `${kind} asset must embed the canonical loader heading`,
-    );
-    assert.ok(
-      asset.includes("capability\nhandshake") || asset.includes("capability handshake") ||
-        asset.includes("**capability"),
-      `${kind} asset must embed the capability handshake section`,
-    );
+    expect(asset.includes("# `/audit-code` Loader"), `${kind} asset must embed the canonical loader heading`).toBeTruthy();
+    expect(asset.includes("capability\nhandshake") || asset.includes("capability handshake") ||
+        asset.includes("**capability"), `${kind} asset must embed the capability handshake section`).toBeTruthy();
   }
 });
 
@@ -64,20 +57,14 @@ test("E1: every IDE host asset embeds the canonical loader body verbatim", () =>
 test("E1: --host-models appears in BOTH the report and continuation guidance for every IDE asset", () => {
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
     // The asset overall must carry the flag (initial Report block).
-    assert.ok(
-      asset.includes("--host-models"),
-      `${kind} asset must carry --host-models in the capability handshake`,
-    );
+    expect(asset.includes("--host-models"), `${kind} asset must carry --host-models in the capability handshake`).toBeTruthy();
     // The CONTINUATION guidance ("run ... next-step again with the same
     // capability flags (...)") must itself list --host-models, so a host that
     // only reads the continuation block on later turns still reports its roster.
     const continuationMatch = asset.match(
       /again with[\s\S]*?(`--host-models`)[\s\S]*?prompt_path/,
     );
-    assert.ok(
-      continuationMatch,
-      `${kind} asset continuation section must list --host-models alongside the other capability flags`,
-    );
+    expect(continuationMatch, `${kind} asset continuation section must list --host-models alongside the other capability flags`).toBeTruthy();
   }
 });
 
@@ -90,10 +77,7 @@ test("E1: all four capability flags appear in every IDE asset", () => {
   ];
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
     for (const flag of FLAGS) {
-      assert.ok(
-        asset.includes(flag),
-        `${kind} asset must carry capability flag '${flag}'`,
-      );
+      expect(asset.includes(flag), `${kind} asset must carry capability flag '${flag}'`).toBeTruthy();
     }
   }
 });
@@ -104,14 +88,8 @@ test("E1: every IDE asset uses the correct in-repo entrypoint, not a stale monor
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
     // A12 collapsed the monorepo: the dev entrypoint is `audit-code.mjs` at the
     // repo root, not the old `packages/audit-code/audit-code.mjs`.
-    assert.ok(
-      /\bnode audit-code\.mjs\b/.test(asset),
-      `${kind} asset must reference the repo-root 'node audit-code.mjs' entrypoint`,
-    );
-    assert.ok(
-      !asset.includes("packages/audit-code/audit-code.mjs"),
-      `${kind} asset must not embed the stale 'packages/audit-code/audit-code.mjs' entrypoint`,
-    );
+    expect(/\bnode audit-code\.mjs\b/.test(asset), `${kind} asset must reference the repo-root 'node audit-code.mjs' entrypoint`).toBeTruthy();
+    expect(!asset.includes("packages/audit-code/audit-code.mjs"), `${kind} asset must not embed the stale 'packages/audit-code/audit-code.mjs' entrypoint`).toBeTruthy();
   }
 });
 
@@ -124,11 +102,7 @@ test("no-drift: committed .gemini/commands/audit-code.toml equals a fresh render
       "utf8",
     ),
   );
-  assert.equal(
-    committed,
-    lf(RENDERED_ASSETS["gemini-toml"]),
-    "Committed Gemini TOML drifted from the canonical body. Re-run `audit-code install` (or regenerate the asset).",
-  );
+  expect(committed, "Committed Gemini TOML drifted from the canonical body. Re-run `audit-code install` (or regenerate the asset).").toBe(lf(RENDERED_ASSETS["gemini-toml"]));
 });
 
 test("no-drift: committed .github/agents/auditor.agent.md equals a fresh render of the canonical body", () => {
@@ -138,9 +112,5 @@ test("no-drift: committed .github/agents/auditor.agent.md equals a fresh render 
       "utf8",
     ),
   );
-  assert.equal(
-    committed,
-    lf(RENDERED_ASSETS["vscode-agent"]),
-    "Committed VS Code agent file drifted from the canonical body. Re-run `audit-code install` (or regenerate the asset).",
-  );
+  expect(committed, "Committed VS Code agent file drifted from the canonical body. Re-run `audit-code install` (or regenerate the asset).").toBe(lf(RENDERED_ASSETS["vscode-agent"]));
 });

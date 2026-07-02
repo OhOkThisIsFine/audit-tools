@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { buildKnipGraphIndex, classifyKnipLead } = await import(
@@ -23,7 +23,7 @@ test("CE-001/INV-K6 — backslash/mixed-case graph node id matches a POSIX knip 
     surfaceManifest: { surfaces: [] },
     criticalFlows: { flows: [] },
   });
-  assert.equal(classifyKnipLead("src/Foo.ts", index), "HAS-IMPORTERS");
+  expect(classifyKnipLead("src/Foo.ts", index)).toBe("HAS-IMPORTERS");
 });
 
 test("CE-003/INV-K2 — analyzers_used=[typescript] + non-TS lead → UNVERIFIED", () => {
@@ -34,7 +34,7 @@ test("CE-003/INV-K2 — analyzers_used=[typescript] + non-TS lead → UNVERIFIED
     surfaceManifest: { surfaces: [] },
     criticalFlows: { flows: [] },
   });
-  assert.equal(classifyKnipLead("src/thing.py", index), "UNVERIFIED");
+  expect(classifyKnipLead("src/thing.py", index)).toBe("UNVERIFIED");
 });
 
 test("CE-003/INV-K2 — empty analyzers_used → UNVERIFIED even for a TS lead", () => {
@@ -43,7 +43,7 @@ test("CE-003/INV-K2 — empty analyzers_used → UNVERIFIED even for a TS lead",
     surfaceManifest: { surfaces: [] },
     criticalFlows: { flows: [] },
   });
-  assert.equal(classifyKnipLead("src/orphan.ts", index), "UNVERIFIED");
+  expect(classifyKnipLead("src/orphan.ts", index)).toBe("UNVERIFIED");
 });
 
 test("INV-K3 — a fanIn-0 file that IS a surface entrypoint → ENTRYPOINT, not LIKELY-DEAD", () => {
@@ -54,7 +54,7 @@ test("INV-K3 — a fanIn-0 file that IS a surface entrypoint → ENTRYPOINT, not
     },
     criticalFlows: { flows: [] },
   });
-  assert.equal(classifyKnipLead("src/main.ts", index), "ENTRYPOINT");
+  expect(classifyKnipLead("src/main.ts", index)).toBe("ENTRYPOINT");
 });
 
 test("INV-K3 — a fanIn-0 file that is a critical-flow entrypoint → ENTRYPOINT", () => {
@@ -73,7 +73,7 @@ test("INV-K3 — a fanIn-0 file that is a critical-flow entrypoint → ENTRYPOIN
       ],
     },
   });
-  assert.equal(classifyKnipLead("src/boot.ts", index), "ENTRYPOINT");
+  expect(classifyKnipLead("src/boot.ts", index)).toBe("ENTRYPOINT");
 });
 
 test("LIKELY-DEAD happy path — in-degree 0, non-entrypoint, own analyzer ran", () => {
@@ -82,7 +82,7 @@ test("LIKELY-DEAD happy path — in-degree 0, non-entrypoint, own analyzer ran",
     surfaceManifest: { surfaces: [] },
     criticalFlows: { flows: [] },
   });
-  assert.equal(classifyKnipLead("src/dead.ts", index), "LIKELY-DEAD");
+  expect(classifyKnipLead("src/dead.ts", index)).toBe("LIKELY-DEAD");
 });
 
 test("HAS-IMPORTERS wins over entrypoint status when in-degree > 0", () => {
@@ -93,13 +93,13 @@ test("HAS-IMPORTERS wins over entrypoint status when in-degree > 0", () => {
     },
     criticalFlows: { flows: [] },
   });
-  assert.equal(classifyKnipLead("src/main.ts", index), "HAS-IMPORTERS");
+  expect(classifyKnipLead("src/main.ts", index)).toBe("HAS-IMPORTERS");
 });
 
 test("degrade-to-empty — all artifacts missing → UNVERIFIED, never throws", () => {
   const index = buildKnipGraphIndex({});
   assert.doesNotThrow(() => classifyKnipLead("src/anything.ts", index));
-  assert.equal(classifyKnipLead("src/anything.ts", index), "UNVERIFIED");
+  expect(classifyKnipLead("src/anything.ts", index)).toBe("UNVERIFIED");
 });
 
 test("degrade-to-empty — malformed graphs object does not throw", () => {

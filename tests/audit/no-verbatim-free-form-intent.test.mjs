@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,11 +33,7 @@ for (const file of WORKER_PROMPT_RENDERERS) {
         hits.push(`${i + 1}: ${line.trim()}`);
       }
     });
-    assert.equal(
-      hits.length,
-      0,
-      `Worker prompts must not contain the raw free_form_intent — interpret it into ` +
-        `lens/priority signals at planning instead (INV-S04):\n${hits.join("\n")}`,
-    );
+    expect(hits.length, `Worker prompts must not contain the raw free_form_intent — interpret it into ` +
+        `lens/priority signals at planning instead (INV-S04):\n${hits.join("\n")}`).toBe(0);
   });
 }

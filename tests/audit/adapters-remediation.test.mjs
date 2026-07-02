@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { normalizeCoverageSummary } = await import("../../src/audit/adapters/coverageSummary.ts");
 const { normalizeEslintJson } = await import("../../src/audit/adapters/eslint.ts");
@@ -16,15 +15,13 @@ test("normalizeCoverageSummary keeps only below-threshold files and preserves se
     { path: "src/fail.ts", lines_pct: 49.5, branches_pct: 12.3 },
   ]);
 
-  assert.equal(normalized.tool, "coverage-summary");
-  assert.deepEqual(
-    normalized.results.map((result) => ({
+  expect(normalized.tool).toBe("coverage-summary");
+  expect(normalized.results.map((result) => ({
       id: result.id,
       severity: result.severity,
       path: result.path,
       summary: result.summary,
-    })),
-    [
+    }))).toEqual([
       {
         id: "coverage-1",
         severity: "medium",
@@ -37,8 +34,7 @@ test("normalizeCoverageSummary keeps only below-threshold files and preserves se
         path: "src/fail.ts",
         summary: "Low line coverage: 49.5%, branch coverage 12.3%.",
       },
-    ],
-  );
+    ]);
 });
 
 test("normalizeEslintJson maps known severities and safely downgrades malformed values to info", () => {
@@ -69,15 +65,13 @@ test("normalizeEslintJson maps known severities and safely downgrades malformed 
     },
   ]);
 
-  assert.equal(normalized.tool, "eslint");
-  assert.deepEqual(
-    normalized.results.map((result) => ({
+  expect(normalized.tool).toBe("eslint");
+  expect(normalized.results.map((result) => ({
       id: result.id,
       severity: result.severity,
       path: result.path,
       summary: result.summary,
-    })),
-    [
+    }))).toEqual([
       {
         id: "src/app.ts:1",
         severity: "medium",
@@ -114,11 +108,10 @@ test("normalizeEslintJson maps known severities and safely downgrades malformed 
         path: "src/app.ts",
         summary: "String severity.",
       },
-    ],
-  );
-  assert.equal(normalized.results[0].line_start, 2);
-  assert.equal(normalized.results[0].line_end, 3);
-  assert.equal(normalized.results[0].rule, "no-bad-error");
+    ]);
+  expect(normalized.results[0].line_start).toBe(2);
+  expect(normalized.results[0].line_end).toBe(3);
+  expect(normalized.results[0].rule).toBe("no-bad-error");
 });
 
 test("normalizeNpmAuditJson preserves 0-based ids and fills unknown vulnerability detail safely", () => {
@@ -129,16 +122,14 @@ test("normalizeNpmAuditJson preserves 0-based ids and fills unknown vulnerabilit
     },
   });
 
-  assert.equal(normalized.tool, "npm-audit");
-  assert.deepEqual(
-    normalized.results.map((result) => ({
+  expect(normalized.tool).toBe("npm-audit");
+  expect(normalized.results.map((result) => ({
       id: result.id,
       severity: result.severity,
       path: result.path,
       summary: result.summary,
       rule: result.rule,
-    })),
-    [
+    }))).toEqual([
       {
         id: "npm-audit-0",
         severity: "high",
@@ -155,8 +146,7 @@ test("normalizeNpmAuditJson preserves 0-based ids and fills unknown vulnerabilit
           "Package minimist has a low severity vulnerability in range unknown.",
         rule: "minimist",
       },
-    ],
-  );
+    ]);
 });
 
 const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
@@ -167,11 +157,8 @@ test("normalizeNpmAuditJson maps 'moderate' severity to 'medium'", () => {
       "test-pkg": { severity: "moderate", range: ">=1.0.0" },
     },
   });
-  assert.equal(normalized.results[0].severity, "medium");
-  assert.ok(
-    VALID_SEVERITIES.has(normalized.results[0].severity),
-    "normalized severity must be a valid schema enum member",
-  );
+  expect(normalized.results[0].severity).toBe("medium");
+  expect(VALID_SEVERITIES.has(normalized.results[0].severity), "normalized severity must be a valid schema enum member").toBeTruthy();
 });
 
 test("normalizeNpmAuditJson passes through valid schema severities unchanged", () => {
@@ -179,7 +166,7 @@ test("normalizeNpmAuditJson passes through valid schema severities unchanged", (
     const normalized = normalizeNpmAuditJson({
       vulnerabilities: { pkg: { severity: sev } },
     });
-    assert.equal(normalized.results[0].severity, sev, `${sev} should map to ${sev}`);
+    expect(normalized.results[0].severity, `${sev} should map to ${sev}`).toBe(sev);
   }
 });
 
@@ -187,18 +174,12 @@ test("normalizeNpmAuditJson defaults unknown/missing severities to a valid schem
   const withUndefined = normalizeNpmAuditJson({
     vulnerabilities: { pkg: {} },
   });
-  assert.ok(
-    VALID_SEVERITIES.has(withUndefined.results[0].severity),
-    `undefined severity produced '${withUndefined.results[0].severity}', not in enum`,
-  );
+  expect(VALID_SEVERITIES.has(withUndefined.results[0].severity), `undefined severity produced '${withUndefined.results[0].severity}', not in enum`).toBeTruthy();
 
   const withBogus = normalizeNpmAuditJson({
     vulnerabilities: { pkg: { severity: "bogus" } },
   });
-  assert.ok(
-    VALID_SEVERITIES.has(withBogus.results[0].severity),
-    `'bogus' severity produced '${withBogus.results[0].severity}', not in enum`,
-  );
+  expect(VALID_SEVERITIES.has(withBogus.results[0].severity), `'bogus' severity produced '${withBogus.results[0].severity}', not in enum`).toBeTruthy();
 });
 
 test("normalizeSemgrepJson drops incomplete results and defaults missing categories to security", () => {
@@ -236,16 +217,14 @@ test("normalizeSemgrepJson drops incomplete results and defaults missing categor
     ],
   });
 
-  assert.equal(normalized.tool, "semgrep");
-  assert.deepEqual(
-    normalized.results.map((result) => ({
+  expect(normalized.tool).toBe("semgrep");
+  expect(normalized.results.map((result) => ({
       id: result.id,
       category: result.category,
       severity: result.severity,
       path: result.path,
       summary: result.summary,
-    })),
-    [
+    }))).toEqual([
       {
         id: "sg.maintainability",
         category: "maintainability",
@@ -260,10 +239,9 @@ test("normalizeSemgrepJson drops incomplete results and defaults missing categor
         path: "src/session.ts",
         summary: "Analyzer found a noteworthy session path.",
       },
-    ],
-  );
-  assert.equal(normalized.results[0].line_start, 4);
-  assert.equal(normalized.results[0].line_end, 8);
+    ]);
+  expect(normalized.results[0].line_start).toBe(4);
+  expect(normalized.results[0].line_end).toBe(8);
 });
 
 test("normalizeSemgrepJson maps uppercase semgrep severities to lowercase schema values (COR-cffe3d7b)", () => {
@@ -283,11 +261,7 @@ test("normalizeSemgrepJson maps uppercase semgrep severities to lowercase schema
         },
       ],
     });
-    assert.equal(
-      normalized.results[0]?.severity,
-      expected,
-      `severity '${input}' should map to '${expected}'`,
-    );
+    expect(normalized.results[0]?.severity, `severity '${input}' should map to '${expected}'`).toBe(expected);
   }
 });
 
@@ -301,11 +275,7 @@ test("normalizeSemgrepJson maps mixed-case semgrep severity to lowercase schema 
       },
     ],
   });
-  assert.equal(
-    normalized.results[0]?.severity,
-    "medium",
-    "mixed-case 'Warning' should map to 'medium'",
-  );
+  expect(normalized.results[0]?.severity, "mixed-case 'Warning' should map to 'medium'").toBe("medium");
 });
 
 test("normalizeSemgrepJson produces undefined/fallback severity for missing or unknown severity (COR-cffe3d7b)", () => {
@@ -321,10 +291,7 @@ test("normalizeSemgrepJson produces undefined/fallback severity for missing or u
       },
     ],
   });
-  assert.ok(
-    VALID_SEVERITIES.has(withMissing.results[0]?.severity),
-    `missing severity produced '${withMissing.results[0]?.severity}', not in schema enum`,
-  );
+  expect(VALID_SEVERITIES.has(withMissing.results[0]?.severity), `missing severity produced '${withMissing.results[0]?.severity}', not in schema enum`).toBeTruthy();
 
   // Unknown severity string — normalizeGenericExternalResults applies its fallback
   const withUnknown = normalizeSemgrepJson({
@@ -336,43 +303,37 @@ test("normalizeSemgrepJson produces undefined/fallback severity for missing or u
       },
     ],
   });
-  assert.ok(
-    VALID_SEVERITIES.has(withUnknown.results[0]?.severity),
-    `unknown severity produced '${withUnknown.results[0]?.severity}', not in schema enum`,
-  );
+  expect(VALID_SEVERITIES.has(withUnknown.results[0]?.severity), `unknown severity produced '${withUnknown.results[0]?.severity}', not in schema enum`).toBeTruthy();
 });
 
 test("normalizeGenericExternalResults maps absent severity to 'info' (COR-0a17639f)", () => {
   const result = normalizeGenericExternalResults("my-tool", [
     { path: "src/a.ts", summary: "finding with no severity" },
   ]);
-  assert.equal(result.results.length, 1);
-  assert.equal(result.results[0].severity, "info");
+  expect(result.results.length).toBe(1);
+  expect(result.results[0].severity).toBe("info");
   const severityEnum = ["critical", "high", "medium", "low", "info"];
-  assert.ok(
-    severityEnum.includes(result.results[0].severity),
-    `severity '${result.results[0].severity}' must be a member of the schema enum`,
-  );
+  expect(severityEnum.includes(result.results[0].severity), `severity '${result.results[0].severity}' must be a member of the schema enum`).toBeTruthy();
 });
 
 test("normalizeCoverageSummary respects COVERAGE_THRESHOLD_LOW: files at or above 80% are excluded", () => {
   const atThreshold = normalizeCoverageSummary([{ path: "src/ok.ts", lines_pct: 80 }]);
-  assert.deepEqual(atThreshold.results, [], "lines_pct === 80 must not be flagged");
+  expect(atThreshold.results, "lines_pct === 80 must not be flagged").toEqual([]);
 
   const belowThreshold = normalizeCoverageSummary([{ path: "src/low.ts", lines_pct: 79 }]);
-  assert.equal(belowThreshold.results.length, 1, "lines_pct === 79 must be flagged");
-  assert.equal(belowThreshold.results[0].path, "src/low.ts");
+  expect(belowThreshold.results.length, "lines_pct === 79 must be flagged").toBe(1);
+  expect(belowThreshold.results[0].path).toBe("src/low.ts");
 });
 
 test("normalizeCoverageSummary assigns severity correctly around COVERAGE_SEVERITY_HIGH", () => {
   const high = normalizeCoverageSummary([{ path: "src/high.ts", lines_pct: 49 }]);
-  assert.equal(high.results[0].severity, "high", "lines_pct === 49 should be high");
+  expect(high.results[0].severity, "lines_pct === 49 should be high").toBe("high");
 
   const mediumAtBoundary = normalizeCoverageSummary([{ path: "src/med50.ts", lines_pct: 50 }]);
-  assert.equal(mediumAtBoundary.results[0].severity, "medium", "lines_pct === 50 should be medium");
+  expect(mediumAtBoundary.results[0].severity, "lines_pct === 50 should be medium").toBe("medium");
 
   const mediumBeforeThreshold = normalizeCoverageSummary([{ path: "src/med79.ts", lines_pct: 79 }]);
-  assert.equal(mediumBeforeThreshold.results[0].severity, "medium", "lines_pct === 79 should be medium");
+  expect(mediumBeforeThreshold.results[0].severity, "lines_pct === 79 should be medium").toBe("medium");
 });
 
 test("normalizeCoverageSummary pins the lines_pct=50 boundary to medium and lines_pct=49.9 to high", () => {
@@ -381,24 +342,16 @@ test("normalizeCoverageSummary pins the lines_pct=50 boundary to medium and line
     { path: "src/boundary-medium.ts", lines_pct: 50 },
   ]);
 
-  assert.equal(normalized.results.length, 2, "both files below 80% threshold must be flagged");
+  expect(normalized.results.length, "both files below 80% threshold must be flagged").toBe(2);
 
   const highEntry = normalized.results.find((r) => r.path === "src/boundary-high.ts");
   const mediumEntry = normalized.results.find((r) => r.path === "src/boundary-medium.ts");
 
-  assert.ok(highEntry, "src/boundary-high.ts must be present in results");
-  assert.ok(mediumEntry, "src/boundary-medium.ts must be present in results");
+  expect(highEntry, "src/boundary-high.ts must be present in results").toBeTruthy();
+  expect(mediumEntry, "src/boundary-medium.ts must be present in results").toBeTruthy();
 
-  assert.equal(
-    highEntry.severity,
-    "high",
-    "lines_pct=49.9 is strictly below 50 so severity must be 'high'",
-  );
-  assert.equal(
-    mediumEntry.severity,
-    "medium",
-    "lines_pct=50 is not strictly below 50 so severity must be 'medium'",
-  );
+  expect(highEntry.severity, "lines_pct=49.9 is strictly below 50 so severity must be 'high'").toBe("high");
+  expect(mediumEntry.severity, "lines_pct=50 is not strictly below 50 so severity must be 'medium'").toBe("medium");
 });
 
 // --- CP-NODE-1: dedicated clippy / rubocop severity adapters ---
@@ -426,26 +379,23 @@ const CLIPPY_STREAM = [
 
 test("normalizeClippyJson maps clippy severities and validates through the generic seam", () => {
   const normalized = normalizeClippyJson(CLIPPY_STREAM);
-  assert.equal(normalized.tool, "clippy");
-  assert.deepEqual(
-    normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule })),
-    [
+  expect(normalized.tool).toBe("clippy");
+  expect(normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule }))).toEqual([
       { severity: "high", path: "src/lib.rs", rule: "E0308" },
       { severity: "medium", path: "src/main.rs", rule: "clippy::unused" },
-    ],
-  );
+    ]);
   for (const r of normalized.results) {
-    assert.ok(VALID_SEVERITIES.has(r.severity), `severity '${r.severity}' must be a schema enum member`);
+    expect(VALID_SEVERITIES.has(r.severity), `severity '${r.severity}' must be a schema enum member`).toBeTruthy();
   }
 });
 
 test("normalizeClippyJson downgrades malformed input to an empty result set (no throw)", () => {
   for (const bad of ["", "not json", "{}", "garbage\nmore garbage"]) {
     const normalized = normalizeClippyJson(bad);
-    assert.equal(normalized.tool, "clippy");
-    assert.deepEqual(normalized.results, []);
+    expect(normalized.tool).toBe("clippy");
+    expect(normalized.results).toEqual([]);
   }
-  assert.deepEqual(parseClippy("not json"), []);
+  expect(parseClippy("not json")).toEqual([]);
 });
 
 const RUBOCOP_REPORT = JSON.stringify({
@@ -462,26 +412,23 @@ const RUBOCOP_REPORT = JSON.stringify({
 
 test("normalizeRubocopJson maps rubocop severities (fatal→high, convention→low) through the generic seam", () => {
   const normalized = normalizeRubocopJson(RUBOCOP_REPORT);
-  assert.equal(normalized.tool, "rubocop");
-  assert.deepEqual(
-    normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule, line_start: r.line_start })),
-    [
+  expect(normalized.tool).toBe("rubocop");
+  expect(normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule, line_start: r.line_start }))).toEqual([
       { severity: "high", path: "app/foo.rb", rule: "Lint/Fatal", line_start: 2 },
       { severity: "low", path: "app/foo.rb", rule: "Style/Nit", line_start: 9 },
-    ],
-  );
+    ]);
   for (const r of normalized.results) {
-    assert.ok(VALID_SEVERITIES.has(r.severity), `severity '${r.severity}' must be a schema enum member`);
+    expect(VALID_SEVERITIES.has(r.severity), `severity '${r.severity}' must be a schema enum member`).toBeTruthy();
   }
 });
 
 test("normalizeRubocopJson downgrades malformed input to an empty result set (no throw)", () => {
   for (const bad of ["", "not json", "{}", JSON.stringify({ files: "nope" })]) {
     const normalized = normalizeRubocopJson(bad);
-    assert.equal(normalized.tool, "rubocop");
-    assert.deepEqual(normalized.results, []);
+    expect(normalized.tool).toBe("rubocop");
+    expect(normalized.results).toEqual([]);
   }
-  assert.deepEqual(parseRubocop("not json"), []);
+  expect(parseRubocop("not json")).toEqual([]);
 });
 
 test("normalizeGenericExternalResults maps native severity aliases onto schema enum (COR-0a17639f)", () => {
@@ -501,10 +448,6 @@ test("normalizeGenericExternalResults maps native severity aliases onto schema e
     const result = normalizeGenericExternalResults("test-tool", [
       { path: "src/x.ts", summary: "test finding", severity: input },
     ]);
-    assert.equal(
-      result.results[0].severity,
-      expected,
-      `severity '${input}' should map to '${expected}'`,
-    );
+    expect(result.results[0].severity, `severity '${input}' should map to '${expected}'`).toBe(expected);
   }
 });

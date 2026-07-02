@@ -3,8 +3,7 @@
  * with emphasis on INV-GND-02: grounding is a TOTAL function — a finding with no
  * grounding verdict (undefined/absent) is treated as ungrounded → verify.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   normalizeForMatch,
   normalizeRepoPath,
@@ -29,20 +28,20 @@ function finding(affected_files) {
 }
 
 test("normalizeForMatch strips CR and collapses whitespace", () => {
-  assert.equal(normalizeForMatch("  a\r\n  b\t c  "), "a b c");
+  expect(normalizeForMatch("  a\r\n  b\t c  ")).toBe("a b c");
 });
 
 test("normalizeRepoPath: trims, backslash→slash, strips ./, lowercases", () => {
-  assert.equal(normalizeRepoPath(".\\SRC\\A.ts"), "src/a.ts");
-  assert.equal(normalizeRepoPath("  src/B.TS  "), "src/b.ts");
-  assert.equal(normalizeRepoPath("./pkg/x.ts"), "pkg/x.ts");
+  expect(normalizeRepoPath(".\\SRC\\A.ts")).toBe("src/a.ts");
+  expect(normalizeRepoPath("  src/B.TS  ")).toBe("src/b.ts");
+  expect(normalizeRepoPath("./pkg/x.ts")).toBe("pkg/x.ts");
 });
 
 test("quoteMatches is whitespace/CRLF-insensitive and content-based", () => {
   const file = "function foo() {\r\n    return bar();\r\n}\n";
-  assert.equal(quoteMatches(file, "return bar();"), true);
-  assert.equal(quoteMatches(file, "return baz();"), false);
-  assert.equal(quoteMatches(file, "   "), false);
+  expect(quoteMatches(file, "return bar();")).toBe(true);
+  expect(quoteMatches(file, "return baz();")).toBe(false);
+  expect(quoteMatches(file, "   ")).toBe(false);
 });
 
 test("verifyFindingGrounding grounds a matching quote and flags an absent one", async () => {
@@ -52,34 +51,34 @@ test("verifyFindingGrounding grounds a matching quote and flags an absent one", 
     finding([{ path: "src/auth.ts", quoted_text: "return sign(secret);" }]),
     reader,
   );
-  assert.equal(ok.status, "grounded");
+  expect(ok.status).toBe("grounded");
 
   const bad = await verifyFindingGrounding(
     "/repo",
     finding([{ path: "src/auth.ts", quoted_text: "DROP TABLE users;" }]),
     reader,
   );
-  assert.equal(bad.status, "ungrounded");
-  assert.match(bad.reason ?? "", /not found on disk/);
+  expect(bad.status).toBe("ungrounded");
+  expect(bad.reason ?? "").toMatch(/not found on disk/);
 });
 
 test("INV-GND-02: an undefined/absent grounding verdict is treated as ungrounded → verify", () => {
   // No grounding field at all → NOT grounded → needs verification.
   const noVerdict = { grounding: undefined };
-  assert.equal(findingIsGrounded(noVerdict), false);
-  assert.equal(findingNeedsVerificationBeforeFix(noVerdict), true);
+  expect(findingIsGrounded(noVerdict)).toBe(false);
+  expect(findingNeedsVerificationBeforeFix(noVerdict)).toBe(true);
 
   const missingField = {};
-  assert.equal(findingIsGrounded(missingField), false);
-  assert.equal(findingNeedsVerificationBeforeFix(missingField), true);
+  expect(findingIsGrounded(missingField)).toBe(false);
+  expect(findingNeedsVerificationBeforeFix(missingField)).toBe(true);
 
   // Explicitly ungrounded → needs verification.
   const ungrounded = { grounding: { status: "ungrounded", reason: "x" } };
-  assert.equal(findingIsGrounded(ungrounded), false);
-  assert.equal(findingNeedsVerificationBeforeFix(ungrounded), true);
+  expect(findingIsGrounded(ungrounded)).toBe(false);
+  expect(findingNeedsVerificationBeforeFix(ungrounded)).toBe(true);
 
   // Only a positive 'grounded' verdict skips verification.
   const grounded = { grounding: { status: "grounded" } };
-  assert.equal(findingIsGrounded(grounded), true);
-  assert.equal(findingNeedsVerificationBeforeFix(grounded), false);
+  expect(findingIsGrounded(grounded)).toBe(true);
+  expect(findingNeedsVerificationBeforeFix(grounded)).toBe(false);
 });

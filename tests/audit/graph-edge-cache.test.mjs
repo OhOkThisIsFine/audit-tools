@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { buildGraphBundle } from "../../src/audit/extractors/graph.ts";
 
 // C2 incremental graph-build â€” per-file edge cache.
@@ -49,14 +48,10 @@ test("sink-only build is byte-identical to a plain full build; cache covers all 
   const plain = fullBuild(m, contents);
   const { bundle, cache } = incrementalBuild(m, contents, undefined);
 
-  assert.deepEqual(bundle, plain, "sink-collecting build must equal the plain build");
-  assert.ok(cache, "a cache must be produced into the sink");
-  assert.deepEqual(
-    Object.keys(cache.entries).sort(),
-    [A, B],
-    "cache must cover exactly the in-scope files",
-  );
-  assert.equal(typeof cache.path_lookup_hash, "string");
+  expect(bundle, "sink-collecting build must equal the plain build").toEqual(plain);
+  expect(cache, "a cache must be produced into the sink").toBeTruthy();
+  expect(Object.keys(cache.entries).sort(), "cache must cover exactly the in-scope files").toEqual([A, B]);
+  expect(typeof cache.path_lookup_hash).toBe("string");
 });
 
 test("feeding the prior cache back (unchanged) yields a byte-identical bundle", () => {
@@ -67,7 +62,7 @@ test("feeding the prior cache back (unchanged) yields a byte-identical bundle", 
   const plain = fullBuild(m, contents);
   const { bundle } = incrementalBuild(m, contents, cache);
 
-  assert.deepEqual(bundle, plain, "unchanged incremental build must equal the full build");
+  expect(bundle, "unchanged incremental build must equal the full build").toEqual(plain);
 });
 
 test("a cached contribution is REUSED (not re-extracted) when content_key + pathLookup match", () => {
@@ -82,10 +77,7 @@ test("a cached contribution is REUSED (not re-extracted) when content_key + path
 
   const { bundle } = incrementalBuild(m, contents, cache);
   const refs = bundle.graphs?.references ?? [];
-  assert.ok(
-    refs.some((e) => e.to === "SENTINEL-REUSED"),
-    "B's cached (doctored) contribution must be reused verbatim",
-  );
+  expect(refs.some((e) => e.to === "SENTINEL-REUSED"), "B's cached (doctored) contribution must be reused verbatim").toBeTruthy();
 });
 
 test("a content change re-extracts ONLY the changed file; the rest stay reused", () => {
@@ -103,13 +95,13 @@ test("a content change re-extracts ONLY the changed file; the rest stay reused",
 
   const { bundle } = incrementalBuild(m2, editedContents, cache);
   const refs = bundle.graphs?.references ?? [];
-  assert.ok(!refs.some((e) => e.to === "SENTINEL-A"), "A must be re-extracted (its sentinel gone)");
-  assert.ok(refs.some((e) => e.to === "SENTINEL-B"), "B must stay reused (its sentinel kept)");
+  expect(!refs.some((e) => e.to === "SENTINEL-A"), "A must be re-extracted (its sentinel gone)").toBeTruthy();
+  expect(refs.some((e) => e.to === "SENTINEL-B"), "B must stay reused (its sentinel kept)").toBeTruthy();
 
   // And the result equals a clean full build of the edited tree.
   const plain = fullBuild(m2, editedContents);
   const cleanRefs = (plain.graphs?.references ?? []).map((e) => e.to);
-  assert.ok(!cleanRefs.includes("SENTINEL-A") && !cleanRefs.includes("SENTINEL-B"));
+  expect(!cleanRefs.includes("SENTINEL-A") && !cleanRefs.includes("SENTINEL-B")).toBeTruthy();
 });
 
 test("a file WITHOUT a content hash is never reused (size fallback is unsound) â€” fail-safe re-extract", () => {
@@ -120,7 +112,7 @@ test("a file WITHOUT a content hash is never reused (size fallback is unsound) â
   const { cache } = incrementalBuild(m, contents, undefined);
 
   // Nothing should have been cached for hash-less files.
-  assert.deepEqual(Object.keys(cache.entries), [], "hash-less files must not be cached");
+  expect(Object.keys(cache.entries), "hash-less files must not be cached").toEqual([]);
 
   // Even if a doctored entry is fed in, a hash-less file must NOT reuse it.
   const doctored = {
@@ -134,8 +126,8 @@ test("a file WITHOUT a content hash is never reused (size fallback is unsound) â
   };
   const { bundle } = incrementalBuild(m, contents, doctored);
   const refs = bundle.graphs?.references ?? [];
-  assert.ok(!refs.some((e) => e.to === "SENTINEL-STALE"), "hash-less file must re-extract, never reuse");
-  assert.deepEqual(bundle, fullBuild(m, contents), "hash-less build must equal the full build");
+  expect(!refs.some((e) => e.to === "SENTINEL-STALE"), "hash-less file must re-extract, never reuse").toBeTruthy();
+  expect(bundle, "hash-less build must equal the full build").toEqual(fullBuild(m, contents));
 });
 
 test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () => {
@@ -153,12 +145,9 @@ test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () =
 
   const { bundle, cache: cache2 } = incrementalBuild(m2, contents2, cache);
   const refs = bundle.graphs?.references ?? [];
-  assert.ok(
-    !refs.some((e) => e.to === "SENTINEL-B"),
-    "a pathLookup change must invalidate every entry (B's sentinel gone)",
-  );
-  assert.notEqual(cache2.path_lookup_hash, cache.path_lookup_hash, "path_lookup_hash must move");
+  expect(!refs.some((e) => e.to === "SENTINEL-B"), "a pathLookup change must invalidate every entry (B's sentinel gone)").toBeTruthy();
+  expect(cache2.path_lookup_hash, "path_lookup_hash must move").not.toBe(cache.path_lookup_hash);
 
   const plain = fullBuild(m2, contents2);
-  assert.deepEqual(bundle, plain, "invalidated incremental build must equal the full build");
+  expect(bundle, "invalidated incremental build must equal the full build").toEqual(plain);
 });

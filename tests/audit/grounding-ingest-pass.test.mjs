@@ -4,8 +4,7 @@
 // ungrounded-list wiring (not just the per-finding verifiers, which are unit
 // tested elsewhere). Uses real temp files for the grounded case and no-quote /
 // quote-not-on-disk for the ungrounded cases — deterministic, no process spawns.
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,20 +68,17 @@ test("groundPassingFindings grounds every finding and returns the ungrounded one
 
     // Every finding was annotated in place (the parallel pass mutated each).
     for (const r of passing) {
-      for (const f of r.findings) assert.ok(f.grounding, `${f.id} should carry a grounding verdict`);
+      for (const f of r.findings) expect(f.grounding, `${f.id} should carry a grounding verdict`).toBeTruthy();
     }
-    assert.equal(passing[0].findings[0].grounding.status, "grounded");
-    assert.equal(passing[0].findings[1].grounding.status, "ungrounded");
-    assert.equal(passing[1].findings[0].grounding.status, "ungrounded");
+    expect(passing[0].findings[0].grounding.status).toBe("grounded");
+    expect(passing[0].findings[1].grounding.status).toBe("ungrounded");
+    expect(passing[1].findings[0].grounding.status).toBe("ungrounded");
 
     // Ungrounded list: exactly the two ungrounded findings, in input order, with
     // their owning task_id (proves the flatten/filter/order wiring under the pool).
-    assert.deepEqual(
-      ungrounded.map((u) => u.finding_id),
-      ["F-noquote", "F-badquote"],
-    );
-    assert.equal(ungrounded[0].task_id, "u1:security");
-    assert.equal(ungrounded[1].task_id, "u2:correctness");
+    expect(ungrounded.map((u) => u.finding_id)).toEqual(["F-noquote", "F-badquote"]);
+    expect(ungrounded[0].task_id).toBe("u1:security");
+    expect(ungrounded[1].task_id).toBe("u2:correctness");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

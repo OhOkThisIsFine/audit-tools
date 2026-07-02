@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -40,11 +40,11 @@ test("advanceAudit preserves persisted complete state when no executor is select
     audit_report: "# Audit Report\n",
   });
 
-  assert.equal(result.selected_executor, null);
-  assert.equal(result.progress_made, false);
-  assert.equal(result.audit_state.status, "complete");
-  assert.equal(result.audit_state.last_executor, "synthesis_executor");
-  assert.equal(result.audit_state.last_obligation, "synthesis_current");
+  expect(result.selected_executor).toBe(null);
+  expect(result.progress_made).toBe(false);
+  expect(result.audit_state.status).toBe("complete");
+  expect(result.audit_state.last_executor).toBe("synthesis_executor");
+  expect(result.audit_state.last_obligation).toBe("synthesis_current");
 });
 
 test("advanceAudit wraps executor failures with executor and obligation context", async () => {
@@ -61,43 +61,25 @@ test("advanceAudit wraps executor failures with executor and obligation context"
       { root: missingRoot },
     ),
     (error) => {
-      assert.match(
-        error.message,
-        /advanceAudit intake_executor failed while resolving repo_manifest/i,
-      );
+      expect(error.message).toMatch(/advanceAudit intake_executor failed while resolving repo_manifest/i);
       return true;
     },
   );
 });
 
 test("runtime validation runs package-manager shims through the Windows shell", () => {
-  assert.deepEqual(
-    resolveRuntimeValidationSpawnCommand(["npm", "test"], "win32", "cmd.exe"),
-    { command: "cmd.exe", args: ["/d", "/s", "/c", "npm test"] },
-  );
-  assert.deepEqual(
-    resolveRuntimeValidationSpawnCommand(
+  expect(resolveRuntimeValidationSpawnCommand(["npm", "test"], "win32", "cmd.exe")).toEqual({ command: "cmd.exe", args: ["/d", "/s", "/c", "npm test"] });
+  expect(resolveRuntimeValidationSpawnCommand(
       ["npx", "vitest", "run", "--reporter=dot"],
       "win32",
       "cmd.exe",
-    ),
-    {
+    )).toEqual({
       command: "cmd.exe",
       args: ["/d", "/s", "/c", "npx vitest run --reporter=dot"],
-    },
-  );
-  assert.deepEqual(
-    resolveRuntimeValidationSpawnCommand(["npm.cmd", "test"], "win32", "cmd.exe"),
-    { command: "cmd.exe", args: ["/d", "/s", "/c", "npm.cmd test"] },
-  );
-  assert.deepEqual(
-    resolveRuntimeValidationSpawnCommand(["python", "-m", "pytest"], "win32"),
-    { command: "python", args: ["-m", "pytest"] },
-  );
-  assert.deepEqual(
-    resolveRuntimeValidationSpawnCommand(["npm", "test"], "linux"),
-    { command: "npm", args: ["test"] },
-  );
+    });
+  expect(resolveRuntimeValidationSpawnCommand(["npm.cmd", "test"], "win32", "cmd.exe")).toEqual({ command: "cmd.exe", args: ["/d", "/s", "/c", "npm.cmd test"] });
+  expect(resolveRuntimeValidationSpawnCommand(["python", "-m", "pytest"], "win32")).toEqual({ command: "python", args: ["-m", "pytest"] });
+  expect(resolveRuntimeValidationSpawnCommand(["npm", "test"], "linux")).toEqual({ command: "npm", args: ["test"] });
 });
 
 test("deriveAuditState marks audit tasks complete when every task has a result", () => {
@@ -131,8 +113,8 @@ test("deriveAuditState marks audit tasks complete when every task has a result",
     ],
   });
 
-  assert.equal(findObligation(state, "audit_tasks_completed")?.state, "satisfied");
-  assert.equal(findObligation(state, "audit_results_ingested")?.state, "satisfied");
+  expect(findObligation(state, "audit_tasks_completed")?.state).toBe("satisfied");
+  expect(findObligation(state, "audit_results_ingested")?.state).toBe("satisfied");
 });
 
 test("deriveAuditState requires syntax-resolution marker instead of imported analyzer results", () => {
@@ -147,7 +129,7 @@ test("deriveAuditState requires syntax-resolution marker instead of imported ana
       results: [],
     }],
   });
-  assert.equal(findObligation(importedOnly, "syntax_resolved")?.state, "missing");
+  expect(findObligation(importedOnly, "syntax_resolved")?.state).toBe("missing");
 
   const withMarker = deriveAuditState({
     repo_manifest: {
@@ -164,7 +146,7 @@ test("deriveAuditState requires syntax-resolution marker instead of imported ana
       completed_at: "2026-04-22T00:00:00Z",
     },
   });
-  assert.equal(findObligation(withMarker, "syntax_resolved")?.state, "satisfied");
+  expect(findObligation(withMarker, "syntax_resolved")?.state).toBe("satisfied");
 });
 
 test("external analyzer import clears planning-derived outputs in memory", () => {
@@ -183,11 +165,11 @@ test("external analyzer import clears planning-derived outputs in memory", () =>
     },
   );
 
-  assert.equal(run.updated.external_analyzer_results[0].tool, "semgrep");
-  assert.equal(run.updated.coverage_matrix, undefined);
-  assert.equal(run.updated.audit_tasks, undefined);
-  assert.equal(run.updated.requeue_tasks, undefined);
-  assert.equal(run.updated.audit_report, undefined);
+  expect(run.updated.external_analyzer_results[0].tool).toBe("semgrep");
+  expect(run.updated.coverage_matrix).toBe(undefined);
+  expect(run.updated.audit_tasks).toBe(undefined);
+  expect(run.updated.requeue_tasks).toBe(undefined);
+  expect(run.updated.audit_report).toBe(undefined);
 });
 
 test("deriveAuditState keeps explicit pending follow-up tasks actionable after coverage is complete", () => {
@@ -244,7 +226,7 @@ test("deriveAuditState keeps explicit pending follow-up tasks actionable after c
     ],
   });
 
-  assert.equal(findObligation(state, "audit_tasks_completed")?.state, "missing");
+  expect(findObligation(state, "audit_tasks_completed")?.state).toBe("missing");
 });
 
 test("deepening results do not add non-required lenses to coverage completion", () => {
@@ -276,8 +258,8 @@ test("deepening results do not add non-required lenses to coverage completion", 
     ],
   );
 
-  assert.deepEqual(updated.files[0].completed_lenses, []);
-  assert.equal(updated.files[0].audit_status, "pending");
+  expect(updated.files[0].completed_lenses).toEqual([]);
+  expect(updated.files[0].audit_status).toBe("pending");
 });
 
 test("selective deepening creates bounded follow-up tasks for risky or ambiguous findings", () => {
@@ -318,22 +300,19 @@ test("selective deepening creates bounded follow-up tasks for risky or ambiguous
     results: [result],
   });
 
-  assert.equal(tasks.length, 1);
-  assert.match(tasks[0].task_id, /^deepening:finding:/);
-  assert.equal(tasks[0].priority, "high");
-  assert.deepEqual(tasks[0].file_paths, ["src/api/auth.ts"]);
-  assert.equal(tasks[0].file_line_counts["src/api/auth.ts"], 40);
-  assert.ok(tasks[0].tags.includes("selective_deepening"));
-  assert.ok(tasks[0].tags.includes("trigger:high_severity"));
-  assert.ok(tasks[0].tags.includes("trigger:low_confidence"));
+  expect(tasks.length).toBe(1);
+  expect(tasks[0].task_id).toMatch(/^deepening:finding:/);
+  expect(tasks[0].priority).toBe("high");
+  expect(tasks[0].file_paths).toEqual(["src/api/auth.ts"]);
+  expect(tasks[0].file_line_counts["src/api/auth.ts"]).toBe(40);
+  expect(tasks[0].tags.includes("selective_deepening")).toBeTruthy();
+  expect(tasks[0].tags.includes("trigger:high_severity")).toBeTruthy();
+  expect(tasks[0].tags.includes("trigger:low_confidence")).toBeTruthy();
 
-  assert.equal(
-    buildSelectiveDeepeningTasks({
+  expect(buildSelectiveDeepeningTasks({
       existingTasks: [...tasks, sourceTask],
       results: [result],
-    }).length,
-    0,
-  );
+    }).length).toBe(0);
 });
 
 test("selective deepening adds a reconciliation task for conflicting findings", () => {
@@ -384,13 +363,13 @@ test("selective deepening adds a reconciliation task for conflicting findings", 
     results,
   });
 
-  assert.equal(tasks.length, 2);
+  expect(tasks.length).toBe(2);
   const conflict = tasks.find((task) =>
     task.tags.includes("trigger:conflicting_output"),
   );
-  assert.ok(conflict);
-  assert.match(conflict.task_id, /^deepening:conflict:/);
-  assert.deepEqual(conflict.file_paths, ["src/api/auth.ts"]);
+  expect(conflict).toBeTruthy();
+  expect(conflict.task_id).toMatch(/^deepening:conflict:/);
+  expect(conflict.file_paths).toEqual(["src/api/auth.ts"]);
 });
 
 test("selective deepening samples high-risk no-finding results", () => {
@@ -419,11 +398,11 @@ test("selective deepening samples high-risk no-finding results", () => {
     results: [result],
   });
 
-  assert.equal(tasks.length, 1);
-  assert.match(tasks[0].task_id, /^deepening:clean:/);
-  assert.equal(tasks[0].priority, "high");
-  assert.deepEqual(tasks[0].file_paths, ["src/api/auth.ts"]);
-  assert.ok(tasks[0].tags.includes("trigger:high_risk_no_finding"));
+  expect(tasks.length).toBe(1);
+  expect(tasks[0].task_id).toMatch(/^deepening:clean:/);
+  expect(tasks[0].priority).toBe("high");
+  expect(tasks[0].file_paths).toEqual(["src/api/auth.ts"]);
+  expect(tasks[0].tags.includes("trigger:high_risk_no_finding")).toBeTruthy();
 });
 
 test("selective deepening creates a lens steward for risky completed lens output", () => {
@@ -486,14 +465,14 @@ test("selective deepening creates a lens steward for risky completed lens output
   const steward = tasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward);
-  assert.match(steward.task_id, /^deepening:steward:/);
-  assert.equal(steward.priority, "high");
-  assert.equal(steward.lens, "security");
-  assert.ok(steward.tags.includes("trigger:external_analyzer_signal"));
-  assert.ok(steward.tags.includes("trigger:many_no_finding_results"));
-  assert.ok(steward.rationale.includes("Do not write direct findings"));
-  assert.ok(steward.file_paths.includes("src/api/auth.ts"));
+  expect(steward).toBeTruthy();
+  expect(steward.task_id).toMatch(/^deepening:steward:/);
+  expect(steward.priority).toBe("high");
+  expect(steward.lens).toBe("security");
+  expect(steward.tags.includes("trigger:external_analyzer_signal")).toBeTruthy();
+  expect(steward.tags.includes("trigger:many_no_finding_results")).toBeTruthy();
+  expect(steward.rationale.includes("Do not write direct findings")).toBeTruthy();
+  expect(steward.file_paths.includes("src/api/auth.ts")).toBeTruthy();
 });
 
 test("lens steward verification suggestions become bounded follow-up tasks", () => {
@@ -545,13 +524,13 @@ test("lens steward verification suggestions become bounded follow-up tasks", () 
     results: [verificationResult],
   });
 
-  assert.equal(tasks.length, 1);
-  assert.match(tasks[0].task_id, /^deepening:steward-followup:/);
-  assert.equal(tasks[0].priority, "high");
-  assert.deepEqual(tasks[0].file_paths, ["src/api/auth.ts"]);
-  assert.equal(tasks[0].file_line_counts["src/api/auth.ts"], 40);
-  assert.ok(tasks[0].tags.includes("lens_verification_followup"));
-  assert.ok(tasks[0].tags.includes("trigger:lens_verification"));
+  expect(tasks.length).toBe(1);
+  expect(tasks[0].task_id).toMatch(/^deepening:steward-followup:/);
+  expect(tasks[0].priority).toBe("high");
+  expect(tasks[0].file_paths).toEqual(["src/api/auth.ts"]);
+  expect(tasks[0].file_line_counts["src/api/auth.ts"]).toBe(40);
+  expect(tasks[0].tags.includes("lens_verification_followup")).toBeTruthy();
+  expect(tasks[0].tags.includes("trigger:lens_verification")).toBeTruthy();
 });
 
 test("selective deepening reconciles runtime validation disagreement", () => {
@@ -604,11 +583,11 @@ test("selective deepening reconciles runtime validation disagreement", () => {
   const runtimeTask = tasks.find((task) =>
     task.tags.includes("trigger:runtime_validation_disagreement"),
   );
-  assert.ok(runtimeTask);
-  assert.match(runtimeTask.task_id, /^deepening:runtime:/);
-  assert.equal(runtimeTask.lens, "security");
-  assert.equal(runtimeTask.priority, "high");
-  assert.deepEqual(runtimeTask.file_paths, ["src/api/auth.ts"]);
+  expect(runtimeTask).toBeTruthy();
+  expect(runtimeTask.task_id).toMatch(/^deepening:runtime:/);
+  expect(runtimeTask.lens).toBe("security");
+  expect(runtimeTask.priority).toBe("high");
+  expect(runtimeTask.file_paths).toEqual(["src/api/auth.ts"]);
 });
 
 test("result ingestion appends selective deepening tasks to the next review plan", () => {
@@ -664,12 +643,12 @@ test("result ingestion appends selective deepening tasks to the next review plan
     [result],
   );
 
-  assert.equal(run.updated.audit_tasks.length, 2);
-  assert.equal(run.updated.audit_tasks[0].status, "complete");
-  assert.equal(run.updated.audit_tasks[1].status, "pending");
-  assert.ok(run.updated.audit_tasks[1].tags.includes("selective_deepening"));
-  assert.ok(run.artifacts_written.includes("audit_plan_metrics.json"));
-  assert.match(run.progress_summary, /selective deepening task/i);
+  expect(run.updated.audit_tasks.length).toBe(2);
+  expect(run.updated.audit_tasks[0].status).toBe("complete");
+  expect(run.updated.audit_tasks[1].status).toBe("pending");
+  expect(run.updated.audit_tasks[1].tags.includes("selective_deepening")).toBeTruthy();
+  expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
+  expect(run.progress_summary).toMatch(/selective deepening task/i);
 });
 
 test("runtime validation updates append disagreement follow-ups to the next review plan", () => {
@@ -730,12 +709,12 @@ test("runtime validation updates append disagreement follow-ups to the next revi
     },
   );
 
-  assert.equal(run.updated.audit_tasks.length, 2);
+  expect(run.updated.audit_tasks.length).toBe(2);
   const followup = run.updated.audit_tasks[1];
-  assert.ok(followup.tags.includes("trigger:runtime_validation_disagreement"));
-  assert.equal(followup.status, "pending");
-  assert.ok(run.artifacts_written.includes("audit_plan_metrics.json"));
-  assert.match(run.progress_summary, /selective deepening task/i);
+  expect(followup.tags.includes("trigger:runtime_validation_disagreement")).toBeTruthy();
+  expect(followup.status).toBe("pending");
+  expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
+  expect(run.progress_summary).toMatch(/selective deepening task/i);
 });
 
 test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_FILES and emits stderr when sources exceed the limit", () => {
@@ -786,12 +765,8 @@ test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_F
   }
 
   const steward = tasks.find((task) => task.tags.includes("lens_verification"));
-  assert.ok(steward, "expected a lens steward task to be created");
-  assert.equal(
-    steward.file_paths.length,
-    12,
-    "steward file_paths should be capped at MAX_LENS_VERIFICATION_FILES (12), not 13",
-  );
+  expect(steward, "expected a lens steward task to be created").toBeTruthy();
+  expect(steward.file_paths.length, "steward file_paths should be capped at MAX_LENS_VERIFICATION_FILES (12), not 13").toBe(12);
 
   // The truncation trace is a structured JSON log line (see lensVerification.ts
   // and the dedicated observability-signals test), not a human-readable string.
@@ -804,12 +779,9 @@ test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_F
       }
     })
     .find((obj) => obj && obj.event === "truncated_verification_file_list");
-  assert.ok(
-    truncationLog,
-    `expected a truncated_verification_file_list log line but got: ${JSON.stringify(stderrLines)}`,
-  );
-  assert.equal(truncationLog.kept, 12, "kept should be MAX_LENS_VERIFICATION_FILES (12)");
-  assert.equal(truncationLog.total, 13, "total should reflect the 13 candidate files");
+  expect(truncationLog, `expected a truncated_verification_file_list log line but got: ${JSON.stringify(stderrLines)}`).toBeTruthy();
+  expect(truncationLog.kept, "kept should be MAX_LENS_VERIFICATION_FILES (12)").toBe(12);
+  expect(truncationLog.total, "total should reflect the 13 candidate files").toBe(13);
 });
 
 test("buildFlowCoverage tolerates malformed flow paths and concerns", () => {
@@ -839,11 +811,11 @@ test("buildFlowCoverage tolerates malformed flow paths and concerns", () => {
     },
   );
 
-  assert.deepEqual(coverage.flows[0].paths, []);
-  assert.deepEqual(coverage.flows[0].required_lenses, []);
+  expect(coverage.flows[0].paths).toEqual([]);
+  expect(coverage.flows[0].required_lenses).toEqual([]);
   // null concerns → no required lenses → vacuously complete (required.every(...)
   // over an empty set is true), matching the "no concerns" vacuous-truth case.
-  assert.equal(coverage.flows[0].status, "complete");
+  expect(coverage.flows[0].status).toBe("complete");
 });
 
 test("buildFlowRequeueTasks skips unsupported flow lenses instead of throwing", () => {
@@ -886,9 +858,9 @@ test("buildFlowRequeueTasks skips unsupported flow lenses instead of throwing", 
       ],
     },
   );
-  assert.equal(tasks.length, 1);
-  assert.equal(tasks[0].lens, "security");
-  assert.ok(tasks.every((task) => task.lens !== "mystery"));
+  expect(tasks.length).toBe(1);
+  expect(tasks[0].lens).toBe("security");
+  expect(tasks.every((task) => task.lens !== "mystery")).toBeTruthy();
 });
 
 test("buildFlowRequeueTasks ignores malformed analyzer entries but still prioritizes real signals", () => {
@@ -935,9 +907,9 @@ test("buildFlowRequeueTasks ignores malformed analyzer entries but still priorit
     ],
   );
 
-  assert.equal(tasks.length, 1);
-  assert.equal(tasks[0].priority, "high");
-  assert.ok(tasks[0].tags.includes("external_analyzer_signal"));
+  expect(tasks.length).toBe(1);
+  expect(tasks[0].priority).toBe("high");
+  expect(tasks[0].tags.includes("external_analyzer_signal")).toBeTruthy();
 });
 
 test("buildFlowCoverage: flow with no concerns gets status complete (vacuous truth)", () => {
@@ -967,8 +939,8 @@ test("buildFlowCoverage: flow with no concerns gets status complete (vacuous tru
     },
   );
 
-  assert.equal(coverage.flows[0].status, "complete");
-  assert.deepEqual(coverage.flows[0].required_lenses, []);
+  expect(coverage.flows[0].status).toBe("complete");
+  expect(coverage.flows[0].required_lenses).toEqual([]);
 });
 
 test("buildFlowCoverage: flow with only unknown concerns gets status complete (required is empty after filter)", () => {
@@ -998,8 +970,8 @@ test("buildFlowCoverage: flow with only unknown concerns gets status complete (r
     },
   );
 
-  assert.equal(coverage.flows[0].status, "complete");
-  assert.deepEqual(coverage.flows[0].required_lenses, []);
+  expect(coverage.flows[0].status).toBe("complete");
+  expect(coverage.flows[0].required_lenses).toEqual([]);
 });
 
 test("buildFlowCoverage: flow with one required lens that is covered returns complete", () => {
@@ -1029,7 +1001,7 @@ test("buildFlowCoverage: flow with one required lens that is covered returns com
     },
   );
 
-  assert.equal(coverage.flows[0].status, "complete");
+  expect(coverage.flows[0].status).toBe("complete");
 });
 
 test("buildFlowCoverage: flow with required lenses where some but not all are covered returns partial", () => {
@@ -1059,7 +1031,7 @@ test("buildFlowCoverage: flow with required lenses where some but not all are co
     },
   );
 
-  assert.equal(coverage.flows[0].status, "partial");
+  expect(coverage.flows[0].status).toBe("partial");
 });
 
 test("buildFlowCoverage: flow with required lenses where none are covered returns pending", () => {
@@ -1089,7 +1061,7 @@ test("buildFlowCoverage: flow with required lenses where none are covered return
     },
   );
 
-  assert.equal(coverage.flows[0].status, "pending");
+  expect(coverage.flows[0].status).toBe("pending");
 });
 
 test("buildRequeueTasks ignores malformed analyzer entries but still prioritizes real signals", () => {
@@ -1114,9 +1086,9 @@ test("buildRequeueTasks ignores malformed analyzer entries but still prioritizes
     ],
   );
 
-  assert.equal(tasks.length, 1);
-  assert.equal(tasks[0].priority, "high");
-  assert.ok(tasks[0].tags.includes("external_analyzer_signal"));
+  expect(tasks.length).toBe(1);
+  expect(tasks[0].priority).toBe("high");
+  expect(tasks[0].tags.includes("external_analyzer_signal")).toBeTruthy();
 });
 
 test("lens steward trigger large_lens_surface when 3 or more source results", () => {
@@ -1189,9 +1161,9 @@ test("lens steward trigger large_lens_surface when 3 or more source results", ()
   const steward = deepeningTasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward, "should produce a lens steward task");
-  assert.ok(steward.tags.includes("trigger:large_lens_surface"));
-  assert.ok(!steward.tags.includes("trigger:many_no_finding_results"));
+  expect(steward, "should produce a lens steward task").toBeTruthy();
+  expect(steward.tags.includes("trigger:large_lens_surface")).toBeTruthy();
+  expect(!steward.tags.includes("trigger:many_no_finding_results")).toBeTruthy();
 });
 
 test("lens steward trigger large_lens_surface when 4 or more unique files across sources", () => {
@@ -1253,8 +1225,8 @@ test("lens steward trigger large_lens_surface when 4 or more unique files across
   const steward = deepeningTasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward, "should produce a lens steward task");
-  assert.ok(steward.tags.includes("trigger:large_lens_surface"));
+  expect(steward, "should produce a lens steward task").toBeTruthy();
+  expect(steward.tags.includes("trigger:large_lens_surface")).toBeTruthy();
 });
 
 test("lens steward trigger large_file_reviewed when a source task has large_file tag", () => {
@@ -1316,8 +1288,8 @@ test("lens steward trigger large_file_reviewed when a source task has large_file
   const steward = deepeningTasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward, "should produce a lens steward task");
-  assert.ok(steward.tags.includes("trigger:large_file_reviewed"));
+  expect(steward, "should produce a lens steward task").toBeTruthy();
+  expect(steward.tags.includes("trigger:large_file_reviewed")).toBeTruthy();
 });
 
 test("lens steward trigger unresolved_external_signal when external path has no matching finding", () => {
@@ -1394,9 +1366,9 @@ test("lens steward trigger unresolved_external_signal when external path has no 
   const steward = deepeningTasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward, "should produce a lens steward task");
-  assert.ok(steward.tags.includes("trigger:unresolved_external_signal"));
-  assert.ok(steward.tags.includes("trigger:external_analyzer_signal"));
+  expect(steward, "should produce a lens steward task").toBeTruthy();
+  expect(steward.tags.includes("trigger:unresolved_external_signal")).toBeTruthy();
+  expect(steward.tags.includes("trigger:external_analyzer_signal")).toBeTruthy();
 });
 
 test("lens steward trigger critical_flow when a source task has critical_flow tag", () => {
@@ -1458,8 +1430,8 @@ test("lens steward trigger critical_flow when a source task has critical_flow ta
   const steward = deepeningTasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward, "should produce a lens steward task");
-  assert.ok(steward.tags.includes("trigger:critical_flow"));
+  expect(steward, "should produce a lens steward task").toBeTruthy();
+  expect(steward.tags.includes("trigger:critical_flow")).toBeTruthy();
 });
 
 test("lensVerificationTriggers totalLines uses path-owner map: large_lens_surface fires when totalLines >= 2000", () => {
@@ -1537,12 +1509,9 @@ test("lensVerificationTriggers totalLines uses path-owner map: large_lens_surfac
   const steward = deepeningTasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward, "should produce a lens steward task");
+  expect(steward, "should produce a lens steward task").toBeTruthy();
   // large_lens_surface fires: handler.ts (1800) + router.ts (250) = 2050 >= 2000
-  assert.ok(
-    steward.tags.includes("trigger:large_lens_surface"),
-    "large_lens_surface should fire when totalLines >= 2000",
-  );
+  expect(steward.tags.includes("trigger:large_lens_surface"), "large_lens_surface should fire when totalLines >= 2000").toBeTruthy();
 });
 
 test("lensVerificationTriggers totalLines: first-owner semantics — second source's lines for shared path are not double-counted", () => {
@@ -1610,13 +1579,10 @@ test("lensVerificationTriggers totalLines: first-owner semantics — second sour
   const steward = deepeningTasks.find((task) =>
     task.tags.includes("lens_verification"),
   );
-  assert.ok(steward, "should produce a lens steward task (sources.length=2)");
+  expect(steward, "should produce a lens steward task (sources.length=2)").toBeTruthy();
   // With first-owner semantics: src/big.ts=1200 (owned by src-big-a) +
   // src/other.ts=700 = 1900 < 2000 → large_lens_surface must NOT fire.
-  assert.ok(
-    !steward.tags.includes("trigger:large_lens_surface"),
-    "large_lens_surface must NOT fire when first-owner totalLines < 2000",
-  );
+  expect(!steward.tags.includes("trigger:large_lens_surface"), "large_lens_surface must NOT fire when first-owner totalLines < 2000").toBeTruthy();
 });
 
 // ── conflictGroups spread-guard tests ────────────────────────────────────────
@@ -1680,11 +1646,7 @@ test("conflictGroups suppresses group when both severitySpread and confidenceSpr
   const conflictTasks = tasks.filter((task) =>
     task.tags.includes("trigger:conflicting_output"),
   );
-  assert.equal(
-    conflictTasks.length,
-    0,
-    `expected no conflict tasks when both spreads < 2, got: ${JSON.stringify(conflictTasks.map((t) => t.task_id))}`,
-  );
+  expect(conflictTasks.length, `expected no conflict tasks when both spreads < 2, got: ${JSON.stringify(conflictTasks.map((t) => t.task_id))}`).toBe(0);
 });
 
 test("conflictGroups keeps group when severitySpread >= 2 even if confidenceSpread < 2", () => {
@@ -1720,11 +1682,8 @@ test("conflictGroups keeps group when severitySpread >= 2 even if confidenceSpre
   const conflict = tasks.find((task) =>
     task.tags.includes("trigger:conflicting_output"),
   );
-  assert.ok(
-    conflict,
-    "expected a conflict task when severitySpread >= 2, even if confidenceSpread < 2",
-  );
-  assert.match(conflict.task_id, /^deepening:conflict:/);
+  expect(conflict, "expected a conflict task when severitySpread >= 2, even if confidenceSpread < 2").toBeTruthy();
+  expect(conflict.task_id).toMatch(/^deepening:conflict:/);
 });
 
 test("conflictGroups keeps group when confidenceSpread >= 2 even if severitySpread < 2", () => {
@@ -1760,11 +1719,8 @@ test("conflictGroups keeps group when confidenceSpread >= 2 even if severitySpre
   const conflict = tasks.find((task) =>
     task.tags.includes("trigger:conflicting_output"),
   );
-  assert.ok(
-    conflict,
-    "expected a conflict task when confidenceSpread >= 2, even if severitySpread < 2",
-  );
-  assert.match(conflict.task_id, /^deepening:conflict:/);
+  expect(conflict, "expected a conflict task when confidenceSpread >= 2, even if severitySpread < 2").toBeTruthy();
+  expect(conflict.task_id).toMatch(/^deepening:conflict:/);
 });
 
 // ── requeue folding ────────────────────────────────────────────────────────
@@ -1801,11 +1757,11 @@ test("planning executor completes with an empty lineIndex (no line counts availa
     // Empty lineIndex — no file has a known line count.
     const result = await runPlanningExecutor(bundle, tmpRoot, {});
 
-    assert.ok(result, "executor must return a result");
-    assert.ok(Array.isArray(result.updated.task_affinity_graph?.nodes), "must produce a task-affinity graph");
+    expect(result, "executor must return a result").toBeTruthy();
+    expect(Array.isArray(result.updated.task_affinity_graph?.nodes), "must produce a task-affinity graph").toBeTruthy();
     // With zero line counts the task is still planned (may have 0-line estimate)
     // but must NOT throw.
-    assert.ok(typeof result.updated === "object", "updated bundle must be an object");
+    expect(typeof result.updated === "object", "updated bundle must be an object").toBeTruthy();
   } finally {
     await rm(tmpRoot, { recursive: true, force: true });
   }
@@ -1841,11 +1797,8 @@ test("planning executor folds pending requeue tasks into the dispatch surface", 
 
     // Packets are partitioned just-in-time at dispatch (never persisted); the
     // planning-time dispatch surface is the task-affinity graph.
-    assert.ok(Array.isArray(result.updated.task_affinity_graph?.nodes));
-    assert.ok(
-      result.updated.task_affinity_graph.nodes.length > 0,
-      "expected at least one task-affinity node",
-    );
+    expect(Array.isArray(result.updated.task_affinity_graph?.nodes)).toBeTruthy();
+    expect(result.updated.task_affinity_graph.nodes.length > 0, "expected at least one task-affinity node").toBeTruthy();
 
     // The requeue payload is built before folding; any pending requeue task
     // file paths must appear in the dispatch surface
@@ -1856,10 +1809,7 @@ test("planning executor folds pending requeue tasks into the dispatch surface", 
       (t) => t.status === "pending",
     )) {
       for (const path of requeueTask.file_paths) {
-        assert.ok(
-          dispatchFilePaths.has(path),
-          `requeue task path "${path}" must appear in the task-affinity graph`,
-        );
+        expect(dispatchFilePaths.has(path), `requeue task path "${path}" must appear in the task-affinity graph`).toBeTruthy();
       }
     }
   } finally {
@@ -1923,8 +1873,8 @@ test("ingestion executor folds pending requeue tasks for uncovered files into th
   const requeueTask = run.updated.requeue_tasks?.find(
     (t) => t.task_id === "requeue:security:src/lib/utils.ts",
   );
-  assert.ok(requeueTask, "expected a pending requeue task for src/lib/utils.ts");
-  assert.equal(requeueTask.status, "pending");
+  expect(requeueTask, "expected a pending requeue task for src/lib/utils.ts").toBeTruthy();
+  expect(requeueTask.status).toBe("pending");
 
   // The requeue task must count toward the dispatch surface so JIT
   // packetization actually covers it: refreshed metrics span the persisted
@@ -1933,15 +1883,9 @@ test("ingestion executor folds pending requeue tasks for uncovered files into th
   const foldedRequeue = (run.updated.requeue_tasks ?? []).filter(
     (t) => t.status === "pending" && !trackedIds.has(t.task_id),
   );
-  assert.ok(
-    foldedRequeue.some((t) => t.file_paths.includes("src/lib/utils.ts")),
-    "utils requeue task must be part of the folded dispatch surface",
-  );
-  assert.equal(
-    run.updated.audit_plan_metrics.task_count,
-    run.updated.audit_tasks.length + foldedRequeue.length,
-  );
-  assert.ok(run.artifacts_written.includes("audit_plan_metrics.json"));
+  expect(foldedRequeue.some((t) => t.file_paths.includes("src/lib/utils.ts")), "utils requeue task must be part of the folded dispatch surface").toBeTruthy();
+  expect(run.updated.audit_plan_metrics.task_count).toBe(run.updated.audit_tasks.length + foldedRequeue.length);
+  expect(run.artifacts_written.includes("audit_plan_metrics.json")).toBeTruthy();
 });
 
 test("ingestion executor deduplicates requeue tasks already present in audit_tasks", () => {
@@ -2008,9 +1952,5 @@ test("ingestion executor deduplicates requeue tasks already present in audit_tas
   const foldedRequeue = (run.updated.requeue_tasks ?? []).filter(
     (t) => t.status === "pending" && !trackedIds.has(t.task_id),
   );
-  assert.equal(
-    run.updated.audit_plan_metrics.task_count,
-    run.updated.audit_tasks.length + foldedRequeue.length,
-    "requeue task must not be folded into the dispatch surface twice",
-  );
+  expect(run.updated.audit_plan_metrics.task_count, "requeue task must not be folded into the dispatch surface twice").toBe(run.updated.audit_tasks.length + foldedRequeue.length);
 });

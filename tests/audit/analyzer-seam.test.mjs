@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,12 +49,9 @@ test("mergeAnalyzerEdges: analyzer import edge supersedes the regex floor for th
   const merged = mergeAnalyzerEdges(floor, analyzer);
 
   const ab = merged.filter((e) => e.from === "a.ts" && e.to === "b.ts");
-  assert.equal(ab.length, 1, "import-group edges collapse to one");
-  assert.equal(ab[0].kind, "ts-import", "higher-confidence analyzer edge wins");
-  assert.ok(
-    merged.some((e) => e.kind === "heuristic-container-edge"),
-    "ungrouped floor kinds survive the merge",
-  );
+  expect(ab.length, "import-group edges collapse to one").toBe(1);
+  expect(ab[0].kind, "higher-confidence analyzer edge wins").toBe("ts-import");
+  expect(merged.some((e) => e.kind === "heuristic-container-edge"), "ungrouped floor kinds survive the merge").toBeTruthy();
 });
 
 test("mergeAnalyzerEdges: distinct ungrouped kinds between the same nodes both survive", () => {
@@ -64,7 +60,7 @@ test("mergeAnalyzerEdges: distinct ungrouped kinds between the same nodes both s
     { from: "a", to: "b", kind: "test-source-link", confidence: 0.88 },
   ];
   const merged = mergeAnalyzerEdges(floor, []);
-  assert.equal(merged.length, 2);
+  expect(merged.length).toBe(2);
 });
 
 test("runGraphEnrichmentExecutor merges analyzer edges and records provenance", async () => {
@@ -73,20 +69,20 @@ test("runGraphEnrichmentExecutor merges analyzer edges and records provenance", 
     registry: [fakeAnalyzer],
   });
 
-  assert.deepEqual(result.updated.graph_bundle.analyzers_used, ["fake"]);
-  assert.equal(result.updated.analyzer_capability.status, "applied");
+  expect(result.updated.graph_bundle.analyzers_used).toEqual(["fake"]);
+  expect(result.updated.analyzer_capability.status).toBe("applied");
   const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "fake");
-  assert.equal(entry.resolution, "repo");
-  assert.equal(entry.edges_added, 1);
+  expect(entry.resolution).toBe("repo");
+  expect(entry.edges_added).toBe(1);
 
   const ab = result.updated.graph_bundle.graphs.imports.filter(
     (e) => e.from === "src/a.ts" && e.to === "src/b.ts",
   );
-  assert.equal(ab.length, 1);
-  assert.equal(ab[0].kind, "ts-import");
+  expect(ab.length).toBe(1);
+  expect(ab[0].kind).toBe("ts-import");
 
-  assert.ok(result.artifacts_written.includes("graph_bundle.json"));
-  assert.ok(result.artifacts_written.includes("analyzer_capability.json"));
+  expect(result.artifacts_written.includes("graph_bundle.json")).toBeTruthy();
+  expect(result.artifacts_written.includes("analyzer_capability.json")).toBeTruthy();
 });
 
 test("runGraphEnrichmentExecutor omits and leaves the floor byte-identical when the dep is absent", async () => {
@@ -107,16 +103,12 @@ test("runGraphEnrichmentExecutor omits and leaves the floor byte-identical when 
       analyzers: { typescript: "auto" },
     });
 
-    assert.equal(result.updated.analyzer_capability.status, "omitted");
-    assert.equal(result.updated.graph_bundle.analyzers_used, undefined);
-    assert.equal(
-      JSON.stringify(result.updated.graph_bundle),
-      floorJson,
-      "regex floor is unchanged when the analyzer is absent",
-    );
-    assert.deepEqual(result.artifacts_written, ["analyzer_capability.json"]);
+    expect(result.updated.analyzer_capability.status).toBe("omitted");
+    expect(result.updated.graph_bundle.analyzers_used).toBe(undefined);
+    expect(JSON.stringify(result.updated.graph_bundle), "regex floor is unchanged when the analyzer is absent").toBe(floorJson);
+    expect(result.artifacts_written).toEqual(["analyzer_capability.json"]);
     const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "typescript");
-    assert.equal(entry.resolution, "absent");
+    expect(entry.resolution).toBe("absent");
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
@@ -135,9 +127,9 @@ test("runGraphEnrichmentExecutor records not_applicable when no in-scope files a
     root: "/virtual/root",
     registry: [typescriptAnalyzer],
   });
-  assert.equal(result.updated.analyzer_capability.status, "omitted");
+  expect(result.updated.analyzer_capability.status).toBe("omitted");
   const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "typescript");
-  assert.equal(entry.resolution, "not_applicable");
+  expect(entry.resolution).toBe("not_applicable");
 });
 
 // Tests for the extracted runSingleAnalyzer / buildEnrichedGraph helpers —
@@ -158,10 +150,10 @@ test("runSingleAnalyzer (via executor): returns ok:false with note when dependen
     });
 
     const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "typescript");
-    assert.equal(entry.resolution, "absent", "absent dep → ok:false with resolution absent");
-    assert.equal(entry.edges_added, 0, "no edges added for absent dep");
+    expect(entry.resolution, "absent dep → ok:false with resolution absent").toBe("absent");
+    expect(entry.edges_added, "no edges added for absent dep").toBe(0);
     // analyze() should not have contributed any edge
-    assert.equal(result.updated.analyzer_capability.status, "omitted");
+    expect(result.updated.analyzer_capability.status).toBe("omitted");
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
@@ -181,10 +173,10 @@ test("runSingleAnalyzer (via executor): returns ok:false with structured note wh
   });
 
   const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "throwing");
-  assert.ok(entry.note, "note should be populated on analyzer error");
-  assert.ok(entry.note.includes("TypeError"), "note should include error name");
-  assert.ok(entry.note.includes("Deliberate test failure"), "note should include error message");
-  assert.equal(entry.edges_added, 0);
+  expect(entry.note, "note should be populated on analyzer error").toBeTruthy();
+  expect(entry.note.includes("TypeError"), "note should include error name").toBeTruthy();
+  expect(entry.note.includes("Deliberate test failure"), "note should include error message").toBeTruthy();
+  expect(entry.edges_added).toBe(0);
 });
 
 test("buildEnrichedGraph (via executor): merges edges into correct buckets and deduplicates routes", async () => {
@@ -209,13 +201,13 @@ test("buildEnrichedGraph (via executor): merges edges into correct buckets and d
   });
 
   const gb = result.updated.graph_bundle;
-  assert.ok(gb.graphs.imports.some((e) => e.kind === "ts-import"), "ts-import edges in imports bucket");
-  assert.ok(gb.graphs.calls.some((e) => e.kind === "ts-call"), "ts-call edges in calls bucket");
+  expect(gb.graphs.imports.some((e) => e.kind === "ts-import"), "ts-import edges in imports bucket").toBeTruthy();
+  expect(gb.graphs.calls.some((e) => e.kind === "ts-call"), "ts-call edges in calls bucket").toBeTruthy();
   const routes = gb.graphs.routes;
-  assert.ok(Array.isArray(routes), "routes should be an array");
+  expect(Array.isArray(routes), "routes should be an array").toBeTruthy();
   const fooRoutes = routes.filter((r) => r.path === "/foo" && r.method === "GET");
-  assert.equal(fooRoutes.length, 1, "duplicate routes are deduplicated");
-  assert.deepEqual(gb.analyzers_used, ["route-emit"]);
+  expect(fooRoutes.length, "duplicate routes are deduplicated").toBe(1);
+  expect(gb.analyzers_used).toEqual(["route-emit"]);
 });
 
 test("runGraphEnrichmentExecutor loop: not_applicable analyzers record capability entry and skip analyze()", async () => {
@@ -241,10 +233,10 @@ test("runGraphEnrichmentExecutor loop: not_applicable analyzers record capabilit
   });
 
   const entry = result.updated.analyzer_capability.analyzers.find((a) => a.id === "never-supported");
-  assert.equal(entry.resolution, "not_applicable");
-  assert.equal(analyzeCalled, false, "analyze() must not be called for not_applicable analyzers");
+  expect(entry.resolution).toBe("not_applicable");
+  expect(analyzeCalled, "analyze() must not be called for not_applicable analyzers").toBe(false);
   // Graph bundle must be byte-identical to the floor
-  assert.equal(JSON.stringify(result.updated.graph_bundle), floorJson);
+  expect(JSON.stringify(result.updated.graph_bundle)).toBe(floorJson);
 });
 
 test("resolveAnalyzerPlan flags an auto+absent analyzer with in-scope files for an install decision", async () => {
@@ -253,24 +245,24 @@ test("resolveAnalyzerPlan flags an auto+absent analyzer with in-scope files for 
   try {
     const plan = resolveAnalyzerPlan(root, undefined, ["src/a.ts"], { cacheRoot });
     const ts = plan.find((p) => p.id === "typescript");
-    assert.equal(ts.setting, "auto");
-    assert.equal(ts.resolution, "absent");
-    assert.equal(ts.supportedCount, 1);
-    assert.equal(needsInstallDecision(ts), true);
+    expect(ts.setting).toBe("auto");
+    expect(ts.resolution).toBe("absent");
+    expect(ts.supportedCount).toBe(1);
+    expect(needsInstallDecision(ts)).toBe(true);
 
     // No supported files → not_applicable → never proposes an install.
     const empty = resolveAnalyzerPlan(root, undefined, ["README.md"], { cacheRoot }).find(
       (p) => p.id === "typescript",
     );
-    assert.equal(empty.resolution, "not_applicable");
-    assert.equal(needsInstallDecision(empty), false);
+    expect(empty.resolution).toBe("not_applicable");
+    expect(needsInstallDecision(empty)).toBe(false);
 
     // Explicit skip is decisive (no prompt).
     const skipped = resolveAnalyzerPlan(root, { typescript: "skip" }, ["src/a.ts"], {
       cacheRoot,
     }).find((p) => p.id === "typescript");
-    assert.equal(skipped.resolution, "skip");
-    assert.equal(needsInstallDecision(skipped), false);
+    expect(skipped.resolution).toBe("skip");
+    expect(needsInstallDecision(skipped)).toBe(false);
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });

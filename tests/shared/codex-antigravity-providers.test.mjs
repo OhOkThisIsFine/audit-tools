@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -36,16 +36,16 @@ const noCommands = () => false;
 const allCommands = () => true;
 
 test("codex and antigravity are members of PROVIDER_NAMES", () => {
-  assert.ok(PROVIDER_NAMES.includes("codex"));
-  assert.ok(PROVIDER_NAMES.includes("antigravity"));
+  expect(PROVIDER_NAMES.includes("codex")).toBeTruthy();
+  expect(PROVIDER_NAMES.includes("antigravity")).toBeTruthy();
 });
 
 test("resolveFreshSessionProviderName passes codex through verbatim", () => {
-  assert.equal(resolveFreshSessionProviderName("codex", {}), "codex");
+  expect(resolveFreshSessionProviderName("codex", {})).toBe("codex");
 });
 
 test("resolveFreshSessionProviderName passes antigravity through verbatim", () => {
-  assert.equal(resolveFreshSessionProviderName("antigravity", {}), "antigravity");
+  expect(resolveFreshSessionProviderName("antigravity", {})).toBe("antigravity");
 });
 
 test("auto resolves to codex when inside a codex session", () => {
@@ -54,7 +54,7 @@ test("auto resolves to codex when inside a codex session", () => {
     {},
     { env: { CODEX: "1" }, commandExists: noCommands },
   );
-  assert.equal(resolved, "codex");
+  expect(resolved).toBe("codex");
 });
 
 test("auto resolves to codex from config when only codex is available", () => {
@@ -67,7 +67,7 @@ test("auto resolves to codex from config when only codex is available", () => {
       commandExists: (command) => command === "codex",
     },
   );
-  assert.equal(resolved, "codex");
+  expect(resolved).toBe("codex");
 });
 
 test("auto resolves to antigravity with the IDE marker and a template", () => {
@@ -76,7 +76,7 @@ test("auto resolves to antigravity with the IDE marker and a template", () => {
     { antigravity: { command_template: ["ag", "--run"] } },
     { env: { ANTIGRAVITY: "1" }, commandExists: noCommands },
   );
-  assert.equal(resolved, "antigravity");
+  expect(resolved).toBe("antigravity");
 });
 
 test("auto does NOT resolve to antigravity with the marker but no template", () => {
@@ -85,19 +85,19 @@ test("auto does NOT resolve to antigravity with the marker but no template", () 
     {},
     { env: { ANTIGRAVITY: "1" }, commandExists: noCommands },
   );
-  assert.notEqual(resolved, "antigravity");
+  expect(resolved).not.toBe("antigravity");
 });
 
 test("createFreshSessionProvider constructs a CodexProvider", () => {
   const provider = createFreshSessionProvider("codex", {}, deps);
-  assert.equal(provider.name, "codex");
-  assert.ok(provider instanceof CodexProvider);
+  expect(provider.name).toBe("codex");
+  expect(provider instanceof CodexProvider).toBeTruthy();
 });
 
 test("codex construction succeeds with an absent codex config", () => {
   // No sessionConfig.codex at all — command defaults to "codex".
   const provider = createFreshSessionProvider("codex", {}, deps);
-  assert.ok(provider instanceof CodexProvider);
+  expect(provider instanceof CodexProvider).toBeTruthy();
 });
 
 test("createFreshSessionProvider constructs a SubprocessTemplateProvider for antigravity", () => {
@@ -106,8 +106,8 @@ test("createFreshSessionProvider constructs a SubprocessTemplateProvider for ant
     { antigravity: { command_template: ["ag", "--run"] } },
     deps,
   );
-  assert.equal(provider.name, "antigravity");
-  assert.ok(provider instanceof SubprocessTemplateProvider);
+  expect(provider.name).toBe("antigravity");
+  expect(provider instanceof SubprocessTemplateProvider).toBeTruthy();
 });
 
 test("antigravity throws when no command template is configured", () => {
@@ -131,8 +131,8 @@ test("antigravity throws when the command template is empty", () => {
 
 test("CodexProvider.queryLimits resolves to null (best-effort no-op)", async () => {
   const provider = new CodexProvider(undefined);
-  assert.equal(await provider.queryLimits(null), null);
-  assert.equal(await provider.queryLimits("some-model"), null);
+  expect(await provider.queryLimits(null)).toBe(null);
+  expect(await provider.queryLimits("some-model")).toBe(null);
 });
 
 // ── CodexProvider.launch — verified invocation shape (codex-cli 0.140.0) ───────
@@ -173,44 +173,44 @@ test("CodexProvider.launch invokes `codex exec` with stdin prompt + worktree-roo
   const h = launchCodex(undefined);
   await h.promiseResult;
   const c = h.getCaptured();
-  assert.ok(c, "launchCommand was called");
+  expect(c, "launchCommand was called").toBeTruthy();
   const flat = [c.command, ...c.args].join(" ");
-  assert.match(flat, /\bexec\b/);
-  assert.match(flat, /--sandbox/);
-  assert.match(flat, /workspace-write/);
-  assert.match(flat, /--cd/);
-  assert.match(flat, /--add-dir/);
+  expect(flat).toMatch(/\bexec\b/);
+  expect(flat).toMatch(/--sandbox/);
+  expect(flat).toMatch(/workspace-write/);
+  expect(flat).toMatch(/--cd/);
+  expect(flat).toMatch(/--add-dir/);
   // Headless dispatch runs in untrusted temp dirs / fresh worktrees; without
   // this flag `codex exec` refuses to start and exits 1 before doing any work.
-  assert.match(flat, /--skip-git-repo-check/);
+  expect(flat).toMatch(/--skip-git-repo-check/);
   // Prompt is delivered via stdin, never as an argv positional.
-  assert.equal(c.input.stdinText, "IMPLEMENT THIS NODE");
-  assert.ok(!flat.includes("IMPLEMENT THIS NODE"), "prompt body must not appear in argv");
+  expect(c.input.stdinText).toBe("IMPLEMENT THIS NODE");
+  expect(!flat.includes("IMPLEMENT THIS NODE"), "prompt body must not appear in argv").toBeTruthy();
   // No bogus `--prompt`/`--ask-for-approval` (the old stub's unverified guesses).
-  assert.ok(!flat.includes("--prompt"), "no --prompt flag");
-  assert.ok(!flat.includes("--ask-for-approval"), "exec has no --ask-for-approval flag");
+  expect(!flat.includes("--prompt"), "no --prompt flag").toBeTruthy();
+  expect(!flat.includes("--ask-for-approval"), "exec has no --ask-for-approval flag").toBeTruthy();
 });
 
 test("CodexProvider.launch honors sandbox_mode + model config (no hardcoded model)", async () => {
   const h = launchCodex({ sandbox_mode: "danger-full-access", model: "some-model-id" });
   await h.promiseResult;
   const flat = [h.getCaptured().command, ...h.getCaptured().args].join(" ");
-  assert.match(flat, /danger-full-access/);
-  assert.ok(!flat.includes("workspace-write"), "explicit sandbox_mode overrides the default");
-  assert.match(flat, /--model/);
-  assert.match(flat, /some-model-id/);
+  expect(flat).toMatch(/danger-full-access/);
+  expect(!flat.includes("workspace-write"), "explicit sandbox_mode overrides the default").toBeTruthy();
+  expect(flat).toMatch(/--model/);
+  expect(flat).toMatch(/some-model-id/);
 });
 
 test("CodexProvider.launch omits --model when unset (codex default applies)", async () => {
   const h = launchCodex(undefined);
   await h.promiseResult;
   const flat = [h.getCaptured().command, ...h.getCaptured().args].join(" ");
-  assert.ok(!flat.includes("--model"), "no --model flag when config.model is unset");
+  expect(!flat.includes("--model"), "no --model flag when config.model is unset").toBeTruthy();
 });
 
 test("classifyProvider maps codex to hosted and antigravity to unknown", () => {
-  assert.equal(classifyProvider("codex").hostClass, "hosted");
-  assert.equal(classifyProvider("antigravity").hostClass, "unknown");
+  expect(classifyProvider("codex").hostClass).toBe("hosted");
+  expect(classifyProvider("antigravity").hostClass).toBe("unknown");
 });
 
 // Guard: the bare-availability codex tie-break is last-resort only — it must NOT
@@ -224,7 +224,7 @@ test("codex tie-break does not preempt claude/opencode availability", () => {
     {},
     { env: {}, commandExists: allCommands },
   );
-  assert.notEqual(resolved, "codex");
+  expect(resolved).not.toBe("codex");
 });
 
 // Guard: configured claude takes precedence over configured codex (claude's
@@ -236,7 +236,7 @@ test("configured claude takes precedence over configured codex", () => {
     { claude_code: { command: "claude" }, codex: { command: "codex" } },
     { env: {}, commandExists: allCommands },
   );
-  assert.equal(resolved, "claude-code");
+  expect(resolved).toBe("claude-code");
 });
 
 // Minimal deps that satisfies FreshSessionProviderDeps for the auto path.
@@ -280,17 +280,14 @@ test("createFreshSessionProvider auto path writes a structured stderr diagnostic
   } finally {
     process.stderr.write = originalWrite;
   }
-  assert.equal(captured.length, 1, "exactly one stderr write expected");
+  expect(captured.length, "exactly one stderr write expected").toBe(1);
   const line = captured[0];
-  assert.ok(line.startsWith("[shared] providers:"), `line should start with '[shared] providers:': ${line}`);
-  assert.ok(line.includes("test"), `line should contain orchestratorName 'test': ${line}`);
-  assert.ok(line.includes("auto-resolved provider"), `line should contain 'auto-resolved provider': ${line}`);
-  assert.ok(/auto-resolved provider '\w[\w-]*'/.test(line), `line should contain provider name in single quotes: ${line}`);
-  assert.ok(
-    line.includes("fallback: none") || line.includes("no capable agent provider detected"),
-    `line should contain either 'fallback: none' or 'no capable agent provider detected': ${line}`,
-  );
-  assert.ok(line.endsWith("\n"), `line should end with newline: ${JSON.stringify(line)}`);
+  expect(line.startsWith("[shared] providers:"), `line should start with '[shared] providers:': ${line}`).toBeTruthy();
+  expect(line.includes("test"), `line should contain orchestratorName 'test': ${line}`).toBeTruthy();
+  expect(line.includes("auto-resolved provider"), `line should contain 'auto-resolved provider': ${line}`).toBeTruthy();
+  expect(/auto-resolved provider '\w[\w-]*'/.test(line), `line should contain provider name in single quotes: ${line}`).toBeTruthy();
+  expect(line.includes("fallback: none") || line.includes("no capable agent provider detected"), `line should contain either 'fallback: none' or 'no capable agent provider detected': ${line}`).toBeTruthy();
+  expect(line.endsWith("\n"), `line should end with newline: ${JSON.stringify(line)}`).toBeTruthy();
 });
 
 test("createFreshSessionProvider with an explicit provider name does NOT write a stderr diagnostic", () => {
@@ -305,7 +302,7 @@ test("createFreshSessionProvider with an explicit provider name does NOT write a
   } finally {
     process.stderr.write = originalWrite;
   }
-  assert.deepEqual(captured, [], "no stderr output expected for an explicitly named provider");
+  expect(captured, "no stderr output expected for an explicitly named provider").toEqual([]);
 });
 
 // ── chooseAutoProvider: explicit priority table ───────────────────────────────
@@ -332,7 +329,7 @@ test("chooseAutoProvider: insideOpenCode wins over all other signals", () => {
       commandExists: allCommands,
     },
   );
-  assert.equal(resolved, "opencode");
+  expect(resolved).toBe("opencode");
 });
 
 test("chooseAutoProvider: insideCodex wins when insideOpenCode is false", () => {
@@ -341,7 +338,7 @@ test("chooseAutoProvider: insideCodex wins when insideOpenCode is false", () => 
     {},
     { env: { CODEX: "1" }, commandExists: allCommands },
   );
-  assert.equal(resolved, "codex");
+  expect(resolved).toBe("codex");
 });
 
 test("chooseAutoProvider: vscode-task fires when in VSCode with a template and no in-session signals", () => {
@@ -350,7 +347,7 @@ test("chooseAutoProvider: vscode-task fires when in VSCode with a template and n
     { vscode_task: { command_template: ["vscode-task"] } },
     { env: { TERM_PROGRAM: "vscode" }, commandExists: noCommands },
   );
-  assert.equal(resolved, "vscode-task");
+  expect(resolved).toBe("vscode-task");
 });
 
 test("chooseAutoProvider: antigravity fires when in Antigravity with a template", () => {
@@ -359,7 +356,7 @@ test("chooseAutoProvider: antigravity fires when in Antigravity with a template"
     { antigravity: { command_template: ["ag", "--run"] } },
     { env: { ANTIGRAVITY: "1" }, commandExists: noCommands },
   );
-  assert.equal(resolved, "antigravity");
+  expect(resolved).toBe("antigravity");
 });
 
 test("chooseAutoProvider: subprocess-template fires with no IDE or in-session signals", () => {
@@ -368,7 +365,7 @@ test("chooseAutoProvider: subprocess-template fires with no IDE or in-session si
     { subprocess_template: { command_template: ["my-sub"] } },
     { env: {}, commandExists: noCommands },
   );
-  assert.equal(resolved, "subprocess-template");
+  expect(resolved).toBe("subprocess-template");
 });
 
 // ── config-gated rungs take precedence over tie-breaks ────────────────────────
@@ -379,7 +376,7 @@ test("chooseAutoProvider: config-gated claude-code fires even when opencode is a
     { claude_code: { command: "claude" } },
     { env: {}, commandExists: allCommands },
   );
-  assert.equal(resolved, "claude-code");
+  expect(resolved).toBe("claude-code");
 });
 
 test("chooseAutoProvider: config-gated opencode fires when explicitly configured and available", () => {
@@ -389,7 +386,7 @@ test("chooseAutoProvider: config-gated opencode fires when explicitly configured
     { opencode: { command: "opencode" } },
     { env: {}, commandExists: allCommands },
   );
-  assert.equal(resolved, "opencode");
+  expect(resolved).toBe("opencode");
 });
 
 test("chooseAutoProvider: config-gated codex fires when configured and only codex available", () => {
@@ -401,7 +398,7 @@ test("chooseAutoProvider: config-gated codex fires when configured and only code
       commandExists: (cmd) => cmd === "codex",
     },
   );
-  assert.equal(resolved, "codex");
+  expect(resolved).toBe("codex");
 });
 
 // ── availability tie-breaks with no explicit config ───────────────────────────
@@ -415,7 +412,7 @@ test("chooseAutoProvider: tie-break resolves claude-code when only claude is ava
       commandExists: (cmd) => cmd === "claude",
     },
   );
-  assert.equal(resolved, "claude-code");
+  expect(resolved).toBe("claude-code");
 });
 
 test("PB-1: bare-PATH opencode (no config, no claude) is NOT tie-broken to; falls through to local-subprocess", () => {
@@ -430,7 +427,7 @@ test("PB-1: bare-PATH opencode (no config, no claude) is NOT tie-broken to; fall
       commandExists: (cmd) => cmd === "opencode",
     },
   );
-  assert.equal(resolved, "local-subprocess");
+  expect(resolved).toBe("local-subprocess");
 });
 
 test("chooseAutoProvider: last-resort resolves codex when only codex is available", () => {
@@ -442,7 +439,7 @@ test("chooseAutoProvider: last-resort resolves codex when only codex is availabl
       commandExists: (cmd) => cmd === "codex",
     },
   );
-  assert.equal(resolved, "codex");
+  expect(resolved).toBe("codex");
 });
 
 test("chooseAutoProvider: falls back to local-subprocess when nothing is available and no config", () => {
@@ -451,7 +448,7 @@ test("chooseAutoProvider: falls back to local-subprocess when nothing is availab
     {},
     { env: {}, commandExists: noCommands },
   );
-  assert.equal(resolved, "local-subprocess");
+  expect(resolved).toBe("local-subprocess");
 });
 
 // ── self-spawn guards ─────────────────────────────────────────────────────────
@@ -466,8 +463,8 @@ test("chooseAutoProvider: insideClaudeCode forces claudeAvailable=false, falls t
       commandExists: (cmd) => cmd === "claude",
     },
   );
-  assert.notEqual(resolved, "claude-code");
-  assert.equal(resolved, "local-subprocess");
+  expect(resolved).not.toBe("claude-code");
+  expect(resolved).toBe("local-subprocess");
 });
 
 test("chooseAutoProvider: insideCodex in-session rung fires before codexAvailable self-spawn guard", () => {
@@ -477,5 +474,5 @@ test("chooseAutoProvider: insideCodex in-session rung fires before codexAvailabl
     {},
     { env: { CODEX: "1" }, commandExists: noCommands },
   );
-  assert.equal(resolved, "codex");
+  expect(resolved).toBe("codex");
 });

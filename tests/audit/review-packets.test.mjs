@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -55,38 +54,35 @@ test("review packets group related lenses without changing task identity", () =>
     generatedAt: new Date("2026-04-22T00:00:00Z"),
   });
 
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, [
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual([
     "src-auth:security",
     "src-auth:correctness",
     "src-auth:reliability",
   ]);
-  assert.deepEqual(packets[0].lenses, [
+  expect(packets[0].lenses).toEqual([
     "security",
     "correctness",
     "reliability",
   ]);
-  assert.equal(packets[0].total_lines, 70);
-  assert.equal(metrics.task_count, 3);
-  assert.equal(metrics.packet_count, 1);
-  assert.equal(metrics.estimated_agent_reduction, 2);
-  assert.equal(metrics.repeated_line_reference_count, 140);
-  assert.equal(metrics.packet_quality.weakly_explained_packet_count, 1);
-  assert.deepEqual(metrics.packet_quality.weakly_explained_gap_counts, {
+  expect(packets[0].total_lines).toBe(70);
+  expect(metrics.task_count).toBe(3);
+  expect(metrics.packet_count).toBe(1);
+  expect(metrics.estimated_agent_reduction).toBe(2);
+  expect(metrics.repeated_line_reference_count).toBe(140);
+  expect(metrics.packet_quality.weakly_explained_packet_count).toBe(1);
+  expect(metrics.packet_quality.weakly_explained_gap_counts).toEqual({
     missing_internal_edges: 1,
     unexplained_files: 0,
     partial_cohesion: 0,
   });
-  assert.deepEqual(
-    metrics.packet_quality.weakly_explained_file_extension_counts,
-    {
+  expect(metrics.packet_quality.weakly_explained_file_extension_counts).toEqual({
       ".ts": 2,
-    },
-  );
-  assert.deepEqual(metrics.packet_quality.weakly_explained_packet_ids, [
+    });
+  expect(metrics.packet_quality.weakly_explained_packet_ids).toEqual([
     packets[0].packet_id,
   ]);
-  assert.deepEqual(metrics.packet_quality.weakly_explained_packet_samples, [
+  expect(metrics.packet_quality.weakly_explained_packet_samples).toEqual([
     {
       packet_id: packets[0].packet_id,
       primary_gap: "missing_internal_edges",
@@ -111,10 +107,7 @@ test("packet ordering keeps related tasks adjacent for provider batches", () => 
     makeTask("src-auth:security", "security", { priority: "high" }),
   ]);
 
-  assert.deepEqual(
-    ordered.map((task) => task.task_id),
-    ["src-auth:security", "src-auth:tests", "src-other:correctness"],
-  );
+  expect(ordered.map((task) => task.task_id)).toEqual(["src-auth:security", "src-auth:tests", "src-other:correctness"]);
 });
 
 test("review packets merge graph-connected task groups within packet budgets", () => {
@@ -149,16 +142,16 @@ test("review packets merge graph-connected task groups within packet budgets", (
     generatedAt: new Date("2026-04-22T00:00:00Z"),
   });
 
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, [
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual([
     "src-auth:security",
     "src-session:correctness",
   ]);
-  assert.deepEqual(packets[0].file_paths, [
+  expect(packets[0].file_paths).toEqual([
     "src/api/auth.ts",
     "src/lib/session.ts",
   ]);
-  assert.deepEqual(packets[0].key_edges, [
+  expect(packets[0].key_edges).toEqual([
     {
       from: "src/api/auth.ts",
       to: "src/lib/session.ts",
@@ -166,25 +159,22 @@ test("review packets merge graph-connected task groups within packet budgets", (
       confidence: 0.8,
     },
   ]);
-  assert.deepEqual(packets[0].quality, {
+  expect(packets[0].quality).toEqual({
     cohesion_score: 1,
     internal_edge_count: 1,
     boundary_edge_count: 0,
     unexplained_file_count: 0,
   });
-  assert.deepEqual(metrics.packet_quality.merge_edge_kind_counts, { esm: 1 });
-  assert.deepEqual(metrics.packet_quality.boundary_edge_kind_counts, {});
-  assert.equal(metrics.packet_quality.weakly_explained_packet_count, 0);
-  assert.deepEqual(metrics.packet_quality.weakly_explained_gap_counts, {
+  expect(metrics.packet_quality.merge_edge_kind_counts).toEqual({ esm: 1 });
+  expect(metrics.packet_quality.boundary_edge_kind_counts).toEqual({});
+  expect(metrics.packet_quality.weakly_explained_packet_count).toBe(0);
+  expect(metrics.packet_quality.weakly_explained_gap_counts).toEqual({
     missing_internal_edges: 0,
     unexplained_files: 0,
     partial_cohesion: 0,
   });
-  assert.deepEqual(
-    metrics.packet_quality.weakly_explained_file_extension_counts,
-    {},
-  );
-  assert.deepEqual(metrics.packet_quality.weakly_explained_packet_samples, []);
+  expect(metrics.packet_quality.weakly_explained_file_extension_counts).toEqual({});
+  expect(metrics.packet_quality.weakly_explained_packet_samples).toEqual([]);
 });
 
 test("review packets co-pack source and test tasks linked by graph evidence", () => {
@@ -219,16 +209,16 @@ test("review packets co-pack source and test tasks linked by graph evidence", ()
     },
   });
 
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, [
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual([
     "src-auth:security",
     "src-auth-test:tests",
   ]);
-  assert.deepEqual(packets[0].file_paths, [
+  expect(packets[0].file_paths).toEqual([
     "src/api/auth.test.ts",
     "src/api/auth.ts",
   ]);
-  assert.deepEqual(packets[0].key_edges, [
+  expect(packets[0].key_edges).toEqual([
     {
       from: "src/api/auth.test.ts",
       to: "src/api/auth.ts",
@@ -237,7 +227,7 @@ test("review packets co-pack source and test tasks linked by graph evidence", ()
       reason: "Test path naming maps to source path 'src/api/auth.ts'.",
     },
   ]);
-  assert.equal(packets[0].quality.cohesion_score, 1);
+  expect(packets[0].quality.cohesion_score).toBe(1);
 });
 
 test("review packets co-pack route files with imported handlers and expose entrypoints", () => {
@@ -280,15 +270,15 @@ test("review packets co-pack route files with imported handlers and expose entry
     },
   });
 
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, [
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual([
     "src-handler:security",
     "src-route:correctness",
   ]);
-  assert.deepEqual(packets[0].entrypoints, [
+  expect(packets[0].entrypoints).toEqual([
     "POST /login -> src/handlers/auth.ts",
   ]);
-  assert.deepEqual(packets[0].key_edges, [
+  expect(packets[0].key_edges).toEqual([
     {
       from: "src/routes/auth.ts",
       to: "src/handlers/auth.ts",
@@ -349,16 +339,16 @@ test("review packets bridge entrypoint flow paths through boundary-only files", 
     },
   });
 
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, [
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual([
     "src-route:correctness",
     "src-session-repo:data",
   ]);
-  assert.deepEqual(packets[0].file_paths, [
+  expect(packets[0].file_paths).toEqual([
     "src/data/sessionRepo.ts",
     "src/routes/auth.ts",
   ]);
-  assert.deepEqual(packets[0].key_edges, [
+  expect(packets[0].key_edges).toEqual([
     {
       from: "src/routes/auth.ts",
       to: "src/data/sessionRepo.ts",
@@ -368,8 +358,8 @@ test("review packets bridge entrypoint flow paths through boundary-only files", 
         "Entrypoint flow from 'src/routes/auth.ts' reaches 'src/data/sessionRepo.ts' via src/handlers/auth.ts.",
     },
   ]);
-  assert.deepEqual(packets[0].boundary_files, ["src/handlers/auth.ts"]);
-  assert.deepEqual(packets[0].quality, {
+  expect(packets[0].boundary_files).toEqual(["src/handlers/auth.ts"]);
+  expect(packets[0].quality).toEqual({
     cohesion_score: 1,
     internal_edge_count: 1,
     boundary_edge_count: 2,
@@ -428,14 +418,12 @@ test("entrypoint flow bridges do not traverse high fan shared files", () => {
     },
   });
 
-  assert.equal(packets.length, 2);
-  assert.ok(
-    packets.every(
+  expect(packets.length).toBe(2);
+  expect(packets.every(
       (packet) =>
         packet.key_edges?.some((edge) => edge.kind === "entrypoint-flow-link") !==
         true,
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("review packets cluster bounded subsystem tasks without graph evidence", () => {
@@ -456,16 +444,16 @@ test("review packets cluster bounded subsystem tasks without graph evidence", ()
 
   const packets = buildReviewPackets(tasks);
 
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, [
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual([
     "src-billing-invoice:security",
     "src-billing-discounts:correctness",
   ]);
-  assert.deepEqual(packets[0].file_paths, [
+  expect(packets[0].file_paths).toEqual([
     "src/features/billing/discounts.ts",
     "src/features/billing/invoice.ts",
   ]);
-  assert.deepEqual(packets[0].key_edges, [
+  expect(packets[0].key_edges).toEqual([
     {
       from: "src/features/billing/discounts.ts",
       to: "src/features/billing/invoice.ts",
@@ -475,7 +463,7 @@ test("review packets cluster bounded subsystem tasks without graph evidence", ()
         "Bounded subsystem cluster 'src/features/billing' groups 2 file(s) without stronger graph evidence.",
     },
   ]);
-  assert.deepEqual(packets[0].quality, {
+  expect(packets[0].quality).toEqual({
     cohesion_score: 1,
     internal_edge_count: 1,
     boundary_edge_count: 0,
@@ -514,16 +502,16 @@ test("review packets cluster bounded package-owned tasks across subdirectories",
     },
   });
 
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, [
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual([
     "pkg-auth-api:security",
     "pkg-auth-session:correctness",
   ]);
-  assert.deepEqual(packets[0].file_paths, [
+  expect(packets[0].file_paths).toEqual([
     "packages/auth/src/api/login.ts",
     "packages/auth/src/lib/session.ts",
   ]);
-  assert.deepEqual(packets[0].key_edges, [
+  expect(packets[0].key_edges).toEqual([
     {
       from: "packages/auth/src/api/login.ts",
       to: "packages/auth/src/lib/session.ts",
@@ -533,7 +521,7 @@ test("review packets cluster bounded package-owned tasks across subdirectories",
         "Package ownership root 'packages/auth' groups 2 file(s) across bounded package subdirectories.",
     },
   ]);
-  assert.deepEqual(packets[0].quality, {
+  expect(packets[0].quality).toEqual({
     cohesion_score: 1,
     internal_edge_count: 1,
     boundary_edge_count: 0,
@@ -568,11 +556,11 @@ function assertOwnershipRootCase({
   const packets = buildReviewPackets(tasks, { graphBundle });
 
   // Verify: two tasks are clustered through the ownership root
-  assert.equal(packets.length, 1, "Expected single packet from ownership clustering");
-  assert.deepEqual(packets[0].task_ids, expectedTaskIds, "Task IDs should match expected");
+  expect(packets.length, "Expected single packet from ownership clustering").toBe(1);
+  expect(packets[0].task_ids, "Task IDs should match expected").toEqual(expectedTaskIds);
 
   // Verify: key_edges entry includes ecosystem-specific edge kind and reason wording
-  assert.deepEqual(packets[0].key_edges, [expectedKeyEdge], "Key edges should match expected edge with ecosystem-specific kind and reason");
+  expect(packets[0].key_edges, "Key edges should match expected edge with ecosystem-specific kind and reason").toEqual([expectedKeyEdge]);
 
   if (assertMetrics) {
     const metrics = buildAuditPlanMetrics(tasks, {
@@ -581,9 +569,9 @@ function assertOwnershipRootCase({
     });
 
     // Verify: case produces expected edge kind in metrics
-    assert.deepEqual(metrics.packet_quality.merge_edge_kind_counts, {
+    expect(metrics.packet_quality.merge_edge_kind_counts, "Metrics should reflect the ecosystem-specific edge kind").toEqual({
       [expectedKeyEdge.kind]: 1,
-    }, "Metrics should reflect the ecosystem-specific edge kind");
+    });
   }
 }
 
@@ -776,14 +764,12 @@ test("module ownership clustering ignores repository root tsconfig files", () =>
     },
   });
 
-  assert.equal(packets.length, 2);
-  assert.ok(
-    packets.every(
+  expect(packets.length).toBe(2);
+  expect(packets.every(
       (packet) =>
         packet.key_edges?.some((edge) => edge.kind === "module-ownership-link") !==
         true,
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("package ownership clustering ignores repository root package manifests", () => {
@@ -817,14 +803,12 @@ test("package ownership clustering ignores repository root package manifests", (
     },
   });
 
-  assert.equal(packets.length, 2);
-  assert.ok(
-    packets.every(
+  expect(packets.length).toBe(2);
+  expect(packets.every(
       (packet) =>
         packet.key_edges?.some((edge) => edge.kind === "package-ownership-link") !==
         true,
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("subsystem clustering ignores broad source directories", () => {
@@ -845,14 +829,12 @@ test("subsystem clustering ignores broad source directories", () => {
 
   const packets = buildReviewPackets(tasks);
 
-  assert.equal(packets.length, 2);
-  assert.ok(
-    packets.every(
+  expect(packets.length).toBe(2);
+  expect(packets.every(
       (packet) =>
         packet.key_edges?.some((edge) => edge.kind === "subsystem-cluster-link") !==
         true,
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("weak graph edges remain boundary context instead of forcing packet expansion", () => {
@@ -889,25 +871,25 @@ test("weak graph edges remain boundary context instead of forcing packet expansi
     generatedAt: new Date("2026-04-22T00:00:00Z"),
   });
 
-  assert.equal(packets.length, 2);
+  expect(packets.length).toBe(2);
   const authPacket = packets.find((packet) =>
     packet.file_paths.includes("src/api/auth.ts"),
   );
   const sessionPacket = packets.find((packet) =>
     packet.file_paths.includes("src/lib/session.ts"),
   );
-  assert.ok(authPacket);
-  assert.ok(sessionPacket);
-  assert.equal(authPacket.key_edges, undefined);
-  assert.deepEqual(authPacket.boundary_files, ["src/lib/session.ts"]);
-  assert.deepEqual(sessionPacket.boundary_files, ["src/api/auth.ts"]);
-  assert.equal(metrics.packet_quality.boundary_crossing_count, 2);
-  assert.deepEqual(metrics.packet_quality.merge_edge_kind_counts, {});
-  assert.deepEqual(metrics.packet_quality.boundary_edge_kind_counts, {
+  expect(authPacket).toBeTruthy();
+  expect(sessionPacket).toBeTruthy();
+  expect(authPacket.key_edges).toBe(undefined);
+  expect(authPacket.boundary_files).toEqual(["src/lib/session.ts"]);
+  expect(sessionPacket.boundary_files).toEqual(["src/api/auth.ts"]);
+  expect(metrics.packet_quality.boundary_crossing_count).toBe(2);
+  expect(metrics.packet_quality.merge_edge_kind_counts).toEqual({});
+  expect(metrics.packet_quality.boundary_edge_kind_counts).toEqual({
     "heuristic-auth-session-link": 1,
   });
-  assert.equal(metrics.packet_quality.average_cohesion_score, 1);
-  assert.equal(metrics.packet_quality.weakly_explained_packet_count, 0);
+  expect(metrics.packet_quality.average_cohesion_score).toBe(1);
+  expect(metrics.packet_quality.weakly_explained_packet_count).toBe(0);
 });
 
 test("high fan-in graph edges do not collapse shared files into every packet", () => {
@@ -941,9 +923,9 @@ test("high fan-in graph edges do not collapse shared files into every packet", (
     generatedAt: new Date("2026-04-22T00:00:00Z"),
   });
 
-  assert.equal(packets.length, tasks.length);
-  assert.equal(metrics.packet_quality.high_fan_in_file_count, 1);
-  assert.equal(metrics.packet_quality.largest_unexplained_packet_files, 0);
+  expect(packets.length).toBe(tasks.length);
+  expect(metrics.packet_quality.high_fan_in_file_count).toBe(1);
+  expect(metrics.packet_quality.largest_unexplained_packet_files).toBe(0);
 });
 
 test("directory-proximity merge combines small packets sharing a deep directory", () => {
@@ -976,27 +958,18 @@ test("directory-proximity merge combines small packets sharing a deep directory"
 
   // The three payments tasks share src/services/payments (depth 3) → merged.
   // The utils task stays alone (src/utils is depth 2 < minDepth 3).
-  assert.equal(packets.length, 2, `expected 2 packets, got ${packets.length}`);
+  expect(packets.length, `expected 2 packets, got ${packets.length}`).toBe(2);
   const paymentsPacket = packets.find((p) =>
     p.file_paths.includes("src/services/payments/validate.ts"),
   );
-  assert.ok(paymentsPacket, "should have a payments packet");
-  assert.ok(
-    paymentsPacket.file_paths.includes("src/services/payments/charge.ts"),
-    "payments packet should include charge.ts",
-  );
-  assert.ok(
-    paymentsPacket.file_paths.includes("src/services/payments/refund.ts"),
-    "payments packet should include refund.ts",
-  );
+  expect(paymentsPacket, "should have a payments packet").toBeTruthy();
+  expect(paymentsPacket.file_paths.includes("src/services/payments/charge.ts"), "payments packet should include charge.ts").toBeTruthy();
+  expect(paymentsPacket.file_paths.includes("src/services/payments/refund.ts"), "payments packet should include refund.ts").toBeTruthy();
   const utilsPacket = packets.find((p) =>
     p.file_paths.includes("src/utils/format.ts"),
   );
-  assert.ok(utilsPacket, "should have a utils packet");
-  assert.ok(
-    !utilsPacket.file_paths.includes("src/services/payments/validate.ts"),
-    "utils packet should not include payments files",
-  );
+  expect(utilsPacket, "should have a utils packet").toBeTruthy();
+  expect(!utilsPacket.file_paths.includes("src/services/payments/validate.ts"), "utils packet should not include payments files").toBeTruthy();
 });
 
 test("tiny test files batch across unit boundaries per lens", () => {
@@ -1030,14 +1003,12 @@ test("tiny test files batch across unit boundaries per lens", () => {
     },
   );
 
-  assert.deepEqual(
-    tasks.map((task) => ({
+  expect(tasks.map((task) => ({
       task_id: task.task_id,
       unit_id: task.unit_id,
       lens: task.lens,
       file_paths: task.file_paths,
-    })),
-    [
+    }))).toEqual([
       {
         task_id: "tests-tiny-files:maintainability",
         unit_id: "tests-tiny-files",
@@ -1050,8 +1021,7 @@ test("tiny test files batch across unit boundaries per lens", () => {
         lens: "tests",
         file_paths: ["tests/a.test.mjs", "tests/b.test.mjs"],
       },
-    ],
-  );
+    ]);
 });
 
 test("prepare-dispatch writes one packet prompt for multiple task outputs", async () => {
@@ -1084,21 +1054,21 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
     );
 
     const summary = JSON.parse(captured.stdout);
-    assert.equal(summary.run_id, runId);
-    assert.equal(summary.packet_count, 1);
-    assert.equal(summary.task_count, 2);
-    assert.equal(summary.warning_count, 0);
-    assert.equal(summary.dispatch_warnings_path, null);
-    assert.equal(summary.dispatch_plan_path, join(runDir, "dispatch-plan.json"));
+    expect(summary.run_id).toBe(runId);
+    expect(summary.packet_count).toBe(1);
+    expect(summary.task_count).toBe(2);
+    expect(summary.warning_count).toBe(0);
+    expect(summary.dispatch_warnings_path).toBe(null);
+    expect(summary.dispatch_plan_path).toBe(join(runDir, "dispatch-plan.json"));
 
     const plan = JSON.parse(
       await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
     );
-    assert.equal(plan.length, 1);
-    assert.equal(summary.largest_packet.packet_id, plan[0].packet_id);
-    assert.equal(summary.largest_packet.total_lines, 70);
-    assert.equal(summary.largest_packet.estimated_tokens > 0, true);
-    assert.deepEqual(Object.keys(plan[0]).sort(), [
+    expect(plan.length).toBe(1);
+    expect(summary.largest_packet.packet_id).toBe(plan[0].packet_id);
+    expect(summary.largest_packet.total_lines).toBe(70);
+    expect(summary.largest_packet.estimated_tokens > 0).toBe(true);
+    expect(Object.keys(plan[0]).sort()).toEqual([
       "access",
       "complexity",
       "description",
@@ -1107,7 +1077,7 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
       "prompt_path",
       "result_path",
     ]);
-    assert.deepEqual(plan[0].complexity, {
+    expect(plan[0].complexity).toEqual({
       priority: "medium",
       task_count: 2,
       file_count: 2,
@@ -1119,44 +1089,35 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
     });
     // Tasks here carry no frozen risk_estimate, so the rebuilt affinity graph
     // reports routing_risk 0 and the standard-floor escalators set the tier.
-    assert.deepEqual(plan[0].model_hint, {
+    expect(plan[0].model_hint).toEqual({
       tier: "standard",
       reasons: ["routing_risk:0.00", "sensitive_lens", "medium_priority"],
     });
     const resultMap = JSON.parse(
       await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
     );
-    assert.deepEqual(
-      resultMap.entries.map((entry) => entry.task_id).sort(),
-      ["src-auth:correctness", "src-auth:security"],
-    );
-    assert.equal(
-      new Set(resultMap.entries.map((entry) => entry.result_path)).size,
-      2,
-    );
+    expect(resultMap.entries.map((entry) => entry.task_id).sort()).toEqual(["src-auth:correctness", "src-auth:security"]);
+    expect(new Set(resultMap.entries.map((entry) => entry.result_path)).size).toBe(2);
 
     const prompt = await readFile(plan[0].prompt_path, "utf8");
-    assert.match(prompt, /## Packet graph context/);
-    assert.match(prompt, /Quality: cohesion=/);
-    assert.match(prompt, /emit exactly one result per listed task/i);
-    assert.match(prompt, /Do not use shell search commands/i);
-    assert.match(prompt, /src-auth:security/);
-    assert.match(prompt, /src-auth:correctness/);
+    expect(prompt).toMatch(/## Packet graph context/);
+    expect(prompt).toMatch(/Quality: cohesion=/);
+    expect(prompt).toMatch(/emit exactly one result per listed task/i);
+    expect(prompt).toMatch(/Do not use shell search commands/i);
+    expect(prompt).toMatch(/src-auth:security/);
+    expect(prompt).toMatch(/src-auth:correctness/);
     // result_path is embedded and the worker is told to WRITE it (no submit-packet
     // command, no inline-only emission). This is the data-loss fix: the generated
     // worker prompt must write its results, matching the rolling-dispatch step prompt.
-    assert.match(prompt, /result_path:/);
-    assert.match(prompt, /WRITE that array[\s\S]*to your result_path/i);
-    assert.doesNotMatch(prompt, /Do not write files/i);
-    assert.doesNotMatch(prompt, /emit it INLINE/i);
-    assert.doesNotMatch(prompt, /submit-packet/);
+    expect(prompt).toMatch(/result_path:/);
+    expect(prompt).toMatch(/WRITE that array[\s\S]*to your result_path/i);
+    expect(prompt).not.toMatch(/Do not write files/i);
+    expect(prompt).not.toMatch(/emit it INLINE/i);
+    expect(prompt).not.toMatch(/submit-packet/);
     // quoted_text grounding is required in the generated prompt.
-    assert.match(prompt, /quoted_text/);
+    expect(prompt).toMatch(/quoted_text/);
     // Case-insensitive match: old prompt had lowercase "reply", new has "Reply"
-    assert.match(
-      prompt,
-      new RegExp(`reply exactly: valid: ${plan[0].packet_id}, findings=<total finding count>`, "i"),
-    );
+    expect(prompt).toMatch(new RegExp(`reply exactly: valid: ${plan[0].packet_id}, findings=<total finding count>`, "i"));
   });
 });
 
@@ -1196,9 +1157,9 @@ test("prepare-dispatch marks tiny low-risk packets for small model routing", asy
     const plan = JSON.parse(
       await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
     );
-    assert.equal(plan[0].complexity.priority, "low");
-    assert.equal(plan[0].complexity.total_lines, 12);
-    assert.deepEqual(plan[0].model_hint, {
+    expect(plan[0].complexity.priority).toBe("low");
+    expect(plan[0].complexity.total_lines).toBe(12);
+    expect(plan[0].model_hint).toEqual({
       tier: "small",
       reasons: ["routing_risk:0.00"],
     });
@@ -1237,11 +1198,8 @@ test("prepare-dispatch keeps colliding sanitized task ids on distinct result pat
     const resultMap = JSON.parse(
       await readFile(join(runDir, "dispatch-result-map.json"), "utf8"),
     );
-    assert.equal(resultMap.entries.length, 2);
-    assert.equal(
-      new Set(resultMap.entries.map((entry) => entry.result_path)).size,
-      2,
-    );
+    expect(resultMap.entries.length).toBe(2);
+    expect(new Set(resultMap.entries.map((entry) => entry.result_path)).size).toBe(2);
   });
 });
 
@@ -1266,9 +1224,9 @@ test("large single-file packets stay isolated and get mechanical anchors", async
     }),
   ]);
 
-  assert.equal(packets.length, 2);
-  assert.ok(packets.every((packet) => packet.file_paths.length === 1));
-  assert.ok(packets.every((packet) => packet.task_ids.length === 1));
+  expect(packets.length).toBe(2);
+  expect(packets.every((packet) => packet.file_paths.length === 1)).toBeTruthy();
+  expect(packets.every((packet) => packet.task_ids.length === 1)).toBeTruthy();
 
   await withTempDir(async (artifactsDir) => {
     const runId = "run-large";
@@ -1309,34 +1267,30 @@ test("large single-file packets stay isolated and get mechanical anchors", async
     );
 
     const summary = JSON.parse(captured.stdout);
-    assert.equal(summary.warning_count, 0);
+    expect(summary.warning_count).toBe(0);
     const plan = JSON.parse(
       await readFile(join(runDir, "dispatch-plan.json"), "utf8"),
     );
-    assert.match(plan[0].description, /isolated large-file mode/i);
-    assert.equal(plan[0].complexity.large_file_mode, true);
-    assert.equal(plan[0].model_hint.tier, "deep");
-    assert.ok(plan[0].model_hint.reasons.includes("isolated_large_file"));
+    expect(plan[0].description).toMatch(/isolated large-file mode/i);
+    expect(plan[0].complexity.large_file_mode).toBe(true);
+    expect(plan[0].model_hint.tier).toBe("deep");
+    expect(plan[0].model_hint.reasons.includes("isolated_large_file")).toBeTruthy();
     const taskResultFiles = await readdir(join(runDir, "task-results"));
     const anchorFile = taskResultFiles.find((name) => name.endsWith(".anchors.json"));
-    assert.ok(anchorFile);
+    expect(anchorFile).toBeTruthy();
     const anchors = JSON.parse(
       await readFile(join(runDir, "task-results", anchorFile), "utf8"),
     );
-    assert.equal(anchors.review_mode, "isolated_large_file");
-    assert.ok(
-      anchors.anchors.some(
+    expect(anchors.review_mode).toBe("isolated_large_file");
+    expect(anchors.anchors.some(
         (anchor) => anchor.kind === "symbol" && anchor.name === "authenticate",
-      ),
-    );
-    assert.ok(
-      anchors.anchors.some(
+      )).toBeTruthy();
+    expect(anchors.anchors.some(
         (anchor) => anchor.kind === "keyword" && anchor.name.toLowerCase() === "password",
-      ),
-    );
+      )).toBeTruthy();
     const prompt = await readFile(plan[0].prompt_path, "utf8");
-    assert.match(prompt, /Large File Review Mode/);
-    assert.match(prompt, /Anchor file:/);
-    assert.match(prompt, /authenticate/);
+    expect(prompt).toMatch(/Large File Review Mode/);
+    expect(prompt).toMatch(/Anchor file:/);
+    expect(prompt).toMatch(/authenticate/);
   });
 });

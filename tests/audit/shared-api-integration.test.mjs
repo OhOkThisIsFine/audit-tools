@@ -8,8 +8,7 @@
  * All tests are pure/synchronous or use mock dispatchers — no real LLM calls.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Shared contract imports (the pinned seam types and version constants)
@@ -34,8 +33,8 @@ const { runRollingDispatch } = await import("../../src/audit/orchestrator/rollin
 // ============================================================================
 
 test("ROLLING_DISPATCH_ENGINE_VERSION is a non-empty string", () => {
-  assert.equal(typeof ROLLING_DISPATCH_ENGINE_VERSION, "string");
-  assert.ok(ROLLING_DISPATCH_ENGINE_VERSION.length > 0);
+  expect(typeof ROLLING_DISPATCH_ENGINE_VERSION).toBe("string");
+  expect(ROLLING_DISPATCH_ENGINE_VERSION.length > 0).toBeTruthy();
 });
 
 test("runRollingDispatch: dispatches items and calls onResult once per item", async () => {
@@ -85,18 +84,18 @@ test("runRollingDispatch: dispatches items and calls onResult once per item", as
   );
 
   // Every packet should have been dispatched
-  assert.equal(dispatchCount, 2, "dispatch called for each packet");
+  expect(dispatchCount, "dispatch called for each packet").toBe(2);
   // onResult called once per item
-  assert.equal(onResultCalls.length, 2, "onResult called twice");
-  assert.ok(onResultCalls.includes("p1"), "onResult got p1");
-  assert.ok(onResultCalls.includes("p2"), "onResult got p2");
+  expect(onResultCalls.length, "onResult called twice").toBe(2);
+  expect(onResultCalls.includes("p1"), "onResult got p1").toBeTruthy();
+  expect(onResultCalls.includes("p2"), "onResult got p2").toBeTruthy();
   // status is complete
-  assert.equal(result.status, "complete");
-  assert.equal(result.stranded_ids.length, 0);
-  assert.equal(result.schema_version, ROLLING_DISPATCH_ENGINE_VERSION);
+  expect(result.status).toBe("complete");
+  expect(result.stranded_ids.length).toBe(0);
+  expect(result.schema_version).toBe(ROLLING_DISPATCH_ENGINE_VERSION);
   // consumerTerminal called with complete
-  assert.equal(terminalCalls.length, 1);
-  assert.equal(terminalCalls[0].status, "complete");
+  expect(terminalCalls.length).toBe(1);
+  expect(terminalCalls[0].status).toBe("complete");
 });
 
 test("runRollingDispatch: terminates with status partial when pool is empty", async () => {
@@ -122,12 +121,12 @@ test("runRollingDispatch: terminates with status partial when pool is empty", as
     async (packet) => ({ packet, outcome: "success" }),
   );
 
-  assert.equal(result.status, "partial");
-  assert.deepEqual(result.stranded_ids, ["p1"]);
-  assert.equal(result.partial_reason, "empty_pool");
+  expect(result.status).toBe("partial");
+  expect(result.stranded_ids).toEqual(["p1"]);
+  expect(result.partial_reason).toBe("empty_pool");
   // consumerTerminal called with partial
-  assert.equal(terminalCalls.length, 1);
-  assert.equal(terminalCalls[0].status, "partial");
+  expect(terminalCalls.length).toBe(1);
+  expect(terminalCalls[0].status).toBe("partial");
 });
 
 // TST-30655614: individual packet failure path — one packet returns outcome:'failed'
@@ -169,17 +168,17 @@ test("runRollingDispatch: one packet outcome:failed is included in results with 
   const result = await runRollingDispatch(packets, pool, {}, contract, dispatchPacket);
 
   // Both packets are dispatched; outcome:'failed' is a completed result, not a strandedId.
-  assert.equal(result.status, "complete", "all packets dispatched → status is complete");
-  assert.equal(result.stranded_ids.length, 0, "no stranded packets — failure is still a dispatch result");
+  expect(result.status, "all packets dispatched → status is complete").toBe("complete");
+  expect(result.stranded_ids.length, "no stranded packets — failure is still a dispatch result").toBe(0);
 
   // onResult is invoked for every dispatched packet, including the failed one.
   const resultIds = onResultCalls.map((r) => r.id);
-  assert.ok(resultIds.includes("p-ok"), "onResult should be called for the successful packet");
-  assert.ok(resultIds.includes("p-fail"), "onResult should be called for the failed packet");
+  expect(resultIds.includes("p-ok"), "onResult should be called for the successful packet").toBeTruthy();
+  expect(resultIds.includes("p-fail"), "onResult should be called for the failed packet").toBeTruthy();
 
   // Verify the failed packet's outcome is correctly recorded.
   const failedResult = onResultCalls.find((r) => r.id === "p-fail");
-  assert.equal(failedResult?.outcome, "failed", "failed packet must have outcome:failed in results");
+  expect(failedResult?.outcome, "failed packet must have outcome:failed in results").toBe("failed");
 });
 
 // ============================================================================
@@ -187,8 +186,8 @@ test("runRollingDispatch: one packet outcome:failed is included in results with 
 // ============================================================================
 
 test("PROVIDER_CONFIRMATION_RESULT_VERSION is a non-empty string", () => {
-  assert.equal(typeof PROVIDER_CONFIRMATION_RESULT_VERSION, "string");
-  assert.ok(PROVIDER_CONFIRMATION_RESULT_VERSION.length > 0);
+  expect(typeof PROVIDER_CONFIRMATION_RESULT_VERSION).toBe("string");
+  expect(PROVIDER_CONFIRMATION_RESULT_VERSION.length > 0).toBeTruthy();
 });
 
 test("confirmProviders: returns a valid ProviderConfirmationResult with schema_version", () => {
@@ -203,36 +202,36 @@ test("confirmProviders: returns a valid ProviderConfirmationResult with schema_v
     [],
   );
 
-  assert.equal(result.schema_version, PROVIDER_CONFIRMATION_RESULT_VERSION);
-  assert.equal(typeof result.confirmed_at, "string");
-  assert.ok(result.confirmed_at.length > 0, "confirmed_at is set");
-  assert.ok(Array.isArray(result.provider_pool), "provider_pool is array");
-  assert.ok(result.provider_pool.length >= 1, "at least one pool entry");
-  assert.equal(result.session_level, true);
+  expect(result.schema_version).toBe(PROVIDER_CONFIRMATION_RESULT_VERSION);
+  expect(typeof result.confirmed_at).toBe("string");
+  expect(result.confirmed_at.length > 0, "confirmed_at is set").toBeTruthy();
+  expect(Array.isArray(result.provider_pool), "provider_pool is array").toBeTruthy();
+  expect(result.provider_pool.length >= 1, "at least one pool entry").toBeTruthy();
+  expect(result.session_level).toBe(true);
 });
 
 test("confirmProviders: every pool entry has name, capability_tier, excluded flag", () => {
   const result = confirmProviders({}, {}, []);
 
   for (const entry of result.provider_pool) {
-    assert.equal(typeof entry.name, "string", `entry.name is string for ${JSON.stringify(entry)}`);
-    assert.equal(typeof entry.capability_tier, "string", `entry.capability_tier is string`);
-    assert.equal(typeof entry.excluded, "boolean", `entry.excluded is boolean`);
+    expect(typeof entry.name, `entry.name is string for ${JSON.stringify(entry)}`).toBe("string");
+    expect(typeof entry.capability_tier, `entry.capability_tier is string`).toBe("string");
+    expect(typeof entry.excluded, `entry.excluded is boolean`).toBe("boolean");
   }
 });
 
 test("confirmProviders: local-subprocess is present and not excluded by default", () => {
   const result = confirmProviders({}, {}, []);
   const local = result.provider_pool.find((e) => e.name === "local-subprocess");
-  assert.ok(local, "local-subprocess in pool");
-  assert.equal(local.excluded, false);
+  expect(local, "local-subprocess in pool").toBeTruthy();
+  expect(local.excluded).toBe(false);
 });
 
 test("confirmProviders: local-subprocess is marked excluded when explicitly excluded", () => {
   const result = confirmProviders({}, {}, ["local-subprocess"]);
   const local = result.provider_pool.find((e) => e.name === "local-subprocess");
-  assert.ok(local, "local-subprocess still in pool when excluded");
-  assert.equal(local.excluded, true);
+  expect(local, "local-subprocess still in pool when excluded").toBeTruthy();
+  expect(local.excluded).toBe(true);
 });
 
 // ============================================================================
@@ -240,8 +239,8 @@ test("confirmProviders: local-subprocess is marked excluded when explicitly excl
 // ============================================================================
 
 test("FREE_FORM_INTENT_INTERPRETATION_VERSION is a non-empty string", () => {
-  assert.equal(typeof FREE_FORM_INTENT_INTERPRETATION_VERSION, "string");
-  assert.ok(FREE_FORM_INTENT_INTERPRETATION_VERSION.length > 0);
+  expect(typeof FREE_FORM_INTENT_INTERPRETATION_VERSION).toBe("string");
+  expect(FREE_FORM_INTENT_INTERPRETATION_VERSION.length > 0).toBeTruthy();
 });
 
 test("interpretFreeFormIntentForAudit: encodes a lens clause and promotes an uncodable clause", () => {
@@ -251,20 +250,20 @@ test("interpretFreeFormIntentForAudit: encodes a lens clause and promotes an unc
     "focus on security; use strict mode for all modules",
   );
 
-  assert.equal(result.schema_version, FREE_FORM_INTENT_INTERPRETATION_VERSION);
-  assert.ok(Array.isArray(result.encoded_clauses), "encoded_clauses is array");
-  assert.ok(Array.isArray(result.checkpoint_questions), "checkpoint_questions is array");
-  assert.equal(typeof result.has_unencodable, "boolean");
+  expect(result.schema_version).toBe(FREE_FORM_INTENT_INTERPRETATION_VERSION);
+  expect(Array.isArray(result.encoded_clauses), "encoded_clauses is array").toBeTruthy();
+  expect(Array.isArray(result.checkpoint_questions), "checkpoint_questions is array").toBeTruthy();
+  expect(typeof result.has_unencodable).toBe("boolean");
 
   // "focus on security" → lens_weight for security
   const securityClause = result.encoded_clauses.find(
     (c) => c.kind === "lens_weight" && c.lens === "security",
   );
-  assert.ok(securityClause, "encoded_clauses contains a lens_weight entry for security");
+  expect(securityClause, "encoded_clauses contains a lens_weight entry for security").toBeTruthy();
 
   // "use strict mode for all modules" cannot be encoded → checkpoint question
-  assert.ok(result.checkpoint_questions.length >= 1, "at least one checkpoint question");
-  assert.equal(result.has_unencodable, true);
+  expect(result.checkpoint_questions.length >= 1, "at least one checkpoint question").toBeTruthy();
+  expect(result.has_unencodable).toBe(true);
 });
 
 test("interpretFreeFormIntentForAudit: free_form_intent is NOT threaded verbatim into any returned field", () => {
@@ -272,23 +271,20 @@ test("interpretFreeFormIntentForAudit: free_form_intent is NOT threaded verbatim
   const result = interpretFreeFormIntentForAudit(verbatim);
 
   // schema_version should not contain verbatim
-  assert.ok(!result.schema_version.includes(verbatim));
+  expect(!result.schema_version.includes(verbatim)).toBeTruthy();
 
   // No encoded clause's text field should equal the full input verbatim
   for (const clause of result.encoded_clauses) {
-    assert.ok(
-      clause.text !== verbatim,
-      `encoded clause text should not equal verbatim input, got: ${clause.text}`,
-    );
+    expect(clause.text !== verbatim, `encoded clause text should not equal verbatim input, got: ${clause.text}`).toBeTruthy();
   }
 });
 
 test("interpretFreeFormIntentForAudit: empty input returns empty results", () => {
   const result = interpretFreeFormIntentForAudit("");
-  assert.equal(result.schema_version, FREE_FORM_INTENT_INTERPRETATION_VERSION);
-  assert.deepEqual(result.encoded_clauses, []);
-  assert.deepEqual(result.checkpoint_questions, []);
-  assert.equal(result.has_unencodable, false);
+  expect(result.schema_version).toBe(FREE_FORM_INTENT_INTERPRETATION_VERSION);
+  expect(result.encoded_clauses).toEqual([]);
+  expect(result.checkpoint_questions).toEqual([]);
+  expect(result.has_unencodable).toBe(false);
 });
 
 // ============================================================================
@@ -298,11 +294,11 @@ test("interpretFreeFormIntentForAudit: empty input returns empty results", () =>
 test("all three shared APIs compose end-to-end without throwing", async () => {
   // Step 1: confirm providers (deterministic)
   const confirmation = confirmProviders({}, {}, []);
-  assert.equal(confirmation.schema_version, PROVIDER_CONFIRMATION_RESULT_VERSION);
+  expect(confirmation.schema_version).toBe(PROVIDER_CONFIRMATION_RESULT_VERSION);
 
   // Step 2: interpret intent (deterministic)
   const interpretation = interpretFreeFormIntentForAudit("review security and performance");
-  assert.equal(interpretation.schema_version, FREE_FORM_INTENT_INTERPRETATION_VERSION);
+  expect(interpretation.schema_version).toBe(FREE_FORM_INTENT_INTERPRETATION_VERSION);
 
   // Step 3: run rolling dispatch through the confirmed pool
   const packets = [
@@ -336,15 +332,12 @@ test("all three shared APIs compose end-to-end without throwing", async () => {
   );
 
   // All three composed without throwing; dispatch completed
-  assert.equal(dispatchResult.status, "complete");
-  assert.equal(dispatchResult.results.length, 2);
-  assert.equal(onResultIds.length, 2);
+  expect(dispatchResult.status).toBe("complete");
+  expect(dispatchResult.results.length).toBe(2);
+  expect(onResultIds.length).toBe(2);
 
   // Verify confirmation and interpretation are non-trivially populated
-  assert.ok(confirmation.provider_pool.length >= 1);
-  assert.ok(
-    interpretation.encoded_clauses.length >= 1 ||
-      interpretation.checkpoint_questions.length >= 1,
-    "interpretation has at least some output",
-  );
+  expect(confirmation.provider_pool.length >= 1).toBeTruthy();
+  expect(interpretation.encoded_clauses.length >= 1 ||
+      interpretation.checkpoint_questions.length >= 1, "interpretation has at least some output").toBeTruthy();
 });

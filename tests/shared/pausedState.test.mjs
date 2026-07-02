@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   filterNewProviders,
@@ -14,22 +13,22 @@ const {
 
 test("filterNewProviders — excludes settled providers, passes genuinely new ones", () => {
   const result = filterNewProviders(["a", "b", "c"], new Set(["a"]));
-  assert.deepEqual(result, ["b", "c"]);
+  expect(result).toEqual(["b", "c"]);
 });
 
 test("filterNewProviders — returns empty when all discovered are settled", () => {
   const result = filterNewProviders(["a"], new Set(["a", "b"]));
-  assert.deepEqual(result, []);
+  expect(result).toEqual([]);
 });
 
 test("filterNewProviders — returns empty when discovered is empty", () => {
   const result = filterNewProviders([], new Set(["a"]));
-  assert.deepEqual(result, []);
+  expect(result).toEqual([]);
 });
 
 test("filterNewProviders — returns all discovered when settled is empty", () => {
   const result = filterNewProviders(["x"], new Set());
-  assert.deepEqual(result, ["x"]);
+  expect(result).toEqual(["x"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -37,26 +36,26 @@ test("filterNewProviders — returns all discovered when settled is empty", () =
 // ---------------------------------------------------------------------------
 
 test("checkLivelockGuard — returns false below limit", () => {
-  assert.equal(checkLivelockGuard(2, 0, 3), false);
+  expect(checkLivelockGuard(2, 0, 3)).toBe(false);
 });
 
 test("checkLivelockGuard — returns true at limit with no new capacity", () => {
-  assert.equal(checkLivelockGuard(3, 0, 3), true);
+  expect(checkLivelockGuard(3, 0, 3)).toBe(true);
 });
 
 test("checkLivelockGuard — returns true above limit", () => {
-  assert.equal(checkLivelockGuard(5, 0, 3), true);
+  expect(checkLivelockGuard(5, 0, 3)).toBe(true);
 });
 
 test("checkLivelockGuard — returns false when new capacity arrived even at limit", () => {
-  assert.equal(checkLivelockGuard(3, 1, 3), false);
+  expect(checkLivelockGuard(3, 1, 3)).toBe(false);
 });
 
 test("checkLivelockGuard — uses LIVELOCK_PAUSE_LIMIT as default", () => {
   // At exactly LIVELOCK_PAUSE_LIMIT with no new capacity → livelock
-  assert.equal(checkLivelockGuard(LIVELOCK_PAUSE_LIMIT, 0), true);
+  expect(checkLivelockGuard(LIVELOCK_PAUSE_LIMIT, 0)).toBe(true);
   // One below — no livelock
-  assert.equal(checkLivelockGuard(LIVELOCK_PAUSE_LIMIT - 1, 0), false);
+  expect(checkLivelockGuard(LIVELOCK_PAUSE_LIMIT - 1, 0)).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -83,7 +82,7 @@ test("advancePausedState — returns running when genuinely new providers arrive
     rediscoveredProviders: ["p2"],
     settledExclusions: new Set(["p1"]),
   });
-  assert.equal(result.kind, "running");
+  expect(result.kind).toBe("running");
 });
 
 test("advancePausedState — resets pause_count on transition to running (kind=running has no pause_count)", () => {
@@ -93,9 +92,9 @@ test("advancePausedState — resets pause_count on transition to running (kind=r
     rediscoveredProviders: ["p2"],
     settledExclusions: new Set(),
   });
-  assert.equal(result.kind, "running");
+  expect(result.kind).toBe("running");
   // running state has no pause_count property
-  assert.ok(!("pause_count" in result));
+  expect(!("pause_count" in result)).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -110,9 +109,9 @@ test("advancePausedState — increments pause_count when no new providers and be
     settledExclusions: new Set(["p1"]),
     livelockLimit: 3,
   });
-  assert.equal(result.kind, "waiting_for_provider");
+  expect(result.kind).toBe("waiting_for_provider");
   if (result.kind === "waiting_for_provider") {
-    assert.equal(result.pause_count, 1);
+    expect(result.pause_count).toBe(1);
   }
 });
 
@@ -124,9 +123,9 @@ test("advancePausedState — preserves stranded_node_ids while paused", () => {
     settledExclusions: new Set(),
     livelockLimit: 5,
   });
-  assert.equal(result.kind, "waiting_for_provider");
+  expect(result.kind).toBe("waiting_for_provider");
   if (result.kind === "waiting_for_provider") {
-    assert.deepEqual(result.stranded_node_ids, ["n-alpha", "n-beta"]);
+    expect(result.stranded_node_ids).toEqual(["n-alpha", "n-beta"]);
   }
 });
 
@@ -138,9 +137,9 @@ test("advancePausedState — preserves paused_at timestamp while paused", () => 
     settledExclusions: new Set(),
     livelockLimit: 5,
   });
-  assert.equal(result.kind, "waiting_for_provider");
+  expect(result.kind).toBe("waiting_for_provider");
   if (result.kind === "waiting_for_provider") {
-    assert.equal(result.paused_at, current.paused_at);
+    expect(result.paused_at).toBe(current.paused_at);
   }
 });
 
@@ -157,10 +156,10 @@ test("advancePausedState — returns terminal/livelock when livelock guard trigg
     settledExclusions: new Set(),
     livelockLimit: 3,
   });
-  assert.equal(result.kind, "terminal");
+  expect(result.kind).toBe("terminal");
   if (result.kind === "terminal") {
-    assert.equal(result.reason, "livelock");
-    assert.deepEqual(result.stranded_node_ids, ["stranded-1"]);
+    expect(result.reason).toBe("livelock");
+    expect(result.stranded_node_ids).toEqual(["stranded-1"]);
   }
 });
 
@@ -173,9 +172,9 @@ test("advancePausedState — carries stranded_node_ids into terminal state", () 
     settledExclusions: new Set(),
     livelockLimit: 3,
   });
-  assert.equal(result.kind, "terminal");
+  expect(result.kind).toBe("terminal");
   if (result.kind === "terminal") {
-    assert.deepEqual(result.stranded_node_ids, stranded);
+    expect(result.stranded_node_ids).toEqual(stranded);
   }
 });
 
@@ -189,10 +188,10 @@ test("INV-S03 — settled exclusions are never re-offered across multiple re-dis
 
   // Round 2: re-discovery surfaces ['p1', 'p2']
   const genuinelyNew = filterNewProviders(["p1", "p2"], settled);
-  assert.deepEqual(genuinelyNew, ["p2"]);
+  expect(genuinelyNew).toEqual(["p2"]);
 
   // settled set is not mutated by filterNewProviders
-  assert.equal(settled.size, 1);
-  assert.ok(settled.has("p1"));
-  assert.ok(!settled.has("p2"));
+  expect(settled.size).toBe(1);
+  expect(settled.has("p1")).toBeTruthy();
+  expect(!settled.has("p2")).toBeTruthy();
 });

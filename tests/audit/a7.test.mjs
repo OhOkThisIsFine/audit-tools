@@ -22,7 +22,7 @@
  * (Antigravity / OpenCode GUI dispatch) live in spec/host-validation.md.
  */
 
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
@@ -48,24 +48,12 @@ test("verify:hosts verifies exactly the hosts in INSTALL_HOST_ORDER (no hand-mai
   const report = await verifyHostsIsolated();
   // The reported verified set and the actually-run host set must both equal the
   // single source of truth — adding a host to the table auto-extends the gate.
-  assert.deepEqual(
-    report.verified_hosts,
-    [...INSTALL_HOST_ORDER],
-    "report.verified_hosts must equal INSTALL_HOST_ORDER",
-  );
-  assert.deepEqual(
-    report.hosts.map((h) => h.host),
-    [...INSTALL_HOST_ORDER],
-    "the hosts actually re-verified must equal INSTALL_HOST_ORDER",
-  );
+  expect(report.verified_hosts, "report.verified_hosts must equal INSTALL_HOST_ORDER").toEqual([...INSTALL_HOST_ORDER]);
+  expect(report.hosts.map((h) => h.host), "the hosts actually re-verified must equal INSTALL_HOST_ORDER").toEqual([...INSTALL_HOST_ORDER]);
   // Every host in the table has its own verify() handler — the gate would emit a
   // synthetic 'host_handler' error otherwise.
   for (const hostKey of INSTALL_HOST_ORDER) {
-    assert.equal(
-      typeof INSTALL_HOST_DEFINITIONS[hostKey].verify,
-      "function",
-      `host "${hostKey}" must have a verify() handler`,
-    );
+    expect(typeof INSTALL_HOST_DEFINITIONS[hostKey].verify, `host "${hostKey}" must have a verify() handler`).toBe("function");
   }
 });
 
@@ -73,25 +61,13 @@ test("verify:hosts verifies exactly the hosts in INSTALL_HOST_ORDER (no hand-mai
 
 test("a clean deploy passes every host's own verify() handler", async () => {
   const report = await verifyHostsIsolated();
-  assert.equal(
-    report.status,
-    "ok",
-    `verify:hosts must be ok on a clean deploy; report: ${JSON.stringify(report, null, 2)}`,
-  );
-  assert.equal(report.issue_count, 0, "a clean deploy must have zero issues");
+  expect(report.status, `verify:hosts must be ok on a clean deploy; report: ${JSON.stringify(report, null, 2)}`).toBe("ok");
+  expect(report.issue_count, "a clean deploy must have zero issues").toBe(0);
   for (const host of report.hosts) {
-    assert.equal(
-      host.status,
-      "ok",
-      `host "${host.host}" must verify ok; checks: ${JSON.stringify(host.checks)}`,
-    );
-    assert.ok(host.checks.length > 0, `host "${host.host}" must run at least one check`);
+    expect(host.status, `host "${host.host}" must verify ok; checks: ${JSON.stringify(host.checks)}`).toBe("ok");
+    expect(host.checks.length > 0, `host "${host.host}" must run at least one check`).toBeTruthy();
     for (const check of host.checks) {
-      assert.equal(
-        check.status,
-        "ok",
-        `check "${check.id}" for host "${host.host}" must be ok: ${check.summary ?? ""}`,
-      );
+      expect(check.status, `check "${check.id}" for host "${host.host}" must be ok: ${check.summary ?? ""}`).toBe("ok");
     }
   }
 });
@@ -105,24 +81,13 @@ test("verify:hosts deploys under a temp $HOME and restores the real HOME/USERPRO
   const report = await verifyHostsIsolated();
 
   // The redirected HOME is a throwaway temp dir, NOT the operator's real config.
-  assert.ok(report.home_dir, "report must record the temp home dir it used");
-  assert.notEqual(
-    report.home_dir,
-    realHome,
-    "the deploy must use a temp $HOME, never the operator's real HOME",
-  );
-  assert.ok(
-    report.repo_root.startsWith(report.home_dir),
-    "the throwaway repo root must live under the temp $HOME",
-  );
+  expect(report.home_dir, "report must record the temp home dir it used").toBeTruthy();
+  expect(report.home_dir, "the deploy must use a temp $HOME, never the operator's real HOME").not.toBe(realHome);
+  expect(report.repo_root.startsWith(report.home_dir), "the throwaway repo root must live under the temp $HOME").toBeTruthy();
 
   // The caller's environment is restored exactly on the way out.
-  assert.equal(process.env.HOME, realHome, "HOME must be restored after the run");
-  assert.equal(
-    process.env.USERPROFILE,
-    realUserProfile,
-    "USERPROFILE must be restored after the run",
-  );
+  expect(process.env.HOME, "HOME must be restored after the run").toBe(realHome);
+  expect(process.env.USERPROFILE, "USERPROFILE must be restored after the run").toBe(realUserProfile);
 
   // By default the throwaway tree is cleaned up — nothing leaks to disk.
   await assert.rejects(
@@ -135,7 +100,7 @@ test("verify:hosts can keep its artifacts for inspection (keepArtifacts)", async
   const report = await verifyHostsIsolated({ keepArtifacts: true });
   try {
     const stats = await stat(report.repo_root);
-    assert.ok(stats.isDirectory(), "the throwaway repo root must persist when kept");
+    expect(stats.isDirectory(), "the throwaway repo root must persist when kept").toBeTruthy();
   } finally {
     const { rm } = await import("node:fs/promises");
     await rm(report.home_dir, { recursive: true, force: true }).catch(() => {});
@@ -147,25 +112,14 @@ test("verify:hosts can keep its artifacts for inspection (keepArtifacts)", async
 test("verify:release invokes verify:hosts ahead of the publish smoke steps", () => {
   const pkg = readPackageJson();
   const verifyRelease = pkg.scripts["verify:release"];
-  assert.ok(verifyRelease, "package.json must define a verify:release script");
-  assert.match(
-    verifyRelease,
-    /\bnpm run verify:hosts\b/,
-    "verify:release must invoke verify:hosts",
-  );
+  expect(verifyRelease, "package.json must define a verify:release script").toBeTruthy();
+  expect(verifyRelease, "verify:release must invoke verify:hosts").toMatch(/\bnpm run verify:hosts\b/);
   // It must gate BEFORE the publish smoke steps, not after.
   const hostsIdx = verifyRelease.indexOf("verify:hosts");
   const smokeIdx = verifyRelease.indexOf("smoke:packaged-audit-code");
-  assert.ok(smokeIdx >= 0, "verify:release must still run the packaged smoke step");
-  assert.ok(
-    hostsIdx < smokeIdx,
-    "verify:hosts must run ahead of the publish smoke steps",
-  );
+  expect(smokeIdx >= 0, "verify:release must still run the packaged smoke step").toBeTruthy();
+  expect(hostsIdx < smokeIdx, "verify:hosts must run ahead of the publish smoke steps").toBeTruthy();
 
   // The script itself must exist and point at the real runner.
-  assert.equal(
-    pkg.scripts["verify:hosts"],
-    "node scripts/audit/verify-hosts.mjs",
-    "verify:hosts must invoke the verify-hosts runner script",
-  );
+  expect(pkg.scripts["verify:hosts"], "verify:hosts must invoke the verify-hosts runner script").toBe("node scripts/audit/verify-hosts.mjs");
 });

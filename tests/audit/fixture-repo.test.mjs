@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -66,10 +65,7 @@ test("committed fixture repo supports external analyzer import and deterministic
         ],
       },
     });
-    assert.equal(
-      imported.selected_executor,
-      "external_analyzer_import_executor",
-    );
+    expect(imported.selected_executor).toBe("external_analyzer_import_executor");
     bundle = imported.updated_bundle;
 
     const autoFix = await advanceAudit(bundle, { root });
@@ -82,10 +78,7 @@ test("committed fixture repo supports external analyzer import and deterministic
     // here (no externalAcquisition option), so it writes a hermetic empty marker.
     const acquisition = await advanceAudit(bundle, { root });
     bundle = acquisition.updated_bundle;
-    assert.equal(
-      acquisition.selected_executor,
-      "external_analyzer_acquisition_executor",
-    );
+    expect(acquisition.selected_executor).toBe("external_analyzer_acquisition_executor");
 
     const structure = await advanceAudit(bundle);
     bundle = structure.updated_bundle;
@@ -108,8 +101,8 @@ test("committed fixture repo supports external analyzer import and deterministic
       lineIndex: await buildFixtureLineIndex(root),
     });
 
-    assert.equal(planning.selected_executor, "planning_executor");
-    assert.ok(planning.updated_bundle.audit_tasks.length > 0);
+    expect(planning.selected_executor).toBe("planning_executor");
+    expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
 
     const analyzerDrivenTask = planning.updated_bundle.audit_tasks.find(
       (task) =>
@@ -117,17 +110,14 @@ test("committed fixture repo supports external analyzer import and deterministic
         task.file_paths.includes("src/api/auth.ts") &&
         task.tags?.includes("external_analyzer_signal"),
     );
-    assert.ok(analyzerDrivenTask);
-    assert.equal(analyzerDrivenTask.priority, "high");
-    assert.ok(analyzerDrivenTask.tags.includes("external_analyzer_signal"));
-    assert.equal(planning.updated_bundle.runtime_validation_tasks.tasks.length, 0);
-    assert.equal(planning.updated_bundle.runtime_validation_report, undefined);
-    assert.equal(
-      planning.audit_state.obligations.find(
+    expect(analyzerDrivenTask).toBeTruthy();
+    expect(analyzerDrivenTask.priority).toBe("high");
+    expect(analyzerDrivenTask.tags.includes("external_analyzer_signal")).toBeTruthy();
+    expect(planning.updated_bundle.runtime_validation_tasks.tasks.length).toBe(0);
+    expect(planning.updated_bundle.runtime_validation_report).toBe(undefined);
+    expect(planning.audit_state.obligations.find(
         (item) => item.id === "runtime_validation_current",
-      )?.state,
-      "satisfied",
-    );
+      )?.state).toBe("satisfied");
   });
 });
 
@@ -142,19 +132,19 @@ test("committed simple-app fixture stays production-shaped and explicitly test-o
     "utf8",
   );
 
-  assert.match(authSource, /Fixture-only authentication helper/i);
-  assert.match(authSource, /AuthenticationError/);
-  assert.match(authSource, /timingSafeEqual/);
-  assert.match(authSource, /\[fixture-auth\]/);
+  expect(authSource).toMatch(/Fixture-only authentication helper/i);
+  expect(authSource).toMatch(/AuthenticationError/);
+  expect(authSource).toMatch(/timingSafeEqual/);
+  expect(authSource).toMatch(/\[fixture-auth\]/);
 
-  assert.match(sessionSource, /Fixture-only session helper/i);
-  assert.match(sessionSource, /randomUUID/);
-  assert.match(sessionSource, /expiresAt/);
-  assert.match(sessionSource, /revokeSession/);
-  assert.match(sessionSource, /isSessionActive/);
+  expect(sessionSource).toMatch(/Fixture-only session helper/i);
+  expect(sessionSource).toMatch(/randomUUID/);
+  expect(sessionSource).toMatch(/expiresAt/);
+  expect(sessionSource).toMatch(/revokeSession/);
+  expect(sessionSource).toMatch(/isSessionActive/);
 
-  assert.match(deploySource, /concurrency:/);
-  assert.match(deploySource, /needs: validate/);
-  assert.match(deploySource, /rollback/i);
-  assert.match(deploySource, /npm test/);
+  expect(deploySource).toMatch(/concurrency:/);
+  expect(deploySource).toMatch(/needs: validate/);
+  expect(deploySource).toMatch(/rollback/i);
+  expect(deploySource).toMatch(/npm test/);
 });

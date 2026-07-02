@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { mergeFindings } = await import("../../src/audit/reporting/mergeFindings.ts");
 const {
@@ -107,37 +106,28 @@ test("mergeFindings deduplicates duplicate findings and aggregates runtime plus 
     ],
   );
 
-  assert.equal(merged.length, 2);
-  assert.equal(merged[0].title, "Missing audit trail");
-  assert.equal(merged[0].severity, "high");
-  assert.equal(merged[0].confidence, "high");
-  assert.equal(
-    merged[0].summary,
-    "Authentication failures are not logged consistently across the auth/session boundary.",
-  );
-  assert.equal(merged[0].impact, "Investigations lose audit fidelity.");
-  assert.equal(merged[0].likelihood, "High for repeated login failures.");
-  assert.equal(merged[0].systemic, true);
-  assert.deepEqual(
-    merged[0].affected_files.map((file) => `${file.path}:${file.line_start ?? ""}`),
-    [
+  expect(merged.length).toBe(2);
+  expect(merged[0].title).toBe("Missing audit trail");
+  expect(merged[0].severity).toBe("high");
+  expect(merged[0].confidence).toBe("high");
+  expect(merged[0].summary).toBe("Authentication failures are not logged consistently across the auth/session boundary.");
+  expect(merged[0].impact).toBe("Investigations lose audit fidelity.");
+  expect(merged[0].likelihood).toBe("High for repeated login failures.");
+  expect(merged[0].systemic).toBe(true);
+  expect(merged[0].affected_files.map((file) => `${file.path}:${file.line_start ?? ""}`)).toEqual([
       "src/api/auth.ts:3",
       "src/lib/session.ts:2",
       "src/lib/session.ts:8",
-    ],
-  );
-  assert.deepEqual(merged[0].evidence, [
+    ]);
+  expect(merged[0].evidence).toEqual([
     "manual-review",
     "shared-evidence",
     "second-pass-review",
     "rv-confirmed: confirmed — Runtime replay reproduced the missing log path.",
     "external:semgrep:src/api/auth.ts:Analyzer corroborates missing auth logging.",
   ]);
-  assert.equal(
-    merged[0].evidence.some((entry) => /pending runtime evidence/i.test(entry)),
-    false,
-  );
-  assert.equal(merged[1].title, "Secondary note");
+  expect(merged[0].evidence.some((entry) => /pending runtime evidence/i.test(entry))).toBe(false);
+  expect(merged[1].title).toBe("Secondary note");
 });
 
 test("buildAuditReportModel forwards external analyzer context into merged findings and summary counts", () => {
@@ -224,28 +214,23 @@ test("buildAuditReportModel forwards external analyzer context into merged findi
     }],
   });
 
-  assert.equal(report.summary.finding_count, 1);
-  assert.equal(report.summary.work_block_count, 1);
-  assert.equal(report.summary.severity_breakdown.medium, 1);
-  assert.equal(report.summary.runtime_validation_status_breakdown.confirmed, 1);
-  assert.equal(
-    report.summary.runtime_validation_status_breakdown.not_required,
-    1,
-  );
-  assert.equal(report.summary.audited_file_count, 1);
-  assert.equal(report.summary.excluded_file_count, 1);
-  assert.ok(
-    report.findings[0].evidence.includes(
+  expect(report.summary.finding_count).toBe(1);
+  expect(report.summary.work_block_count).toBe(1);
+  expect(report.summary.severity_breakdown.medium).toBe(1);
+  expect(report.summary.runtime_validation_status_breakdown.confirmed).toBe(1);
+  expect(report.summary.runtime_validation_status_breakdown.not_required).toBe(1);
+  expect(report.summary.audited_file_count).toBe(1);
+  expect(report.summary.excluded_file_count).toBe(1);
+  expect(report.findings[0].evidence.includes(
       "external:semgrep:src/api/auth.ts:Analyzer corroboration.",
-    ),
-  );
+    )).toBeTruthy();
 
   const markdown = renderAuditReportMarkdown(report);
-  assert.match(markdown, /Severity breakdown: medium: 1/);
+  expect(markdown).toMatch(/Severity breakdown: medium: 1/);
   // Note 2: the markdown summarizes evidence (count + top item, pointer to JSON)
   // rather than dumping every entry; the full list stays in audit-findings.json
   // (asserted on the contract above).
-  assert.match(markdown, /Evidence: \d+ items .* see audit-findings\.json/);
+  expect(markdown).toMatch(/Evidence: \d+ items .* see audit-findings\.json/);
 });
 
 test("renderAuditReportMarkdown renders the standardized per-finding block", () => {
@@ -291,12 +276,12 @@ test("renderAuditReportMarkdown renders the standardized per-finding block", () 
   // Note 2: fixed-order labelled badge block — Severity → Confidence → Lens →
   // Grounding (always shown, even when no verdict was recorded). Category is no
   // longer rendered in the block (the full record stays in audit-findings.json).
-  assert.match(markdown, /### DR-001 — Implicit tenant boundary is unenforced/);
-  assert.match(markdown, /- Severity: medium/);
-  assert.match(markdown, /- Confidence: high/);
-  assert.match(markdown, /- Lens: architecture/);
-  assert.match(markdown, /- Grounding: not assessed/);
-  assert.doesNotMatch(markdown, /- Category:/);
+  expect(markdown).toMatch(/### DR-001 — Implicit tenant boundary is unenforced/);
+  expect(markdown).toMatch(/- Severity: medium/);
+  expect(markdown).toMatch(/- Confidence: high/);
+  expect(markdown).toMatch(/- Lens: architecture/);
+  expect(markdown).toMatch(/- Grounding: not assessed/);
+  expect(markdown).not.toMatch(/- Category:/);
 });
 
 // ── Cross-lens dedup ────────────────────────────────────────────────────────
@@ -336,7 +321,7 @@ test("cross-lens dedup merges findings with same title and file from different l
       makeFinding({ id: "COR-001", title: "Suite executes compiled dist", lens: "correctness" }),
     ]),
   ]);
-  assert.equal(merged.length, 1);
+  expect(merged.length).toBe(1);
 });
 
 test("cross-lens dedup merges findings with similar titles (Jaccard > 0.5) from different lenses", () => {
@@ -358,8 +343,8 @@ test("cross-lens dedup merges findings with similar titles (Jaccard > 0.5) from 
       }),
     ]),
   ]);
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0].severity, "high");
+  expect(merged.length).toBe(1);
+  expect(merged[0].severity).toBe("high");
 });
 
 test("cross-lens dedup keeps findings with different titles from different lenses", () => {
@@ -371,7 +356,7 @@ test("cross-lens dedup keeps findings with different titles from different lense
       makeFinding({ id: "TST-001", title: "Test coverage below threshold", lens: "tests" }),
     ]),
   ]);
-  assert.equal(merged.length, 2);
+  expect(merged.length).toBe(2);
 });
 
 test("cross-lens dedup does not affect same-lens findings with different titles", () => {
@@ -381,7 +366,7 @@ test("cross-lens dedup does not affect same-lens findings with different titles"
       makeFinding({ id: "SEC-002", title: "Unvalidated query parameters", lens: "security" }),
     ]),
   ]);
-  assert.equal(merged.length, 2);
+  expect(merged.length).toBe(2);
 });
 
 test("cross-lens dedup merges evidence from absorbed finding", () => {
@@ -393,9 +378,9 @@ test("cross-lens dedup merges evidence from absorbed finding", () => {
       makeFinding({ id: "B-001", title: "Missing validation", lens: "correctness", evidence: ["ev-cor"] }),
     ]),
   ]);
-  assert.equal(merged.length, 1);
-  assert.ok(merged[0].evidence.includes("ev-sec"));
-  assert.ok(merged[0].evidence.includes("ev-cor"));
+  expect(merged.length).toBe(1);
+  expect(merged[0].evidence.includes("ev-sec")).toBeTruthy();
+  expect(merged[0].evidence.includes("ev-cor")).toBeTruthy();
 });
 
 // ── designAssessment branch ────────────────────────────────────────────────
@@ -413,10 +398,10 @@ test("mergeFindings includes designAssessment.findings in output", () => {
     undefined,
     { generated_at: "2026-01-01T00:00:00Z", findings: [designFinding] },
   );
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0].title, "Architectural coupling violation");
-  assert.equal(merged[0].severity, "high");
-  assert.equal(merged[0].lens, "architecture");
+  expect(merged.length).toBe(1);
+  expect(merged[0].title).toBe("Architectural coupling violation");
+  expect(merged[0].severity).toBe("high");
+  expect(merged[0].lens).toBe("architecture");
 });
 
 test("mergeFindings includes designAssessment.review_findings in output", () => {
@@ -444,10 +429,10 @@ test("mergeFindings includes designAssessment.review_findings in output", () => 
       review_findings: [reviewFinding],
     },
   );
-  assert.equal(merged.length, 2);
+  expect(merged.length).toBe(2);
   const titles = merged.map((f) => f.title);
-  assert.ok(titles.includes("Design finding A"));
-  assert.ok(titles.includes("Design review finding B"));
+  expect(titles.includes("Design finding A")).toBeTruthy();
+  expect(titles.includes("Design review finding B")).toBeTruthy();
 });
 
 test("mergeFindings merges an AuditResult finding into a matching designAssessment finding", () => {
@@ -489,15 +474,9 @@ test("mergeFindings merges an AuditResult finding into a matching designAssessme
     undefined,
     { generated_at: "2026-01-01T00:00:00Z", findings: [designFinding] },
   );
-  assert.equal(merged.length, 1, "no duplicate — AuditResult finding merged into design finding");
-  assert.equal(merged[0].severity, "high", "higher severity from AuditResult is preserved");
-  assert.equal(merged[0].confidence, "high", "higher confidence from AuditResult is preserved");
-  assert.ok(
-    merged[0].evidence.includes("design-ev"),
-    "design-assessment evidence is retained",
-  );
-  assert.ok(
-    merged[0].evidence.includes("audit-ev"),
-    "AuditResult evidence is unioned in",
-  );
+  expect(merged.length, "no duplicate — AuditResult finding merged into design finding").toBe(1);
+  expect(merged[0].severity, "higher severity from AuditResult is preserved").toBe("high");
+  expect(merged[0].confidence, "higher confidence from AuditResult is preserved").toBe("high");
+  expect(merged[0].evidence.includes("design-ev"), "design-assessment evidence is retained").toBeTruthy();
+  expect(merged[0].evidence.includes("audit-ev"), "AuditResult evidence is unioned in").toBeTruthy();
 });

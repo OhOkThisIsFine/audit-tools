@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import {
@@ -65,8 +65,8 @@ test("JSON readers and writers surface path-aware failures and optional readers 
       writeJsonFile(impossibleWritePath, { ok: true }),
       new RegExp(`Failed to prepare parent directory .*value\\.json`, "i"),
     );
-    await assert.equal(await readOptionalJsonFile(missingJsonPath), undefined);
-    await assert.equal(await readOptionalNdjsonFile(join(tempDir, "missing.jsonl")), undefined);
+    await expect(await readOptionalJsonFile(missingJsonPath)).toBe(undefined);
+    await expect(await readOptionalNdjsonFile(join(tempDir, "missing.jsonl"))).toBe(undefined);
   });
 });
 
@@ -87,7 +87,7 @@ test("NDJSON parsing preserves physical line numbers and append/write helpers ro
     await writeNdjsonFile(validNdjsonPath, [{ id: 1 }]);
     await appendNdjsonFile(validNdjsonPath, { id: 2 });
 
-    assert.deepEqual(await readNdjsonFile(validNdjsonPath), [
+    expect(await readNdjsonFile(validNdjsonPath)).toEqual([
       { id: 1 },
       { id: 2 },
     ]);
@@ -120,34 +120,22 @@ test("artifact bundle definitions round-trip joined paths, falsey values, and cl
     await writeCoreArtifacts(tempDir, bundle);
 
     const loaded = await loadArtifactBundle(`${tempDir}${sep}`);
-    assert.deepEqual(loaded.repo_manifest, bundle.repo_manifest);
-    assert.equal(loaded.auto_fixes_applied, false);
-    assert.deepEqual(loaded.audit_results, bundle.audit_results);
-    assert.equal(getArtifactValue(loaded, "audit-report.md"), "# Audit Report\n");
-    assert.equal(getArtifactValue(loaded, "missing.json"), undefined);
-    assert.ok(loaded.tooling_manifest);
+    expect(loaded.repo_manifest).toEqual(bundle.repo_manifest);
+    expect(loaded.auto_fixes_applied).toBe(false);
+    expect(loaded.audit_results).toEqual(bundle.audit_results);
+    expect(getArtifactValue(loaded, "audit-report.md")).toBe("# Audit Report\n");
+    expect(getArtifactValue(loaded, "missing.json")).toBe(undefined);
+    expect(loaded.tooling_manifest).toBeTruthy();
 
     const expectedManifest = await buildToolingManifest();
-    assert.equal(
-      loaded.tooling_manifest.package_version,
-      expectedManifest.package_version,
-    );
-    assert.match(loaded.tooling_manifest.implementation_hash, /^[a-f0-9]{64}$/);
-    assert.notEqual(
-      loaded.tooling_manifest.implementation_hash,
-      "0".repeat(64),
-    );
-    assert.deepEqual(loaded.tooling_manifest.inputs, Array.from(TOOLING_INPUTS));
-    assert.deepEqual(
-      stableToolingManifestValues(loaded.tooling_manifest),
-      stableToolingManifestValues(expectedManifest),
-    );
+    expect(loaded.tooling_manifest.package_version).toBe(expectedManifest.package_version);
+    expect(loaded.tooling_manifest.implementation_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(loaded.tooling_manifest.implementation_hash).not.toBe("0".repeat(64));
+    expect(loaded.tooling_manifest.inputs).toEqual(Array.from(TOOLING_INPUTS));
+    expect(stableToolingManifestValues(loaded.tooling_manifest)).toEqual(stableToolingManifestValues(expectedManifest));
 
     const loadedAgain = await loadArtifactBundle(`${tempDir}${sep}`);
-    assert.deepEqual(
-      stableToolingManifestValues(loadedAgain.tooling_manifest),
-      stableToolingManifestValues(loaded.tooling_manifest),
-    );
+    expect(stableToolingManifestValues(loadedAgain.tooling_manifest)).toEqual(stableToolingManifestValues(loaded.tooling_manifest));
 
   });
 });
@@ -171,11 +159,11 @@ test("final report promotion preserves artifacts when destination is not writabl
       },
     );
 
-    assert.equal(result.promoted, false);
-    assert.equal(result.cleaned, false);
-    assert.match(result.warning, /could not promote final report/i);
-    assert.equal(warnings.length, 1);
-    assert.equal(existsSync(join(artifactsDir, "audit-report.md")), true);
+    expect(result.promoted).toBe(false);
+    expect(result.cleaned).toBe(false);
+    expect(result.warning).toMatch(/could not promote final report/i);
+    expect(warnings.length).toBe(1);
+    expect(existsSync(join(artifactsDir, "audit-report.md"))).toBe(true);
   });
 });
 
@@ -204,13 +192,13 @@ test("promoteFinalAuditReport warns when audit-findings.json copy fails (OBS-24e
     );
 
     // Primary report copy succeeded — promoted must be true.
-    assert.equal(result.promoted, true, "promoted must be true when only audit-findings.json copy fails");
+    expect(result.promoted, "promoted must be true when only audit-findings.json copy fails").toBe(true);
     // warning field must NOT be set when only the secondary contract copy failed.
-    assert.equal(result.warning, undefined, "warning field must be undefined when primary report copy succeeded");
+    expect(result.warning, "warning field must be undefined when primary report copy succeeded").toBe(undefined);
     // warn callback must have been called once with a message about audit-findings.json.
-    assert.equal(warnings.length, 1, "warn must be called exactly once");
-    assert.match(warnings[0], /audit-findings\.json/, "warn message must mention audit-findings.json");
-    assert.match(warnings[0], /ENOENT/, "warn message must include the error text");
+    expect(warnings.length, "warn must be called exactly once").toBe(1);
+    expect(warnings[0], "warn message must mention audit-findings.json").toMatch(/audit-findings\.json/);
+    expect(warnings[0], "warn message must include the error text").toMatch(/ENOENT/);
   });
 });
 
@@ -221,8 +209,8 @@ test("run artifact helpers produce parseable run ids and clean only dispatch fil
     const runId = buildRunId(" flow:auth/entry ", 7, fixedNow);
     const paths = getRunPaths(artifactsDir, runId);
 
-    assert.equal(runId, "20260422T151617089Z_flow-auth-entry_007");
-    assert.equal(buildRunId("", 1, fixedNow), "20260422T151617089Z_terminal_001");
+    expect(runId).toBe("20260422T151617089Z_flow-auth-entry_007");
+    expect(buildRunId("", 1, fixedNow)).toBe("20260422T151617089Z_terminal_001");
 
     await ensureSupervisorDirs(artifactsDir);
 
@@ -269,69 +257,45 @@ test("run artifact helpers produce parseable run ids and clean only dispatch fil
       pendingTasks,
     );
 
-    assert.deepEqual(
-      JSON.parse(await readFile(paths.taskPath, "utf8")),
-      task,
-    );
-    assert.equal(await readFile(paths.promptPath, "utf8"), "# Prompt\n");
-    assert.deepEqual(
-      JSON.parse(await readFile(paths.statusPath, "utf8")),
-      { run_id: runId, status: "dispatched" },
-    );
-    assert.deepEqual(
-      JSON.parse(
+    expect(JSON.parse(await readFile(paths.taskPath, "utf8"))).toEqual(task);
+    expect(await readFile(paths.promptPath, "utf8")).toBe("# Prompt\n");
+    expect(JSON.parse(await readFile(paths.statusPath, "utf8"))).toEqual({ run_id: runId, status: "dispatched" });
+    expect(JSON.parse(
         await readFile(join(artifactsDir, "dispatch", "current-tasks.json"), "utf8"),
-      ),
-      pendingTasks,
-    );
-    assert.deepEqual(
-      JSON.parse(
+      )).toEqual(pendingTasks);
+    expect(JSON.parse(
         await readFile(join(artifactsDir, "dispatch", "current-single-task.json"), "utf8"),
-      ),
-      pendingTasks[0],
-    );
+      )).toEqual(pendingTasks[0]);
     const singleTaskPrompt = await readFile(
       join(artifactsDir, "dispatch", "current-single-task-prompt.md"),
       "utf8",
     );
-    assert.match(singleTaskPrompt, /task_id: audit-1/);
-    assert.match(singleTaskPrompt, /worker_command:/);
-    assert.doesNotMatch(singleTaskPrompt, /audit-2/);
-    assert.ok(
-      (await readFile(join(artifactsDir, "dispatch", "audit-result.schema.json"), "utf8")).includes(
+    expect(singleTaskPrompt).toMatch(/task_id: audit-1/);
+    expect(singleTaskPrompt).toMatch(/worker_command:/);
+    expect(singleTaskPrompt).not.toMatch(/audit-2/);
+    expect((await readFile(join(artifactsDir, "dispatch", "audit-result.schema.json"), "utf8")).includes(
         "\"$schema\"",
-      ),
-    );
-    assert.ok(
-      (await readFile(join(artifactsDir, "dispatch", "audit-results.schema.json"), "utf8")).includes(
+      )).toBeTruthy();
+    expect((await readFile(join(artifactsDir, "dispatch", "audit-results.schema.json"), "utf8")).includes(
         "\"Audit Results\"",
-      ),
-    );
-    assert.ok(
-      (await readFile(join(artifactsDir, "dispatch", "finding.schema.json"), "utf8")).includes(
+      )).toBeTruthy();
+    expect((await readFile(join(artifactsDir, "dispatch", "finding.schema.json"), "utf8")).includes(
         "\"Audit Finding\"",
-      ),
-    );
+      )).toBeTruthy();
 
     await clearDispatchFiles(artifactsDir);
 
-    assert.equal(existsSync(join(artifactsDir, "dispatch", "current-task.json")), false);
-    assert.equal(existsSync(join(artifactsDir, "dispatch", "current-prompt.md")), false);
-    assert.equal(existsSync(join(artifactsDir, "dispatch", "current-tasks.json")), false);
-    assert.equal(existsSync(join(artifactsDir, "dispatch", "current-single-task.json")), false);
-    assert.equal(existsSync(join(artifactsDir, "dispatch", "current-single-task-prompt.md")), false);
-    assert.equal(
-      existsSync(join(artifactsDir, "dispatch", "audit-result.schema.json")),
-      false,
-    );
-    assert.equal(
-      existsSync(join(artifactsDir, "dispatch", "audit-results.schema.json")),
-      false,
-    );
-    assert.equal(existsSync(join(artifactsDir, "dispatch", "finding.schema.json")), false);
-    assert.equal(existsSync(paths.taskPath), true);
-    assert.equal(existsSync(paths.promptPath), true);
-    assert.equal(existsSync(paths.statusPath), true);
+    expect(existsSync(join(artifactsDir, "dispatch", "current-task.json"))).toBe(false);
+    expect(existsSync(join(artifactsDir, "dispatch", "current-prompt.md"))).toBe(false);
+    expect(existsSync(join(artifactsDir, "dispatch", "current-tasks.json"))).toBe(false);
+    expect(existsSync(join(artifactsDir, "dispatch", "current-single-task.json"))).toBe(false);
+    expect(existsSync(join(artifactsDir, "dispatch", "current-single-task-prompt.md"))).toBe(false);
+    expect(existsSync(join(artifactsDir, "dispatch", "audit-result.schema.json"))).toBe(false);
+    expect(existsSync(join(artifactsDir, "dispatch", "audit-results.schema.json"))).toBe(false);
+    expect(existsSync(join(artifactsDir, "dispatch", "finding.schema.json"))).toBe(false);
+    expect(existsSync(paths.taskPath)).toBe(true);
+    expect(existsSync(paths.promptPath)).toBe(true);
+    expect(existsSync(paths.statusPath)).toBe(true);
   });
 });
 
@@ -340,11 +304,7 @@ test("clearDispatchFiles is a no-op when the dispatch directory does not exist",
     const artifactsDir = join(tempDir, ".audit-tools/audit");
 
     await mkdir(artifactsDir, { recursive: true });
-    assert.equal(
-      existsSync(join(artifactsDir, "dispatch")),
-      false,
-      "dispatch directory should not exist before clearDispatchFiles",
-    );
+    expect(existsSync(join(artifactsDir, "dispatch")), "dispatch directory should not exist before clearDispatchFiles").toBe(false);
 
     // clearDispatchFiles must resolve without throwing even though dispatch/ is absent.
     await assert.doesNotReject(
@@ -353,11 +313,7 @@ test("clearDispatchFiles is a no-op when the dispatch directory does not exist",
     );
 
     // The directory must not be created as a side-effect.
-    assert.equal(
-      existsSync(join(artifactsDir, "dispatch")),
-      false,
-      "clearDispatchFiles must not create the dispatch directory",
-    );
+    expect(existsSync(join(artifactsDir, "dispatch")), "clearDispatchFiles must not create the dispatch directory").toBe(false);
   });
 });
 
@@ -367,10 +323,7 @@ test("io/artifacts has no import from cli/dispatch (ARC-13a4083a)", async () => 
   const { dirname, join: pathJoin } = await import("node:path");
   const __dir = dirname(fileURLToPath(import.meta.url));
   const src = await readFileFs(pathJoin(__dir, "../../src/audit/io/artifacts.ts"), "utf8");
-  assert.ok(
-    !src.includes("../cli/dispatch"),
-    "io/artifacts.ts must not import from ../cli/dispatch (circular dependency); use ../types/activeDispatch instead",
-  );
+  expect(!src.includes("../cli/dispatch"), "io/artifacts.ts must not import from ../cli/dispatch (circular dependency); use ../types/activeDispatch instead").toBeTruthy();
 });
 
 test("readPackageVersion logs to stderr on JSON parse error and returns null (OBS-9335faf6)", async () => {
@@ -415,12 +368,12 @@ test("readPackageVersion logs to stderr on JSON parse error and returns null (OB
       process.stderr.write = orig;
     }
 
-    assert.equal(result, null, "parse error must return null");
+    expect(result, "parse error must return null").toBe(null);
     const matchingLine = stderrLines.find((l) => l.includes("readPackageVersion"));
-    assert.ok(matchingLine, "stderr must contain a line mentioning readPackageVersion");
-    assert.match(matchingLine, /readPackageVersion/);
+    expect(matchingLine, "stderr must contain a line mentioning readPackageVersion").toBeTruthy();
+    expect(matchingLine).toMatch(/readPackageVersion/);
     // The error message from JSON.parse should be present
-    assert.ok(stderrLines.some((l) => l.includes("readPackageVersion")));
+    expect(stderrLines.some((l) => l.includes("readPackageVersion"))).toBeTruthy();
   });
 });
 
@@ -431,7 +384,7 @@ test("ARTIFACT_DEFINITIONS each have a non-null phase field from the 5 valid aud
   const { ARTIFACT_DEFINITIONS } = await import("../../src/audit/io/artifacts.ts");
   const validPhases = new Set(["intake", "analysis", "execution", "reporting", "supervisor"]);
   const entries = Object.entries(ARTIFACT_DEFINITIONS);
-  assert.ok(entries.length >= 25, `expected at least 25 artifact definitions, got ${entries.length}`);
+  expect(entries.length >= 25, `expected at least 25 artifact definitions, got ${entries.length}`).toBeTruthy();
   const missingPhase = [];
   const badPhase = [];
   for (const [key, def] of entries) {
@@ -441,12 +394,12 @@ test("ARTIFACT_DEFINITIONS each have a non-null phase field from the 5 valid aud
       badPhase.push(`${key}: '${def.phase}'`);
     }
   }
-  assert.deepEqual(missingPhase, [], `artifact definitions missing phase: ${missingPhase.join(", ")}`);
-  assert.deepEqual(badPhase, [], `artifact definitions with invalid phase: ${badPhase.join(", ")}`);
+  expect(missingPhase, `artifact definitions missing phase: ${missingPhase.join(", ")}`).toEqual([]);
+  expect(badPhase, `artifact definitions with invalid phase: ${badPhase.join(", ")}`).toEqual([]);
   // Each phase must be represented — the grouping is meaningful, not nominal.
   const presentPhases = new Set(entries.map(([, def]) => def.phase));
   for (const phase of validPhases) {
-    assert.ok(presentPhases.has(phase), `phase '${phase}' has no artifact definitions`);
+    expect(presentPhases.has(phase), `phase '${phase}' has no artifact definitions`).toBeTruthy();
   }
 });
 
@@ -455,7 +408,7 @@ test("ArtifactBundle active_dispatch field still typed as ActiveDispatchState af
   await withTempDir("arc-13a4083a-", async (dir) => {
     // No active-dispatch.json → active_dispatch should be absent
     const bundle = await load(dir);
-    assert.ok(!("active_dispatch" in bundle), "active_dispatch absent when file missing");
+    expect(!("active_dispatch" in bundle), "active_dispatch absent when file missing").toBeTruthy();
 
     // With a valid active-dispatch.json, the field should be populated
     const { writeFile: wf } = await import("node:fs/promises");
@@ -468,9 +421,9 @@ test("ArtifactBundle active_dispatch field still typed as ActiveDispatchState af
     };
     await wf(join(dir, "active-dispatch.json"), JSON.stringify(activeDispatch));
     const bundle2 = await load(dir);
-    assert.ok("active_dispatch" in bundle2, "active_dispatch populated when file present");
-    assert.equal(bundle2.active_dispatch?.run_id, "test-run");
-    assert.equal(bundle2.active_dispatch?.status, "active");
+    expect("active_dispatch" in bundle2, "active_dispatch populated when file present").toBeTruthy();
+    expect(bundle2.active_dispatch?.run_id).toBe("test-run");
+    expect(bundle2.active_dispatch?.status).toBe("active");
   });
 });
 
@@ -491,10 +444,10 @@ test("loadArtifactBundle throws ArtifactSchemaVersionError for mismatched intent
     await assert.rejects(
       load(dir),
       (err) => {
-        assert.ok(err instanceof ArtifactSchemaVersionError, "must be ArtifactSchemaVersionError");
-        assert.match(err.message, /intent_checkpoint\.json/);
-        assert.match(err.message, /intent-checkpoint\/v0/);
-        assert.match(err.message, /intent-checkpoint\/v1/);
+        expect(err instanceof ArtifactSchemaVersionError, "must be ArtifactSchemaVersionError").toBeTruthy();
+        expect(err.message).toMatch(/intent_checkpoint\.json/);
+        expect(err.message).toMatch(/intent-checkpoint\/v0/);
+        expect(err.message).toMatch(/intent-checkpoint\/v1/);
         return true;
       },
     );
@@ -515,7 +468,7 @@ test("loadArtifactBundle succeeds for correct intent_checkpoint schema_version (
     await wf(join(dir, "intent_checkpoint.json"), JSON.stringify(valid), "utf8");
 
     const bundle = await load(dir);
-    assert.equal(bundle.intent_checkpoint?.schema_version, "intent-checkpoint/v1");
+    expect(bundle.intent_checkpoint?.schema_version).toBe("intent-checkpoint/v1");
   });
 });
 
@@ -535,9 +488,9 @@ test("loadArtifactBundle throws ArtifactSchemaVersionError for mismatched provid
     await assert.rejects(
       load(dir),
       (err) => {
-        assert.ok(err instanceof ArtifactSchemaVersionError, "must be ArtifactSchemaVersionError");
-        assert.match(err.message, /provider_confirmation\.json/);
-        assert.match(err.message, /0\.0\.0/);
+        expect(err instanceof ArtifactSchemaVersionError, "must be ArtifactSchemaVersionError").toBeTruthy();
+        expect(err.message).toMatch(/provider_confirmation\.json/);
+        expect(err.message).toMatch(/0\.0\.0/);
         return true;
       },
     );
@@ -565,11 +518,7 @@ test("audit-code src/ has no circular imports — in-process cycle check reports
 
   const cycles = await findImportCycles(entrypoint);
 
-  assert.deepEqual(
-    cycles,
-    [],
-    `Circular imports detected in src/audit/. ` +
+  expect(cycles, `Circular imports detected in src/audit/. ` +
       `Cycles:\n${cycles.map((c) => "  " + formatCycle(c, repoRoot)).join("\n")}\n` +
-      `Fix by ensuring no import chain forms a cycle. (ARC-1fa005bb regression guard)`,
-  );
+      `Fix by ensuring no import chain forms a cycle. (ARC-1fa005bb regression guard)`).toEqual([]);
 });

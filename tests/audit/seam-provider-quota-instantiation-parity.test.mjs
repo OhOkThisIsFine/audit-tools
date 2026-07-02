@@ -35,8 +35,7 @@
  *      belong exclusively to the other (no cross-bleed of auditor-only exports).
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -121,30 +120,20 @@ const SHARED_QUOTA_SYMBOLS = [
 
 test("both orchestrators' quota/index export the same shared symbols", () => {
   for (const sym of SHARED_QUOTA_SYMBOLS) {
-    assert.ok(
-      sym in auditQuota,
-      `audit-code quota/index is missing shared symbol: ${sym}`,
-    );
-    assert.ok(
-      sym in remediateQuota,
-      `remediate-code quota/index is missing shared symbol: ${sym}`,
-    );
+    expect(sym in auditQuota, `audit-code quota/index is missing shared symbol: ${sym}`).toBeTruthy();
+    expect(sym in remediateQuota, `remediate-code quota/index is missing shared symbol: ${sym}`).toBeTruthy();
     // Both must be the same kind of thing (function vs class vs primitive)
-    assert.equal(
-      typeof auditQuota[sym],
-      typeof remediateQuota[sym],
-      `symbol ${sym} has type '${typeof auditQuota[sym]}' in audit-code but '${typeof remediateQuota[sym]}' in remediate-code`,
-    );
+    expect(typeof auditQuota[sym], `symbol ${sym} has type '${typeof auditQuota[sym]}' in audit-code but '${typeof remediateQuota[sym]}' in remediate-code`).toBe(typeof remediateQuota[sym]);
   }
 });
 
 // 2. Both providers/index expose the factory functions
 
 test("both providers/index expose createFreshSessionProvider and resolveFreshSessionProviderName", () => {
-  assert.equal(typeof auditProviders.createFreshSessionProvider, "function");
-  assert.equal(typeof auditProviders.resolveFreshSessionProviderName, "function");
-  assert.equal(typeof remediateProviders.createFreshSessionProvider, "function");
-  assert.equal(typeof remediateProviders.resolveFreshSessionProviderName, "function");
+  expect(typeof auditProviders.createFreshSessionProvider).toBe("function");
+  expect(typeof auditProviders.resolveFreshSessionProviderName).toBe("function");
+  expect(typeof remediateProviders.createFreshSessionProvider).toBe("function");
+  expect(typeof remediateProviders.resolveFreshSessionProviderName).toBe("function");
 });
 
 // 3. resolveFreshSessionProviderName: explicit provider passes through identically
@@ -162,12 +151,8 @@ test("resolveFreshSessionProviderName: explicit provider name produces same resu
       {},
       { commandExists: () => false, env: {} },
     );
-    assert.equal(
-      auditResult,
-      remediateResult,
-      `explicit provider '${name}' → audit='${auditResult}' remediate='${remediateResult}'`,
-    );
-    assert.equal(auditResult, name, `explicit provider '${name}' should pass through verbatim, got '${auditResult}'`);
+    expect(auditResult, `explicit provider '${name}' → audit='${auditResult}' remediate='${remediateResult}'`).toBe(remediateResult);
+    expect(auditResult, `explicit provider '${name}' should pass through verbatim, got '${auditResult}'`).toBe(name);
   }
 });
 
@@ -182,10 +167,10 @@ test("createFreshSessionProvider: local-subprocess instantiates correctly in bot
     "local-subprocess",
     {},
   );
-  assert.equal(auditProvider.name, "local-subprocess");
-  assert.equal(remediateProvider.name, "local-subprocess");
-  assert.equal(typeof auditProvider.launch, "function");
-  assert.equal(typeof remediateProvider.launch, "function");
+  expect(auditProvider.name).toBe("local-subprocess");
+  expect(remediateProvider.name).toBe("local-subprocess");
+  expect(typeof auditProvider.launch).toBe("function");
+  expect(typeof remediateProvider.launch).toBe("function");
 });
 
 // 5. hostLimits: distinct ENV_PREFIX — neither bleeds into the other
@@ -194,14 +179,14 @@ test("audit-code hostLimits reads AUDIT_CODE_ prefix, not REMEDIATE_CODE_", () =
   // Set the REMEDIATE prefix but NOT the AUDIT prefix — audit should return null
   const env = { REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "5" };
   const result = auditHostLimits.detectHostActiveSubagentLimit(env);
-  assert.equal(result, null, "audit-code must NOT read REMEDIATE_CODE_ prefix");
+  expect(result, "audit-code must NOT read REMEDIATE_CODE_ prefix").toBe(null);
 });
 
 test("remediate-code hostLimits reads REMEDIATE_CODE_ prefix, not AUDIT_CODE_", () => {
   // Set the AUDIT prefix but NOT the REMEDIATE prefix — remediate should return null
   const env = { AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "5" };
   const result = remediateHostLimits.detectHostActiveSubagentLimit(env);
-  assert.equal(result, null, "remediate-code must NOT read AUDIT_CODE_ prefix");
+  expect(result, "remediate-code must NOT read AUDIT_CODE_ prefix").toBe(null);
 });
 
 // 6. resolveHostActiveSubagentLimit: correct prefix produces a numeric result
@@ -212,9 +197,9 @@ test("audit-code resolveHostActiveSubagentLimit reads its own AUDIT_CODE_HOST_MA
     sessionConfig: {},
     env: { AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "8" },
   });
-  assert.ok(result !== null, "should resolve a limit from AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS");
-  assert.equal(typeof result.active_subagents, "number");
-  assert.equal(result.active_subagents, 8);
+  expect(result !== null, "should resolve a limit from AUDIT_CODE_HOST_MAX_ACTIVE_SUBAGENTS").toBeTruthy();
+  expect(typeof result.active_subagents).toBe("number");
+  expect(result.active_subagents).toBe(8);
 });
 
 test("remediate-code resolveHostActiveSubagentLimit reads its own REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS", () => {
@@ -222,9 +207,9 @@ test("remediate-code resolveHostActiveSubagentLimit reads its own REMEDIATE_CODE
     sessionConfig: {},
     env: { REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS: "4" },
   });
-  assert.ok(result !== null, "should resolve a limit from REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS");
-  assert.equal(typeof result.active_subagents, "number");
-  assert.equal(result.active_subagents, 4);
+  expect(result !== null, "should resolve a limit from REMEDIATE_CODE_HOST_MAX_ACTIVE_SUBAGENTS").toBeTruthy();
+  expect(typeof result.active_subagents).toBe("number");
+  expect(result.active_subagents).toBe(4);
 });
 
 // 7. No cross-bleed: auditor-only symbols absent from remediate-code quota/index
@@ -247,10 +232,7 @@ test("remediate-code quota/index does not export auditor-only symbols", () => {
     "resolveHostModel",
   ];
   for (const sym of auditorOnly) {
-    assert.ok(
-      !(sym in remediateQuota),
-      `remediate-code quota/index should NOT export auditor-only symbol: ${sym}`,
-    );
+    expect(!(sym in remediateQuota), `remediate-code quota/index should NOT export auditor-only symbol: ${sym}`).toBeTruthy();
   }
 });
 
@@ -263,10 +245,7 @@ test("audit-code quota/index exports auditor-specific symbols absent from shared
     "DISPATCH_QUOTA_V1ALPHA2",
   ];
   for (const sym of auditorOnly) {
-    assert.ok(
-      sym in auditQuota,
-      `audit-code quota/index should export auditor-specific symbol: ${sym}`,
-    );
+    expect(sym in auditQuota, `audit-code quota/index should export auditor-specific symbol: ${sym}`).toBeTruthy();
   }
 });
 
@@ -306,21 +285,12 @@ test("no per-orchestrator provider class body: orchestrator provider files decla
     const source = stripComments(readProviderSource(rel));
     // A re-export (`export { ClaudeCodeProvider } from "audit-tools/shared"`)
     // is allowed; a class *declaration* is not. Match `class <Name>` definitions.
-    assert.ok(
-      !/\bclass\s+\w+/.test(source),
-      `${rel} must not declare a provider class — the class is single-sourced in audit-tools/shared (drift-plan E4)`,
-    );
+    expect(!/\bclass\s+\w+/.test(source), `${rel} must not declare a provider class — the class is single-sourced in audit-tools/shared (drift-plan E4)`).toBeTruthy();
     // It must also not re-implement FreshSessionProvider locally.
-    assert.ok(
-      !/implements\s+FreshSessionProvider/.test(source),
-      `${rel} must not implement FreshSessionProvider locally (drift-plan E4)`,
-    );
+    expect(!/implements\s+FreshSessionProvider/.test(source), `${rel} must not implement FreshSessionProvider locally (drift-plan E4)`).toBeTruthy();
     // It must construct/bind the shared class (factory injection), so the shared
     // import has to be present.
-    assert.ok(
-      source.includes("audit-tools/shared"),
-      `${rel} must source its provider class from audit-tools/shared`,
-    );
+    expect(source.includes("audit-tools/shared"), `${rel} must source its provider class from audit-tools/shared`).toBeTruthy();
   }
 });
 
@@ -333,16 +303,8 @@ test("provider class single-source: both orchestrators' ClaudeCodeProvider is th
       import.meta.url,
     )
   );
-  assert.strictEqual(
-    auditClaude.ClaudeCodeProvider,
-    sharedShared.ClaudeCodeProvider,
-    "audit-code ClaudeCodeProvider must be the shared class, not a re-implementation",
-  );
-  assert.strictEqual(
-    remediateClaude.ClaudeCodeProvider,
-    sharedShared.ClaudeCodeProvider,
-    "remediate-code ClaudeCodeProvider must be the shared class, not a re-implementation",
-  );
+  expect(auditClaude.ClaudeCodeProvider, "audit-code ClaudeCodeProvider must be the shared class, not a re-implementation").toBe(sharedShared.ClaudeCodeProvider);
+  expect(remediateClaude.ClaudeCodeProvider, "remediate-code ClaudeCodeProvider must be the shared class, not a re-implementation").toBe(sharedShared.ClaudeCodeProvider);
 });
 
 test("per-orchestrator delta is ONLY the claude-code skip-permissions default", async () => {
@@ -407,20 +369,14 @@ test("per-orchestrator delta is ONLY the claude-code skip-permissions default", 
   const remediateCall = await argvFor(remediateClaude.createClaudeCodeProvider);
 
   // audit-code default: permissions NOT skipped.
-  assert.ok(
-    !auditCall.args.includes("--dangerously-skip-permissions"),
-    "audit-code claude-code must NOT skip permissions by default",
-  );
+  expect(!auditCall.args.includes("--dangerously-skip-permissions"), "audit-code claude-code must NOT skip permissions by default").toBeTruthy();
   // remediate-code default: permissions skipped (unattended).
-  assert.ok(
-    remediateCall.args.includes("--dangerously-skip-permissions"),
-    "remediate-code claude-code MUST skip permissions by default",
-  );
+  expect(remediateCall.args.includes("--dangerously-skip-permissions"), "remediate-code claude-code MUST skip permissions by default").toBeTruthy();
   // Shared behavior: both deliver the prompt via stdin (not as an argv value).
-  assert.equal(auditCall.launchInput.stdinText, "prompt body");
-  assert.equal(remediateCall.launchInput.stdinText, "prompt body");
-  assert.ok(!auditCall.args.includes("prompt body"));
-  assert.ok(!remediateCall.args.includes("prompt body"));
+  expect(auditCall.launchInput.stdinText).toBe("prompt body");
+  expect(remediateCall.launchInput.stdinText).toBe("prompt body");
+  expect(!auditCall.args.includes("prompt body")).toBeTruthy();
+  expect(!remediateCall.args.includes("prompt body")).toBeTruthy();
 });
 
 // ── 9. Provider-keyed factory: unknown key → generic fallback (drift-plan E5) ─
@@ -428,9 +384,9 @@ test("per-orchestrator delta is ONLY the claude-code skip-permissions default", 
 test("getErrorParserForProvider: unknown provider key falls back to the generic parser (both orchestrators)", () => {
   for (const [label, quota] of [["audit-code", auditQuota], ["remediate-code", remediateQuota]]) {
     const claude = quota.getErrorParserForProvider("claude-code");
-    assert.equal(claude.name, "claude-code", `${label} must resolve claude-code parser`);
+    expect(claude.name, `${label} must resolve claude-code parser`).toBe("claude-code");
     const unknown = quota.getErrorParserForProvider("totally-unknown-provider");
-    assert.equal(unknown.name, "generic", `${label} unknown key must fall back to generic parser`);
+    expect(unknown.name, `${label} unknown key must fall back to generic parser`).toBe("generic");
   }
 });
 
@@ -438,6 +394,6 @@ test("getHeaderExtractorForProvider: unknown provider key falls back to the gene
   // The header AXIS is intentionally audit-only; we only verify the unknown-key
   // fallback contract of its provider-keyed factory here.
   const { getHeaderExtractorForProvider } = await import("../../src/audit/quota/headerExtractors/index.ts");
-  assert.equal(getHeaderExtractorForProvider("claude-code").name, "claude-code");
-  assert.equal(getHeaderExtractorForProvider("totally-unknown").name, "generic");
+  expect(getHeaderExtractorForProvider("claude-code").name).toBe("claude-code");
+  expect(getHeaderExtractorForProvider("totally-unknown").name).toBe("generic");
 });

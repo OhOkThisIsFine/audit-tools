@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
@@ -39,57 +38,58 @@ function makeActiveReviewRun(artifactsDir, runId) {
 // hostCanDispatch=false — single_task_fallback branch
 // ---------------------------------------------------------------------------
 
-await test("renderSemanticReviewStep hostCanDispatch=false returns a single_task_fallback step contract", async (t) => {
-  const artifactsDir = await makeTempArtifactsDir();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+describe("renderSemanticReviewStep hostCanDispatch=false returns a single_task_fallback step contract", () => {
+  let artifactsDir;
+  let activeReviewRun;
+  let result;
 
-  const runId = "test-run-fallback";
-  const activeReviewRun = makeActiveReviewRun(artifactsDir, runId);
+  beforeAll(async () => {
+    artifactsDir = await makeTempArtifactsDir();
 
-  const result = await renderSemanticReviewStep({
-    root: artifactsDir,
-    artifactsDir,
-    activeReviewRun,
-    hostCanDispatch: false,
-    hostMaxActiveSubagents: null,
-    hostCanRestrictSubagentTools: false,
-    hostCanSelectSubagentModel: false,
+    const runId = "test-run-fallback";
+    activeReviewRun = makeActiveReviewRun(artifactsDir, runId);
+
+    result = await renderSemanticReviewStep({
+      root: artifactsDir,
+      artifactsDir,
+      activeReviewRun,
+      hostCanDispatch: false,
+      hostMaxActiveSubagents: null,
+      hostCanRestrictSubagentTools: false,
+      hostCanSelectSubagentModel: false,
+    });
   });
 
-  await t.test("stepKind is single_task_fallback", () => {
-    assert.strictEqual(result.step_kind, "single_task_fallback");
+  afterAll(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  it("stepKind is single_task_fallback", () => {
+    expect(result.step_kind).toBe("single_task_fallback");
   });
 
-  await t.test("status is ready", () => {
-    assert.strictEqual(result.status, "ready");
+  it("status is ready", () => {
+    expect(result.status).toBe("ready");
   });
 
-  await t.test("runId matches activeReviewRun.run_id", () => {
-    assert.strictEqual(result.run_id, activeReviewRun.run_id);
+  it("runId matches activeReviewRun.run_id", () => {
+    expect(result.run_id).toBe(activeReviewRun.run_id);
   });
 
-  await t.test("artifactPaths.single_task_prompt is a non-empty string", () => {
-    assert.ok(
-      typeof result.artifact_paths.single_task_prompt === "string" &&
-        result.artifact_paths.single_task_prompt.length > 0,
-      "single_task_prompt must be a non-empty string",
-    );
+  it("artifactPaths.single_task_prompt is a non-empty string", () => {
+    expect(typeof result.artifact_paths.single_task_prompt === "string" &&
+        result.artifact_paths.single_task_prompt.length > 0, "single_task_prompt must be a non-empty string").toBeTruthy();
   });
 
-  await t.test("artifactPaths.audit_results equals normalized activeReviewRun.audit_results_path", () => {
-    assert.strictEqual(
-      result.artifact_paths.audit_results,
-      toPromptPathToken(activeReviewRun.audit_results_path),
-    );
+  it("artifactPaths.audit_results equals normalized activeReviewRun.audit_results_path", () => {
+    expect(result.artifact_paths.audit_results).toBe(toPromptPathToken(activeReviewRun.audit_results_path));
   });
 
-  await t.test("allowedCommands has length >= 1 and contains the rendered worker command", () => {
-    assert.ok(result.allowed_commands.length >= 1, "allowed_commands must be non-empty");
+  it("allowedCommands has length >= 1 and contains the rendered worker command", () => {
+    expect(result.allowed_commands.length >= 1, "allowed_commands must be non-empty").toBeTruthy();
     // The rendered worker command is built from renderCommand(activeReviewRun.worker_command)
     const hasWorkerCommand = result.allowed_commands.some((cmd) =>
       cmd.includes("audit-code") && cmd.includes("submit-packet"),
     );
-    assert.ok(hasWorkerCommand, "allowed_commands must contain the rendered worker command");
+    expect(hasWorkerCommand, "allowed_commands must contain the rendered worker command").toBeTruthy();
   });
 });
 
@@ -97,83 +97,78 @@ await test("renderSemanticReviewStep hostCanDispatch=false returns a single_task
 // hostCanDispatch=true — dispatch_review branch
 // ---------------------------------------------------------------------------
 
-await test("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_review step contract", async (t) => {
-  const artifactsDir = await makeTempArtifactsDir();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+describe("renderSemanticReviewStep hostCanDispatch=true returns a dispatch_review step contract", () => {
+  let artifactsDir;
+  let activeReviewRun;
+  let result;
 
-  const runId = "test-run-dispatch";
-  const runDir = join(artifactsDir, "runs", runId);
-  await mkdir(join(runDir, "task-results"), { recursive: true });
+  beforeAll(async () => {
+    artifactsDir = await makeTempArtifactsDir();
 
-  // Write a minimal pending-audit-tasks.json with one task
-  const pendingTasks = [
-    {
-      task_id: "t-abc123",
-      unit_id: "unit-abc",
-      pass_id: "pass:correctness",
-      lens: "correctness",
-      file_paths: ["src/foo/foo.ts"],
-      file_line_counts: { "src/foo/foo.ts": 50 },
-      rationale: "review foo",
-      priority: "medium",
-    },
-  ];
-  await writeFile(
-    join(runDir, "pending-audit-tasks.json"),
-    JSON.stringify(pendingTasks),
-    "utf8",
-  );
+    const runId = "test-run-dispatch";
+    const runDir = join(artifactsDir, "runs", runId);
+    await mkdir(join(runDir, "task-results"), { recursive: true });
 
-  const activeReviewRun = makeActiveReviewRun(artifactsDir, runId);
-
-  const result = await renderSemanticReviewStep({
-    root: artifactsDir,
-    artifactsDir,
-    activeReviewRun,
-    hostCanDispatch: true,
-    hostMaxActiveSubagents: null,
-    hostCanRestrictSubagentTools: false,
-    hostCanSelectSubagentModel: false,
-  });
-
-  await t.test("stepKind is dispatch_review", () => {
-    assert.strictEqual(result.step_kind, "dispatch_review");
-  });
-
-  await t.test("status is ready", () => {
-    assert.strictEqual(result.status, "ready");
-  });
-
-  await t.test("runId matches activeReviewRun.run_id", () => {
-    assert.strictEqual(result.run_id, activeReviewRun.run_id);
-  });
-
-  await t.test("progress.pending_packets >= 1", () => {
-    assert.ok(
-      result.progress != null && result.progress.pending_packets >= 1,
-      "progress.pending_packets must be at least 1",
+    // Write a minimal pending-audit-tasks.json with one task
+    const pendingTasks = [
+      {
+        task_id: "t-abc123",
+        unit_id: "unit-abc",
+        pass_id: "pass:correctness",
+        lens: "correctness",
+        file_paths: ["src/foo/foo.ts"],
+        file_line_counts: { "src/foo/foo.ts": 50 },
+        rationale: "review foo",
+        priority: "medium",
+      },
+    ];
+    await writeFile(
+      join(runDir, "pending-audit-tasks.json"),
+      JSON.stringify(pendingTasks),
+      "utf8",
     );
+
+    activeReviewRun = makeActiveReviewRun(artifactsDir, runId);
+
+    result = await renderSemanticReviewStep({
+      root: artifactsDir,
+      artifactsDir,
+      activeReviewRun,
+      hostCanDispatch: true,
+      hostMaxActiveSubagents: null,
+      hostCanRestrictSubagentTools: false,
+      hostCanSelectSubagentModel: false,
+    });
   });
 
-  await t.test("artifactPaths.dispatch_plan is a non-empty string", () => {
-    assert.ok(
-      typeof result.artifact_paths.dispatch_plan === "string" &&
-        result.artifact_paths.dispatch_plan.length > 0,
-      "dispatch_plan must be a non-empty string",
-    );
+  afterAll(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  it("stepKind is dispatch_review", () => {
+    expect(result.step_kind).toBe("dispatch_review");
   });
 
-  await t.test("allowedCommands contains a merge-and-ingest command", () => {
-    assert.ok(
-      result.allowed_commands.some((cmd) => /merge-and-ingest/.test(cmd)),
-      "allowed_commands must include a merge-and-ingest command",
-    );
+  it("status is ready", () => {
+    expect(result.status).toBe("ready");
   });
 
-  await t.test("allowedCommands contains a next-step command", () => {
-    assert.ok(
-      result.allowed_commands.some((cmd) => /next-step/.test(cmd)),
-      "allowed_commands must include a next-step command",
-    );
+  it("runId matches activeReviewRun.run_id", () => {
+    expect(result.run_id).toBe(activeReviewRun.run_id);
+  });
+
+  it("progress.pending_packets >= 1", () => {
+    expect(result.progress != null && result.progress.pending_packets >= 1, "progress.pending_packets must be at least 1").toBeTruthy();
+  });
+
+  it("artifactPaths.dispatch_plan is a non-empty string", () => {
+    expect(typeof result.artifact_paths.dispatch_plan === "string" &&
+        result.artifact_paths.dispatch_plan.length > 0, "dispatch_plan must be a non-empty string").toBeTruthy();
+  });
+
+  it("allowedCommands contains a merge-and-ingest command", () => {
+    expect(result.allowed_commands.some((cmd) => /merge-and-ingest/.test(cmd)), "allowed_commands must include a merge-and-ingest command").toBeTruthy();
+  });
+
+  it("allowedCommands contains a next-step command", () => {
+    expect(result.allowed_commands.some((cmd) => /next-step/.test(cmd)), "allowed_commands must include a next-step command").toBeTruthy();
   });
 });

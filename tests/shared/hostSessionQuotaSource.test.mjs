@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { HostSessionQuotaSource } = await import(
   "../../src/shared/quota/hostSessionQuotaSource.ts"
@@ -34,22 +33,22 @@ test("CE-003 channel isolation: a healthy result quoting a limit string never pa
   // The consumed AuditResult finding content quotes the exact session-limit
   // string — but it arrives on the `result` channel and must be ignored.
   const event = src.recordLimit("result", `Finding: code prints "${LIMIT_TEXT}"`, "pkt-1");
-  assert.equal(event.recorded, false, "result-channel limit string must not be recorded");
-  assert.equal(event.cooldown_until, null);
+  expect(event.recorded, "result-channel limit string must not be recorded").toBe(false);
+  expect(event.cooldown_until).toBe(null);
 
   const probe = await src.probeUsage(KEY);
   // Open with no limit known → the source has NO usage signal, so it passes
   // through (not_applicable / null snapshot) rather than masking the learned
   // source in the cascade. Composition over masking.
-  assert.equal(probe.status, "not_applicable", "open + no limit → passes through");
-  assert.equal(probe.snapshot, null, "no snapshot asserted while window open with no limit");
-  assert.equal(src.cooldownUntil(), null, "no cooldown set");
-  assert.equal(escalations.length, 0);
+  expect(probe.status, "open + no limit → passes through").toBe("not_applicable");
+  expect(probe.snapshot, "no snapshot asserted while window open with no limit").toBe(null);
+  expect(src.cooldownUntil(), "no cooldown set").toBe(null);
+  expect(escalations.length).toBe(0);
 
   // The SAME string on the error channel DOES record a limit.
   const real = src.recordLimit("error", LIMIT_TEXT, "pkt-1");
-  assert.equal(real.recorded, true, "error-channel limit must be recorded");
-  assert.notEqual(real.cooldown_until, null);
+  expect(real.recorded, "error-channel limit must be recorded").toBe(true);
+  expect(real.cooldown_until).not.toBe(null);
 });
 
 test("reset form 'resets 3:30pm' (clock time) → next-future-occurrence pause, auto-resume", async () => {
@@ -59,31 +58,25 @@ test("reset form 'resets 3:30pm' (clock time) → next-future-occurrence pause, 
   const src = new HostSessionQuotaSource({ providerModelKey: KEY, now });
 
   const event = src.recordLimit("error", "session limit reached · resets 3:30pm", "pkt-a");
-  assert.equal(event.recorded, true);
+  expect(event.recorded).toBe(true);
   const resetMs = new Date(event.cooldown_until).getTime();
   const expected = new Date(2026, 0, 1, 15, 30, 0).getTime();
-  assert.ok(
-    Math.abs(resetMs - expected) <= 6000,
-    `reset should be ~15:30 today (+buffer); got ${event.cooldown_until}`,
-  );
+  expect(Math.abs(resetMs - expected) <= 6000, `reset should be ~15:30 today (+buffer); got ${event.cooldown_until}`).toBeTruthy();
 
   // Paused before reset.
   let probe = await src.probeUsage(KEY);
-  assert.equal(probe.snapshot.remaining_pct, 0, "paused → remaining_pct 0");
-  assert.equal(probe.snapshot.reset_at, event.cooldown_until);
+  expect(probe.snapshot.remaining_pct, "paused → remaining_pct 0").toBe(0);
+  expect(probe.snapshot.reset_at).toBe(event.cooldown_until);
 
   // Advance past the reset → auto-resume. A limit was seen this cycle, so the
   // source now reports the near-wall band (CRITICAL throttle) rather than passing
   // through — the account approached the wall, the tracker is still live.
   now.set(resetMs + 1);
   probe = await src.probeUsage(KEY);
-  assert.equal(probe.status, "ok", "window reopened after reset");
-  assert.ok(
-    probe.snapshot.remaining_pct > 0 && probe.snapshot.remaining_pct < 0.1,
-    `near-wall band after a recorded limit; got ${probe.snapshot.remaining_pct}`,
-  );
-  assert.equal(probe.snapshot.reset_at, null);
-  assert.equal(src.cooldownUntil(), null);
+  expect(probe.status, "window reopened after reset").toBe("ok");
+  expect(probe.snapshot.remaining_pct > 0 && probe.snapshot.remaining_pct < 0.1, `near-wall band after a recorded limit; got ${probe.snapshot.remaining_pct}`).toBeTruthy();
+  expect(probe.snapshot.reset_at).toBe(null);
+  expect(src.cooldownUntil()).toBe(null);
 });
 
 test("reset form 'Resets in 2h' (duration) → ~2h pause, auto-resume", async () => {
@@ -92,23 +85,17 @@ test("reset form 'Resets in 2h' (duration) → ~2h pause, auto-resume", async ()
   const src = new HostSessionQuotaSource({ providerModelKey: KEY, now });
 
   const event = src.recordLimit("status", "You've hit your usage limit. Resets in 2h", "pkt-b");
-  assert.equal(event.recorded, true);
+  expect(event.recorded).toBe(true);
   const resetMs = new Date(event.cooldown_until).getTime();
-  assert.ok(
-    Math.abs(resetMs - (start + 2 * 3600_000)) <= 6000,
-    `reset should be ~2h out (+buffer); got ${event.cooldown_until}`,
-  );
+  expect(Math.abs(resetMs - (start + 2 * 3600_000)) <= 6000, `reset should be ~2h out (+buffer); got ${event.cooldown_until}`).toBeTruthy();
 
   now.set(start + 2 * 3600_000 - 1000);
-  assert.equal((await src.probeUsage(KEY)).snapshot.remaining_pct, 0, "still paused just before reset");
+  expect((await src.probeUsage(KEY)).snapshot.remaining_pct, "still paused just before reset").toBe(0);
 
   now.set(resetMs + 1);
   const resumed = await src.probeUsage(KEY);
-  assert.equal(resumed.status, "ok", "auto-resumed after reset");
-  assert.ok(
-    resumed.snapshot.remaining_pct > 0 && resumed.snapshot.remaining_pct < 0.1,
-    "near-wall band after a recorded limit",
-  );
+  expect(resumed.status, "auto-resumed after reset").toBe("ok");
+  expect(resumed.snapshot.remaining_pct > 0 && resumed.snapshot.remaining_pct < 0.1, "near-wall band after a recorded limit").toBeTruthy();
 });
 
 test("non-consuming re-queue: dropProvider returns the packet to pending, never consumed", async () => {
@@ -118,7 +105,7 @@ test("non-consuming re-queue: dropProvider returns the packet to pending, never 
   const now = fakeClock(Date.UTC(2026, 0, 1, 10, 0, 0));
   const src = new HostSessionQuotaSource({ providerModelKey: KEY, now });
   const event = src.recordLimit("error", LIMIT_TEXT, "pkt-c");
-  assert.equal(event.recorded, true);
+  expect(event.recorded).toBe(true);
 
   const state = {
     active_pools: [{ pool: { id: "host" }, provider: {} }],
@@ -130,13 +117,9 @@ test("non-consuming re-queue: dropProvider returns the packet to pending, never 
 
   const next = dropProvider(state, "host", "exhausted");
   // The packet is re-queued (pending), not lost and not consumed.
-  assert.deepEqual(
-    next.pending_tokens.map((t) => t.id),
-    ["pkt-c"],
-    "limit-message packet returned to pending (non-consuming re-queue)",
-  );
-  assert.equal(next.in_flight_tokens.length, 0, "no longer in-flight");
-  assert.equal(next.event_log[0].requeued_count, 1, "re-queue is recorded, not a consume");
+  expect(next.pending_tokens.map((t) => t.id), "limit-message packet returned to pending (non-consuming re-queue)").toEqual(["pkt-c"]);
+  expect(next.in_flight_tokens.length, "no longer in-flight").toBe(0);
+  expect(next.event_log[0].requeued_count, "re-queue is recorded, not a consume").toBe(1);
 });
 
 test("bounded escalation: same packet re-limiting past the bound escalates to a terminal operator surface", async () => {
@@ -156,17 +139,17 @@ test("bounded escalation: same packet re-limiting past the bound escalates to a 
   for (let i = 0; i < 4; i++) {
     last = src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-loop");
     if (i < 3) {
-      assert.equal(last.escalation, null, `cycle ${i + 1} within bound → no escalation yet`);
+      expect(last.escalation, `cycle ${i + 1} within bound → no escalation yet`).toBe(null);
       now.advance(1000); // small drift, still well before the 1h reset
     }
   }
 
-  assert.notEqual(last.escalation, null, "4th re-limit (> bound 3) must escalate");
-  assert.equal(last.escalation.packet_id, "pkt-loop");
-  assert.equal(last.escalation.consecutive_re_limits, 4);
-  assert.equal(escalations.length, 1, "operator surface invoked exactly once");
-  assert.match(escalations[0].reason, /escalating to operator/i);
-  assert.equal(src.isEscalated("pkt-loop"), true, "packet marked escalated → caller stops re-queuing");
+  expect(last.escalation, "4th re-limit (> bound 3) must escalate").not.toBe(null);
+  expect(last.escalation.packet_id).toBe("pkt-loop");
+  expect(last.escalation.consecutive_re_limits).toBe(4);
+  expect(escalations.length, "operator surface invoked exactly once").toBe(1);
+  expect(escalations[0].reason).toMatch(/escalating to operator/i);
+  expect(src.isEscalated("pkt-loop"), "packet marked escalated → caller stops re-queuing").toBe(true);
 });
 
 test("escalation also fires on cumulative wall bound", async () => {
@@ -183,9 +166,9 @@ test("escalation also fires on cumulative wall bound", async () => {
   // Each re-limit adds ~1h (+5s buffer). Two cycles = ~2h > 90min bound.
   src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-wall");
   const second = src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-wall");
-  assert.notEqual(second.escalation, null, "cumulative wall over bound → escalate");
-  assert.equal(escalations.length, 1);
-  assert.match(escalations[0].reason, /cumulative/i);
+  expect(second.escalation, "cumulative wall over bound → escalate").not.toBe(null);
+  expect(escalations.length).toBe(1);
+  expect(escalations[0].reason).toMatch(/cumulative/i);
 });
 
 test("own-provider only: a different provider/model key is not_applicable (composes, never overwrites)", async () => {
@@ -194,8 +177,8 @@ test("own-provider only: a different provider/model key is not_applicable (compo
   src.recordLimit("error", LIMIT_TEXT, "pkt-x");
 
   const other = await src.probeUsage("other-provider/model");
-  assert.equal(other.status, "not_applicable", "does not answer for other providers");
-  assert.equal(other.snapshot, null);
+  expect(other.status, "does not answer for other providers").toBe("not_applicable");
+  expect(other.snapshot).toBe(null);
 });
 
 test("a fresh genuine limit after auto-resume starts a new (un-escalated) re-limit count", async () => {
@@ -209,17 +192,17 @@ test("a fresh genuine limit after auto-resume starts a new (un-escalated) re-lim
   // Two same-window re-limits (within bound), then resume, then a fresh limit:
   src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-y");
   const r2 = src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-y");
-  assert.equal(r2.escalation, null, "2 == bound, not yet over");
+  expect(r2.escalation, "2 == bound, not yet over").toBe(null);
 
   // Advance past the reset → window reopened (cooldown cleared). The tracker
   // survives the auto-resume (so a probe between two pre-reset re-limits can't
   // silently reset the escalation count); near-wall band is still reported.
   now.advance(2 * 3600_000);
   const afterResume = await src.probeUsage(KEY);
-  assert.equal(afterResume.status, "ok", "resumed");
-  assert.equal(src.cooldownUntil(), null, "cooldown cleared on resume");
+  expect(afterResume.status, "resumed").toBe("ok");
+  expect(src.cooldownUntil(), "cooldown cleared on resume").toBe(null);
 
   // A genuinely new limit on the same packet must NOT immediately escalate.
   const fresh = src.recordLimit("error", "session limit reached. Resets in 1h", "pkt-y");
-  assert.equal(fresh.escalation, null, "post-resume count restarts — no false escalation");
+  expect(fresh.escalation, "post-resume count restarts — no false escalation").toBe(null);
 });

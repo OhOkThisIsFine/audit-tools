@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
@@ -62,16 +62,16 @@ const minimalConfig = {
 };
 
 test("parseJsonLoose parses direct, fenced, and prose-wrapped JSON", () => {
-  assert.deepEqual(parseJsonLoose('{"a":1}'), { a: 1 });
-  assert.deepEqual(parseJsonLoose("```json\n{\"a\":2}\n```"), { a: 2 });
-  assert.deepEqual(parseJsonLoose("Sure!\n{\"a\":3}\nDone."), { a: 3 });
+  expect(parseJsonLoose('{"a":1}')).toEqual({ a: 1 });
+  expect(parseJsonLoose("```json\n{\"a\":2}\n```")).toEqual({ a: 2 });
+  expect(parseJsonLoose("Sure!\n{\"a\":3}\nDone.")).toEqual({ a: 3 });
   assert.throws(() => parseJsonLoose("no json here"));
 });
 
 test("parseJsonLoose balance scan tolerates trailing garbage after the object", () => {
   // A complete object followed by junk braces/brackets: the lastIndexOf-slice
   // approach would over-capture; the balance scan stops at the matched close.
-  assert.deepEqual(parseJsonLoose('prefix {"a":1,"b":[2,3]} }]}'), {
+  expect(parseJsonLoose('prefix {"a":1,"b":[2,3]} }]}')).toEqual({
     a: 1,
     b: [2, 3],
   });
@@ -80,14 +80,14 @@ test("parseJsonLoose balance scan tolerates trailing garbage after the object", 
 test("parseJsonLoose returns the real object, not a trivial example before it", () => {
   // Reasoning models often emit an illustrative `{}` before the real payload.
   const text = 'Example: {} then the answer:\n{"files":[],"result":{"ok":true}}';
-  assert.deepEqual(parseJsonLoose(text), { files: [], result: { ok: true } });
+  expect(parseJsonLoose(text)).toEqual({ files: [], result: { ok: true } });
 });
 
 test("parseJsonLoose ignores braces inside strings", () => {
   // A `}` inside a string must not terminate the object early.
-  assert.deepEqual(parseJsonLoose('{"msg":"a } b"}'), { msg: "a } b" });
+  expect(parseJsonLoose('{"msg":"a } b"}')).toEqual({ msg: "a } b" });
   // Escaped quote inside a string must not flip string state.
-  assert.deepEqual(parseJsonLoose('{"msg":"she said \\"hi } bye\\""}'), {
+  expect(parseJsonLoose('{"msg":"she said \\"hi } bye\\""}')).toEqual({
     msg: 'she said "hi } bye"',
   });
 });
@@ -109,11 +109,11 @@ test("launch applies files to the worktree and writes the result", async () => {
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
 
-  assert.equal(res.accepted, true);
-  assert.equal(res.exitCode, 0);
-  assert.equal(readFileSync(join(repoRoot, "src/foo.txt"), "utf8"), "hello");
-  assert.equal(readFileSync(join(repoRoot, "bar.txt"), "utf8"), "world");
-  assert.deepEqual(JSON.parse(readFileSync(input.resultPath, "utf8")), {
+  expect(res.accepted).toBe(true);
+  expect(res.exitCode).toBe(0);
+  expect(readFileSync(join(repoRoot, "src/foo.txt"), "utf8")).toBe("hello");
+  expect(readFileSync(join(repoRoot, "bar.txt"), "utf8")).toBe("world");
+  expect(JSON.parse(readFileSync(input.resultPath, "utf8"))).toEqual({
     item_results: [{ finding_id: "N-1", status: "resolved" }],
   });
 });
@@ -126,9 +126,9 @@ test("launch degrades cleanly when the API key env var is unset", async () => {
     { fetchFn, env: {} },
   );
   const res = await provider.launch(input);
-  assert.equal(res.accepted, false);
-  assert.match(res.error ?? "", /API key/);
-  assert.equal(fetchFn._calls, 0, "must not call the endpoint without a key");
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/API key/);
+  expect(fetchFn._calls, "must not call the endpoint without a key").toBe(0);
 });
 
 test("launch requires both base_url and model", async () => {
@@ -137,12 +137,12 @@ test("launch requires both base_url and model", async () => {
     { model: "m", api_key: "k" },
     { fetchFn: fakeFetchReturning("{}") },
   );
-  assert.equal((await noBase.launch(input)).accepted, false);
+  expect((await noBase.launch(input)).accepted).toBe(false);
   const noModel = new OpenAiCompatibleProvider(
     { base_url: "https://x/v1", api_key: "k" },
     { fetchFn: fakeFetchReturning("{}") },
   );
-  assert.equal((await noModel.launch(input)).accepted, false);
+  expect((await noModel.launch(input)).accepted).toBe(false);
 });
 
 test("launch fails on a non-2xx HTTP response", async () => {
@@ -150,8 +150,8 @@ test("launch fails on a non-2xx HTTP response", async () => {
   const fetchFn = fakeFetchReturning("rate limited", { ok: false, status: 429 });
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, false);
-  assert.match(res.error ?? "", /HTTP 429/);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/HTTP 429/);
 });
 
 test("launch fails when the completion is not parseable JSON", async () => {
@@ -159,8 +159,8 @@ test("launch fails when the completion is not parseable JSON", async () => {
   const fetchFn = fakeFetchReturning("I cannot help with that.");
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, false);
-  assert.match(res.error ?? "", /parseable JSON/);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/parseable JSON/);
 });
 
 test("launch rejects a file path escaping the worktree", async () => {
@@ -172,9 +172,9 @@ test("launch rejects a file path escaping the worktree", async () => {
   const fetchFn = fakeFetchReturning(content);
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, false);
-  assert.match(res.error ?? "", /outside the worktree/);
-  assert.equal(existsSync(join(repoRoot, "..", "escape.txt")), false);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/outside the worktree/);
+  expect(existsSync(join(repoRoot, "..", "escape.txt"))).toBe(false);
 });
 
 test("launch fails when the model returns files but omits the result", async () => {
@@ -183,8 +183,8 @@ test("launch fails when the model returns files but omits the result", async () 
   const fetchFn = fakeFetchReturning(content);
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, false);
-  assert.match(res.error ?? "", /result/);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/result/);
 });
 
 test("launch skips control-plane (.audit-tools) paths echoed into files[]", async () => {
@@ -204,13 +204,9 @@ test("launch skips control-plane (.audit-tools) paths echoed into files[]", asyn
   const fetchFn = fakeFetchReturning(content);
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, true);
-  assert.equal(readFileSync(join(repoRoot, "src/real.ts"), "utf8"), "export const x = 1;");
-  assert.equal(
-    existsSync(join(repoRoot, ".audit-tools")),
-    false,
-    "a .audit-tools/ control-plane path must never be written into the worktree",
-  );
+  expect(res.accepted).toBe(true);
+  expect(readFileSync(join(repoRoot, "src/real.ts"), "utf8")).toBe("export const x = 1;");
+  expect(existsSync(join(repoRoot, ".audit-tools")), "a .audit-tools/ control-plane path must never be written into the worktree").toBe(false);
 });
 
 test("launch inlines current contents of prompt-referenced files", async () => {
@@ -230,41 +226,29 @@ test("launch inlines current contents of prompt-referenced files", async () => {
   };
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, true);
+  expect(res.accepted).toBe(true);
   const userMsg = captured.messages.find((m) => m.role === "user").content;
-  assert.match(userMsg, /existing/);
-  assert.match(userMsg, /config\.json/);
+  expect(userMsg).toMatch(/existing/);
+  expect(userMsg).toMatch(/config\.json/);
 });
 
 test("openai-compatible resolves verbatim and from config", () => {
-  assert.equal(
-    resolveFreshSessionProviderName("openai-compatible", {}),
-    "openai-compatible",
-  );
+  expect(resolveFreshSessionProviderName("openai-compatible", {})).toBe("openai-compatible");
   // Inside a CLAUDECODE session (claude can't self-spawn), a configured endpoint
   // becomes the automatic worker.
-  assert.equal(
-    resolveFreshSessionProviderName(
+  expect(resolveFreshSessionProviderName(
       "auto",
       { openai_compatible: { base_url: "https://nim.test/v1", model: "m" } },
       { env: { CLAUDECODE: "1" }, commandExists: () => false },
-    ),
-    "openai-compatible",
-  );
+    )).toBe("openai-compatible");
 });
 
 test("a configured endpoint beats the codex last-resort; without it codex wins", () => {
   const cfg = { openai_compatible: { base_url: "https://nim.test/v1", model: "m" } };
   const env = { CLAUDECODE: "1" };
   const onlyCodex = (c) => c === "codex";
-  assert.equal(
-    resolveFreshSessionProviderName("auto", cfg, { env, commandExists: onlyCodex }),
-    "openai-compatible",
-  );
-  assert.equal(
-    resolveFreshSessionProviderName("auto", {}, { env, commandExists: onlyCodex }),
-    "codex",
-  );
+  expect(resolveFreshSessionProviderName("auto", cfg, { env, commandExists: onlyCodex })).toBe("openai-compatible");
+  expect(resolveFreshSessionProviderName("auto", {}, { env, commandExists: onlyCodex })).toBe("codex");
 });
 
 test("request body defaults response_format ON when not configured", async () => {
@@ -283,8 +267,8 @@ test("request body defaults response_format ON when not configured", async () =>
   };
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, true);
-  assert.deepEqual(captured.response_format, { type: "json_object" });
+  expect(res.accepted).toBe(true);
+  expect(captured.response_format).toEqual({ type: "json_object" });
 });
 
 test("request body omits response_format when explicitly disabled", async () => {
@@ -306,8 +290,8 @@ test("request body omits response_format when explicitly disabled", async () => 
     { fetchFn },
   );
   const res = await provider.launch(input);
-  assert.equal(res.accepted, true);
-  assert.equal(captured.response_format, undefined);
+  expect(res.accepted).toBe(true);
+  expect(captured.response_format).toBe(undefined);
 });
 
 for (const status of [400, 422]) {
@@ -332,10 +316,10 @@ for (const status of [400, 422]) {
     };
     const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
     const res = await provider.launch(input);
-    assert.equal(res.accepted, true, res.error);
-    assert.equal(call, 2, "must retry exactly once");
-    assert.deepEqual(bodies[0].response_format, { type: "json_object" });
-    assert.equal(bodies[1].response_format, undefined, "retry must drop response_format");
+    expect(res.accepted, res.error).toBe(true);
+    expect(call, "must retry exactly once").toBe(2);
+    expect(bodies[0].response_format).toEqual({ type: "json_object" });
+    expect(bodies[1].response_format, "retry must drop response_format").toBe(undefined);
   });
 }
 
@@ -348,9 +332,9 @@ test("a degrade-exhausted request (both attempts fail) is fatal", async () => {
   };
   const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
   const res = await provider.launch(input);
-  assert.equal(res.accepted, false);
-  assert.match(res.error ?? "", /HTTP 400/);
-  assert.equal(call, 2, "first attempt + one retry, no loop");
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/HTTP 400/);
+  expect(call, "first attempt + one retry, no loop").toBe(2);
 });
 
 test("createFreshSessionProvider constructs the openai-compatible provider", () => {
@@ -370,5 +354,5 @@ test("createFreshSessionProvider constructs the openai-compatible provider", () 
     { openai_compatible: { base_url: "https://x/v1", model: "m" } },
     deps,
   );
-  assert.equal(provider.name, "openai-compatible");
+  expect(provider.name).toBe("openai-compatible");
 });

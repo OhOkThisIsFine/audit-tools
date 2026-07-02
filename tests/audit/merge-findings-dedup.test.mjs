@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { mergeFindings } = await import("../../src/audit/reporting/mergeFindings.ts");
 const { assignStableFindingIds } = await import("../../src/audit/reporting/findingIdentity.ts");
@@ -80,28 +79,12 @@ test("mergeFindings collapses re-emissions of one identity across files and pass
     },
   ]);
 
-  assert.equal(
-    merged.length,
-    1,
-    "re-emissions of one identity across files/units/passes must collapse to 1",
-  );
-  assert.deepEqual(
-    merged[0].affected_files.map((f) => f.path),
-    ["src/alpha.ts", "src/zeta.ts"],
-    "survivor's affected_files is the union of both paths, sorted by path",
-  );
-  assert.deepEqual(
-    [...merged[0].evidence].sort(),
-    ["ev-first", "ev-second", "ev-shared"],
-    "survivor's evidence is the set-union of both findings' evidence",
-  );
-  assert.equal(merged[0].severity, "high", "severity escalates to the max rank");
-  assert.equal(
-    merged[0].confidence,
-    "medium",
-    "confidence escalates to the max rank",
-  );
-  assert.equal(merged[0].systemic, true, "systemic ORs across re-emissions");
+  expect(merged.length, "re-emissions of one identity across files/units/passes must collapse to 1").toBe(1);
+  expect(merged[0].affected_files.map((f) => f.path), "survivor's affected_files is the union of both paths, sorted by path").toEqual(["src/alpha.ts", "src/zeta.ts"]);
+  expect([...merged[0].evidence].sort(), "survivor's evidence is the set-union of both findings' evidence").toEqual(["ev-first", "ev-second", "ev-shared"]);
+  expect(merged[0].severity, "severity escalates to the max rank").toBe("high");
+  expect(merged[0].confidence, "confidence escalates to the max rank").toBe("medium");
+  expect(merged[0].systemic, "systemic ORs across re-emissions").toBe(true);
 });
 
 test("one problem re-emitted from two files/passes merges to one finding that keeps the canonical stable id of its identity", () => {
@@ -132,21 +115,10 @@ test("one problem re-emitted from two files/passes merges to one finding that ke
     }),
   ]);
 
-  assert.equal(
-    merged.length,
-    1,
-    "the same problem reported from two files/passes must merge to exactly 1 finding",
-  );
-  assert.deepEqual(
-    merged[0].affected_files.map((f) => f.path),
-    ["src/alpha.ts", "src/zeta.ts"],
-    "merged file coverage reflects both source files",
-  );
-  assert.ok(
-    merged[0].evidence.includes("ev-alpha") &&
-      merged[0].evidence.includes("ev-zeta"),
-    "merged evidence reflects both sources",
-  );
+  expect(merged.length, "the same problem reported from two files/passes must merge to exactly 1 finding").toBe(1);
+  expect(merged[0].affected_files.map((f) => f.path), "merged file coverage reflects both source files").toEqual(["src/alpha.ts", "src/zeta.ts"]);
+  expect(merged[0].evidence.includes("ev-alpha") &&
+      merged[0].evidence.includes("ev-zeta"), "merged evidence reflects both sources").toBeTruthy();
 
   // Re-keying the merged finding yields the same canonical id as a fresh
   // single-source emission of the identity — merging never moves the id.
@@ -154,11 +126,7 @@ test("one problem re-emitted from two files/passes merges to one finding that ke
   const [canonical] = assignStableFindingIds([
     emission("src/alpha.ts", "ev-alpha"),
   ]);
-  assert.equal(
-    rekeyed.id,
-    canonical.id,
-    "the merged finding's id must equal the canonical id derived for its identity",
-  );
+  expect(rekeyed.id, "the merged finding's id must equal the canonical id derived for its identity").toBe(canonical.id);
 });
 
 test("the same title shape in two different units stays two findings with distinct ids", () => {
@@ -188,22 +156,10 @@ test("the same title shape in two different units stays two findings with distin
     }),
   ]);
 
-  assert.equal(
-    merged.length,
-    2,
-    "the same title shape in two different units must NOT collapse",
-  );
-  assert.deepEqual(
-    new Set(merged.map((f) => f.unit_id)),
-    new Set(["u-poller", "u-uploader"]),
-    "each surviving finding retains its own unit_id",
-  );
+  expect(merged.length, "the same title shape in two different units must NOT collapse").toBe(2);
+  expect(new Set(merged.map((f) => f.unit_id)), "each surviving finding retains its own unit_id").toEqual(new Set(["u-poller", "u-uploader"]));
   const ids = assignStableFindingIds(merged).map((f) => f.id);
-  assert.notEqual(
-    ids[0],
-    ids[1],
-    "the two findings must keep distinct, non-equal ids",
-  );
+  expect(ids[0], "the two findings must keep distinct, non-equal ids").not.toBe(ids[1]);
 });
 
 test("mergeFindings keeps same-title findings with different categories separate (category is part of identity)", () => {
@@ -227,11 +183,7 @@ test("mergeFindings keeps same-title findings with different categories separate
       }),
     ]),
   ]);
-  assert.equal(
-    merged.length,
-    2,
-    "identical title with different category on different files must stay 2",
-  );
+  expect(merged.length, "identical title with different category on different files must stay 2").toBe(2);
 });
 
 test("mergeFindings keeps same-title same-category findings with different lenses on different files separate", () => {
@@ -258,11 +210,7 @@ test("mergeFindings keeps same-title same-category findings with different lense
       }),
     ]),
   ]);
-  assert.equal(
-    merged.length,
-    2,
-    "identical title+category across lenses on disjoint files must stay 2",
-  );
+  expect(merged.length, "identical title+category across lenses on disjoint files must stay 2").toBe(2);
 });
 
 // ── same-lens dedup edge cases ────────────────────────────────────────────────
@@ -291,11 +239,8 @@ test("deduplicateSameLens merges two same-lens findings with both line_end missi
     wrapResult([b]),
   ]);
 
-  assert.equal(merged.length, 1, "identical-title same-lens no-line-info findings must merge to 1");
-  assert.ok(
-    merged[0].evidence.includes("ev-a") && merged[0].evidence.includes("ev-b"),
-    "survivor absorbs evidence from both findings",
-  );
+  expect(merged.length, "identical-title same-lens no-line-info findings must merge to 1").toBe(1);
+  expect(merged[0].evidence.includes("ev-a") && merged[0].evidence.includes("ev-b"), "survivor absorbs evidence from both findings").toBeTruthy();
 });
 
 test("deduplicateSameLens merges same-category same-lens findings with title Jaccard in [0.35, 0.44] (catMatch lowers threshold to 0.35)", () => {
@@ -328,7 +273,7 @@ test("deduplicateSameLens merges same-category same-lens findings with title Jac
     wrapResult([b]),
   ]);
 
-  assert.equal(merged.length, 1, "same-category same-lens findings with Jaccard 0.4 must merge");
+  expect(merged.length, "same-category same-lens findings with Jaccard 0.4 must merge").toBe(1);
 });
 
 test("deduplicateSameLens does NOT merge different-category same-lens findings with title Jaccard in [0.35, 0.44] (threshold stays at 0.45)", () => {
@@ -358,7 +303,7 @@ test("deduplicateSameLens does NOT merge different-category same-lens findings w
     wrapResult([b]),
   ]);
 
-  assert.equal(merged.length, 2, "different-category same-lens findings with Jaccard 0.4 must NOT merge");
+  expect(merged.length, "different-category same-lens findings with Jaccard 0.4 must NOT merge").toBe(2);
 });
 
 test("deduplicateSameLens keeps near-duplicate-title findings separate when lineRangeOverlaps is false and filePathOverlap is below 0.5", () => {
@@ -394,5 +339,5 @@ test("deduplicateSameLens keeps near-duplicate-title findings separate when line
     },
   ]);
 
-  assert.equal(merged.length, 2, "same-lens findings on different files must survive dedup unchanged");
+  expect(merged.length, "same-lens findings on different files must survive dedup unchanged").toBe(2);
 });

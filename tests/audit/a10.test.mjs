@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,16 +28,16 @@ test("grants a node to exactly one of two concurrent loops (single-grant)", asyn
 
     const winners = attempts.filter((r) => r.acquired);
     const losers = attempts.filter((r) => !r.acquired);
-    assert.equal(winners.length, 1, "exactly one loop may claim the node");
-    assert.equal(losers.length, 3);
+    expect(winners.length, "exactly one loop may claim the node").toBe(1);
+    expect(losers.length).toBe(3);
     for (const loser of losers) {
-      assert.equal(loser.heldBy, winners[0].ownerToken);
+      expect(loser.heldBy).toBe(winners[0].ownerToken);
     }
-    assert.equal(await loopA.isClaimed("node-1"), true);
+    expect(await loopA.isClaimed("node-1")).toBe(true);
 
     const other = await loopB.claim("node-2", "poolB");
-    assert.equal(other.acquired, true);
-    assert.deepEqual(Object.keys(await loopA.listClaims()).sort(), ["node-1", "node-2"]);
+    expect(other.acquired).toBe(true);
+    expect(Object.keys(await loopA.listClaims()).sort()).toEqual(["node-1", "node-2"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -51,20 +50,20 @@ test("reclaims a claim once its heartbeat passes STALE_LOCK_MS (stale-reclaim cl
     const reg = new ClaimRegistry(registryPath, () => nowMs);
 
     const first = await reg.claim("node-1", "poolA");
-    assert.equal(first.acquired, true);
+    expect(first.acquired).toBe(true);
 
     nowMs += STALE_LOCK_MS; // exactly at the window — still live
-    assert.deepEqual(await reg.reclaimStale(), []);
-    assert.equal(await reg.isClaimed("node-1"), true);
+    expect(await reg.reclaimStale()).toEqual([]);
+    expect(await reg.isClaimed("node-1")).toBe(true);
 
     nowMs += 1; // past the window — now stale
-    assert.equal(await reg.isClaimed("node-1"), false);
-    assert.deepEqual(await reg.reclaimStale(), ["node-1"]);
-    assert.deepEqual(Object.keys(await reg.listClaims()), []);
+    expect(await reg.isClaimed("node-1")).toBe(false);
+    expect(await reg.reclaimStale()).toEqual(["node-1"]);
+    expect(Object.keys(await reg.listClaims())).toEqual([]);
 
     const second = await reg.claim("node-1", "poolB");
-    assert.equal(second.acquired, true);
-    assert.notEqual(second.ownerToken, first.ownerToken);
+    expect(second.acquired).toBe(true);
+    expect(second.ownerToken).not.toBe(first.ownerToken);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -80,17 +79,17 @@ test("never clobbers a re-heartbeated live owner (token-survival)", async () => 
     const token = claim.ownerToken;
 
     nowMs += STALE_LOCK_MS;
-    assert.equal(await reg.heartbeat("node-1", token), true);
+    expect(await reg.heartbeat("node-1", token)).toBe(true);
 
     nowMs += 1; // would be stale vs the original claim, but the heartbeat refreshed it
-    assert.deepEqual(await reg.reclaimStale(), []);
-    assert.equal(await reg.isClaimed("node-1"), true);
+    expect(await reg.reclaimStale()).toEqual([]);
+    expect(await reg.isClaimed("node-1")).toBe(true);
 
-    assert.equal(await reg.release("node-1", "not-the-owner"), false);
-    assert.equal(await reg.isClaimed("node-1"), true);
-    assert.equal(await reg.heartbeat("node-1", "not-the-owner"), false);
-    assert.equal(await reg.release("node-1", token), true);
-    assert.equal(await reg.isClaimed("node-1"), false);
+    expect(await reg.release("node-1", "not-the-owner")).toBe(false);
+    expect(await reg.isClaimed("node-1")).toBe(true);
+    expect(await reg.heartbeat("node-1", "not-the-owner")).toBe(false);
+    expect(await reg.release("node-1", token)).toBe(true);
+    expect(await reg.isClaimed("node-1")).toBe(false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -102,14 +101,14 @@ test("degrades a corrupt registry to empty instead of throwing (malformed)", asy
     await writeFile(registryPath, "{ not valid json ::::", "utf8");
     const reg = new ClaimRegistry(registryPath);
     const claim = await reg.claim("node-1", "poolA");
-    assert.equal(claim.acquired, true);
+    expect(claim.acquired).toBe(true);
     const onDisk = JSON.parse(await readFile(registryPath, "utf8"));
-    assert.deepEqual(Object.keys(onDisk), ["node-1"]);
+    expect(Object.keys(onDisk)).toEqual(["node-1"]);
 
     await writeFile(registryPath, "[1,2,3]", "utf8");
     const reg2 = new ClaimRegistry(registryPath);
-    assert.deepEqual(await reg2.listClaims(), {});
-    assert.equal((await reg2.claim("node-2", "poolB")).acquired, true);
+    expect(await reg2.listClaims()).toEqual({});
+    expect((await reg2.claim("node-2", "poolB")).acquired).toBe(true);
 
     await writeFile(
       registryPath,
@@ -120,7 +119,7 @@ test("degrades a corrupt registry to empty instead of throwing (malformed)", asy
       "utf8",
     );
     const reg3 = new ClaimRegistry(registryPath);
-    assert.deepEqual(Object.keys(await reg3.listClaims()), ["good"]);
+    expect(Object.keys(await reg3.listClaims())).toEqual(["good"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

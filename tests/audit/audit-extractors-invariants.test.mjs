@@ -5,8 +5,7 @@
  *
  * These are deterministic, in-process tests — no LLM calls.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,18 +27,12 @@ test("INV-01: graphManifestEdges/index.ts contains no imports from graph.ts", ()
     join(EXTRACTOR_SRC, "graphManifestEdges", "index.ts"),
     "utf8",
   );
-  assert.ok(
-    !indexSrc.includes("from \"../graph.js\"") &&
+  expect(!indexSrc.includes("from \"../graph.js\"") &&
     !indexSrc.includes("from \"../graph\"") &&
     !indexSrc.includes("from './graph'") &&
-    !indexSrc.includes("from \"./graph\""),
-    "graphManifestEdges/index.ts must not import from graph.ts",
-  );
+    !indexSrc.includes("from \"./graph\""), "graphManifestEdges/index.ts must not import from graph.ts").toBeTruthy();
   // Must not contain any `import` statements (only re-exports).
-  assert.ok(
-    !indexSrc.includes("\nimport ") && !indexSrc.startsWith("import "),
-    "graphManifestEdges/index.ts must not have any import statements — pure re-export barrel only",
-  );
+  expect(!indexSrc.includes("\nimport ") && !indexSrc.startsWith("import "), "graphManifestEdges/index.ts must not have any import statements — pure re-export barrel only").toBeTruthy();
 });
 
 test("INV-01: each graphManifestEdges language analyzer imports independently (no graph.ts cycle)", () => {
@@ -54,10 +47,7 @@ test("INV-01: each graphManifestEdges language analyzer imports independently (n
   ];
   for (const filePath of analyzerFiles) {
     const src = readFileSync(filePath, "utf8");
-    assert.ok(
-      !src.includes("from \"../graph.js\"") && !src.includes("from \"../graph\""),
-      `${filePath} must not import from graph.ts (would create a cycle)`,
-    );
+    expect(!src.includes("from \"../graph.js\"") && !src.includes("from \"../graph\""), `${filePath} must not import from graph.ts (would create a cycle)`).toBeTruthy();
   }
 });
 
@@ -104,25 +94,19 @@ test("INV-02: extractors emit edges that conform to shared GraphEdge shape", asy
   for (const edges of allEdgeLists) {
     for (const edge of edges) {
       total++;
-      assert.equal(typeof edge.from, "string", `edge.from must be string, got ${typeof edge.from}`);
-      assert.ok(edge.from.length > 0, "edge.from must be non-empty");
-      assert.equal(typeof edge.to, "string", `edge.to must be string, got ${typeof edge.to}`);
-      assert.ok(edge.to.length > 0, "edge.to must be non-empty");
-      assert.equal(typeof edge.kind, "string", `edge.kind must be string`);
-      assert.ok(edge.kind.length > 0, "edge.kind must be non-empty");
+      expect(typeof edge.from, `edge.from must be string, got ${typeof edge.from}`).toBe("string");
+      expect(edge.from.length > 0, "edge.from must be non-empty").toBeTruthy();
+      expect(typeof edge.to, `edge.to must be string, got ${typeof edge.to}`).toBe("string");
+      expect(edge.to.length > 0, "edge.to must be non-empty").toBeTruthy();
+      expect(typeof edge.kind, `edge.kind must be string`).toBe("string");
+      expect(edge.kind.length > 0, "edge.kind must be non-empty").toBeTruthy();
       if (edge.confidence !== undefined) {
-        assert.ok(
-          typeof edge.confidence === "number" && edge.confidence >= 0 && edge.confidence <= 1,
-          `edge.confidence must be a number in [0,1], got ${edge.confidence}`,
-        );
+        expect(typeof edge.confidence === "number" && edge.confidence >= 0 && edge.confidence <= 1, `edge.confidence must be a number in [0,1], got ${edge.confidence}`).toBeTruthy();
       }
-      assert.ok(
-        VALID_DIRECTIONS.has(edge.direction),
-        `edge.direction must be 'directed', 'undirected', or undefined, got '${edge.direction}'`,
-      );
+      expect(VALID_DIRECTIONS.has(edge.direction), `edge.direction must be 'directed', 'undirected', or undefined, got '${edge.direction}'`).toBeTruthy();
     }
   }
-  assert.ok(total > 0, "should have emitted at least one edge");
+  expect(total > 0, "should have emitted at least one edge").toBeTruthy();
 });
 
 // ── INV-audit-extractors-03: cycle detection uses per-DFS-path bookkeeping ──
@@ -161,12 +145,9 @@ test("INV-03: detectCycles finds cycle reachable only through already-visited sh
   const cycleFinding = result.findings.find(
     (finding) => finding.category === "dependency_cycle",
   );
-  assert.ok(cycleFinding, "must detect the X↔C cycle reachable via the shared X node");
-  assert.ok(
-    cycleFinding.affected_files.some((f) => f.path === "X.ts") ||
-    cycleFinding.affected_files.some((f) => f.path === "C.ts"),
-    "cycle finding must include X.ts or C.ts",
-  );
+  expect(cycleFinding, "must detect the X↔C cycle reachable via the shared X node").toBeTruthy();
+  expect(cycleFinding.affected_files.some((f) => f.path === "X.ts") ||
+    cycleFinding.affected_files.some((f) => f.path === "C.ts"), "cycle finding must include X.ts or C.ts").toBeTruthy();
 });
 
 test("INV-03: detectCycles finds direct 2-node cycle (basic regression)", async () => {
@@ -193,7 +174,7 @@ test("INV-03: detectCycles finds direct 2-node cycle (basic regression)", async 
   const cycleFinding = result.findings.find(
     (finding) => finding.category === "dependency_cycle",
   );
-  assert.ok(cycleFinding, "must detect the a↔b cycle");
+  expect(cycleFinding, "must detect the a↔b cycle").toBeTruthy();
 });
 
 // ── INV-audit-extractors-04: regex-based extraction is linear-time-safe ──────
@@ -220,12 +201,9 @@ test("INV-04: Angular route ANGULAR_ROUTE_OBJECT_PATTERN does not hang on deeply
   const result = extractFrameworkRouteEvidence("src/app-routing.module.ts", content, new Map());
   const elapsed = Date.now() - start;
 
-  assert.ok(
-    elapsed < 2000,
-    `Angular route extraction must complete in <2000ms, took ${elapsed}ms (possible catastrophic backtracking)`,
-  );
+  expect(elapsed < 2000, `Angular route extraction must complete in <2000ms, took ${elapsed}ms (possible catastrophic backtracking)`).toBeTruthy();
   // Should extract routes from the nested content.
-  assert.ok(Array.isArray(result.routes), "must return routes array");
+  expect(Array.isArray(result.routes), "must return routes array").toBeTruthy();
 });
 
 // ── INV-audit-extractors-05: loadIgnoreFile honors gitignore-style glob semantics ─
@@ -254,7 +232,7 @@ test("INV-05: loadIgnoreFile returns patterns including wildcard and negation li
     );
 
     const patterns = await loadIgnoreFile(root);
-    assert.deepEqual(patterns, ["dist/", "*.log", "!important.log", "secrets/"]);
+    expect(patterns).toEqual(["dist/", "*.log", "!important.log", "secrets/"]);
   });
 });
 
@@ -263,7 +241,7 @@ test("INV-05: loadIgnoreFile tolerates a missing .auditorignore file", async () 
 
   await withTempDir("audit-code-inv05b-", async (root) => {
     const patterns = await loadIgnoreFile(root);
-    assert.deepEqual(patterns, []);
+    expect(patterns).toEqual([]);
   });
 });
 
@@ -296,16 +274,9 @@ test("INV-06: buildFileDisposition surfaces root_ignored guard branch", async ()
     spawn: fakeSpawn,
   });
 
-  assert.equal(result.vcs_ignore?.applied, false, "root_ignored guard must set applied=false");
-  assert.equal(
-    result.vcs_ignore?.guard_branch,
-    "root_ignored",
-    "guard_branch must be 'root_ignored'",
-  );
-  assert.ok(
-    result.vcs_ignore?.skipped_reason?.includes("root itself is ignored"),
-    "skipped_reason must mention the root being ignored",
-  );
+  expect(result.vcs_ignore?.applied, "root_ignored guard must set applied=false").toBe(false);
+  expect(result.vcs_ignore?.guard_branch, "guard_branch must be 'root_ignored'").toBe("root_ignored");
+  expect(result.vcs_ignore?.skipped_reason?.includes("root itself is ignored"), "skipped_reason must mention the root being ignored").toBeTruthy();
 });
 
 test("INV-06: buildFileDisposition surfaces share_exceeded guard branch", async () => {
@@ -338,20 +309,10 @@ test("INV-06: buildFileDisposition surfaces share_exceeded guard branch", async 
     spawn: fakeSpawn,
   });
 
-  assert.equal(result.vcs_ignore?.applied, false, "share_exceeded guard must set applied=false");
-  assert.equal(
-    result.vcs_ignore?.guard_branch,
-    "share_exceeded",
-    "guard_branch must be 'share_exceeded'",
-  );
-  assert.ok(
-    result.vcs_ignore?.skipped_reason?.includes("exceeds VCS_IGNORED_MAX_SHARE"),
-    "skipped_reason must mention the exceeded share",
-  );
-  assert.ok(
-    typeof VCS_IGNORED_MAX_SHARE === "number" && VCS_IGNORED_MAX_SHARE > 0 && VCS_IGNORED_MAX_SHARE < 1,
-    "VCS_IGNORED_MAX_SHARE must be exported and be a fraction in (0,1)",
-  );
+  expect(result.vcs_ignore?.applied, "share_exceeded guard must set applied=false").toBe(false);
+  expect(result.vcs_ignore?.guard_branch, "guard_branch must be 'share_exceeded'").toBe("share_exceeded");
+  expect(result.vcs_ignore?.skipped_reason?.includes("exceeds VCS_IGNORED_MAX_SHARE"), "skipped_reason must mention the exceeded share").toBeTruthy();
+  expect(typeof VCS_IGNORED_MAX_SHARE === "number" && VCS_IGNORED_MAX_SHARE > 0 && VCS_IGNORED_MAX_SHARE < 1, "VCS_IGNORED_MAX_SHARE must be exported and be a fraction in (0,1)").toBeTruthy();
 });
 
 // ── INV-audit-extractors-07: TypeScript analyzer uses async file IO ───────────
@@ -363,14 +324,8 @@ test("INV-07: typescript analyzer source does not import readFileSync", () => {
     join(EXTRACTOR_SRC, "analyzers", "typescript.ts"),
     "utf8",
   );
-  assert.ok(
-    !src.includes("readFileSync"),
-    "typescript analyzer must not use readFileSync; use async readFile instead",
-  );
-  assert.ok(
-    src.includes("readFile"),
-    "typescript analyzer must import readFile (async)",
-  );
+  expect(!src.includes("readFileSync"), "typescript analyzer must not use readFileSync; use async readFile instead").toBeTruthy();
+  expect(src.includes("readFile"), "typescript analyzer must import readFile (async)").toBeTruthy();
 });
 
 // ── INV-audit-extractors-08: oversized file handling in fsIntake ─────────────
@@ -394,12 +349,12 @@ test("INV-08: buildRepoManifestFromFs includes oversized files without a hash", 
     const small = manifest.files.find((f) => f.path === "src/small.ts");
     const huge = manifest.files.find((f) => f.path === "src/huge.ts");
 
-    assert.ok(small, "small file must appear in manifest");
-    assert.equal(typeof small.hash, "string", "small file must have a hash");
+    expect(small, "small file must appear in manifest").toBeTruthy();
+    expect(typeof small.hash, "small file must have a hash").toBe("string");
 
-    assert.ok(huge, "oversized file must appear in manifest (not silently dropped)");
-    assert.equal(huge.hash, undefined, "oversized file must NOT have a hash");
-    assert.ok(huge.size_bytes > 100, "oversized file must have its actual size_bytes recorded");
+    expect(huge, "oversized file must appear in manifest (not silently dropped)").toBeTruthy();
+    expect(huge.hash, "oversized file must NOT have a hash").toBe(undefined);
+    expect(huge.size_bytes > 100, "oversized file must have its actual size_bytes recorded").toBeTruthy();
   });
 });
 
@@ -430,26 +385,14 @@ test("INV-09: heuristicAuthSession edges connect only auth-named to session-name
   for (const edge of authSessionEdges) {
     const fromLower = edge.from.toLowerCase();
     const toLower = edge.to.toLowerCase();
-    assert.ok(
-      fromLower.includes("auth"),
-      `heuristic-auth-session-link 'from' must include 'auth', got: ${edge.from}`,
-    );
-    assert.ok(
-      toLower.includes("session"),
-      `heuristic-auth-session-link 'to' must include 'session', got: ${edge.to}`,
-    );
+    expect(fromLower.includes("auth"), `heuristic-auth-session-link 'from' must include 'auth', got: ${edge.from}`).toBeTruthy();
+    expect(toLower.includes("session"), `heuristic-auth-session-link 'to' must include 'session', got: ${edge.to}`).toBeTruthy();
   }
 
   // Must NOT link auth files to unrelated billing or profile files.
   const linkedTargets = new Set(authSessionEdges.map((e) => e.to));
-  assert.ok(
-    !linkedTargets.has("src/billing/invoice.ts"),
-    "heuristicAuthSession must NOT link to unrelated billing files",
-  );
-  assert.ok(
-    !linkedTargets.has("src/user/profile.ts"),
-    "heuristicAuthSession must NOT link to unrelated user profile files",
-  );
+  expect(!linkedTargets.has("src/billing/invoice.ts"), "heuristicAuthSession must NOT link to unrelated billing files").toBeTruthy();
+  expect(!linkedTargets.has("src/user/profile.ts"), "heuristicAuthSession must NOT link to unrelated user profile files").toBeTruthy();
 });
 
 // ── INV-audit-extractors-10: parse errors emit a structured diagnostic ────────
@@ -473,7 +416,7 @@ test("INV-10: graphSuites JSON parse error emits a stderr diagnostic", async () 
       "not valid json {{{",
       new Map(),
     );
-    assert.deepEqual(result, [], "must return empty array on parse error");
+    expect(result, "must return empty array on parse error").toEqual([]);
   } finally {
     process.stderr.write = origWrite;
   }
@@ -481,17 +424,14 @@ test("INV-10: graphSuites JSON parse error emits a stderr diagnostic", async () 
   const hasLog = stderrLines.some(
     (line) => line.includes("graphSuites") && line.includes("JSON parse error"),
   );
-  assert.ok(hasLog, "must emit a structured stderr diagnostic on JSON parse error");
+  expect(hasLog, "must emit a structured stderr diagnostic on JSON parse error").toBeTruthy();
 });
 
 test("INV-10: fsIntake emits warn diagnostic for unreadable directory", async () => {
   // fsIntake already emits console.warn for readdir errors.
   // Verify the diagnostic message format by inspecting source.
   const src = readFileSync(join(EXTRACTOR_SRC, "fsIntake.ts"), "utf8");
-  assert.ok(
-    src.includes("console.warn") && src.includes("skipping unreadable"),
-    "fsIntake must have console.warn for unreadable directory/file errors",
-  );
+  expect(src.includes("console.warn") && src.includes("skipping unreadable"), "fsIntake must have console.warn for unreadable directory/file errors").toBeTruthy();
 });
 
 test("INV-10: fsIntake emits warn diagnostic for oversized files", async () => {
@@ -519,7 +459,7 @@ test("INV-10: fsIntake emits warn diagnostic for oversized files", async () => {
     const hasSkipLog = warnMessages.some(
       (msg) => msg.includes("[fsIntake]") && msg.includes("oversized"),
     );
-    assert.ok(hasSkipLog, "fsIntake must emit a warn diagnostic for oversized files");
+    expect(hasSkipLog, "fsIntake must emit a warn diagnostic for oversized files").toBeTruthy();
   });
 });
 
@@ -560,15 +500,9 @@ test("ARC-27aceb61: buildGraphBundle extracts ESM static import edges", async ()
   const importEdges = bundle.graphs.imports;
 
   const edge = importEdges.find((e) => e.from === "src/a.ts" && e.to === "src/b.ts");
-  assert.ok(
-    edge !== undefined,
-    "buildGraphBundle must extract an ESM import edge from src/a.ts → src/b.ts",
-  );
-  assert.strictEqual(edge.kind, "esm", "import edge must have kind 'esm'");
-  assert.ok(
-    typeof edge.confidence === "number" && edge.confidence > 0,
-    "import edge must have positive confidence",
-  );
+  expect(edge !== undefined, "buildGraphBundle must extract an ESM import edge from src/a.ts → src/b.ts").toBeTruthy();
+  expect(edge.kind, "import edge must have kind 'esm'").toBe("esm");
+  expect(typeof edge.confidence === "number" && edge.confidence > 0, "import edge must have positive confidence").toBeTruthy();
 });
 
 test("ARC-27aceb61: buildGraphBundle extracts re-export edges", async () => {
@@ -591,11 +525,8 @@ test("ARC-27aceb61: buildGraphBundle extracts re-export edges", async () => {
   const edge = importEdges.find(
     (e) => e.from === "src/index.ts" && e.to === "src/utils.ts",
   );
-  assert.ok(
-    edge !== undefined,
-    "buildGraphBundle must extract a re-export edge from src/index.ts → src/utils.ts",
-  );
-  assert.strictEqual(edge.kind, "re-export", "re-export edge must have kind 're-export'");
+  expect(edge !== undefined, "buildGraphBundle must extract a re-export edge from src/index.ts → src/utils.ts").toBeTruthy();
+  expect(edge.kind, "re-export edge must have kind 're-export'").toBe("re-export");
 });
 
 test("ARC-27aceb61: buildGraphBundle extracts string-literal dynamic import edges", async () => {
@@ -618,15 +549,8 @@ test("ARC-27aceb61: buildGraphBundle extracts string-literal dynamic import edge
   const edge = importEdges.find(
     (e) => e.from === "src/loader.ts" && e.to === "src/module.ts",
   );
-  assert.ok(
-    edge !== undefined,
-    "buildGraphBundle must extract a dynamic-import edge for string-literal specifier",
-  );
-  assert.strictEqual(
-    edge.kind,
-    "dynamic-import",
-    "dynamic import edge must have kind 'dynamic-import'",
-  );
+  expect(edge !== undefined, "buildGraphBundle must extract a dynamic-import edge for string-literal specifier").toBeTruthy();
+  expect(edge.kind, "dynamic import edge must have kind 'dynamic-import'").toBe("dynamic-import");
 });
 
 test("ARC-27aceb61: buildGraphBundle does NOT extract template-literal dynamic import edges (known regex limitation)", async () => {
@@ -659,9 +583,5 @@ test("ARC-27aceb61: buildGraphBundle does NOT extract template-literal dynamic i
   // EXPECTED: the regex approach does NOT detect this edge. This is the documented
   // limitation. If this assertion ever fails, it means the extractor was upgraded
   // to handle template literals (e.g. via TS compiler API) — update accordingly.
-  assert.strictEqual(
-    edge,
-    undefined,
-    "buildGraphBundle must NOT extract a template-literal dynamic import (known regex limitation — ARC-27aceb61)",
-  );
+  expect(edge, "buildGraphBundle must NOT extract a template-literal dynamic import (known regex limitation — ARC-27aceb61)").toBe(undefined);
 });

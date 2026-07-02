@@ -3,13 +3,9 @@
  *
  * cmdWorkerRun accepts an injectable WorkerRunDeps seam ({ readJsonFile,
  * writeJsonFile, runAuditStep }) so this failure path can be exercised under
- * the project's `node --import tsx/esm --test` runner, which cannot use
- * `t.mock.module` (module mocking requires --experimental-test-module-mocks
- * and conflicts with the tsx/esm loader). We inject the dependencies directly
- * instead of mocking the module graph.
+ * the project's vitest runner without touching the real filesystem.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
@@ -93,46 +89,24 @@ test("cmdWorkerRun writes a failed WorkerResult when the result write throws a n
     // ── Assertions ─────────────────────────────────────────────────────────
 
     // 1. writeJsonFile was called exactly twice.
-    assert.strictEqual(
-      writeJsonFileCallCount,
-      2,
-      `expected writeJsonFile to be called twice, got ${writeJsonFileCallCount}`,
-    );
+    expect(writeJsonFileCallCount, `expected writeJsonFile to be called twice, got ${writeJsonFileCallCount}`).toBe(2);
 
     // 2. First call targeted the result_path with the original workerResult.
-    assert.strictEqual(
-      writeJsonFileCalls[0].path,
-      resultPath,
-      "first writeJsonFile call should target result_path",
-    );
+    expect(writeJsonFileCalls[0].path, "first writeJsonFile call should target result_path").toBe(resultPath);
 
     // 3. Second call was the fallback: status must be "failed".
-    assert.strictEqual(
-      writeJsonFileCalls[1].data.status,
-      "failed",
-      `second writeJsonFile call should carry status 'failed', got: ${writeJsonFileCalls[1].data.status}`,
-    );
+    expect(writeJsonFileCalls[1].data.status, `second writeJsonFile call should carry status 'failed', got: ${writeJsonFileCalls[1].data.status}`).toBe("failed");
 
     // 4. Fallback result contains an error message mentioning the original write failure.
     const fallbackErrors = writeJsonFileCalls[1].data.errors ?? [];
-    assert.ok(
-      fallbackErrors.some((e) => /EPERM|operation not permitted/i.test(e)),
-      `fallback result errors should mention write failure, got: ${JSON.stringify(fallbackErrors)}`,
-    );
+    expect(fallbackErrors.some((e) => /EPERM|operation not permitted/i.test(e)), `fallback result errors should mention write failure, got: ${JSON.stringify(fallbackErrors)}`).toBeTruthy();
 
     // 5. process.exitCode was set to 1.
-    assert.strictEqual(
-      process.exitCode,
-      1,
-      "process.exitCode should be 1 after write failure",
-    );
+    expect(process.exitCode, "process.exitCode should be 1 after write failure").toBe(1);
 
     // 6. process.stderr received a diagnostic message referencing result_path.
     const combinedStderr = stderrChunks.join("");
-    assert.ok(
-      combinedStderr.includes(resultPath),
-      `stderr should include result_path, got: ${combinedStderr}`,
-    );
+    expect(combinedStderr.includes(resultPath), `stderr should include result_path, got: ${combinedStderr}`).toBeTruthy();
 
     process.exitCode = prevExitCode;
   } finally {

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve, sep } from "node:path";
@@ -26,84 +25,60 @@ const ARGS_SOURCE_PATH = resolve(
 // ---------------------------------------------------------------------------
 
 test("resolveHostDispatchCapability: explicit=true wins over sessionConfig false and env false", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       explicit: true,
       sessionConfig: /** @type {any} */ ({ host_can_dispatch_subagents: false }),
       env: { AUDIT_CODE_HOST_CAN_DISPATCH: "false" },
-    }),
-    true,
-  );
+    })).toBe(true);
 });
 
 test("resolveHostDispatchCapability: explicit=false wins over sessionConfig true and env true", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       explicit: false,
       sessionConfig: /** @type {any} */ ({ host_can_dispatch_subagents: true }),
       env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" },
-    }),
-    false,
-  );
+    })).toBe(false);
 });
 
 test("resolveHostDispatchCapability: sessionConfig false wins when explicit is undefined", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       sessionConfig: /** @type {any} */ ({ host_can_dispatch_subagents: false }),
       env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" },
-    }),
-    false,
-  );
+    })).toBe(false);
 });
 
 test("resolveHostDispatchCapability: sessionConfig true wins when explicit is undefined", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       sessionConfig: /** @type {any} */ ({ host_can_dispatch_subagents: true }),
-    }),
-    true,
-  );
+    })).toBe(true);
 });
 
 test("resolveHostDispatchCapability: env AUDIT_CODE_HOST_CAN_DISPATCH=false used when explicit and sessionConfig both absent", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       sessionConfig: /** @type {any} */ ({}),
       env: { AUDIT_CODE_HOST_CAN_DISPATCH: "false" },
-    }),
-    false,
-  );
+    })).toBe(false);
 });
 
 test("resolveHostDispatchCapability: env AUDIT_CODE_HOST_CAN_DISPATCH=true used when explicit and sessionConfig both absent", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       sessionConfig: /** @type {any} */ ({}),
       env: { AUDIT_CODE_HOST_CAN_DISPATCH: "true" },
-    }),
-    true,
-  );
+    })).toBe(true);
 });
 
 test("resolveHostDispatchCapability: defaults to true when all inputs absent", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       sessionConfig: /** @type {any} */ ({}),
       env: {},
-    }),
-    true,
-  );
+    })).toBe(true);
 });
 
 test("resolveHostDispatchCapability: garbage env var value falls back to default true", () => {
-  assert.strictEqual(
-    resolveHostDispatchCapability({
+  expect(resolveHostDispatchCapability({
       sessionConfig: /** @type {any} */ ({}),
       env: { AUDIT_CODE_HOST_CAN_DISPATCH: "yes" },
-    }),
-    true,
-  );
+    })).toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -111,31 +86,31 @@ test("resolveHostDispatchCapability: garbage env var value falls back to default
 // ---------------------------------------------------------------------------
 
 test("optionalBooleanEnv: 'true' → true", () => {
-  assert.strictEqual(optionalBooleanEnv("true"), true);
+  expect(optionalBooleanEnv("true")).toBe(true);
 });
 
 test("optionalBooleanEnv: 'false' → false", () => {
-  assert.strictEqual(optionalBooleanEnv("false"), false);
+  expect(optionalBooleanEnv("false")).toBe(false);
 });
 
 test("optionalBooleanEnv: undefined → undefined", () => {
-  assert.strictEqual(optionalBooleanEnv(undefined), undefined);
+  expect(optionalBooleanEnv(undefined)).toBe(undefined);
 });
 
 test("optionalBooleanEnv: empty string → undefined", () => {
-  assert.strictEqual(optionalBooleanEnv(""), undefined);
+  expect(optionalBooleanEnv("")).toBe(undefined);
 });
 
 test("optionalBooleanEnv: '1' → undefined", () => {
-  assert.strictEqual(optionalBooleanEnv("1"), undefined);
+  expect(optionalBooleanEnv("1")).toBe(undefined);
 });
 
 test("optionalBooleanEnv: 'yes' → undefined", () => {
-  assert.strictEqual(optionalBooleanEnv("yes"), undefined);
+  expect(optionalBooleanEnv("yes")).toBe(undefined);
 });
 
 test("optionalBooleanEnv: 'TRUE' (uppercase) → undefined", () => {
-  assert.strictEqual(optionalBooleanEnv("TRUE"), undefined);
+  expect(optionalBooleanEnv("TRUE")).toBe(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -145,27 +120,21 @@ test("optionalBooleanEnv: 'TRUE' (uppercase) → undefined", () => {
 test("getArtifactsDir: --root <X> with no --artifacts-dir resolves under <X>/.audit-tools/audit", () => {
   const rootX = resolve(sep, "tmp", "some-target-root");
   const argv = ["--root", rootX];
-  assert.strictEqual(getRootDir(argv), rootX);
+  expect(getRootDir(argv)).toBe(rootX);
   // The default MUST rebase onto --root, not resolve `.audit-tools/audit`
   // against the process CWD.
-  assert.strictEqual(
-    getArtifactsDir(argv),
-    join(rootX, ".audit-tools", "audit"),
-  );
+  expect(getArtifactsDir(argv)).toBe(join(rootX, ".audit-tools", "audit"));
 });
 
 test("getArtifactsDir: bare default (no flags) resolves under CWD/.audit-tools/audit", () => {
-  assert.strictEqual(
-    getArtifactsDir([]),
-    join(resolve("."), ".audit-tools", "audit"),
-  );
+  expect(getArtifactsDir([])).toBe(join(resolve("."), ".audit-tools", "audit"));
 });
 
 test("getArtifactsDir: explicit --artifacts-dir is honored verbatim (ignores --root)", () => {
   const rootX = resolve(sep, "tmp", "some-target-root");
   const explicit = resolve(sep, "var", "artifacts", "elsewhere");
   const argv = ["--root", rootX, "--artifacts-dir", explicit];
-  assert.strictEqual(getArtifactsDir(argv), explicit);
+  expect(getArtifactsDir(argv)).toBe(explicit);
 });
 
 // ---------------------------------------------------------------------------
@@ -189,16 +158,8 @@ function stripComments(source) {
 test("CLI args code has no `.audit-tools` path-join literal beyond the single default sentinel", () => {
   const code = stripComments(readFileSync(ARGS_SOURCE_PATH, "utf8"));
   const occurrences = (code.match(/\.audit-tools/g) ?? []).length;
-  assert.strictEqual(
-    occurrences,
-    1,
-    `Expected exactly one '.audit-tools' literal (the DIRECT_CLI_DEFAULTS default) in ${ARGS_SOURCE_PATH}, found ${occurrences}. Route path construction through audit-tools/shared auditToolsPaths instead of re-spelling the join literal.`,
-  );
+  expect(occurrences, `Expected exactly one '.audit-tools' literal (the DIRECT_CLI_DEFAULTS default) in ${ARGS_SOURCE_PATH}, found ${occurrences}. Route path construction through audit-tools/shared auditToolsPaths instead of re-spelling the join literal.`).toBe(1);
   // The one allowed occurrence is the default-value sentinel, not a join() arg.
-  assert.match(code, /artifactsDir:\s*"\.audit-tools\/audit"/);
-  assert.doesNotMatch(
-    code,
-    /(?:join|resolve)\([^)]*\.audit-tools/,
-    "No join()/resolve() call in CLI args code may take a '.audit-tools' literal — use the shared auditToolsPaths helpers.",
-  );
+  expect(code).toMatch(/artifactsDir:\s*"\.audit-tools\/audit"/);
+  expect(code, "No join()/resolve() call in CLI args code may take a '.audit-tools' literal — use the shared auditToolsPaths helpers.").not.toMatch(/(?:join|resolve)\([^)]*\.audit-tools/);
 });

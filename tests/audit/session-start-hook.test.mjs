@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
@@ -74,17 +74,17 @@ await test("session-start.sh is a no-op when CLAUDE_CODE_REMOTE is not set", { s
     timeout: 10_000,
   });
 
-  assert.equal(result.status, 0, `script exited ${result.status}: ${result.stderr}`);
-  assert.equal(result.stdout, "", "expected no stdout");
-  assert.equal(result.stderr, "", "expected no stderr");
+  expect(result.status, `script exited ${result.status}: ${result.stderr}`).toBe(0);
+  expect(result.stdout, "expected no stdout").toBe("");
+  expect(result.stderr, "expected no stderr").toBe("");
 });
 
 await test("session-start.sh is a no-op when CLAUDE_CODE_REMOTE is set to a value other than 'true'", { skip: SKIP }, () => {
   const result = spawnHook({ CLAUDE_CODE_REMOTE: "false" });
 
-  assert.equal(result.status, 0, `script exited ${result.status}: ${result.stderr}`);
-  assert.equal(result.stdout, "", "expected no stdout");
-  assert.equal(result.stderr, "", "expected no stderr");
+  expect(result.status, `script exited ${result.status}: ${result.stderr}`).toBe(0);
+  expect(result.stdout, "expected no stdout").toBe("");
+  expect(result.stderr, "expected no stderr").toBe("");
 });
 
 await test("session-start.sh runs npm install and the build command in order when CLAUDE_CODE_REMOTE=true", { skip: SKIP }, (t) => {
@@ -113,11 +113,7 @@ await test("session-start.sh runs npm install and the build command in order whe
     timeout: 10_000,
   });
 
-  assert.equal(
-    result.status,
-    0,
-    `script exited ${result.status}: ${result.stderr}`,
-  );
+  expect(result.status, `script exited ${result.status}: ${result.stderr}`).toBe(0);
 
   let log = "";
   try {
@@ -127,9 +123,9 @@ await test("session-start.sh runs npm install and the build command in order whe
   }
 
   const lines = log.trim().split("\n");
-  assert.equal(lines.length, 2, `expected 2 npm invocations, got: ${JSON.stringify(lines)}`);
-  assert.equal(lines[0], "install");
-  assert.equal(lines[1], "run build");
+  expect(lines.length, `expected 2 npm invocations, got: ${JSON.stringify(lines)}`).toBe(2);
+  expect(lines[0]).toBe("install");
+  expect(lines[1]).toBe("run build");
 });
 
 await test("session-start.sh propagates non-zero exit when npm install fails", { skip: SKIP }, () => {
@@ -154,9 +150,5 @@ await test("session-start.sh propagates non-zero exit when npm install fails", {
     timeout: 10_000,
   });
 
-  assert.notEqual(
-    result.status,
-    0,
-    "expected non-zero exit when npm install fails (set -euo pipefail)",
-  );
+  expect(result.status, "expected non-zero exit when npm install fails (set -euo pipefail)").not.toBe(0);
 });

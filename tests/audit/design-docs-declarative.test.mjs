@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,13 +51,9 @@ for (const docName of DESIGN_DOCS) {
         if (m) violations.push(`${docName}:${i + 1}: banned "${m[0]}" — ${line.trim()}`);
       }
     });
-    assert.equal(
-      violations.length,
-      0,
-      `Design docs must be declarative target contracts, not status logs. ` +
+    expect(violations.length, `Design docs must be declarative target contracts, not status logs. ` +
         `Found current-state/status language — rewrite as the target the system ` +
         `should meet (completion is checked separately against code):\n` +
-        violations.join("\n"),
-    );
+        violations.join("\n")).toBe(0);
   });
 }

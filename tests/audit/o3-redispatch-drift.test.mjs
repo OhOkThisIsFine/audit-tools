@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // O3 — drift re-dispatch + supersession + convergence, end to end across the
 // ingestion executor, the ledger keys, and the staleness gate.
@@ -50,9 +49,9 @@ test("first ingest establishes baseline; unchanged content never drifts", () => 
 
   // No baseline yet → rekey is a pass-through (genuine base result).
   const rekeyed = rekeyDriftedResults([r], tasks, {}, []);
-  assert.equal(rekeyed[0].emit_source, undefined, "no drift on first ingest");
+  expect(rekeyed[0].emit_source, "no drift on first ingest").toBe(undefined);
   const ledger = appendResultsToLedger([], rekeyed);
-  assert.equal(ledger.length, 1);
+  expect(ledger.length).toBe(1);
 
   // Record the baseline, then re-derive with UNCHANGED content → not stale.
   const baselines = refreshResultBaselines(undefined, rekeyed, tasks);
@@ -61,7 +60,7 @@ test("first ingest establishes baseline; unchanged content never drifts", () => 
     [t],
     baselines,
   );
-  assert.equal(stale.size, 0, "unchanged content is not stale");
+  expect(stale.size, "unchanged content is not stale").toBe(0);
 });
 
 test("content drift → re-dispatch appends fresh findings, supersedes, converges", () => {
@@ -73,56 +72,45 @@ test("content drift → re-dispatch appends fresh findings, supersedes, converge
   const ingest1 = rekeyDriftedResults([r1], tasks, {}, []);
   let ledger = appendResultsToLedger([], ingest1);
   let baselines = refreshResultBaselines(undefined, ingest1, tasks);
-  assert.deepEqual(
-    selectCurrentResults(ledger).flatMap((r) => r.findings.map((f) => f.id)),
-    ["F_old"],
-  );
+  expect(selectCurrentResults(ledger).flatMap((r) => r.findings.map((f) => f.id))).toEqual(["F_old"]);
 
   // Content of the task changes (the file grew). The CURRENT base result now
   // drifts from its baseline → the gate marks the task for re-dispatch.
   const tEdited = task({ file_line_counts: { "a.ts": 250 } });
   tasks = tasksByTaskId(tEdited);
-  assert.notEqual(
-    taskContentSignatureForTask(t),
-    taskContentSignatureForTask(tEdited),
-    "edit moves the live signature",
-  );
+  expect(taskContentSignatureForTask(t), "edit moves the live signature").not.toBe(taskContentSignatureForTask(tEdited));
   const staleBefore = computeStaleResultTaskIds(
     selectCurrentResults(ledger),
     [tEdited],
     baselines,
   );
-  assert.ok(staleBefore.has("u1:security"), "drift fires staleness → re-dispatch");
+  expect(staleBefore.has("u1:security"), "drift fires staleness → re-dispatch").toBeTruthy();
 
   // Round 2: the re-audit returns a fresh base-shaped result (F_new, F_old dropped).
   // Ingestion re-keys it as redispatch attempt 1 → DISTINCT idempotency_key →
   // the append-only ledger ACCEPTS it (no idempotent no-op).
   const r2 = baseResult([{ id: "F_new" }]);
   const ingest2 = rekeyDriftedResults([r2], tasks, baselines, ledger);
-  assert.equal(ingest2[0].emit_source, "redispatch");
-  assert.equal(ingest2[0].attempt, 1);
+  expect(ingest2[0].emit_source).toBe("redispatch");
+  expect(ingest2[0].attempt).toBe(1);
   const ledgerBefore = ledger.length;
   ledger = appendResultsToLedger(ledger, ingest2);
-  assert.equal(ledger.length, ledgerBefore + 1, "fresh redispatch record appended");
+  expect(ledger.length, "fresh redispatch record appended").toBe(ledgerBefore + 1);
   baselines = refreshResultBaselines(baselines, ingest2, tasks);
 
   // Supersession: only the redispatch (F_new) is current; the stale F_old base
   // record — including the DROPPED finding — never surfaces.
   const current = selectCurrentResults(ledger);
-  assert.equal(current.length, 1, "base lineage collapses to the current record");
-  assert.deepEqual(
-    current.flatMap((r) => r.findings.map((f) => f.id)),
-    ["F_new"],
-    "superseded F_old gone; F_new current",
-  );
+  expect(current.length, "base lineage collapses to the current record").toBe(1);
+  expect(current.flatMap((r) => r.findings.map((f) => f.id)), "superseded F_old gone; F_new current").toEqual(["F_new"]);
 
   // Convergence: with the baseline refreshed to the edited content, the gate is
   // quiet — no infinite re-dispatch loop.
   const staleAfter = computeStaleResultTaskIds(current, [tEdited], baselines);
-  assert.equal(staleAfter.size, 0, "re-dispatch converges (no re-loop)");
+  expect(staleAfter.size, "re-dispatch converges (no re-loop)").toBe(0);
 
   // A second drift bumps to attempt 2 (monotonic, distinct key).
-  assert.equal(maxRedispatchAttempt(ledger, "u1:security"), 1);
+  expect(maxRedispatchAttempt(ledger, "u1:security")).toBe(1);
 });
 
 test("supersession keys on task_id, never identity_key — distinct tasks never collapse", () => {
@@ -134,11 +122,8 @@ test("supersession keys on task_id, never identity_key — distinct tasks never 
   const a = baseResult([{ id: "A" }], { task_id: "u1:security:part-1" });
   const b = baseResult([{ id: "B" }], { task_id: "u2:security:part-2", unit_id: "u2" });
   const current = selectCurrentResults([a, b]);
-  assert.equal(current.length, 2, "distinct tasks both retained");
-  assert.deepEqual(
-    current.flatMap((r) => r.findings.map((f) => f.id)).sort(),
-    ["A", "B"],
-  );
+  expect(current.length, "distinct tasks both retained").toBe(2);
+  expect(current.flatMap((r) => r.findings.map((f) => f.id)).sort()).toEqual(["A", "B"]);
 
   // Same task_id, base + redispatch → collapses to the higher attempt.
   const base = baseResult([{ id: "OLD" }], { task_id: "u1:security" });
@@ -148,18 +133,12 @@ test("supersession keys on task_id, never identity_key — distinct tasks never 
     attempt: 1,
   });
   const collapsed = selectCurrentResults([base, redis]);
-  assert.equal(collapsed.length, 1);
-  assert.deepEqual(collapsed[0].findings.map((f) => f.id), ["NEW"]);
+  expect(collapsed.length).toBe(1);
+  expect(collapsed[0].findings.map((f) => f.id)).toEqual(["NEW"]);
 });
 
 test("emitSourceFor reads a persisted emit_source before the task_id prefix", () => {
-  assert.equal(emitSourceFor(baseResult([])), "base");
-  assert.equal(
-    emitSourceFor(baseResult([], { emit_source: "redispatch", attempt: 2 })),
-    "redispatch",
-  );
-  assert.equal(
-    emitSourceFor(baseResult([], { task_id: "deepening:x" })),
-    "deepening",
-  );
+  expect(emitSourceFor(baseResult([]))).toBe("base");
+  expect(emitSourceFor(baseResult([], { emit_source: "redispatch", attempt: 2 }))).toBe("redispatch");
+  expect(emitSourceFor(baseResult([], { task_id: "deepening:x" }))).toBe("deepening");
 });

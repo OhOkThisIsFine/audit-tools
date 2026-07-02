@@ -26,6 +26,16 @@
   "commit or stash `<path>`" directive (was: opaque git error → identical auto-retries → human triage), work
   preserved under quarantine. (`src/remediate/steps/dispatch.ts`.) Tests: `intake-resolver.test.ts`,
   `next-step-resume-gates.test.ts`, `dispatch-worktree.test.ts`. Full remediate suite green (2111/0).
+- **Test-runner consolidation — ✅ DONE (2026-07-02, repo-internal, unpublished).** The whole suite now
+  runs on ONE runner (vitest) across `tests/audit` + `tests/shared` + `tests/remediate`; the node:test split
+  (`test:node`, `node --test`, `tsx/esm` loader) was retired. Audit/shared `.test.mjs` files use vitest
+  `test`/`describe`/`it` + `expect`; `node:assert/strict` is kept only for the four control-flow assertions
+  (`throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that have no clean `expect` form (it runs fine under
+  vitest). `npm test` = build + `vitest run`; single file = `npx vitest run <path>`. `vitest.config.ts`
+  raises `testTimeout` to 120s (audit integration tests spawn real subprocesses; node:test had no per-test
+  timeout). Framework-consistency guards updated (`shared-tests-invariants` INV-shared-tests-02,
+  `audit-infra-architecture` ARC-843ce274-2). **No npm publish** — tests aren't in the published `files`
+  set and dist is unchanged; commit+push to main only.
 - **Immediate next:** none pending — the multi-agent cooperative-runs track is complete (see below).
   Next candidates are the other forward tracks in `docs/backlog.md` (parallel dispatch over overlapping
   files; the deferred T5 items). Env-bound follow-up for the shipped track: live two-IDE validation. Slice **3 (per-agent step slot) SHIPPED**: `stepContractWriter` writes each

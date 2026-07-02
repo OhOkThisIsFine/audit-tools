@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,11 +13,11 @@ function fsError(code) {
 
 test("isTransientFsError flags Windows lock codes only", () => {
   for (const code of ["EPERM", "EBUSY", "EACCES", "EEXIST"]) {
-    assert.equal(isTransientFsError(fsError(code)), true, code);
+    expect(isTransientFsError(fsError(code)), code).toBe(true);
   }
-  assert.equal(isTransientFsError(fsError("ENOENT")), false);
-  assert.equal(isTransientFsError(new Error("no code")), false);
-  assert.equal(isTransientFsError(null), false);
+  expect(isTransientFsError(fsError("ENOENT"))).toBe(false);
+  expect(isTransientFsError(new Error("no code"))).toBe(false);
+  expect(isTransientFsError(null)).toBe(false);
 });
 
 test("withFsRetry retries transient errors then succeeds", async () => {
@@ -30,8 +30,8 @@ test("withFsRetry retries transient errors then succeeds", async () => {
     },
     { sleep: async () => {} },
   );
-  assert.equal(result, "ok");
-  assert.equal(calls, 3);
+  expect(result).toBe("ok");
+  expect(calls).toBe(3);
 });
 
 test("withFsRetry rethrows non-transient errors immediately", async () => {
@@ -46,7 +46,7 @@ test("withFsRetry rethrows non-transient errors immediately", async () => {
     ),
     /ENOENT/,
   );
-  assert.equal(calls, 1);
+  expect(calls).toBe(1);
 });
 
 test("withFsRetry gives up after the attempt budget", async () => {
@@ -61,7 +61,7 @@ test("withFsRetry gives up after the attempt budget", async () => {
     ),
     /EBUSY/,
   );
-  assert.equal(calls, 4);
+  expect(calls).toBe(4);
 });
 
 test("writeJsonFile round-trips and survives concurrent writers", async () => {
@@ -72,9 +72,9 @@ test("writeJsonFile round-trips and survives concurrent writers", async () => {
       Array.from({ length: 10 }, (_, i) => writeJsonFile(path, { i })),
     );
     const parsed = await readJsonFile(path);
-    assert.equal(typeof parsed.i, "number");
+    expect(typeof parsed.i).toBe("number");
     const raw = await readFile(path, "utf8");
-    assert.match(raw, /\n$/);
+    expect(raw).toMatch(/\n$/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -97,11 +97,7 @@ test("writeJsonFile removes its temp file when the durable write fails", async (
 
     // No `.tmp` residue may linger in the temp's parent directory.
     const leftovers = (await readdir(dir)).filter((name) => name.endsWith(".tmp"));
-    assert.deepEqual(
-      leftovers,
-      [],
-      `writeJsonFile must clean up its temp file on failure; found: ${leftovers.join(", ")}`,
-    );
+    expect(leftovers, `writeJsonFile must clean up its temp file on failure; found: ${leftovers.join(", ")}`).toEqual([]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

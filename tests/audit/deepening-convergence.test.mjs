@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, describe, it, expect } from "vitest";
 import { join } from "node:path";
 
 const { validateAuditResults, defaultFindingLensFromResult } = await import(
@@ -52,18 +51,18 @@ function resultFor(taskId, { lens = "security", findings } = {}) {
 test("defaultFindingLensFromResult — backfills omitted finding lens from AuditResult.lens", () => {
   const payload = [resultFor("deepening:finding:e0e34e19f3", { lens: "reliability" })];
   defaultFindingLensFromResult(payload);
-  assert.equal(payload[0].findings[0].lens, "reliability");
+  expect(payload[0].findings[0].lens).toBe("reliability");
 });
 
-test("defaultFindingLensFromResult — never overwrites an explicit finding lens (mismatch still surfaced)", async (t) => {
-  await t.test("explicit lens preserved", () => {
+describe("defaultFindingLensFromResult — never overwrites an explicit finding lens (mismatch still surfaced)", () => {
+  it("explicit lens preserved", () => {
     const finding = { ...findingWithoutLens(), lens: "performance" };
     const payload = [resultFor("t1", { lens: "security", findings: [finding] })];
     defaultFindingLensFromResult(payload);
-    assert.equal(payload[0].findings[0].lens, "performance");
+    expect(payload[0].findings[0].lens).toBe("performance");
   });
 
-  await t.test("a genuine explicit-vs-result lens mismatch is still a validation error", () => {
+  it("a genuine explicit-vs-result lens mismatch is still a validation error", () => {
     const task = deepeningTask("t1", "security");
     const finding = { ...findingWithoutLens(), lens: "performance" };
     const payload = [resultFor("t1", { lens: "security", findings: [finding] })];
@@ -71,37 +70,31 @@ test("defaultFindingLensFromResult — never overwrites an explicit finding lens
     const issues = validateAuditResults(payload, [task], {
       lineIndex: { "src/auth.ts": 10 },
     });
-    assert.ok(
-      issues.some(
+    expect(issues.some(
         (i) => i.severity === "error" && /findings\[0\]\.lens must match/.test(i.message),
-      ),
-      "mismatched explicit finding lens must still error",
-    );
+      ), "mismatched explicit finding lens must still error").toBeTruthy();
   });
 });
 
-test("missing findings[].lens sub-bug — red without the default, green with it", async (t) => {
+describe("missing findings[].lens sub-bug — red without the default, green with it", () => {
   const task = deepeningTask("deepening:finding:e0e34e19f3", "security");
   const lineIndex = { "src/auth.ts": 10 };
 
-  await t.test("RED: validator rejects a finding that omits lens", () => {
+  it("RED: validator rejects a finding that omits lens", () => {
     const payload = [resultFor(task.task_id, { lens: "security" })];
     const issues = validateAuditResults(payload, [task], { lineIndex });
-    assert.ok(
-      issues.some(
+    expect(issues.some(
         (i) => i.severity === "error" && /findings\[0\]\.lens/.test(i.field ?? i.message),
-      ),
-      "a finding with no lens must be rejected before the fix",
-    );
+      ), "a finding with no lens must be rejected before the fix").toBeTruthy();
   });
 
-  await t.test("GREEN: force-defaulting the lens first clears every error", () => {
+  it("GREEN: force-defaulting the lens first clears every error", () => {
     const payload = [resultFor(task.task_id, { lens: "security" })];
     defaultFindingLensFromResult(payload);
     const issues = validateAuditResults(payload, [task], { lineIndex });
     const errors = issues.filter((i) => i.severity === "error");
-    assert.deepEqual(errors, [], `expected no errors, got: ${errors.map((e) => e.message).join("; ")}`);
-    assert.equal(payload[0].findings[0].lens, "security");
+    expect(errors, `expected no errors, got: ${errors.map((e) => e.message).join("; ")}`).toEqual([]);
+    expect(payload[0].findings[0].lens).toBe("security");
   });
 });
 
@@ -113,9 +106,9 @@ test("packetMembersByPacketId — groups member task_ids per packet, drops the p
     { packet_id: "P2", task_id: "deepening:steward:c" },
   ];
   const map = packetMembersByPacketId(entries);
-  assert.deepEqual(map.get("P1"), ["deepening:finding:a", "deepening:finding:b"]);
-  assert.deepEqual(map.get("P2"), ["deepening:steward:c"]);
-  assert.equal(map.has("__prior_dispatch__"), false);
+  expect(map.get("P1")).toEqual(["deepening:finding:a", "deepening:finding:b"]);
+  expect(map.get("P2")).toEqual(["deepening:steward:c"]);
+  expect(map.has("__prior_dispatch__")).toBe(false);
 });
 
 test("packet-id leak sub-bug — result keyed under packet_id rebinds to the sole outstanding member", async () => {
@@ -140,12 +133,12 @@ test("packet-id leak sub-bug — result keyed under packet_id rebinds to the sol
     packetMembers,
   );
 
-  assert.equal(failing.length, 0, `expected no failures, got: ${JSON.stringify(failing)}`);
-  assert.equal(passing.length, 1);
-  assert.equal(recoveredCount, 1);
+  expect(failing.length, `expected no failures, got: ${JSON.stringify(failing)}`).toBe(0);
+  expect(passing.length).toBe(1);
+  expect(recoveredCount).toBe(1);
   // Rebound onto the member id, lens backfilled — ready to ingest, loop broken.
-  assert.equal(passing[0].task_id, member.task_id);
-  assert.equal(passing[0].findings[0].lens, "security");
+  expect(passing[0].task_id).toBe(member.task_id);
+  expect(passing[0].findings[0].lens).toBe("security");
 });
 
 test("multi-member fan-out — a partially-answered packet completes its remaining member without re-running the done one", async () => {
@@ -178,9 +171,9 @@ test("multi-member fan-out — a partially-answered packet completes its remaini
     packetMembers,
   );
 
-  assert.equal(failing.length, 0, `expected no failures, got: ${JSON.stringify(failing)}`);
-  assert.equal(passing.length, 1);
-  assert.equal(passing[0].task_id, memberB.task_id, "rebound onto the outstanding member, not the completed one");
+  expect(failing.length, `expected no failures, got: ${JSON.stringify(failing)}`).toBe(0);
+  expect(passing.length).toBe(1);
+  expect(passing[0].task_id, "rebound onto the outstanding member, not the completed one").toBe(memberB.task_id);
 });
 
 test("ambiguity guard — packet with >1 outstanding member does NOT rebind (no false completion)", async () => {
@@ -207,6 +200,6 @@ test("ambiguity guard — packet with >1 outstanding member does NOT rebind (no 
 
   // Both members stay missing (no result file): a >1-outstanding packet is never
   // rebound, so neither is falsely completed.
-  assert.equal(passing.length, 0);
-  assert.equal(failing.length, 2);
+  expect(passing.length).toBe(0);
+  expect(failing.length).toBe(2);
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildAuditReportModel, renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.ts");
 
@@ -29,9 +28,9 @@ await test("FINDING-013: budget_deferred_task_count counts budget_deferred files
       ],
     },
   });
-  assert.equal(report.summary.audited_file_count, 2);
-  assert.equal(report.summary.excluded_file_count, 1, "excluded excludes budget_deferred");
-  assert.equal(report.summary.budget_deferred_task_count, 2);
+  expect(report.summary.audited_file_count).toBe(2);
+  expect(report.summary.excluded_file_count, "excluded excludes budget_deferred").toBe(1);
+  expect(report.summary.budget_deferred_task_count).toBe(2);
 });
 
 await test("FINDING-013: budget_deferred_task_count is 0 when no files are budget_deferred", () => {
@@ -44,7 +43,7 @@ await test("FINDING-013: budget_deferred_task_count is 0 when no files are budge
       ],
     },
   });
-  assert.equal(report.summary.budget_deferred_task_count, 0);
+  expect(report.summary.budget_deferred_task_count).toBe(0);
 });
 
 // ── FINDING-013: report markdown summary line ───────────────────────────────
@@ -60,7 +59,7 @@ await test("FINDING-013: renderAuditReportMarkdown adds a 'Not audited (budget)'
     },
   });
   const md = renderAuditReportMarkdown(report);
-  assert.match(md, /Not audited \(budget\): 1 task\(s\) skipped by packet budget cap/);
+  expect(md).toMatch(/Not audited \(budget\): 1 task\(s\) skipped by packet budget cap/);
 });
 
 await test("FINDING-013: the 'Not audited (budget)' line is omitted when budget_deferred_task_count === 0", () => {
@@ -69,7 +68,7 @@ await test("FINDING-013: the 'Not audited (budget)' line is omitted when budget_
     coverageMatrix: { files: [coverageFile("src/a.ts", "complete")] },
   });
   const md = renderAuditReportMarkdown(report);
-  assert.doesNotMatch(md, /Not audited \(budget\)/);
+  expect(md).not.toMatch(/Not audited \(budget\)/);
 });
 
 // ── FINDING-013: scope-and-coverage budget notice ───────────────────────────
@@ -90,11 +89,11 @@ await test("FINDING-013: '## Scope and Coverage' renders the budget-mode notice"
       deferred_task_ids: ["t-1", "t-2", "t-3", "t-4"],
     },
   });
-  assert.match(md, /Partial audit \(budget cap\)\./);
-  assert.match(md, /3 packet\(s\) covering 4 task\(s\) were deferred/);
-  assert.match(md, /A full audit is advised before release\./);
+  expect(md).toMatch(/Partial audit \(budget cap\)\./);
+  expect(md).toMatch(/3 packet\(s\) covering 4 task\(s\) were deferred/);
+  expect(md).toMatch(/A full audit is advised before release\./);
   // Distinct from the delta-mode notice.
-  assert.doesNotMatch(md, /Delta audit since/);
+  expect(md).not.toMatch(/Delta audit since/);
 });
 
 await test("FINDING-013: budget-mode notice is distinct from the default full-scope notice", () => {
@@ -103,6 +102,6 @@ await test("FINDING-013: budget-mode notice is distinct from the default full-sc
     coverageMatrix: { files: [coverageFile("src/a.ts", "complete")] },
   });
   const full = renderAuditReportMarkdown(report); // no scope → default branch
-  assert.doesNotMatch(full, /Partial audit \(budget cap\)/);
-  assert.match(full, /deterministic output from the completed audit/);
+  expect(full).not.toMatch(/Partial audit \(budget cap\)/);
+  expect(full).toMatch(/deterministic output from the completed audit/);
 });

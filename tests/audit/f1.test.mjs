@@ -15,8 +15,7 @@
  * downstream consumer — here the sole consumer that puts these artifacts in front
  * of the model is `renderSharedStructuralContext`, exercised directly below.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   projectDesignReviewInputs,
@@ -147,7 +146,7 @@ test("excluded field: repo_manifest.generated_at churn projects byte-identically
       },
     }),
   );
-  assert.equal(after, before);
+  expect(after).toBe(before);
 });
 
 test("excluded field: per-file size_bytes/hash churn (content edit) projects byte-identically", () => {
@@ -164,7 +163,7 @@ test("excluded field: per-file size_bytes/hash churn (content edit) projects byt
       },
     }),
   );
-  assert.equal(after, before);
+  expect(after).toBe(before);
 });
 
 test("excluded field: graph edge confidence/reason churn projects byte-identically", () => {
@@ -178,7 +177,7 @@ test("excluded field: graph edge confidence/reason churn projects byte-identical
       },
     }),
   );
-  assert.equal(after, before);
+  expect(after).toBe(before);
 });
 
 test("excluded field: surface.notes churn projects byte-identically", () => {
@@ -192,7 +191,7 @@ test("excluded field: surface.notes churn projects byte-identically", () => {
       },
     }),
   );
-  assert.equal(after, before);
+  expect(after).toBe(before);
 });
 
 test("excluded field: risk_register.notes churn projects byte-identically", () => {
@@ -204,7 +203,7 @@ test("excluded field: risk_register.notes churn projects byte-identically", () =
       },
     }),
   );
-  assert.equal(after, before);
+  expect(after).toBe(before);
 });
 
 test("excluded field: design_assessment.generated_at churn projects byte-identically", () => {
@@ -217,7 +216,7 @@ test("excluded field: design_assessment.generated_at churn projects byte-identic
       },
     }),
   );
-  assert.equal(after, before);
+  expect(after).toBe(before);
 });
 
 test("excluded field: the scope bracket-tag REASON text is cosmetic (reword projects byte-identically)", () => {
@@ -228,11 +227,11 @@ test("excluded field: the scope bracket-tag REASON text is cosmetic (reword proj
   const wordingB = bundle({
     intent_checkpoint: checkpoint({ excluded_scope: [{ path: "vendor", reason: "third party" }] }),
   });
-  assert.equal(projStr(wordingB), projStr(wordingA), "rewording the exclusion reason must not re-stale");
+  expect(projStr(wordingB), "rewording the exclusion reason must not re-stale").toBe(projStr(wordingA));
   // And it really IS excluded (kind captured), not silently dropped.
   const unitProj = projectDesignReviewInput("unit_manifest", wordingA);
   const u2 = unitProj.find((u) => u.unit_id === "U2");
-  assert.equal(u2.scope, "excluded", "the disposition kind is still projected");
+  expect(u2.scope, "the disposition kind is still projected").toBe("excluded");
 });
 
 // ── 2. Load-bearing negative-complement (rendered fact still re-stales) ─────────
@@ -255,7 +254,7 @@ test("negative-complement: adding a source file (rendered count + reading list) 
       },
     }),
   );
-  assert.notEqual(after, before);
+  expect(after).not.toBe(before);
 });
 
 test("negative-complement: a real graph edge (rendered) re-stales", () => {
@@ -272,7 +271,7 @@ test("negative-complement: a real graph edge (rendered) re-stales", () => {
       },
     }),
   );
-  assert.notEqual(after, before);
+  expect(after).not.toBe(before);
 });
 
 test("negative-complement: a surface method (rendered) re-stales", () => {
@@ -286,7 +285,7 @@ test("negative-complement: a surface method (rendered) re-stales", () => {
       },
     }),
   );
-  assert.notEqual(after, before);
+  expect(after).not.toBe(before);
 });
 
 test("negative-complement: a risk signal (rendered) re-stales", () => {
@@ -298,7 +297,7 @@ test("negative-complement: a risk signal (rendered) re-stales", () => {
       },
     }),
   );
-  assert.notEqual(after, before);
+  expect(after).not.toBe(before);
 });
 
 test("negative-complement: a deterministic finding's rendered field (severity) re-stales", () => {
@@ -308,7 +307,7 @@ test("negative-complement: a deterministic finding's rendered field (severity) r
     generated_at: "2026-01-01T00:00:00Z",
     findings: [{ ...bundle().design_assessment.findings[0], severity: "low" }],
   };
-  assert.notEqual(projStr(flipped), before);
+  expect(projStr(flipped)).not.toBe(before);
 });
 
 // ── 3. Order / provenance independence ──────────────────────────────────────────
@@ -327,7 +326,7 @@ test("order-independence: reordering files projects identically", () => {
       },
     }),
   );
-  assert.equal(reversed, before);
+  expect(reversed).toBe(before);
 });
 
 test("order-independence: reordering units / risk items / surfaces projects identically", () => {
@@ -336,7 +335,7 @@ test("order-independence: reordering units / risk items / surfaces projects iden
   const reordered = bundle({
     unit_manifest: { units: [...base.unit_manifest.units].reverse() },
   });
-  assert.equal(projStr(reordered), before);
+  expect(projStr(reordered)).toBe(before);
 });
 
 test("order-independence: reordering a unit's excluded_scope entries projects identically", () => {
@@ -356,7 +355,7 @@ test("order-independence: reordering a unit's excluded_scope entries projects id
       ],
     }),
   });
-  assert.equal(projStr(b), projStr(a), "exclusion-entry order does not change any unit's disposition");
+  expect(projStr(b), "exclusion-entry order does not change any unit's disposition").toBe(projStr(a));
 });
 
 // ── 4. Scope-change re-stale (dc4 determination kept in the projection) ──────────
@@ -365,13 +364,13 @@ test("scope-change re-stale: excluding a previously-in-scope unit re-stales the 
   // Baseline: no checkpoint → both units in scope.
   const baseline = bundle();
   const snap = snapshotFrom(baseline);
-  assert.equal(isDesignReviewStale(snap, baseline), false, "identical bundle is fresh");
+  expect(isDesignReviewStale(snap, baseline), "identical bundle is fresh").toBe(false);
 
   // Now the host excludes vendor/ → U2 flips to excluded → the review must re-run.
   const scoped = bundle({
     intent_checkpoint: checkpoint({ excluded_scope: [{ path: "vendor", reason: "third-party" }] }),
   });
-  assert.equal(isDesignReviewStale(snap, scoped), true, "a scope exclusion re-stales the review");
+  expect(isDesignReviewStale(snap, scoped), "a scope exclusion re-stales the review").toBe(true);
 });
 
 test("scope-change re-stale: a disposition_overrides exclusion also re-stales", () => {
@@ -382,7 +381,7 @@ test("scope-change re-stale: a disposition_overrides exclusion also re-stales", 
       disposition_overrides: [{ path: "vendor/x.ts", status: "vendor", reason: "generated" }],
     }),
   });
-  assert.equal(isDesignReviewStale(snap, scoped), true);
+  expect(isDesignReviewStale(snap, scoped)).toBe(true);
 });
 
 test("scope-change re-stale: a partially-excluded unit stays in scope (no spurious re-stale)", () => {
@@ -408,11 +407,7 @@ test("scope-change re-stale: a partially-excluded unit stays in scope (no spurio
     unit_manifest: twoFileUnit.unit_manifest,
     intent_checkpoint: checkpoint({ excluded_scope: [{ path: "src/a.ts", reason: "one file only" }] }),
   });
-  assert.equal(
-    isDesignReviewStale(snap, partiallyExcluded),
-    false,
-    "a unit with any in-scope file stays in scope → no re-stale",
-  );
+  expect(isDesignReviewStale(snap, partiallyExcluded), "a unit with any in-scope file stays in scope → no re-stale").toBe(false);
 });
 
 test("scope-change re-stale: rewording an exclusion reason does NOT re-stale (cosmetic)", () => {
@@ -423,7 +418,7 @@ test("scope-change re-stale: rewording an exclusion reason does NOT re-stale (co
   const scopedB = bundle({
     intent_checkpoint: checkpoint({ excluded_scope: [{ path: "vendor", reason: "vendored dependency" }] }),
   });
-  assert.equal(isDesignReviewStale(snap, scopedB), false, "the bracket-tag reason text is cosmetic");
+  expect(isDesignReviewStale(snap, scopedB), "the bracket-tag reason text is cosmetic").toBe(false);
 });
 
 // ── CE-008: the rendered prompt is the actual downstream consumer ────────────────
@@ -434,13 +429,13 @@ test("scope-change re-stale: rewording an exclusion reason does NOT re-stale (co
 
 test("CE-008: the scope flip the projection captures is exactly what the prompt renders", () => {
   const inScope = renderSharedStructuralContext(bundle(), 5);
-  assert.match(inScope, /U2 \[in scope\]/, "with no checkpoint the unit renders [in scope]");
+  expect(inScope, "with no checkpoint the unit renders [in scope]").toMatch(/U2 \[in scope\]/);
 
   const scoped = bundle({
     intent_checkpoint: checkpoint({ excluded_scope: [{ path: "vendor", reason: "third-party" }] }),
   });
   const excludedRender = renderSharedStructuralContext(scoped, 5);
-  assert.match(excludedRender, /U2 \[excluded: third-party\]/, "the excluded unit renders the tag the projection keys on");
+  expect(excludedRender, "the excluded unit renders the tag the projection keys on").toMatch(/U2 \[excluded: third-party\]/);
   // The whole-prompt path agrees (renderDesignReviewPrompt wraps the shared context).
-  assert.match(renderDesignReviewPrompt(scoped), /U2 \[excluded: third-party\]/);
+  expect(renderDesignReviewPrompt(scoped)).toMatch(/U2 \[excluded: third-party\]/);
 });

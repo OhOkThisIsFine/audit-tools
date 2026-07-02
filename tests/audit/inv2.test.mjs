@@ -17,8 +17,7 @@
  * The LIVE per-provider endpoint probes need real local credentials, so they are
  * gated/skipped here (see the `live endpoint` block at the bottom).
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, afterEach, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -52,7 +51,7 @@ const { computeDispatchCapacity, summarizeDispatchCapacityPools } = await import
 const NOW = Date.parse("2026-06-19T12:00:00.000Z");
 
 const tmpDirs = [];
-test.afterEach(() => {
+afterEach(() => {
   while (tmpDirs.length) {
     try {
       rmSync(tmpDirs.pop(), { recursive: true, force: true });
@@ -85,17 +84,17 @@ const okResponse = (body) => ({ ok: true, status: 200, json: async () => body })
 
 test("remainingFromUsedPercent is exact for integer percents (no float drift)", () => {
   // "percent used" → remaining fraction: 20% used ⇒ 0.8 remaining (exact).
-  assert.equal(remainingFromUsedPercent(20), 0.8);
-  assert.equal(remainingFromUsedPercent(75), 0.25);
-  assert.equal(remainingFromUsedPercent(0), 1);
-  assert.equal(remainingFromUsedPercent(100), 0);
+  expect(remainingFromUsedPercent(20)).toBe(0.8);
+  expect(remainingFromUsedPercent(75)).toBe(0.25);
+  expect(remainingFromUsedPercent(0)).toBe(1);
+  expect(remainingFromUsedPercent(100)).toBe(0);
 });
 
 test("clampFraction pins out-of-range and non-finite values into [0,1]", () => {
-  assert.equal(clampFraction(1.5), 1);
-  assert.equal(clampFraction(-0.2), 0);
-  assert.equal(clampFraction(Number.NaN), 0);
-  assert.equal(clampFraction(0.42), 0.42);
+  expect(clampFraction(1.5)).toBe(1);
+  expect(clampFraction(-0.2)).toBe(0);
+  expect(clampFraction(Number.NaN)).toBe(0);
+  expect(clampFraction(0.42)).toBe(0.42);
 });
 
 test("each source maps its live payload to an exact, binding 0–1 fraction", () => {
@@ -105,29 +104,29 @@ test("each source maps its live payload to an exact, binding 0–1 fraction", ()
     null,
     NOW,
   );
-  assert.equal(claude.remaining_pct, 0.2); // 80% used → 0.2 remaining (exact)
-  assert.equal(claude.source, "claude-oauth");
+  expect(claude.remaining_pct).toBe(0.2); // 80% used → 0.2 remaining (exact)
+  expect(claude.source).toBe("claude-oauth");
 
   // Codex: most-constrained of two windows, exact.
   const codex = mapCodexUsage(
     { rate_limit: { primary_window: { used_percent: 12 }, secondary_window: { used_percent: 40 } } },
     NOW,
   );
-  assert.equal(codex.remaining_pct, 0.6);
+  expect(codex.remaining_pct).toBe(0.6);
 
   // Copilot: percent_remaining path, exact.
   const copilot = mapCopilotUsage(
     { quota_snapshots: { premium_interactions: { percent_remaining: 30 } } },
     NOW,
   );
-  assert.equal(copilot.remaining_pct, 0.3);
+  expect(copilot.remaining_pct).toBe(0.3);
 
   // Antigravity: already a fraction; binds on the least-remaining model + clamps.
   const antigravity = mapAntigravityUsage(
     { models: [{ quotaInfo: { remainingFraction: 0.9 } }, { quotaInfo: { remainingFraction: 1.5 } }] },
     NOW,
   );
-  assert.equal(antigravity.remaining_pct, 0.9); // 1.5 clamps but 0.9 is lower → binds 0.9
+  expect(antigravity.remaining_pct).toBe(0.9); // 1.5 clamps but 0.9 is lower → binds 0.9
 });
 
 // ── 2. Discovered-window slot-rise (escape the 32k floor) ─────────────────────
@@ -165,20 +164,9 @@ test("a discovered capability window lifts the resolved context above the 32k fl
     pendingItemTokens,
   });
 
-  assert.equal(
-    floored.primary.schedule.resolved_limits.context_tokens,
-    32_000,
-    "without a discovered window the conservative 32k floor applies",
-  );
-  assert.equal(
-    lifted.primary.schedule.resolved_limits.context_tokens,
-    200_000,
-    "the discovered capability window must outrank the 32k default",
-  );
-  assert.ok(
-    lifted.total_slots >= floored.total_slots,
-    `discovered window must not REDUCE slots (floored=${floored.total_slots} lifted=${lifted.total_slots})`,
-  );
+  expect(floored.primary.schedule.resolved_limits.context_tokens, "without a discovered window the conservative 32k floor applies").toBe(32_000);
+  expect(lifted.primary.schedule.resolved_limits.context_tokens, "the discovered capability window must outrank the 32k default").toBe(200_000);
+  expect(lifted.total_slots >= floored.total_slots, `discovered window must not REDUCE slots (floored=${floored.total_slots} lifted=${lifted.total_slots})`).toBeTruthy();
 });
 
 // ── 3. Hermeticity ───────────────────────────────────────────────────────────
@@ -191,7 +179,7 @@ test("the DEFAULT fetch makes no network call under a test runner (hermetic)", a
     }),
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
 });
 
 test("an injected fetchImpl exercises the real mapping (hermeticity escape hatch)", async () => {
@@ -206,8 +194,8 @@ test("an injected fetchImpl exercises the real mapping (hermeticity escape hatch
     now: () => NOW,
   });
   const snap = await src.queryCurrentUsage("claude-code/*");
-  assert.equal(fetchImpl.calls.length, 1, "an injected fetch must actually be called");
-  assert.equal(snap.remaining_pct, clampFraction(0.3));
+  expect(fetchImpl.calls.length, "an injected fetch must actually be called").toBe(1);
+  expect(snap.remaining_pct).toBe(clampFraction(0.3));
 });
 
 // ── 4a. Explicit silent-degrade marker on the probe ──────────────────────────
@@ -224,8 +212,8 @@ test("probeUsage distinguishes degraded (queried, lost) from not_applicable (gat
     now: () => NOW,
   });
   const degradedProbe = await degraded.probeUsage("codex/*");
-  assert.equal(degradedProbe.snapshot, null);
-  assert.equal(degradedProbe.status, "degraded");
+  expect(degradedProbe.snapshot).toBe(null);
+  expect(degradedProbe.status).toBe("degraded");
 
   // Non-matching provider → NOT_APPLICABLE, with no I/O.
   const naFetch = recordingFetch(okResponse({}));
@@ -235,8 +223,8 @@ test("probeUsage distinguishes degraded (queried, lost) from not_applicable (gat
     now: () => NOW,
   });
   const naProbe = await notApplicable.probeUsage("claude-code/*");
-  assert.equal(naProbe.status, "not_applicable");
-  assert.equal(naFetch.calls.length, 0, "a gated-out provider must not hit the network");
+  expect(naProbe.status).toBe("not_applicable");
+  expect(naFetch.calls.length, "a gated-out provider must not hit the network").toBe(0);
 
   // Handled provider + a mappable 200 → OK.
   const ok = new CodexQuotaSource({
@@ -247,8 +235,8 @@ test("probeUsage distinguishes degraded (queried, lost) from not_applicable (gat
     now: () => NOW,
   });
   const okProbe = await ok.probeUsage("codex/*");
-  assert.equal(okProbe.status, "ok");
-  assert.equal(okProbe.snapshot.remaining_pct, 0.9);
+  expect(okProbe.status).toBe("ok");
+  expect(okProbe.snapshot.remaining_pct).toBe(0.9);
 });
 
 test("CompositeQuotaSource.probeUsage aggregates a degrade across the cascade", async () => {
@@ -272,7 +260,7 @@ test("CompositeQuotaSource.probeUsage aggregates a degrade across the cascade", 
   };
   const composite = new CompositeQuotaSource([inertSource, degradingSource]);
   const probe = await composite.probeUsage("codex/*");
-  assert.equal(probe.status, "degraded", "any handling source that degrades makes the cascade degraded");
+  expect(probe.status, "any handling source that degrades makes the cascade degraded").toBe("degraded");
 
   // A throwing source also counts as a degrade (probeQuotaSource fallback path).
   const throwingSource = {
@@ -282,21 +270,21 @@ test("CompositeQuotaSource.probeUsage aggregates a degrade across the cascade", 
     },
   };
   const composite2 = new CompositeQuotaSource([throwingSource]);
-  assert.equal((await composite2.probeUsage("codex/*")).status, "degraded");
+  expect((await composite2.probeUsage("codex/*")).status).toBe("degraded");
 
   // No source applies → not_applicable (the cascade was simply silent).
   const composite3 = new CompositeQuotaSource([inertSource]);
-  assert.equal((await composite3.probeUsage("codex/*")).status, "not_applicable");
+  expect((await composite3.probeUsage("codex/*")).status).toBe("not_applicable");
 });
 
 test("probeQuotaSource derives a conservative status for a plain queryCurrentUsage stub", async () => {
   // No probeUsage → a null result must be reported as not_applicable, never an
   // over-claimed degrade (a bare stub can't tell a silent degrade from a non-match).
   const nullStub = { name: "n", async queryCurrentUsage() { return null; } };
-  assert.equal((await probeQuotaSource(nullStub, "x/y")).status, "not_applicable");
+  expect((await probeQuotaSource(nullStub, "x/y")).status).toBe("not_applicable");
 
   const throwStub = { name: "t", async queryCurrentUsage() { throw new Error("x"); } };
-  assert.equal((await probeQuotaSource(throwStub, "x/y")).status, "degraded");
+  expect((await probeQuotaSource(throwStub, "x/y")).status).toBe("degraded");
 });
 
 // ── 4b. Attaches RAW signals + the degrade marker, never a pre-folded slot count ─
@@ -322,7 +310,7 @@ test("a pool carries the RAW per-pool signals and the degrade marker — no pre-
   };
   // The pool object itself holds raw signals, NOT a slot count — the only numeric
   // capacity field on CapacityPool is absent; slots are derived downstream.
-  assert.equal("slots" in pool, false, "CapacityPool must not carry a pre-folded slot count");
+  expect("slots" in pool, "CapacityPool must not carry a pre-folded slot count").toBe(false);
 
   const capacity = computeDispatchCapacity({
     pools: [pool],
@@ -331,10 +319,10 @@ test("a pool carries the RAW per-pool signals and the degrade marker — no pre-
   });
   const [summary] = summarizeDispatchCapacityPools(capacity);
   // The raw snapshot + the degrade marker survive into the summary unfolded.
-  assert.deepEqual(summary.quota_source_snapshot, snapshot);
-  assert.equal(summary.quota_signal_degraded, true);
+  expect(summary.quota_source_snapshot).toEqual(snapshot);
+  expect(summary.quota_signal_degraded).toBe(true);
   // And the fold still happened in the scheduler: a real slot count is present.
-  assert.ok(summary.slots >= 1);
+  expect(summary.slots >= 1).toBeTruthy();
 });
 
 test("a healthy (non-degraded) pool omits the degrade marker from its summary", async () => {
@@ -354,11 +342,7 @@ test("a healthy (non-degraded) pool omits the degrade marker from its summary", 
     pendingItemTokens: [1_000],
   });
   const [summary] = summarizeDispatchCapacityPools(capacity);
-  assert.equal(
-    summary.quota_signal_degraded,
-    undefined,
-    "no degrade must leave the marker unset (not false) so it stays a positive signal",
-  );
+  expect(summary.quota_signal_degraded, "no degrade must leave the marker unset (not false) so it stays a positive signal").toBe(undefined);
 });
 
 // ── Gated live endpoint validation (needs real local credentials) ────────────
@@ -378,7 +362,7 @@ test(
     const src = new ClaudeOAuthQuotaSource({ fetchImpl: globalThis.fetch });
     const snap = await src.queryCurrentUsage("claude-code/*");
     if (snap !== null) {
-      assert.ok(snap.remaining_pct === null || (snap.remaining_pct >= 0 && snap.remaining_pct <= 1));
+      expect(snap.remaining_pct === null || (snap.remaining_pct >= 0 && snap.remaining_pct <= 1)).toBeTruthy();
     }
   },
 );

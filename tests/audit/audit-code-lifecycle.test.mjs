@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -93,26 +92,26 @@ test("audit-code wrapper supports repeated bounded advance-audit invocations wit
     const first = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(first.selected_executor, "provider_confirmation_executor");
-    assert.equal(first.next_likely_step, "repo_manifest");
+    expect(first.selected_executor).toBe("provider_confirmation_executor");
+    expect(first.next_likely_step).toBe("repo_manifest");
 
     const second = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(second.selected_executor, "intake_executor");
-    assert.equal(second.next_likely_step, "auto_fixes_applied");
+    expect(second.selected_executor).toBe("intake_executor");
+    expect(second.next_likely_step).toBe("auto_fixes_applied");
 
     const third = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(third.selected_executor, "auto_fix_executor");
-    assert.equal(third.next_likely_step, "syntax_resolved");
+    expect(third.selected_executor).toBe("auto_fix_executor");
+    expect(third.next_likely_step).toBe("syntax_resolved");
 
     const fourth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(fourth.selected_executor, "syntax_resolution_executor");
-    assert.equal(fourth.next_likely_step, "external_analyzers_current");
+    expect(fourth.selected_executor).toBe("syntax_resolution_executor");
+    expect(fourth.next_likely_step).toBe("external_analyzers_current");
 
     // External-analyzer acquisition (Slice D) runs between syntax resolution and
     // structure. Under advance-audit it is NOT enabled (only the CLI next-step
@@ -121,22 +120,17 @@ test("audit-code wrapper supports repeated bounded advance-audit invocations wit
     const acquisition = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(
-      acquisition.selected_executor,
-      "external_analyzer_acquisition_executor",
-    );
-    assert.equal(acquisition.next_likely_step, "structure_artifacts");
-    assert.ok(
-      acquisition.artifacts_written.includes(
+    expect(acquisition.selected_executor).toBe("external_analyzer_acquisition_executor");
+    expect(acquisition.next_likely_step).toBe("structure_artifacts");
+    expect(acquisition.artifacts_written.includes(
         "external_analyzer_acquisition.json",
-      ),
-    );
+      )).toBeTruthy();
 
     const fifth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(fifth.selected_executor, "structure_executor");
-    assert.equal(fifth.next_likely_step, "graph_enrichment_current");
+    expect(fifth.selected_executor).toBe("structure_executor");
+    expect(fifth.next_likely_step).toBe("graph_enrichment_current");
 
     // Graph enrichment runs between structure and design assessment. Under
     // advance-audit it never prompts: optional analyzers resolve or fall
@@ -144,41 +138,41 @@ test("audit-code wrapper supports repeated bounded advance-audit invocations wit
     const enrichment = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(enrichment.selected_executor, "graph_enrichment_executor");
-    assert.equal(enrichment.next_likely_step, "design_assessment_current");
+    expect(enrichment.selected_executor).toBe("graph_enrichment_executor");
+    expect(enrichment.next_likely_step).toBe("design_assessment_current");
 
     const sixth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(sixth.selected_executor, "design_assessment_executor");
-    assert.equal(sixth.next_likely_step, "intent_checkpoint_current");
+    expect(sixth.selected_executor).toBe("design_assessment_executor");
+    expect(sixth.next_likely_step).toBe("intent_checkpoint_current");
 
     // Intent checkpoint auto-completes headlessly under advance-audit.
     const seventh = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(seventh.selected_executor, "intent_checkpoint_executor");
-    assert.equal(seventh.next_likely_step, "design_review_contract_completed");
+    expect(seventh.selected_executor).toBe("intent_checkpoint_executor");
+    expect(seventh.next_likely_step).toBe("design_review_contract_completed");
 
     const eighth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(eighth.selected_executor, "design_review_contract");
-    assert.equal(eighth.next_likely_step, "design_review_conceptual_completed");
+    expect(eighth.selected_executor).toBe("design_review_contract");
+    expect(eighth.next_likely_step).toBe("design_review_conceptual_completed");
 
     const eighthB = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(eighthB.selected_executor, "design_review_conceptual");
-    assert.equal(eighthB.next_likely_step, "planning_artifacts");
+    expect(eighthB.selected_executor).toBe("design_review_conceptual");
+    expect(eighthB.next_likely_step).toBe("planning_artifacts");
 
     const ninth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
-    assert.equal(ninth.selected_executor, "planning_executor");
-    assert.ok(Array.isArray(ninth.artifacts_written));
-    assert.ok(ninth.artifacts_written.includes("audit_tasks.json"));
-    assert.ok(ninth.artifacts_written.includes("requeue_tasks.json"));
+    expect(ninth.selected_executor).toBe("planning_executor");
+    expect(Array.isArray(ninth.artifacts_written)).toBeTruthy();
+    expect(ninth.artifacts_written.includes("audit_tasks.json")).toBeTruthy();
+    expect(ninth.artifacts_written.includes("requeue_tasks.json")).toBeTruthy();
   });
 });
 
@@ -216,13 +210,8 @@ test("audit-code wrapper accepts external analyzer evidence on the advance-audit
         )
       ).stdout,
     );
-    assert.equal(
-      imported.selected_executor,
-      "external_analyzer_import_executor",
-    );
-    assert.equal(imported.progress_made, true);
-    assert.ok(
-      imported.artifacts_written.includes("external_analyzer_results.json"),
-    );
+    expect(imported.selected_executor).toBe("external_analyzer_import_executor");
+    expect(imported.progress_made).toBe(true);
+    expect(imported.artifacts_written.includes("external_analyzer_results.json")).toBeTruthy();
   });
 });

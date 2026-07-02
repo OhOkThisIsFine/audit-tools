@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   discoverProviders,
@@ -20,8 +19,8 @@ test("discoverProviders returns entry for claude-code when 'claude' found on PAT
   // logic by verifying the returned array only contains entries with detected:true.
   const result = discoverProviders({}, process.env);
   for (const p of result) {
-    assert.equal(p.detected, true, `provider ${p.name} should be marked detected`);
-    assert.ok(["frontier", "capable", "fast", "unknown"].includes(p.capabilityTier));
+    expect(p.detected, `provider ${p.name} should be marked detected`).toBe(true);
+    expect(["frontier", "capable", "fast", "unknown"].includes(p.capabilityTier)).toBeTruthy();
   }
 });
 
@@ -39,18 +38,15 @@ test("discoverProviders assigns correct capability tiers for well-known names", 
   ];
 
   for (const p of syntheticProviders) {
-    assert.ok(
-      ["frontier", "capable", "fast", "unknown"].includes(p.capabilityTier),
-      `unexpected tier ${p.capabilityTier} for ${p.name}`,
-    );
+    expect(["frontier", "capable", "fast", "unknown"].includes(p.capabilityTier), `unexpected tier ${p.capabilityTier} for ${p.name}`).toBeTruthy();
   }
 
   // Verify tiers match expected mapping
   const tierMap = Object.fromEntries(syntheticProviders.map(p => [p.name, p.capabilityTier]));
-  assert.equal(tierMap["claude-code"],       "frontier");
-  assert.equal(tierMap["opencode"],          "capable");
-  assert.equal(tierMap["codex"],             "capable");
-  assert.equal(tierMap["local-subprocess"],  "unknown");
+  expect(tierMap["claude-code"]).toBe("frontier");
+  expect(tierMap["opencode"]).toBe("capable");
+  expect(tierMap["codex"]).toBe("capable");
+  expect(tierMap["local-subprocess"]).toBe("unknown");
 });
 
 test("discoverProviders surfaces openai-compatible when configured (config-gated, not PATH-probed)", () => {
@@ -61,23 +57,15 @@ test("discoverProviders surfaces openai-compatible when configured (config-gated
     {},
   );
   const entry = configured.find((p) => p.name === "openai-compatible");
-  assert.ok(entry, "openai-compatible should be surfaced when base_url + model are set");
-  assert.equal(entry.detected, true);
-  assert.equal(entry.capabilityTier, "capable");
+  expect(entry, "openai-compatible should be surfaced when base_url + model are set").toBeTruthy();
+  expect(entry.detected).toBe(true);
+  expect(entry.capabilityTier).toBe("capable");
 
   // Absent config → not surfaced; partial config (model missing) → not surfaced.
-  assert.equal(
-    discoverProviders({}, {}).some((p) => p.name === "openai-compatible"),
-    false,
-    "openai-compatible must NOT appear without configuration",
-  );
-  assert.equal(
-    discoverProviders({ openai_compatible: { base_url: "https://example/v1" } }, {}).some(
+  expect(discoverProviders({}, {}).some((p) => p.name === "openai-compatible"), "openai-compatible must NOT appear without configuration").toBe(false);
+  expect(discoverProviders({ openai_compatible: { base_url: "https://example/v1" } }, {}).some(
       (p) => p.name === "openai-compatible",
-    ),
-    false,
-    "openai-compatible needs both base_url AND model",
-  );
+    ), "openai-compatible needs both base_url AND model").toBe(false);
 });
 
 test("PB-1: discoverProviders does NOT surface a bare-PATH opencode without explicit config", () => {
@@ -86,11 +74,7 @@ test("PB-1: discoverProviders does NOT surface a bare-PATH opencode without expl
   // unprompted). This holds regardless of whether opencode is actually installed
   // in the test environment — the gate `continue`s before pushing the entry.
   const result = discoverProviders({}, {});
-  assert.equal(
-    result.some((p) => p.name === "opencode"),
-    false,
-    "bare-PATH opencode must NOT appear without opencode.* config",
-  );
+  expect(result.some((p) => p.name === "opencode"), "bare-PATH opencode must NOT appear without opencode.* config").toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -107,10 +91,10 @@ test("applyProviderConfirmationSelections filters excluded providers", () => {
   const result = applyProviderConfirmationSelections(pool, ["codex"], []);
   const names = result.providers.map(p => p.name);
 
-  assert.ok(!names.includes("codex"), "codex should be excluded");
-  assert.ok(names.includes("claude-code"), "claude-code should be preserved");
-  assert.ok(names.includes("opencode"), "opencode should be preserved");
-  assert.deepEqual(result.excluded, ["codex"]);
+  expect(!names.includes("codex"), "codex should be excluded").toBeTruthy();
+  expect(names.includes("claude-code"), "claude-code should be preserved").toBeTruthy();
+  expect(names.includes("opencode"), "opencode should be preserved").toBeTruthy();
+  expect(result.excluded).toEqual(["codex"]);
 });
 
 test("applyProviderConfirmationSelections preserves non-excluded providers", () => {
@@ -120,8 +104,8 @@ test("applyProviderConfirmationSelections preserves non-excluded providers", () 
   ];
 
   const result = applyProviderConfirmationSelections(pool, [], []);
-  assert.equal(result.providers.length, 2);
-  assert.deepEqual(result.excluded, []);
+  expect(result.providers.length).toBe(2);
+  expect(result.excluded).toEqual([]);
 });
 
 test("applyProviderConfirmationSelections appends addUndetected providers with detected:false", () => {
@@ -134,10 +118,10 @@ test("applyProviderConfirmationSelections appends addUndetected providers with d
 
   const result = applyProviderConfirmationSelections(pool, [], undetected);
   const added = result.providers.find(p => p.name === "codex");
-  assert.ok(added, "codex should appear in confirmed pool");
-  assert.equal(added.detected, false, "addUndetected entries should have detected:false");
-  assert.equal(result.addedUndetected.length, 1);
-  assert.equal(result.addedUndetected[0].detected, false);
+  expect(added, "codex should appear in confirmed pool").toBeTruthy();
+  expect(added.detected, "addUndetected entries should have detected:false").toBe(false);
+  expect(result.addedUndetected.length).toBe(1);
+  expect(result.addedUndetected[0].detected).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -157,7 +141,7 @@ test("queryProviderQuota returns null when queryLimits is not implemented", asyn
   };
 
   const result = await queryProviderQuota(syntheticDiscovered, providerWithoutQueryLimits);
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("queryProviderQuota returns null when queryLimits rejects", async () => {
@@ -175,7 +159,7 @@ test("queryProviderQuota returns null when queryLimits rejects", async () => {
   };
 
   const result = await queryProviderQuota(syntheticDiscovered, providerThatThrows);
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 test("queryProviderQuota returns the limits when queryLimits succeeds", async () => {
@@ -192,7 +176,7 @@ test("queryProviderQuota returns the limits when queryLimits succeeds", async ()
   };
 
   const result = await queryProviderQuota(syntheticDiscovered, providerWithLimits);
-  assert.deepEqual(result, limits);
+  expect(result).toEqual(limits);
 });
 
 test("OBS-9a9091ad: queryProviderQuota invokes the injected log on a swallowed query error", async () => {
@@ -217,13 +201,13 @@ test("OBS-9a9091ad: queryProviderQuota invokes the injected log on a swallowed q
     (providerName, error) => logged.push({ providerName, error }),
   );
   // Contract unchanged: still swallows to null, still never throws.
-  assert.equal(result, null);
+  expect(result).toBe(null);
   // ...but the failure is now surfaced through the injected channel with the
   // provider name + the original error, so a persistently-failing provider is
   // no longer invisible to operators.
-  assert.equal(logged.length, 1, "log must fire exactly once on a swallowed error");
-  assert.equal(logged[0].providerName, "codex");
-  assert.equal(logged[0].error, boom);
+  expect(logged.length, "log must fire exactly once on a swallowed error").toBe(1);
+  expect(logged[0].providerName).toBe("codex");
+  expect(logged[0].error).toBe(boom);
 });
 
 test("OBS-9a9091ad: queryProviderQuota does NOT invoke the injected log on success", async () => {
@@ -244,8 +228,8 @@ test("OBS-9a9091ad: queryProviderQuota does NOT invoke the injected log on succe
     providerWithLimits,
     (providerName, error) => logged.push({ providerName, error }),
   );
-  assert.deepEqual(result, { requests_per_minute: 60 });
-  assert.equal(logged.length, 0, "log must not fire when the query succeeds");
+  expect(result).toEqual({ requests_per_minute: 60 });
+  expect(logged.length, "log must not fire when the query succeeds").toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -257,19 +241,19 @@ test("buildProviderConfirmationDisplay returns table with expected headers", () 
     { name: "claude-code", command: "claude", capabilityTier: "frontier", detected: true },
   ];
   const display = buildProviderConfirmationDisplay(discovered);
-  assert.ok(display.includes("| Provider |"), "should include Provider column");
-  assert.ok(display.includes("| Tier |"),     "should include Tier column");
-  assert.ok(display.includes("| Quota |"),    "should include Quota column");
-  assert.ok(display.includes("| Default |"), "should include Default column");
-  assert.ok(display.includes("claude-code"),  "should include provider name");
-  assert.ok(display.includes("frontier"),     "should include tier");
-  assert.ok(display.includes("included"),     "frontier provider should be marked included");
+  expect(display.includes("| Provider |"), "should include Provider column").toBeTruthy();
+  expect(display.includes("| Tier |"), "should include Tier column").toBeTruthy();
+  expect(display.includes("| Quota |"), "should include Quota column").toBeTruthy();
+  expect(display.includes("| Default |"), "should include Default column").toBeTruthy();
+  expect(display.includes("claude-code"), "should include provider name").toBeTruthy();
+  expect(display.includes("frontier"), "should include tier").toBeTruthy();
+  expect(display.includes("included"), "frontier provider should be marked included").toBeTruthy();
 });
 
 test("buildProviderConfirmationDisplay returns message when pool is empty", () => {
   const display = buildProviderConfirmationDisplay([]);
-  assert.ok(display.length > 0);
-  assert.ok(!display.includes("|"), "empty pool should not produce a table");
+  expect(display.length > 0).toBeTruthy();
+  expect(!display.includes("|"), "empty pool should not produce a table").toBeTruthy();
 });
 
 test("buildProviderConfirmationDisplay marks local-subprocess as add explicitly", () => {
@@ -277,7 +261,7 @@ test("buildProviderConfirmationDisplay marks local-subprocess as add explicitly"
     { name: "local-subprocess", command: undefined, capabilityTier: "unknown", detected: true },
   ];
   const display = buildProviderConfirmationDisplay(discovered);
-  assert.ok(display.includes("add explicitly"), "local-subprocess should not be default");
+  expect(display.includes("add explicitly"), "local-subprocess should not be default").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -294,11 +278,11 @@ test("SessionConfig accepts confirmed_provider_pool field", () => {
       addedUndetected: [],
     },
   };
-  assert.ok(config.confirmed_provider_pool !== undefined);
+  expect(config.confirmed_provider_pool !== undefined).toBeTruthy();
 });
 
 test("SessionConfig confirmed_provider_pool is optional", () => {
   /** @type {import("../../src/shared/types/sessionConfig.ts").SessionConfig} */
   const config = { provider: "opencode" };
-  assert.equal(config.confirmed_provider_pool, undefined);
+  expect(config.confirmed_provider_pool).toBe(undefined);
 });

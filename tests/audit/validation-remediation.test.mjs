@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   formatValidationIssues,
@@ -29,18 +28,15 @@ test("requireKeys rejects non-object payloads and shared validation formatting s
     },
   ]);
 
-  assert.deepEqual(issues, [
+  expect(issues).toEqual([
     {
       path: "repo_manifest",
       message: "Expected an object, got array.",
       severity: "error",
     },
   ]);
-  assert.equal(
-    formatValidationIssues(issues),
-    "  [error] repo_manifest: Expected an object, got array.",
-  );
-  assert.deepEqual(prefixed, [
+  expect(formatValidationIssues(issues)).toBe("  [error] repo_manifest: Expected an object, got array.");
+  expect(prefixed).toEqual([
     {
       path: "session_config.claude_code.command",
       message: "command must be a bare executable name or direct executable path.",
@@ -63,27 +59,21 @@ test("validateArtifactBundle reports malformed bundle sections and unit invarian
     },
   });
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "repo_manifest" &&
         /expected an object, got array/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues.some(
+    )).toBeTruthy();
+  expect(issues.some(
       (issue) =>
         issue.path === "unit_manifest:unit-auth" &&
         /unit has no files/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues.some(
+    )).toBeTruthy();
+  expect(issues.some(
       (issue) =>
         issue.path === "unit_manifest:unit-auth" &&
         /unit has no required lenses/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateArtifactBundle treats vcs_ignore aggregate prefixes as disposition coverage", () => {
@@ -114,10 +104,7 @@ test("validateArtifactBundle treats vcs_ignore aggregate prefixes as disposition
   );
   // Paths under an aggregate prefix are accounted for; genuinely uncovered
   // paths are still flagged.
-  assert.deepEqual(
-    missing.map((issue) => issue.message),
-    ["Missing disposition entry for orphan/missing.ts"],
-  );
+  expect(missing.map((issue) => issue.message)).toEqual(["Missing disposition entry for orphan/missing.ts"]);
 });
 
 test("validateArtifactBundle rejects invalid audit task line ranges", () => {
@@ -130,8 +117,7 @@ test("validateArtifactBundle rejects invalid audit task line ranges", () => {
     rationale: "Review auth.",
   };
 
-  assert.deepEqual(
-    validateArtifactBundle({
+  expect(validateArtifactBundle({
       audit_tasks: [
         {
           ...baseTask,
@@ -143,9 +129,7 @@ test("validateArtifactBundle rejects invalid audit task line ranges", () => {
           line_ranges: [{ path: "src/api/auth.ts", start: 1, end: 4 }],
         },
       ],
-    }),
-    [],
-  );
+    })).toEqual([]);
 
   const issues = validateArtifactBundle({
     audit_tasks: [
@@ -156,13 +140,11 @@ test("validateArtifactBundle rejects invalid audit task line ranges", () => {
     ],
   });
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "audit_tasks:task-1.line_ranges:0" &&
         /end must be greater than or equal to start/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateAuditResults exposes a shared path alias for empty evidence failures", () => {
@@ -204,13 +186,10 @@ test("validateAuditResults exposes a shared path alias for empty evidence failur
   const evidenceIssue = issues.find(
     (issue) => issue.field === "findings[0].evidence",
   );
-  assert.ok(evidenceIssue);
-  assert.equal(evidenceIssue.path, "findings[0].evidence");
-  assert.match(evidenceIssue.message, /empty strings/i);
-  assert.match(
-    formatAuditResultIssues([evidenceIssue]),
-    /\[error\] task-1 \/ findings\[0\]\.evidence:/i,
-  );
+  expect(evidenceIssue).toBeTruthy();
+  expect(evidenceIssue.path).toBe("findings[0].evidence");
+  expect(evidenceIssue.message).toMatch(/empty strings/i);
+  expect(formatAuditResultIssues([evidenceIssue])).toMatch(/\[error\] task-1 \/ findings\[0\]\.evidence:/i);
 });
 
 test("validateAuditResults accepts file_coverage paths with backslashes or ./ prefix", () => {
@@ -245,7 +224,7 @@ test("validateAuditResults accepts file_coverage paths with backslashes or ./ pr
     { lineIndex: { "src/utils/helpers.ts": 50, "src/index.ts": 20 } },
   );
   const backslashErrors = issuesBackslash.filter((i) => i.severity === "error");
-  assert.equal(backslashErrors.length, 0, `unexpected errors: ${JSON.stringify(backslashErrors)}`);
+  expect(backslashErrors.length, `unexpected errors: ${JSON.stringify(backslashErrors)}`).toBe(0);
 
   // ./ prefix paths
   const issuesDotSlash = validateAuditResults(
@@ -266,7 +245,7 @@ test("validateAuditResults accepts file_coverage paths with backslashes or ./ pr
     { lineIndex: { "src/utils/helpers.ts": 50, "src/index.ts": 20 } },
   );
   const dotSlashErrors = issuesDotSlash.filter((i) => i.severity === "error");
-  assert.equal(dotSlashErrors.length, 0, `unexpected errors: ${JSON.stringify(dotSlashErrors)}`);
+  expect(dotSlashErrors.length, `unexpected errors: ${JSON.stringify(dotSlashErrors)}`).toBe(0);
 
   // Mixed: backslash + ./ prefix
   const issuesMixed = validateAuditResults(
@@ -287,7 +266,7 @@ test("validateAuditResults accepts file_coverage paths with backslashes or ./ pr
     { lineIndex: { "src/utils/helpers.ts": 50, "src/index.ts": 20 } },
   );
   const mixedErrors = issuesMixed.filter((i) => i.severity === "error");
-  assert.equal(mixedErrors.length, 0, `unexpected errors: ${JSON.stringify(mixedErrors)}`);
+  expect(mixedErrors.length, `unexpected errors: ${JSON.stringify(mixedErrors)}`).toBe(0);
 });
 
 test("validateAuditResults rejects a backslash path that normalizes to an unrecognized file", () => {
@@ -323,18 +302,12 @@ test("validateAuditResults rejects a backslash path that normalizes to an unreco
   );
 
   const errorIssues = issues.filter((i) => i.severity === "error");
-  assert.ok(
-    errorIssues.length >= 1,
-    `expected at least one error issue, got: ${JSON.stringify(errorIssues)}`,
-  );
+  expect(errorIssues.length >= 1, `expected at least one error issue, got: ${JSON.stringify(errorIssues)}`).toBeTruthy();
   const pathIssue = errorIssues.find(
     (i) => i.field === "file_coverage[0].path",
   );
-  assert.ok(
-    pathIssue,
-    `expected an error issue with field 'file_coverage[0].path', got: ${JSON.stringify(errorIssues)}`,
-  );
-  assert.match(pathIssue.message, /not listed in the task file_paths/i);
+  expect(pathIssue, `expected an error issue with field 'file_coverage[0].path', got: ${JSON.stringify(errorIssues)}`).toBeTruthy();
+  expect(pathIssue.message).toMatch(/not listed in the task file_paths/i);
 });
 
 test("validateAuditResults detects duplicates across normalized paths", () => {
@@ -366,7 +339,7 @@ test("validateAuditResults detects duplicates across normalized paths", () => {
     tasks,
   );
   const dupIssue = issues.find((i) => /duplicated/i.test(i.message));
-  assert.ok(dupIssue, "should detect normalized duplicate");
+  expect(dupIssue, "should detect normalized duplicate").toBeTruthy();
 });
 
 test("validateAuditResults accepts affected_files path with backslashes when file_coverage declares forward-slash equivalent", () => {
@@ -412,7 +385,7 @@ test("validateAuditResults accepts affected_files path with backslashes when fil
   const pathErrors = issues.filter(
     (i) => i.severity === "error" && /affected_files/.test(i.field ?? ""),
   );
-  assert.equal(pathErrors.length, 0, `unexpected affected_files errors: ${JSON.stringify(pathErrors)}`);
+  expect(pathErrors.length, `unexpected affected_files errors: ${JSON.stringify(pathErrors)}`).toBe(0);
 });
 
 test("validateAuditResults accepts affected_files path with leading ./ prefix when file_coverage declares stripped equivalent", () => {
@@ -458,7 +431,7 @@ test("validateAuditResults accepts affected_files path with leading ./ prefix wh
   const pathErrors = issues.filter(
     (i) => i.severity === "error" && /affected_files/.test(i.field ?? ""),
   );
-  assert.equal(pathErrors.length, 0, `unexpected affected_files errors: ${JSON.stringify(pathErrors)}`);
+  expect(pathErrors.length, `unexpected affected_files errors: ${JSON.stringify(pathErrors)}`).toBe(0);
 });
 
 test("validateAuditResults produces a WARNING (not error) for affected_files path not in file_coverage (INV-09 strip-and-warn)", () => {
@@ -507,22 +480,14 @@ test("validateAuditResults produces a WARNING (not error) for affected_files pat
   const pathErrors = issues.filter(
     (i) => i.severity === "error" && /affected_files\[0\]\.path/.test(i.field ?? ""),
   );
-  assert.equal(pathErrors.length, 0, `out-of-scope affected_files must not produce a hard error, got: ${JSON.stringify(pathErrors)}`);
+  expect(pathErrors.length, `out-of-scope affected_files must not produce a hard error, got: ${JSON.stringify(pathErrors)}`).toBe(0);
 
   const pathWarnings = issues.filter(
     (i) => i.severity === "warning" && /affected_files\[0\]\.path/.test(i.field ?? ""),
   );
-  assert.equal(pathWarnings.length, 1, `expected exactly one affected_files path warning, got: ${JSON.stringify(pathWarnings)}`);
-  assert.match(
-    pathWarnings[0].message,
-    /out-of-scope/i,
-    "warning message must mention out-of-scope",
-  );
-  assert.match(
-    pathWarnings[0].message,
-    /src\/foo\.ts/,
-    "warning should surface the task's allowed files",
-  );
+  expect(pathWarnings.length, `expected exactly one affected_files path warning, got: ${JSON.stringify(pathWarnings)}`).toBe(1);
+  expect(pathWarnings[0].message, "warning message must mention out-of-scope").toMatch(/out-of-scope/i);
+  expect(pathWarnings[0].message, "warning should surface the task's allowed files").toMatch(/src\/foo\.ts/);
 });
 
 test("validateSessionConfig rejects compound command strings and environment validation avoids probing them", async () => {
@@ -554,70 +519,54 @@ test("validateSessionConfig rejects compound command strings and environment val
     },
   );
 
-  assert.ok(
-    configIssues.some(
+  expect(configIssues.some(
       (issue) =>
         issue.path === "claude_code.command" &&
         /bare executable name or direct executable path/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    environmentIssues.some(
+    )).toBeTruthy();
+  expect(environmentIssues.some(
       (issue) =>
         issue.path === "claude_code.command" &&
         /put cli flags in extra_args/i.test(issue.message),
-    ),
-  );
-  assert.equal(commandLookups, 0);
-  assert.equal(pathLookups, 0);
+    )).toBeTruthy();
+  expect(commandLookups).toBe(0);
+  expect(pathLookups).toBe(0);
 });
 
 test("validateSessionConfig accepts boolean host dispatch capability", () => {
-  assert.deepEqual(
-    validateSessionConfig({
+  expect(validateSessionConfig({
       provider: "local-subprocess",
       host_can_dispatch_subagents: true,
-    }),
-    [],
-  );
+    })).toEqual([]);
 
   const issues = validateSessionConfig({
     host_can_dispatch_subagents: "true",
   });
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "host_can_dispatch_subagents" &&
         /must be a boolean/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateSessionConfig validates the analyzers map of resolution settings", () => {
-  assert.deepEqual(
-    validateSessionConfig({
+  expect(validateSessionConfig({
       provider: "local-subprocess",
       analyzers: { typescript: "ephemeral", python: "skip" },
-    }),
-    [],
-  );
+    })).toEqual([]);
 
   const badSetting = validateSessionConfig({ analyzers: { typescript: "yes" } });
-  assert.ok(
-    badSetting.some(
+  expect(badSetting.some(
       (issue) =>
         issue.path === "analyzers.typescript" &&
         /repo, ephemeral, permanent, skip, auto/.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 
   const badShape = validateSessionConfig({ analyzers: ["typescript"] });
-  assert.ok(
-    badShape.some(
+  expect(badShape.some(
       (issue) =>
         issue.path === "analyzers" && /must be a JSON object/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateArtifactBundle reports orphaned runtime_validation_report results", () => {
@@ -636,12 +585,10 @@ test("validateArtifactBundle reports orphaned runtime_validation_report results"
   const orphanIssues1 = issues1.filter(
     (issue) => issue.path === "runtime_validation_report:rvt-unknown",
   );
-  assert.equal(orphanIssues1.length, 1);
-  assert.match(orphanIssues1[0].message, /unknown task/i);
+  expect(orphanIssues1.length).toBe(1);
+  expect(orphanIssues1[0].message).toMatch(/unknown task/i);
   // Known task produces no orphan issue
-  assert.ok(
-    !issues1.some((issue) => issue.path === "runtime_validation_report:rvt-1"),
-  );
+  expect(!issues1.some((issue) => issue.path === "runtime_validation_report:rvt-1")).toBeTruthy();
 
   // Case 2: report present but no runtime_validation_tasks → every result is an orphan
   const issues2 = validateArtifactBundle({
@@ -652,20 +599,16 @@ test("validateArtifactBundle reports orphaned runtime_validation_report results"
       ],
     },
   });
-  assert.ok(
-    issues2.some(
+  expect(issues2.some(
       (issue) =>
         issue.path === "runtime_validation_report:rvt-a" &&
         /unknown task/i.test(issue.message),
-    ),
-  );
-  assert.ok(
-    issues2.some(
+    )).toBeTruthy();
+  expect(issues2.some(
       (issue) =>
         issue.path === "runtime_validation_report:rvt-b" &&
         /unknown task/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 
   // Case 3: well-formed bundle — all results reference known task ids → no runtime_validation_report issues
   const issues3 = validateArtifactBundle({
@@ -682,11 +625,9 @@ test("validateArtifactBundle reports orphaned runtime_validation_report results"
       ],
     },
   });
-  assert.ok(
-    !issues3.some((issue) =>
+  expect(!issues3.some((issue) =>
       issue.path.startsWith("runtime_validation_report:"),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateAuditResults logs a summary to stderr when issues are found", () => {
@@ -720,21 +661,18 @@ test("validateAuditResults logs a summary to stderr when issues are found", () =
         },
       ],
     );
-    assert.ok(issues.length > 0, "expected at least one validation issue");
+    expect(issues.length > 0, "expected at least one validation issue").toBeTruthy();
     const logLine = stderrLines.find((l) =>
       /\[audit-results validation\]/.test(l),
     );
-    assert.ok(logLine, `expected a stderr log line; got: ${JSON.stringify(stderrLines)}`);
-    assert.match(logLine, /\[audit-results validation\] \d+ error\(s\), \d+ warning\(s\) across \d+ result\(s\)/);
+    expect(logLine, `expected a stderr log line; got: ${JSON.stringify(stderrLines)}`).toBeTruthy();
+    expect(logLine).toMatch(/\[audit-results validation\] \d+ error\(s\), \d+ warning\(s\) across \d+ result\(s\)/);
 
     // Clean run — no stderr log
     stderrLines.length = 0;
     const cleanIssues = validateAuditResults([], []);
-    assert.deepEqual(cleanIssues, []);
-    assert.ok(
-      !stderrLines.some((l) => /\[audit-results validation\]/.test(l)),
-      "expected no stderr log on clean run",
-    );
+    expect(cleanIssues).toEqual([]);
+    expect(!stderrLines.some((l) => /\[audit-results validation\]/.test(l)), "expected no stderr log on clean run").toBeTruthy();
   } finally {
     process.stderr.write = origWrite;
   }
@@ -750,21 +688,18 @@ test("validateArtifactBundle logs a summary to stderr when issues are found", ()
   try {
     // repo_manifest as array triggers a validation issue
     const issues = validateArtifactBundle({ repo_manifest: [] });
-    assert.ok(issues.length > 0, "expected at least one validation issue");
+    expect(issues.length > 0, "expected at least one validation issue").toBeTruthy();
     const logLine = stderrLines.find((l) =>
       /\[artifact-bundle validation\]/.test(l),
     );
-    assert.ok(logLine, `expected a stderr log line; got: ${JSON.stringify(stderrLines)}`);
-    assert.match(logLine, /\[artifact-bundle validation\] \d+ issue\(s\)/);
+    expect(logLine, `expected a stderr log line; got: ${JSON.stringify(stderrLines)}`).toBeTruthy();
+    expect(logLine).toMatch(/\[artifact-bundle validation\] \d+ issue\(s\)/);
 
     // Clean run — no stderr log
     stderrLines.length = 0;
     const cleanIssues = validateArtifactBundle({});
-    assert.deepEqual(cleanIssues, []);
-    assert.ok(
-      !stderrLines.some((l) => /\[artifact-bundle validation\]/.test(l)),
-      "expected no stderr log on clean run",
-    );
+    expect(cleanIssues).toEqual([]);
+    expect(!stderrLines.some((l) => /\[artifact-bundle validation\]/.test(l)), "expected no stderr log on clean run").toBeTruthy();
   } finally {
     process.stderr.write = origWrite;
   }
@@ -772,63 +707,50 @@ test("validateArtifactBundle logs a summary to stderr when issues are found", ()
 
 test("validateSessionConfig validates the dispatch sub-object fields", () => {
   // Valid dispatch object — no issues
-  assert.deepEqual(
-    validateSessionConfig({
+  expect(validateSessionConfig({
       provider: "local-subprocess",
       dispatch: { confirm_threshold: 2, max_packets: 10 },
-    }),
-    [],
-  );
+    })).toEqual([]);
 
   // dispatch is an array (non-object) — issue on path 'dispatch'
   const issuesArray = validateSessionConfig({ dispatch: ["not-an-object"] });
-  assert.ok(
-    issuesArray.some(
+  expect(issuesArray.some(
       (issue) =>
         issue.path === "dispatch" &&
         /must be a JSON object/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 
   // dispatch.confirm_threshold is -1 (negative integer) — issue on path 'dispatch.confirm_threshold'
   const issuesThresholdNeg = validateSessionConfig({ dispatch: { confirm_threshold: -1 } });
-  assert.ok(
-    issuesThresholdNeg.some(
+  expect(issuesThresholdNeg.some(
       (issue) =>
         issue.path === "dispatch.confirm_threshold" &&
         /must be a non-negative integer/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 
   // dispatch.confirm_threshold is 1.5 (non-integer) — issue on path 'dispatch.confirm_threshold'
   const issuesThresholdFloat = validateSessionConfig({ dispatch: { confirm_threshold: 1.5 } });
-  assert.ok(
-    issuesThresholdFloat.some(
+  expect(issuesThresholdFloat.some(
       (issue) =>
         issue.path === "dispatch.confirm_threshold" &&
         /must be a non-negative integer/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 
   // dispatch.max_packets is -1 (negative integer) — issue on path 'dispatch.max_packets'
   const issuesMaxPacketsNeg = validateSessionConfig({ dispatch: { max_packets: -1 } });
-  assert.ok(
-    issuesMaxPacketsNeg.some(
+  expect(issuesMaxPacketsNeg.some(
       (issue) =>
         issue.path === "dispatch.max_packets" &&
         /must be a non-negative integer/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 
   // dispatch.max_packets is 'all' (non-integer) — issue on path 'dispatch.max_packets'
   const issuesMaxPacketsStr = validateSessionConfig({ dispatch: { max_packets: "all" } });
-  assert.ok(
-    issuesMaxPacketsStr.some(
+  expect(issuesMaxPacketsStr.some(
       (issue) =>
         issue.path === "dispatch.max_packets" &&
         /must be a non-negative integer/i.test(issue.message),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("validateConfiguredProviderEnvironment checks explicit executable paths without PATH probing", async () => {
@@ -856,9 +778,9 @@ test("validateConfiguredProviderEnvironment checks explicit executable paths wit
     },
   );
 
-  assert.deepEqual(issues, []);
-  assert.equal(commandLookups, 0);
-  assert.equal(pathLookups, 1);
+  expect(issues).toEqual([]);
+  expect(commandLookups).toBe(0);
+  expect(pathLookups).toBe(1);
 });
 
 // ── INV-09: out-of-scope affected_files is a warning, not a hard error ────────
@@ -899,9 +821,9 @@ test("INV-09: affected_files path outside file_coverage is a warning (not an err
   const errors = issues.filter((i) => i.severity === "error");
   const warnings = issues.filter((i) => i.severity === "warning");
 
-  assert.equal(errors.length, 0, "out-of-scope affected_files must not be a hard error");
-  assert.equal(warnings.length, 1, "out-of-scope affected_files must emit a warning");
-  assert.match(warnings[0].message, /out-of-scope/i, "warning message must mention out-of-scope");
+  expect(errors.length, "out-of-scope affected_files must not be a hard error").toBe(0);
+  expect(warnings.length, "out-of-scope affected_files must emit a warning").toBe(1);
+  expect(warnings[0].message, "warning message must mention out-of-scope").toMatch(/out-of-scope/i);
 });
 
 test("INV-09: in-scope findings in the same result are retained when one affected_files entry is out-of-scope", () => {
@@ -939,7 +861,7 @@ test("INV-09: in-scope findings in the same result are retained when one affecte
   const issues = validateAuditResults([result], [task], { lineIndex: { "src/core.ts": 30 } });
   // A clean result with only in-scope entries should produce no errors or warnings.
   const errors = issues.filter((i) => i.severity === "error");
-  assert.equal(errors.length, 0, "in-scope finding with valid span must produce no errors");
+  expect(errors.length, "in-scope finding with valid span must produce no errors").toBe(0);
 });
 
 // ── FND-REL-6f9f6681: commandExists must handle hangs/timeouts gracefully ─────
@@ -956,14 +878,11 @@ test("FND-REL-6f9f6681: validateConfiguredProviderEnvironment reports not-found 
     },
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "claude_code.command" &&
         /not found on path/i.test(issue.message),
-    ),
-    `expected a 'not found on PATH' issue; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected a 'not found on PATH' issue; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 test("FND-REL-6f9f6681: validateConfiguredProviderEnvironment reports not-found for opencode when PATH probe returns false", async () => {
@@ -975,14 +894,11 @@ test("FND-REL-6f9f6681: validateConfiguredProviderEnvironment reports not-found 
     },
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "opencode.command" &&
         /not found on path/i.test(issue.message),
-    ),
-    `expected a 'not found on PATH' issue when commandExists returns false; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected a 'not found on PATH' issue when commandExists returns false; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 // ── TST-6f9f6681: codex branch of validateConfiguredProviderEnvironment ────────
@@ -995,14 +911,11 @@ test("TST-6f9f6681: validateConfiguredProviderEnvironment reports not-found for 
     },
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "codex.command" &&
         /not found on path/i.test(issue.message),
-    ),
-    `expected a 'not found on PATH' issue for codex when commandExists returns false; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected a 'not found on PATH' issue for codex when commandExists returns false; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 test("TST-6f9f6681: validateConfiguredProviderEnvironment accepts codex when PATH probe returns true", async () => {
@@ -1014,11 +927,7 @@ test("TST-6f9f6681: validateConfiguredProviderEnvironment accepts codex when PAT
   );
 
   const codexIssues = issues.filter((issue) => issue.path === "codex.command");
-  assert.equal(
-    codexIssues.length,
-    0,
-    `expected no codex.command issues when codex is found on PATH; got: ${JSON.stringify(codexIssues)}`,
-  );
+  expect(codexIssues.length, `expected no codex.command issues when codex is found on PATH; got: ${JSON.stringify(codexIssues)}`).toBe(0);
 });
 
 test("TST-6f9f6681: validateConfiguredProviderEnvironment rejects compound codex command and skips PATH probe", async () => {
@@ -1033,15 +942,12 @@ test("TST-6f9f6681: validateConfiguredProviderEnvironment rejects compound codex
     },
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "codex.command" &&
         /put cli flags in extra_args/i.test(issue.message),
-    ),
-    `expected a compound-command issue for codex; got: ${JSON.stringify(issues)}`,
-  );
-  assert.equal(commandLookups, 0, "PATH probe must not run for compound commands");
+    ), `expected a compound-command issue for codex; got: ${JSON.stringify(issues)}`).toBeTruthy();
+  expect(commandLookups, "PATH probe must not run for compound commands").toBe(0);
 });
 
 test("TST-6f9f6681: validateConfiguredProviderEnvironment accepts codex explicit executable path when it exists", async () => {
@@ -1057,124 +963,93 @@ test("TST-6f9f6681: validateConfiguredProviderEnvironment accepts codex explicit
   );
 
   const codexIssues = issues.filter((issue) => issue.path === "codex.command");
-  assert.equal(
-    codexIssues.length,
-    0,
-    `expected no codex.command issues when absolute path exists; got: ${JSON.stringify(codexIssues)}`,
-  );
+  expect(codexIssues.length, `expected no codex.command issues when absolute path exists; got: ${JSON.stringify(codexIssues)}`).toBe(0);
 });
 
 // ── TST-6f9f6681-2: synthesis and routing_tiers sections of validateSessionConfig ────
 
 test("TST-6f9f6681-2: validateSessionConfig accepts synthesis object with narrative boolean", () => {
-  assert.deepEqual(
-    validateSessionConfig({
+  expect(validateSessionConfig({
       provider: "local-subprocess",
       synthesis: { narrative: true },
-    }),
-    [],
-    "synthesis.narrative: true should produce no issues",
-  );
+    }), "synthesis.narrative: true should produce no issues").toEqual([]);
 
-  assert.deepEqual(
-    validateSessionConfig({
+  expect(validateSessionConfig({
       provider: "local-subprocess",
       synthesis: { narrative: false },
-    }),
-    [],
-    "synthesis.narrative: false should produce no issues",
-  );
+    }), "synthesis.narrative: false should produce no issues").toEqual([]);
 });
 
 test("TST-6f9f6681-2: validateSessionConfig rejects synthesis as array", () => {
   const issues = validateSessionConfig({ synthesis: ["narrative"] });
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "synthesis" &&
         /must be a json object/i.test(issue.message),
-    ),
-    `expected a synthesis-must-be-object issue; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected a synthesis-must-be-object issue; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 test("TST-6f9f6681-2: validateSessionConfig rejects synthesis.narrative as non-boolean", () => {
   const issues = validateSessionConfig({ synthesis: { narrative: "yes" } });
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "synthesis.narrative" &&
         /must be a boolean/i.test(issue.message),
-    ),
-    `expected a synthesis.narrative type error; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected a synthesis.narrative type error; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 test("TST-6f9f6681-2: validateSessionConfig accepts dispatch.routing_tiers with valid deep_at and standard_at", () => {
-  assert.deepEqual(
-    validateSessionConfig({
+  expect(validateSessionConfig({
       provider: "local-subprocess",
       dispatch: { routing_tiers: { deep_at: 0.8, standard_at: 0.4 } },
-    }),
-    [],
-    "routing_tiers with deep_at >= standard_at should produce no issues",
-  );
+    }), "routing_tiers with deep_at >= standard_at should produce no issues").toEqual([]);
 });
 
 test("TST-6f9f6681-2: validateSessionConfig rejects dispatch.routing_tiers as array", () => {
   const issues = validateSessionConfig({
     dispatch: { routing_tiers: ["deep_at"] },
   });
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "dispatch.routing_tiers" &&
         /must be a json object/i.test(issue.message),
-    ),
-    `expected dispatch.routing_tiers-must-be-object issue; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected dispatch.routing_tiers-must-be-object issue; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 test("TST-6f9f6681-2: validateSessionConfig rejects dispatch.routing_tiers.deep_at out of range", () => {
   const issues = validateSessionConfig({
     dispatch: { routing_tiers: { deep_at: 1.5, standard_at: 0.5 } },
   });
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "dispatch.routing_tiers.deep_at" &&
         /\[0, 1\]/.test(issue.message),
-    ),
-    `expected deep_at range error; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected deep_at range error; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 test("TST-6f9f6681-2: validateSessionConfig rejects routing_tiers where deep_at < standard_at", () => {
   const issues = validateSessionConfig({
     dispatch: { routing_tiers: { deep_at: 0.3, standard_at: 0.7 } },
   });
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.path === "dispatch.routing_tiers" &&
         /deep_at must be >= standard_at/i.test(issue.message),
-    ),
-    `expected deep_at < standard_at ordering error; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected deep_at < standard_at ordering error; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 // ── CE-009: semantic-validity gate on significant total_lines divergence ───────
 
 test("isSignificantLineCountDivergence: small deltas stay advisory, large diverge", () => {
   // Past neither threshold → advisory (S7).
-  assert.equal(isSignificantLineCountDivergence(12, 10), false, "diff 2 (floor) stays advisory");
-  assert.equal(isSignificantLineCountDivergence(990, 1000), false, "10/1000 = 1% under ratio stays advisory");
+  expect(isSignificantLineCountDivergence(12, 10), "diff 2 (floor) stays advisory").toBe(false);
+  expect(isSignificantLineCountDivergence(990, 1000), "10/1000 = 1% under ratio stays advisory").toBe(false);
   // Past both thresholds → significant.
-  assert.equal(isSignificantLineCountDivergence(13, 10), true, "diff 3 on a 10-line file is significant");
-  assert.equal(isSignificantLineCountDivergence(900, 1000), true, "100/1000 = 10% over ratio is significant");
+  expect(isSignificantLineCountDivergence(13, 10), "diff 3 on a 10-line file is significant").toBe(true);
+  expect(isSignificantLineCountDivergence(900, 1000), "100/1000 = 10% over ratio is significant").toBe(true);
   // expected 0 → any delta past the absolute floor is significant (no ratio).
-  assert.equal(isSignificantLineCountDivergence(2, 0), false, "diff 2 at expected 0 stays advisory");
-  assert.equal(isSignificantLineCountDivergence(3, 0), true, "diff 3 at expected 0 is significant");
+  expect(isSignificantLineCountDivergence(2, 0), "diff 2 at expected 0 stays advisory").toBe(false);
+  expect(isSignificantLineCountDivergence(3, 0), "diff 3 at expected 0 is significant").toBe(true);
 });
 
 test("validateAuditResults: significant total_lines divergence is a hard-reject error (CE-009)", () => {
@@ -1203,15 +1078,12 @@ test("validateAuditResults: significant total_lines divergence is a hard-reject 
     { lineIndex: { "src/api/auth.ts": 100 } },
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.field === "file_coverage[0].total_lines" &&
         issue.severity === "error" &&
         /diverges materially from the current line count/i.test(issue.message),
-    ),
-    `expected a hard-reject error for significant divergence; got: ${JSON.stringify(issues)}`,
-  );
+    ), `expected a hard-reject error for significant divergence; got: ${JSON.stringify(issues)}`).toBeTruthy();
 });
 
 test("validateAuditResults: small total_lines mismatch stays an advisory warning (S7)", () => {
@@ -1240,20 +1112,13 @@ test("validateAuditResults: small total_lines mismatch stays an advisory warning
     { lineIndex: { "src/api/auth.ts": 100 } },
   );
 
-  assert.ok(
-    issues.some(
+  expect(issues.some(
       (issue) =>
         issue.field === "file_coverage[0].total_lines" &&
         issue.severity === "warning" &&
         /does not match the current line count/i.test(issue.message),
-    ),
-    `expected an advisory warning for a small mismatch; got: ${JSON.stringify(issues)}`,
-  );
-  assert.equal(
-    issues.filter((i) => i.severity === "error").length,
-    0,
-    "a small mismatch must not produce any hard-reject error",
-  );
+    ), `expected an advisory warning for a small mismatch; got: ${JSON.stringify(issues)}`).toBeTruthy();
+  expect(issues.filter((i) => i.severity === "error").length, "a small mismatch must not produce any hard-reject error").toBe(0);
 });
 
 // ── CP-NODE-4: intra-result duplicate finding-id hard-reject ───────────────────
@@ -1307,7 +1172,7 @@ test("CP-NODE-4: distinct finding ids in the same result produce zero id-duplica
   );
 
   const dupIdIssues = issues.filter((i) => /finding id .* is duplicated/i.test(i.message));
-  assert.equal(dupIdIssues.length, 0, `expected no duplicate-id issues; got: ${JSON.stringify(dupIdIssues)}`);
+  expect(dupIdIssues.length, `expected no duplicate-id issues; got: ${JSON.stringify(dupIdIssues)}`).toBe(0);
 });
 
 test("CP-NODE-4: two findings in one result sharing an id produce exactly one duplicate-id error", () => {
@@ -1361,8 +1226,8 @@ test("CP-NODE-4: two findings in one result sharing an id produce exactly one du
   const dupIdIssues = issues.filter(
     (i) => i.severity === "error" && i.field === "findings[1].id" && /finding id .* is duplicated/i.test(i.message),
   );
-  assert.equal(dupIdIssues.length, 1, `expected exactly one duplicate-id error at findings[1].id; got: ${JSON.stringify(issues)}`);
-  assert.match(dupIdIssues[0].message, /SEC-DUP/);
+  expect(dupIdIssues.length, `expected exactly one duplicate-id error at findings[1].id; got: ${JSON.stringify(issues)}`).toBe(1);
+  expect(dupIdIssues[0].message).toMatch(/SEC-DUP/);
 });
 
 test("CP-NODE-4: the same finding id reused across DIFFERENT results does not flag as a duplicate", () => {
@@ -1402,5 +1267,5 @@ test("CP-NODE-4: the same finding id reused across DIFFERENT results does not fl
   );
 
   const dupIdIssues = issues.filter((i) => /finding id .* is duplicated/i.test(i.message));
-  assert.equal(dupIdIssues.length, 0, `same id across separate results must not flag; got: ${JSON.stringify(dupIdIssues)}`);
+  expect(dupIdIssues.length, `same id across separate results must not flag; got: ${JSON.stringify(dupIdIssues)}`).toBe(0);
 });

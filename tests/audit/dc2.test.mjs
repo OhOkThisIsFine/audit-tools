@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,27 +48,27 @@ async function withTempRoot(fn) {
 
 await test("the shared artifact lives at <root>/.audit-tools/provider-confirmation.json", () => {
   const p = sharedProviderConfirmationPath("/repo");
-  assert.match(p.replace(/\\/g, "/"), /\/repo\/\.audit-tools\/provider-confirmation\.json$/);
-  assert.equal(SHARED_PROVIDER_CONFIRMATION_FILENAME, "provider-confirmation.json");
+  expect(p.replace(/\\/g, "/")).toMatch(/\/repo\/\.audit-tools\/provider-confirmation\.json$/);
+  expect(SHARED_PROVIDER_CONFIRMATION_FILENAME).toBe("provider-confirmation.json");
 });
 
 await test("a built confirmation stamps schema_version / session_level / confirmed_at and the roster", () => {
   const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
-  assert.equal(built.schema_version, SHARED_PROVIDER_CONFIRMATION_VERSION);
-  assert.equal(built.session_level, true);
-  assert.ok(Date.parse(built.confirmed_at) > 0, "confirmed_at is an ISO-8601 timestamp");
-  assert.ok(Array.isArray(built.roster), "carries a roster snapshot");
-  assert.ok(Array.isArray(built.provider_pool), "carries a provider pool");
+  expect(built.schema_version).toBe(SHARED_PROVIDER_CONFIRMATION_VERSION);
+  expect(built.session_level).toBe(true);
+  expect(Date.parse(built.confirmed_at) > 0, "confirmed_at is an ISO-8601 timestamp").toBeTruthy();
+  expect(Array.isArray(built.roster), "carries a roster snapshot").toBeTruthy();
+  expect(Array.isArray(built.provider_pool), "carries a provider pool").toBeTruthy();
   // The roster is sorted + de-duplicated.
-  assert.deepEqual([...built.roster].sort(), built.roster);
+  expect([...built.roster].sort()).toEqual(built.roster);
 });
 
 await test("local-subprocess fallback is always present in the pool (it is never PATH-detected)", () => {
   const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
   const local = built.provider_pool.find((e) => e.name === "local-subprocess");
-  assert.ok(local, "local-subprocess is always in the confirmed pool");
+  expect(local, "local-subprocess is always in the confirmed pool").toBeTruthy();
   // It is the always-available fallback, not part of the discovered roster.
-  assert.ok(!built.roster.includes("local-subprocess"), "local-subprocess is not in the PATH roster");
+  expect(!built.roster.includes("local-subprocess"), "local-subprocess is not in the PATH roster").toBeTruthy();
 });
 
 // ── cross-tool honor: audit writes, remediate-side reads the same pool ───────
@@ -80,43 +79,40 @@ await test("cross-tool honor: a confirmation written by audit is read + honored 
     await writeSharedProviderConfirmation(root, built);
 
     const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    assert.ok(read, "a written confirmation is read back, not null");
-    assert.equal(read.status, "confirmed", "matching roster → confirmed (honored)");
+    expect(read, "a written confirmation is read back, not null").toBeTruthy();
+    expect(read.status, "matching roster → confirmed (honored)").toBe("confirmed");
     // Compare against the JSON-normalized form: writeJsonFile drops keys whose
     // value is `undefined` (a `reason: undefined` entry round-trips without the
     // key), so the durable artifact is the JSON projection of the built pool.
     const persisted = JSON.parse(JSON.stringify(built));
-    assert.deepEqual(read.confirmation.provider_pool, persisted.provider_pool);
-    assert.deepEqual(read.confirmation.roster, persisted.roster);
-    assert.equal(read.confirmation.session_level, true);
+    expect(read.confirmation.provider_pool).toEqual(persisted.provider_pool);
+    expect(read.confirmation.roster).toEqual(persisted.roster);
+    expect(read.confirmation.session_level).toBe(true);
   });
 });
 
 await test("audit's provider-confirmation executor WRITES the shared artifact when root is known", async () => {
   await withTempRoot(async (root) => {
     const result = await runProviderConfirmationAutoComplete({}, root);
-    assert.ok(
-      result.artifacts_written.includes("provider-confirmation.json"),
-      "the shared artifact is reported as written",
-    );
+    expect(result.artifacts_written.includes("provider-confirmation.json"), "the shared artifact is reported as written").toBeTruthy();
     // The file is on disk and re-reads as a valid confirmation.
     const onDisk = JSON.parse(
       await readFile(sharedProviderConfirmationPath(root), "utf8"),
     );
-    assert.equal(onDisk.schema_version, SHARED_PROVIDER_CONFIRMATION_VERSION);
-    assert.equal(onDisk.session_level, true);
+    expect(onDisk.schema_version).toBe(SHARED_PROVIDER_CONFIRMATION_VERSION);
+    expect(onDisk.session_level).toBe(true);
     const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    assert.ok(read && read.status === "confirmed");
+    expect(read && read.status === "confirmed").toBeTruthy();
   });
 });
 
 await test("audit's executor without a root does NOT write the shared artifact (headless, root-less)", async () => {
   await withTempRoot(async (root) => {
     const result = await runProviderConfirmationAutoComplete({});
-    assert.ok(!result.artifacts_written.includes("provider-confirmation.json"));
+    expect(!result.artifacts_written.includes("provider-confirmation.json")).toBeTruthy();
     // Nothing was written under root.
     const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    assert.equal(read, null);
+    expect(read).toBe(null);
   });
 });
 
@@ -125,7 +121,7 @@ await test("audit's executor without a root does NOT write the shared artifact (
 await test("absent artifact → null (never-block: remediate self-resolves)", async () => {
   await withTempRoot(async (root) => {
     const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    assert.equal(read, null);
+    expect(read).toBe(null);
   });
 });
 
@@ -146,7 +142,7 @@ await test("malformed artifacts → null (never-block, never throws)", async () 
     for (const body of malformedCases) {
       await writeFile(p, body, "utf8");
       const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-      assert.equal(read, null, `malformed body should read as null: ${body.slice(0, 40)}`);
+      expect(read, `malformed body should read as null: ${body.slice(0, 40)}`).toBe(null);
     }
   });
 });
@@ -165,25 +161,25 @@ await test("roster-stale → a DISTINCT reconfirm signal (not null, not confirme
     // Guard: the perturbed roster must actually differ from the current one for
     // this env, otherwise the test would be vacuous.
     const current = currentProviderRoster({}, CLEAN_ENV);
-    assert.notDeepEqual(stale.roster, current, "stored roster must differ from current");
+    expect(stale.roster, "stored roster must differ from current").not.toEqual(current);
 
     await writeSharedProviderConfirmation(root, stale);
     const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    assert.ok(read, "stale confirmation is not null");
-    assert.equal(read.status, "reconfirm", "roster change → reconfirm");
-    assert.ok(typeof read.reason === "string" && read.reason.length > 0, "carries a reason");
+    expect(read, "stale confirmation is not null").toBeTruthy();
+    expect(read.status, "roster change → reconfirm").toBe("reconfirm");
+    expect(typeof read.reason === "string" && read.reason.length > 0, "carries a reason").toBeTruthy();
     // The third state is DISTINCT from both null and 'confirmed'.
-    assert.notEqual(read.status, "confirmed");
-    assert.notEqual(read, null);
+    expect(read.status).not.toBe("confirmed");
+    expect(read).not.toBe(null);
     // The stale confirmation is still surfaced (so a caller can diff it).
-    assert.deepEqual(read.confirmation.roster, stale.roster);
+    expect(read.confirmation.roster).toEqual(stale.roster);
   });
 });
 
 await test("CE-012: roster-stale is distinguishable from absent — they return different shapes", async () => {
   await withTempRoot(async (root) => {
     // Absent → null.
-    assert.equal(await readSharedProviderConfirmation(root, {}, CLEAN_ENV), null);
+    expect(await readSharedProviderConfirmation(root, {}, CLEAN_ENV)).toBe(null);
 
     // Present-but-stale → object with status:'reconfirm'.
     const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
@@ -192,8 +188,8 @@ await test("CE-012: roster-stale is distinguishable from absent — they return 
       roster: [...new Set([...built.roster, "openai-compatible"])].sort(),
     });
     const stale = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    assert.notEqual(stale, null, "stale is NOT collapsed into the never-block null");
-    assert.equal(stale.status, "reconfirm");
+    expect(stale, "stale is NOT collapsed into the never-block null").not.toBe(null);
+    expect(stale.status).toBe("reconfirm");
   });
 });
 
@@ -205,7 +201,7 @@ await test("PB-1: a bare-PATH opencode is NOT in the roster unless explicitly co
   // command it would be eligible. We assert the opt-in direction holds for the
   // unconfigured case regardless of whether opencode is on PATH.
   const unconfigured = currentProviderRoster({}, CLEAN_ENV);
-  assert.ok(!unconfigured.includes("opencode"), "bare-PATH opencode is opt-in, not in the roster");
+  expect(!unconfigured.includes("opencode"), "bare-PATH opencode is opt-in, not in the roster").toBeTruthy();
 });
 
 // ── CE-003: concurrent-writer torn read ──────────────────────────────────────
@@ -256,10 +252,10 @@ await test("CE-003: a lockless read never observes a torn file under a concurren
     const [, ...readResults] = await Promise.all([writeStorm, ...readers]);
 
     for (const r of readResults) {
-      assert.notEqual(r, null, "no read saw a torn/invalid file (would parse to null)");
-      assert.equal(r.status, "confirmed", "every read observed a complete, fresh-roster confirmation");
-      assert.equal(r.confirmation.schema_version, SHARED_PROVIDER_CONFIRMATION_VERSION);
-      assert.equal(r.confirmation.session_level, true);
+      expect(r, "no read saw a torn/invalid file (would parse to null)").not.toBe(null);
+      expect(r.status, "every read observed a complete, fresh-roster confirmation").toBe("confirmed");
+      expect(r.confirmation.schema_version).toBe(SHARED_PROVIDER_CONFIRMATION_VERSION);
+      expect(r.confirmation.session_level).toBe(true);
     }
   });
 });

@@ -34,8 +34,7 @@
  *     empty findings/work_blocks arrays, summary counts both zero, valid markdown.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { runResultIngestionExecutor } = await import("../../src/audit/orchestrator/ingestionExecutors.ts");
 const { runSynthesisExecutor } = await import("../../src/audit/orchestrator/synthesisExecutors.ts");
@@ -98,15 +97,15 @@ test("E: runSynthesisExecutor on an empty bundle produces a valid zero-count rep
   const result = runSynthesisExecutor(bundle);
 
   const report = result.updated.audit_findings;
-  assert.ok(report, "audit_findings must be present in the returned bundle");
-  assert.equal(report.findings.length, 0, "zero results → zero findings");
-  assert.equal(report.work_blocks.length, 0, "zero results → zero work blocks");
-  assert.equal(report.summary.finding_count, 0, "summary.finding_count must be 0");
-  assert.equal(report.summary.work_block_count, 0, "summary.work_block_count must be 0");
+  expect(report, "audit_findings must be present in the returned bundle").toBeTruthy();
+  expect(report.findings.length, "zero results → zero findings").toBe(0);
+  expect(report.work_blocks.length, "zero results → zero work blocks").toBe(0);
+  expect(report.summary.finding_count, "summary.finding_count must be 0").toBe(0);
+  expect(report.summary.work_block_count, "summary.work_block_count must be 0").toBe(0);
 
   const markdown = result.updated.audit_report;
-  assert.ok(typeof markdown === "string" && markdown.length > 0, "markdown render must be a non-empty string");
-  assert.ok(markdown.includes("Findings"), "markdown must include a Findings section header");
+  expect(typeof markdown === "string" && markdown.length > 0, "markdown render must be a non-empty string").toBeTruthy();
+  expect(markdown.includes("Findings"), "markdown must include a Findings section header").toBeTruthy();
 });
 
 // ── A: Partial-synthesis ──────────────────────────────────────────────────────
@@ -129,27 +128,13 @@ test("A: runSynthesisExecutor on a partial bundle (wave-1 only) produces a valid
   const result = runSynthesisExecutor(bundle, wave1);
 
   const report = result.updated.audit_findings;
-  assert.ok(report, "audit_findings must be present after partial synthesis");
-  assert.equal(
-    report.summary.finding_count,
-    report.findings.length,
-    "summary.finding_count must equal findings.length",
-  );
-  assert.equal(
-    report.summary.work_block_count,
-    report.work_blocks.length,
-    "summary.work_block_count must equal work_blocks.length",
-  );
-  assert.ok(report.findings.length > 0, "wave-1 findings must produce at least one finding");
-  assert.ok(result.updated.audit_report, "audit_report markdown must be present");
-  assert.ok(
-    result.artifacts_written.includes("audit-findings.json"),
-    "audit-findings.json must be in artifacts_written",
-  );
-  assert.ok(
-    result.artifacts_written.includes("audit-report.md"),
-    "audit-report.md must be in artifacts_written",
-  );
+  expect(report, "audit_findings must be present after partial synthesis").toBeTruthy();
+  expect(report.summary.finding_count, "summary.finding_count must equal findings.length").toBe(report.findings.length);
+  expect(report.summary.work_block_count, "summary.work_block_count must equal work_blocks.length").toBe(report.work_blocks.length);
+  expect(report.findings.length > 0, "wave-1 findings must produce at least one finding").toBeTruthy();
+  expect(result.updated.audit_report, "audit_report markdown must be present").toBeTruthy();
+  expect(result.artifacts_written.includes("audit-findings.json"), "audit-findings.json must be in artifacts_written").toBeTruthy();
+  expect(result.artifacts_written.includes("audit-report.md"), "audit-report.md must be in artifacts_written").toBeTruthy();
 });
 
 // ── C: Markdown parity (partial) ──────────────────────────────────────────────
@@ -172,10 +157,7 @@ test("C: all finding IDs in the partial JSON contract appear verbatim in the par
   const markdown = result.updated.audit_report;
 
   for (const finding of report.findings) {
-    assert.ok(
-      markdown.includes(finding.id),
-      `finding id ${finding.id} must appear verbatim in the markdown render`,
-    );
+    expect(markdown.includes(finding.id), `finding id ${finding.id} must appear verbatim in the markdown render`).toBeTruthy();
   }
 });
 
@@ -193,15 +175,8 @@ test("D: runResultIngestionExecutor output feeds directly into runSynthesisExecu
   const ingestionResult = runResultIngestionExecutor(bundle, wave1);
 
   // The updated bundle from ingestion must carry the merged results.
-  assert.ok(
-    Array.isArray(ingestionResult.updated.audit_results),
-    "ingestion must produce audit_results in the updated bundle",
-  );
-  assert.equal(
-    ingestionResult.updated.audit_results.length,
-    wave1.length,
-    "ingested bundle must have exactly wave-1 results",
-  );
+  expect(Array.isArray(ingestionResult.updated.audit_results), "ingestion must produce audit_results in the updated bundle").toBeTruthy();
+  expect(ingestionResult.updated.audit_results.length, "ingested bundle must have exactly wave-1 results").toBe(wave1.length);
 
   // Feed ingestion output directly into synthesis — no transformation.
   const synthResult = runSynthesisExecutor(
@@ -210,13 +185,9 @@ test("D: runResultIngestionExecutor output feeds directly into runSynthesisExecu
   );
 
   const report = synthResult.updated.audit_findings;
-  assert.ok(report, "synthesis on ingestion output must produce audit_findings");
-  assert.equal(
-    report.summary.finding_count,
-    report.findings.length,
-    "pipeline-compatible report: finding_count == findings.length",
-  );
-  assert.ok(report.findings.length > 0, "pipeline must surface wave-1 findings");
+  expect(report, "synthesis on ingestion output must produce audit_findings").toBeTruthy();
+  expect(report.summary.finding_count, "pipeline-compatible report: finding_count == findings.length").toBe(report.findings.length);
+  expect(report.findings.length > 0, "pipeline must surface wave-1 findings").toBeTruthy();
 });
 
 test("B: adding a second wave of results and re-synthesizing yields >= findings from the first synthesis", () => {
@@ -289,19 +260,13 @@ test("B: adding a second wave of results and re-synthesizing yields >= findings 
   );
   const count2 = synth2.updated.audit_findings.summary.finding_count;
 
-  assert.ok(
-    count2 >= count1,
-    `Full-report finding count (${count2}) must be >= partial-report count (${count1}) — adding results must not drop findings`,
-  );
+  expect(count2 >= count1, `Full-report finding count (${count2}) must be >= partial-report count (${count1}) — adding results must not drop findings`).toBeTruthy();
 
   // Both F-MONO-001 and F-MONO-002 must appear in the full report.
   const fullReport = synth2.updated.audit_findings;
   const fullMarkdown = synth2.updated.audit_report;
   for (const finding of fullReport.findings) {
-    assert.ok(
-      fullMarkdown.includes(finding.id),
-      `full-report finding ${finding.id} must appear in the markdown render`,
-    );
+    expect(fullMarkdown.includes(finding.id), `full-report finding ${finding.id} must appear in the markdown render`).toBeTruthy();
   }
 });
 
@@ -352,21 +317,10 @@ test("C: all finding IDs in the full multi-wave JSON contract appear verbatim in
   const report = result.updated.audit_findings;
   const markdown = result.updated.audit_report;
 
-  assert.equal(
-    report.summary.finding_count,
-    report.findings.length,
-    "summary.finding_count must equal findings.length across all waves",
-  );
-  assert.equal(
-    report.summary.work_block_count,
-    report.work_blocks.length,
-    "summary.work_block_count must equal work_blocks.length",
-  );
+  expect(report.summary.finding_count, "summary.finding_count must equal findings.length across all waves").toBe(report.findings.length);
+  expect(report.summary.work_block_count, "summary.work_block_count must equal work_blocks.length").toBe(report.work_blocks.length);
 
   for (const finding of report.findings) {
-    assert.ok(
-      markdown.includes(finding.id),
-      `finding id ${finding.id} must appear in the multi-wave markdown render`,
-    );
+    expect(markdown.includes(finding.id), `finding id ${finding.id} must appear in the multi-wave markdown render`).toBeTruthy();
   }
 });

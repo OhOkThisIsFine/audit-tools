@@ -1,9 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
 
-// Single-package layout: remediate's vitest suite lives under tests/remediate.
-// The shared/audit suites are node:test `.mjs` files — they MUST be excluded
-// here or vitest's default glob sweeps them up as a wall of false failures.
+// Single-package layout: one vitest runner for all three areas.
+// remediate = `.test.ts`; audit + shared = `.test.mjs` (migrated off node:test).
 const sharedSrc = fileURLToPath(new URL("./src/shared", import.meta.url));
 
 export default defineConfig({
@@ -14,9 +13,16 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ["tests/remediate/**/*.test.ts"],
-    testTimeout: 30000,
-    hookTimeout: 10000,
+    include: [
+      "tests/remediate/**/*.test.ts",
+      "tests/audit/**/*.test.mjs",
+      "tests/shared/**/*.test.mjs",
+    ],
+    // Audit integration tests spawn real subprocesses (audit-code CLI round-trips)
+    // and can run for well over a minute; node:test had no per-test timeout, so
+    // the ceiling is generous. Remediate/shared unit tests finish far under it.
+    testTimeout: 120000,
+    hookTimeout: 60000,
     exclude: [
       ...configDefaults.exclude,
       ".audit-artifacts/**",

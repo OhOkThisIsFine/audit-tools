@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -38,25 +38,16 @@ function withCapturedWarn(fn) {
 }
 
 test("CLI flag parsing falls back when values are missing or malformed", () => {
-  assert.equal(
-    cliTestUtils.getFlag(
+  expect(cliTestUtils.getFlag(
       ["node", "cli", "plan", "--root", "repo"],
       "--root",
-    ),
-    "repo",
-  );
-  assert.equal(
-    cliTestUtils.getFlag(
+    )).toBe("repo");
+  expect(cliTestUtils.getFlag(
       ["node", "cli", "plan", "--root", "--artifacts-dir", "out"],
       "--root",
       ".",
-    ),
-    ".",
-  );
-  assert.equal(
-    cliTestUtils.getFlag(["node", "cli", "plan", "--root"], "--root", "."),
-    ".",
-  );
+    )).toBe(".");
+  expect(cliTestUtils.getFlag(["node", "cli", "plan", "--root"], "--root", ".")).toBe(".");
 });
 
 test("ingest-results rejects a value-less --results alongside --batch-results (COR-79283e3b)", async () => {
@@ -74,8 +65,8 @@ test("ingest-results rejects a value-less --results alongside --batch-results (C
       tempRoot,
       "--results",
     ]);
-    assert.match(stderr, /not both/i);
-    assert.equal(exitCode, 1);
+    expect(stderr).toMatch(/not both/i);
+    expect(exitCode).toBe(1);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -86,18 +77,9 @@ test("CLI numeric options prefer argv, then session config, then documented defa
     timeout_ms: 9_000,
   };
 
-  assert.equal(
-    cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "1200"], sessionConfig),
-    1200,
-  );
-  assert.equal(
-    cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "oops"], sessionConfig),
-    9_000,
-  );
-  assert.equal(
-    cliTestUtils.getTimeoutMs(["node", "cli"], {}),
-    cliTestUtils.defaults.timeoutMs,
-  );
+  expect(cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "1200"], sessionConfig)).toBe(1200);
+  expect(cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "oops"], sessionConfig)).toBe(9_000);
+  expect(cliTestUtils.getTimeoutMs(["node", "cli"], {})).toBe(cliTestUtils.defaults.timeoutMs);
 });
 
 test("CLI helper utilities count lines deterministically", async () => {
@@ -111,9 +93,9 @@ test("CLI helper utilities count lines deterministically", async () => {
     await writeFile(trailingNewlineFile, "alpha\nbeta\n");
     await writeFile(noTrailingNewlineFile, "alpha\nbeta");
 
-    assert.equal(await cliTestUtils.countLines(emptyFile), 0);
-    assert.equal(await cliTestUtils.countLines(trailingNewlineFile), 2);
-    assert.equal(await cliTestUtils.countLines(noTrailingNewlineFile), 2);
+    expect(await cliTestUtils.countLines(emptyFile)).toBe(0);
+    expect(await cliTestUtils.countLines(trailingNewlineFile)).toBe(2);
+    expect(await cliTestUtils.countLines(noTrailingNewlineFile)).toBe(2);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -139,20 +121,14 @@ test("next-step starts intake for manifestless source repositories", async () =>
       artifactsDir,
     ]);
 
-    assert.equal(result.exitCode, 0);
+    expect(result.exitCode).toBe(0);
     const step = JSON.parse(result.stdout);
-    assert.equal(step.contract_version, "audit-code-step/v1alpha1");
-    assert.equal(step.status, "ready");
+    expect(step.contract_version).toBe("audit-code-step/v1alpha1");
+    expect(step.status).toBe("ready");
     // Intake ran: the manifest artifacts exist on disk.
-    assert.equal(
-      (await stat(join(artifactsDir, "repo_manifest.json"))).isFile(),
-      true,
-    );
-    assert.equal(
-      (await stat(join(artifactsDir, "file_disposition.json"))).isFile(),
-      true,
-    );
-    assert.doesNotMatch(result.stdout + result.stderr, /No recognisable project signals/i);
+    expect((await stat(join(artifactsDir, "repo_manifest.json"))).isFile()).toBe(true);
+    expect((await stat(join(artifactsDir, "file_disposition.json"))).isFile()).toBe(true);
+    expect(result.stdout + result.stderr).not.toMatch(/No recognisable project signals/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -176,9 +152,9 @@ test("next-step blocks empty or documentation-only repositories after intake val
       join(root, ".audit-tools/audit"),
     ]);
 
-    assert.equal(result.exitCode, 1);
-    assert.match(result.stderr, /No auditable files found/);
-    assert.doesNotMatch(result.stdout + result.stderr, /No recognisable project signals/i);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/No auditable files found/);
+    expect(result.stdout + result.stderr).not.toMatch(/No recognisable project signals/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -210,10 +186,10 @@ test("runFirstAvailableCommand prefers PATHEXT shims over extensionless files on
       { command: "fixture-tool", args: [] },
     ]);
 
-    assert.ok(result);
-    assert.match(result.candidate.command, /fixture-tool\.cmd$/i);
-    assert.equal(result.exitCode, 0);
-    assert.match(result.stdout, /pathext-shim/);
+    expect(result).toBeTruthy();
+    expect(result.candidate.command).toMatch(/fixture-tool\.cmd$/i);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/pathext-shim/);
   } finally {
     if (previousPath === undefined) {
       delete process.env.PATH;
@@ -233,8 +209,8 @@ test("warnIfNotGitRepo warns to stderr when .git is absent", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-no-git-"));
   try {
     const stderrOutput = withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
-    assert.match(stderrOutput, /does not appear to be a git repository/);
-    assert.match(stderrOutput, new RegExp(tempDir.replace(/\\/g, "\\\\")));
+    expect(stderrOutput).toMatch(/does not appear to be a git repository/);
+    expect(stderrOutput).toMatch(new RegExp(tempDir.replace(/\\/g, "\\\\")));
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -254,8 +230,8 @@ test("warnIfNotGitRepo emits warning to stderr (console.warn), not stdout", asyn
     } finally {
       console.log = originalLog;
     }
-    assert.equal(stdoutOutput, "", "warning must not go to stdout");
-    assert.match(stderrOutput, /does not appear to be a git repository/);
+    expect(stdoutOutput, "warning must not go to stdout").toBe("");
+    expect(stderrOutput).toMatch(/does not appear to be a git repository/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -277,7 +253,7 @@ test("warnIfNotGitRepo emits no warning when .git directory is present", async (
   try {
     await mkdir(join(tempDir, ".git"), { recursive: true });
     const stderrOutput = withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
-    assert.equal(stderrOutput, "", "no warning expected for a valid git repo");
+    expect(stderrOutput, "no warning expected for a valid git repo").toBe("");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -289,7 +265,7 @@ test("warnIfNotGitRepo emits no warning when .git file is present (git worktree)
     // git worktrees create a .git file (not a directory) pointing to the main repo
     await writeFile(join(tempDir, ".git"), "gitdir: /some/other/repo/.git/worktrees/branch\n");
     const stderrOutput = withCapturedWarn(() => cliTestUtils.warnIfNotGitRepo(tempDir));
-    assert.equal(stderrOutput, "", "no warning expected for a git worktree (.git file)");
+    expect(stderrOutput, "no warning expected for a git worktree (.git file)").toBe("");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -304,9 +280,9 @@ test("runCli reports unknown commands without throwing", async () => {
     ]),
   );
 
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /Unknown command: definitely-unknown/);
-  assert.match(result.stderr, /Available commands:/);
+  expect(result.code).toBe(1);
+  expect(result.stderr).toMatch(/Unknown command: definitely-unknown/);
+  expect(result.stderr).toMatch(/Available commands:/);
 });
 
 test("each extracted command module exports the expected function (ARC-3579b443)", async () => {
@@ -334,11 +310,7 @@ test("each extracted command module exports the expected function (ARC-3579b443)
   ];
   for (const [file, exportName] of cases) {
     const mod = await import(pathToFileURL(pathJoin(distDir, file)).href);
-    assert.equal(
-      typeof mod[exportName],
-      "function",
-      `${file} must export ${exportName} as a function`,
-    );
+    expect(typeof mod[exportName], `${file} must export ${exportName} as a function`).toBe("function");
   }
 });
 
@@ -350,6 +322,6 @@ test("cli.ts main dispatcher sets exitCode=1 for unknown command without throwin
       "arc-3579b443-unknown-command",
     ]),
   );
-  assert.equal(result.code, 1, "unknown command must set exitCode=1");
-  assert.match(result.stderr, /Unknown command: arc-3579b443-unknown-command/);
+  expect(result.code, "unknown command must set exitCode=1").toBe(1);
+  expect(result.stderr).toMatch(/Unknown command: arc-3579b443-unknown-command/);
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,12 +23,12 @@ function fullBuckets(n) {
 test("LearnedQuotaSource returns null for unknown provider", async () => {
   const source = new LearnedQuotaSource(24);
   const snapshot = await source.queryCurrentUsage("nonexistent/model");
-  assert.equal(snapshot, null);
+  expect(snapshot).toBe(null);
 });
 
 test("LearnedQuotaSource.name is 'learned'", () => {
   const source = new LearnedQuotaSource();
-  assert.equal(source.name, "learned");
+  expect(source.name).toBe("learned");
 });
 
 // ── CompositeQuotaSource ────────────────────────────────────────────────────
@@ -52,8 +51,8 @@ test("CompositeQuotaSource returns first non-null snapshot", async () => {
   };
   const composite = new CompositeQuotaSource([source1, source2]);
   const snapshot = await composite.queryCurrentUsage("test/model");
-  assert.equal(snapshot?.source, "test");
-  assert.equal(snapshot?.remaining_pct, 0.5);
+  expect(snapshot?.source).toBe("test");
+  expect(snapshot?.remaining_pct).toBe(0.5);
 });
 
 test("CompositeQuotaSource returns null when all sources return null", async () => {
@@ -61,7 +60,7 @@ test("CompositeQuotaSource returns null when all sources return null", async () 
   const source2 = { name: "b", queryCurrentUsage: async () => null };
   const composite = new CompositeQuotaSource([source1, source2]);
   const snapshot = await composite.queryCurrentUsage("test/model");
-  assert.equal(snapshot, null);
+  expect(snapshot).toBe(null);
 });
 
 test("CompositeQuotaSource skips failing sources", async () => {
@@ -82,7 +81,7 @@ test("CompositeQuotaSource skips failing sources", async () => {
   };
   const composite = new CompositeQuotaSource([failingSource, goodSource]);
   const snapshot = await composite.queryCurrentUsage("test/model");
-  assert.equal(snapshot?.source, "good");
+  expect(snapshot?.source).toBe("good");
 });
 
 test("buildQuotaSource prefers additional sources before learned fallback", async () => {
@@ -100,7 +99,7 @@ test("buildQuotaSource prefers additional sources before learned fallback", asyn
   const source = buildQuotaSource({ additionalSources: [providerSource] });
   const snapshot = await source.queryCurrentUsage("test/model");
 
-  assert.equal(snapshot?.source, "provider");
+  expect(snapshot?.source).toBe("provider");
 });
 
 test("buildQuotaSource skips failing additional sources and falls back cleanly", async () => {
@@ -114,7 +113,7 @@ test("buildQuotaSource skips failing additional sources and falls back cleanly",
   });
   const snapshot = await source.queryCurrentUsage("missing/model");
 
-  assert.equal(snapshot, null);
+  expect(snapshot).toBe(null);
 });
 
 // ── Scheduler integration with quotaSourceSnapshot ──────────────────────────
@@ -141,9 +140,9 @@ test("token-budget gate: a genuinely exhausted window (remaining 0) throttles to
     requestedConcurrency: 10,
     quotaSourceSnapshot: snapshot,
   });
-  assert.equal(schedule.max_concurrent, 1);
-  assert.equal(schedule.cooldown_until, reset);
-  assert.deepEqual(schedule.quota_source_snapshot, snapshot);
+  expect(schedule.max_concurrent).toBe(1);
+  expect(schedule.cooldown_until).toBe(reset);
+  expect(schedule.quota_source_snapshot).toEqual(snapshot);
 });
 
 test("token-budget gate: absolute tokens_remaining caps the wave directly", () => {
@@ -164,8 +163,8 @@ test("token-budget gate: absolute tokens_remaining caps the wave directly", () =
     quotaSourceSnapshot: snapshot,
   });
   // 3000 budget / 1000 per slot → 3 slots fit.
-  assert.equal(schedule.max_concurrent, 3);
-  assert.equal(schedule.binding_cap, "token_budget");
+  expect(schedule.max_concurrent).toBe(3);
+  expect(schedule.binding_cap).toBe("token_budget");
 });
 
 test("token-budget gate: cold start (no absolute, no learned slope) admits a small calibration batch", () => {
@@ -186,8 +185,8 @@ test("token-budget gate: cold start (no absolute, no learned slope) admits a sma
     quotaStateEntry: null, // no learned tokens_per_pct
     quotaSourceSnapshot: snapshot,
   });
-  assert.equal(schedule.binding_cap, "token_budget");
-  assert.ok(schedule.max_concurrent <= 3, `cold-start batch should be small, got ${schedule.max_concurrent}`);
+  expect(schedule.binding_cap).toBe("token_budget");
+  expect(schedule.max_concurrent <= 3, `cold-start batch should be small, got ${schedule.max_concurrent}`).toBeTruthy();
 });
 
 test("token-budget gate: a healthy learned budget does not reduce the wave", () => {
@@ -215,8 +214,8 @@ test("token-budget gate: a healthy learned budget does not reduce the wave", () 
     estimatedSlotTokens: [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
     quotaSourceSnapshot: snapshot,
   });
-  assert.equal(schedule.max_concurrent, 10);
-  assert.equal(schedule.binding_cap, "none");
+  expect(schedule.max_concurrent).toBe(10);
+  expect(schedule.binding_cap).toBe("none");
 });
 
 test("token-budget gate: weekly-binding vs session-binding pools use distinct slopes (MIN over windows)", () => {
@@ -252,6 +251,6 @@ test("token-budget gate: weekly-binding vs session-binding pools use distinct sl
     quotaSourceSnapshot: snapshot,
   });
   // weekly budget 1000 / 500 per slot → 2 slots; NOT the session budget's ~many.
-  assert.equal(schedule.max_concurrent, 2);
-  assert.equal(schedule.binding_cap, "token_budget");
+  expect(schedule.max_concurrent).toBe(2);
+  expect(schedule.binding_cap).toBe("token_budget");
 });

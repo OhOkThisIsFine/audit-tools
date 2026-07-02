@@ -18,8 +18,7 @@
  * regression (a reintroduced inline writer / a second hash helper / a local
  * AccessDeclaration) fails here rather than silently drifting.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,16 +59,8 @@ const ALL_SRC_FILES = [
 
 test("io-hash-single-source/1a: shared writeJsonFile exists and is the atomic writer", () => {
   const src = read(SHARED_JSON_WRITER);
-  assert.match(
-    src,
-    /function writeFileAtomic\(/,
-    "shared/src/io/json.ts must define the atomic writer writeFileAtomic",
-  );
-  assert.match(
-    src,
-    /export async function writeJsonFile\(/,
-    "shared/src/io/json.ts must export writeJsonFile",
-  );
+  expect(src, "shared/src/io/json.ts must define the atomic writer writeFileAtomic").toMatch(/function writeFileAtomic\(/);
+  expect(src, "shared/src/io/json.ts must export writeJsonFile").toMatch(/export async function writeJsonFile\(/);
 });
 
 test("io-hash-single-source/1b: no other src module defines a temp-then-rename atomic writer", () => {
@@ -87,11 +78,7 @@ test("io-hash-single-source/1b: no other src module defines a temp-then-rename a
       offenders.push(file.replace(/\\/g, "/"));
     }
   }
-  assert.deepEqual(
-    offenders,
-    [],
-    `Only shared/src/io/json.ts may implement an atomic JSON writer; offenders route their durable write through shared writeJsonFile instead: ${offenders.join(", ")}`,
-  );
+  expect(offenders, `Only shared/src/io/json.ts may implement an atomic JSON writer; offenders route their durable write through shared writeJsonFile instead: ${offenders.join(", ")}`).toEqual([]);
 });
 
 // ── Guard 2: single SHA-256 content-hash helper ───────────────────────────────
@@ -109,25 +96,15 @@ const HASH_CONTENT_CONSUMERS = [
 
 test("io-hash-single-source/2a: shared hashContent exists and is exported", () => {
   const src = read(SHARED_HASH);
-  assert.match(
-    src,
-    /export function hashContent\(/,
-    "shared/src/hash.ts must export the hashContent primitive",
-  );
+  expect(src, "shared/src/hash.ts must export the hashContent primitive").toMatch(/export function hashContent\(/);
 });
 
 test("io-hash-single-source/2b: consolidated call sites route through shared hashContent (no inline sha256)", () => {
   for (const file of HASH_CONTENT_CONSUMERS) {
     const src = read(file);
     const rel = file.replace(/\\/g, "/");
-    assert.ok(
-      /hashContent/.test(src),
-      `${rel} must use the shared hashContent primitive`,
-    );
-    assert.ok(
-      !/createHash\(\s*["']sha256["']\s*\)/.test(src),
-      `${rel} must not carry an inline createHash("sha256") chain — route through hashContent`,
-    );
+    expect(/hashContent/.test(src), `${rel} must use the shared hashContent primitive`).toBeTruthy();
+    expect(!/createHash\(\s*["']sha256["']\s*\)/.test(src), `${rel} must not carry an inline createHash("sha256") chain — route through hashContent`).toBeTruthy();
   }
 });
 
@@ -137,10 +114,7 @@ test("io-hash-single-source/2c: no ad-hoc .slice on a hashContent result at the 
   for (const file of HASH_CONTENT_CONSUMERS) {
     const src = read(file);
     const rel = file.replace(/\\/g, "/");
-    assert.ok(
-      !/hashContent\([^;]*\)\s*\.slice\(/.test(src),
-      `${rel} must pass truncation length via hashContent(..., { length }), not a trailing .slice() on the result`,
-    );
+    expect(!/hashContent\([^;]*\)\s*\.slice\(/.test(src), `${rel} must pass truncation length via hashContent(..., { length }), not a trailing .slice() on the result`).toBeTruthy();
   }
 });
 
@@ -154,11 +128,7 @@ test("io-hash-single-source/3a: AccessDeclaration is declared only in shared", (
   const declRegex =
     /(?:export\s+)?(?:interface\s+AccessDeclaration\b[^=]*\{|type\s+AccessDeclaration\s*=)/;
   // Shared owns the single declaration.
-  assert.match(
-    read(SHARED_ACCESS_DECLARATION),
-    declRegex,
-    "shared/src/types/accessDeclaration.ts must declare the AccessDeclaration type",
-  );
+  expect(read(SHARED_ACCESS_DECLARATION), "shared/src/types/accessDeclaration.ts must declare the AccessDeclaration type").toMatch(declRegex);
   // No other src file may declare it (re-export / import of the shared type is
   // fine and is excluded below: a re-export is `export type { AccessDeclaration }`
   // which has no `interface|type` keyword).
@@ -167,11 +137,7 @@ test("io-hash-single-source/3a: AccessDeclaration is declared only in shared", (
     if (file === SHARED_ACCESS_DECLARATION) continue;
     if (declRegex.test(read(file))) offenders.push(file.replace(/\\/g, "/"));
   }
-  assert.deepEqual(
-    offenders,
-    [],
-    `AccessDeclaration must be declared only in shared; redeclared in: ${offenders.join(", ")}`,
-  );
+  expect(offenders, `AccessDeclaration must be declared only in shared; redeclared in: ${offenders.join(", ")}`).toEqual([]);
 });
 
 test("io-hash-single-source/3b: orchestrators import AccessDeclaration from shared, not a local copy", () => {
@@ -182,10 +148,7 @@ test("io-hash-single-source/3b: orchestrators import AccessDeclaration from shar
     ["remediate-code/src/steps/types.ts", remediateTypes],
     ["audit-code/src/types/workerSession.ts", auditWorkerSession],
   ]) {
-    assert.ok(
-      /AccessDeclaration[^]*from\s+["']audit-tools\/shared["']/.test(src),
-      `${label} must import AccessDeclaration from audit-tools/shared`,
-    );
+    expect(/AccessDeclaration[^]*from\s+["']audit-tools\/shared["']/.test(src), `${label} must import AccessDeclaration from audit-tools/shared`).toBeTruthy();
   }
 
   // The earlier duplicate was a second `AccessDeclaration` listed in a separate
@@ -203,10 +166,6 @@ test("io-hash-single-source/3b: orchestrators import AccessDeclaration from shar
       /import\s+type\s+\{[^}]*AccessDeclaration[^}]*\}\s+from\s+["']audit-tools\/shared["']/g,
     ) ?? []
   ).length;
-  assert.equal(
-    importStatementsWithAccess,
-    1,
-    "remediate-code/src/steps/types.ts must import AccessDeclaration in exactly one statement (no duplicate cross-package listing)",
-  );
-  assert.ok(sharedAccessImports.length >= 1);
+  expect(importStatementsWithAccess, "remediate-code/src/steps/types.ts must import AccessDeclaration in exactly one statement (no duplicate cross-package listing)").toBe(1);
+  expect(sharedAccessImports.length >= 1).toBeTruthy();
 });

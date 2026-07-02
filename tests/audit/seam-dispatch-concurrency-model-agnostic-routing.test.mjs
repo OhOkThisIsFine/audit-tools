@@ -30,7 +30,7 @@
  *      are available.
  */
 
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 // ── audit-code tierRouting (local TypeScript, loaded via tsx/esm) ────────────
@@ -104,21 +104,14 @@ test("A1: TIER_RANK keys match the DispatchModelTier union used by CapacityPool.
   // in audit-tools/shared) must be exactly the three keys in TIER_RANK.
   const expectedTiers = ["small", "standard", "deep"];
   const actualKeys = Object.keys(TIER_RANK).sort();
-  assert.deepEqual(
-    actualKeys,
-    expectedTiers.sort(),
-    "TIER_RANK must cover exactly the DispatchModelTier union",
-  );
+  expect(actualKeys, "TIER_RANK must cover exactly the DispatchModelTier union").toEqual(expectedTiers.sort());
 });
 
 test("A2: TIER_ORDER spans all DispatchModelTier values in ascending capability order", () => {
-  assert.deepEqual(TIER_ORDER, ["small", "standard", "deep"]);
+  expect(TIER_ORDER).toEqual(["small", "standard", "deep"]);
   // Ranks must be strictly ascending along TIER_ORDER.
   for (let i = 1; i < TIER_ORDER.length; i++) {
-    assert.ok(
-      TIER_RANK[TIER_ORDER[i]] > TIER_RANK[TIER_ORDER[i - 1]],
-      `TIER_RANK[${TIER_ORDER[i]}] must be > TIER_RANK[${TIER_ORDER[i - 1]}]`,
-    );
+    expect(TIER_RANK[TIER_ORDER[i]] > TIER_RANK[TIER_ORDER[i - 1]], `TIER_RANK[${TIER_ORDER[i]}] must be > TIER_RANK[${TIER_ORDER[i - 1]}]`).toBeTruthy();
   }
 });
 
@@ -126,10 +119,7 @@ test("A3: CapacityPool.rank 'deep' string is accepted as a valid TIER_RANK key",
   // This verifies the shared string "deep" (from CapacityPool.rank) round-trips
   // through audit-code's TIER_RANK without losing its relative rank value.
   const pool = openPool("deep-pool", "deep");
-  assert.ok(
-    Object.prototype.hasOwnProperty.call(TIER_RANK, pool.rank),
-    "'deep' rank from CapacityPool must be a key in TIER_RANK",
-  );
+  expect(Object.prototype.hasOwnProperty.call(TIER_RANK, pool.rank), "'deep' rank from CapacityPool must be a key in TIER_RANK").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -141,8 +131,8 @@ test("B1: low routing_risk (<= standard_at) → small tier (baseline)", () => {
     routingRisk: 0.1,
     complexity: complexity(),
   });
-  assert.equal(hint.tier, "small");
-  assert.ok(hint.reasons.some((r) => r.startsWith("routing_risk:")));
+  expect(hint.tier).toBe("small");
+  expect(hint.reasons.some((r) => r.startsWith("routing_risk:"))).toBeTruthy();
 });
 
 test("B2: mid routing_risk (>= standard_at, < deep_at) → standard tier", () => {
@@ -150,7 +140,7 @@ test("B2: mid routing_risk (>= standard_at, < deep_at) → standard tier", () =>
     routingRisk: 0.5,
     complexity: complexity(),
   });
-  assert.equal(hint.tier, "standard");
+  expect(hint.tier).toBe("standard");
 });
 
 test("B3: high routing_risk (>= deep_at) → deep tier", () => {
@@ -158,7 +148,7 @@ test("B3: high routing_risk (>= deep_at) → deep tier", () => {
     routingRisk: 0.8,
     complexity: complexity(),
   });
-  assert.equal(hint.tier, "deep");
+  expect(hint.tier).toBe("deep");
 });
 
 test("B4: undefined routing_risk → small tier (unknown baseline)", () => {
@@ -166,8 +156,8 @@ test("B4: undefined routing_risk → small tier (unknown baseline)", () => {
     routingRisk: undefined,
     complexity: complexity(),
   });
-  assert.equal(hint.tier, "small");
-  assert.ok(hint.reasons.includes("routing_risk:unknown"));
+  expect(hint.tier).toBe("small");
+  expect(hint.reasons.includes("routing_risk:unknown")).toBeTruthy();
 });
 
 test("B5: deep escalator (large_file_mode) raises small baseline to deep", () => {
@@ -175,8 +165,8 @@ test("B5: deep escalator (large_file_mode) raises small baseline to deep", () =>
     routingRisk: 0.1,
     complexity: complexity({ large_file_mode: true }),
   });
-  assert.equal(hint.tier, "deep");
-  assert.ok(hint.reasons.includes("isolated_large_file"));
+  expect(hint.tier).toBe("deep");
+  expect(hint.reasons.includes("isolated_large_file")).toBeTruthy();
 });
 
 test("B6: standard escalator (sensitive_lens) raises small baseline to standard", () => {
@@ -184,8 +174,8 @@ test("B6: standard escalator (sensitive_lens) raises small baseline to standard"
     routingRisk: 0.1,
     complexity: complexity({ lenses: ["security"] }),
   });
-  assert.equal(hint.tier, "standard");
-  assert.ok(hint.reasons.includes("sensitive_lens"));
+  expect(hint.tier).toBe("standard");
+  expect(hint.reasons.includes("sensitive_lens")).toBeTruthy();
 });
 
 test("B7: deep escalator does NOT lower a deep baseline — escalators are raise-only", () => {
@@ -194,7 +184,7 @@ test("B7: deep escalator does NOT lower a deep baseline — escalators are raise
     routingRisk: 0.9,
     complexity: complexity(),
   });
-  assert.equal(hint.tier, "deep");
+  expect(hint.tier).toBe("deep");
 });
 
 test("B8: critical_flow tag escalates to deep regardless of low risk", () => {
@@ -202,8 +192,8 @@ test("B8: critical_flow tag escalates to deep regardless of low risk", () => {
     routingRisk: 0.1,
     complexity: complexity({ tags: ["critical_flow"] }),
   });
-  assert.equal(hint.tier, "deep");
-  assert.ok(hint.reasons.includes("critical_flow"));
+  expect(hint.tier).toBe("deep");
+  expect(hint.reasons.includes("critical_flow")).toBeTruthy();
 });
 
 test("B9: custom routing_tiers overrides default cut-points", () => {
@@ -213,7 +203,7 @@ test("B9: custom routing_tiers overrides default cut-points", () => {
     complexity: complexity(),
     routingTiers: { deep_at: 0.9, standard_at: 0.5 },
   });
-  assert.equal(hint.tier, "standard");
+  expect(hint.tier).toBe("standard");
 });
 
 // ---------------------------------------------------------------------------
@@ -227,28 +217,28 @@ test("C1: all three tiers reported — each gets its own budget", () => {
     ["deep", 300],
   ]);
   const out = resolveTierBudgets(input);
-  assert.equal(out.small, 100);
-  assert.equal(out.standard, 200);
-  assert.equal(out.deep, 300);
+  expect(out.small).toBe(100);
+  expect(out.standard).toBe(200);
+  expect(out.deep).toBe(300);
 });
 
 test("C2: only 'deep' reported — standard and small fall back to deep (nearest is deep, no lower available)", () => {
   const input = new Map([["deep", 300]]);
   const out = resolveTierBudgets(input);
-  assert.equal(out.deep, 300);
+  expect(out.deep).toBe(300);
   // standard has no lower tier below it when only deep is reported
-  assert.equal(out.standard, 300);
-  assert.equal(out.small, 300);
+  expect(out.standard).toBe(300);
+  expect(out.small).toBe(300);
 });
 
 test("C3: only 'small' reported — standard and deep get small (nearest lower wins — COR-eebbabf7)", () => {
   const input = new Map([["small", 100]]);
   const out = resolveTierBudgets(input);
-  assert.equal(out.small, 100);
+  expect(out.small).toBe(100);
   // standard: nearest lower = small (distance 1 down); up would be deep (distance 1 up — tie).
   // COR-eebbabf7 invariant: prefer lower on tie → small budget.
-  assert.equal(out.standard, 100);
-  assert.equal(out.deep, 100);
+  expect(out.standard).toBe(100);
+  expect(out.deep).toBe(100);
 });
 
 test("C4: 'small' and 'deep' reported — standard falls back to small (lower preferred on equal distance)", () => {
@@ -259,10 +249,10 @@ test("C4: 'small' and 'deep' reported — standard falls back to small (lower pr
     ["deep", 500],
   ]);
   const out = resolveTierBudgets(input);
-  assert.equal(out.small, 50);
-  assert.equal(out.deep, 500);
+  expect(out.small).toBe(50);
+  expect(out.deep).toBe(500);
   // standard: down=small(50), up=deep(500). lower preferred → 50.
-  assert.equal(out.standard, 50);
+  expect(out.standard).toBe(50);
 });
 
 test("C5: resolveTierBudgets rejects empty input", () => {
@@ -289,8 +279,8 @@ test("D1: high-complexity packet (0.9) routes to the highest-rank pool (deep > s
     {},
     {},
   );
-  assert.ok(slot !== null, "should find a slot");
-  assert.equal(slot.poolId, "deep-pool", "high-complexity must prefer the deep pool");
+  expect(slot !== null, "should find a slot").toBeTruthy();
+  expect(slot.poolId, "high-complexity must prefer the deep pool").toBe("deep-pool");
 });
 
 test("D2: low-complexity packet (0.1) routes to the lowest-rank pool (small < standard)", () => {
@@ -306,8 +296,8 @@ test("D2: low-complexity packet (0.1) routes to the lowest-rank pool (small < st
     {},
     {},
   );
-  assert.ok(slot !== null, "should find a slot");
-  assert.equal(slot.poolId, "small-pool", "low-complexity must prefer the small pool");
+  expect(slot !== null, "should find a slot").toBeTruthy();
+  expect(slot.poolId, "low-complexity must prefer the small pool").toBe("small-pool");
 });
 
 test("D3: boundary packet (complexity=0.5) is treated as high-complexity", () => {
@@ -324,8 +314,8 @@ test("D3: boundary packet (complexity=0.5) is treated as high-complexity", () =>
     {},
     {},
   );
-  assert.ok(slot !== null, "boundary complexity should find a slot");
-  assert.equal(slot.poolId, "deep-pool", "complexity 0.5 is high-complexity: prefer deep");
+  expect(slot !== null, "boundary complexity should find a slot").toBeTruthy();
+  expect(slot.poolId, "complexity 0.5 is high-complexity: prefer deep").toBe("deep-pool");
 });
 
 test("D4: pools without rank fall back to standard (neutral) — unknown provider is not mis-ranked", () => {
@@ -343,8 +333,8 @@ test("D4: pools without rank fall back to standard (neutral) — unknown provide
     {},
     {},
   );
-  assert.ok(slot !== null);
-  assert.equal(slot.poolId, "deep-pool", "explicit 'deep' rank must beat neutral (undefined rank)");
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId, "explicit 'deep' rank must beat neutral (undefined rank)").toBe("deep-pool");
 });
 
 // ---------------------------------------------------------------------------
@@ -353,11 +343,11 @@ test("D4: pools without rank fall back to standard (neutral) — unknown provide
 
 test("E1: 5 agents, max 2 concurrent → correct summary fields", () => {
   const fanout = computeDispatchFanout({ agentCount: 5, maxConcurrent: 2 });
-  assert.equal(fanout.agent_count, 5);
-  assert.equal(fanout.max_concurrent_agents, 2);
-  assert.equal(fanout.confirmation_recommended, false); // 5 <= default threshold (10)
-  assert.match(fanout.dispatch_summary, /5 agents/);
-  assert.match(fanout.dispatch_summary, /max 2 concurrent/);
+  expect(fanout.agent_count).toBe(5);
+  expect(fanout.max_concurrent_agents).toBe(2);
+  expect(fanout.confirmation_recommended).toBe(false); // 5 <= default threshold (10)
+  expect(fanout.dispatch_summary).toMatch(/5 agents/);
+  expect(fanout.dispatch_summary).toMatch(/max 2 concurrent/);
 });
 
 test("E2: agent_count > confirm_threshold triggers confirmation_recommended", () => {
@@ -366,13 +356,13 @@ test("E2: agent_count > confirm_threshold triggers confirmation_recommended", ()
     maxConcurrent: 4,
     confirmThreshold: 10,
   });
-  assert.equal(fanout.confirmation_recommended, true);
+  expect(fanout.confirmation_recommended).toBe(true);
 });
 
 test("E3: 1 agent produces singular 'agent' label in dispatch_summary", () => {
   const fanout = computeDispatchFanout({ agentCount: 1, maxConcurrent: 1 });
-  assert.match(fanout.dispatch_summary, /1 agent,/);
-  assert.doesNotMatch(fanout.dispatch_summary, /1 agents/);
+  expect(fanout.dispatch_summary).toMatch(/1 agent,/);
+  expect(fanout.dispatch_summary).not.toMatch(/1 agents/);
 });
 
 // ---------------------------------------------------------------------------
@@ -398,10 +388,10 @@ test("F1: createRollingDispatcher routes packets and returns all results", async
   ]);
 
   const results = await dispatcher.run();
-  assert.equal(results.length, 3);
+  expect(results.length).toBe(3);
   const resultIds = results.map((r) => r.packet.id).sort();
-  assert.deepEqual(resultIds, ["a", "b", "c"]);
-  assert.ok(results.every((r) => r.outcome === "success"));
+  expect(resultIds).toEqual(["a", "b", "c"]);
+  expect(results.every((r) => r.outcome === "success")).toBeTruthy();
 });
 
 test("F2: createRollingDispatcher with two rank pools routes high-complexity to deep pool", async () => {
@@ -426,23 +416,21 @@ test("F2: createRollingDispatcher with two rank pools routes high-complexity to 
 
   await dispatcher.run();
 
-  assert.equal(routedTo["hi"], "deep-pool",
-    "high-complexity packet must be routed to the deep pool");
-  assert.equal(routedTo["lo"], "small-pool",
-    "low-complexity packet must be routed to the small pool");
+  expect(routedTo["hi"], "high-complexity packet must be routed to the deep pool").toBe("deep-pool");
+  expect(routedTo["lo"], "low-complexity packet must be routed to the small pool").toBe("small-pool");
 });
 
 test("F3: InFlightTokenTracker in-flight accounting round-trips correctly", () => {
   const tracker = new InFlightTokenTracker();
   tracker.recordDispatched("pool-a", 1000);
   tracker.recordDispatched("pool-a", 500);
-  assert.equal(tracker.getInFlightTokens("pool-a"), 1500);
+  expect(tracker.getInFlightTokens("pool-a")).toBe(1500);
 
   tracker.recordCompleted("pool-a", 500);
-  assert.equal(tracker.getInFlightTokens("pool-a"), 1000);
+  expect(tracker.getInFlightTokens("pool-a")).toBe(1000);
 
   // Unknown pool returns 0
-  assert.equal(tracker.getInFlightTokens("pool-b"), 0);
+  expect(tracker.getInFlightTokens("pool-b")).toBe(0);
 });
 
 test("F4: createRollingDispatcher deduplicate: enqueue same packet id twice → dispatched once", async () => {
@@ -461,6 +449,6 @@ test("F4: createRollingDispatcher deduplicate: enqueue same packet id twice → 
   dispatcher.enqueue([p, p]);
 
   const results = await dispatcher.run();
-  assert.equal(results.length, 1);
-  assert.equal(dispatchCount, 1, "duplicate packet id must not be dispatched twice");
+  expect(results.length).toBe(1);
+  expect(dispatchCount, "duplicate packet id must not be dispatched twice").toBe(1);
 });

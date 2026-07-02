@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -32,7 +32,7 @@ test("cleanupStaleArtifactsDir preserves artifacts directory when status is acti
 
     await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.ok(await dirExists(artifactsDir), "directory should still exist for active status");
+    expect(await dirExists(artifactsDir), "directory should still exist for active status").toBeTruthy();
   });
 });
 
@@ -47,7 +47,7 @@ test("cleanupStaleArtifactsDir preserves artifacts directory when status is bloc
 
     await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.ok(await dirExists(artifactsDir), "directory should still exist for blocked status");
+    expect(await dirExists(artifactsDir), "directory should still exist for blocked status").toBeTruthy();
   });
 });
 
@@ -62,7 +62,7 @@ test("cleanupStaleArtifactsDir re-throws on malformed audit_state.json", async (
       "should throw on malformed JSON",
     );
 
-    assert.ok(await dirExists(artifactsDir), "directory should still exist after rejection");
+    expect(await dirExists(artifactsDir), "directory should still exist after rejection").toBeTruthy();
   });
 });
 
@@ -77,7 +77,7 @@ test("cleanupStaleArtifactsDir returns silently when audit_state.json is absent"
       "should resolve without throwing when audit_state.json is missing",
     );
 
-    assert.ok(await dirExists(artifactsDir), "directory should still exist (nothing deleted)");
+    expect(await dirExists(artifactsDir), "directory should still exist (nothing deleted)").toBeTruthy();
   });
 });
 
@@ -92,7 +92,7 @@ test("cleanupStaleArtifactsDir removes artifacts directory when status is comple
 
     await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed for complete status");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed for complete status").toBeTruthy();
   });
 });
 
@@ -107,7 +107,7 @@ test("cleanupStaleArtifactsDir removes artifacts directory when status is not_st
 
     await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed for not_started status");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed for not_started status").toBeTruthy();
   });
 });
 
@@ -124,9 +124,9 @@ test("cleanupStaleArtifactsDir: deletes when status is complete (no options)", a
 
     const result = await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.equal(result.action, "deleted");
-    assert.equal(result.status, "complete");
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed");
+    expect(result.action).toBe("deleted");
+    expect(result.status).toBe("complete");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed").toBeTruthy();
   });
 });
 
@@ -141,9 +141,9 @@ test("cleanupStaleArtifactsDir: deletes when status is not_started (no options)"
 
     const result = await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.equal(result.action, "deleted");
-    assert.equal(result.status, "not_started");
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed");
+    expect(result.action).toBe("deleted");
+    expect(result.status).toBe("not_started");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed").toBeTruthy();
   });
 });
 
@@ -158,12 +158,12 @@ test("cleanupStaleArtifactsDir: skips deletion when status is active and force i
 
     const result = await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.equal(result.action, "skipped");
-    assert.equal(result.status, "active");
-    assert.ok(typeof result.reason === "string", "reason should be a string");
-    assert.ok(result.reason.includes("active"), "reason should mention 'active'");
-    assert.ok(result.reason.includes("resumed") || result.reason.includes("resume"), "reason should mention resumption");
-    assert.ok(await dirExists(artifactsDir), "directory should still exist");
+    expect(result.action).toBe("skipped");
+    expect(result.status).toBe("active");
+    expect(typeof result.reason === "string", "reason should be a string").toBeTruthy();
+    expect(result.reason.includes("active"), "reason should mention 'active'").toBeTruthy();
+    expect(result.reason.includes("resumed") || result.reason.includes("resume"), "reason should mention resumption").toBeTruthy();
+    expect(await dirExists(artifactsDir), "directory should still exist").toBeTruthy();
   });
 });
 
@@ -178,9 +178,9 @@ test("cleanupStaleArtifactsDir: deletes when status is active and force is true"
 
     const result = await cleanupStaleArtifactsDir(artifactsDir, { force: true });
 
-    assert.equal(result.action, "deleted");
-    assert.equal(result.status, "active");
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed despite active status");
+    expect(result.action).toBe("deleted");
+    expect(result.status).toBe("active");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed despite active status").toBeTruthy();
   });
 });
 
@@ -195,9 +195,9 @@ test("cleanupStaleArtifactsDir: dry-run skips rm but returns dry-run action", as
 
     const result = await cleanupStaleArtifactsDir(artifactsDir, { dryRun: true });
 
-    assert.equal(result.action, "dry-run");
-    assert.equal(result.status, "complete");
-    assert.ok(await dirExists(artifactsDir), "directory should still exist in dry-run mode");
+    expect(result.action).toBe("dry-run");
+    expect(result.status).toBe("complete");
+    expect(await dirExists(artifactsDir), "directory should still exist in dry-run mode").toBeTruthy();
   });
 });
 
@@ -209,9 +209,9 @@ test("cleanupStaleArtifactsDir: skips silently when audit_state.json is missing 
 
     const result = await cleanupStaleArtifactsDir(artifactsDir);
 
-    assert.equal(result.action, "skipped");
-    assert.equal(result.status, "unknown");
-    assert.ok(await dirExists(artifactsDir), "directory should still exist");
+    expect(result.action).toBe("skipped");
+    expect(result.status).toBe("unknown");
+    expect(await dirExists(artifactsDir), "directory should still exist").toBeTruthy();
   });
 });
 
@@ -223,9 +223,9 @@ test("cleanupStaleArtifactsDir: force=true deletes even when state file is missi
 
     const result = await cleanupStaleArtifactsDir(artifactsDir, { force: true });
 
-    assert.equal(result.action, "deleted");
-    assert.equal(result.status, "unknown");
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed when force=true and state file is missing");
+    expect(result.action).toBe("deleted");
+    expect(result.status).toBe("unknown");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed when force=true and state file is missing").toBeTruthy();
   });
 });
 
@@ -255,12 +255,12 @@ test("cmdCleanup: active status — exitCode=1, JSON action=skipped with reason"
 
     const { code, stdout } = await runCleanup(artifactsDir);
 
-    assert.equal(code, 1, "exitCode should be 1 when action is skipped");
+    expect(code, "exitCode should be 1 when action is skipped").toBe(1);
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.action, "skipped");
-    assert.equal(parsed.artifacts_dir, artifactsDir);
-    assert.ok(typeof parsed.reason === "string" && parsed.reason.length > 0, "reason should be a non-empty string");
-    assert.ok(await dirExists(artifactsDir), "directory should still exist");
+    expect(parsed.action).toBe("skipped");
+    expect(parsed.artifacts_dir).toBe(artifactsDir);
+    expect(typeof parsed.reason === "string" && parsed.reason.length > 0, "reason should be a non-empty string").toBeTruthy();
+    expect(await dirExists(artifactsDir), "directory should still exist").toBeTruthy();
   });
 });
 
@@ -275,11 +275,11 @@ test("cmdCleanup: complete status — exitCode=0, JSON action=deleted", async ()
 
     const { code, stdout } = await runCleanup(artifactsDir);
 
-    assert.equal(code, 0, "exitCode should be 0 when action is deleted");
+    expect(code, "exitCode should be 0 when action is deleted").toBe(0);
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.action, "deleted");
-    assert.equal(parsed.status, "complete");
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed");
+    expect(parsed.action).toBe("deleted");
+    expect(parsed.status).toBe("complete");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed").toBeTruthy();
   });
 });
 
@@ -291,15 +291,12 @@ test("cmdCleanup: missing state file (no flags) — exitCode=1, JSON action=skip
 
     const { code, stdout } = await runCleanup(artifactsDir);
 
-    assert.equal(code, 1, "exitCode should be 1 when action is skipped");
+    expect(code, "exitCode should be 1 when action is skipped").toBe(1);
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.action, "skipped");
-    assert.ok(typeof parsed.reason === "string", "reason should be a string");
-    assert.ok(
-      parsed.reason.includes("--force") || parsed.reason.includes("force"),
-      "reason should mention --force",
-    );
-    assert.ok(await dirExists(artifactsDir), "directory should still exist");
+    expect(parsed.action).toBe("skipped");
+    expect(typeof parsed.reason === "string", "reason should be a string").toBeTruthy();
+    expect(parsed.reason.includes("--force") || parsed.reason.includes("force"), "reason should mention --force").toBeTruthy();
+    expect(await dirExists(artifactsDir), "directory should still exist").toBeTruthy();
   });
 });
 
@@ -314,11 +311,11 @@ test("cmdCleanup: --force flag deletes active-status artifacts, exitCode=0", asy
 
     const { code, stdout } = await runCleanup(artifactsDir, ["--force"]);
 
-    assert.equal(code, 0, "exitCode should be 0 when force-deleted");
+    expect(code, "exitCode should be 0 when force-deleted").toBe(0);
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.action, "deleted");
-    assert.equal(parsed.status, "active");
-    assert.ok(!(await dirExists(artifactsDir)), "directory should be removed with --force");
+    expect(parsed.action).toBe("deleted");
+    expect(parsed.status).toBe("active");
+    expect(!(await dirExists(artifactsDir)), "directory should be removed with --force").toBeTruthy();
   });
 });
 
@@ -333,11 +330,11 @@ test("cmdCleanup: --dry-run flag returns dry-run action without deleting, exitCo
 
     const { code, stdout } = await runCleanup(artifactsDir, ["--dry-run"]);
 
-    assert.equal(code, 0, "exitCode should be 0 for dry-run");
+    expect(code, "exitCode should be 0 for dry-run").toBe(0);
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.action, "dry-run");
-    assert.equal(parsed.dry_run, true);
-    assert.ok(await dirExists(artifactsDir), "directory should still exist after dry-run");
+    expect(parsed.action).toBe("dry-run");
+    expect(parsed.dry_run).toBe(true);
+    expect(await dirExists(artifactsDir), "directory should still exist after dry-run").toBeTruthy();
   });
 });
 
@@ -354,7 +351,7 @@ test("cmdCleanup: stdout is always valid JSON", async () => {
     } catch {
       assert.fail(`cmdCleanup stdout is not valid JSON: ${stdout}`);
     }
-    assert.ok(typeof parsed.action === "string", "action should be a string");
-    assert.ok(typeof parsed.artifacts_dir === "string", "artifacts_dir should be a string");
+    expect(typeof parsed.action === "string", "action should be a string").toBeTruthy();
+    expect(typeof parsed.artifacts_dir === "string", "artifacts_dir should be a string").toBeTruthy();
   });
 });

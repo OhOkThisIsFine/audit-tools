@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { dropProvider, reroutePackets } = await import("../../src/shared/quota/rollingEngine.ts");
 
@@ -60,36 +59,36 @@ test("dropProvider removes pool and requeues in-flight packets", () => {
   const next = dropProvider(state, "pool-A", "exhausted");
 
   // active_pools contains only pool B
-  assert.equal(next.active_pools.length, 1);
-  assert.equal(next.active_pools[0].pool.id, "pool-B");
+  expect(next.active_pools.length).toBe(1);
+  expect(next.active_pools[0].pool.id).toBe("pool-B");
 
   // exhausted_pools contains pool A
-  assert.equal(next.exhausted_pools.length, 1);
-  assert.equal(next.exhausted_pools[0].pool.id, "pool-A");
+  expect(next.exhausted_pools.length).toBe(1);
+  expect(next.exhausted_pools[0].pool.id).toBe("pool-A");
 
   // pending queue includes the 3 formerly in-flight packets from pool A
-  assert.equal(next.pending_tokens.length, 3);
+  expect(next.pending_tokens.length).toBe(3);
   const pendingIds = next.pending_tokens.map((t) => t.id);
-  assert.deepEqual(pendingIds.sort(), ["pkt-1", "pkt-2", "pkt-3"]);
+  expect(pendingIds.sort()).toEqual(["pkt-1", "pkt-2", "pkt-3"]);
 
   // in_flight_tokens retains only pool-B's packet
-  assert.equal(next.in_flight_tokens.length, 1);
-  assert.equal(next.in_flight_tokens[0].assigned_pool_id, "pool-B");
+  expect(next.in_flight_tokens.length).toBe(1);
+  expect(next.in_flight_tokens[0].assigned_pool_id).toBe("pool-B");
 
   // event log contains one ProviderPoolEvent with the right shape
-  assert.equal(next.event_log.length, 1);
+  expect(next.event_log.length).toBe(1);
   const evt = next.event_log[0];
-  assert.equal(evt.kind, "exhausted");
-  assert.equal(evt.provider_id, "pool-A");
-  assert.equal(evt.requeued_count, 3);
-  assert.equal(evt.in_flight_count, 3);
-  assert.ok(evt.timestamp);
+  expect(evt.kind).toBe("exhausted");
+  expect(evt.provider_id).toBe("pool-A");
+  expect(evt.requeued_count).toBe(3);
+  expect(evt.in_flight_count).toBe(3);
+  expect(evt.timestamp).toBeTruthy();
 
   // original state is not mutated
-  assert.equal(state.active_pools.length, 2);
-  assert.equal(state.in_flight_tokens.length, 4);
-  assert.equal(state.pending_tokens.length, 0);
-  assert.equal(state.event_log.length, 0);
+  expect(state.active_pools.length).toBe(2);
+  expect(state.in_flight_tokens.length).toBe(4);
+  expect(state.pending_tokens.length).toBe(0);
+  expect(state.event_log.length).toBe(0);
 });
 
 test("dropProvider with unavailable kind records correct event", () => {
@@ -104,14 +103,14 @@ test("dropProvider with unavailable kind records correct event", () => {
   const next = dropProvider(state, "pool-A", "unavailable");
 
   // event records unavailable kind
-  assert.equal(next.event_log.length, 1);
-  assert.equal(next.event_log[0].kind, "unavailable");
+  expect(next.event_log.length).toBe(1);
+  expect(next.event_log[0].kind).toBe("unavailable");
 
   // pool moves to exhausted_pools
-  assert.equal(next.exhausted_pools.length, 1);
-  assert.equal(next.exhausted_pools[0].pool.id, "pool-A");
-  assert.equal(next.active_pools.length, 1);
-  assert.equal(next.active_pools[0].pool.id, "pool-B");
+  expect(next.exhausted_pools.length).toBe(1);
+  expect(next.exhausted_pools[0].pool.id).toBe("pool-A");
+  expect(next.active_pools.length).toBe(1);
+  expect(next.active_pools[0].pool.id).toBe("pool-B");
 });
 
 test("dropProvider emits a structured stderr observability line (OBS-d81a55ab)", () => {
@@ -146,14 +145,14 @@ test("dropProvider emits a structured stderr observability line (OBS-d81a55ab)",
     })
     .find((r) => r && r.kind === "rolling_engine_drop_provider");
 
-  assert.ok(record, "dropProvider should write a structured JSON observability line");
-  assert.equal(record.provider_id, "pool-A");
-  assert.equal(record.drop_kind, "exhausted");
-  assert.equal(record.in_flight_count, 2);
-  assert.equal(record.requeued_count, 2);
-  assert.ok(record.ts, "record should carry a timestamp");
+  expect(record, "dropProvider should write a structured JSON observability line").toBeTruthy();
+  expect(record.provider_id).toBe("pool-A");
+  expect(record.drop_kind).toBe("exhausted");
+  expect(record.in_flight_count).toBe(2);
+  expect(record.requeued_count).toBe(2);
+  expect(record.ts, "record should carry a timestamp").toBeTruthy();
   // The drop itself still behaves correctly alongside the logging.
-  assert.equal(next.event_log.length, 1);
+  expect(next.event_log.length).toBe(1);
 });
 
 test("dropProvider on the last active pool produces empty active_pools", () => {
@@ -166,11 +165,11 @@ test("dropProvider on the last active pool produces empty active_pools", () => {
   const next = dropProvider(state, "pool-A", "exhausted");
 
   // active_pools is empty — caller responsible for detecting empty-pool
-  assert.equal(next.active_pools.length, 0);
-  assert.equal(next.exhausted_pools.length, 1);
+  expect(next.active_pools.length).toBe(0);
+  expect(next.exhausted_pools.length).toBe(1);
 
   // packets requeued
-  assert.equal(next.pending_tokens.length, 2);
+  expect(next.pending_tokens.length).toBe(2);
 });
 
 test("dropProvider is idempotent for an already-dropped pool", () => {
@@ -186,11 +185,11 @@ test("dropProvider is idempotent for an already-dropped pool", () => {
   const second = dropProvider(first, "pool-A", "exhausted");
 
   // Second call changes nothing: pool-A already not in active_pools
-  assert.equal(second.active_pools.length, first.active_pools.length);
-  assert.equal(second.exhausted_pools.length, first.exhausted_pools.length);
-  assert.equal(second.pending_tokens.length, first.pending_tokens.length);
+  expect(second.active_pools.length).toBe(first.active_pools.length);
+  expect(second.exhausted_pools.length).toBe(first.exhausted_pools.length);
+  expect(second.pending_tokens.length).toBe(first.pending_tokens.length);
   // No duplicate event appended
-  assert.equal(second.event_log.length, first.event_log.length);
+  expect(second.event_log.length).toBe(first.event_log.length);
 });
 
 // ---------------------------------------------------------------------------
@@ -215,15 +214,15 @@ test("reroutePackets distributes pending tokens across remaining pools", () => {
   const result = reroutePackets(state, {});
 
   // allocation is returned (non-null)
-  assert.ok(result.allocation !== null);
+  expect(result.allocation !== null).toBeTruthy();
 
   // total_slots reflects only pool-B's capacity (≥1, capped by pending count)
-  assert.ok(result.allocation.total_slots >= 1);
-  assert.ok(result.allocation.total_slots <= 6);
+  expect(result.allocation.total_slots >= 1).toBeTruthy();
+  expect(result.allocation.total_slots <= 6).toBeTruthy();
 
   // packets originally assigned to pool-A now have pool-B as their pool
   for (const token of result.state.pending_tokens) {
-    assert.equal(token.assigned_pool_id, "pool-B");
+    expect(token.assigned_pool_id).toBe("pool-B");
   }
 });
 
@@ -234,15 +233,15 @@ test("reroutePackets strands all pending and emits empty_pool terminal when acti
   });
 
   const result = reroutePackets(state, {});
-  assert.equal(result.allocation, null);
+  expect(result.allocation).toBe(null);
   // No surviving pool: every pending packet is stranded (zero left assigned to a
   // dropped pool) and surfaced in an empty_pool terminal.
-  assert.equal(result.state.pending_tokens.length, 0);
-  assert.ok(result.terminal !== null);
-  assert.equal(result.terminal.reason, "empty_pool");
-  assert.deepEqual(result.terminal.stranded_ids.sort(), ["pkt-1", "pkt-2"]);
+  expect(result.state.pending_tokens.length).toBe(0);
+  expect(result.terminal !== null).toBeTruthy();
+  expect(result.terminal.reason).toBe("empty_pool");
+  expect(result.terminal.stranded_ids.sort()).toEqual(["pkt-1", "pkt-2"]);
   // Original state is not mutated.
-  assert.equal(state.pending_tokens.length, 2);
+  expect(state.pending_tokens.length).toBe(2);
 });
 
 test("reroutePackets returns state unchanged when no pending tokens", () => {
@@ -250,9 +249,9 @@ test("reroutePackets returns state unchanged when no pending tokens", () => {
   const state = makeState({ active_pools: [poolB], pending_tokens: [] });
 
   const result = reroutePackets(state, {});
-  assert.equal(result.allocation, null);
-  assert.equal(result.terminal, null);
-  assert.equal(result.state, state);
+  expect(result.allocation).toBe(null);
+  expect(result.terminal).toBe(null);
+  expect(result.state).toBe(state);
 });
 
 // ── INV-QD-13 / SEAM-rolling-stranding: no pending token left on a dead pool ──
@@ -288,39 +287,32 @@ test("reroutePackets (INV-QD-13): multi-pool drop with pending > survivor slots 
   state = dropProvider(state, "pool-B", "exhausted");
 
   const activeIds = new Set(state.active_pools.map((e) => e.pool.id));
-  assert.deepEqual([...activeIds], ["pool-C"], "only pool-C survives");
+  expect([...activeIds], "only pool-C survives").toEqual(["pool-C"]);
 
   const result = reroutePackets(state, {});
 
   // INVARIANT: zero pending tokens point at a dropped/exhausted pool.
   for (const t of result.state.pending_tokens) {
-    assert.ok(
-      activeIds.has(t.assigned_pool_id),
-      `pending token ${t.id} is assigned to non-active pool ${t.assigned_pool_id}`,
-    );
+    expect(activeIds.has(t.assigned_pool_id), `pending token ${t.id} is assigned to non-active pool ${t.assigned_pool_id}`).toBeTruthy();
   }
 
   // Surplus beyond pool-C's 2 slots must be stranded, not silently dropped.
-  assert.ok(result.terminal !== null, "surplus must surface a terminal");
-  assert.equal(result.terminal.reason, "empty_pool");
+  expect(result.terminal !== null, "surplus must surface a terminal").toBeTruthy();
+  expect(result.terminal.reason).toBe("empty_pool");
 
   // Every original pending packet is accounted for exactly once: either on an
   // active pool or in stranded_ids. Nothing vanishes, nothing duplicated.
   const placedIds = result.state.pending_tokens.map((t) => t.id);
   const strandedIds = result.terminal.stranded_ids;
   const allAccounted = [...placedIds, ...strandedIds].sort();
-  assert.deepEqual(
-    allAccounted,
-    pending.map((t) => t.id).sort(),
-    "every pending packet must be either placed on an active pool or stranded",
-  );
+  expect(allAccounted, "every pending packet must be either placed on an active pool or stranded").toEqual(pending.map((t) => t.id).sort());
   // No id appears in both sets.
   for (const id of placedIds) {
-    assert.ok(!strandedIds.includes(id), `${id} must not be both placed and stranded`);
+    expect(!strandedIds.includes(id), `${id} must not be both placed and stranded`).toBeTruthy();
   }
   // pool-C can take at most 2 → at least 5 stranded.
-  assert.ok(result.state.pending_tokens.length <= 2, "survivor placed at most its slot count");
-  assert.ok(strandedIds.length >= 5, "surplus beyond survivor slots stranded");
+  expect(result.state.pending_tokens.length <= 2, "survivor placed at most its slot count").toBeTruthy();
+  expect(strandedIds.length >= 5, "surplus beyond survivor slots stranded").toBeTruthy();
 });
 
 test("reroutePackets (INV-QD-13): single drop within survivor capacity strands nothing", () => {
@@ -337,9 +329,9 @@ test("reroutePackets (INV-QD-13): single drop within survivor capacity strands n
 
   const result = reroutePackets(state, {});
   // pool-B (8 slots) absorbs all 3 — nothing stranded.
-  assert.equal(result.terminal, null);
-  assert.equal(result.state.pending_tokens.length, 3);
+  expect(result.terminal).toBe(null);
+  expect(result.state.pending_tokens.length).toBe(3);
   for (const t of result.state.pending_tokens) {
-    assert.equal(t.assigned_pool_id, "pool-B");
+    expect(t.assigned_pool_id).toBe("pool-B");
   }
 });

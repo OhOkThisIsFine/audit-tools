@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   normalizeCheckpointValue,
@@ -28,14 +27,11 @@ test("normalize ignores volatile fields and whitespace", () => {
       intent_summary: "  full-audit  ",
     }),
   );
-  assert.equal(a, b, "volatile + whitespace differences normalize identically");
+  expect(a, "volatile + whitespace differences normalize identically").toBe(b);
 });
 
 test("absent vs present is a real difference", () => {
-  assert.notEqual(
-    normalizeCheckpointValue(undefined),
-    normalizeCheckpointValue(checkpoint()),
-  );
+  expect(normalizeCheckpointValue(undefined)).not.toBe(normalizeCheckpointValue(checkpoint()));
 });
 
 test("equal normal forms => unchanged without judge call", async () => {
@@ -49,9 +45,9 @@ test("equal normal forms => unchanged without judge call", async () => {
     },
     judgeId: "host",
   });
-  assert.equal(res.verdict, "unchanged");
-  assert.equal(res.judged, false);
-  assert.equal(judgeCalls, 0, "no judge call when normal forms match");
+  expect(res.verdict).toBe("unchanged");
+  expect(res.judged).toBe(false);
+  expect(judgeCalls, "no judge call when normal forms match").toBe(0);
 });
 
 test("differing forms => judge runs; uncertain/non-boolean is fail-safe changed", async () => {
@@ -61,8 +57,8 @@ test("differing forms => judge runs; uncertain/non-boolean is fail-safe changed"
     judge: () => undefined, // non-boolean => fail-safe
     judgeId: "host",
   });
-  assert.equal(res.verdict, "changed");
-  assert.equal(res.judged, true);
+  expect(res.verdict).toBe("changed");
+  expect(res.judged).toBe(true);
 });
 
 test("judge throw => fail-safe changed", async () => {
@@ -74,7 +70,7 @@ test("judge throw => fail-safe changed", async () => {
     },
     judgeId: "host",
   });
-  assert.equal(res.verdict, "changed");
+  expect(res.verdict).toBe("changed");
 });
 
 test("explicit true => unchanged", async () => {
@@ -84,7 +80,7 @@ test("explicit true => unchanged", async () => {
     judge: () => true,
     judgeId: "host",
   });
-  assert.equal(res.verdict, "unchanged");
+  expect(res.verdict).toBe("unchanged");
 });
 
 test("verdict cached on (prior,new,gate_version); judge runs once", async () => {
@@ -103,21 +99,21 @@ test("verdict cached on (prior,new,gate_version); judge runs once", async () => 
   };
   const r1 = await intentCheckpointEquivalenceGate(args);
   const r2 = await intentCheckpointEquivalenceGate(args);
-  assert.equal(r1.verdict, "changed");
-  assert.equal(r2.verdict, "changed");
-  assert.equal(judgeCalls, 1, "second call is a cache hit");
-  assert.equal(r2.judged, false);
+  expect(r1.verdict).toBe("changed");
+  expect(r2.verdict).toBe("changed");
+  expect(judgeCalls, "second call is a cache hit").toBe(1);
+  expect(r2.judged).toBe(false);
 });
 
 test("gate_version is local (no probe) and changes with judgeId/config", () => {
   const v1 = computeGateVersion({ judgeId: "host" });
   const v2 = computeGateVersion({ judgeId: "other-model" });
-  assert.notEqual(v1, v2, "judge id participates");
+  expect(v1, "judge id participates").not.toBe(v2);
   const v3 = computeGateVersion({
     judgeId: "host",
     normalizeConfig: { ...DEFAULT_NORMALIZE_CONFIG, version: "v2" },
   });
-  assert.notEqual(v1, v3, "normalize config participates");
+  expect(v1, "normalize config participates").not.toBe(v3);
 });
 
 test("lock interleave: clean run commits, no fallback", async () => {
@@ -132,9 +128,9 @@ test("lock interleave: clean run commits, no fallback", async () => {
       return v;
     },
   });
-  assert.equal(res.verdict, "changed");
-  assert.equal(res.usedFallback, false);
-  assert.deepEqual(committed, ["changed"]);
+  expect(res.verdict).toBe("changed");
+  expect(res.usedFallback).toBe(false);
+  expect(committed).toEqual(["changed"]);
 });
 
 test("lock interleave: token moves during judge => re-derive, then commit", async () => {
@@ -153,9 +149,9 @@ test("lock interleave: token moves during judge => re-derive, then commit", asyn
     commit: async (v) => v,
     maxAttempts: 3,
   });
-  assert.equal(res.verdict, "unchanged");
-  assert.equal(res.usedFallback, false);
-  assert.ok(gateCalls >= 2, "re-derived after interleave");
+  expect(res.verdict).toBe("unchanged");
+  expect(res.usedFallback).toBe(false);
+  expect(gateCalls >= 2, "re-derived after interleave").toBeTruthy();
 });
 
 test("lock interleave: persistent contention => lock-across-judge fallback commits", async () => {
@@ -168,6 +164,6 @@ test("lock interleave: persistent contention => lock-across-judge fallback commi
     commit: async (v) => v,
     maxAttempts: 2,
   });
-  assert.equal(res.usedFallback, true, "fell back after exhausting attempts");
-  assert.equal(res.verdict, "changed");
+  expect(res.usedFallback, "fell back after exhausting attempts").toBe(true);
+  expect(res.verdict).toBe("changed");
 });

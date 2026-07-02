@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { writeFile, unlink, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ test("acquireLock creates lock file and releaseLock removes it", async () => {
   const lockPath = tmpLock();
   const token = await acquireLock(lockPath);
   const info = await stat(lockPath);
-  assert.ok(info.isFile());
+  expect(info.isFile()).toBeTruthy();
   await releaseLock(lockPath, token);
   await assert.rejects(() => stat(lockPath), { code: "ENOENT" });
 });
@@ -34,7 +34,7 @@ test("acquireLock blocks when lock is held", async () => {
   const token2 = await acquireLock(lockPath, 5000);
   clearTimeout(releaseTimer);
   const elapsed = Date.now() - start;
-  assert.ok(elapsed >= 50, `expected to wait at least 50ms, waited ${elapsed}ms`);
+  expect(elapsed >= 50, `expected to wait at least 50ms, waited ${elapsed}ms`).toBeTruthy();
   await releaseLock(lockPath, token2);
 });
 
@@ -59,7 +59,7 @@ test("acquireLock cleans up stale lock", async () => {
 
   const token = await acquireLock(lockPath, 2000);
   const info = await stat(lockPath);
-  assert.ok(info.mtimeMs > Date.now() - 5000, "lock file should have fresh mtime");
+  expect(info.mtimeMs > Date.now() - 5000, "lock file should have fresh mtime").toBeTruthy();
   await releaseLock(lockPath, token);
 });
 
@@ -67,10 +67,10 @@ test("withFileLock runs function under lock", async () => {
   const lockPath = tmpLock();
   const result = await withFileLock(lockPath, async () => {
     const info = await stat(lockPath);
-    assert.ok(info.isFile());
+    expect(info.isFile()).toBeTruthy();
     return 42;
   });
-  assert.equal(result, 42);
+  expect(result).toBe(42);
   await assert.rejects(() => stat(lockPath), { code: "ENOENT" });
 });
 

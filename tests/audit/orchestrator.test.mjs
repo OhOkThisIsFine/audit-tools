@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { buildAuditTasks } = await import("../../src/audit/orchestrator.ts");
@@ -28,11 +28,8 @@ test("buildAuditTasks emits deterministic task structures and honors lens limits
     limit_lenses: ["security", "config_deployment"],
   });
 
-  assert.deepEqual(
-    tasks.map((task) => task.task_id),
-    ["src-auth:security", "infra-deploy:config_deployment"],
-  );
-  assert.deepEqual(tasks[0], {
+  expect(tasks.map((task) => task.task_id)).toEqual(["src-auth:security", "infra-deploy:config_deployment"]);
+  expect(tasks[0]).toEqual({
     task_id: "src-auth:security",
     unit_id: "src-auth",
     pass_id: "focused:security",
@@ -75,8 +72,8 @@ test("buildAuditTasks accepts custom (non-canonical) lens names", () => {
       },
     ],
   });
-  assert.ok(tasks.some((t) => t.lens === "whimsy"));
-  assert.ok(tasks.some((t) => t.lens === "security"));
+  expect(tasks.some((t) => t.lens === "whimsy")).toBeTruthy();
+  expect(tasks.some((t) => t.lens === "security")).toBeTruthy();
 });
 
 test("buildAuditTasks validates options before generating tasks", () => {
@@ -99,11 +96,8 @@ test("buildAuditTasks accepts options supplied as a JSON string", () => {
     '{"pass_prefix":"json","limit_lenses":["correctness"]}',
   );
 
-  assert.deepEqual(
-    tasks.map((task) => task.task_id),
-    ["src-auth:correctness"],
-  );
-  assert.equal(tasks[0].pass_id, "json:correctness");
+  expect(tasks.map((task) => task.task_id)).toEqual(["src-auth:correctness"]);
+  expect(tasks[0].pass_id).toBe("json:correctness");
 });
 
 test("buildAuditTasks rejects malformed JSON string and array options", () => {

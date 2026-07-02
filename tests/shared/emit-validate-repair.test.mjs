@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,10 +105,10 @@ test("clean payload: no stages beyond validate, status clean, empty warnings", a
       artifactsDir: dir,
       runId: "r1",
     });
-    assert.equal(out.status, "clean");
-    assert.deepEqual(out.stages_applied, ["validate"]);
-    assert.deepEqual(out.warnings, []);
-    assert.deepEqual(out.remaining_errors, []);
+    expect(out.status).toBe("clean");
+    expect(out.stages_applied).toEqual(["validate"]);
+    expect(out.warnings).toEqual([]);
+    expect(out.remaining_errors).toEqual([]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -129,15 +128,15 @@ test("coercion alone clears OPTIONAL errors: status coerced, NO LLM call", async
         return p;
       },
     });
-    assert.equal(out.status, "coerced");
-    assert.deepEqual(out.stages_applied, ["validate", "coerce"]);
-    assert.equal(patcherCalled, false, "cheapest-first: no LLM when coercion suffices");
-    assert.ok(out.warnings.length > 0, "warnings non-empty when status != clean");
+    expect(out.status).toBe("coerced");
+    expect(out.stages_applied).toEqual(["validate", "coerce"]);
+    expect(patcherCalled, "cheapest-first: no LLM when coercion suffices").toBe(false);
+    expect(out.warnings.length > 0, "warnings non-empty when status != clean").toBeTruthy();
     // Identity preserved.
-    assert.equal(out.repaired_payload[0].unit_id, "u1");
-    assert.ok(!("opt" in out.repaired_payload[0]), "invalid optional dropped");
+    expect(out.repaired_payload[0].unit_id).toBe("u1");
+    expect(!("opt" in out.repaired_payload[0]), "invalid optional dropped").toBeTruthy();
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes(repairId("test_contract:attempt-1:drop:[0].opt")));
+    expect(ids.includes(repairId("test_contract:attempt-1:drop:[0].opt"))).toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -152,10 +151,10 @@ test("recoverable per-element identity is backfilled (single element)", async ()
       artifactsDir: dir,
       runId: "r1",
     });
-    assert.equal(out.status, "coerced");
-    assert.equal(out.repaired_payload[0].unit_id, "recovered-unit");
+    expect(out.status).toBe("coerced");
+    expect(out.repaired_payload[0].unit_id).toBe("recovered-unit");
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes(repairId("test_contract:attempt-1:backfill:[0].unit_id")));
+    expect(ids.includes(repairId("test_contract:attempt-1:backfill:[0].unit_id"))).toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -172,15 +171,15 @@ test("multi-element missing unit_id escalates to unrepairable, never homogenized
       // Even with a patcher available, an unrecoverable identity short-circuits.
       patcher: async (p) => p,
     });
-    assert.equal(out.status, "unrepairable");
-    assert.ok(out.stages_applied.includes("redispatch"));
-    assert.ok(!out.stages_applied.includes("llm_patch"), "no LLM on unrecoverable identity");
+    expect(out.status).toBe("unrepairable");
+    expect(out.stages_applied.includes("redispatch")).toBeTruthy();
+    expect(!out.stages_applied.includes("llm_patch"), "no LLM on unrecoverable identity").toBeTruthy();
     // The second element was NOT given a sibling's id.
-    assert.notEqual(out.repaired_payload[1].unit_id, "u1");
-    assert.equal(out.redispatch.attempt, 2);
-    assert.ok(out.warnings.length > 0);
+    expect(out.repaired_payload[1].unit_id).not.toBe("u1");
+    expect(out.redispatch.attempt).toBe(2);
+    expect(out.warnings.length > 0).toBeTruthy();
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes(repairId("test_contract:attempt-1:unrecoverable-identity")));
+    expect(ids.includes(repairId("test_contract:attempt-1:unrecoverable-identity"))).toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -197,14 +196,14 @@ test("bounded LLM patch fixes remaining REQUIRED errors: status patched", async 
       runId: "r1",
       patcher: async (payload, errors) => {
         calls += 1;
-        assert.ok(errors.length > 0, "patcher receives errors-only");
+        expect(errors.length > 0, "patcher receives errors-only").toBeTruthy();
         return payload.map((el) => ({ ...el, unit_id: "patched-unit" }));
       },
     });
-    assert.equal(out.status, "patched");
-    assert.equal(calls, 1, "bounded to a single attempt by default");
-    assert.deepEqual(out.stages_applied, ["validate", "coerce", "llm_patch"]);
-    assert.equal(out.repaired_payload[0].unit_id, "patched-unit");
+    expect(out.status).toBe("patched");
+    expect(calls, "bounded to a single attempt by default").toBe(1);
+    expect(out.stages_applied).toEqual(["validate", "coerce", "llm_patch"]);
+    expect(out.repaired_payload[0].unit_id).toBe("patched-unit");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -221,17 +220,17 @@ test("LLM patch fails to fix: stage3 re-dispatch signal with advanced attempt", 
       attempt: 1,
       patcher: async (p) => p, // no-op patch
     });
-    assert.equal(out.status, "unrepairable");
-    assert.deepEqual(out.stages_applied, [
+    expect(out.status).toBe("unrepairable");
+    expect(out.stages_applied).toEqual([
       "validate",
       "coerce",
       "llm_patch",
       "redispatch",
     ]);
-    assert.equal(out.redispatch.attempt, 2);
-    assert.ok(out.remaining_errors.length > 0);
+    expect(out.redispatch.attempt).toBe(2);
+    expect(out.remaining_errors.length > 0).toBeTruthy();
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes(repairId("test_contract:attempt-1:redispatch")));
+    expect(ids.includes(repairId("test_contract:attempt-1:redispatch"))).toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -246,9 +245,9 @@ test("no patcher supplied: required errors after coercion go straight to re-disp
       artifactsDir: dir,
       runId: "r1",
     });
-    assert.equal(out.status, "unrepairable");
-    assert.ok(!out.stages_applied.includes("llm_patch"));
-    assert.ok(out.stages_applied.includes("redispatch"));
+    expect(out.status).toBe("unrepairable");
+    expect(!out.stages_applied.includes("llm_patch")).toBeTruthy();
+    expect(out.stages_applied.includes("redispatch")).toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -265,7 +264,7 @@ test("repeated repair (attempt > 1) records a friction event", async () => {
       attempt: 2,
     });
     const ids = await frictionIds(dir, "r1");
-    assert.ok(ids.includes(repairId("test_contract:attempt-2:repeated")));
+    expect(ids.includes(repairId("test_contract:attempt-2:repeated"))).toBeTruthy();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -273,5 +272,5 @@ test("repeated repair (attempt > 1) records a friction event", async () => {
 
 test("seam is exported from the shared barrel", async () => {
   const shared = await import("../../src/shared/index.ts");
-  assert.equal(typeof shared.runEmitValidateRepair, "function");
+  expect(typeof shared.runEmitValidateRepair).toBe("function");
 });

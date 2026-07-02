@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -74,9 +73,9 @@ test("computeAuditScope: deterministic — same inputs (any changed order) → i
     includedFiles: [...included].reverse(),
     graphBundle,
   });
-  assert.deepEqual(first, second);
-  assert.equal(first.mode, "delta");
-  assert.equal(first.since, "HEAD~1");
+  expect(first).toEqual(second);
+  expect(first.mode).toBe("delta");
+  expect(first.since).toBe("HEAD~1");
 });
 
 test("computeAuditScope: one changed file pulls in only its direct neighbours", () => {
@@ -92,10 +91,10 @@ test("computeAuditScope: one changed file pulls in only its direct neighbours", 
       { from: "src/b.ts", to: "src/c.ts", confidence: 0.6 },
     ]),
   });
-  assert.deepEqual(scope.seed_files, ["src/a.ts"]);
-  assert.deepEqual(scope.expanded_files, ["src/b.ts", "src/e.ts"]);
+  expect(scope.seed_files).toEqual(["src/a.ts"]);
+  expect(scope.expanded_files).toEqual(["src/b.ts", "src/e.ts"]);
   // src/c.ts is two hops away and must stay out of scope.
-  assert.ok(!scope.expanded_files.includes("src/c.ts"));
+  expect(!scope.expanded_files.includes("src/c.ts")).toBeTruthy();
 });
 
 test("applyScopeToCoverage: in-scope files re-queue, the rest inherit prior complete", () => {
@@ -117,12 +116,12 @@ test("applyScopeToCoverage: in-scope files re-queue, the rest inherit prior comp
 
   // Seed + direct neighbours re-queue (pending, nothing completed yet).
   for (const inScope of ["src/a.ts", "src/b.ts", "src/e.ts"]) {
-    assert.equal(byPath.get(inScope).audit_status, "pending");
-    assert.deepEqual(byPath.get(inScope).completed_lenses, []);
+    expect(byPath.get(inScope).audit_status).toBe("pending");
+    expect(byPath.get(inScope).completed_lenses).toEqual([]);
   }
   // Out-of-scope file with a prior complete record inherits that completion.
-  assert.equal(byPath.get("src/c.ts").audit_status, "complete");
-  assert.deepEqual(byPath.get("src/c.ts").completed_lenses, ["correctness"]);
+  expect(byPath.get("src/c.ts").audit_status).toBe("complete");
+  expect(byPath.get("src/c.ts").completed_lenses).toEqual(["correctness"]);
 });
 
 test("applyScopeToCoverage: out-of-scope file with no prior is excluded this run", () => {
@@ -136,15 +135,15 @@ test("applyScopeToCoverage: out-of-scope file with no prior is excluded this run
   const fresh = coverage(["src/a.ts", "src/z.ts"], { status: "pending" });
   const result = applyScopeToCoverage(fresh, scope /* no prior */);
   const z = result.files.find((f) => f.path === "src/z.ts");
-  assert.equal(z.audit_status, "excluded");
-  assert.equal(z.classification_status, "out_of_scope_delta");
-  assert.deepEqual(z.required_lenses, []);
+  expect(z.audit_status).toBe("excluded");
+  expect(z.classification_status).toBe("out_of_scope_delta");
+  expect(z.required_lenses).toEqual([]);
 });
 
 test("applyScopeToCoverage: full scope is a no-op", () => {
   const fresh = coverage(["src/a.ts", "src/b.ts"], { status: "pending" });
   const result = applyScopeToCoverage(fresh, fullAuditScope());
-  assert.equal(result.files.every((f) => f.audit_status === "pending"), true);
+  expect(result.files.every((f) => f.audit_status === "pending")).toBe(true);
 });
 
 test("applyScopeToCoverage: deterministic exclusions are left untouched", () => {
@@ -159,9 +158,9 @@ test("applyScopeToCoverage: deterministic exclusions are left untouched", () => 
   fresh.files.find((f) => f.path === "vendor/lib.js").audit_status = "excluded";
   const result = applyScopeToCoverage(fresh, scope);
   const vendor = result.files.find((f) => f.path === "vendor/lib.js");
-  assert.equal(vendor.audit_status, "excluded");
+  expect(vendor.audit_status).toBe("excluded");
   // Not re-tagged as out_of_scope_delta — it was already a deterministic exclusion.
-  assert.notEqual(vendor.classification_status, "out_of_scope_delta");
+  expect(vendor.classification_status).not.toBe("out_of_scope_delta");
 });
 
 test("computeAuditScope: high fan-in/out hubs are skipped to prevent scope blow-up", () => {
@@ -179,8 +178,8 @@ test("computeAuditScope: high fan-in/out hubs are skipped to prevent scope blow-
     graphBundle: bundleWithEdges(edges),
   });
   // The hub is never traversed into, so neither it nor its 15 dependents enter scope.
-  assert.deepEqual(scope.seed_files, ["src/seed.ts"]);
-  assert.deepEqual(scope.expanded_files, []);
+  expect(scope.seed_files).toEqual(["src/seed.ts"]);
+  expect(scope.expanded_files).toEqual([]);
 });
 
 test("computeAuditScope: expansion stops at the file budget and records a note", () => {
@@ -197,8 +196,8 @@ test("computeAuditScope: expansion stops at the file budget and records a note",
     graphBundle: bundleWithEdges(edges),
     budget: { max_files: 3 },
   });
-  assert.equal(scope.seed_files.length + scope.expanded_files.length <= 3, true);
-  assert.match(scope.dropped_note ?? "", /budget/);
+  expect(scope.seed_files.length + scope.expanded_files.length <= 3).toBe(true);
+  expect(scope.dropped_note ?? "").toMatch(/budget/);
 });
 
 test("computeAuditScope: changed files outside the auditable set drop out", () => {
@@ -208,9 +207,9 @@ test("computeAuditScope: changed files outside the auditable set drop out", () =
     includedFiles: ["src/a.ts"],
     graphBundle: bundleWithEdges([]),
   });
-  assert.deepEqual(scope.seed_files, []);
-  assert.deepEqual(scope.expanded_files, []);
-  assert.match(scope.dropped_note ?? "", /No auditable files changed/);
+  expect(scope.seed_files).toEqual([]);
+  expect(scope.expanded_files).toEqual([]);
+  expect(scope.dropped_note ?? "").toMatch(/No auditable files changed/);
 });
 
 test("computeAuditScope: two-hop expansion succeeds when accumulated confidence stays above the floor", () => {
@@ -228,29 +227,29 @@ test("computeAuditScope: two-hop expansion succeeds when accumulated confidence 
       { from: "src/d.ts", to: "src/e.ts", confidence: 0.8 },
     ]),
   });
-  assert.equal(scope.mode, "delta");
-  assert.deepEqual(scope.seed_files, ["src/a.ts"]);
+  expect(scope.mode).toBe("delta");
+  expect(scope.seed_files).toEqual(["src/a.ts"]);
   // One hop (0.8) clears 0.5 floor.
-  assert.ok(scope.expanded_files.includes("src/b.ts"), "src/b.ts should be in expanded_files (1 hop, 0.8)");
+  expect(scope.expanded_files.includes("src/b.ts"), "src/b.ts should be in expanded_files (1 hop, 0.8)").toBeTruthy();
   // Two hops (0.64) still clears 0.5 floor — the key assertion.
-  assert.ok(scope.expanded_files.includes("src/c.ts"), "src/c.ts should be in expanded_files (2 hops, 0.64)");
+  expect(scope.expanded_files.includes("src/c.ts"), "src/c.ts should be in expanded_files (2 hops, 0.64)").toBeTruthy();
   // Three hops (0.512) clears 0.5 floor.
-  assert.ok(scope.expanded_files.includes("src/d.ts"), "src/d.ts should be in expanded_files (3 hops, 0.512)");
+  expect(scope.expanded_files.includes("src/d.ts"), "src/d.ts should be in expanded_files (3 hops, 0.512)").toBeTruthy();
   // Four hops (0.41) drops below 0.5 floor — BFS stops here.
-  assert.ok(!scope.expanded_files.includes("src/e.ts"), "src/e.ts should NOT be in expanded_files (4 hops, 0.41 < 0.5)");
+  expect(!scope.expanded_files.includes("src/e.ts"), "src/e.ts should NOT be in expanded_files (4 hops, 0.41 < 0.5)").toBeTruthy();
 });
 
 test("resolveAuditScope: no --since → full audit", () => {
   const scope = resolveAuditScope({ root: ".", bundle: {} });
-  assert.equal(scope.mode, "full");
-  assert.equal(scope.since, null);
-  assert.equal(scope.dropped_note, undefined);
+  expect(scope.mode).toBe("full");
+  expect(scope.since).toBe(null);
+  expect(scope.dropped_note).toBe(undefined);
 });
 
 test("resolveAuditScope: --since with no root falls back to full with a note", () => {
   const scope = resolveAuditScope({ since: "HEAD~1", bundle: {} });
-  assert.equal(scope.mode, "full");
-  assert.match(scope.dropped_note ?? "", /full audit/);
+  expect(scope.mode).toBe("full");
+  expect(scope.dropped_note ?? "").toMatch(/full audit/);
 });
 
 test("resolveAuditScope: real git repo — changed file + graph neighbour, mistyped ref → full", async (t) => {
@@ -303,9 +302,9 @@ test("resolveAuditScope: real git repo — changed file + graph neighbour, misty
     };
 
     const scope = resolveAuditScope({ root, since: "HEAD", bundle });
-    assert.equal(scope.mode, "delta");
-    assert.deepEqual(scope.seed_files, ["a.ts"]);
-    assert.deepEqual(scope.expanded_files, ["b.ts"]);
+    expect(scope.mode).toBe("delta");
+    expect(scope.seed_files).toEqual(["a.ts"]);
+    expect(scope.expanded_files).toEqual(["b.ts"]);
 
     // A mistyped ref must not silently audit nothing — fall back to full.
     const fallback = resolveAuditScope({
@@ -313,8 +312,8 @@ test("resolveAuditScope: real git repo — changed file + graph neighbour, misty
       since: "definitely-not-a-ref",
       bundle,
     });
-    assert.equal(fallback.mode, "full");
-    assert.match(fallback.dropped_note ?? "", /could not be resolved/);
+    expect(fallback.mode).toBe("full");
+    expect(fallback.dropped_note ?? "").toMatch(/could not be resolved/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -367,22 +366,22 @@ test("disposition: batched check-ignore classifies ignored files as vcs_ignored 
     );
 
     // Exactly one batched spawn with --stdin, never per-file.
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].command, "git");
-    assert.ok(calls[0].args.includes("check-ignore"));
-    assert.ok(calls[0].args.includes("--stdin"));
+    expect(calls.length).toBe(1);
+    expect(calls[0].command).toBe("git");
+    expect(calls[0].args.includes("check-ignore")).toBeTruthy();
+    expect(calls[0].args.includes("--stdin")).toBeTruthy();
     // Input batch is forward-slash normalized.
-    assert.ok(calls[0].options.input.includes("alpha/b.ts"));
-    assert.ok(!calls[0].options.input.includes("\\"));
+    expect(calls[0].options.input.includes("alpha/b.ts")).toBeTruthy();
+    expect(!calls[0].options.input.includes("\\")).toBeTruthy();
 
     const byPath = new Map(disposition.files.map((f) => [f.path, f]));
     for (const ignored of ["alpha/a.ts", "alpha\\b.ts"]) {
-      assert.equal(byPath.get(ignored).status, "excluded");
-      assert.equal(byPath.get(ignored).reason, VCS_IGNORED_REASON);
+      expect(byPath.get(ignored).status).toBe("excluded");
+      expect(byPath.get(ignored).reason).toBe(VCS_IGNORED_REASON);
     }
-    assert.equal(byPath.get("src/keep.ts").status, "included");
-    assert.equal(disposition.vcs_ignore.applied, true);
-    assert.equal(disposition.vcs_ignore.ignored_count, 2);
+    expect(byPath.get("src/keep.ts").status).toBe("included");
+    expect(disposition.vcs_ignore.applied).toBe(true);
+    expect(disposition.vcs_ignore.ignored_count).toBe(2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -397,15 +396,12 @@ test("disposition: check-ignore exit 1 (nothing ignored) is success; targeted ex
       { root },
     );
     const byPath = new Map(disposition.files.map((f) => [f.path, f]));
-    assert.equal(byPath.get("src/a.ts").status, "included");
+    expect(byPath.get("src/a.ts").status).toBe("included");
     // Existing targeted exclusion still applies unchanged.
-    assert.equal(byPath.get("dist/bundle.js").status, "generated");
-    assert.equal(
-      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
-      false,
-    );
-    assert.equal(disposition.vcs_ignore.applied, true);
-    assert.equal(disposition.vcs_ignore.ignored_count, 0);
+    expect(byPath.get("dist/bundle.js").status).toBe("generated");
+    expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
+    expect(disposition.vcs_ignore.applied).toBe(true);
+    expect(disposition.vcs_ignore.ignored_count).toBe(0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -424,15 +420,12 @@ test("disposition: git absent (spawn ENOENT) falls back cleanly to targeted excl
     { root: tmpdir(), spawn: enoentSpawn },
   );
   const byPath = new Map(disposition.files.map((f) => [f.path, f]));
-  assert.equal(byPath.get("src/a.ts").status, "included");
-  assert.equal(byPath.get("dist/bundle.js").status, "generated");
-  assert.equal(
-    disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
-    false,
-  );
-  assert.equal(disposition.vcs_ignore.applied, false);
-  assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
-  assert.match(disposition.vcs_ignore.skipped_reason, /ENOENT/);
+  expect(byPath.get("src/a.ts").status).toBe("included");
+  expect(byPath.get("dist/bundle.js").status).toBe("generated");
+  expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
+  expect(disposition.vcs_ignore.applied).toBe(false);
+  expect(disposition.vcs_ignore.skipped_reason).toMatch(/skipped/);
+  expect(disposition.vcs_ignore.skipped_reason).toMatch(/ENOENT/);
 });
 
 test("disposition: not a git work tree (exit 128) falls back cleanly and records why", async (t) => {
@@ -459,14 +452,11 @@ test("disposition: not a git work tree (exit 128) falls back cleanly and records
       { root },
     );
     const byPath = new Map(disposition.files.map((f) => [f.path, f]));
-    assert.equal(byPath.get("src/a.ts").status, "included");
-    assert.equal(byPath.get("dist/bundle.js").status, "generated");
-    assert.equal(
-      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
-      false,
-    );
-    assert.equal(disposition.vcs_ignore.applied, false);
-    assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
+    expect(byPath.get("src/a.ts").status).toBe("included");
+    expect(byPath.get("dist/bundle.js").status).toBe("generated");
+    expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
+    expect(disposition.vcs_ignore.applied).toBe(false);
+    expect(disposition.vcs_ignore.skipped_reason).toMatch(/skipped/);
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
   }
@@ -483,11 +473,11 @@ test("disposition: at or below VCS_IGNORED_PER_FILE_LIMIT emits per-file records
     );
     for (const path of ignored) {
       const item = disposition.files.find((f) => f.path === path);
-      assert.equal(item.status, "excluded");
-      assert.equal(item.reason, VCS_IGNORED_REASON);
+      expect(item.status).toBe("excluded");
+      expect(item.reason).toBe(VCS_IGNORED_REASON);
     }
-    assert.equal(disposition.vcs_ignore.applied, true);
-    assert.equal(disposition.vcs_ignore.aggregates, undefined);
+    expect(disposition.vcs_ignore.applied).toBe(true);
+    expect(disposition.vcs_ignore.aggregates).toBe(undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -510,19 +500,16 @@ test("disposition: exactly VCS_IGNORED_PER_FILE_LIMIT ignored files is the per-f
 
     const disposition = buildFileDisposition(manifest(paths), { root });
 
-    assert.equal(disposition.vcs_ignore.applied, true);
-    assert.equal(disposition.vcs_ignore.ignored_count, ignoredTotal);
-    assert.equal(disposition.vcs_ignore.aggregates, undefined);
+    expect(disposition.vcs_ignore.applied).toBe(true);
+    expect(disposition.vcs_ignore.ignored_count).toBe(ignoredTotal);
+    expect(disposition.vcs_ignore.aggregates).toBe(undefined);
     const perFile = disposition.files.filter(
       (f) => f.reason === VCS_IGNORED_REASON,
     );
-    assert.equal(perFile.length, ignoredTotal);
-    assert.equal(perFile.every((f) => f.status === "excluded"), true);
+    expect(perFile.length).toBe(ignoredTotal);
+    expect(perFile.every((f) => f.status === "excluded")).toBe(true);
     // Non-ignored candidates all remain present and included.
-    assert.equal(
-      disposition.files.filter((f) => f.status === "included").length,
-      includedCount,
-    );
+    expect(disposition.files.filter((f) => f.status === "included").length).toBe(includedCount);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -535,7 +522,7 @@ test("disposition: above VCS_IGNORED_PER_FILE_LIMIT aggregates by directory pref
     const alphaCount = Math.ceil(VCS_IGNORED_PER_FILE_LIMIT * 0.75);
     const betaCount = VCS_IGNORED_PER_FILE_LIMIT - alphaCount + 51;
     const ignoredTotal = alphaCount + betaCount;
-    assert.ok(ignoredTotal > VCS_IGNORED_PER_FILE_LIMIT);
+    expect(ignoredTotal > VCS_IGNORED_PER_FILE_LIMIT).toBeTruthy();
 
     // Enough included files to keep the ignored share under the guard.
     const includedCount =
@@ -549,20 +536,17 @@ test("disposition: above VCS_IGNORED_PER_FILE_LIMIT aggregates by directory pref
     const disposition = buildFileDisposition(manifest(paths), { root });
 
     // Bounded: no unbounded per-file vcs_ignored records.
-    assert.equal(
-      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
-      false,
-    );
-    assert.equal(disposition.files.length, includedCount);
-    assert.equal(disposition.vcs_ignore.applied, true);
+    expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
+    expect(disposition.files.length).toBe(includedCount);
+    expect(disposition.vcs_ignore.applied).toBe(true);
 
     const aggregates = disposition.vcs_ignore.aggregates;
-    assert.deepEqual(aggregates, [
+    expect(aggregates).toEqual([
       { prefix: "alpha", count: alphaCount, reason: VCS_IGNORED_REASON },
       { prefix: "beta", count: betaCount, reason: VCS_IGNORED_REASON },
     ]);
     const sum = aggregates.reduce((acc, a) => acc + a.count, 0);
-    assert.equal(sum, ignoredTotal);
+    expect(sum).toBe(ignoredTotal);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -576,14 +560,11 @@ test("disposition: root-ignored guard skips the rule and records root_ignored", 
       manifest(["src/a.ts", "src/b.ts", "lib/c.ts"]),
       { root },
     );
-    assert.equal(
-      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
-      false,
-    );
-    assert.equal(disposition.files.length, 3);
-    assert.equal(disposition.vcs_ignore.applied, false);
-    assert.equal(disposition.vcs_ignore.guard_branch, "root_ignored");
-    assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
+    expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
+    expect(disposition.files.length).toBe(3);
+    expect(disposition.vcs_ignore.applied).toBe(false);
+    expect(disposition.vcs_ignore.guard_branch).toBe("root_ignored");
+    expect(disposition.vcs_ignore.skipped_reason).toMatch(/skipped/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -600,14 +581,11 @@ test("disposition: share guard skips the rule and records share_exceeded", async
       "src/keep.ts",
     ];
     const disposition = buildFileDisposition(manifest(paths), { root });
-    assert.equal(
-      disposition.files.some((f) => f.reason === VCS_IGNORED_REASON),
-      false,
-    );
-    assert.equal(disposition.files.length, 20);
-    assert.equal(disposition.vcs_ignore.applied, false);
-    assert.equal(disposition.vcs_ignore.guard_branch, "share_exceeded");
-    assert.match(disposition.vcs_ignore.skipped_reason, /skipped/);
+    expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
+    expect(disposition.files.length).toBe(20);
+    expect(disposition.vcs_ignore.applied).toBe(false);
+    expect(disposition.vcs_ignore.guard_branch).toBe("share_exceeded");
+    expect(disposition.vcs_ignore.skipped_reason).toMatch(/skipped/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

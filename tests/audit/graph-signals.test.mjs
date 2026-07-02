@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { importSourceModule } from "./helpers/sourceImport.mjs";
 
 const { deriveGraphSignals, allGraphEdges } = await importSourceModule(
@@ -19,10 +18,7 @@ test("allGraphEdges flattens every edge bucket but skips routes and malformed ed
       junk: [{ from: "d" }, null, { to: "e" }, "nope"],
     },
   });
-  assert.deepEqual(
-    edges.map((e) => `${e.from}->${e.to}`),
-    ["a->b", "b->c"],
-  );
+  expect(edges.map((e) => `${e.from}->${e.to}`)).toEqual(["a->b", "b->c"]);
 });
 
 test("deriveGraphSignals detects a directed cycle and marks its members", () => {
@@ -33,8 +29,8 @@ test("deriveGraphSignals detects a directed cycle and marks its members", () => 
       { from: "c", to: "a" },
     ]),
   );
-  assert.equal(signals.cycles.length, 1);
-  assert.deepEqual([...signals.nodesInCycles].sort(), ["a", "b", "c"]);
+  expect(signals.cycles.length).toBe(1);
+  expect([...signals.nodesInCycles].sort()).toEqual(["a", "b", "c"]);
 });
 
 test("deriveGraphSignals returns no cycles for a DAG", () => {
@@ -44,8 +40,8 @@ test("deriveGraphSignals returns no cycles for a DAG", () => {
       { from: "a", to: "c" },
     ]),
   );
-  assert.equal(signals.cycles.length, 0);
-  assert.equal(signals.nodesInCycles.size, 0);
+  expect(signals.cycles.length).toBe(0);
+  expect(signals.nodesInCycles.size).toBe(0);
 });
 
 test("deriveGraphSignals dedups the same directed cycle found from different roots", () => {
@@ -57,7 +53,7 @@ test("deriveGraphSignals dedups the same directed cycle found from different roo
       { from: "b", to: "a" },
     ]),
   );
-  assert.equal(signals.cycles.length, 1);
+  expect(signals.cycles.length).toBe(1);
 });
 
 test("deriveGraphSignals flags hubs at the fan-in/fan-out threshold", () => {
@@ -67,9 +63,9 @@ test("deriveGraphSignals flags hubs at the fan-in/fan-out threshold", () => {
     imports.push({ from: "hub", to: `tgt-${i}` });
   }
   const signals = deriveGraphSignals(bundle(imports));
-  assert.ok(signals.hubs.has("hub"), "hub with 8 in + 8 out should be flagged");
-  assert.equal(signals.fanIn.get("hub"), 8);
-  assert.equal(signals.fanOut.get("hub"), 8);
+  expect(signals.hubs.has("hub"), "hub with 8 in + 8 out should be flagged").toBeTruthy();
+  expect(signals.fanIn.get("hub")).toBe(8);
+  expect(signals.fanOut.get("hub")).toBe(8);
 });
 
 test("deriveGraphSignals does not flag a node below the hub threshold", () => {
@@ -79,7 +75,7 @@ test("deriveGraphSignals does not flag a node below the hub threshold", () => {
     imports.push({ from: "hub", to: `tgt-${i}` });
   }
   const signals = deriveGraphSignals(bundle(imports));
-  assert.equal(signals.hubs.has("hub"), false);
+  expect(signals.hubs.has("hub")).toBe(false);
 });
 
 test("deletion candidates are low-in-degree leaves (fanIn 0, fanOut > 0), not pure orphans", () => {
@@ -90,9 +86,9 @@ test("deletion candidates are low-in-degree leaves (fanIn 0, fanOut > 0), not pu
   const signals = deriveGraphSignals(
     bundle([{ from: "entry", to: "lib" }]),
   );
-  assert.deepEqual([...signals.deletionCandidates], ["entry"]);
-  assert.equal(signals.deletionCandidates.has("lib"), false);
-  assert.deepEqual([...signals.connected].sort(), ["entry", "lib"]);
+  expect([...signals.deletionCandidates]).toEqual(["entry"]);
+  expect(signals.deletionCandidates.has("lib")).toBe(false);
+  expect([...signals.connected].sort()).toEqual(["entry", "lib"]);
 });
 
 test("a node inside a cycle is never a deletion candidate (every cycle member has fanIn > 0)", () => {
@@ -102,5 +98,5 @@ test("a node inside a cycle is never a deletion candidate (every cycle member ha
       { from: "b", to: "a" },
     ]),
   );
-  assert.equal(signals.deletionCandidates.size, 0);
+  expect(signals.deletionCandidates.size).toBe(0);
 });

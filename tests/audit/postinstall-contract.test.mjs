@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -55,38 +54,38 @@ test("postinstall seeds Codex skill metadata with the canonical hyphenated displ
     const openAiMetadataPath = join(codexSkillDir, "agents", "openai.yaml");
     const opencodeConfigPath = join(homeDir, ".config", "opencode", "opencode.json");
 
-    assert.equal((await stat(join(codexSkillDir, "SKILL.md"))).isFile(), true);
-    assert.equal((await stat(join(codexSkillDir, "audit-code.prompt.md"))).isFile(), true);
-    assert.equal((await stat(openAiMetadataPath)).isFile(), true);
-    assert.match(await readFile(openAiMetadataPath, "utf8"), /display_name: "audit-code"/);
+    expect((await stat(join(codexSkillDir, "SKILL.md"))).isFile()).toBe(true);
+    expect((await stat(join(codexSkillDir, "audit-code.prompt.md"))).isFile()).toBe(true);
+    expect((await stat(openAiMetadataPath)).isFile()).toBe(true);
+    expect(await readFile(openAiMetadataPath, "utf8")).toMatch(/display_name: "audit-code"/);
     const opencodeConfig = JSON.parse(await readFile(opencodeConfigPath, "utf8"));
-    assert.equal(opencodeConfig.permission?.read, "allow");
-    assert.equal(opencodeConfig.permission?.grep, "allow");
+    expect(opencodeConfig.permission?.read).toBe("allow");
+    expect(opencodeConfig.permission?.grep).toBe("allow");
     // Global scope must not seed broad allows (CFG-4996560e).
-    assert.equal(opencodeConfig.permission?.external_directory, undefined);
-    assert.equal(opencodeConfig.permission?.bash?.["*"], undefined);
-    assert.equal(opencodeConfig.permission?.bash?.["audit-code"], "allow");
-    assert.equal(opencodeConfig.permission?.bash?.["audit-code next-step*"], "allow");
-    assert.equal(opencodeConfig.permission?.bash?.["audit-code synthesize*"], "deny");
+    expect(opencodeConfig.permission?.external_directory).toBe(undefined);
+    expect(opencodeConfig.permission?.bash?.["*"]).toBe(undefined);
+    expect(opencodeConfig.permission?.bash?.["audit-code"]).toBe("allow");
+    expect(opencodeConfig.permission?.bash?.["audit-code next-step*"]).toBe("allow");
+    expect(opencodeConfig.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
     // Single-package postinstall runs both the audit and remediate halves, so the
     // shared global opencode.json also carries the remediate scope's allows
     // (e.g. "Select-String *"). The audit half still seeds no broad allows of its own.
-    assert.equal(opencodeConfig.agent?.auditor?.permission?.read, "allow");
-    assert.equal(opencodeConfig.agent?.auditor?.permission?.bash?.["*audit-code.mjs* synthesize*"], "deny");
-    assert.match(result.stdout, /Codex skill UI metadata/);
-    assert.equal(result.stderr, "");
+    expect(opencodeConfig.agent?.auditor?.permission?.read).toBe("allow");
+    expect(opencodeConfig.agent?.auditor?.permission?.bash?.["*audit-code.mjs* synthesize*"]).toBe("deny");
+    expect(result.stdout).toMatch(/Codex skill UI metadata/);
+    expect(result.stderr).toBe("");
 
     // Claude Desktop command file
     const claudeCommandPath = join(homeDir, ".claude", "commands", "audit-code.md");
-    assert.equal((await stat(claudeCommandPath)).isFile(), true);
-    assert.match(await readFile(claudeCommandPath, "utf8"), /audit-code/);
+    expect((await stat(claudeCommandPath)).isFile()).toBe(true);
+    expect(await readFile(claudeCommandPath, "utf8")).toMatch(/audit-code/);
 
     // Antigravity (Gemini IDE) plugin files
     const antigravityPluginDir = join(homeDir, ".gemini", "config", "plugins", "audit-code");
     const antigravityPluginJsonPath = join(antigravityPluginDir, "plugin.json");
     const antigravityPluginSkillPath = join(antigravityPluginDir, "skills", "SKILL.md");
-    assert.equal((await stat(antigravityPluginJsonPath)).isFile(), true);
-    assert.equal((await stat(antigravityPluginSkillPath)).isFile(), true);
+    expect((await stat(antigravityPluginJsonPath)).isFile()).toBe(true);
+    expect((await stat(antigravityPluginSkillPath)).isFile()).toBe(true);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
@@ -113,17 +112,17 @@ test("postinstall global scope seeds no broad allows on a fresh config (CFG-4996
     const config = JSON.parse(await readFile(configPath, "utf8"));
 
     // No broad allows at the global top-level scope.
-    assert.equal(config.permission?.bash?.["*"], undefined);
-    assert.equal(config.permission?.external_directory, undefined);
+    expect(config.permission?.bash?.["*"]).toBe(undefined);
+    expect(config.permission?.external_directory).toBe(undefined);
 
     // Denylist hygiene rules are still present at the top level.
-    assert.equal(config.permission?.bash?.["audit-code synthesize*"], "deny");
-    assert.equal(config.permission?.bash?.["audit-code cleanup*"], "deny");
-    assert.equal(config.permission?.bash?.["*dist*index.js* synthesize*"], "deny");
-    assert.equal(config.permission?.bash?.["rm *"], "deny");
+    expect(config.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
+    expect(config.permission?.bash?.["audit-code cleanup*"]).toBe("deny");
+    expect(config.permission?.bash?.["*dist*index.js* synthesize*"]).toBe("deny");
+    expect(config.permission?.bash?.["rm *"]).toBe("deny");
 
     // Specific allows remain.
-    assert.equal(config.permission?.bash?.["audit-code next-step*"], "allow");
+    expect(config.permission?.bash?.["audit-code next-step*"]).toBe("allow");
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
@@ -145,22 +144,22 @@ test("postinstall migrates exactly-matching historically managed broad rules out
     const config = JSON.parse(await readFile(configPath, "utf8"));
 
     // Exactly-matching historically managed broad rules are removed.
-    assert.equal(config.permission?.bash?.["*"], undefined);
-    assert.equal(config.permission?.external_directory, undefined);
+    expect(config.permission?.bash?.["*"]).toBe(undefined);
+    expect(config.permission?.external_directory).toBe(undefined);
 
     // Unrelated user-authored keys survive the migration unchanged — including
     // a specific bash key whose value happens to equal the managed broad value
     // ("allow"): only the broad wildcard is migrated, never specific entries.
-    assert.equal(config.theme, "user-theme");
-    assert.equal(config.permission?.webfetch, "ask");
-    assert.equal(config.permission?.bash?.["custom-user-tool *"], "deny");
-    assert.equal(config.permission?.bash?.["git status"], "allow");
+    expect(config.theme).toBe("user-theme");
+    expect(config.permission?.webfetch).toBe("ask");
+    expect(config.permission?.bash?.["custom-user-tool *"]).toBe("deny");
+    expect(config.permission?.bash?.["git status"]).toBe("allow");
 
     // Convergence: re-running over the already-migrated config is idempotent —
     // the broad rules are not re-emitted and the result is byte-identical.
     const firstRaw = await readFile(configPath, "utf8");
     await runPostinstall(homeDir);
-    assert.equal(await readFile(configPath, "utf8"), firstRaw);
+    expect(await readFile(configPath, "utf8")).toBe(firstRaw);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }
@@ -180,8 +179,8 @@ test("postinstall leaves non-matching top-level broad rules untouched", async ()
       await readFile(join(homeDir, ".config", "opencode", "opencode.json"), "utf8"),
     );
 
-    assert.equal(config.permission?.bash?.["*"], "ask");
-    assert.deepEqual(config.permission?.external_directory, {
+    expect(config.permission?.bash?.["*"]).toBe("ask");
+    expect(config.permission?.external_directory).toEqual({
       "*": "deny",
       "C:/somewhere/**": "allow",
     });
@@ -198,16 +197,16 @@ test("postinstall keeps auditor agent broad-allow-with-denylist and is idempoten
     const first = JSON.parse(await readFile(configPath, "utf8"));
 
     // Agent scope keeps the broad allow plus the denylist.
-    assert.equal(first.agent?.auditor?.permission?.bash?.["*"], "allow");
-    assert.deepEqual(first.agent?.auditor?.permission?.external_directory, { "*": "allow" });
-    assert.equal(first.agent?.auditor?.permission?.bash?.["audit-code synthesize*"], "deny");
-    assert.equal(first.agent?.auditor?.permission?.bash?.["rm *"], "deny");
+    expect(first.agent?.auditor?.permission?.bash?.["*"]).toBe("allow");
+    expect(first.agent?.auditor?.permission?.external_directory).toEqual({ "*": "allow" });
+    expect(first.agent?.auditor?.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
+    expect(first.agent?.auditor?.permission?.bash?.["rm *"]).toBe("deny");
 
     // Re-running is idempotent for both scopes (no duplicate or mutated rules).
     await runPostinstall(homeDir);
     const second = JSON.parse(await readFile(configPath, "utf8"));
-    assert.deepEqual(second.agent?.auditor, first.agent?.auditor);
-    assert.deepEqual(second.permission, first.permission);
+    expect(second.agent?.auditor).toEqual(first.agent?.auditor);
+    expect(second.permission).toEqual(first.permission);
   } finally {
     await rm(homeDir, { recursive: true, force: true });
   }

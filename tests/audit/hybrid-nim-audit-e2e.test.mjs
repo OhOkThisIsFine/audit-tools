@@ -14,11 +14,9 @@
  *
  * SKIPPED unless RUN_NIM_E2E=1 AND a NIM key (LLM_BACKEND_API_KEY or NVIDIA_API_KEY) is
  * in the env. Run from the repo root:
- *   RUN_NIM_E2E=1 node --import tsx/esm --test tests/audit/hybrid-nim-audit-e2e.test.mjs
+ *   RUN_NIM_E2E=1 npx vitest run tests/audit/hybrid-nim-audit-e2e.test.mjs
  */
-
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -111,18 +109,12 @@ test(
 
       // Crit. 3 (audit) — the NIM pool reviewed its partition LIVE this cycle (real
       // AuditResults folded into the cumulative store, or promoted on a complete run).
-      assert.ok(
-        nimReviewed,
-        "the NIM partition must review live — AuditResults in audit_results.jsonl (or promoted findings)",
-      );
+      expect(nimReviewed, "the NIM partition must review live — AuditResults in audit_results.jsonl (or promoted findings)").toBeTruthy();
       // The split routed work to BOTH pools: after NIM ingested its partition, the host
       // gets the coverage-driven complement as the `semantic_review` step (unless NIM
       // happened to cover the whole frontier, which `transition`s — both are valid hybrid
       // outcomes; the split + the live NIM review above is the crit-3 proof).
-      assert.ok(
-        result?.kind === "semantic_review" || result?.kind === "transition",
-        `expected the host complement (semantic_review) or a covered-frontier transition, got ${result?.kind}`,
-      );
+      expect(result?.kind === "semantic_review" || result?.kind === "transition", `expected the host complement (semantic_review) or a covered-frontier transition, got ${result?.kind}`).toBeTruthy();
 
       // The host review must be re-derived from coverage as the COMPLEMENT — not the
       // reused NIM partition run. Read the host run's task list: it must EXCLUDE every
@@ -133,12 +125,9 @@ test(
         const hostTaskIds = existsSync(hostTasksPath)
           ? JSON.parse(readFileSync(hostTasksPath, "utf8")).map((t) => t.task_id)
           : [];
-        assert.ok(hostTaskIds.length > 0, "the host complement review must list tasks");
+        expect(hostTaskIds.length > 0, "the host complement review must list tasks").toBeTruthy();
         for (const covered of taskIds) {
-          assert.ok(
-            !hostTaskIds.includes(covered),
-            `host review must exclude NIM-covered task ${covered} (it re-derives the complement, not reuses the NIM run)`,
-          );
+          expect(!hostTaskIds.includes(covered), `host review must exclude NIM-covered task ${covered} (it re-derives the complement, not reuses the NIM run)`).toBeTruthy();
         }
       }
     });

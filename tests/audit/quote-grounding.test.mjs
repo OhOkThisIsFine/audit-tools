@@ -1,5 +1,4 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   normalizeForMatch,
   quoteMatches,
@@ -21,19 +20,19 @@ function finding(affected_files) {
 }
 
 test("normalizeForMatch strips CR and collapses whitespace", () => {
-  assert.equal(normalizeForMatch("  a\r\n  b\t c  "), "a b c");
+  expect(normalizeForMatch("  a\r\n  b\t c  ")).toBe("a b c");
 });
 
 test("quoteMatches is whitespace/CRLF-insensitive and content-based", () => {
   const file = "function foo() {\r\n    return bar();\r\n}\n";
   // Differently-indented, LF-only quote still matches.
-  assert.equal(quoteMatches(file, "return bar();"), true);
+  expect(quoteMatches(file, "return bar();")).toBe(true);
   // Multi-line span matches across the (normalized) content.
-  assert.equal(quoteMatches(file, "function foo() {\n  return bar();"), true);
+  expect(quoteMatches(file, "function foo() {\n  return bar();")).toBe(true);
   // Absent text does not match.
-  assert.equal(quoteMatches(file, "return baz();"), false);
+  expect(quoteMatches(file, "return baz();")).toBe(false);
   // An empty quote grounds nothing.
-  assert.equal(quoteMatches(file, "   "), false);
+  expect(quoteMatches(file, "   ")).toBe(false);
 });
 
 test("verifyFindingGrounding: a matching quote grounds the finding", async () => {
@@ -43,7 +42,7 @@ test("verifyFindingGrounding: a matching quote grounds the finding", async () =>
     finding([{ path: "src/auth.ts", line_start: 1, line_end: 2, quoted_text: "return sign(secret);" }]),
     reader,
   );
-  assert.equal(result.status, "grounded");
+  expect(result.status).toBe("grounded");
 });
 
 test("verifyFindingGrounding: matching is content-based, robust to line-number drift", async () => {
@@ -54,7 +53,7 @@ test("verifyFindingGrounding: matching is content-based, robust to line-number d
     finding([{ path: "src/auth.ts", line_start: 999, line_end: 1000, quoted_text: "return ok;" }]),
     reader,
   );
-  assert.equal(result.status, "grounded");
+  expect(result.status).toBe("grounded");
 });
 
 test("verifyFindingGrounding: a quote not present on disk is ungrounded", async () => {
@@ -64,9 +63,9 @@ test("verifyFindingGrounding: a quote not present on disk is ungrounded", async 
     finding([{ path: "src/auth.ts", line_start: 1, line_end: 1, quoted_text: "DROP TABLE users;" }]),
     reader,
   );
-  assert.equal(result.status, "ungrounded");
-  assert.match(result.reason ?? "", /src\/auth\.ts/);
-  assert.match(result.reason ?? "", /not found on disk/);
+  expect(result.status).toBe("ungrounded");
+  expect(result.reason ?? "").toMatch(/src\/auth\.ts/);
+  expect(result.reason ?? "").toMatch(/not found on disk/);
 });
 
 test("verifyFindingGrounding: a finding with no quoted_text is ungrounded", async () => {
@@ -76,8 +75,8 @@ test("verifyFindingGrounding: a finding with no quoted_text is ungrounded", asyn
     finding([{ path: "src/auth.ts", line_start: 1, line_end: 1 }]),
     reader,
   );
-  assert.equal(result.status, "ungrounded");
-  assert.match(result.reason ?? "", /no .*quoted_text/i);
+  expect(result.status).toBe("ungrounded");
+  expect(result.reason ?? "").toMatch(/no .*quoted_text/i);
 });
 
 test("verifyFindingGrounding: one matching span among several grounds the finding", async () => {
@@ -91,7 +90,7 @@ test("verifyFindingGrounding: one matching span among several grounds the findin
     ]),
     reader,
   );
-  assert.equal(result.status, "grounded");
+  expect(result.status).toBe("grounded");
 });
 
 test("verifyFindingGrounding: an unreadable file yields an ungrounded reason", async () => {
@@ -103,6 +102,6 @@ test("verifyFindingGrounding: an unreadable file yields an ungrounded reason", a
     finding([{ path: "src/missing.ts", line_start: 1, line_end: 1, quoted_text: "x();" }]),
     reader,
   );
-  assert.equal(result.status, "ungrounded");
-  assert.match(result.reason ?? "", /could not be read/);
+  expect(result.status).toBe("ungrounded");
+  expect(result.reason ?? "").toMatch(/could not be read/);
 });

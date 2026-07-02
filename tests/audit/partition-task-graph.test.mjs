@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { partitionTaskGraph } = await import("../../src/audit/orchestrator/partitionTaskGraph.ts");
 const { buildTaskAffinityGraph } = await import("../../src/audit/orchestrator/taskAffinityGraph.ts");
@@ -28,11 +27,11 @@ test("a generous token+risk budget merges coupled tasks into one packet", () => 
     contextTokenBudget: 100000,
     riskMassBudget: 100,
   });
-  assert.equal(packets.length, 1);
-  assert.deepEqual(packets[0].task_ids, ["t1", "t2", "t3"]);
-  assert.equal(packets[0].token_estimate, 300);
-  assert.ok(Math.abs(packets[0].risk_mass - 0.9) < 1e-9);
-  assert.ok(Math.abs(packets[0].routing_risk - 0.3) < 1e-9);
+  expect(packets.length).toBe(1);
+  expect(packets[0].task_ids).toEqual(["t1", "t2", "t3"]);
+  expect(packets[0].token_estimate).toBe(300);
+  expect(Math.abs(packets[0].risk_mass - 0.9) < 1e-9).toBeTruthy();
+  expect(Math.abs(packets[0].routing_risk - 0.3) < 1e-9).toBeTruthy();
 });
 
 test("a token ceiling caps packet size (ceiling, not quota)", () => {
@@ -42,8 +41,8 @@ test("a token ceiling caps packet size (ceiling, not quota)", () => {
     riskMassBudget: 100,
   });
   // one packet of 2, one of 1 (no atomic task is split)
-  assert.equal(packets.length, 2);
-  assert.ok(packets.every((p) => p.token_estimate <= 250));
+  expect(packets.length).toBe(2);
+  expect(packets.every((p) => p.token_estimate <= 250)).toBeTruthy();
 });
 
 test("a risk-mass ceiling caps aggregate risk per packet", () => {
@@ -52,8 +51,8 @@ test("a risk-mass ceiling caps aggregate risk per packet", () => {
     contextTokenBudget: 100000,
     riskMassBudget: 0.65,
   });
-  assert.equal(packets.length, 2);
-  assert.ok(packets.every((p) => p.risk_mass <= 0.65 + 1e-9));
+  expect(packets.length).toBe(2);
+  expect(packets.every((p) => p.risk_mass <= 0.65 + 1e-9)).toBeTruthy();
 });
 
 test("an atomic task exceeding the token ceiling becomes its own over_budget packet", () => {
@@ -64,8 +63,8 @@ test("an atomic task exceeding the token ceiling becomes its own over_budget pac
     contextTokenBudget: 1000,
     riskMassBudget: 100,
   });
-  assert.equal(packets.length, 1);
-  assert.equal(packets[0].over_budget, true);
+  expect(packets.length).toBe(1);
+  expect(packets[0].over_budget).toBe(true);
 });
 
 test("routing_risk is the max member risk; packets sort highest-risk first", () => {
@@ -78,16 +77,16 @@ test("routing_risk is the max member risk; packets sort highest-risk first", () 
     contextTokenBudget: 100000,
     riskMassBudget: 100,
   });
-  assert.equal(packets.length, 2);
-  assert.equal(packets[0].task_ids[0], "hirisk"); // highest routing risk first
-  assert.equal(packets[0].routing_risk, 0.9);
+  expect(packets.length).toBe(2);
+  expect(packets[0].task_ids[0]).toBe("hirisk"); // highest routing risk first
+  expect(packets[0].routing_risk).toBe(0.9);
 });
 
 test("partition is deterministic for the same graph + budgets", () => {
   const opts = { contextTokenBudget: 250, riskMassBudget: 100 };
   const a = partitionTaskGraph(COUPLED, opts);
   const b = partitionTaskGraph(COUPLED, opts);
-  assert.deepEqual(a, b);
+  expect(a).toEqual(b);
 });
 
 // ── TST-63d9e3e4: over_budget single-node overhead boundary ──────────────────
@@ -108,8 +107,8 @@ test("TST-63d9e3e4: single-node at exactly (contextTokenBudget + overhead - 1) i
     riskMassBudget: 100,
     promptOverheadTokens: overhead,
   });
-  assert.equal(packets.length, 1);
-  assert.equal(packets[0].over_budget, undefined, "one token below ceiling should NOT be over_budget");
+  expect(packets.length).toBe(1);
+  expect(packets[0].over_budget, "one token below ceiling should NOT be over_budget").toBe(undefined);
 });
 
 test("TST-63d9e3e4: single-node at exactly (contextTokenBudget + overhead) is over_budget", () => {
@@ -126,8 +125,8 @@ test("TST-63d9e3e4: single-node at exactly (contextTokenBudget + overhead) is ov
     riskMassBudget: 100,
     promptOverheadTokens: overhead,
   });
-  assert.equal(packets.length, 1);
-  assert.equal(packets[0].over_budget, true, "one token above ceiling should be over_budget");
+  expect(packets.length).toBe(1);
+  expect(packets[0].over_budget, "one token above ceiling should be over_budget").toBe(true);
 });
 
 test("TST-63d9e3e4: overhead defaults to 0 when promptOverheadTokens is undefined", () => {
@@ -138,13 +137,13 @@ test("TST-63d9e3e4: overhead defaults to 0 when promptOverheadTokens is undefine
     task({ task_id: "at-budget", token_estimate: budget, risk_estimate: 0.1 }),
   ]);
   const notOver = partitionTaskGraph(atBudget, { contextTokenBudget: budget, riskMassBudget: 100 });
-  assert.equal(notOver[0].over_budget, undefined, "at exactly budget (no overhead) is NOT over_budget");
+  expect(notOver[0].over_budget, "at exactly budget (no overhead) is NOT over_budget").toBe(undefined);
 
   const overBudget = buildTaskAffinityGraph([
     task({ task_id: "over-budget", token_estimate: budget + 1, risk_estimate: 0.1 }),
   ]);
   const isOver = partitionTaskGraph(overBudget, { contextTokenBudget: budget, riskMassBudget: 100 });
-  assert.equal(isOver[0].over_budget, true, "one token above budget (no overhead) IS over_budget");
+  expect(isOver[0].over_budget, "one token above budget (no overhead) IS over_budget").toBe(true);
 });
 
 test("TST-63d9e3e4: two-node packet exceeding budget is NOT flagged as over_budget (only single-node check)", () => {
@@ -158,8 +157,8 @@ test("TST-63d9e3e4: two-node packet exceeding budget is NOT flagged as over_budg
   ]);
   // No edges → two separate packets; neither is over_budget
   const packets = partitionTaskGraph(graph, { contextTokenBudget: 1000, riskMassBudget: 100 });
-  assert.equal(packets.length, 2);
+  expect(packets.length).toBe(2);
   for (const p of packets) {
-    assert.equal(p.over_budget, undefined, "disjoint two-node packets with 600 tokens each are not over_budget");
+    expect(p.over_budget, "disjoint two-node packets with 600 tokens each are not over_budget").toBe(undefined);
   }
 });

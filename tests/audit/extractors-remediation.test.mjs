@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -56,24 +55,16 @@ function getDispositionItem(disposition, path) {
 
 function assertPredicateCases(name, predicate, positives, negatives) {
   for (const path of positives) {
-    assert.equal(
-      predicate(normalizeExtractorPath(path)),
-      true,
-      `${name} should match ${path}`,
-    );
+    expect(predicate(normalizeExtractorPath(path)), `${name} should match ${path}`).toBe(true);
   }
   for (const path of negatives) {
-    assert.equal(
-      predicate(normalizeExtractorPath(path)),
-      false,
-      `${name} should not match ${path}`,
-    );
+    expect(predicate(normalizeExtractorPath(path)), `${name} should not match ${path}`).toBe(false);
   }
 }
 
 test("loadIgnoreFile returns trimmed non-comment patterns and tolerates missing files", async () => {
   await withTempDir("audit-code-ignore-", async (root) => {
-    assert.deepEqual(await loadIgnoreFile(root), []);
+    expect(await loadIgnoreFile(root)).toEqual([]);
 
     await writeFile(
       join(root, ".auditorignore"),
@@ -81,7 +72,7 @@ test("loadIgnoreFile returns trimmed non-comment patterns and tolerates missing 
       "utf8",
     );
 
-    assert.deepEqual(await loadIgnoreFile(root), [
+    expect(await loadIgnoreFile(root)).toEqual([
       "src/generated",
       "logs/*.txt",
     ]);
@@ -136,7 +127,7 @@ test("buildRiskRegister derives deterministic risk signals from units, flows, an
   );
 
   const auth = register.items.find((item) => item.unit_id === "auth-cache");
-  assert.deepEqual(auth.signals, [
+  expect(auth.signals).toEqual([
     "high_bucket_density",
     "security_relevant",
     "writes_or_persistence",
@@ -144,11 +135,8 @@ test("buildRiskRegister derives deterministic risk signals from units, flows, an
     "critical_flow_member",
     "external_analyzer_signal",
   ]);
-  assert.equal(auth.risk_score, 9);
-  assert.deepEqual(
-    register.items.map((item) => item.unit_id),
-    ["auth-cache", "docs"],
-  );
+  expect(auth.risk_score).toBe(9);
+  expect(register.items.map((item) => item.unit_id)).toEqual(["auth-cache", "docs"]);
 });
 
 test("buildRiskRegister folds whole-graph signals: cycle + hub raise score, deletion candidate is informational", () => {
@@ -174,14 +162,14 @@ test("buildRiskRegister folds whole-graph signals: cycle + hub raise score, dele
   const register = buildRiskRegister(unitManifest, undefined, undefined, graphSignals);
   const byId = Object.fromEntries(register.items.map((i) => [i.unit_id, i]));
 
-  assert.deepEqual(byId.cyc.signals, ["member_of_cycle"]);
-  assert.equal(byId.cyc.risk_score, 1, "cycle membership adds 1");
-  assert.deepEqual(byId.hub.signals, ["is_hub"]);
-  assert.equal(byId.hub.risk_score, 1, "hub status adds 1");
+  expect(byId.cyc.signals).toEqual(["member_of_cycle"]);
+  expect(byId.cyc.risk_score, "cycle membership adds 1").toBe(1);
+  expect(byId.hub.signals).toEqual(["is_hub"]);
+  expect(byId.hub.risk_score, "hub status adds 1").toBe(1);
   // deletion_candidate is advisory: signal present, score unchanged.
-  assert.deepEqual(byId.dead.signals, ["deletion_candidate"]);
-  assert.equal(byId.dead.risk_score, 0, "deletion candidate does not inflate score");
-  assert.deepEqual(byId.plain.signals, []);
+  expect(byId.dead.signals).toEqual(["deletion_candidate"]);
+  expect(byId.dead.risk_score, "deletion candidate does not inflate score").toBe(0);
+  expect(byId.plain.signals).toEqual([]);
 });
 
 test("buildRiskRegister omits graph signals entirely when none are supplied (back-compat)", () => {
@@ -189,7 +177,7 @@ test("buildRiskRegister omits graph signals entirely when none are supplied (bac
     units: [{ unit_id: "u", name: "u", files: ["src/u.ts"], required_lenses: [], risk_score: 0 }],
   };
   const register = buildRiskRegister(unitManifest);
-  assert.deepEqual(register.items[0].signals, []);
+  expect(register.items[0].signals).toEqual([]);
 });
 
 test("buildRepoManifestFromFs traverses recursively, ignores configured paths, and hashes bounded files", async () => {
@@ -217,18 +205,12 @@ test("buildRepoManifestFromFs traverses recursively, ignores configured paths, a
       max_file_size_bytes: 6,
     });
 
-    assert.deepEqual(
-      manifest.files.map((file) => file.path).sort(),
-      ["src/large.ts", "src/nested/app.ts"],
-    );
+    expect(manifest.files.map((file) => file.path).sort()).toEqual(["src/large.ts", "src/nested/app.ts"]);
     const small = manifest.files.find((file) => file.path === "src/nested/app.ts");
     const large = manifest.files.find((file) => file.path === "src/large.ts");
-    assert.equal(
-      small.hash,
-      createHash("sha256").update("small\n").digest("hex"),
-    );
-    assert.equal(large.size_bytes, 10);
-    assert.equal(large.hash, undefined);
+    expect(small.hash).toBe(createHash("sha256").update("small\n").digest("hex"));
+    expect(large.size_bytes).toBe(10);
+    expect(large.hash).toBe(undefined);
   });
 });
 
@@ -236,19 +218,19 @@ test("bucketFile handles Windows-style separators, case-insensitivity, and overl
   const assignment = bucketFile("C:\\repo\\SRC\\Api\\test_worker.TS");
   const vendor = bucketFile("C:\\repo\\node_modules\\left-pad\\index.js");
 
-  assert.deepEqual(assignment.buckets, [
+  expect(assignment.buckets).toEqual([
     "tests",
     "interface",
     "concurrency_state",
   ]);
-  assert.deepEqual(assignment.rationale, [
+  expect(assignment.rationale).toEqual([
     "path suggests tests",
     "path suggests interface code",
     "path suggests concurrency or stateful behavior",
   ]);
 
-  assert.deepEqual(vendor.buckets, ["generated_vendor"]);
-  assert.deepEqual(vendor.rationale, [
+  expect(vendor.buckets).toEqual(["generated_vendor"]);
+  expect(vendor.rationale).toEqual([
     "node_modules or .git excluded by convention",
   ]);
 });
@@ -269,10 +251,10 @@ test("isTestPath matches test tokens without substring false positives", () => {
   ];
 
   for (const path of positives) {
-    assert.equal(isTestPath(normalizeExtractorPath(path)), true, path);
+    expect(isTestPath(normalizeExtractorPath(path)), path).toBe(true);
   }
   for (const path of negatives) {
-    assert.equal(isTestPath(normalizeExtractorPath(path)), false, path);
+    expect(isTestPath(normalizeExtractorPath(path)), path).toBe(false);
   }
 });
 
@@ -451,10 +433,7 @@ test("buildRepoManifest infers languages from normalized extensions and leaves e
     { path: "README", size_bytes: 13 },
   ]);
 
-  assert.deepEqual(
-    manifest.files.map((file) => file.language),
-    ["tsx", "javascript", "typescript", "unknown"],
-  );
+  expect(manifest.files.map((file) => file.language)).toEqual(["tsx", "javascript", "typescript", "unknown"]);
 });
 
 test("buildFileDisposition stays stable for Windows-style absolute paths and overlapping matches", () => {
@@ -468,33 +447,18 @@ test("buildFileDisposition stays stable for Windows-style absolute paths and ove
   ]);
   const disposition = buildFileDisposition(repoManifest);
 
-  assert.equal(
-    getDispositionItem(disposition, "C:\\repo\\Docs\\Runbook.MD")?.status,
-    "doc_only",
-  );
-  assert.equal(
-    getDispositionItem(disposition, "C:\\repo\\DIST\\bundle.js")?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(disposition, "C:\\repo\\vendor\\left-pad\\index.js")?.status,
-    "vendor",
-  );
-  assert.equal(
-    getDispositionItem(disposition, "C:\\repo\\logs\\STDOUT.LOG")?.status,
-    "generated",
-  );
+  expect(getDispositionItem(disposition, "C:\\repo\\Docs\\Runbook.MD")?.status).toBe("doc_only");
+  expect(getDispositionItem(disposition, "C:\\repo\\DIST\\bundle.js")?.status).toBe("generated");
+  expect(getDispositionItem(disposition, "C:\\repo\\vendor\\left-pad\\index.js")?.status).toBe("vendor");
+  expect(getDispositionItem(disposition, "C:\\repo\\logs\\STDOUT.LOG")?.status).toBe("generated");
 
   const lockfile = getDispositionItem(
     disposition,
     "C:\\repo\\docs\\package-lock.json",
   );
-  assert.equal(lockfile?.status, "generated");
-  assert.match(lockfile?.reason ?? "", /lockfile/i);
-  assert.equal(
-    getDispositionItem(disposition, "C:\\repo\\archive.TAR.GZ")?.status,
-    "binary",
-  );
+  expect(lockfile?.status).toBe("generated");
+  expect(lockfile?.reason ?? "").toMatch(/lockfile/i);
+  expect(getDispositionItem(disposition, "C:\\repo\\archive.TAR.GZ")?.status).toBe("binary");
 });
 
 test("buildFileDisposition excludes generated install and test artifacts before they reach planning", () => {
@@ -510,50 +474,26 @@ test("buildFileDisposition excludes generated install and test artifacts before 
   ]);
   const disposition = buildFileDisposition(repoManifest);
 
-  assert.equal(
-    getDispositionItem(disposition, ".audit-tools/audit/dispatch/current-task.json")?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(
+  expect(getDispositionItem(disposition, ".audit-tools/audit/dispatch/current-task.json")?.status).toBe("generated");
+  expect(getDispositionItem(
       disposition,
       ".audit-tools/audit/dispatch/audit-result.schema.json",
-    )?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(disposition, ".audit-code/install/run-mcp-server.mjs")?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(disposition, ".audit-code/install/manifest.json")?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(
+    )?.status).toBe("generated");
+  expect(getDispositionItem(disposition, ".audit-code/install/run-mcp-server.mjs")?.status).toBe("generated");
+  expect(getDispositionItem(disposition, ".audit-code/install/manifest.json")?.status).toBe("generated");
+  expect(getDispositionItem(
       disposition,
       ".audit-code/install/claude-desktop/bundle/server/index.js",
-    )?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(
+    )?.status).toBe("generated");
+  expect(getDispositionItem(
       disposition,
       ".audit-code/install/claude-desktop/auditor-lambda.dxt",
-    )?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(disposition, ".audit-code/install/GETTING-STARTED.md")?.status,
-    "doc_only",
-  );
-  assert.equal(
-    getDispositionItem(
+    )?.status).toBe("generated");
+  expect(getDispositionItem(disposition, ".audit-code/install/GETTING-STARTED.md")?.status).toBe("doc_only");
+  expect(getDispositionItem(
       disposition,
       "tests/.test-plan-artifacts/remediation_plan.json",
-    )?.status,
-    "generated",
-  );
+    )?.status).toBe("generated");
 });
 
 test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/cache)", () => {
@@ -564,16 +504,10 @@ test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/cache)", (
   ]);
   const disposition = buildFileDisposition(repoManifest);
 
-  assert.equal(
-    getDispositionItem(disposition, ".tmp/cache/index.js")?.status,
-    "excluded",
-  );
-  assert.equal(
-    getDispositionItem(disposition, ".tmp/cache/package.json")?.status,
-    "excluded",
-  );
+  expect(getDispositionItem(disposition, ".tmp/cache/index.js")?.status).toBe("excluded");
+  expect(getDispositionItem(disposition, ".tmp/cache/package.json")?.status).toBe("excluded");
   // Real source outside .tmp is still included.
-  assert.equal(getDispositionItem(disposition, "src/index.ts")?.status, "included");
+  expect(getDispositionItem(disposition, "src/index.ts")?.status).toBe("included");
 });
 
 test("buildFileDisposition excludes archives, package caches, nested .audit-artifacts, and pipeline output contracts", () => {
@@ -589,28 +523,19 @@ test("buildFileDisposition excludes archives, package caches, nested .audit-arti
   ]);
   const disposition = buildFileDisposition(repoManifest);
 
-  assert.equal(
-    getDispositionItem(disposition, "packages/remediate-code/remediator-lambda-0.3.5.tgz")?.status,
-    "binary",
-  );
-  assert.equal(getDispositionItem(disposition, "release/payload.tar")?.status, "binary");
-  assert.equal(getDispositionItem(disposition, "release/archive.tar.gz")?.status, "binary");
-  assert.equal(
-    getDispositionItem(disposition, "packages/audit-code/.audit-artifacts/runs/x/task-results/a.json")?.status,
-    "generated",
-  );
-  assert.equal(
-    getDispositionItem(
+  expect(getDispositionItem(disposition, "packages/remediate-code/remediator-lambda-0.3.5.tgz")?.status).toBe("binary");
+  expect(getDispositionItem(disposition, "release/payload.tar")?.status).toBe("binary");
+  expect(getDispositionItem(disposition, "release/archive.tar.gz")?.status).toBe("binary");
+  expect(getDispositionItem(disposition, "packages/audit-code/.audit-artifacts/runs/x/task-results/a.json")?.status).toBe("generated");
+  expect(getDispositionItem(
       disposition,
       "packages/remediate-code/smoke/tmp/run-1/npm-cache/_cacache/content-v2/sha512/aa/bb/cc",
-    )?.status,
-    "excluded",
-  );
-  assert.equal(getDispositionItem(disposition, "audit/audit-findings.json")?.status, "generated");
+    )?.status).toBe("excluded");
+  expect(getDispositionItem(disposition, "audit/audit-findings.json")?.status).toBe("generated");
   // The matching markdown render stays doc_only via isDocPath.
-  assert.equal(getDispositionItem(disposition, "audit/audit-report.md")?.status, "doc_only");
+  expect(getDispositionItem(disposition, "audit/audit-report.md")?.status).toBe("doc_only");
   // Real source is still audited.
-  assert.equal(getDispositionItem(disposition, "src/index.ts")?.status, "included");
+  expect(getDispositionItem(disposition, "src/index.ts")?.status).toBe("included");
   // Every non-source artifact above is kept out of audit scope.
   for (const p of [
     "packages/remediate-code/remediator-lambda-0.3.5.tgz",
@@ -618,10 +543,7 @@ test("buildFileDisposition excludes archives, package caches, nested .audit-arti
     "packages/remediate-code/smoke/tmp/run-1/npm-cache/_cacache/content-v2/sha512/aa/bb/cc",
     "audit/audit-findings.json",
   ]) {
-    assert.ok(
-      isAuditExcludedStatus(getDispositionItem(disposition, p)?.status),
-      `${p} should be excluded from audit scope`,
-    );
+    expect(isAuditExcludedStatus(getDispositionItem(disposition, p)?.status), `${p} should be excluded from audit scope`).toBeTruthy();
   }
 });
 
@@ -636,12 +558,12 @@ test("buildFileDisposition excludes extension binary and source map artifacts", 
   ]);
   const disposition = buildFileDisposition(repoManifest);
 
-  assert.equal(getDispositionItem(disposition, "service/main.js")?.status, "included");
-  assert.equal(getDispositionItem(disposition, "content/sidebar.html")?.status, "included");
-  assert.equal(getDispositionItem(disposition, "download_worker/codec.wasm")?.status, "binary");
-  assert.equal(getDispositionItem(disposition, "download_worker/libav-6.5.7.wasm.mjs")?.status, "generated");
-  assert.equal(getDispositionItem(disposition, "content/panel.js.map")?.status, "generated");
-  assert.equal(getDispositionItem(disposition, "bitmaps/logo-128.png")?.status, "binary");
+  expect(getDispositionItem(disposition, "service/main.js")?.status).toBe("included");
+  expect(getDispositionItem(disposition, "content/sidebar.html")?.status).toBe("included");
+  expect(getDispositionItem(disposition, "download_worker/codec.wasm")?.status).toBe("binary");
+  expect(getDispositionItem(disposition, "download_worker/libav-6.5.7.wasm.mjs")?.status).toBe("generated");
+  expect(getDispositionItem(disposition, "content/panel.js.map")?.status).toBe("generated");
+  expect(getDispositionItem(disposition, "bitmaps/logo-128.png")?.status).toBe("binary");
 });
 
 test("buildSurfaceManifest excludes generated files and preserves the documented heuristic note", () => {
@@ -653,7 +575,7 @@ test("buildSurfaceManifest excludes generated files and preserves the documented
   const disposition = buildFileDisposition(repoManifest);
   const manifest = buildSurfaceManifest(repoManifest, disposition);
 
-  assert.deepEqual(manifest.surfaces, [
+  expect(manifest.surfaces).toEqual([
     {
       id: "surface:src\\API\\route.ts",
       kind: "interface",
@@ -671,13 +593,10 @@ test("buildSurfaceManifest excludes generated files and preserves the documented
       notes: [EXTRACTOR_HEURISTIC_NOTE],
     },
   ]);
-  assert.equal(
-    disposition.files
+  expect(disposition.files
       .filter((item) => isAuditExcludedStatus(item.status))
       .map((item) => item.path)
-      .includes("dist\\generated-cli.js"),
-    true,
-  );
+      .includes("dist\\generated-cli.js")).toBe(true);
 });
 
 test("buildCriticalFlowManifest links normalized related paths and dedupes duplicate surface entries", () => {
@@ -726,45 +645,31 @@ test("buildCriticalFlowManifest links normalized related paths and dedupes dupli
     (flow) => flow.entrypoints[0] === "src\\workers\\queueJob.ts",
   );
 
-  assert.equal(authFlows.length, 1);
-  assert.ok(authFlows[0].paths.includes("src\\lib\\session.ts"));
-  assert.ok(authFlows[0].concerns.includes("security"));
-  assert.ok(authFlows[0].concerns.includes("correctness"));
-  assert.deepEqual(authFlows[0].notes, [EXTRACTOR_HEURISTIC_NOTE]);
+  expect(authFlows.length).toBe(1);
+  expect(authFlows[0].paths.includes("src\\lib\\session.ts")).toBeTruthy();
+  expect(authFlows[0].concerns.includes("security")).toBeTruthy();
+  expect(authFlows[0].concerns.includes("correctness")).toBeTruthy();
+  expect(authFlows[0].notes).toEqual([EXTRACTOR_HEURISTIC_NOTE]);
 
-  assert.ok(queueFlow);
-  assert.ok(queueFlow.paths.includes("src\\workers\\retryTask.ts"));
-  assert.ok(queueFlow.concerns.includes("reliability"));
-  assert.ok(
-    flowManifest.flows.some(
+  expect(queueFlow).toBeTruthy();
+  expect(queueFlow.paths.includes("src\\workers\\retryTask.ts")).toBeTruthy();
+  expect(queueFlow.concerns.includes("reliability")).toBeTruthy();
+  expect(flowManifest.flows.some(
       (flow) => flow.entrypoints[0] === "src\\models\\invoice.ts",
-    ),
-  );
-  assert.equal(
-    flowManifest.flows.some(
+    )).toBeTruthy();
+  expect(flowManifest.flows.some(
       (flow) => flow.entrypoints[0] === "schemas\\audit_result.schema.json",
-    ),
-    false,
-  );
-  assert.equal(
-    flowManifest.flows.some(
+    )).toBe(false);
+  expect(flowManifest.flows.some(
       (flow) => flow.entrypoints[0] === "tests\\helpers\\jsonSchemaAssert.mjs",
-    ),
-    false,
-  );
-  assert.equal(
-    flowManifest.flows.some(
+    )).toBe(false);
+  expect(flowManifest.flows.some(
       (flow) => flow.entrypoints[0] === "tests\\schema-contracts.test.mjs",
-    ),
-    false,
-  );
-  assert.equal(
-    flowManifest.flows.some(
+    )).toBe(false);
+  expect(flowManifest.flows.some(
       (flow) => flow.entrypoints[0] === "examples\\session-config\\claude-code-model.json",
-    ),
-    false,
-  );
-  assert.equal(flowManifest.fallback_required, false);
+    )).toBe(false);
+  expect(flowManifest.fallback_required).toBe(false);
 });
 
 // Shared fixture for the three Chrome-extension tests below.
@@ -816,42 +721,31 @@ test("buildGraphBundle understands Chrome extension manifests and HTML resources
     edge.to,
     edge.kind,
   ]);
-  assert.ok(
-    references.some(
+  expect(references.some(
       ([from, to, kind]) =>
         from === "manifest.json" &&
         to === "service/main.js" &&
         kind === "chrome-extension-background-link",
-    ),
-  );
-  assert.ok(
-    references.some(
+    )).toBeTruthy();
+  expect(references.some(
       ([from, to, kind]) =>
         from === "manifest.json" &&
         to === "content/content-script.js" &&
         kind === "chrome-extension-content-script-link",
-    ),
-  );
-  assert.ok(
-    references.some(
+    )).toBeTruthy();
+  expect(references.some(
       ([from, to, kind]) =>
         from === "manifest.json" &&
         to === "content/sidebar.html" &&
         kind === "chrome-extension-ui-page-link",
-    ),
-  );
-  assert.ok(
-    references.some(
+    )).toBeTruthy();
+  expect(references.some(
       ([from, to, kind]) =>
         from === "content/sidebar.html" &&
         to === "content/panel.js" &&
         kind === "html-resource-link",
-    ),
-  );
-  assert.equal(
-    references.some(([, to]) => to === "bitmaps/logo-128.png"),
-    false,
-  );
+    )).toBeTruthy();
+  expect(references.some(([, to]) => to === "bitmaps/logo-128.png")).toBe(false);
 });
 
 test("buildSurfaceManifest understands Chrome extension manifests and HTML resources", () => {
@@ -862,19 +756,16 @@ test("buildSurfaceManifest understands Chrome extension manifests and HTML resou
   const surfaces = buildSurfaceManifest(repoManifest, disposition, {
     graphBundle: graph,
   }).surfaces;
-  assert.deepEqual(
-    surfaces.map((surface) => [
+  expect(surfaces.map((surface) => [
       surface.kind,
       surface.entrypoint,
       surface.exposure,
-    ]),
-    [
+    ])).toEqual([
       ["background", "download_worker/main.js", "local"],
       ["interface", "content/content-script.js", "network"],
       ["interface", "content/sidebar.html", "local"],
       ["background", "service/main.js", "local"],
-    ],
-  );
+    ]);
 });
 
 test("buildUnitManifest understands Chrome extension manifests", () => {
@@ -885,8 +776,8 @@ test("buildUnitManifest understands Chrome extension manifests", () => {
   const serviceUnit = unitManifest.units.find((unit) =>
     unit.files.includes("service/main.js"),
   );
-  assert.equal(serviceUnit?.kind, "extension_background");
-  assert.ok(serviceUnit?.required_lenses.includes("security"));
+  expect(serviceUnit?.kind).toBe("extension_background");
+  expect(serviceUnit?.required_lenses.includes("security")).toBeTruthy();
 });
 
 test("buildGraphBundle resolves code imports and literal path references", () => {
@@ -918,10 +809,10 @@ test("buildGraphBundle resolves code imports and literal path references", () =>
       edge.to === "src/lib/session.ts" &&
       edge.kind === "esm",
   );
-  assert.ok(importEdge);
-  assert.equal(importEdge.direction, "directed");
-  assert.equal(importEdge.confidence, 0.95);
-  assert.match(importEdge.reason, /Resolved esm specifier/);
+  expect(importEdge).toBeTruthy();
+  expect(importEdge.direction).toBe("directed");
+  expect(importEdge.confidence).toBe(0.95);
+  expect(importEdge.reason).toMatch(/Resolved esm specifier/);
 
   const repoReferenceEdge = graph.graphs.references.find(
     (edge) =>
@@ -929,10 +820,10 @@ test("buildGraphBundle resolves code imports and literal path references", () =>
       edge.to === "schemas/audit_result.schema.json" &&
       edge.kind === "repo-path-reference",
   );
-  assert.ok(repoReferenceEdge);
-  assert.equal(repoReferenceEdge.direction, "directed");
-  assert.equal(repoReferenceEdge.confidence, 0.72);
-  assert.match(repoReferenceEdge.reason, /repository path string literal/);
+  expect(repoReferenceEdge).toBeTruthy();
+  expect(repoReferenceEdge.direction).toBe("directed");
+  expect(repoReferenceEdge.confidence).toBe(0.72);
+  expect(repoReferenceEdge.reason).toMatch(/repository path string literal/);
 
   const relativeReferenceEdge = graph.graphs.references.find(
     (edge) =>
@@ -940,23 +831,17 @@ test("buildGraphBundle resolves code imports and literal path references", () =>
       edge.to === "src/lib/session.ts" &&
       edge.kind === "relative-string-reference",
   );
-  assert.ok(relativeReferenceEdge);
-  assert.equal(relativeReferenceEdge.direction, "directed");
-  assert.equal(relativeReferenceEdge.confidence, 0.82);
-  assert.match(relativeReferenceEdge.reason, /relative string literal/);
-  assert.equal(
-    graph.graphs.imports.some((edge) => edge.from === "node_modules/vendor/index.js"),
-    false,
-  );
-  assert.equal(
-    graph.graphs.references.some(
+  expect(relativeReferenceEdge).toBeTruthy();
+  expect(relativeReferenceEdge.direction).toBe("directed");
+  expect(relativeReferenceEdge.confidence).toBe(0.82);
+  expect(relativeReferenceEdge.reason).toMatch(/relative string literal/);
+  expect(graph.graphs.imports.some((edge) => edge.from === "node_modules/vendor/index.js")).toBe(false);
+  expect(graph.graphs.references.some(
       (edge) =>
         edge.from === "src/api/auth.ts" &&
         edge.to === "src/lib/session.ts" &&
         edge.kind === "relative-string-reference",
-    ),
-    false,
-  );
+    )).toBe(false);
 });
 
 test("buildGraphBundle maps TypeScript runtime js specifiers to source files", () => {
@@ -992,15 +877,12 @@ test("buildGraphBundle maps TypeScript runtime js specifiers to source files", (
         candidate.to === to &&
         candidate.kind === kind,
     );
-    assert.ok(edge, `expected ${kind} edge to ${to}`);
-    assert.equal(edge.confidence, 0.95);
-    assert.match(edge.reason, /Resolved/);
+    expect(edge, `expected ${kind} edge to ${to}`).toBeTruthy();
+    expect(edge.confidence).toBe(0.95);
+    expect(edge.reason).toMatch(/Resolved/);
   }
 
-  assert.equal(
-    graph.graphs.references.some((edge) => edge.from === "src/index.ts"),
-    false,
-  );
+  expect(graph.graphs.references.some((edge) => edge.from === "src/index.ts")).toBe(false);
 });
 
 test("buildGraphBundle resolves Python imports to local modules and packages", () => {
@@ -1039,9 +921,7 @@ test("buildGraphBundle resolves Python imports to local modules and packages", (
   const pythonImportEdges = graph.graphs.imports.filter((edge) =>
     ["python-import", "python-from-import"].includes(edge.kind),
   );
-  assert.deepEqual(
-    pythonImportEdges.map((edge) => [edge.from, edge.to, edge.kind]),
-    [
+  expect(pythonImportEdges.map((edge) => [edge.from, edge.to, edge.kind])).toEqual([
       [
         "services/billing/app/invoices.py",
         "services/billing/app/reports/daily.py",
@@ -1056,16 +936,13 @@ test("buildGraphBundle resolves Python imports to local modules and packages", (
       ["src/app/api.py", "src/app/handlers.py", "python-from-import"],
       ["src/app/api.py", "src/app/models.py", "python-from-import"],
       ["src/app/api.py", "src/app/services/auth.py", "python-import"],
-    ],
-  );
-  assert.ok(
-    pythonImportEdges.every(
+    ]);
+  expect(pythonImportEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.95 &&
         /Resolved Python import specifier/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle links deterministic test files to their source files", () => {
@@ -1085,26 +962,18 @@ test("buildGraphBundle links deterministic test files to their source files", ()
     (edge) => edge.kind === "test-source-link",
   );
 
-  assert.deepEqual(
-    testSourceEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(testSourceEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["src/api/auth.test.ts", "src/api/auth.ts"],
       ["src/lib/__tests__/session.spec.ts", "src/lib/session.ts"],
       ["tests/workers/queueJob.test.ts", "src/workers/queueJob.ts"],
-    ],
-  );
-  assert.ok(
-    testSourceEdges.every(
+    ]);
+  expect(testSourceEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.88 &&
         /Test path naming maps to source path/.test(edge.reason ?? ""),
-    ),
-  );
-  assert.equal(
-    testSourceEdges.some((edge) => edge.from === "tests/helpers/testHarness.ts"),
-    false,
-  );
+    )).toBeTruthy();
+  expect(testSourceEdges.some((edge) => edge.from === "tests/helpers/testHarness.ts")).toBe(false);
 });
 
 test("buildGraphBundle links pytest-style test files to Python source files", () => {
@@ -1124,20 +993,14 @@ test("buildGraphBundle links pytest-style test files to Python source files", ()
     (edge) => edge.kind === "test-source-link",
   );
 
-  assert.deepEqual(
-    testSourceEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(testSourceEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["src/app/services/auth_test.py", "src/app/services/auth.py"],
       ["src/app/tests/test_models.py", "src/app/models.py"],
       ["tests/app/test_api.py", "src/app/api.py"],
-    ],
-  );
-  assert.equal(
-    testSourceEdges.some(
+    ]);
+  expect(testSourceEdges.some(
       (edge) => edge.from === "tests/helpers/test_harness.py",
-    ),
-    false,
-  );
+    )).toBe(false);
 });
 
 test("buildGraphBundle imports analyzer ownership roots as graph references", () => {
@@ -1172,21 +1035,16 @@ test("buildGraphBundle imports analyzer ownership roots as graph references", ()
   const ownershipEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "analyzer-ownership-root-link",
   );
-  assert.deepEqual(
-    ownershipEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(ownershipEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["services/billing", "services/billing/api/invoices.py"],
       ["services/billing", "services/billing/store/invoices.py"],
-    ],
-  );
-  assert.ok(
-    ownershipEdges.every(
+    ]);
+  expect(ownershipEdges.every(
       (edge) =>
         edge.direction === "undirected" &&
         edge.confidence === 0.91 &&
         edge.reason === "Python package root contains these modules.",
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle extracts package entrypoints and route handler relationships", () => {
@@ -1231,59 +1089,44 @@ test("buildGraphBundle extracts package entrypoints and route handler relationsh
   const packageEntrypointEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "package-entrypoint-link",
   );
-  assert.deepEqual(
-    packageEntrypointEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(packageEntrypointEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["package.json", "src/cli.ts"],
       ["package.json", "src/handlers/auth.ts"],
-    ],
-  );
-  assert.ok(
-    packageEntrypointEdges.every(
+    ]);
+  expect(packageEntrypointEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.9 &&
         /Package manifest field/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 
   const packageScriptEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "package-script-link",
   );
-  assert.deepEqual(
-    packageScriptEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(packageScriptEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["package.json", "scripts/release-and-publish.mjs"],
       ["package.json", "scripts/smoke-linked-audit-code.mjs"],
-    ],
-  );
-  assert.ok(
-    packageScriptEdges.every(
+    ]);
+  expect(packageScriptEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.88 &&
         /Package script/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 
   const packageScriptSuiteEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "package-script-suite-link",
   );
-  assert.deepEqual(
-    packageScriptSuiteEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(packageScriptSuiteEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["scripts/release-and-publish.mjs", "scripts/run-mcp-server.mjs"],
       ["scripts/run-mcp-server.mjs", "scripts/smoke-linked-audit-code.mjs"],
-    ],
-  );
-  assert.ok(
-    packageScriptSuiteEdges.every(
+    ]);
+  expect(packageScriptSuiteEdges.every(
       (edge) =>
         edge.direction === "undirected" &&
         edge.confidence === 0.78 &&
         /Package script suite 'scripts'/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 
   const routeHandlerEdge = graph.graphs.calls.find(
     (edge) =>
@@ -1291,18 +1134,16 @@ test("buildGraphBundle extracts package entrypoints and route handler relationsh
       edge.to === "src/handlers/auth.ts" &&
       edge.kind === "route-handler-link",
   );
-  assert.ok(routeHandlerEdge);
-  assert.equal(routeHandlerEdge.direction, "directed");
-  assert.equal(routeHandlerEdge.confidence, 0.92);
-  assert.match(routeHandlerEdge.reason, /Route POST '\/login'/);
+  expect(routeHandlerEdge).toBeTruthy();
+  expect(routeHandlerEdge.direction).toBe("directed");
+  expect(routeHandlerEdge.confidence).toBe(0.92);
+  expect(routeHandlerEdge.reason).toMatch(/Route POST '\/login'/);
 
-  assert.deepEqual(
-    graph.graphs.routes.filter((route) =>
+  expect(graph.graphs.routes.filter((route) =>
       ["src/handlers/auth.ts", "src/app/api/health/route.ts"].includes(
         route.handler,
       ),
-    ),
-    [
+    )).toEqual([
       {
         path: "/api/health",
         handler: "src/app/api/health/route.ts",
@@ -1313,8 +1154,7 @@ test("buildGraphBundle extracts package entrypoints and route handler relationsh
         handler: "src/handlers/auth.ts",
         method: "POST",
       },
-    ],
-  );
+    ]);
 });
 
 test("buildGraphBundle extracts JSON Schema refs and bounded suite links", () => {
@@ -1350,9 +1190,7 @@ test("buildGraphBundle extracts JSON Schema refs and bounded suite links", () =>
   const schemaRefs = graph.graphs.references.filter(
     (edge) => edge.kind === "json-schema-ref",
   );
-  assert.deepEqual(
-    schemaRefs.map((edge) => [edge.from, edge.to]),
-    [
+  expect(schemaRefs.map((edge) => [edge.from, edge.to])).toEqual([
       [
         "schemas/remediation_plan.schema.json",
         "schemas/finding.schema.json",
@@ -1361,23 +1199,18 @@ test("buildGraphBundle extracts JSON Schema refs and bounded suite links", () =>
         "schemas/remediation_plan.schema.json",
         "schemas/remediation_block.schema.json",
       ],
-    ],
-  );
-  assert.ok(
-    schemaRefs.every(
+    ]);
+  expect(schemaRefs.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.93 &&
         /JSON Schema \$ref/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 
   const schemaSuiteEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "schema-suite-link",
   );
-  assert.deepEqual(
-    schemaSuiteEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(schemaSuiteEdges.map((edge) => [edge.from, edge.to])).toEqual([
       [
         "schemas/finding.schema.json",
         "schemas/remediation_block.schema.json",
@@ -1386,30 +1219,24 @@ test("buildGraphBundle extracts JSON Schema refs and bounded suite links", () =>
         "schemas/remediation_block.schema.json",
         "schemas/remediation_plan.schema.json",
       ],
-    ],
-  );
-  assert.ok(
-    schemaSuiteEdges.every(
+    ]);
+  expect(schemaSuiteEdges.every(
       (edge) =>
         edge.direction === "undirected" &&
         edge.confidence === 0.78 &&
         /JSON Schema suite 'schemas'/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 
-  assert.deepEqual(
-    graph.graphs.references
+  expect(graph.graphs.references
       .filter((edge) => edge.kind === "github-workflow-suite-link")
-      .map((edge) => [edge.from, edge.to, edge.direction, edge.confidence]),
-    [
+      .map((edge) => [edge.from, edge.to, edge.direction, edge.confidence])).toEqual([
       [
         ".github/workflows/ci.yml",
         ".github/workflows/publish-package.yml",
         "undirected",
         0.78,
       ],
-    ],
-  );
+    ]);
 });
 
 test("buildGraphBundle links schema contract tests to exact schema files", () => {
@@ -1435,21 +1262,16 @@ test("buildGraphBundle links schema contract tests to exact schema files", () =>
   const schemaTestEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "schema-contract-test-link",
   );
-  assert.deepEqual(
-    schemaTestEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(schemaTestEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["tests/schema-contracts.test.ts", "schemas/finding.schema.json"],
       ["tests/schema-contracts.test.ts", "schemas/remediation_plan.schema.json"],
-    ],
-  );
-  assert.ok(
-    schemaTestEdges.every(
+    ]);
+  expect(schemaTestEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.86 &&
         /Schema contract test references/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle links bounded TypeScript type contract suites", () => {
@@ -1473,21 +1295,16 @@ test("buildGraphBundle links bounded TypeScript type contract suites", () => {
   const typeSuiteEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "typescript-type-suite-link",
   );
-  assert.deepEqual(
-    typeSuiteEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(typeSuiteEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["src/types/auditState.ts", "src/types/runLedger.ts"],
       ["src/types/runLedger.ts", "src/types/sessionConfig.ts"],
-    ],
-  );
-  assert.ok(
-    typeSuiteEdges.every(
+    ]);
+  expect(typeSuiteEdges.every(
       (edge) =>
         edge.direction === "undirected" &&
         edge.confidence === 0.78 &&
         /TypeScript type contract suite 'src\/types'/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle extracts workspace package manifest links", () => {
@@ -1512,20 +1329,15 @@ test("buildGraphBundle extracts workspace package manifest links", () => {
   const workspaceEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "workspace-package-link",
   );
-  assert.deepEqual(
-    workspaceEdges.map((edge) => [edge.from, edge.to]),
-    [["package.json", "packages/auth/package.json"]],
-  );
-  assert.ok(
-    workspaceEdges.every(
+  expect(workspaceEdges.map((edge) => [edge.from, edge.to])).toEqual([["package.json", "packages/auth/package.json"]]);
+  expect(workspaceEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.86 &&
         /Workspace pattern 'packages\/\*' includes package manifest/.test(
           edge.reason ?? "",
         ),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle extracts pnpm workspace package manifest links", () => {
@@ -1556,21 +1368,16 @@ test("buildGraphBundle extracts pnpm workspace package manifest links", () => {
   const workspaceEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "workspace-package-link",
   );
-  assert.deepEqual(
-    workspaceEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(workspaceEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["pnpm-workspace.yaml", "packages/auth/package.json"],
       ["pnpm-workspace.yaml", "tools/migration/package.json"],
-    ],
-  );
-  assert.ok(
-    workspaceEdges.every(
+    ]);
+  expect(workspaceEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.86 &&
         /Workspace pattern/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle extracts TypeScript project reference links", () => {
@@ -1602,21 +1409,16 @@ test("buildGraphBundle extracts TypeScript project reference links", () => {
   const projectEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "typescript-project-reference-link",
   );
-  assert.deepEqual(
-    projectEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(projectEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["tsconfig.json", "packages/auth/tsconfig.json"],
       ["tsconfig.json", "packages/billing/tsconfig.build.json"],
-    ],
-  );
-  assert.ok(
-    projectEdges.every(
+    ]);
+  expect(projectEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.87 &&
         /TypeScript project reference/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle extracts Go workspace module links", () => {
@@ -1649,22 +1451,17 @@ test("buildGraphBundle extracts Go workspace module links", () => {
   const moduleEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "go-workspace-module-link",
   );
-  assert.deepEqual(
-    moduleEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(moduleEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["go.work", "services/auth/go.mod"],
       ["go.work", "services/billing/go.mod"],
       ["go.work", "tools/migration/go.mod"],
-    ],
-  );
-  assert.ok(
-    moduleEdges.every(
+    ]);
+  expect(moduleEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.87 &&
         /Go workspace use directive/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle extracts Cargo workspace member links", () => {
@@ -1698,21 +1495,16 @@ test("buildGraphBundle extracts Cargo workspace member links", () => {
   const memberEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "cargo-workspace-member-link",
   );
-  assert.deepEqual(
-    memberEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(memberEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["Cargo.toml", "crates/auth/Cargo.toml"],
       ["Cargo.toml", "tools/xtask/Cargo.toml"],
-    ],
-  );
-  assert.ok(
-    memberEdges.every(
+    ]);
+  expect(memberEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.87 &&
         /Cargo workspace pattern/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle extracts Maven reactor module links", () => {
@@ -1746,22 +1538,17 @@ test("buildGraphBundle extracts Maven reactor module links", () => {
   const moduleEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "maven-module-link",
   );
-  assert.deepEqual(
-    moduleEdges.map((edge) => [edge.from, edge.to]),
-    [
+  expect(moduleEdges.map((edge) => [edge.from, edge.to])).toEqual([
       ["pom.xml", "services/auth/pom.xml"],
       ["pom.xml", "services/billing/pom.xml"],
       ["pom.xml", "tools/migration/pom.xml"],
-    ],
-  );
-  assert.ok(
-    moduleEdges.every(
+    ]);
+  expect(moduleEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.87 &&
         /Maven module/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle links pytest conftest to Python files in its scope directory", () => {
@@ -1781,24 +1568,19 @@ test("buildGraphBundle links pytest conftest to Python files in its scope direct
     (edge) => edge.kind === "conftest-link",
   );
 
-  assert.deepEqual(
-    conftestEdges.map((edge) => [edge.from, edge.to]).sort(),
-    [
+  expect(conftestEdges.map((edge) => [edge.from, edge.to]).sort()).toEqual([
       ["tests/conftest.py", "tests/integration/test_pipeline.py"],
       ["tests/conftest.py", "tests/test_module.py"],
       ["tests/conftest.py", "tests/test_other.py"],
       ["tests/conftest.py", "tests/utils/helpers.py"],
       ["tests/integration/conftest.py", "tests/integration/test_pipeline.py"],
-    ].sort(),
-  );
-  assert.ok(
-    conftestEdges.every(
+    ].sort());
+  expect(conftestEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.85 &&
         /Pytest conftest/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle links pyproject.toml testpaths to conftest in test directory", () => {
@@ -1822,18 +1604,13 @@ test("buildGraphBundle links pyproject.toml testpaths to conftest in test direct
   const testpathEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "pyproject-testpaths-link",
   );
-  assert.deepEqual(
-    testpathEdges.map((edge) => [edge.from, edge.to]),
-    [["pyproject.toml", "tests/conftest.py"]],
-  );
-  assert.ok(
-    testpathEdges.every(
+  expect(testpathEdges.map((edge) => [edge.from, edge.to])).toEqual([["pyproject.toml", "tests/conftest.py"]]);
+  expect(testpathEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.85 &&
         /pyproject\.toml testpaths/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle emits yaml-path-reference-link edges for YAML files referencing config files by path", () => {
@@ -1861,21 +1638,16 @@ test("buildGraphBundle emits yaml-path-reference-link edges for YAML files refer
   const yamlEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "yaml-path-reference-link",
   );
-  assert.deepEqual(
-    yamlEdges.map((edge) => [edge.from, edge.to]).sort(),
-    [
+  expect(yamlEdges.map((edge) => [edge.from, edge.to]).sort()).toEqual([
       ["configs/benchmark.yaml", "configs/templates/cifar10_base.yaml"],
       ["configs/benchmark.yaml", "configs/templates/sst2_base.yaml"],
-    ].sort(),
-  );
-  assert.ok(
-    yamlEdges.every(
+    ].sort());
+  expect(yamlEdges.every(
       (edge) =>
         edge.direction === "directed" &&
         edge.confidence === 0.8 &&
         /YAML file references path/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle links Python files in test utility directories with python-test-util-suite-link", () => {
@@ -1894,22 +1666,16 @@ test("buildGraphBundle links Python files in test utility directories with pytho
     (edge) => edge.kind === "python-test-util-suite-link",
   );
 
-  assert.deepEqual(
-    utilEdges.map((edge) => [edge.from, edge.to]).sort(),
-    [
+  expect(utilEdges.map((edge) => [edge.from, edge.to]).sort(), "links files in tests/utils/ but not src/utils/").toEqual([
       ["tests/utils/assertions.py", "tests/utils/mocks.py"],
       ["tests/utils/mocks.py", "tests/utils/test_data.py"],
-    ].sort(),
-    "links files in tests/utils/ but not src/utils/",
-  );
-  assert.ok(
-    utilEdges.every(
+    ].sort());
+  expect(utilEdges.every(
       (edge) =>
         edge.direction === "undirected" &&
         edge.confidence === 0.72 &&
         /Python test utility/.test(edge.reason ?? ""),
-    ),
-  );
+    )).toBeTruthy();
 });
 
 test("buildGraphBundle python-test-util-suite-link matches helpers/ and support/ in test directories", () => {
@@ -1928,21 +1694,11 @@ test("buildGraphBundle python-test-util-suite-link matches helpers/ and support/
   );
 
   const edgePairs = utilEdges.map((edge) => [edge.from, edge.to]).sort();
-  assert.ok(
-    edgePairs.some(([f, t]) => f === "tests/helpers/fixtures.py" && t === "tests/helpers/builders.py") ||
-    edgePairs.some(([f, t]) => f === "tests/helpers/builders.py" && t === "tests/helpers/fixtures.py"),
-    "links files in tests/helpers/",
-  );
-  assert.ok(
-    edgePairs.some(([f, t]) => f === "spec/support/matchers.py" && t === "spec/support/factories.py") ||
-    edgePairs.some(([f, t]) => f === "spec/support/factories.py" && t === "spec/support/matchers.py"),
-    "links files in spec/support/",
-  );
-  assert.equal(
-    utilEdges.filter((e) => e.from === "src/helpers/utils.py" || e.to === "src/helpers/utils.py").length,
-    0,
-    "does not link files in src/helpers/",
-  );
+  expect(edgePairs.some(([f, t]) => f === "tests/helpers/fixtures.py" && t === "tests/helpers/builders.py") ||
+    edgePairs.some(([f, t]) => f === "tests/helpers/builders.py" && t === "tests/helpers/fixtures.py"), "links files in tests/helpers/").toBeTruthy();
+  expect(edgePairs.some(([f, t]) => f === "spec/support/matchers.py" && t === "spec/support/factories.py") ||
+    edgePairs.some(([f, t]) => f === "spec/support/factories.py" && t === "spec/support/matchers.py"), "links files in spec/support/").toBeTruthy();
+  expect(utilEdges.filter((e) => e.from === "src/helpers/utils.py" || e.to === "src/helpers/utils.py").length, "does not link files in src/helpers/").toBe(0);
 });
 
 test("buildGraphBundle python-test-util-suite-link skips conftest.py and non-.py files", () => {
@@ -1958,7 +1714,7 @@ test("buildGraphBundle python-test-util-suite-link skips conftest.py and non-.py
     (edge) => edge.kind === "python-test-util-suite-link",
   );
 
-  assert.equal(utilEdges.length, 0, "single non-conftest .py file does not form a suite");
+  expect(utilEdges.length, "single non-conftest .py file does not form a suite").toBe(0);
 });
 
 test("buildGraphBundle yaml-path-reference-link does not match non-config paths or absolute URLs", () => {
@@ -1984,7 +1740,7 @@ test("buildGraphBundle yaml-path-reference-link does not match non-config paths 
   const yamlEdges = graph.graphs.references.filter(
     (edge) => edge.kind === "yaml-path-reference-link",
   );
-  assert.equal(yamlEdges.length, 0, "absolute URLs should not produce edges");
+  expect(yamlEdges.length, "absolute URLs should not produce edges").toBe(0);
 });
 
 test("isAuditArtifactPath matches only the exact segment", () => {
@@ -2001,9 +1757,9 @@ test("isAuditArtifactPath matches only the exact segment", () => {
   ];
 
   for (const path of positives) {
-    assert.equal(isAuditArtifactPath(normalizeExtractorPath(path)), true, path);
+    expect(isAuditArtifactPath(normalizeExtractorPath(path)), path).toBe(true);
   }
   for (const path of negatives) {
-    assert.equal(isAuditArtifactPath(normalizeExtractorPath(path)), false, path);
+    expect(isAuditArtifactPath(normalizeExtractorPath(path)), path).toBe(false);
   }
 });

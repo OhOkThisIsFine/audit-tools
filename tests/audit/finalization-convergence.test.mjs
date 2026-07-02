@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -89,16 +88,13 @@ test("finalization converges through the real persist/reload loop without oscill
         completedAt = i;
         break;
       }
-      assert.ok(
-        decision.selected_executor,
-        `iter ${i}: an executor should be selected (trail: ${trail.join(" -> ")})`,
-      );
+      expect(decision.selected_executor, `iter ${i}: an executor should be selected (trail: ${trail.join(" -> ")})`).toBeTruthy();
       trail.push(decision.selected_obligation);
 
       let res;
       if (decision.selected_executor === "agent" || decision.selected_executor === "rolling_dispatch_executor") {
         const results = resultsForPending(bundle);
-        assert.ok(results.length > 0, "agent/rolling_dispatch_executor handoff must have pending tasks to answer");
+        expect(results.length > 0, "agent/rolling_dispatch_executor handoff must have pending tasks to answer").toBeTruthy();
         res = await advanceAudit(bundle, {
           root,
           lineIndex: LINE_INDEX,
@@ -112,18 +108,12 @@ test("finalization converges through the real persist/reload loop without oscill
       await writeCoreArtifacts(artDir, res.updated_bundle, { prune: true });
     }
 
-    assert.ok(
-      completedAt >= 0,
-      `finalization must converge to complete within ${MAX_ITERS} iterations; trail: ${trail.join(" -> ")}`,
-    );
-    assert.ok(sawRuntimeTasks, "fixture should exercise runtime validation tasks");
+    expect(completedAt >= 0, `finalization must converge to complete within ${MAX_ITERS} iterations; trail: ${trail.join(" -> ")}`).toBeTruthy();
+    expect(sawRuntimeTasks, "fixture should exercise runtime validation tasks").toBeTruthy();
 
     const firstSynthesis = trail.indexOf("synthesis_current");
-    assert.ok(firstSynthesis >= 0, `synthesis should run; trail: ${trail.join(" -> ")}`);
-    assert.ok(
-      !trail.slice(firstSynthesis).includes("planning_artifacts"),
-      `planning must not re-run after synthesis; trail: ${trail.join(" -> ")}`,
-    );
+    expect(firstSynthesis >= 0, `synthesis should run; trail: ${trail.join(" -> ")}`).toBeTruthy();
+    expect(!trail.slice(firstSynthesis).includes("planning_artifacts"), `planning must not re-run after synthesis; trail: ${trail.join(" -> ")}`).toBeTruthy();
 
     // Every persisted artifact must survive a reload with an identical content
     // hash — a round-trip-unstable artifact perpetually re-stales its downstream.
@@ -133,11 +123,7 @@ test("finalization converges through the real persist/reload loop without oscill
       const mem = lastUpdated?.[key];
       const disk = reloaded[key];
       if ((mem ?? null) === null && (disk ?? null) === null) continue;
-      assert.equal(
-        mem == null ? "ABSENT" : hashArtifactValue(fileName, mem),
-        disk == null ? "ABSENT" : hashArtifactValue(fileName, disk),
-        `${fileName} must round-trip identically across persist/reload`,
-      );
+      expect(mem == null ? "ABSENT" : hashArtifactValue(fileName, mem), `${fileName} must round-trip identically across persist/reload`).toBe(disk == null ? "ABSENT" : hashArtifactValue(fileName, disk));
     }
   });
 });
@@ -151,15 +137,15 @@ test("writeCoreArtifacts prunes cleared artifacts only when asked", async () => 
       repo_manifest: repoManifest,
       audit_report: "# Report\n",
     });
-    assert.equal((await loadArtifactBundle(dir)).audit_report, "# Report\n");
+    expect((await loadArtifactBundle(dir)).audit_report).toBe("# Report\n");
 
     // Default (no prune): a cleared artifact lingers on disk.
     await writeCoreArtifacts(dir, { repo_manifest: repoManifest });
-    assert.equal((await loadArtifactBundle(dir)).audit_report, "# Report\n");
+    expect((await loadArtifactBundle(dir)).audit_report).toBe("# Report\n");
 
     // prune: the cleared artifact is removed; pruning a missing file is a no-op.
     await writeCoreArtifacts(dir, { repo_manifest: repoManifest }, { prune: true });
-    assert.equal((await loadArtifactBundle(dir)).audit_report, undefined);
+    expect((await loadArtifactBundle(dir)).audit_report).toBe(undefined);
     await writeCoreArtifacts(dir, { repo_manifest: repoManifest }, { prune: true });
   });
 });
@@ -169,9 +155,9 @@ test("writeCoreArtifacts prunes cleared artifacts only when asked", async () => 
 // re-stales coverage_matrix → planning.
 test("synthesis renders findings without rewriting or materializing audit_results", () => {
   const noResults = runSynthesisExecutor({ coverage_matrix: { files: [] } }, undefined);
-  assert.equal(noResults.updated.audit_results, undefined);
-  assert.ok(!noResults.artifacts_written.includes("audit_results.jsonl"));
-  assert.ok(noResults.artifacts_written.includes("audit-report.md"));
+  expect(noResults.updated.audit_results).toBe(undefined);
+  expect(!noResults.artifacts_written.includes("audit_results.jsonl")).toBeTruthy();
+  expect(noResults.artifacts_written.includes("audit-report.md")).toBeTruthy();
 
   const ingested = [
     { task_id: "u:security", unit_id: "u", pass_id: "p", lens: "security", file_coverage: [], findings: [] },
@@ -180,7 +166,7 @@ test("synthesis renders findings without rewriting or materializing audit_result
     { coverage_matrix: { files: [] }, audit_results: ingested },
     undefined,
   );
-  assert.equal(withResults.updated.audit_results, ingested);
+  expect(withResults.updated.audit_results).toBe(ingested);
 });
 
 // Fix: a rebuilt artifact's wall-clock generated_at is provenance, not content;
@@ -188,15 +174,8 @@ test("synthesis renders findings without rewriting or materializing audit_result
 // perpetually re-stales downstreams).
 test("metadata content hash ignores generated_at for rebuilt timestamped artifacts", () => {
   for (const name of ["audit_plan_metrics.json", "design_assessment.json"]) {
-    assert.equal(
-      hashArtifactValue(name, { generated_at: "2026-01-01T00:00:00Z", data: 1 }),
-      hashArtifactValue(name, { generated_at: "2026-12-31T23:59:59Z", data: 1 }),
-      `${name} hash should ignore generated_at`,
-    );
+    expect(hashArtifactValue(name, { generated_at: "2026-01-01T00:00:00Z", data: 1 }), `${name} hash should ignore generated_at`).toBe(hashArtifactValue(name, { generated_at: "2026-12-31T23:59:59Z", data: 1 }));
   }
   // coverage_matrix is intentionally NOT stripped (its timestamp is content).
-  assert.notEqual(
-    hashArtifactValue("coverage_matrix.json", { generated_at: "a", files: [] }),
-    hashArtifactValue("coverage_matrix.json", { generated_at: "b", files: [] }),
-  );
+  expect(hashArtifactValue("coverage_matrix.json", { generated_at: "a", files: [] })).not.toBe(hashArtifactValue("coverage_matrix.json", { generated_at: "b", files: [] }));
 });

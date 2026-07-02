@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -84,38 +84,22 @@ test("default executor branch emits executor_end log event and returns progress_
     });
 
     // Return value should indicate no progress was made.
-    assert.equal(result.progress_made, false, "progress_made should be false");
+    expect(result.progress_made, "progress_made should be false").toBe(false);
 
     // Run log must contain an executor_end event for the unrecognized executor.
     const lines = (await readFile(logPath, "utf8")).trim().split("\n");
     const events = lines.map((line) => JSON.parse(line));
 
     const executorEndEvents = events.filter((e) => e.kind === "executor_end");
-    assert.ok(
-      executorEndEvents.length > 0,
-      "should emit at least one executor_end event",
-    );
+    expect(executorEndEvents.length > 0, "should emit at least one executor_end event").toBeTruthy();
     const endEvent = executorEndEvents[0];
-    assert.equal(
-      endEvent.note,
-      "not_a_real_executor",
-      "executor_end note should contain the unrecognized executor name",
-    );
-    assert.ok(
-      typeof endEvent.duration_ms === "number",
-      "executor_end should include a numeric duration_ms",
-    );
+    expect(endEvent.note, "executor_end note should contain the unrecognized executor name").toBe("not_a_real_executor");
+    expect(typeof endEvent.duration_ms === "number", "executor_end should include a numeric duration_ms").toBeTruthy();
 
     // An error event should also be emitted to signal the unknown executor.
     const errorEvents = events.filter((e) => e.kind === "error");
-    assert.ok(
-      errorEvents.length > 0,
-      "should emit an error event for the unrecognized executor",
-    );
-    assert.ok(
-      errorEvents[0].note.includes("not_a_real_executor"),
-      "error event note should include the unrecognized executor name",
-    );
+    expect(errorEvents.length > 0, "should emit an error event for the unrecognized executor").toBeTruthy();
+    expect(errorEvents[0].note.includes("not_a_real_executor"), "error event note should include the unrecognized executor name").toBeTruthy();
   } finally {
     await rm(logDir, { recursive: true, force: true });
   }
@@ -138,18 +122,12 @@ test("formatExecutorFailure preserves error cause chain", async () => {
     caught = err;
   }
 
-  assert.ok(caught instanceof Error, "thrown value should be an Error");
+  expect(caught instanceof Error, "thrown value should be an Error").toBeTruthy();
 
   // The wrapper message matches the formatExecutorFailure pattern.
-  assert.match(
-    caught.message,
-    /advanceAudit runtime_validation_update_executor failed while resolving/,
-  );
+  expect(caught.message).toMatch(/advanceAudit runtime_validation_update_executor failed while resolving/);
 
   // The cause chain is preserved and points to the original inner error.
-  assert.ok(caught.cause instanceof Error, "error.cause should be an Error");
-  assert.match(
-    caught.cause.message,
-    /advanceAudit runtime_validation_update_executor requires runtimeValidationUpdates/,
-  );
+  expect(caught.cause instanceof Error, "error.cause should be an Error").toBeTruthy();
+  expect(caught.cause.message).toMatch(/advanceAudit runtime_validation_update_executor requires runtimeValidationUpdates/);
 });

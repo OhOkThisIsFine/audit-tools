@@ -1,5 +1,4 @@
-import test, { afterEach } from "node:test";
-import assert from "node:assert/strict";
+import { test, afterEach, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
@@ -58,29 +57,29 @@ function okResponse(body) {
 // ---- parseProviderModelKey ----
 
 test("parseProviderModelKey splits provider/model and normalizes wildcard/empty", () => {
-  assert.deepEqual(parseProviderModelKey("claude-code/*"), { provider: "claude-code", account: null, model: null });
-  assert.deepEqual(parseProviderModelKey("claude-code/"), { provider: "claude-code", account: null, model: null });
-  assert.deepEqual(parseProviderModelKey("claude-code/claude-opus-4-8"), {
+  expect(parseProviderModelKey("claude-code/*")).toEqual({ provider: "claude-code", account: null, model: null });
+  expect(parseProviderModelKey("claude-code/")).toEqual({ provider: "claude-code", account: null, model: null });
+  expect(parseProviderModelKey("claude-code/claude-opus-4-8")).toEqual({
     provider: "claude-code",
     account: null,
     model: "claude-opus-4-8",
   });
-  assert.deepEqual(parseProviderModelKey("codex"), { provider: "codex", account: null, model: null });
+  expect(parseProviderModelKey("codex")).toEqual({ provider: "codex", account: null, model: null });
 });
 
 test("parseProviderModelKey extracts the account segment (provider#account/model)", () => {
-  assert.deepEqual(parseProviderModelKey("claude-code#org-abc/claude-opus-4-8"), {
+  expect(parseProviderModelKey("claude-code#org-abc/claude-opus-4-8")).toEqual({
     provider: "claude-code",
     account: "org-abc",
     model: "claude-opus-4-8",
   });
-  assert.deepEqual(parseProviderModelKey("claude-code#org-abc/*"), {
+  expect(parseProviderModelKey("claude-code#org-abc/*")).toEqual({
     provider: "claude-code",
     account: "org-abc",
     model: null,
   });
   // Model tail may itself contain '/': only provider+account live before the first '/'.
-  assert.deepEqual(parseProviderModelKey("openrouter#acctB/anthropic/claude-x"), {
+  expect(parseProviderModelKey("openrouter#acctB/anthropic/claude-x")).toEqual({
     provider: "openrouter",
     account: "acctB",
     model: "anthropic/claude-x",
@@ -91,16 +90,16 @@ test("parseProviderModelKey extracts the account segment (provider#account/model
 
 test("mapUsageToSnapshot picks the least-remaining window as a 0-1 fraction", () => {
   const snap = mapUsageToSnapshot(LIVE_USAGE, null, NOW);
-  assert.equal(snap.remaining_pct, 0.9); // five_hour util 10 → 90% remaining
-  assert.equal(snap.reset_at, "2026-06-17T04:30:00.038674+00:00");
-  assert.equal(snap.source, "claude-oauth");
-  assert.equal(snap.requests_remaining, null);
-  assert.equal(snap.captured_at, new Date(NOW).toISOString());
+  expect(snap.remaining_pct).toBe(0.9); // five_hour util 10 → 90% remaining
+  expect(snap.reset_at).toBe("2026-06-17T04:30:00.038674+00:00");
+  expect(snap.source).toBe("claude-oauth");
+  expect(snap.requests_remaining).toBe(null);
+  expect(snap.captured_at).toBe(new Date(NOW).toISOString());
 });
 
 test("mapUsageToSnapshot returns null when no window has a numeric utilization", () => {
-  assert.equal(mapUsageToSnapshot({ five_hour: null, seven_day: null, limits: [] }, null, NOW), null);
-  assert.equal(mapUsageToSnapshot({}, null, NOW), null);
+  expect(mapUsageToSnapshot({ five_hour: null, seven_day: null, limits: [] }, null, NOW)).toBe(null);
+  expect(mapUsageToSnapshot({}, null, NOW)).toBe(null);
 });
 
 test("mapUsageToSnapshot honors a per-model scoped limits[] entry when the model is known", () => {
@@ -114,10 +113,10 @@ test("mapUsageToSnapshot honors a per-model scoped limits[] entry when the model
     ],
   };
   const known = mapUsageToSnapshot(body, "claude-sonnet-4-6", NOW);
-  assert.equal(known.remaining_pct, 0.2); // scoped window binds at 80% util
+  expect(known.remaining_pct).toBe(0.2); // scoped window binds at 80% util
   // Unknown model → the scoped 80% window is skipped, five_hour(10) binds.
   const unknown = mapUsageToSnapshot(body, null, NOW);
-  assert.equal(unknown.remaining_pct, 0.9);
+  expect(unknown.remaining_pct).toBe(0.9);
 });
 
 test("mapUsageToSnapshot lets a high limits[] entry bind over top-level windows", () => {
@@ -126,13 +125,13 @@ test("mapUsageToSnapshot lets a high limits[] entry bind over top-level windows"
     limits: [{ percent: 95, resets_at: "r-crit", scope: null }],
   };
   const snap = mapUsageToSnapshot(body, null, NOW);
-  assert.equal(snap.remaining_pct, 0.05);
-  assert.equal(snap.reset_at, "r-crit");
+  expect(snap.remaining_pct).toBe(0.05);
+  expect(snap.reset_at).toBe("r-crit");
 });
 
 test("mapUsageToSnapshot clamps over-cap utilization to 0 remaining", () => {
   const snap = mapUsageToSnapshot({ five_hour: { utilization: 130, resets_at: "r" } }, null, NOW);
-  assert.equal(snap.remaining_pct, 0);
+  expect(snap.remaining_pct).toBe(0);
 });
 
 // ---- queryCurrentUsage ----
@@ -144,8 +143,8 @@ test("queryCurrentUsage returns null for a non-Claude provider without fetching"
     fetchImpl,
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("codex/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("codex/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("queryCurrentUsage maps a live 200 response and sends auth + beta headers", async () => {
@@ -156,12 +155,12 @@ test("queryCurrentUsage maps a live 200 response and sends auth + beta headers",
     now: () => NOW,
   });
   const snap = await src.queryCurrentUsage("claude-code/*");
-  assert.equal(snap.remaining_pct, 0.9);
-  assert.equal(snap.source, "claude-oauth");
-  assert.equal(fetchImpl.calls.length, 1);
+  expect(snap.remaining_pct).toBe(0.9);
+  expect(snap.source).toBe("claude-oauth");
+  expect(fetchImpl.calls.length).toBe(1);
   const headers = fetchImpl.calls[0].init.headers;
-  assert.equal(headers.Authorization, "Bearer tok-abc");
-  assert.equal(headers["anthropic-beta"], "oauth-2025-04-20");
+  expect(headers.Authorization).toBe("Bearer tok-abc");
+  expect(headers["anthropic-beta"]).toBe("oauth-2025-04-20");
 });
 
 test("queryCurrentUsage returns null when the credentials file is missing", async () => {
@@ -171,8 +170,8 @@ test("queryCurrentUsage returns null when the credentials file is missing", asyn
     fetchImpl,
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("queryCurrentUsage returns null for an expired token without fetching", async () => {
@@ -182,8 +181,8 @@ test("queryCurrentUsage returns null for an expired token without fetching", asy
     fetchImpl,
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("queryCurrentUsage degrades to null on a 401 response", async () => {
@@ -193,8 +192,8 @@ test("queryCurrentUsage degrades to null on a 401 response", async () => {
     fetchImpl,
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
-  assert.equal(fetchImpl.calls.length, 1);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(1);
 });
 
 test("queryCurrentUsage degrades to null when fetch throws", async () => {
@@ -204,7 +203,7 @@ test("queryCurrentUsage degrades to null when fetch throws", async () => {
     fetchImpl,
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
 });
 
 test("queryCurrentUsage caches within the TTL and refetches after it elapses", async () => {
@@ -219,10 +218,10 @@ test("queryCurrentUsage caches within the TTL and refetches after it elapses", a
   await src.queryCurrentUsage("claude-code/*");
   clock += 10_000; // within TTL
   await src.queryCurrentUsage("claude-code/*");
-  assert.equal(fetchImpl.calls.length, 1);
+  expect(fetchImpl.calls.length).toBe(1);
   clock += 60_000; // past TTL
   await src.queryCurrentUsage("claude-code/*");
-  assert.equal(fetchImpl.calls.length, 2);
+  expect(fetchImpl.calls.length).toBe(2);
 });
 
 test("queryCurrentUsage with the DEFAULT fetch makes no network call under a test runner", async () => {
@@ -232,7 +231,7 @@ test("queryCurrentUsage with the DEFAULT fetch makes no network call under a tes
     credentialsPath: writeCreds(validCreds()),
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
 });
 
 // ---- resolveAccountId (account discriminator for pool keys) ----
@@ -242,10 +241,10 @@ test("resolveAccountId reads organizationUuid from the credential, gated by prov
     credentialsPath: writeCreds({ ...validCreds(), organizationUuid: "org-xyz" }),
     readEnvToken: () => null,
   });
-  assert.equal(await src.resolveAccountId("claude-code/*"), "org-xyz");
-  assert.equal(await src.resolveAccountId("claude-code/some-model"), "org-xyz");
+  expect(await src.resolveAccountId("claude-code/*")).toBe("org-xyz");
+  expect(await src.resolveAccountId("claude-code/some-model")).toBe("org-xyz");
   // Not this source's provider → null (no cross-provider account leakage).
-  assert.equal(await src.resolveAccountId("codex/*"), null);
+  expect(await src.resolveAccountId("codex/*")).toBe(null);
 });
 
 test("resolveAccountId is null when the credential file has no organizationUuid / is absent", async () => {
@@ -253,12 +252,12 @@ test("resolveAccountId is null when the credential file has no organizationUuid 
     credentialsPath: writeCreds(validCreds()),
     readEnvToken: () => null,
   });
-  assert.equal(await noOrg.resolveAccountId("claude-code/*"), null);
+  expect(await noOrg.resolveAccountId("claude-code/*")).toBe(null);
   const absent = new ClaudeOAuthQuotaSource({
     credentialsPath: join(tmpdir(), "no-such-claude", ".credentials.json"),
     readEnvToken: () => "env-only",
   });
-  assert.equal(await absent.resolveAccountId("claude-code/*"), null);
+  expect(await absent.resolveAccountId("claude-code/*")).toBe(null);
 });
 
 test("resolveAccountId skips the DEFAULT credential path under a test runner (hermeticity)", async () => {
@@ -266,7 +265,7 @@ test("resolveAccountId skips the DEFAULT credential path under a test runner (he
   // runner this must NOT read the real machine credential, or pool ids would be
   // machine-dependent. An explicitly-injected path (above) is still honored.
   const def = new ClaudeOAuthQuotaSource({ readEnvToken: () => null });
-  assert.equal(await def.resolveAccountId("claude-code/*"), null);
+  expect(await def.resolveAccountId("claude-code/*")).toBe(null);
 });
 
 // ---- credential resolution: env handoff + refresh-on-expiry ----
@@ -301,8 +300,8 @@ test("CLAUDE_CODE_OAUTH_TOKEN short-circuits the file and probes with the env to
     now: () => NOW,
   });
   const snap = await src.queryCurrentUsage("claude-code/*");
-  assert.equal(snap.remaining_pct, 0.9);
-  assert.equal(fetchImpl.calls[0].init.headers.Authorization, "Bearer env-handoff-token");
+  expect(snap.remaining_pct).toBe(0.9);
+  expect(fetchImpl.calls[0].init.headers.Authorization).toBe("Bearer env-handoff-token");
 });
 
 test("an expired token is refreshed, the rotated creds are persisted, and /usage uses the new token", async () => {
@@ -310,8 +309,8 @@ test("an expired token is refreshed, the rotated creds are persisted, and /usage
   let usageAuth = null;
   const fetchImpl = routedFetch({
     onToken: (body) => {
-      assert.equal(body.grant_type, "refresh_token");
-      assert.equal(body.refresh_token, "rt-old");
+      expect(body.grant_type).toBe("refresh_token");
+      expect(body.refresh_token).toBe("rt-old");
       return okResponse({ access_token: "at-new", refresh_token: "rt-new", expires_in: 28800, scope: "user:inference" });
     },
     onUsage: (init) => {
@@ -321,13 +320,13 @@ test("an expired token is refreshed, the rotated creds are persisted, and /usage
   });
   const src = new ClaudeOAuthQuotaSource({ credentialsPath: credsPath, readEnvToken: () => null, fetchImpl, now: () => NOW });
   const snap = await src.queryCurrentUsage("claude-code/*");
-  assert.equal(snap.remaining_pct, 0.9);
-  assert.equal(usageAuth, "Bearer at-new");
+  expect(snap.remaining_pct).toBe(0.9);
+  expect(usageAuth).toBe("Bearer at-new");
   // Rotated credential persisted atomically (refresh token replaced, expiry advanced).
   const persisted = readCreds(credsPath).claudeAiOauth;
-  assert.equal(persisted.accessToken, "at-new");
-  assert.equal(persisted.refreshToken, "rt-new");
-  assert.equal(persisted.expiresAt, NOW + 28800 * 1000);
+  expect(persisted.accessToken).toBe("at-new");
+  expect(persisted.refreshToken).toBe("rt-new");
+  expect(persisted.expiresAt).toBe(NOW + 28800 * 1000);
 });
 
 test("a 401 on a file token forces one refresh + retry", async () => {
@@ -343,9 +342,9 @@ test("a 401 on a file token forces one refresh + retry", async () => {
   });
   const src = new ClaudeOAuthQuotaSource({ credentialsPath: credsPath, readEnvToken: () => null, fetchImpl, now: () => NOW });
   const snap = await src.queryCurrentUsage("claude-code/*");
-  assert.equal(snap.remaining_pct, 0.9);
-  assert.equal(usageCalls, 2); // stale 401, then retry with refreshed token
-  assert.equal(readCreds(credsPath).claudeAiOauth.accessToken, "at-fresh");
+  expect(snap.remaining_pct).toBe(0.9);
+  expect(usageCalls).toBe(2); // stale 401, then retry with refreshed token
+  expect(readCreds(credsPath).claudeAiOauth.accessToken).toBe("at-fresh");
 });
 
 test("a failed refresh grant degrades to null and leaves creds untouched", async () => {
@@ -355,9 +354,9 @@ test("a failed refresh grant degrades to null and leaves creds untouched", async
     onUsage: () => okResponse(LIVE_USAGE),
   });
   const src = new ClaudeOAuthQuotaSource({ credentialsPath: credsPath, readEnvToken: () => null, fetchImpl, now: () => NOW });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
   // Original (expired) creds are NOT clobbered by a failed refresh.
-  assert.equal(readCreds(credsPath).claudeAiOauth.refreshToken, "rt-old");
+  expect(readCreds(credsPath).claudeAiOauth.refreshToken).toBe("rt-old");
 });
 
 test("an expired token with no refresh token degrades without any network call", async () => {
@@ -368,8 +367,8 @@ test("an expired token with no refresh token degrades without any network call",
     fetchImpl,
     now: () => NOW,
   });
-  assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
-  assert.equal(fetchImpl.calls.length, 0);
+  expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
+  expect(fetchImpl.calls.length).toBe(0);
 });
 
 test("AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA disables the source even with an injected fetch", async () => {
@@ -382,8 +381,8 @@ test("AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA disables the source even with an injec
       fetchImpl,
       now: () => NOW,
     });
-    assert.equal(await src.queryCurrentUsage("claude-code/*"), null);
-    assert.equal(fetchImpl.calls.length, 0);
+    expect(await src.queryCurrentUsage("claude-code/*")).toBe(null);
+    expect(fetchImpl.calls.length).toBe(0);
   } finally {
     if (prev === undefined) delete process.env.AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA;
     else process.env.AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA = prev;

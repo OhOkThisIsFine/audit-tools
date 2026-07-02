@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   nextStepCommand,
   mergeAndIngestCommand,
@@ -19,14 +18,8 @@ function withInvocation(value, fn) {
 
 test("continuation commands default to the audit-code bin when no invocation hint is set", () => {
   withInvocation(undefined, () => {
-    assert.match(
-      nextStepCommand("/repo", "/repo/.audit-tools/audit"),
-      /^audit-code next-step --root \/repo --artifacts-dir /,
-    );
-    assert.match(
-      mergeAndIngestCommand("/repo/.audit-tools/audit", "run-1"),
-      /^audit-code merge-and-ingest --artifacts-dir .* --run-id run-1$/,
-    );
+    expect(nextStepCommand("/repo", "/repo/.audit-tools/audit")).toMatch(/^audit-code next-step --root \/repo --artifacts-dir /);
+    expect(mergeAndIngestCommand("/repo/.audit-tools/audit", "run-1")).toMatch(/^audit-code merge-and-ingest --artifacts-dir .* --run-id run-1$/);
   });
 });
 
@@ -35,13 +28,10 @@ test("continuation commands honor AUDIT_CODE_INVOCATION (source-checkout dogfood
     JSON.stringify(["node", "C:/Code/audit-tools/packages/audit-code/audit-code.mjs"]),
     () => {
       const cmd = nextStepCommand("/repo", "/repo/.audit-tools/audit");
-      assert.match(cmd, /^node /);
-      assert.match(cmd, /audit-code\.mjs next-step/);
-      assert.doesNotMatch(cmd, /^audit-code /);
-      assert.match(
-        mergeAndIngestCommand("/repo/.audit-tools/audit", "run-1"),
-        /^node .*audit-code\.mjs merge-and-ingest /,
-      );
+      expect(cmd).toMatch(/^node /);
+      expect(cmd).toMatch(/audit-code\.mjs next-step/);
+      expect(cmd).not.toMatch(/^audit-code /);
+      expect(mergeAndIngestCommand("/repo/.audit-tools/audit", "run-1")).toMatch(/^node .*audit-code\.mjs merge-and-ingest /);
     },
   );
 });
@@ -55,26 +45,23 @@ test("continuation commands emit POSIX separators so Windows backslash paths sur
       const merge = mergeAndIngestCommand("C:\\Code\\repo\\.audit-tools/audit", "run-1");
       // No backslash may survive: a bash host treats `\` as an escape and would
       // collapse `node C:\a\b.mjs` to `node C:ab.mjs`.
-      assert.doesNotMatch(next, /\\/);
-      assert.doesNotMatch(merge, /\\/);
-      assert.match(
-        next,
-        /^node C:\/Code\/audit-tools\/packages\/audit-code\/audit-code\.mjs next-step --root C:\/Code\/repo --artifacts-dir C:\/Code\/repo\/\.audit-tools\/audit$/,
-      );
-      assert.match(merge, /--run-id run-1$/);
+      expect(next).not.toMatch(/\\/);
+      expect(merge).not.toMatch(/\\/);
+      expect(next).toMatch(/^node C:\/Code\/audit-tools\/packages\/audit-code\/audit-code\.mjs next-step --root C:\/Code\/repo --artifacts-dir C:\/Code\/repo\/\.audit-tools\/audit$/);
+      expect(merge).toMatch(/--run-id run-1$/);
     },
   );
 });
 
 test("malformed AUDIT_CODE_INVOCATION falls back to the audit-code bin", () => {
   withInvocation("not-json", () => {
-    assert.match(nextStepCommand("/repo", "/a"), /^audit-code next-step /);
+    expect(nextStepCommand("/repo", "/a")).toMatch(/^audit-code next-step /);
   });
   // Non-array JSON and empty array are also rejected.
   withInvocation("{}", () => {
-    assert.match(nextStepCommand("/repo", "/a"), /^audit-code /);
+    expect(nextStepCommand("/repo", "/a")).toMatch(/^audit-code /);
   });
   withInvocation("[]", () => {
-    assert.match(nextStepCommand("/repo", "/a"), /^audit-code /);
+    expect(nextStepCommand("/repo", "/a")).toMatch(/^audit-code /);
   });
 });

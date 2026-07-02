@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { scheduleWave } = await import("../../src/shared/quota/scheduler.ts");
 
@@ -38,8 +37,8 @@ test("rpm cap: scheduleWave respects requests_per_minute limit", () => {
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 4, "max_concurrent should be capped by rpm");
-  assert.equal(schedule.binding_cap, "rpm");
+  expect(schedule.max_concurrent, "max_concurrent should be capped by rpm").toBe(4);
+  expect(schedule.binding_cap).toBe("rpm");
 });
 
 test("tpm cap: scheduleWave respects input_tokens_per_minute limit", () => {
@@ -63,8 +62,8 @@ test("tpm cap: scheduleWave respects input_tokens_per_minute limit", () => {
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 5, "max_concurrent should be capped by tpm");
-  assert.equal(schedule.binding_cap, "tpm");
+  expect(schedule.max_concurrent, "max_concurrent should be capped by tpm").toBe(5);
+  expect(schedule.binding_cap).toBe("tpm");
 });
 
 test("learned cap: scheduleWave uses quotaStateEntry when provided", () => {
@@ -86,8 +85,8 @@ test("learned cap: scheduleWave uses quotaStateEntry when provided", () => {
     quotaStateEntry,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 1, "max_concurrent should be capped by learned history");
-  assert.equal(schedule.binding_cap, "learned");
+  expect(schedule.max_concurrent, "max_concurrent should be capped by learned history").toBe(1);
+  expect(schedule.binding_cap).toBe("learned");
 });
 
 test("no invented cap: scheduleWave leaves the wave uncapped with no learned/host/rate/budget signal", () => {
@@ -104,8 +103,8 @@ test("no invented cap: scheduleWave leaves the wave uncapped with no learned/hos
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 20, "wave should be uncapped");
-  assert.equal(schedule.binding_cap, "none");
+  expect(schedule.max_concurrent, "wave should be uncapped").toBe(20);
+  expect(schedule.binding_cap).toBe("none");
 });
 
 test("no invented cap: an unconfigured local provider is also uncapped", () => {
@@ -119,8 +118,8 @@ test("no invented cap: an unconfigured local provider is also uncapped", () => {
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 20);
-  assert.equal(schedule.binding_cap, "none");
+  expect(schedule.max_concurrent).toBe(20);
+  expect(schedule.binding_cap).toBe("none");
 });
 
 // ── Discovered-capability context window (N5a) ───────────────────────────────
@@ -139,9 +138,9 @@ test("discovered capability: context window overrides the 32k default for a null
     hostConcurrencyLimit: null,
     discoveredLimits: { context_tokens: 200_000, output_tokens: 32_000 },
   });
-  assert.equal(schedule.resolved_limits.context_tokens, 200_000);
-  assert.equal(schedule.resolved_limits.output_tokens, 32_000);
-  assert.equal(schedule.source, "discovered_capability");
+  expect(schedule.resolved_limits.context_tokens).toBe(200_000);
+  expect(schedule.resolved_limits.output_tokens).toBe(32_000);
+  expect(schedule.source).toBe("discovered_capability");
 });
 
 test("discovered capability: explicit per-model config still wins over discovery", () => {
@@ -161,8 +160,8 @@ test("discovered capability: explicit per-model config still wins over discovery
     hostConcurrencyLimit: null,
     discoveredLimits: { context_tokens: 200_000, output_tokens: 32_000 },
   });
-  assert.equal(schedule.resolved_limits.context_tokens, 128_000);
-  assert.equal(schedule.source, "explicit_config");
+  expect(schedule.resolved_limits.context_tokens).toBe(128_000);
+  expect(schedule.source).toBe("explicit_config");
 });
 
 test("discovered capability: absent context window leaves resolution unchanged", () => {
@@ -177,8 +176,8 @@ test("discovered capability: absent context window leaves resolution unchanged",
     hostConcurrencyLimit: null,
     discoveredLimits: { requests_per_minute: 10 },
   });
-  assert.equal(schedule.resolved_limits.context_tokens, 32_000);
-  assert.notEqual(schedule.source, "discovered_capability");
+  expect(schedule.resolved_limits.context_tokens).toBe(32_000);
+  expect(schedule.source).not.toBe("discovered_capability");
 });
 
 // ── binding_cap precedence (TST-bf201bf7) ─────────────────────────────────────
@@ -204,8 +203,8 @@ test("host_concurrency cap: a tighter host ceiling overrides a looser quota cap 
     quotaStateEntry: null,
     hostConcurrencyLimit: { active_subagents: 2 },
   });
-  assert.equal(schedule.max_concurrent, 2, "host ceiling (2) must override the looser rpm cap (8)");
-  assert.equal(schedule.binding_cap, "host_concurrency");
+  expect(schedule.max_concurrent, "host ceiling (2) must override the looser rpm cap (8)").toBe(2);
+  expect(schedule.binding_cap).toBe("host_concurrency");
 });
 
 test("host_concurrency cap: a looser host ceiling does NOT override a tighter quota cap", () => {
@@ -225,8 +224,8 @@ test("host_concurrency cap: a looser host ceiling does NOT override a tighter qu
     quotaStateEntry: null,
     hostConcurrencyLimit: { active_subagents: 10 },
   });
-  assert.equal(schedule.max_concurrent, 3, "rpm (3) is tighter than the host ceiling (10)");
-  assert.equal(schedule.binding_cap, "rpm");
+  expect(schedule.max_concurrent, "rpm (3) is tighter than the host ceiling (10)").toBe(3);
+  expect(schedule.binding_cap).toBe("rpm");
 });
 
 test("cooldown cap: an active cooldown throttles to one slot and short-circuits cap logic", () => {
@@ -246,9 +245,9 @@ test("cooldown cap: an active cooldown throttles to one slot and short-circuits 
     quotaStateEntry: { updated_at: new Date().toISOString(), buckets: {}, cooldown_until: future, last_429_at: future },
     hostConcurrencyLimit: null,
   });
-  assert.equal(schedule.max_concurrent, 1, "an active cooldown caps the wave at a single slot");
-  assert.equal(schedule.binding_cap, "cooldown");
-  assert.equal(schedule.cooldown_until, future);
+  expect(schedule.max_concurrent, "an active cooldown caps the wave at a single slot").toBe(1);
+  expect(schedule.binding_cap).toBe("cooldown");
+  expect(schedule.cooldown_until).toBe(future);
 });
 
 test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'", () => {
@@ -260,8 +259,8 @@ test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'"
     quotaStateEntry: null,
     hostConcurrencyLimit: { active_subagents: 2 },
   });
-  assert.equal(capped.max_concurrent, 2);
-  assert.equal(capped.binding_cap, "host_concurrency");
+  expect(capped.max_concurrent).toBe(2);
+  expect(capped.binding_cap).toBe("host_concurrency");
 
   const uncapped = scheduleWave({
     providerName: "claude-code",
@@ -271,6 +270,6 @@ test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'"
     quotaStateEntry: null,
     hostConcurrencyLimit: null,
   });
-  assert.equal(uncapped.max_concurrent, 6);
-  assert.equal(uncapped.binding_cap, "none");
+  expect(uncapped.max_concurrent).toBe(6);
+  expect(uncapped.binding_cap).toBe("none");
 });

@@ -1,11 +1,10 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, describe, it, expect } from "vitest";
 
 const { updateAuditTaskStatuses, partitionOrphanedAuditResults } = await import("../../src/audit/orchestrator/resultIngestion.ts");
 
 test("updateAuditTaskStatuses — undefined tasks returns undefined", () => {
   const result = updateAuditTaskStatuses(undefined, []);
-  assert.equal(result, undefined);
+  expect(result).toBe(undefined);
 });
 
 test("updateAuditTaskStatuses — matching tasks are marked complete", () => {
@@ -20,72 +19,72 @@ test("updateAuditTaskStatuses — matching tasks are marked complete", () => {
   const t1 = updated.find((t) => t.task_id === "t1");
   const t2 = updated.find((t) => t.task_id === "t2");
 
-  assert.equal(t1.status, "complete");
+  expect(t1.status).toBe("complete");
   // t2 is not in results — keeps existing status
-  assert.equal(t2.status, "pending");
+  expect(t2.status).toBe("pending");
 });
 
-test("updateAuditTaskStatuses — completed_at is preserved when already set", async (t) => {
+describe("updateAuditTaskStatuses — completed_at is preserved when already set", () => {
   const existingTimestamp = "2025-01-01T00:00:00.000Z";
 
-  await t.test("existing completed_at is NOT overwritten", () => {
+  it("existing completed_at is NOT overwritten", () => {
     const tasks = [{ task_id: "t1", completed_at: existingTimestamp }];
     const results = [{ task_id: "t1" }];
 
     const updated = updateAuditTaskStatuses(tasks, results);
 
-    assert.equal(updated[0].completed_at, existingTimestamp);
+    expect(updated[0].completed_at).toBe(existingTimestamp);
   });
 
-  await t.test("absent completed_at receives a new ISO timestamp string", () => {
+  it("absent completed_at receives a new ISO timestamp string", () => {
     const tasks = [{ task_id: "t1" }];
     const results = [{ task_id: "t1" }];
 
     const updated = updateAuditTaskStatuses(tasks, results);
 
-    assert.ok(typeof updated[0].completed_at === "string");
+    expect(typeof updated[0].completed_at === "string").toBeTruthy();
     // Must be a valid ISO date
-    assert.ok(!isNaN(Date.parse(updated[0].completed_at)));
+    expect(!isNaN(Date.parse(updated[0].completed_at))).toBeTruthy();
   });
 });
 
-test("updateAuditTaskStatuses — completion_reason defaults to result_ingested", async (t) => {
-  await t.test("task without completion_reason gets completion_reason === 'result_ingested'", () => {
+describe("updateAuditTaskStatuses — completion_reason defaults to result_ingested", () => {
+  it("task without completion_reason gets completion_reason === 'result_ingested'", () => {
     const tasks = [{ task_id: "t1" }];
     const results = [{ task_id: "t1" }];
 
     const updated = updateAuditTaskStatuses(tasks, results);
 
-    assert.equal(updated[0].completion_reason, "result_ingested");
+    expect(updated[0].completion_reason).toBe("result_ingested");
   });
 
-  await t.test("task with existing completion_reason keeps its original value", () => {
+  it("task with existing completion_reason keeps its original value", () => {
     const tasks = [{ task_id: "t1", completion_reason: "manual" }];
     const results = [{ task_id: "t1" }];
 
     const updated = updateAuditTaskStatuses(tasks, results);
 
-    assert.equal(updated[0].completion_reason, "manual");
+    expect(updated[0].completion_reason).toBe("manual");
   });
 });
 
-test("updateAuditTaskStatuses — non-matching tasks default status to pending", async (t) => {
-  await t.test("task with no existing status gets status === 'pending'", () => {
+describe("updateAuditTaskStatuses — non-matching tasks default status to pending", () => {
+  it("task with no existing status gets status === 'pending'", () => {
     const tasks = [{ task_id: "t1" }];
     const results = [];
 
     const updated = updateAuditTaskStatuses(tasks, results);
 
-    assert.equal(updated[0].status, "pending");
+    expect(updated[0].status).toBe("pending");
   });
 
-  await t.test("task with an existing non-complete status keeps that status", () => {
+  it("task with an existing non-complete status keeps that status", () => {
     const tasks = [{ task_id: "t1", status: "in_progress" }];
     const results = [];
 
     const updated = updateAuditTaskStatuses(tasks, results);
 
-    assert.equal(updated[0].status, "in_progress");
+    expect(updated[0].status).toBe("in_progress");
   });
 });
 
@@ -99,19 +98,16 @@ test("partitionOrphanedAuditResults — drops results whose task_id is not in th
 
   const partition = partitionOrphanedAuditResults(results, active);
 
-  assert.ok(partition);
-  assert.deepEqual(partition.orphanedTaskIds, ["deepening:steward:abc"]);
-  assert.deepEqual(
-    partition.retained.map((r) => r.task_id),
-    ["t1", "t2"],
-  );
+  expect(partition).toBeTruthy();
+  expect(partition.orphanedTaskIds).toEqual(["deepening:steward:abc"]);
+  expect(partition.retained.map((r) => r.task_id)).toEqual(["t1", "t2"]);
 });
 
 test("partitionOrphanedAuditResults — returns null when there is nothing to filter", () => {
   // No active manifest yet → pass results through unchanged.
-  assert.equal(partitionOrphanedAuditResults([{ task_id: "t1" }], new Set()), null);
+  expect(partitionOrphanedAuditResults([{ task_id: "t1" }], new Set())).toBe(null);
   // Not an array.
-  assert.equal(partitionOrphanedAuditResults(undefined, new Set(["t1"])), null);
+  expect(partitionOrphanedAuditResults(undefined, new Set(["t1"]))).toBe(null);
 });
 
 test("partitionOrphanedAuditResults — keeps every result when all task_ids are active", () => {
@@ -120,7 +116,7 @@ test("partitionOrphanedAuditResults — keeps every result when all task_ids are
 
   const partition = partitionOrphanedAuditResults(results, active);
 
-  assert.ok(partition);
-  assert.equal(partition.orphanedTaskIds.length, 0);
-  assert.equal(partition.retained.length, 2);
+  expect(partition).toBeTruthy();
+  expect(partition.orphanedTaskIds.length).toBe(0);
+  expect(partition.retained.length).toBe(2);
 });

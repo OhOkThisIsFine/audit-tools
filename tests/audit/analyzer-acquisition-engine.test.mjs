@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,27 +56,24 @@ const findingPayload = JSON.stringify([
 
 test("admitSpawn: DEFAULT tools run without a consent token", () => {
   const c = candidate({ defaultRun: true });
-  assert.equal(admitSpawn(c, "auto", undefined), undefined);
+  expect(admitSpawn(c, "auto", undefined)).toBe(undefined);
 });
 
 test("admitSpawn: non-DEFAULT tool is denied without a consent token (any setting)", () => {
   const c = candidate({ defaultRun: false });
   for (const setting of ["auto", "ephemeral", "permanent"]) {
-    assert.ok(
-      typeof admitSpawn(c, setting, undefined) === "string",
-      `setting=${setting} must be gated on the consent token`,
-    );
+    expect(typeof admitSpawn(c, setting, undefined) === "string", `setting=${setting} must be gated on the consent token`).toBeTruthy();
   }
 });
 
 test("admitSpawn: CE-005 — even a permanent pre-installed non-default tool needs the token", () => {
   const c = candidate({ defaultRun: false });
-  assert.ok(typeof admitSpawn(c, "permanent", undefined) === "string");
-  assert.equal(admitSpawn(c, "permanent", "consent-xyz"), undefined);
+  expect(typeof admitSpawn(c, "permanent", undefined) === "string").toBeTruthy();
+  expect(admitSpawn(c, "permanent", "consent-xyz")).toBe(undefined);
 });
 
 test("admitSpawn: skip is decisive regardless of token", () => {
-  assert.ok(typeof admitSpawn(candidate({ defaultRun: true }), "skip", "tok") === "string");
+  expect(typeof admitSpawn(candidate({ defaultRun: true }), "skip", "tok") === "string").toBeTruthy();
 });
 
 test("registerExternalAnalyzers: own-vs-acquire rejects git-history at registration", () => {
@@ -88,21 +84,21 @@ test("registerExternalAnalyzers: own-vs-acquire rejects git-history at registrat
   ]);
   // Only git-history is OWNED. Secret scanning is ACQUIRED (gitleaks), so a
   // candidate named "secret-scan" is no longer rejected.
-  assert.deepEqual(accepted.map((c) => c.id), ["secret-scan", "eslint"]);
-  assert.ok(OWNED_TOOL_IDS.has("git-history"));
-  assert.equal(OWNED_TOOL_IDS.has("secret-scan"), false);
+  expect(accepted.map((c) => c.id)).toEqual(["secret-scan", "eslint"]);
+  expect(OWNED_TOOL_IDS.has("git-history")).toBeTruthy();
+  expect(OWNED_TOOL_IDS.has("secret-scan")).toBe(false);
 });
 
 test("runSafetyGate: missing runner degrades (probe fails → ok:false)", () => {
   const gate = runSafetyGate(candidate(), fakeRunner({ probeOk: false }), "/root");
-  assert.equal(gate.ok, false);
+  expect(gate.ok).toBe(false);
 });
 
 test("runSafetyGate: F5 inv-1 — candidate lacking a pinned version is never executed (degrades)", () => {
   for (const spec of ["", "   ", undefined]) {
     const gate = runSafetyGate(candidate({ spec }), fakeRunner({ probeOk: true }), "/root");
-    assert.equal(gate.ok, false, `spec=${JSON.stringify(spec)} must fail the gate`);
-    assert.match(gate.reason, /pinned version/);
+    expect(gate.ok, `spec=${JSON.stringify(spec)} must fail the gate`).toBe(false);
+    expect(gate.reason).toMatch(/pinned version/);
   }
 });
 
@@ -113,16 +109,16 @@ test("runExternalAnalyzer: F5 inv-1 — unpinned candidate yields empty results 
     return fakeRunner({ toolStdout: findingPayload })(argv, cwd);
   };
   const out = runExternalAnalyzer(candidate({ defaultRun: true, spec: "" }), "/root", { run });
-  assert.equal(toolSpawned, false, "an unpinned tool must never be spawned");
-  assert.equal(out.status.status, "not_resolved");
-  assert.match(out.status.error, /pinned version/);
-  assert.equal(out.results.results.length, 0);
+  expect(toolSpawned, "an unpinned tool must never be spawned").toBe(false);
+  expect(out.status.status).toBe("not_resolved");
+  expect(out.status.error).toMatch(/pinned version/);
+  expect(out.results.results.length).toBe(0);
 });
 
 test("runExternalAnalyzer: non-default tool without consent is reported skipped (never silently)", () => {
   const out = runExternalAnalyzer(candidate(), "/root", { run: fakeRunner({ toolStdout: findingPayload }) });
-  assert.equal(out.status.status, "skipped");
-  assert.equal(out.results.results.length, 0);
+  expect(out.status.status).toBe("skipped");
+  expect(out.results.results.length).toBe(0);
 });
 
 test("runExternalAnalyzer: with consent token, runs + normalizes through the adapter seam", () => {
@@ -130,44 +126,44 @@ test("runExternalAnalyzer: with consent token, runs + normalizes through the ada
     consentToken: "tok",
     run: fakeRunner({ toolStdout: findingPayload }),
   });
-  assert.equal(out.status.status, "findings");
-  assert.equal(out.results.tool, "eslint");
-  assert.equal(out.results.results.length, 1);
-  assert.equal(out.results.results[0].path, "src/a.ts");
+  expect(out.status.status).toBe("findings");
+  expect(out.results.tool).toBe("eslint");
+  expect(out.results.results.length).toBe(1);
+  expect(out.results.results[0].path).toBe("src/a.ts");
   // edges normalized through normalizeGenericExternalEdges
-  assert.ok(out.results.graph_edges && out.results.graph_edges.length === 1);
-  assert.equal(out.results.graph_edges[0].from, "src/a.ts");
+  expect(out.results.graph_edges && out.results.graph_edges.length === 1).toBeTruthy();
+  expect(out.results.graph_edges[0].from).toBe("src/a.ts");
 });
 
 test("runExternalAnalyzer: default tool runs without a token", () => {
   const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
-  assert.equal(out.status.status, "findings");
+  expect(out.status.status).toBe("findings");
 });
 
 test("runExternalAnalyzer: capability-probe failure degrades to empty + not_resolved status", () => {
   const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ probeOk: false }),
   });
-  assert.equal(out.status.status, "not_resolved");
-  assert.equal(out.results.results.length, 0);
+  expect(out.status.status).toBe("not_resolved");
+  expect(out.results.results.length).toBe(0);
 });
 
 test("runExternalAnalyzer: undetected ecosystem is reported skipped", () => {
   const out = runExternalAnalyzer(candidate({ defaultRun: true, detect: () => false }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
-  assert.equal(out.status.status, "skipped");
-  assert.match(out.status.error, /ecosystem/);
+  expect(out.status.status).toBe("skipped");
+  expect(out.status.error).toMatch(/ecosystem/);
 });
 
 test("runExternalAnalyzer: a thrown spawn degrades to spawn_error, never throws", () => {
   const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ throwOnTool: true }),
   });
-  assert.equal(out.status.status, "spawn_error");
-  assert.equal(out.results.results.length, 0);
+  expect(out.status.status).toBe("spawn_error");
+  expect(out.results.results.length).toBe(0);
 });
 
 test("runExternalAnalyzer: F5 fail-2 — a non-zero spawn exit (result.error) degrades to spawn_error, never throws", () => {
@@ -177,17 +173,17 @@ test("runExternalAnalyzer: F5 fail-2 — a non-zero spawn exit (result.error) de
     return { status: 2, stdout: "", stderr: "boom", argv, duration_ms: 1, error: new Error("exited 2") };
   };
   const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", { run });
-  assert.equal(out.status.status, "spawn_error");
-  assert.equal(out.status.exit_code, 2);
-  assert.equal(out.results.results.length, 0);
+  expect(out.status.status).toBe("spawn_error");
+  expect(out.status.exit_code).toBe(2);
+  expect(out.results.results.length).toBe(0);
 });
 
 test("runExternalAnalyzer: malformed tool output degrades to parse_error, never throws", () => {
   const out = runExternalAnalyzer(candidate({ defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: "not json {{{" }),
   });
-  assert.equal(out.status.status, "parse_error");
-  assert.equal(out.results.results.length, 0);
+  expect(out.status.status).toBe("parse_error");
+  expect(out.results.results.length).toBe(0);
 });
 
 test("F5 fail-3: malformed output degrades graph_edges too — no partial/corrupt edges merged", () => {
@@ -200,20 +196,17 @@ test("F5 fail-3: malformed output degrades graph_edges too — no partial/corrup
     "/root",
     { run: fakeRunner({ toolStdout: "not json {{{" }) },
   );
-  assert.equal(out.status.status, "parse_error");
-  assert.equal(out.results.results.length, 0);
-  assert.ok(
-    !out.results.graph_edges || out.results.graph_edges.length === 0,
-    "no graph_edges may survive a parse failure (no partial/corrupt edges merged)",
-  );
+  expect(out.status.status).toBe("parse_error");
+  expect(out.results.results.length).toBe(0);
+  expect(!out.results.graph_edges || out.results.graph_edges.length === 0, "no graph_edges may survive a parse failure (no partial/corrupt edges merged)").toBeTruthy();
 });
 
 test("runExternalAnalyzer: owned tool is rejected even if it slips past registration", () => {
   const out = runExternalAnalyzer(candidate({ id: "git-history", defaultRun: true }), "/root", {
     run: fakeRunner({ toolStdout: findingPayload }),
   });
-  assert.equal(out.status.status, "skipped");
-  assert.match(out.status.error, /owned by F6/);
+  expect(out.status.status).toBe("skipped");
+  expect(out.status.error).toMatch(/owned by F6/);
 });
 
 test("runAcquisitionEngine: one status per candidate; owned rejected; gating applied", () => {
@@ -227,12 +220,12 @@ test("runAcquisitionEngine: one status per candidate; owned rejected; gating app
     { run: fakeRunner({ toolStdout: findingPayload }) },
   );
   // git-history rejected at registration → no status for it
-  assert.deepEqual(statuses.map((s) => s.tool).sort(), ["eslint", "ruff"]);
+  expect(statuses.map((s) => s.tool).sort()).toEqual(["eslint", "ruff"]);
   const eslint = statuses.find((s) => s.tool === "eslint");
   const ruff = statuses.find((s) => s.tool === "ruff");
-  assert.equal(eslint.status, "findings");
-  assert.equal(ruff.status, "skipped");
-  assert.equal(results.length, 1, "only the admitted tool with findings contributes results");
+  expect(eslint.status).toBe("findings");
+  expect(ruff.status).toBe("skipped");
+  expect(results.length, "only the admitted tool with findings contributes results").toBe(1);
 });
 
 test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scope candidate across absent/consent-denied/parse-error paths", () => {
@@ -276,13 +269,13 @@ test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scop
 
   // inv-4 core: status count == in-scope candidate count (owned tool dropped at
   // registration, NOT silently from the in-scope set).
-  assert.equal(statuses.length, scoped.length, 'exactly one status per in-scope candidate');
-  assert.deepEqual(statuses.map((s) => s.tool).sort(), ['absent', 'broken', 'denied']);
-  assert.equal(statuses.find((s) => s.tool === 'absent').status, 'not_resolved');
-  assert.equal(statuses.find((s) => s.tool === 'denied').status, 'skipped');
-  assert.equal(statuses.find((s) => s.tool === 'broken').status, 'parse_error');
+  expect(statuses.length, 'exactly one status per in-scope candidate').toBe(scoped.length);
+  expect(statuses.map((s) => s.tool).sort()).toEqual(['absent', 'broken', 'denied']);
+  expect(statuses.find((s) => s.tool === 'absent').status).toBe('not_resolved');
+  expect(statuses.find((s) => s.tool === 'denied').status).toBe('skipped');
+  expect(statuses.find((s) => s.tool === 'broken').status).toBe('parse_error');
   // None dropped without a status row.
-  assert.ok(statuses.every((s) => typeof s.status === 'string' && s.status.length > 0));
+  expect(statuses.every((s) => typeof s.status === 'string' && s.status.length > 0)).toBeTruthy();
 });
 
 // F5 inv-8 (shared single-insertion merge with F6 — land-order-safe): F5's
@@ -298,16 +291,8 @@ test("F5 inv-8: the pre-shipped merge-helper seam pair lands first (statically i
   // If either symbol were unshipped, the top-level `await import(...)` at the
   // head of this file would have thrown before any F5 consumer test could run —
   // so a half-shipped state (F5 present, seam absent) can never be scheduled.
-  assert.equal(
-    typeof mergeAnalyzerGraphContribution,
-    "function",
-    "graph-contribution seam must be shipped before F5 consumers run",
-  );
-  assert.equal(
-    typeof mergeAnalyzerRiskSignals,
-    "function",
-    "risk-signals seam must be shipped before F5 consumers run",
-  );
+  expect(typeof mergeAnalyzerGraphContribution, "graph-contribution seam must be shipped before F5 consumers run").toBe("function");
+  expect(typeof mergeAnalyzerRiskSignals, "risk-signals seam must be shipped before F5 consumers run").toBe("function");
 });
 
 test("F5 inv-8: F5 dataflow edges + F6 co-change edges both survive a single-insertion merge, deterministically", () => {
@@ -341,21 +326,11 @@ test("F5 inv-8: F5 dataflow edges + F6 co-change edges both survive a single-ins
     [f6Edge],
   );
 
-  assert.equal(f6First.graphs.references.length, 2, "both contributions survive");
-  assert.ok(
-    f6First.graphs.references.some((e) => e.kind === "git-co-change"),
-    "F6 edge survives the F5 append",
-  );
-  assert.ok(
-    f6First.graphs.references.some((e) => e.kind === "analyzer-dataflow-edge"),
-    "F5 edge survives alongside F6",
-  );
-  assert.deepEqual(
-    f5First.graphs.references,
-    f6First.graphs.references,
-    "land order does not change the merged result (deterministic single-insertion)",
-  );
-  assert.deepEqual(bundle.graphs.references, [], "the seam never mutates the input bundle");
+  expect(f6First.graphs.references.length, "both contributions survive").toBe(2);
+  expect(f6First.graphs.references.some((e) => e.kind === "git-co-change"), "F6 edge survives the F5 append").toBeTruthy();
+  expect(f6First.graphs.references.some((e) => e.kind === "analyzer-dataflow-edge"), "F5 edge survives alongside F6").toBeTruthy();
+  expect(f5First.graphs.references, "land order does not change the merged result (deterministic single-insertion)").toEqual(f6First.graphs.references);
+  expect(bundle.graphs.references, "the seam never mutates the input bundle").toEqual([]);
 });
 
 test("F5 inv-8: an F5 dataflow append through the seam is idempotent (re-applying its own edge is a no-op)", () => {
@@ -368,8 +343,8 @@ test("F5 inv-8: an F5 dataflow append through the seam is idempotent (re-applyin
   };
   const once = mergeAnalyzerGraphContribution(bundle, [edge]);
   const twice = mergeAnalyzerGraphContribution(once, [edge]);
-  assert.equal(once.graphs.references.length, 1);
-  assert.deepEqual(twice.graphs.references, once.graphs.references, "idempotent re-apply");
+  expect(once.graphs.references.length).toBe(1);
+  expect(twice.graphs.references, "idempotent re-apply").toEqual(once.graphs.references);
 });
 
 test("F5 inv-8: F5 analyzer risk signals union into the register through the shared seam, leaving F6 signals intact", () => {
@@ -385,13 +360,9 @@ test("F5 inv-8: F5 analyzer risk signals union into the register through the sha
     register,
     new Map([["u1", ["analyzer_dataflow_signal"]]]),
   );
-  assert.deepEqual(
-    merged.items[0].signals,
-    ["analyzer_dataflow_signal", "change_hotspot"],
-    "F5 signal unions with the existing F6 signal, deduped + sorted",
-  );
-  assert.equal(merged.items[0].risk_score, 4, "risk_score untouched by the informational seam");
-  assert.deepEqual(register.items[0].signals, ["change_hotspot"], "input register not mutated");
+  expect(merged.items[0].signals, "F5 signal unions with the existing F6 signal, deduped + sorted").toEqual(["analyzer_dataflow_signal", "change_hotspot"]);
+  expect(merged.items[0].risk_score, "risk_score untouched by the informational seam").toBe(4);
+  expect(register.items[0].signals, "input register not mutated").toEqual(["change_hotspot"]);
 });
 
 test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to skipped/not_resolved, zero edges (runtime-discovered)", () => {
@@ -424,24 +395,21 @@ test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to sk
 
   const { results, statuses } = runAcquisitionEngine(candidates, '/root', { run: noRunnerInstalled });
 
-  assert.equal(toolSpawned, false, 'no tool may be spawned when no runner probes successfully');
+  expect(toolSpawned, 'no tool may be spawned when no runner probes successfully').toBe(false);
   // One status per in-scope candidate — none silently dropped.
-  assert.equal(statuses.length, candidates.length, 'exactly one status per candidate (report-skipped-never-silently)');
-  assert.deepEqual(statuses.map((s) => s.tool).sort(), ['clippy', 'eslint', 'rubocop', 'ruff']);
+  expect(statuses.length, 'exactly one status per candidate (report-skipped-never-silently)').toBe(candidates.length);
+  expect(statuses.map((s) => s.tool).sort()).toEqual(['clippy', 'eslint', 'rubocop', 'ruff']);
   // The three default candidates fail the runtime capability probe => not_resolved.
   for (const id of ['eslint', 'ruff', 'clippy']) {
     const s = statuses.find((x) => x.tool === id);
-    assert.equal(s.status, 'not_resolved', `${id} must degrade to not_resolved when its runner is absent`);
-    assert.match(s.error, /not available/);
+    expect(s.status, `${id} must degrade to not_resolved when its runner is absent`).toBe('not_resolved');
+    expect(s.error).toMatch(/not available/);
   }
   // The non-default candidate without a consent token is skipped before any probe.
-  assert.equal(statuses.find((x) => x.tool === 'rubocop').status, 'skipped');
+  expect(statuses.find((x) => x.tool === 'rubocop').status).toBe('skipped');
   // Zero results AND zero edges reach the merge seam.
-  assert.equal(results.length, 0, 'no candidate contributes results when no runner is discovered');
-  assert.ok(
-    results.every((r) => !r.graph_edges || r.graph_edges.length === 0),
-    'no graph_edges survive when no runner is discovered',
-  );
+  expect(results.length, 'no candidate contributes results when no runner is discovered').toBe(0);
+  expect(results.every((r) => !r.graph_edges || r.graph_edges.length === 0), 'no graph_edges survive when no runner is discovered').toBeTruthy();
 });
 
 // CP-NODE-1: each newly-registered analyzer is consent-gated end-to-end — with
@@ -454,8 +422,8 @@ const { EXTERNAL_ANALYZER_CANDIDATES } = await import(
 for (const id of ["clippy", "rubocop", "hadolint", "actionlint", "type-coverage"]) {
   test(`CP-NODE-1: ${id} is consent-gated — no token => skipped, zero subprocess spawn`, () => {
     const real = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === id);
-    assert.ok(real, `${id} must be registered`);
-    assert.equal(real.defaultRun, false, `${id} must be defaultRun:false`);
+    expect(real, `${id} must be registered`).toBeTruthy();
+    expect(real.defaultRun, `${id} must be defaultRun:false`).toBe(false);
 
     const spawned = [];
     const spy = (argv, cwd) => {
@@ -465,18 +433,18 @@ for (const id of ["clippy", "rubocop", "hadolint", "actionlint", "type-coverage"
     // Force detect() true so the ONLY thing withholding the spawn is consent.
     const forced = { ...real, detect: () => true };
     const out = runExternalAnalyzer(forced, "/root", { run: spy, analyzers: {} });
-    assert.equal(out.status.status, "skipped", `${id} without consent => skipped`);
-    assert.match(out.status.error, /consent token/i);
-    assert.equal(spawned.length, 0, `${id} must spawn ZERO subprocesses without consent`);
+    expect(out.status.status, `${id} without consent => skipped`).toBe("skipped");
+    expect(out.status.error).toMatch(/consent token/i);
+    expect(spawned.length, `${id} must spawn ZERO subprocesses without consent`).toBe(0);
   });
 }
 
 test("detectNodeEcosystem: deterministic marker-file detection", async () => {
   const root = await mkdtemp(join(tmpdir(), "f5-detect-"));
   try {
-    assert.equal(detectNodeEcosystem(root), false);
+    expect(detectNodeEcosystem(root)).toBe(false);
     await writeFile(join(root, "package.json"), "{}");
-    assert.equal(detectNodeEcosystem(root), true);
+    expect(detectNodeEcosystem(root)).toBe(true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -497,21 +465,9 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
   const nonDefault = candidate({ defaultRun: false });
   const dflt = candidate({ defaultRun: true });
   for (const setting of ["auto", "ephemeral", "permanent"]) {
-    assert.equal(
-      typeof admitSpawn(nonDefault, setting, undefined),
-      "string",
-      `non-default + setting=${setting} must be consent_denied without a token`,
-    );
-    assert.equal(
-      admitSpawn(nonDefault, setting, "consent-token"),
-      undefined,
-      `non-default + setting=${setting} is admitted once the per-run token is present`,
-    );
-    assert.equal(
-      admitSpawn(dflt, setting, undefined),
-      undefined,
-      `DEFAULT + setting=${setting} runs unprompted (no token required)`,
-    );
+    expect(typeof admitSpawn(nonDefault, setting, undefined), `non-default + setting=${setting} must be consent_denied without a token`).toBe("string");
+    expect(admitSpawn(nonDefault, setting, "consent-token"), `non-default + setting=${setting} is admitted once the per-run token is present`).toBe(undefined);
+    expect(admitSpawn(dflt, setting, undefined), `DEFAULT + setting=${setting} runs unprompted (no token required)`).toBe(undefined);
   }
 
   // End-to-end through the engine: a spy runner records every subprocess argv.
@@ -534,14 +490,10 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
       // …but supplied NO consentToken for this run.
     },
   );
-  assert.equal(deniedOutcome.status.status, "skipped", "consent_denied => skipped");
-  assert.match(deniedOutcome.status.error, /consent token/i);
-  assert.equal(deniedOutcome.results.results.length, 0, "no findings on a denied spawn");
-  assert.equal(
-    spawned.length,
-    0,
-    "consent absent => permanent non-default tool spawns ZERO subprocesses (not even the probe)",
-  );
+  expect(deniedOutcome.status.status, "consent_denied => skipped").toBe("skipped");
+  expect(deniedOutcome.status.error).toMatch(/consent token/i);
+  expect(deniedOutcome.results.results.length, "no findings on a denied spawn").toBe(0);
+  expect(spawned.length, "consent absent => permanent non-default tool spawns ZERO subprocesses (not even the probe)").toBe(0);
 
   // With the per-run token present, the SAME permanent tool is admitted and the
   // subprocess actually runs (probe + real spawn observed by the spy).
@@ -550,8 +502,8 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
     "/root",
     { run: spy, analyzers: { eslint: "permanent" }, consentToken: "consent-token" },
   );
-  assert.equal(admittedOutcome.status.status, "findings", "admitted spawn produces findings");
-  assert.ok(spawned.length >= 1, "admitted spawn invokes the runner at least once");
+  expect(admittedOutcome.status.status, "admitted spawn produces findings").toBe("findings");
+  expect(spawned.length >= 1, "admitted spawn invokes the runner at least once").toBeTruthy();
 
   // A DEFAULT tool runs UNPROMPTED — no token, yet the subprocess fires.
   const beforeDefault = spawned.length;
@@ -560,8 +512,8 @@ test("F5 inv-2 [CP-NODE-59]: spawn-admission gates every non-DEFAULT tool on con
     "/root",
     { run: spy }, // no consentToken, no analyzers setting
   );
-  assert.equal(defaultOutcome.status.status, "findings", "DEFAULT tool runs without consent");
-  assert.ok(spawned.length > beforeDefault, "DEFAULT spawn invoked the runner unprompted");
+  expect(defaultOutcome.status.status, "DEFAULT tool runs without consent").toBe("findings");
+  expect(spawned.length > beforeDefault, "DEFAULT spawn invoked the runner unprompted").toBeTruthy();
 });
 
 // F5 inv-7 (normalize through the existing adapter seam, unchanged): an acquired
@@ -583,29 +535,22 @@ test("F5 inv-7 [CP-NODE-64]: acquired output normalizes through the existing ada
   });
 
   // The acquired tool ran and was normalized through the adapter seam.
-  assert.equal(out.status.status, "findings");
-  assert.equal(out.results.tool, "eslint");
-  assert.equal(out.results.results.length, 1);
-  assert.ok(out.results.graph_edges && out.results.graph_edges.length === 1);
+  expect(out.status.status).toBe("findings");
+  expect(out.results.tool).toBe("eslint");
+  expect(out.results.results.length).toBe(1);
+  expect(out.results.graph_edges && out.results.graph_edges.length === 1).toBeTruthy();
 
   // Same contract as the wired adapters: the normalized object validates against
   // ExternalAnalyzerResultsSchema.strict() — no parallel shape, no extra fields.
   const parsed = ExternalAnalyzerResultsSchema.strict().safeParse(out.results);
-  assert.ok(
-    parsed.success,
-    `acquired-tool output must validate against the shared contract; got ${
+  expect(parsed.success, `acquired-tool output must validate against the shared contract; got ${
       parsed.success ? "" : JSON.stringify(parsed.error.issues)
-    }`,
-  );
+    }`).toBeTruthy();
 
   // A parallel/extra field on the acquired shape would be rejected by .strict() —
   // proving the validation above is actually discriminating the contract.
   const withParallelShape = { ...out.results, parallel_findings: [{ x: 1 }] };
-  assert.equal(
-    ExternalAnalyzerResultsSchema.strict().safeParse(withParallelShape).success,
-    false,
-    ".strict() must reject any parallel/extra shape on the acquired contract",
-  );
+  expect(ExternalAnalyzerResultsSchema.strict().safeParse(withParallelShape).success, ".strict() must reject any parallel/extra shape on the acquired contract").toBe(false);
 });
 
 // F5 fail-4 (C-009): a non-DEFAULT tool requested WITHOUT the per-run consent
@@ -627,7 +572,7 @@ test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied
   // Pure chokepoint: denial yields a string (the consent_denied reason), never the
   // `undefined` that means "admitted".
   const reason = admitSpawn(installedNonDefault, "auto", undefined);
-  assert.equal(typeof reason, "string", "non-default w/o token must be denied at admitSpawn");
+  expect(typeof reason, "non-default w/o token must be denied at admitSpawn").toBe("string");
 
   // End-to-end through the engine with a spy runner: not a single argv may be
   // dispatched — not even the `--version` capability probe.
@@ -645,17 +590,13 @@ test("F5 fail-4 [CP-NODE-69]: non-DEFAULT tool without consent => consent_denied
 
   // consent_denied contract: skipped status, no findings (resolved=false), and the
   // operator-facing reason names the missing consent token.
-  assert.equal(outcome.status.status, "skipped", "consent_denied => status skipped");
-  assert.match(outcome.status.error, /consent token/i, "denied reason names the consent token");
-  assert.equal(outcome.results.results.length, 0, "consent_denied => no findings (resolved=false)");
+  expect(outcome.status.status, "consent_denied => status skipped").toBe("skipped");
+  expect(outcome.status.error, "denied reason names the consent token").toMatch(/consent token/i);
+  expect(outcome.results.results.length, "consent_denied => no findings (resolved=false)").toBe(0);
 
   // The load-bearing half of C-009: enforcement is at the SPAWN-admission chokepoint,
   // so zero subprocesses ran — the probe never even fired.
-  assert.equal(
-    spawned.length,
-    0,
-    "consent_denied must short-circuit at admitSpawn => ZERO subprocesses (not even the probe)",
-  );
+  expect(spawned.length, "consent_denied must short-circuit at admitSpawn => ZERO subprocesses (not even the probe)").toBe(0);
 });
 
 // F5 fail-7 [CP-NODE-72]: an owned signal (git-history / secret-scan) registered
@@ -672,15 +613,11 @@ test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history) registered as an acq
 
   // Not a single owned id is admitted.
   for (const id of OWNED_TOOL_IDS) {
-    assert.equal(
-      acceptedIds.has(id),
-      false,
-      `owned signal "${id}" must be rejected at registration (cannot enter the acquisition engine)`,
-    );
+    expect(acceptedIds.has(id), `owned signal "${id}" must be rejected at registration (cannot enter the acquisition engine)`).toBe(false);
   }
   // The boundary drops ONLY owned ids; the genuine acquirable tool survives.
-  assert.equal(acceptedIds.has("eslint"), true, "a legitimate acquirable tool is still accepted");
-  assert.equal(accepted.length, 1, "exactly the non-owned candidate survives registration");
+  expect(acceptedIds.has("eslint"), "a legitimate acquirable tool is still accepted").toBe(true);
+  expect(accepted.length, "exactly the non-owned candidate survives registration").toBe(1);
 
   // End-to-end: driving the whole set through the engine never runs an owned id.
   const spawned = [];
@@ -689,5 +626,5 @@ test("F5 fail-7 [CP-NODE-72]: an owned signal (git-history) registered as an acq
     return fakeRunner({ toolStdout: "[]" })(argv, cwd);
   };
   runAcquisitionEngine([...ownedCandidates], "/root", { run: spy, analyzers: {} });
-  assert.equal(spawned.length, 0, "no owned candidate is ever spawned through the engine");
+  expect(spawned.length, "no owned candidate is ever spawned through the engine").toBe(0);
 });

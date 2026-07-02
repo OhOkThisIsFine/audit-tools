@@ -1,4 +1,4 @@
-import test from "node:test";
+import { describe, it, expect } from "vitest";
 import assert from "node:assert/strict";
 import { CoverageMatrixSchema, ClassificationStatusSchema } from "../../src/audit/types.ts";
 
@@ -25,30 +25,27 @@ function coverageMatrixWith(classificationStatus) {
   };
 }
 
-test("coverage_matrix schema accepts all classification_status values written by code", async (t) => {
-  await t.test("classification_status enum includes the statuses written by scope and trivial-audit code", () => {
+describe("coverage_matrix schema accepts all classification_status values written by code", () => {
+  it("classification_status enum includes the statuses written by scope and trivial-audit code", () => {
     const enumValues = ClassificationStatusSchema.options;
     for (const value of ["out_of_scope_delta", "excluded_trivial", "out_of_scope_intent"]) {
-      assert.ok(
-        enumValues.includes(value),
-        `classification_status enum must include "${value}"`,
-      );
+      expect(enumValues.includes(value), `classification_status enum must include "${value}"`).toBeTruthy();
     }
   });
 
-  await t.test("documents using the scope/trivial statuses validate", () => {
+  it("documents using the scope/trivial statuses validate", () => {
     for (const value of ["out_of_scope_delta", "excluded_trivial", "out_of_scope_intent"]) {
       assert.doesNotThrow(() => CoverageMatrixSchema.parse(coverageMatrixWith(value)));
     }
   });
 
-  await t.test("an unknown classification_status value still fails validation", () => {
+  it("an unknown classification_status value still fails validation", () => {
     assert.throws(() =>
       CoverageMatrixSchema.parse(coverageMatrixWith("definitely_not_a_status")),
     );
   });
 
-  await t.test("previously valid classification_status values continue to validate", () => {
+  it("previously valid classification_status values continue to validate", () => {
     const preexisting = [
       "unclassified",
       "classified",

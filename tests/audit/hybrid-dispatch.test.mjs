@@ -12,8 +12,7 @@
  *  - the in-process provider classification (host / IDE backends are NOT in-process).
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,14 +68,14 @@ test("audit hybrid: the NIM partition is claimed + capacity-bounded; all on the 
       readSettled: store.readSettled,
       onSettle: store.onSettle,
     });
-    assert.ok(part.inProcess.length > 0);
+    expect(part.inProcess.length > 0).toBeTruthy();
     // Bounded to the pool's capacity (NOT the whole 12-task frontier).
-    assert.ok(part.inProcess.length < 12);
-    assert.ok(part.inProcess.every((a) => a.providerName === "openai-compatible"));
-    assert.ok(part.inProcess.every((a) => typeof a.ownerToken === "string" && a.ownerToken.length > 0));
+    expect(part.inProcess.length < 12).toBeTruthy();
+    expect(part.inProcess.every((a) => a.providerName === "openai-compatible")).toBeTruthy();
+    expect(part.inProcess.every((a) => typeof a.ownerToken === "string" && a.ownerToken.length > 0)).toBeTruthy();
     // Every returned task is actually claimed in the shared registry.
     const claims = await registry.listClaims();
-    assert.equal(Object.keys(claims).length, part.inProcess.length);
+    expect(Object.keys(claims).length).toBe(part.inProcess.length);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -96,18 +95,18 @@ test("audit hybrid: a quotaSignalDegraded NIM pool still gets a floored slot (sa
       readSettled: store.readSettled,
       onSettle: store.onSettle,
     });
-    assert.ok(part.inProcess.length >= 1);
+    expect(part.inProcess.length >= 1).toBeTruthy();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("audit hybrid: in-process provider classification (host / IDE / local-subprocess are NOT in-process)", () => {
-  assert.equal(isInProcessAuditPool({ providerName: "openai-compatible" }), true);
-  assert.equal(isInProcessAuditPool({ providerName: "codex" }), true);
-  assert.equal(isInProcessAuditPool({ providerName: "opencode" }), true);
-  assert.equal(isInProcessAuditPool({ providerName: "claude-code" }), false);
-  assert.equal(isInProcessAuditPool({ providerName: "vscode-task" }), false);
+  expect(isInProcessAuditPool({ providerName: "openai-compatible" })).toBe(true);
+  expect(isInProcessAuditPool({ providerName: "codex" })).toBe(true);
+  expect(isInProcessAuditPool({ providerName: "opencode" })).toBe(true);
+  expect(isInProcessAuditPool({ providerName: "claude-code" })).toBe(false);
+  expect(isInProcessAuditPool({ providerName: "vscode-task" })).toBe(false);
   // Excluded for audit (it IS audit's conventional host-dispatch default).
-  assert.equal(isInProcessAuditPool({ providerName: "local-subprocess" }), false);
+  expect(isInProcessAuditPool({ providerName: "local-subprocess" })).toBe(false);
 });

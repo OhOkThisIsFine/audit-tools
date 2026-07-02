@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { renderHostAsset } from "../../src/shared/hostAssets.ts";
 
@@ -21,11 +21,8 @@ const CANONICAL_BODY = [
 test("renderHostAsset embeds the canonical body for every kind", () => {
   for (const kind of KINDS) {
     const out = renderHostAsset(kind, { promptBody: CANONICAL_BODY, toolName: "tool" });
-    assert.ok(out.length > 0, `${kind} must produce output`);
-    assert.ok(
-      out.includes("# `/tool` Loader"),
-      `${kind} must embed the canonical loader heading`,
-    );
+    expect(out.length > 0, `${kind} must produce output`).toBeTruthy();
+    expect(out.includes("# `/tool` Loader"), `${kind} must embed the canonical loader heading`).toBeTruthy();
   }
 });
 
@@ -33,10 +30,7 @@ test("renderHostAsset carries --host-models in the continuation guidance for eve
   for (const kind of KINDS) {
     const out = renderHostAsset(kind, { promptBody: CANONICAL_BODY, toolName: "tool" });
     const continuation = out.match(/again with[\s\S]*?(`--host-models`)[\s\S]*?prompt_path/);
-    assert.ok(
-      continuation,
-      `${kind} continuation section must list --host-models`,
-    );
+    expect(continuation, `${kind} continuation section must list --host-models`).toBeTruthy();
   }
 });
 
@@ -46,17 +40,17 @@ test("renderHostAsset gemini-toml escapes backslashes and double-quotes", () => 
     toolName: "tool",
   });
   const promptStart = toml.indexOf('prompt = """');
-  assert.ok(promptStart >= 0, "TOML must contain the multi-line prompt field");
+  expect(promptStart >= 0, "TOML must contain the multi-line prompt field").toBeTruthy();
   const promptSection = toml.slice(promptStart);
-  assert.ok(promptSection.includes("C:\\\\path"), "TOML must escape backslashes in the body");
-  assert.ok(promptSection.includes('\\"hi\\"'), "TOML must escape double-quotes in the body");
+  expect(promptSection.includes("C:\\\\path"), "TOML must escape backslashes in the body").toBeTruthy();
+  expect(promptSection.includes('\\"hi\\"'), "TOML must escape double-quotes in the body").toBeTruthy();
 });
 
 test("renderHostAsset markdown kinds do not escape body characters", () => {
   for (const kind of ["vscode-agent", "codex-recipe", "antigravity-guide"]) {
     const out = renderHostAsset(kind, { promptBody: CANONICAL_BODY, toolName: "tool" });
-    assert.ok(out.includes('say "hi"'), `${kind} must embed double-quotes unescaped`);
-    assert.ok(out.includes("C:\\path"), `${kind} must embed backslashes unescaped`);
+    expect(out.includes('say "hi"'), `${kind} must embed double-quotes unescaped`).toBeTruthy();
+    expect(out.includes("C:\\path"), `${kind} must embed backslashes unescaped`).toBeTruthy();
   }
 });
 
@@ -67,18 +61,12 @@ test("renderHostAsset is bin-agnostic — toolName parameterizes the slash comma
       promptBody: CANONICAL_BODY,
       toolName,
     });
-    assert.ok(
-      toml.includes(`# /${toolName}`),
-      `gemini-toml header must use toolName '${toolName}'`,
-    );
+    expect(toml.includes(`# /${toolName}`), `gemini-toml header must use toolName '${toolName}'`).toBeTruthy();
     const agent = renderHostAsset("vscode-agent", {
       promptBody: CANONICAL_BODY,
       toolName,
     });
-    assert.ok(
-      agent.includes(`/${toolName}`),
-      `vscode-agent must reference '/${toolName}'`,
-    );
+    expect(agent.includes(`/${toolName}`), `vscode-agent must reference '/${toolName}'`).toBeTruthy();
   }
 });
 

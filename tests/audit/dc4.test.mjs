@@ -21,8 +21,7 @@
  *       → "folded-vs-separate stale-set equivalence".
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, onTestFinished, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,7 +113,7 @@ async function readActiveDispatch(artifactsDir) {
 
 test("DC-4 pause: a full strand pauses to a resumable waiting_for_provider state (not an immediate terminal)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const result = await driveRollingAuditDispatch({
     root: artifactsDir,
@@ -126,23 +125,23 @@ test("DC-4 pause: a full strand pauses to a resumable waiting_for_provider state
     ingest: async () => { throw new Error("ingestion must be skipped on a full strand"); },
   });
 
-  assert.equal(result.status, "paused", "a full strand pauses, it does not immediately go terminal");
-  assert.ok(result.stranded_ids.length > 0, "the stranded packets are held by the pause");
-  assert.equal(result.ingest, null, "no ingestion on a full strand");
-  assert.ok(result.paused_state, "a paused_state is surfaced");
-  assert.equal(result.paused_state.lifecycle.kind, "waiting_for_provider");
-  assert.equal(result.paused_state.lifecycle.pause_count, 0, "first pause starts at pause_count 0");
+  expect(result.status, "a full strand pauses, it does not immediately go terminal").toBe("paused");
+  expect(result.stranded_ids.length > 0, "the stranded packets are held by the pause").toBeTruthy();
+  expect(result.ingest, "no ingestion on a full strand").toBe(null);
+  expect(result.paused_state, "a paused_state is surfaced").toBeTruthy();
+  expect(result.paused_state.lifecycle.kind).toBe("waiting_for_provider");
+  expect(result.paused_state.lifecycle.pause_count, "first pause starts at pause_count 0").toBe(0);
 
   // The pause is persisted (resumable) on the active-dispatch artifact, and NOT a
   // terminal — a paused run must not look done to deriveAuditState.
   const active = await readActiveDispatch(artifactsDir);
-  assert.ok(active.paused_state, "paused state persisted for resume");
-  assert.ok(!active.partial_completion_terminal, "a resumable pause is NOT a partial-completion terminal");
+  expect(active.paused_state, "paused state persisted for resume").toBeTruthy();
+  expect(!active.partial_completion_terminal, "a resumable pause is NOT a partial-completion terminal").toBeTruthy();
 });
 
 test("DC-4 spill-first gate: the pause never fires while a pool still has capacity (no strand → no pause)", async (t) => {
   const { artifactsDir, runDir, taskList } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // A dispatcher that succeeds (the pool has capacity / spill is not exhausted).
   const tasksById = new Map(taskList.map((tk) => [tk.task_id, tk]));
@@ -172,15 +171,15 @@ test("DC-4 spill-first gate: the pause never fires while a pool still has capaci
     ingest: async ({ runId }) => ({ summary: { run_id: runId, accepted_count: 3 }, has_failures: false }),
   });
 
-  assert.equal(result.status, "complete", "with capacity the run completes — the pause never engages");
-  assert.equal(result.paused_state, undefined, "no pause when nothing stranded (spill not exhausted)");
+  expect(result.status, "with capacity the run completes — the pause never engages").toBe("complete");
+  expect(result.paused_state, "no pause when nothing stranded (spill not exhausted)").toBe(undefined);
   const active = await readActiveDispatch(artifactsDir);
-  assert.ok(!active.paused_state, "no paused state persisted on a clean completion");
+  expect(!active.paused_state, "no paused state persisted on a clean completion").toBeTruthy();
 });
 
 test("DC-4 resume: re-discovered net-new capacity clears the pause (back to running)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Pass 1: full strand → pause (pause_count 0). The exhausted pool id is the
   // single host pool (settled). prepareDispatchArtifacts assigns the pool id.
@@ -191,9 +190,9 @@ test("DC-4 resume: re-discovered net-new capacity clears the pause (back to runn
     ingest: async () => null,
   });
   const afterPause = await readActiveDispatch(artifactsDir);
-  assert.ok(afterPause.paused_state, "paused after the first strand");
+  expect(afterPause.paused_state, "paused after the first strand").toBeTruthy();
   const settled = afterPause.paused_state.settled_exclusions;
-  assert.ok(settled.length > 0, "the exhausted pool is settled-excluded");
+  expect(settled.length > 0, "the exhausted pool is settled-excluded").toBeTruthy();
 
   // Pass 2: still strands (pool still exhausted), but re-discovery surfaces a
   // genuinely-new provider id NOT in the settled set → advancePausedState resumes.
@@ -205,14 +204,14 @@ test("DC-4 resume: re-discovered net-new capacity clears the pause (back to runn
     discoverProviders: () => [...settled, "brand-new-pool"],
   });
 
-  assert.notEqual(result.status, "paused", "net-new capacity resumes the run (pause cleared)");
+  expect(result.status, "net-new capacity resumes the run (pause cleared)").not.toBe("paused");
   const afterResume = await readActiveDispatch(artifactsDir);
-  assert.ok(!afterResume.paused_state, "the paused state is cleared on resume");
+  expect(!afterResume.paused_state, "the paused state is cleared on resume").toBeTruthy();
 });
 
 test("DC-4 settled set: a spilled-then-exhausted pool is never re-offered as net-new (INV-S03)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   // Pass 1 → pause, capturing the settled (exhausted) pool ids.
   await driveRollingAuditDispatch({
@@ -232,13 +231,13 @@ test("DC-4 settled set: a spilled-then-exhausted pool is never re-offered as net
     discoverProviders: () => settled, // re-offer the settled pools only
   });
 
-  assert.equal(result.status, "paused", "re-offered settled pools are not net-new → stays paused");
-  assert.equal(result.paused_state.lifecycle.pause_count, 1, "pause_count advanced (no resume)");
+  expect(result.status, "re-offered settled pools are not net-new → stays paused").toBe("paused");
+  expect(result.paused_state.lifecycle.pause_count, "pause_count advanced (no resume)").toBe(1);
 });
 
 test("DC-4 terminal: the pause promotes to a partial-completion terminal after the livelock limit", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
-  t.after(() => rm(artifactsDir, { recursive: true, force: true }));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
   const session = { provider: "openai-compatible", quota: { enabled: false } };
   // livelockLimit 2: pass1 enters (count 0), pass2 bumps to 1 (still paused),
@@ -253,21 +252,21 @@ test("DC-4 terminal: the pause promotes to a partial-completion terminal after t
     });
 
   const p1 = await passOnce();
-  assert.equal(p1.status, "paused");
+  expect(p1.status).toBe("paused");
   const settled = p1.paused_state.settled_exclusions;
 
   const p2 = await passOnce({ settled });
-  assert.equal(p2.status, "paused");
-  assert.equal(p2.paused_state.lifecycle.pause_count, 1);
+  expect(p2.status).toBe("paused");
+  expect(p2.paused_state.lifecycle.pause_count).toBe(1);
 
   const p3 = await passOnce({ settled });
-  assert.equal(p3.status, "partial", "at the livelock limit the run goes terminal");
-  assert.equal(p3.paused_state, undefined, "terminal clears the paused state");
+  expect(p3.status, "at the livelock limit the run goes terminal").toBe("partial");
+  expect(p3.paused_state, "terminal clears the paused state").toBe(undefined);
 
   const active = await readActiveDispatch(artifactsDir);
-  assert.ok(active.partial_completion_terminal, "a partial-completion terminal is recorded for synthesis");
-  assert.equal(active.partial_completion_terminal.reason, "livelock_guard");
-  assert.ok(!active.paused_state, "no paused state remains once terminal");
+  expect(active.partial_completion_terminal, "a partial-completion terminal is recorded for synthesis").toBeTruthy();
+  expect(active.partial_completion_terminal.reason).toBe("livelock_guard");
+  expect(!active.paused_state, "no paused state remains once terminal").toBeTruthy();
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -296,8 +295,8 @@ test("DC-4 scope-annotate: design-review units show [in scope] / [excluded: reas
     excluded_scope: [{ path: "vendor", reason: "third-party code" }],
   };
   const prompt = renderDesignReviewPrompt(bundleWithUnits(checkpoint));
-  assert.match(prompt, /unit-incl \[in scope\]/, "in-scope unit annotated [in scope]");
-  assert.match(prompt, /unit-excl \[excluded: third-party code\]/, "excluded unit carries the structured reason");
+  expect(prompt, "in-scope unit annotated [in scope]").toMatch(/unit-incl \[in scope\]/);
+  expect(prompt, "excluded unit carries the structured reason").toMatch(/unit-excl \[excluded: third-party code\]/);
 });
 
 test("DC-4 scope-annotate: a disposition_overrides 'excluded' status also marks a unit excluded", () => {
@@ -312,8 +311,8 @@ test("DC-4 scope-annotate: a disposition_overrides 'excluded' status also marks 
     ],
   };
   const disp = deriveUnitScopeDisposition(["vendor/lib/a.ts", "vendor/lib/b.ts"], checkpoint);
-  assert.equal(disp.kind, "excluded");
-  assert.equal(disp.reason, "generated");
+  expect(disp.kind).toBe("excluded");
+  expect(disp.reason).toBe("generated");
 });
 
 test("DC-4 scope-annotate (no-verbatim): free_form_intent is NEVER threaded into the prompt", () => {
@@ -329,9 +328,9 @@ test("DC-4 scope-annotate (no-verbatim): free_form_intent is NEVER threaded into
   };
   for (const render of [renderDesignReviewPrompt, renderContractReviewPrompt]) {
     const prompt = render(bundleWithUnits(checkpoint));
-    assert.ok(!prompt.includes(secret), `${render.name} must not thread free_form_intent verbatim`);
+    expect(!prompt.includes(secret), `${render.name} must not thread free_form_intent verbatim`).toBeTruthy();
     // The structured exclusion still annotates.
-    assert.match(prompt, /unit-excl \[excluded: third-party\]/);
+    expect(prompt).toMatch(/unit-excl \[excluded: third-party\]/);
   }
 });
 
@@ -345,13 +344,13 @@ test("DC-4 scope-annotate: a unit with ANY in-scope file stays in scope (not exc
   };
   // unit-excl has a.ts (excluded) AND b.ts (in scope) → the unit stays in scope.
   const disp = deriveUnitScopeDisposition(["vendor/lib/a.ts", "vendor/lib/b.ts"], checkpoint);
-  assert.equal(disp.kind, "in_scope", "a partially-excluded unit is not fully excluded");
+  expect(disp.kind, "a partially-excluded unit is not fully excluded").toBe("in_scope");
 });
 
 test("DC-4 scope-annotate: no checkpoint → every unit defaults to [in scope]", () => {
   const prompt = renderDesignReviewPrompt(bundleWithUnits(undefined));
-  assert.match(prompt, /unit-incl \[in scope\]/);
-  assert.match(prompt, /unit-excl \[in scope\]/);
+  expect(prompt).toMatch(/unit-incl \[in scope\]/);
+  expect(prompt).toMatch(/unit-excl \[in scope\]/);
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -396,17 +395,13 @@ test("DC-4 fold-ingest (CE-009): folded ingestion leaves the SAME staleness set 
 
     // CE-009: identical staleness DAG — folding ingestion into the dispatch turn
     // does not shift downstream ledger/staleness state vs. a separate round.
-    assert.deepEqual(folded.stale, separate.stale, "folded and separate ingest leave the same stale set");
+    expect(folded.stale, "folded and separate ingest leave the same stale set").toEqual(separate.stale);
     // The fold satisfies audit_results_ingested IN-TURN with the same outcome.
-    assert.equal(
-      folded.bundle.audit_results.length,
-      separate.bundle.audit_results.length,
-      "both paths ingest the same audit_results",
-    );
-    assert.ok(folded.bundle.audit_results.length > 0, "results were actually ingested");
-    assert.equal(folded.step.selected_executor, "result_ingestion_executor");
+    expect(folded.bundle.audit_results.length, "both paths ingest the same audit_results").toBe(separate.bundle.audit_results.length);
+    expect(folded.bundle.audit_results.length > 0, "results were actually ingested").toBeTruthy();
+    expect(folded.step.selected_executor).toBe("result_ingestion_executor");
     // The stale set is non-trivial (the ingest actually propagated along the DAG),
     // so the equivalence is meaningful, not a both-empty coincidence.
-    assert.ok(separate.stale.length > 0, "ingestion propagated staleness along the dependency DAG");
+    expect(separate.stale.length > 0, "ingestion propagated staleness along the dependency DAG").toBeTruthy();
   });
 });

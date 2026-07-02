@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { buildGraphBundle } from "../../src/audit/extractors/graph.ts";
 
 function manifest(paths) {
@@ -22,25 +21,15 @@ test("heuristic container edges land in heuristics graph, not imports", () => {
   const graphs = bundle.graphs ?? {};
 
   // At least one heuristic edge should be present (container heuristic)
-  assert.ok(
-    Array.isArray(graphs.heuristics),
-    "graphs.heuristics should be an array",
-  );
-  assert.ok(
-    graphs.heuristics.length > 0,
-    "graphs.heuristics should contain at least one edge for deeply-nested paths",
-  );
+  expect(Array.isArray(graphs.heuristics), "graphs.heuristics should be an array").toBeTruthy();
+  expect(graphs.heuristics.length > 0, "graphs.heuristics should contain at least one edge for deeply-nested paths").toBeTruthy();
 
   // No edge with confidence < 1 should bleed into imports
   const imports = graphs.imports ?? [];
   const leakedHeuristics = imports.filter(
     (e) => typeof e.confidence === "number" && e.confidence < 1,
   );
-  assert.equal(
-    leakedHeuristics.length,
-    0,
-    "no heuristic-confidence edges should appear in graphs.imports",
-  );
+  expect(leakedHeuristics.length, "no heuristic-confidence edges should appear in graphs.imports").toBe(0);
 });
 
 test("all edges in heuristics graph have confidence < 1", () => {
@@ -50,10 +39,7 @@ test("all edges in heuristics graph have confidence < 1", () => {
   const heuristics = graphs.heuristics ?? [];
 
   for (const edge of heuristics) {
-    assert.ok(
-      typeof edge.confidence === "number" && edge.confidence < 1,
-      `heuristic edge from=${edge.from} to=${edge.to} should have confidence < 1, got ${edge.confidence}`,
-    );
+    expect(typeof edge.confidence === "number" && edge.confidence < 1, `heuristic edge from=${edge.from} to=${edge.to} should have confidence < 1, got ${edge.confidence}`).toBeTruthy();
   }
 });
 
@@ -66,18 +52,12 @@ test("auth-session heuristic edges land in heuristics graph, not imports", () =>
   const bundle = buildGraphBundle(m, undefined, { fileContents: {} });
   const graphs = bundle.graphs ?? {};
 
-  assert.ok(
-    Array.isArray(graphs.heuristics),
-    "graphs.heuristics should be an array",
-  );
+  expect(Array.isArray(graphs.heuristics), "graphs.heuristics should be an array").toBeTruthy();
   const authSessionEdge = (graphs.heuristics ?? []).find(
     (e) =>
       e.from === "src/auth/middleware.ts" && e.to === "src/session/store.ts",
   );
-  assert.ok(
-    authSessionEdge !== undefined,
-    "graphs.heuristics should contain an edge between the auth file and the session file",
-  );
+  expect(authSessionEdge !== undefined, "graphs.heuristics should contain an edge between the auth file and the session file").toBeTruthy();
 
   // That edge should not appear in imports
   const imports = graphs.imports ?? [];
@@ -85,11 +65,7 @@ test("auth-session heuristic edges land in heuristics graph, not imports", () =>
     (e) =>
       e.from === "src/auth/middleware.ts" && e.to === "src/session/store.ts",
   );
-  assert.equal(
-    crossEdgeInImports,
-    undefined,
-    "auth-session edge should not appear in graphs.imports",
-  );
+  expect(crossEdgeInImports, "auth-session edge should not appear in graphs.imports").toBe(undefined);
 });
 
 test("auth-session heuristic edges are absent from imports even with file content present", () => {
@@ -112,11 +88,7 @@ test("auth-session heuristic edges are absent from imports even with file conten
       (e.from === "src/session/manager.ts" &&
         e.to === "src/auth/handler.ts"),
   );
-  assert.equal(
-    leakedEdge,
-    undefined,
-    "auth-session heuristic edge must not bleed into imports even when file content is present",
-  );
+  expect(leakedEdge, "auth-session heuristic edge must not bleed into imports even when file content is present").toBe(undefined);
 });
 
 // ── extractHeuristicContainerEdges: Windows backslash path normalization ───────
@@ -134,10 +106,7 @@ test("extractHeuristicContainerEdges produces a container edge for a backslash-s
     (e) =>
       e.from === "src/utils/helpers.ts" && e.to === "src/utils",
   );
-  assert.ok(
-    containerEdge !== undefined,
-    "should produce a heuristic container edge with normalized from/to paths for a backslash-separated input",
-  );
+  expect(containerEdge !== undefined, "should produce a heuristic container edge with normalized from/to paths for a backslash-separated input").toBeTruthy();
 });
 
 test("extractHeuristicContainerEdges continues to work for a forward-slash path", () => {
@@ -151,8 +120,5 @@ test("extractHeuristicContainerEdges continues to work for a forward-slash path"
     (e) =>
       e.from === "src/utils/helpers.ts" && e.to === "src/utils",
   );
-  assert.ok(
-    containerEdge !== undefined,
-    "forward-slash path should continue to produce a heuristic container edge",
-  );
+  expect(containerEdge !== undefined, "forward-slash path should continue to produce a heuristic container edge").toBeTruthy();
 });

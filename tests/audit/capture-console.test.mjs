@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 
@@ -13,13 +13,13 @@ test("captureConsole restores console and exitCode after successful call", async
     process.exitCode = 42;
   });
 
-  assert.equal(console.log, originalLog, "console.log must be restored");
-  assert.equal(console.error, originalError, "console.error must be restored");
-  assert.equal(process.exitCode, originalExitCode, "process.exitCode must be restored");
+  expect(console.log, "console.log must be restored").toBe(originalLog);
+  expect(console.error, "console.error must be restored").toBe(originalError);
+  expect(process.exitCode, "process.exitCode must be restored").toBe(originalExitCode);
 
-  assert.match(result.stdout, /hello stdout/);
-  assert.match(result.stderr, /hello stderr/);
-  assert.equal(result.code, 42, "returned code should reflect exitCode set during fn()");
+  expect(result.stdout).toMatch(/hello stdout/);
+  expect(result.stderr).toMatch(/hello stderr/);
+  expect(result.code, "returned code should reflect exitCode set during fn()").toBe(42);
 });
 
 test("captureConsole restores console and exitCode even when fn throws", async () => {
@@ -37,7 +37,7 @@ test("captureConsole restores console and exitCode even when fn throws", async (
     (error) => error === boom,
   );
 
-  assert.equal(console.log, originalLog, "console.log must be restored after throw");
-  assert.equal(console.error, originalError, "console.error must be restored after throw");
-  assert.equal(process.exitCode, originalExitCode, "process.exitCode must be restored after throw");
+  expect(console.log, "console.log must be restored after throw").toBe(originalLog);
+  expect(console.error, "console.error must be restored after throw").toBe(originalError);
+  expect(process.exitCode, "process.exitCode must be restored after throw").toBe(originalExitCode);
 });

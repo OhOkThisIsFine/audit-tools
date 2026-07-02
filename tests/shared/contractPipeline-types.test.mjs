@@ -5,8 +5,7 @@
  *   - ObligationEntry priority + source fields
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect, describe, it } from "vitest";
 
 const {
   CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION,
@@ -16,8 +15,8 @@ const {
 
 // ── ImplementationDAGNode enriched metadata ───────────────────────────────────
 
-test("ImplementationDAGNode accepts enriched metadata fields", async (t) => {
-  await t.test("node with all optional metadata fields is well-formed", () => {
+describe("ImplementationDAGNode accepts enriched metadata fields", () => {
+  it("node with all optional metadata fields is well-formed", () => {
     /** @type {import('../../src/shared/types/contractPipeline.ts').ImplementationDAGNode} */
     const node = {
       id: "N-001",
@@ -37,16 +36,16 @@ test("ImplementationDAGNode accepts enriched metadata fields", async (t) => {
       verification: ["npm run check passes with no errors"],
     };
 
-    assert.equal(node.id, "N-001");
-    assert.deepEqual(node.affected_files, ["packages/shared/src/types/contractPipeline.ts"]);
-    assert.equal(node.lens, "architecture");
-    assert.equal(node.severity, "medium");
-    assert.deepEqual(node.preconditions, ["shared package builds clean"]);
-    assert.deepEqual(node.expected_changes, ["SeamNegotiationRecord exported from contractPipeline.ts"]);
-    assert.deepEqual(node.verification, ["npm run check passes with no errors"]);
+    expect(node.id).toBe("N-001");
+    expect(node.affected_files).toEqual(["packages/shared/src/types/contractPipeline.ts"]);
+    expect(node.lens).toBe("architecture");
+    expect(node.severity).toBe("medium");
+    expect(node.preconditions).toEqual(["shared package builds clean"]);
+    expect(node.expected_changes).toEqual(["SeamNegotiationRecord exported from contractPipeline.ts"]);
+    expect(node.verification).toEqual(["npm run check passes with no errors"]);
   });
 
-  await t.test("node without optional metadata fields is still valid", () => {
+  it("node without optional metadata fields is still valid", () => {
     /** @type {import('../../src/shared/types/contractPipeline.ts').ImplementationDAGNode} */
     const node = {
       id: "N-002",
@@ -59,21 +58,21 @@ test("ImplementationDAGNode accepts enriched metadata fields", async (t) => {
       status: "pending",
     };
 
-    assert.equal(node.id, "N-002");
-    assert.equal(node.affected_files, undefined);
-    assert.equal(node.read_scope, undefined);
-    assert.equal(node.lens, undefined);
-    assert.equal(node.severity, undefined);
-    assert.equal(node.preconditions, undefined);
-    assert.equal(node.expected_changes, undefined);
-    assert.equal(node.verification, undefined);
+    expect(node.id).toBe("N-002");
+    expect(node.affected_files).toBe(undefined);
+    expect(node.read_scope).toBe(undefined);
+    expect(node.lens).toBe(undefined);
+    expect(node.severity).toBe(undefined);
+    expect(node.preconditions).toBe(undefined);
+    expect(node.expected_changes).toBe(undefined);
+    expect(node.verification).toBe(undefined);
   });
 });
 
 // ── SeamNegotiationRecord round-trip ─────────────────────────────────────────
 
-test("SeamNegotiationRecord round-trips through JSON", async (t) => {
-  await t.test("full record with multiple AgentSeam entries serializes and deserializes", () => {
+describe("SeamNegotiationRecord round-trips through JSON", () => {
+  it("full record with multiple AgentSeam entries serializes and deserializes", () => {
     /** @type {import('../../src/shared/types/contractPipeline.ts').SeamNegotiationRecord} */
     const record = {
       contract_version: CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION,
@@ -105,28 +104,25 @@ test("SeamNegotiationRecord round-trips through JSON", async (t) => {
     const serialized = JSON.stringify(record);
     const deserialized = JSON.parse(serialized);
 
-    assert.equal(deserialized.contract_version, CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION);
-    assert.equal(deserialized.goal_id, "goal-abc");
-    assert.equal(deserialized.seams.length, 2);
-    assert.equal(deserialized.seams[0].seam_id, "seam-001");
-    assert.equal(deserialized.seams[0].role, "author");
-    assert.equal(deserialized.seams[0].agent_hint, "claude-code");
-    assert.equal(deserialized.seams[1].role, "reviewer");
-    assert.equal(deserialized.seams[1].agent_hint, undefined);
+    expect(deserialized.contract_version).toBe(CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION);
+    expect(deserialized.goal_id).toBe("goal-abc");
+    expect(deserialized.seams.length).toBe(2);
+    expect(deserialized.seams[0].seam_id).toBe("seam-001");
+    expect(deserialized.seams[0].role).toBe("author");
+    expect(deserialized.seams[0].agent_hint).toBe("claude-code");
+    expect(deserialized.seams[1].role).toBe("reviewer");
+    expect(deserialized.seams[1].agent_hint).toBe(undefined);
   });
 
-  await t.test("contract_version equals CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION constant", () => {
-    assert.equal(
-      CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION,
-      "remediate-code-contract-pipeline/seam-negotiation/v1alpha1"
-    );
+  it("contract_version equals CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION constant", () => {
+    expect(CONTRACT_PIPELINE_SEAM_NEGOTIATION_VERSION).toBe("remediate-code-contract-pipeline/seam-negotiation/v1alpha1");
   });
 });
 
 // ── ObligationEntry priority and source fields ────────────────────────────────
 
-test("ObligationEntry priority and source fields are optional", async (t) => {
-  await t.test("ObligationEntry without priority or source is valid", () => {
+describe("ObligationEntry priority and source fields are optional", () => {
+  it("ObligationEntry without priority or source is valid", () => {
     /** @type {import('../../src/shared/types/contractPipeline.ts').ObligationEntry} */
     const entry = {
       id: "OBL-001",
@@ -136,12 +132,12 @@ test("ObligationEntry priority and source fields are optional", async (t) => {
       status: "pending",
     };
 
-    assert.equal(entry.id, "OBL-001");
-    assert.equal(entry.priority, undefined);
-    assert.equal(entry.source, undefined);
+    expect(entry.id).toBe("OBL-001");
+    expect(entry.priority).toBe(undefined);
+    expect(entry.source).toBe(undefined);
   });
 
-  await t.test("ObligationEntry with priority=1 and source='design_spec' is valid", () => {
+  it("ObligationEntry with priority=1 and source='design_spec' is valid", () => {
     /** @type {import('../../src/shared/types/contractPipeline.ts').ObligationEntry} */
     const entry = {
       id: "OBL-002",
@@ -153,11 +149,11 @@ test("ObligationEntry priority and source fields are optional", async (t) => {
       source: "design_spec",
     };
 
-    assert.equal(entry.priority, 1);
-    assert.equal(entry.source, "design_spec");
+    expect(entry.priority).toBe(1);
+    expect(entry.source).toBe("design_spec");
   });
 
-  await t.test("all valid source values are accepted", () => {
+  it("all valid source values are accepted", () => {
     /** @type {Array<import('../../src/shared/types/contractPipeline.ts').ObligationEntry['source']>} */
     const validSources = ["design_spec", "critique", "counterexample", "manual"];
     for (const source of validSources) {
@@ -170,7 +166,7 @@ test("ObligationEntry priority and source fields are optional", async (t) => {
         status: "pending",
         source,
       };
-      assert.equal(entry.source, source);
+      expect(entry.source).toBe(source);
     }
   });
 });

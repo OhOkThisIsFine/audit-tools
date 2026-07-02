@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 // Internal function exposed for testing via a named export shim. The function
@@ -41,7 +41,7 @@ test("pythonLogicalLines: from foo import (bar, baz) is a single logical line", 
   // parsed correctly as a single logical line, not two truncated ones).
   const edges = extractPythonImportEdges("src/mod.py", content, pl);
   // baz and bar may or may not resolve, but the call must succeed.
-  assert.ok(Array.isArray(edges));
+  expect(Array.isArray(edges)).toBeTruthy();
 });
 
 test("pythonLogicalLines: well-formed multiline import is still a single logical line", () => {
@@ -50,24 +50,15 @@ test("pythonLogicalLines: well-formed multiline import is still a single logical
   const edges = extractPythonImportEdges("src/mod.py", content, pl);
   // Both `bar` and `baz` must be resolved as submodule targets in a single
   // logical-line parse (not two truncated lines from bad paren tracking).
-  assert.ok(Array.isArray(edges), "must return an array");
-  assert.ok(
-    edges.length >= 2,
-    `must emit at least 2 edges (bar+baz resolved), got ${edges.length}: ${JSON.stringify(edges)}`,
-  );
+  expect(Array.isArray(edges), "must return an array").toBeTruthy();
+  expect(edges.length >= 2, `must emit at least 2 edges (bar+baz resolved), got ${edges.length}: ${JSON.stringify(edges)}`).toBeTruthy();
   const tos = edges.map((e) => e.to);
-  assert.ok(
-    tos.some((t) => t.includes("bar")),
-    `expected an edge to foo/bar.py, got: ${JSON.stringify(tos)}`,
-  );
-  assert.ok(
-    tos.some((t) => t.includes("baz")),
-    `expected an edge to foo/baz.py, got: ${JSON.stringify(tos)}`,
-  );
+  expect(tos.some((t) => t.includes("bar")), `expected an edge to foo/bar.py, got: ${JSON.stringify(tos)}`).toBeTruthy();
+  expect(tos.some((t) => t.includes("baz")), `expected an edge to foo/baz.py, got: ${JSON.stringify(tos)}`).toBeTruthy();
 });
 
 test("pythonLogicalLines: file with no imports returns no edges", () => {
   const content = "x = 1\nprint(x)\n";
   const edges = extractPythonImportEdges("src/mod.py", content, lookup("src/mod.py"));
-  assert.deepEqual(edges, []);
+  expect(edges).toEqual([]);
 });

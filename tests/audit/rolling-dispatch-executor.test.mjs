@@ -9,8 +9,7 @@
  *    agent no longer owns it.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { ESTIMATED_TOKENS_PER_LINE } = await import("audit-tools/shared");
 const { estimateTokensFromBytes } = await import("audit-tools/shared");
@@ -67,9 +66,9 @@ test("N-A06: taskContentTokens uses byte-based estimate when sizeIndex present",
   const tokensLine = lineCount * ESTIMATED_TOKENS_PER_LINE;
 
   // Byte-based: ceil(4000 / 4) = 1000; line-based: 100 * 4 = 400
-  assert.equal(tokensByte, estimateTokensFromBytes(sizeBytes), "byte-based tokens should equal estimateTokensFromBytes(size_bytes)");
-  assert.notEqual(tokensByte, tokensLine, "byte-based and line-based estimates should differ when sizes differ");
-  assert.equal(tokensByte, 1000, "ceil(4000 / 4) = 1000");
+  expect(tokensByte, "byte-based tokens should equal estimateTokensFromBytes(size_bytes)").toBe(estimateTokensFromBytes(sizeBytes));
+  expect(tokensByte, "byte-based and line-based estimates should differ when sizes differ").not.toBe(tokensLine);
+  expect(tokensByte, "ceil(4000 / 4) = 1000").toBe(1000);
 });
 
 test("N-A06: taskContentTokens falls back to line-based estimate when sizeIndex missing file", () => {
@@ -79,7 +78,7 @@ test("N-A06: taskContentTokens falls back to line-based estimate when sizeIndex 
 
   // No sizeIndex entry for this path
   const tokens = taskContentTokens(task, {}, {});
-  assert.equal(tokens, lineCount * ESTIMATED_TOKENS_PER_LINE, "should fall back to line-based estimate");
+  expect(tokens, "should fall back to line-based estimate").toBe(lineCount * ESTIMATED_TOKENS_PER_LINE);
 });
 
 test("N-A06: taskContentTokens falls back to line-based estimate when sizeIndex is absent", () => {
@@ -88,7 +87,7 @@ test("N-A06: taskContentTokens falls back to line-based estimate when sizeIndex 
   const task = makeTask("t1", filePath, lineCount);
 
   const tokens = taskContentTokens(task, undefined, {});
-  assert.equal(tokens, lineCount * ESTIMATED_TOKENS_PER_LINE, "should fall back to line-based estimate when sizeIndex is undefined");
+  expect(tokens, "should fall back to line-based estimate when sizeIndex is undefined").toBe(lineCount * ESTIMATED_TOKENS_PER_LINE);
 });
 
 // ── 2. Partial-coverage terminal ──────────────────────────────────────────────
@@ -136,11 +135,7 @@ test("N-A06: deriveAuditState with partial_completion_terminal treats stranded t
   const state = deriveAuditState(bundle);
   const auditTasksObl = state.obligations.find((o) => o.id === "audit_tasks_completed");
   // With partial_completion_terminal, t-stranded is excluded → obligation satisfied
-  assert.equal(
-    auditTasksObl?.state,
-    "satisfied",
-    "audit_tasks_completed must be satisfied when all pending tasks are stranded by partial_completion_terminal",
-  );
+  expect(auditTasksObl?.state, "audit_tasks_completed must be satisfied when all pending tasks are stranded by partial_completion_terminal").toBe("satisfied");
 });
 
 test("N-A06: deriveAuditState without partial_completion_terminal blocks on uncompleted tasks", () => {
@@ -173,11 +168,7 @@ test("N-A06: deriveAuditState without partial_completion_terminal blocks on unco
 
   const state = deriveAuditState(bundle);
   const auditTasksObl = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  assert.equal(
-    auditTasksObl?.state,
-    "missing",
-    "audit_tasks_completed must be missing when tasks are pending and no partial terminal is set",
-  );
+  expect(auditTasksObl?.state, "audit_tasks_completed must be missing when tasks are pending and no partial terminal is set").toBe("missing");
 });
 
 // ── 3. Inline structured-output prompt format ─────────────────────────────────
@@ -193,7 +184,7 @@ test("N-A06: buildPacketPrompt has no submit-packet command text", () => {
     resultPath: "/artifacts/runs/r1/task-results/pkt1-inline-result.json",
   });
 
-  assert.doesNotMatch(prompt, /submit-packet/, "prompt must NOT contain submit-packet command");
+  expect(prompt, "prompt must NOT contain submit-packet command").not.toMatch(/submit-packet/);
 });
 
 test("N-worker-prompt-and-result-contract: buildPacketPrompt instructs the worker to WRITE AuditResult[] to result_path and never forbids writes", () => {
@@ -211,20 +202,12 @@ test("N-worker-prompt-and-result-contract: buildPacketPrompt instructs the worke
   // The worker writes its results file (this is the bug the module fixes: the
   // old prompt told the worker to emit inline and forbade writes, so reviewers
   // wrote nothing and results were lost).
-  assert.match(
-    prompt,
-    /WRITE that array[\s\S]*to your result_path/i,
-    "prompt must instruct the worker to write the array to result_path",
-  );
-  assert.ok(prompt.includes(resultPath), "prompt must name the result_path value to write");
+  expect(prompt, "prompt must instruct the worker to write the array to result_path").toMatch(/WRITE that array[\s\S]*to your result_path/i);
+  expect(prompt.includes(resultPath), "prompt must name the result_path value to write").toBeTruthy();
   // It must NOT tell the worker to emit inline or forbid writing files.
-  assert.doesNotMatch(prompt, /emit it INLINE/i, "prompt must not instruct inline emission");
-  assert.doesNotMatch(prompt, /Do not write files/i, "prompt must not forbid file writes");
-  assert.doesNotMatch(
-    prompt,
-    /skill captures/i,
-    "prompt must not claim a skill captures an inline payload",
-  );
+  expect(prompt, "prompt must not instruct inline emission").not.toMatch(/emit it INLINE/i);
+  expect(prompt, "prompt must not forbid file writes").not.toMatch(/Do not write files/i);
+  expect(prompt, "prompt must not claim a skill captures an inline payload").not.toMatch(/skill captures/i);
 });
 
 test("N-A06: buildPacketPrompt contains result_path so host knows where to write captured output", () => {
@@ -239,8 +222,8 @@ test("N-A06: buildPacketPrompt contains result_path so host knows where to write
     resultPath,
   });
 
-  assert.ok(prompt.includes(resultPath), "prompt must include the result_path value");
-  assert.match(prompt, /result_path:/, "prompt must have result_path header field");
+  expect(prompt.includes(resultPath), "prompt must include the result_path value").toBeTruthy();
+  expect(prompt, "prompt must have result_path header field").toMatch(/result_path:/);
 });
 
 test("N-A06: buildPacketPrompt does NOT contain the Get-Content PowerShell pipe workaround", () => {
@@ -255,36 +238,28 @@ test("N-A06: buildPacketPrompt does NOT contain the Get-Content PowerShell pipe 
   });
 
   // The old workaround was "Get-Content <file> | & <command>"
-  assert.doesNotMatch(
-    prompt,
-    /Get-Content.*\|.*&/,
-    "prompt must NOT contain the PowerShell Get-Content pipe workaround",
-  );
+  expect(prompt, "prompt must NOT contain the PowerShell Get-Content pipe workaround").not.toMatch(/Get-Content.*\|.*&/);
 });
 
 // ── 4. Executor registry ───────────────────────────────────────────────────────
 
 test("N-A06: rolling_dispatch_executor is in EXECUTOR_REGISTRY and owns audit_tasks_completed", () => {
   const entry = EXECUTOR_REGISTRY.find((e) => e.id === "rolling_dispatch_executor");
-  assert.ok(entry, "rolling_dispatch_executor must be in EXECUTOR_REGISTRY");
-  assert.equal(entry.kind, "host_delegation", "rolling_dispatch_executor must be host_delegation");
-  assert.ok(
-    entry.obligation_ids.includes("audit_tasks_completed"),
-    "rolling_dispatch_executor must own audit_tasks_completed obligation",
-  );
+  expect(entry, "rolling_dispatch_executor must be in EXECUTOR_REGISTRY").toBeTruthy();
+  expect(entry.kind, "rolling_dispatch_executor must be host_delegation").toBe("host_delegation");
+  expect(entry.obligation_ids.includes("audit_tasks_completed"), "rolling_dispatch_executor must own audit_tasks_completed obligation").toBeTruthy();
 });
 
 test("N-A06: agent executor no longer owns audit_tasks_completed", () => {
   const agentEntry = EXECUTOR_REGISTRY.find((e) => e.id === "agent");
-  assert.ok(agentEntry, "agent entry must still exist for backward compatibility");
-  assert.equal(agentEntry.obligation_ids.includes("audit_tasks_completed"), false,
-    "agent must NOT own audit_tasks_completed (superseded by rolling_dispatch_executor)");
+  expect(agentEntry, "agent entry must still exist for backward compatibility").toBeTruthy();
+  expect(agentEntry.obligation_ids.includes("audit_tasks_completed"), "agent must NOT own audit_tasks_completed (superseded by rolling_dispatch_executor)").toBe(false);
 });
 
 test("N-A06: audit_tasks_completed is owned by exactly one executor", () => {
   const owners = EXECUTOR_REGISTRY.filter((e) => e.obligation_ids.includes("audit_tasks_completed"));
-  assert.equal(owners.length, 1, "exactly one executor should own audit_tasks_completed");
-  assert.equal(owners[0].id, "rolling_dispatch_executor");
+  expect(owners.length, "exactly one executor should own audit_tasks_completed").toBe(1);
+  expect(owners[0].id).toBe("rolling_dispatch_executor");
 });
 
 // ── INV-07: runRollingDispatch with an empty pool strands all packets ─────────
@@ -305,10 +280,10 @@ test("INV-07: runRollingDispatch with an empty confirmedPools array strands all 
     async () => { throw new Error("should not be called on empty pool"); },
   );
 
-  assert.equal(result.status, "partial", "empty pool must return partial status");
-  assert.equal(result.partial_reason, "empty_pool");
-  assert.deepEqual(result.stranded_ids.sort(), ["pkt-1", "pkt-2"]);
-  assert.equal(result.results.length, 0, "no results when pool is empty");
+  expect(result.status, "empty pool must return partial status").toBe("partial");
+  expect(result.partial_reason).toBe("empty_pool");
+  expect(result.stranded_ids.sort()).toEqual(["pkt-1", "pkt-2"]);
+  expect(result.results.length, "no results when pool is empty").toBe(0);
 });
 
 test("INV-07: runRollingDispatch does not silently drop the pool list it receives (no hidden filter)", async () => {
@@ -320,9 +295,9 @@ test("INV-07: runRollingDispatch does not silently drop the pool list it receive
   const result = await runRollingDispatch([], [], {}, {}, async () => {
     throw new Error("unreachable");
   });
-  assert.equal(result.status, "partial");
-  assert.equal(result.partial_reason, "empty_pool");
-  assert.deepEqual(result.stranded_ids, []);
+  expect(result.status).toBe("partial");
+  expect(result.partial_reason).toBe("empty_pool");
+  expect(result.stranded_ids).toEqual([]);
 });
 
 // ── TST-8f9c443f: post-run livelock guard contract ───────────────────────────
@@ -344,9 +319,9 @@ test("TST-8f9c443f: detectLivelock returns livelock_guard when pendingIds non-em
     consecutiveNoProgressWaves: livelockLimit,
     noProgressLimit: livelockLimit,
   });
-  assert.ok(terminal !== null, "detectLivelock must return a terminal when pendingIds non-empty and waves >= limit");
-  assert.equal(terminal.reason, "livelock_guard");
-  assert.deepEqual(terminal.stranded_ids.sort(), pendingIds.sort());
+  expect(terminal !== null, "detectLivelock must return a terminal when pendingIds non-empty and waves >= limit").toBeTruthy();
+  expect(terminal.reason).toBe("livelock_guard");
+  expect(terminal.stranded_ids.sort()).toEqual(pendingIds.sort());
 });
 
 test("TST-8f9c443f: detectLivelock returns null when pendingIds is empty (no residual packets)", () => {
@@ -356,7 +331,7 @@ test("TST-8f9c443f: detectLivelock returns null when pendingIds is empty (no res
     consecutiveNoProgressWaves: 999,
     noProgressLimit: 3,
   });
-  assert.equal(terminal, null, "detectLivelock must return null when pendingIds is empty");
+  expect(terminal, "detectLivelock must return null when pendingIds is empty").toBe(null);
 });
 
 test("TST-8f9c443f: runRollingDispatch post-run invariant — all successfully dispatched packets appear in results", async () => {
@@ -380,9 +355,9 @@ test("TST-8f9c443f: runRollingDispatch post-run invariant — all successfully d
     {},
     async (packet) => ({ packet, outcome: "success" }),
   );
-  assert.equal(result.status, "complete", "all packets dispatched → complete, no post-run livelock");
-  assert.equal(result.results.length, 3);
-  assert.deepEqual(result.stranded_ids, []);
+  expect(result.status, "all packets dispatched → complete, no post-run livelock").toBe("complete");
+  expect(result.results.length).toBe(3);
+  expect(result.stranded_ids).toEqual([]);
   // partial_reason must be absent for a complete run
-  assert.equal(result.partial_reason, undefined);
+  expect(result.partial_reason).toBe(undefined);
 });

@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { appendResultsToLedger, stampLedgerKeys } =
   await import("../../src/audit/orchestrator/ledger.ts");
@@ -19,32 +18,32 @@ function baseResult(over = {}) {
 test("stampLedgerKeys — mints instance_id + seam keys, idempotent on replay", () => {
   const r = baseResult();
   const a = stampLedgerKeys(r);
-  assert.ok(a.instance_id, "instance_id minted");
-  assert.ok(a.identity_key, "identity_key derived");
-  assert.ok(a.idempotency_key, "idempotency_key derived");
+  expect(a.instance_id, "instance_id minted").toBeTruthy();
+  expect(a.identity_key, "identity_key derived").toBeTruthy();
+  expect(a.idempotency_key, "idempotency_key derived").toBeTruthy();
 
   // Re-stamping an already-stamped record keeps its logical keys (so a replay
   // hashes identically) — only instance_id is per-record.
   const b = stampLedgerKeys(a);
-  assert.equal(b.identity_key, a.identity_key);
-  assert.equal(b.idempotency_key, a.idempotency_key);
-  assert.equal(b.instance_id, a.instance_id);
+  expect(b.identity_key).toBe(a.identity_key);
+  expect(b.idempotency_key).toBe(a.idempotency_key);
+  expect(b.instance_id).toBe(a.instance_id);
 });
 
 test("appendResultsToLedger — append-only, distinct records get distinct instance_ids", () => {
   const ledger = appendResultsToLedger([], [baseResult(), baseResult({ unit_id: "u2" })]);
-  assert.equal(ledger.length, 2);
-  assert.notEqual(ledger[0].instance_id, ledger[1].instance_id);
+  expect(ledger.length).toBe(2);
+  expect(ledger[0].instance_id).not.toBe(ledger[1].instance_id);
 });
 
 test("appendResultsToLedger — replay of the same logical result is a no-op (idempotent)", () => {
   const first = appendResultsToLedger([], [baseResult()]);
-  assert.equal(first.length, 1);
+  expect(first.length).toBe(1);
   // Same coordinate + same emit source → same idempotency_key → no-op.
   const replayed = appendResultsToLedger(first, [baseResult()]);
-  assert.equal(replayed.length, 1, "replay did not append a duplicate");
+  expect(replayed.length, "replay did not append a duplicate").toBe(1);
   // Existing record untouched (append-only).
-  assert.equal(replayed[0].instance_id, first[0].instance_id);
+  expect(replayed[0].instance_id).toBe(first[0].instance_id);
 });
 
 test("appendResultsToLedger — base vs deepening share a coordinate but both persist", () => {
@@ -54,18 +53,14 @@ test("appendResultsToLedger — base vs deepening share a coordinate but both pe
     [],
     [baseResult({ task_id: "t1" }), baseResult({ task_id: "deepening:x:abc" })],
   );
-  assert.equal(ledger.length, 2);
-  assert.equal(ledger[0].identity_key, ledger[1].identity_key, "same identity coordinate");
-  assert.notEqual(
-    ledger[0].idempotency_key,
-    ledger[1].idempotency_key,
-    "distinct logical identity",
-  );
+  expect(ledger.length).toBe(2);
+  expect(ledger[0].identity_key, "same identity coordinate").toBe(ledger[1].identity_key);
+  expect(ledger[0].idempotency_key, "distinct logical identity").not.toBe(ledger[1].idempotency_key);
 });
 
 test("appendResultsToLedger — dedupes replays within a single batch", () => {
   const ledger = appendResultsToLedger([], [baseResult(), baseResult()]);
-  assert.equal(ledger.length, 1);
+  expect(ledger.length).toBe(1);
 });
 
 test("appendResultsToLedger — two deepening rounds at the same coordinate under DISTINCT task_ids both persist (confirmed live 2026-06-30 collision)", () => {
@@ -77,9 +72,9 @@ test("appendResultsToLedger — two deepening rounds at the same coordinate unde
   const round1 = baseResult({ task_id: "deepening:steward:round1hash" });
   const round2 = baseResult({ task_id: "deepening:steward:round2hash" });
   const ledger = appendResultsToLedger([], [round1, round2]);
-  assert.equal(ledger.length, 2, "round 2 is not dropped as a replay of round 1");
-  assert.equal(ledger[0].identity_key, ledger[1].identity_key, "same identity coordinate");
-  assert.notEqual(ledger[0].idempotency_key, ledger[1].idempotency_key);
+  expect(ledger.length, "round 2 is not dropped as a replay of round 1").toBe(2);
+  expect(ledger[0].identity_key, "same identity coordinate").toBe(ledger[1].identity_key);
+  expect(ledger[0].idempotency_key).not.toBe(ledger[1].idempotency_key);
 });
 
 test("appendResultsToLedger — a genuine replay of the SAME deepening task_id still no-ops (INV-2 preserved)", () => {
@@ -87,11 +82,11 @@ test("appendResultsToLedger — a genuine replay of the SAME deepening task_id s
     [],
     [baseResult({ task_id: "deepening:steward:round1hash" })],
   );
-  assert.equal(first.length, 1);
+  expect(first.length).toBe(1);
   const replayed = appendResultsToLedger(
     first,
     [baseResult({ task_id: "deepening:steward:round1hash" })],
   );
-  assert.equal(replayed.length, 1, "same-task_id replay did not append a duplicate");
-  assert.equal(replayed[0].instance_id, first[0].instance_id);
+  expect(replayed.length, "same-task_id replay did not append a duplicate").toBe(1);
+  expect(replayed[0].instance_id).toBe(first[0].instance_id);
 });

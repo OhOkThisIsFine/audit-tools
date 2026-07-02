@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -52,7 +52,7 @@ test("cmdStatus emits valid JSON with audit_state fields when audit_state.json i
     );
 
     const result = await runStatus(artifactsDir);
-    assert.equal(result.exitCode, 0, `Unexpected exit code. stderr: ${result.stderr}`);
+    expect(result.exitCode, `Unexpected exit code. stderr: ${result.stderr}`).toBe(0);
 
     let parsed;
     try {
@@ -61,16 +61,16 @@ test("cmdStatus emits valid JSON with audit_state fields when audit_state.json i
       assert.fail(`stdout is not valid JSON: ${result.stdout}\nstderr: ${result.stderr}`);
     }
 
-    assert.equal(parsed.status, "active");
-    assert.equal(parsed.last_obligation, "plan");
-    assert.ok("obligations_summary" in parsed, "obligations_summary should be present");
+    expect(parsed.status).toBe("active");
+    expect(parsed.last_obligation).toBe("plan");
+    expect("obligations_summary" in parsed, "obligations_summary should be present").toBeTruthy();
 
     const summary = parsed.obligations_summary;
-    assert.equal(summary.satisfied, 1);
-    assert.equal(summary.present, 1);
-    assert.equal(summary.missing, 1);
-    assert.equal(summary.stale, 0);
-    assert.equal(summary.blocked, 0);
+    expect(summary.satisfied).toBe(1);
+    expect(summary.present).toBe(1);
+    expect(summary.missing).toBe(1);
+    expect(summary.stale).toBe(0);
+    expect(summary.blocked).toBe(0);
   });
 });
 
@@ -117,23 +117,23 @@ test("cmdStatus includes recent run ledger entries", async () => {
     );
 
     const result = await runStatus(artifactsDir);
-    assert.equal(result.exitCode, 0);
+    expect(result.exitCode).toBe(0);
 
     const parsed = JSON.parse(result.stdout);
 
-    assert.ok(Array.isArray(parsed.recent_runs), "recent_runs should be an array");
-    assert.ok(parsed.recent_runs.length > 0, "recent_runs should be non-empty");
+    expect(Array.isArray(parsed.recent_runs), "recent_runs should be an array").toBeTruthy();
+    expect(parsed.recent_runs.length > 0, "recent_runs should be non-empty").toBeTruthy();
 
     const firstEntry = parsed.recent_runs[0];
-    assert.ok("run_id" in firstEntry, "each entry should have run_id");
-    assert.ok("obligation_id" in firstEntry, "each entry should have obligation_id");
-    assert.ok("status" in firstEntry, "each entry should have status");
-    assert.ok("started_at" in firstEntry, "each entry should have started_at");
+    expect("run_id" in firstEntry, "each entry should have run_id").toBeTruthy();
+    expect("obligation_id" in firstEntry, "each entry should have obligation_id").toBeTruthy();
+    expect("status" in firstEntry, "each entry should have status").toBeTruthy();
+    expect("started_at" in firstEntry, "each entry should have started_at").toBeTruthy();
 
     // Should be limited to last 5 runs (newest first)
-    assert.ok(parsed.recent_runs.length <= 5, "recent_runs should be capped at 5");
-    assert.equal(parsed.recent_runs[0].run_id, "run-002");
-    assert.equal(parsed.recent_runs[1].run_id, "run-001");
+    expect(parsed.recent_runs.length <= 5, "recent_runs should be capped at 5").toBeTruthy();
+    expect(parsed.recent_runs[0].run_id).toBe("run-002");
+    expect(parsed.recent_runs[1].run_id).toBe("run-001");
   });
 });
 
@@ -160,14 +160,14 @@ test("cmdStatus includes pending task counts from the most recent run directory"
     );
 
     const result = await runStatus(artifactsDir);
-    assert.equal(result.exitCode, 0);
+    expect(result.exitCode).toBe(0);
 
     const parsed = JSON.parse(result.stdout);
 
-    assert.ok(parsed.pending_tasks !== null, "pending_tasks should not be null");
-    assert.equal(parsed.pending_tasks.total, 3);
-    assert.equal(parsed.pending_tasks.remaining, 2);
-    assert.equal(parsed.pending_tasks.run_id, runId);
+    expect(parsed.pending_tasks !== null, "pending_tasks should not be null").toBeTruthy();
+    expect(parsed.pending_tasks.total).toBe(3);
+    expect(parsed.pending_tasks.remaining).toBe(2);
+    expect(parsed.pending_tasks.run_id).toBe(runId);
   });
 });
 
@@ -179,11 +179,11 @@ test("cmdStatus exits cleanly with a clear message when no audit_state.json exis
 
     const result = await runStatus(artifactsDir);
 
-    assert.equal(result.exitCode, 1, "Should exit with code 1 when no audit_state.json");
+    expect(result.exitCode, "Should exit with code 1 when no audit_state.json").toBe(1);
 
     // Should produce a human-readable message, not throw
     const combined = result.stdout + result.stderr;
-    assert.match(combined, /no active audit|audit_state/i, "Should include explanatory message");
+    expect(combined, "Should include explanatory message").toMatch(/no active audit|audit_state/i);
   });
 });
 
@@ -195,7 +195,7 @@ test("cmdStatus outputs structured JSON with status no_active_audit when audit_s
 
     const result = await runStatus(artifactsDir);
 
-    assert.equal(result.exitCode, 1, "process.exitCode should be 1 on no-active-audit path");
+    expect(result.exitCode, "process.exitCode should be 1 on no-active-audit path").toBe(1);
 
     // stdout should be valid JSON
     let parsed;
@@ -205,12 +205,12 @@ test("cmdStatus outputs structured JSON with status no_active_audit when audit_s
       assert.fail(`stdout is not valid JSON on no-active-audit path: ${result.stdout}`);
     }
 
-    assert.equal(parsed.status, "no_active_audit");
-    assert.equal(typeof parsed.error, "string");
-    assert.ok(parsed.error.length > 0, "error field should be a non-empty string");
+    expect(parsed.status).toBe("no_active_audit");
+    expect(typeof parsed.error).toBe("string");
+    expect(parsed.error.length > 0, "error field should be a non-empty string").toBeTruthy();
 
     // Nothing written to stderr on this path
-    assert.equal(result.stderr.trim(), "", "nothing should be written to stderr on no-active-audit path");
+    expect(result.stderr.trim(), "nothing should be written to stderr on no-active-audit path").toBe("");
   });
 });
 
@@ -234,13 +234,13 @@ test("cmdStatus surfaces blockers when audit status is blocked", async () => {
     );
 
     const result = await runStatus(artifactsDir);
-    assert.equal(result.exitCode, 0);
+    expect(result.exitCode).toBe(0);
 
     const parsed = JSON.parse(result.stdout);
 
-    assert.equal(parsed.status, "blocked");
-    assert.ok(Array.isArray(parsed.blockers), "blockers should be an array");
-    assert.ok(parsed.blockers.length > 0, "blockers should be non-empty when status is blocked");
-    assert.match(parsed.blockers[0], /No auditable files/);
+    expect(parsed.status).toBe("blocked");
+    expect(Array.isArray(parsed.blockers), "blockers should be an array").toBeTruthy();
+    expect(parsed.blockers.length > 0, "blockers should be non-empty when status is blocked").toBeTruthy();
+    expect(parsed.blockers[0]).toMatch(/No auditable files/);
   });
 });

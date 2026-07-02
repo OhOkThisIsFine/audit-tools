@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildWorkBlocks } = await import("../../src/audit/reporting/workBlocks.ts");
 
@@ -42,9 +41,9 @@ test("buildWorkBlocks groups findings sharing a unit into one block via union-fi
     ]),
   });
 
-  assert.equal(blocks.length, 1);
-  assert.deepEqual([...blocks[0].finding_ids].sort(), ["F1", "F2"]);
-  assert.ok(blocks[0].unit_ids.includes("unit-shared"));
+  expect(blocks.length).toBe(1);
+  expect([...blocks[0].finding_ids].sort()).toEqual(["F1", "F2"]);
+  expect(blocks[0].unit_ids.includes("unit-shared")).toBeTruthy();
 });
 
 test("buildWorkBlocks derives depends_on from graphBundle import edges across blocks", () => {
@@ -69,15 +68,15 @@ test("buildWorkBlocks derives depends_on from graphBundle import edges across bl
     },
   });
 
-  assert.equal(blocks.length, 2);
+  expect(blocks.length).toBe(2);
   const blockA = blocks.find((b) => b.owned_files.includes("src/a.ts"));
   const blockB = blocks.find((b) => b.owned_files.includes("src/b.ts"));
-  assert.equal(blockA.id, "block-1");
-  assert.equal(blockB.id, "block-2");
+  expect(blockA.id).toBe("block-1");
+  expect(blockB.id).toBe("block-2");
   // The block owning the 'from' file depends on the block owning the 'to' file.
-  assert.deepEqual(blockA.depends_on, ["block-2"]);
+  expect(blockA.depends_on).toEqual(["block-2"]);
   // No reverse edge supplied → the 'to' block has no dependency.
-  assert.deepEqual(blockB.depends_on, []);
+  expect(blockB.depends_on).toEqual([]);
 });
 
 test("buildWorkBlocks re-indexes block ids sequentially after severity sort", () => {
@@ -95,20 +94,14 @@ test("buildWorkBlocks re-indexes block ids sequentially after severity sort", ()
     ]),
   });
 
-  assert.equal(blocks.length, 3);
+  expect(blocks.length).toBe(3);
   // Ordered highest severity first, with ids re-indexed in that order.
-  assert.deepEqual(
-    blocks.map((b) => b.max_severity),
-    ["critical", "medium", "low"],
-  );
-  assert.deepEqual(
-    blocks.map((b) => b.id),
-    ["block-1", "block-2", "block-3"],
-  );
+  expect(blocks.map((b) => b.max_severity)).toEqual(["critical", "medium", "low"]);
+  expect(blocks.map((b) => b.id)).toEqual(["block-1", "block-2", "block-3"]);
 });
 
 test("buildWorkBlocks returns [] for empty findings (early-return guard)", () => {
-  assert.deepEqual(buildWorkBlocks({ findings: [] }), []);
+  expect(buildWorkBlocks({ findings: [] })).toEqual([]);
 });
 
 test("buildWorkBlocks falls back to file:<path> units when no unitManifest is supplied", () => {
@@ -120,9 +113,9 @@ test("buildWorkBlocks falls back to file:<path> units when no unitManifest is su
       finding("F2", "low", ["src/shared.ts"]),
     ],
   });
-  assert.equal(sameFile.length, 1);
-  assert.ok(sameFile[0].unit_ids.includes("file:src/shared.ts"));
-  assert.deepEqual([...sameFile[0].finding_ids].sort(), ["F1", "F2"]);
+  expect(sameFile.length).toBe(1);
+  expect(sameFile[0].unit_ids.includes("file:src/shared.ts")).toBeTruthy();
+  expect([...sameFile[0].finding_ids].sort()).toEqual(["F1", "F2"]);
 
   // Two findings on distinct files -> distinct file:<path> units -> two blocks.
   const distinctFiles = buildWorkBlocks({
@@ -131,11 +124,11 @@ test("buildWorkBlocks falls back to file:<path> units when no unitManifest is su
       finding("F-B", "low", ["src/b.ts"]),
     ],
   });
-  assert.equal(distinctFiles.length, 2);
+  expect(distinctFiles.length).toBe(2);
   const blockA = distinctFiles.find((b) => b.owned_files.includes("src/a.ts"));
   const blockB = distinctFiles.find((b) => b.owned_files.includes("src/b.ts"));
-  assert.ok(blockA.unit_ids.includes("file:src/a.ts"));
-  assert.ok(blockB.unit_ids.includes("file:src/b.ts"));
+  expect(blockA.unit_ids.includes("file:src/a.ts")).toBeTruthy();
+  expect(blockB.unit_ids.includes("file:src/b.ts")).toBeTruthy();
 });
 
 test("buildWorkBlocks derives depends_on from criticalFlows paths across blocks", () => {
@@ -159,12 +152,12 @@ test("buildWorkBlocks derives depends_on from criticalFlows paths across blocks"
     },
   });
 
-  assert.equal(blocks.length, 2);
+  expect(blocks.length).toBe(2);
   const blockA = blocks.find((b) => b.owned_files.includes("src/a.ts"));
   const blockB = blocks.find((b) => b.owned_files.includes("src/b.ts"));
   // Flow blocks are ordered by id; the earlier block depends on the later one.
-  assert.equal(blockA.id, "block-1");
-  assert.equal(blockB.id, "block-2");
-  assert.deepEqual(blockA.depends_on, ["block-2"]);
-  assert.deepEqual(blockB.depends_on, []);
+  expect(blockA.id).toBe("block-1");
+  expect(blockB.id).toBe("block-2");
+  expect(blockA.depends_on).toEqual(["block-2"]);
+  expect(blockB.depends_on).toEqual([]);
 });

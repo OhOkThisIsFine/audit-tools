@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -47,8 +46,8 @@ test("provider-assisted bridge fails clearly on malformed task JSON", async () =
     await writeFile(taskPath, "{not-valid-json", "utf8");
 
     const result = await runBridge(taskPath);
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /task JSON could not be parsed/i);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toMatch(/task JSON could not be parsed/i);
   });
 });
 
@@ -85,11 +84,8 @@ test("provider-assisted bridge validates agent task and pending task structure b
     );
 
     const result = await runBridge(taskPath);
-    assert.notEqual(result.code, 0);
-    assert.match(
-      result.stderr,
-      /pending task 0\.unit_id must be a non-empty string/i,
-    );
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toMatch(/pending task 0\.unit_id must be a non-empty string/i);
   });
 });
 
@@ -143,15 +139,13 @@ test("provider-assisted bridge writes synthetic results for valid agent tasks", 
     );
 
     const result = await runBridge(taskPath);
-    assert.equal(result.code, 0);
+    expect(result.code).toBe(0);
 
     const written = JSON.parse(await readFile(auditResultsPath, "utf8"));
-    assert.equal(written.length, 1);
-    assert.equal(written[0].task_id, "task-1");
-    assert.equal(written[0].file_coverage[0].total_lines, 1);
-    assert.ok(
-      written[0].notes.some((note) => /priority: high/i.test(note)),
-    );
+    expect(written.length).toBe(1);
+    expect(written[0].task_id).toBe("task-1");
+    expect(written[0].file_coverage[0].total_lines).toBe(1);
+    expect(written[0].notes.some((note) => /priority: high/i.test(note))).toBeTruthy();
   });
 });
 
@@ -213,7 +207,7 @@ test("provider-assisted bridge fails clearly when worker command exits non-zero"
     );
 
     const result = await runBridge(taskPath);
-    assert.notEqual(result.code, 0, "bridge should exit non-zero when worker exits with code 1");
+    expect(result.code, "bridge should exit non-zero when worker exits with code 1").not.toBe(0);
   });
 });
 
@@ -243,7 +237,7 @@ test("provider-assisted bridge fails clearly when worker command cannot be spawn
     );
 
     const result = await runBridge(taskPath);
-    assert.notEqual(result.code, 0, "bridge should exit non-zero when worker command cannot be spawned");
-    assert.match(result.stderr, /ENOENT|spawn|failed/i, "stderr should indicate the spawn failure");
+    expect(result.code, "bridge should exit non-zero when worker command cannot be spawned").not.toBe(0);
+    expect(result.stderr, "stderr should indicate the spawn failure").toMatch(/ENOENT|spawn|failed/i);
   });
 });

@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { buildGraphBundle } = await import(
@@ -51,10 +51,7 @@ test("normalizeGenericExternalEdges drops malformed entries and never throws", (
     42,
     { from: 1, to: 2 }, // non-string
   ]);
-  assert.deepEqual(
-    out.map((e) => [e.from, e.to]),
-    [["a.ts", "b.ts"]],
-  );
+  expect(out.map((e) => [e.from, e.to])).toEqual([["a.ts", "b.ts"]]);
 });
 
 test("normalizeGenericExternalEdges dedupes and sorts deterministically", () => {
@@ -69,8 +66,8 @@ test("normalizeGenericExternalEdges dedupes and sorts deterministically", () => 
     { from: "a.ts", to: "b.ts", kind: "k" },
     { from: "z.ts", to: "y.ts", kind: "k" },
   ]);
-  assert.deepEqual(a, b, "input order does not affect output");
-  assert.deepEqual(a.map((e) => [e.from, e.to, e.kind ?? null]), [
+  expect(a, "input order does not affect output").toEqual(b);
+  expect(a.map((e) => [e.from, e.to, e.kind ?? null])).toEqual([
     ["a.ts", "b.ts", null],
     ["a.ts", "b.ts", "k"],
     ["z.ts", "y.ts", "k"],
@@ -83,9 +80,9 @@ test("normalizeGenericExternalEdges clamps confidence to [0,1]", () => {
     { from: "c.ts", to: "d.ts", confidence: -2 },
     { from: "e.ts", to: "f.ts", confidence: "nope" },
   ]);
-  assert.equal(out[0].confidence, 1);
-  assert.equal(out[1].confidence, 0);
-  assert.equal(out[2].confidence, undefined);
+  expect(out[0].confidence).toBe(1);
+  expect(out[1].confidence).toBe(0);
+  expect(out[2].confidence).toBe(undefined);
 });
 
 // ---- graph ingestion at extraction ----
@@ -102,10 +99,10 @@ test("external graph_edges enrich the language-neutral edge set, resolved + dete
     }],
   });
   const edges = analyzerEdgesFor(bundle);
-  assert.equal(edges.length, 1);
-  assert.deepEqual([edges[0].from, edges[0].to], ["src/a.ts", "src/b.ts"]);
-  assert.equal(edges[0].confidence, 0.9);
-  assert.equal(edges[0].direction, "directed");
+  expect(edges.length).toBe(1);
+  expect([edges[0].from, edges[0].to]).toEqual(["src/a.ts", "src/b.ts"]);
+  expect(edges[0].confidence).toBe(0.9);
+  expect(edges[0].direction).toBe("directed");
   // schema-valid
   assert.doesNotThrow(() => GraphBundleSchema.parse(bundle));
 });
@@ -122,7 +119,7 @@ test("external graph_edges with unresolvable / self endpoints are dropped", () =
       results: [],
     }],
   });
-  assert.equal(analyzerEdgesFor(bundle).length, 0);
+  expect(analyzerEdgesFor(bundle).length).toBe(0);
 });
 
 test("malformed graph_edges degrade to empty; build + deriveGraphSignals never throw", () => {
@@ -136,7 +133,7 @@ test("malformed graph_edges degrade to empty; build + deriveGraphSignals never t
       }],
     });
   });
-  assert.equal(analyzerEdgesFor(bundle).length, 0);
+  expect(analyzerEdgesFor(bundle).length).toBe(0);
   assert.doesNotThrow(() => deriveGraphSignals(bundle));
 });
 
@@ -150,9 +147,9 @@ test("deriveGraphSignals stays a pure reader and counts ingested analyzer edges 
   });
   const before = JSON.stringify(bundle);
   const signals = deriveGraphSignals(bundle);
-  assert.equal(JSON.stringify(bundle), before, "deriveGraphSignals must not mutate the bundle");
-  assert.equal(signals.fanIn.get("src/b.ts"), 1);
-  assert.equal(signals.fanOut.get("src/a.ts"), 1);
+  expect(JSON.stringify(bundle), "deriveGraphSignals must not mutate the bundle").toBe(before);
+  expect(signals.fanIn.get("src/b.ts")).toBe(1);
+  expect(signals.fanOut.get("src/a.ts")).toBe(1);
 });
 
 // ---- adapter wrappers normalize native fixture output ----
@@ -172,20 +169,14 @@ test("normalizeSemgrepDataflowJson maps source→sink trace to an edge", () => {
       { extra: {} }, // no trace → dropped
     ],
   });
-  assert.equal(out.tool, "semgrep-dataflow");
-  assert.deepEqual(
-    out.graph_edges.map((e) => [e.from, e.to]),
-    [["src/source.ts", "src/sink.ts"]],
-  );
+  expect(out.tool).toBe("semgrep-dataflow");
+  expect(out.graph_edges.map((e) => [e.from, e.to])).toEqual([["src/source.ts", "src/sink.ts"]]);
 });
 
 test("normalizeSemgrepDataflowJson degrades to empty on malformed input", () => {
   assert.doesNotThrow(() => normalizeSemgrepDataflowJson({}));
-  assert.deepEqual(normalizeSemgrepDataflowJson({}).graph_edges, []);
-  assert.deepEqual(
-    normalizeSemgrepDataflowJson({ results: [{}, null] }).graph_edges,
-    [],
-  );
+  expect(normalizeSemgrepDataflowJson({}).graph_edges).toEqual([]);
+  expect(normalizeSemgrepDataflowJson({ results: [{}, null] }).graph_edges).toEqual([]);
 });
 
 test("normalizeAstGrepJson maps file→captured target", () => {
@@ -197,17 +188,14 @@ test("normalizeAstGrepJson maps file→captured target", () => {
     },
     { file: "src/a.ts" }, // no target capture → dropped
   ]);
-  assert.equal(out.tool, "ast-grep");
-  assert.deepEqual(
-    out.graph_edges.map((e) => [e.from, e.to]),
-    [["src/a.ts", "src/b.ts"]],
-  );
+  expect(out.tool).toBe("ast-grep");
+  expect(out.graph_edges.map((e) => [e.from, e.to])).toEqual([["src/a.ts", "src/b.ts"]]);
 });
 
 test("normalizeAstGrepJson degrades to empty on malformed input", () => {
   assert.doesNotThrow(() => normalizeAstGrepJson(undefined));
-  assert.deepEqual(normalizeAstGrepJson(undefined).graph_edges, []);
-  assert.deepEqual(normalizeAstGrepJson([null, 1, {}]).graph_edges, []);
+  expect(normalizeAstGrepJson(undefined).graph_edges).toEqual([]);
+  expect(normalizeAstGrepJson([null, 1, {}]).graph_edges).toEqual([]);
 });
 
 test("normalizeCodeqlSarif maps first→last threadFlow location", () => {
@@ -253,21 +241,15 @@ test("normalizeCodeqlSarif maps first→last threadFlow location", () => {
       },
     ],
   });
-  assert.equal(out.tool, "codeql");
-  assert.deepEqual(
-    out.graph_edges.map((e) => [e.from, e.to]),
-    [["src/source.ts", "src/sink.ts"]],
-  );
+  expect(out.tool).toBe("codeql");
+  expect(out.graph_edges.map((e) => [e.from, e.to])).toEqual([["src/source.ts", "src/sink.ts"]]);
 });
 
 test("normalizeCodeqlSarif degrades to empty on malformed SARIF", () => {
   assert.doesNotThrow(() => normalizeCodeqlSarif({}));
-  assert.deepEqual(normalizeCodeqlSarif({}).graph_edges, []);
-  assert.deepEqual(
-    normalizeCodeqlSarif({ runs: [{ results: [{ codeFlows: [{}] }] }] })
-      .graph_edges,
-    [],
-  );
+  expect(normalizeCodeqlSarif({}).graph_edges).toEqual([]);
+  expect(normalizeCodeqlSarif({ runs: [{ results: [{ codeFlows: [{}] }] }] })
+      .graph_edges).toEqual([]);
 });
 
 // ---- end-to-end: adapter output feeds the graph extractor ----
@@ -311,8 +293,5 @@ test("codeql adapter output drives graph extraction end-to-end", () => {
   const bundle = buildGraphBundle(manifest(["src/a.ts", "src/b.ts"]), undefined, {
     externalAnalyzerResults: [analyzer],
   });
-  assert.deepEqual(
-    analyzerEdgesFor(bundle).map((e) => [e.from, e.to]),
-    [["src/a.ts", "src/b.ts"]],
-  );
+  expect(analyzerEdgesFor(bundle).map((e) => [e.from, e.to])).toEqual([["src/a.ts", "src/b.ts"]]);
 });

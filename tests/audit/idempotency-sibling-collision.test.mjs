@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const {
   buildResultContentDiscriminator,
@@ -29,8 +28,8 @@ test("split siblings derive DISTINCT idempotency_keys (no INV-2 collision)", () 
   const a = stampLedgerKeys(siblingResult("scope:security:part-1", "F-A"));
   const b = stampLedgerKeys(siblingResult("scope:security:part-2", "F-B"));
   // Same grouping identity (one-to-many), but distinct logical identity.
-  assert.equal(a.identity_key, b.identity_key);
-  assert.notEqual(a.idempotency_key, b.idempotency_key);
+  expect(a.identity_key).toBe(b.identity_key);
+  expect(a.idempotency_key).not.toBe(b.idempotency_key);
 });
 
 test("both split siblings are RETAINED through the append-only INV-2 gate", () => {
@@ -39,29 +38,26 @@ test("both split siblings are RETAINED through the append-only INV-2 gate", () =
     siblingResult("scope:security:part-2", "F-B"),
   ];
   const ledger = appendResultsToLedger([], incoming);
-  assert.equal(ledger.length, 2, "both siblings must persist, not no-op the 2nd");
+  expect(ledger.length, "both siblings must persist, not no-op the 2nd").toBe(2);
   const ids = new Set(ledger.map((r) => r.idempotency_key));
-  assert.equal(ids.size, 2);
+  expect(ids.size).toBe(2);
 });
 
 test("lone (non-split) base task: discriminator + key are BYTE-IDENTICAL to legacy lone-base", () => {
   // Legacy lone-base discriminator (no split component).
   const legacyDisc = "base";
   const lone = buildResultContentDiscriminator({ source: "base" });
-  assert.equal(lone, legacyDisc);
+  expect(lone).toBe(legacyDisc);
   // A lone task_id has no `:part`/path suffix ⇒ empty split component.
-  assert.equal(splitDiscriminatorFromTaskId("scope:security", "security"), "");
+  expect(splitDiscriminatorFromTaskId("scope:security", "security")).toBe("");
   const withTaskId = buildResultContentDiscriminator({
     source: "base",
     split_discriminator: splitDiscriminatorFromTaskId("scope:security", "security"),
   });
-  assert.equal(withTaskId, legacyDisc);
+  expect(withTaskId).toBe(legacyDisc);
   // And the resulting idempotency_key is unchanged vs. the legacy keying.
   const coordinate = { unit_id: "u1", lens: "security", pass_id: "p1" };
-  assert.equal(
-    idempotencyKey({ ...coordinate, result_content_discriminator: withTaskId }),
-    idempotencyKey({ ...coordinate, result_content_discriminator: legacyDisc }),
-  );
+  expect(idempotencyKey({ ...coordinate, result_content_discriminator: withTaskId })).toBe(idempotencyKey({ ...coordinate, result_content_discriminator: legacyDisc }));
 });
 
 test("large_file split: cross-platform task_id canonicalizes to the SAME key (no win32/POSIX collision)", () => {
@@ -76,23 +72,20 @@ test("large_file split: cross-platform task_id canonicalizes to the SAME key (no
     source: "base",
     split_discriminator: splitDiscriminatorFromTaskId(win32, "security"),
   });
-  assert.equal(discPosix, discWin32, "win32 and POSIX splits must not diverge");
+  expect(discPosix, "win32 and POSIX splits must not diverge").toBe(discWin32);
   // canonicalization is the single point of OS-agnosticism.
-  assert.equal(
-    canonicalSplitDiscriminator("dir\\big.ts"),
-    canonicalSplitDiscriminator("dir/big.ts"),
-  );
+  expect(canonicalSplitDiscriminator("dir\\big.ts")).toBe(canonicalSplitDiscriminator("dir/big.ts"));
   // But a DIFFERENT large-file split of the same unit+lens stays distinct.
   const other = buildResultContentDiscriminator({
     source: "base",
     split_discriminator: splitDiscriminatorFromTaskId("scope:security:dir/small.ts", "security"),
   });
-  assert.notEqual(discPosix, other);
+  expect(discPosix).not.toBe(other);
 });
 
 test("replay of an already-ingested split sibling is a NO-OP (INV-2 idempotent)", () => {
   const first = appendResultsToLedger([], [siblingResult("scope:security:part-1", "F-A")]);
   // Re-ingest the SAME logical sibling (stamped keys carried forward).
   const replay = appendResultsToLedger(first, [siblingResult("scope:security:part-1", "F-A")]);
-  assert.equal(replay.length, 1, "replay of same split sibling must not duplicate");
+  expect(replay.length, "replay of same split sibling must not duplicate").toBe(1);
 });

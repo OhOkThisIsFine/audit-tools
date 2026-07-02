@@ -15,8 +15,7 @@
  * re-implements its own reroute logic (OBL-INV-ACL-04).
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // Import from shared — audit-cli is a consumer, not an implementor.
 const {
@@ -89,17 +88,14 @@ await test("OBL-INV-ACL-08: single pool drop — pending tokens reassigned or st
   // then reroutePackets reassigns them to pool-B (or strands any that don't fit).
   state = dropProvider(state, "pool-A", "exhausted");
   // After drop, pending_tokens should contain the requeued packets.
-  assert.equal(state.pending_tokens.length, 2, "dropProvider must requeue in-flight tokens");
+  expect(state.pending_tokens.length, "dropProvider must requeue in-flight tokens").toBe(2);
 
   const result = reroutePackets(state, {});
 
   // Core invariant (INV-QD-13): every remaining pending_token must point to an active pool.
   const alive = activePoolIds(result.state);
   for (const token of result.state.pending_tokens) {
-    assert.ok(
-      alive.has(token.assigned_pool_id),
-      `pending token ${token.id} is assigned to dead pool ${token.assigned_pool_id}`,
-    );
+    expect(alive.has(token.assigned_pool_id), `pending token ${token.id} is assigned to dead pool ${token.assigned_pool_id}`).toBeTruthy();
   }
 
   // Any packet that could not be placed must be in stranded_ids (not left on dead pool).
@@ -108,14 +104,11 @@ await test("OBL-INV-ACL-08: single pool drop — pending tokens reassigned or st
   const originalIds = ["packet-pool-A-0", "packet-pool-A-1"];
 
   for (const id of originalIds) {
-    assert.ok(
-      pendingIds.has(id) || strandedIds.has(id),
-      `packet ${id} must be in pending_tokens (on a live pool) or stranded_ids — never on a dead pool`,
-    );
+    expect(pendingIds.has(id) || strandedIds.has(id), `packet ${id} must be in pending_tokens (on a live pool) or stranded_ids — never on a dead pool`).toBeTruthy();
   }
   // No packet can be in both.
   for (const id of pendingIds) {
-    assert.ok(!strandedIds.has(id), `packet ${id} cannot be both pending and stranded`);
+    expect(!strandedIds.has(id), `packet ${id} cannot be both pending and stranded`).toBeTruthy();
   }
 });
 
@@ -129,22 +122,18 @@ await test("OBL-INV-ACL-08: all pools dropped — pending tokens surfaced in str
 
   // Drop the only pool.
   state = dropProvider(state, "pool-only", "exhausted");
-  assert.equal(state.pending_tokens.length, 3, "dropProvider must requeue all 3 tokens");
-  assert.equal(state.active_pools.length, 0, "active_pools must be empty after sole pool drops");
+  expect(state.pending_tokens.length, "dropProvider must requeue all 3 tokens").toBe(3);
+  expect(state.active_pools.length, "active_pools must be empty after sole pool drops").toBe(0);
 
   const result = reroutePackets(state, {});
 
   // Terminal must fire: empty_pool.
-  assert.ok(result.terminal !== null, "terminal must be set when no active pool remains");
-  assert.equal(result.terminal.reason, "empty_pool");
-  assert.equal(result.terminal.stranded_ids.length, 3, "all 3 packet ids must be stranded");
+  expect(result.terminal !== null, "terminal must be set when no active pool remains").toBeTruthy();
+  expect(result.terminal.reason).toBe("empty_pool");
+  expect(result.terminal.stranded_ids.length, "all 3 packet ids must be stranded").toBe(3);
 
   // Invariant: zero pending_tokens remain (they were moved to stranded_ids).
-  assert.equal(
-    result.state.pending_tokens.length,
-    0,
-    "pending_tokens must be empty after empty-pool terminal — INV-QD-13",
-  );
+  expect(result.state.pending_tokens.length, "pending_tokens must be empty after empty-pool terminal — INV-QD-13").toBe(0);
 });
 
 await test("OBL-INV-ACL-08: surplus pending tokens (exceed survivor capacity) are stranded, zero dead-pool refs", () => {
@@ -169,7 +158,7 @@ await test("OBL-INV-ACL-08: surplus pending tokens (exceed survivor capacity) ar
 
   // Now only pool-C survives. pending has the 4 requeued tokens from pool-A;
   // pool-B had no in-flight tokens in this scenario.
-  assert.equal(state.active_pools.length, 1, "only pool-C should remain active");
+  expect(state.active_pools.length, "only pool-C should remain active").toBe(1);
 
   const result = reroutePackets(state, {});
 
@@ -178,10 +167,7 @@ await test("OBL-INV-ACL-08: surplus pending tokens (exceed survivor capacity) ar
 
   // Core invariant: no pending token assigned to a dead pool.
   for (const token of result.state.pending_tokens) {
-    assert.ok(
-      alive.has(token.assigned_pool_id),
-      `pending token ${token.id} assigned to dead pool ${token.assigned_pool_id} — violates INV-QD-13`,
-    );
+    expect(alive.has(token.assigned_pool_id), `pending token ${token.id} assigned to dead pool ${token.assigned_pool_id} — violates INV-QD-13`).toBeTruthy();
   }
 
   // Whatever couldn't fit must appear in stranded_ids (not hidden in pending).
@@ -190,14 +176,11 @@ await test("OBL-INV-ACL-08: surplus pending tokens (exceed survivor capacity) ar
   const originalIds = new Set(state.pending_tokens.map((t) => t.id));
 
   for (const id of originalIds) {
-    assert.ok(
-      pendingIds.has(id) || strandedIds.has(id),
-      `packet ${id} must be either in pending_tokens or stranded_ids after reroutePackets`,
-    );
+    expect(pendingIds.has(id) || strandedIds.has(id), `packet ${id} must be either in pending_tokens or stranded_ids after reroutePackets`).toBeTruthy();
   }
   // No packet should appear in both.
   for (const id of pendingIds) {
-    assert.ok(!strandedIds.has(id), `packet ${id} cannot be both pending and stranded`);
+    expect(!strandedIds.has(id), `packet ${id} cannot be both pending and stranded`).toBeTruthy();
   }
 });
 
@@ -205,20 +188,20 @@ await test("OBL-INV-ACL-08: no pending tokens — reroutePackets is a no-op, no 
   let state = buildState(["pool-A"]);
   state = dropProvider(state, "pool-A", "exhausted");
   // No in-flight, so dropProvider produces no pending tokens.
-  assert.equal(state.pending_tokens.length, 0);
+  expect(state.pending_tokens.length).toBe(0);
 
   const result = reroutePackets(state, {});
 
-  assert.equal(result.terminal, null, "no terminal when no pending tokens");
-  assert.equal(result.state.pending_tokens.length, 0);
+  expect(result.terminal, "no terminal when no pending tokens").toBe(null);
+  expect(result.state.pending_tokens.length).toBe(0);
 });
 
 await test("OBL-INV-ACL-04: audit-cli-commands does not re-implement reroute — reroutePackets is the single owner", () => {
   // Structural assertion: verify that the shared reroutePackets function exists and
   // is callable, and that the audit-cli has no local reroute implementation.
   // This test asserts the contract, not a specific algorithm.
-  assert.equal(typeof reroutePackets, "function", "reroutePackets must be exported from audit-tools/shared");
-  assert.equal(typeof dropProvider, "function", "dropProvider must be exported from audit-tools/shared");
+  expect(typeof reroutePackets, "reroutePackets must be exported from audit-tools/shared").toBe("function");
+  expect(typeof dropProvider, "dropProvider must be exported from audit-tools/shared").toBe("function");
 
   // Run a basic reroute through the shared API — no wrapping in audit-cli.
   let state = buildState(["P1", "P2"]);
@@ -229,6 +212,6 @@ await test("OBL-INV-ACL-04: audit-cli-commands does not re-implement reroute —
   // If P2 can absorb the packet, no stranding.
   const alive = activePoolIds(result.state);
   for (const token of result.state.pending_tokens) {
-    assert.ok(alive.has(token.assigned_pool_id));
+    expect(alive.has(token.assigned_pool_id)).toBeTruthy();
   }
 });

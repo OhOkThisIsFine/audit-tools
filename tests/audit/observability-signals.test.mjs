@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,9 +62,9 @@ test("checkFileIntegrity reports an unreadable-but-present file via io_errors, n
     const result = await withCapturedStderr(() =>
       checkFileIntegrity(dir, manifest([{ path: rel, hash: "deadbeef" }])),
     );
-    assert.deepEqual(result.io_errors, [rel]);
-    assert.deepEqual(result.missing_files, []);
-    assert.equal(result.is_clean, false);
+    expect(result.io_errors).toEqual([rel]);
+    expect(result.missing_files).toEqual([]);
+    expect(result.is_clean).toBe(false);
   });
 });
 
@@ -75,9 +74,9 @@ test("checkFileIntegrity reports an absent file as missing, not io_errors", asyn
       dir,
       manifest([{ path: "does-not-exist.ts", hash: "deadbeef" }]),
     );
-    assert.deepEqual(result.missing_files, ["does-not-exist.ts"]);
-    assert.deepEqual(result.io_errors, []);
-    assert.equal(result.is_clean, false);
+    expect(result.missing_files).toEqual(["does-not-exist.ts"]);
+    expect(result.io_errors).toEqual([]);
+    expect(result.is_clean).toBe(false);
   });
 });
 
@@ -88,8 +87,8 @@ test("checkFileIntegrity is_clean is false whenever io_errors is non-empty", asy
     const result = await withCapturedStderr(() =>
       checkFileIntegrity(dir, manifest([{ path: rel, hash: "deadbeef" }])),
     );
-    assert.ok(result.io_errors.length > 0);
-    assert.equal(result.is_clean, false);
+    expect(result.io_errors.length > 0).toBeTruthy();
+    expect(result.is_clean).toBe(false);
   });
 });
 
@@ -102,10 +101,10 @@ test("checkFileIntegrity reports a content change in changed_files, not missing/
       dir,
       manifest([{ path: rel, hash: sha256("original") }]),
     );
-    assert.deepEqual(result.changed_files, [rel]);
-    assert.deepEqual(result.missing_files, []);
-    assert.deepEqual(result.io_errors, []);
-    assert.equal(result.is_clean, false);
+    expect(result.changed_files).toEqual([rel]);
+    expect(result.missing_files).toEqual([]);
+    expect(result.io_errors).toEqual([]);
+    expect(result.is_clean).toBe(false);
   });
 });
 
@@ -117,7 +116,7 @@ test("checkFileIntegrity is_clean when current content matches the manifest hash
       dir,
       manifest([{ path: rel, hash: sha256("v1") }]),
     );
-    assert.equal(result.is_clean, true);
+    expect(result.is_clean).toBe(true);
   });
 });
 
@@ -136,21 +135,18 @@ test("normalizeGenericExternalResults drops items missing path/summary and logs 
     return out;
   });
   // Existing behavior preserved: only the two valid items survive.
-  assert.equal(result.results.length, 2);
-  assert.deepEqual(
-    result.results.map((r) => r.path),
-    ["a.ts", "c.ts"],
-  );
+  expect(result.results.length).toBe(2);
+  expect(result.results.map((r) => r.path)).toEqual(["a.ts", "c.ts"]);
   // Structured drop event emitted with the correct count.
   const dropLine = lines.find((l) => {
     try { const obj = JSON.parse(l.trim()); return obj.event === "normalizer_findings_dropped"; }
     catch { return false; }
   });
-  assert.ok(dropLine, "expected a normalizer_findings_dropped JSON event on stderr");
+  expect(dropLine, "expected a normalizer_findings_dropped JSON event on stderr").toBeTruthy();
   const dropEvent = JSON.parse(dropLine.trim());
-  assert.equal(dropEvent.tool, "semgrep");
-  assert.equal(dropEvent.dropped, 2);
-  assert.equal(dropEvent.total, 4);
+  expect(dropEvent.tool).toBe("semgrep");
+  expect(dropEvent.dropped).toBe(2);
+  expect(dropEvent.total).toBe(4);
 });
 
 test("normalizeGenericExternalResults emits no drop log when nothing is dropped", async () => {
@@ -162,13 +158,10 @@ test("normalizeGenericExternalResults emits no drop log when nothing is dropped"
     ]);
     lines.push(...captured);
   });
-  assert.equal(
-    lines.some((l) => {
+  expect(lines.some((l) => {
       try { const obj = JSON.parse(l.trim()); return obj.event === "normalizer_findings_dropped"; }
       catch { return false; }
-    }),
-    false,
-  );
+    })).toBe(false);
 });
 
 // ── buildLineIndex / buildLineIndexForPaths: warn on unreadable file (OBS-2cc9cf82) ──
@@ -197,13 +190,13 @@ test("buildLineIndex warns on unreadable file and returns 0 for that entry", asy
     });
 
     // Non-existent file falls back to 0 line count.
-    assert.equal(result["does-not-exist.ts"], 0);
+    expect(result["does-not-exist.ts"]).toBe(0);
     // Valid file still has the correct count.
-    assert.ok(result[validFile] > 0, "valid file should have a positive line count");
+    expect(result[validFile] > 0, "valid file should have a positive line count").toBeTruthy();
     // A stderr diagnostic was emitted containing the failing path and an error message.
     const warnLine = stderrLines.find((l) => l.includes("does-not-exist.ts"));
-    assert.ok(warnLine, "expected a stderr diagnostic for the unreadable file");
-    assert.match(warnLine, /\[lineIndex\]/);
+    expect(warnLine, "expected a stderr diagnostic for the unreadable file").toBeTruthy();
+    expect(warnLine).toMatch(/\[lineIndex\]/);
   });
 });
 
@@ -220,13 +213,13 @@ test("buildLineIndexForPaths warns on unreadable file and returns 0 for that ent
     });
 
     // Non-existent path falls back to 0.
-    assert.equal(result["ghost.ts"], 0);
+    expect(result["ghost.ts"]).toBe(0);
     // Valid path has a correct count.
-    assert.ok(result[validFile] > 0, "valid file should have a positive line count");
+    expect(result[validFile] > 0, "valid file should have a positive line count").toBeTruthy();
     // A stderr diagnostic was emitted containing the failing path.
     const warnLine = stderrLines.find((l) => l.includes("ghost.ts"));
-    assert.ok(warnLine, "expected a stderr diagnostic for the unreadable path");
-    assert.match(warnLine, /\[lineIndex\]/);
+    expect(warnLine, "expected a stderr diagnostic for the unreadable path").toBeTruthy();
+    expect(warnLine).toMatch(/\[lineIndex\]/);
   });
 });
 
@@ -239,24 +232,17 @@ test("runCommand error event with no prior output returns empty evidence", async
     ["__audit_code_nonexistent_command_xyz__"],
     process.cwd(),
   );
-  assert.equal(result.status, "inconclusive", "status is inconclusive on spawn error");
-  assert.match(result.summary, /Failed to execute/, "summary says 'Failed to execute'");
-  assert.match(
-    result.summary,
-    /__audit_code_nonexistent_command_xyz__/,
-    "summary includes the failing command",
-  );
-  assert.deepEqual(result.evidence, [], "evidence is empty when no output was captured");
+  expect(result.status, "status is inconclusive on spawn error").toBe("inconclusive");
+  expect(result.summary, "summary says 'Failed to execute'").toMatch(/Failed to execute/);
+  expect(result.summary, "summary includes the failing command").toMatch(/__audit_code_nonexistent_command_xyz__/);
+  expect(result.evidence, "evidence is empty when no output was captured").toEqual([]);
 });
 
 test("runCommand error event summary includes the OS error message", async () => {
   const result = await runCommand(["__audit_code_nonexistent_42__"], process.cwd());
-  assert.equal(result.status, "inconclusive");
-  assert.ok(result.summary.length > 0, "summary is non-empty");
-  assert.ok(
-    result.summary.includes("__audit_code_nonexistent_42__"),
-    "summary embeds the command name",
-  );
+  expect(result.status).toBe("inconclusive");
+  expect(result.summary.length > 0, "summary is non-empty").toBeTruthy();
+  expect(result.summary.includes("__audit_code_nonexistent_42__"), "summary embeds the command name").toBeTruthy();
 });
 
 // ── ExecutorRunResult structured observability fields (OBS-d202e206) ──────────
@@ -272,30 +258,30 @@ test("ExecutorRunResult accepts log_entries with all severity levels", async () 
     { severity: "error", message: "error msg", timestamp_ms: 4, context: { task_id: "t1", run_id: "r1" } },
   ];
   for (const e of entries) {
-    assert.ok(typeof e.severity === "string", "severity is a string");
-    assert.ok(typeof e.message === "string", "message is a string");
-    assert.ok(typeof e.timestamp_ms === "number", "timestamp_ms is a number");
+    expect(typeof e.severity === "string", "severity is a string").toBeTruthy();
+    expect(typeof e.message === "string", "message is a string").toBeTruthy();
+    expect(typeof e.timestamp_ms === "number", "timestamp_ms is a number").toBeTruthy();
   }
   // LogEntry with a context object satisfies the type.
   const withCtx = entries[3];
-  assert.ok(withCtx.context !== undefined, "context is present");
-  assert.equal(withCtx.context.task_id, "t1");
+  expect(withCtx.context !== undefined, "context is present").toBeTruthy();
+  expect(withCtx.context.task_id).toBe("t1");
 });
 
 test("ExecutorRunResult accepts optional step_duration_ms and degraded fields", async () => {
   // A minimal valid result omitting optional fields.
   const minimal = { updated: {}, artifacts_written: [], progress_summary: "ok" };
-  assert.ok(minimal.step_duration_ms === undefined, "step_duration_ms is optional");
-  assert.ok(minimal.degraded === undefined, "degraded is optional");
+  expect(minimal.step_duration_ms === undefined, "step_duration_ms is optional").toBeTruthy();
+  expect(minimal.degraded === undefined, "degraded is optional").toBeTruthy();
 
   // With the new fields populated.
   const full = { ...minimal, step_duration_ms: 0, degraded: false };
-  assert.equal(full.step_duration_ms, 0);
-  assert.equal(full.degraded, false);
+  expect(full.step_duration_ms).toBe(0);
+  expect(full.degraded).toBe(false);
 
   // degraded: true is valid.
   const partial = { ...minimal, degraded: true };
-  assert.equal(partial.degraded, true);
+  expect(partial.degraded).toBe(true);
 });
 
 // ── runRuntimeValidationExecutor: deduplication counters in progress_summary (OBS-24ba5c5e) ──
@@ -352,21 +338,9 @@ test("runRuntimeValidationExecutor progress_summary includes unique-command and 
     const result = await runRuntimeValidationExecutor(bundle, dir);
 
     // 3 total tasks, 2 unique command signatures (sharedCommand + uniqueCommand), 1 dedup hit.
-    assert.match(
-      result.progress_summary,
-      /3 task\(s\)/,
-      "summary mentions total task count",
-    );
-    assert.match(
-      result.progress_summary,
-      /2 unique command\(s\) run/,
-      "summary mentions uniqueCommandsRun = 2",
-    );
-    assert.match(
-      result.progress_summary,
-      /1 served from deduplication cache/,
-      "summary mentions deduplicatedHits = 1",
-    );
+    expect(result.progress_summary, "summary mentions total task count").toMatch(/3 task\(s\)/);
+    expect(result.progress_summary, "summary mentions uniqueCommandsRun = 2").toMatch(/2 unique command\(s\) run/);
+    expect(result.progress_summary, "summary mentions deduplicatedHits = 1").toMatch(/1 served from deduplication cache/);
   });
 });
 
@@ -379,16 +353,8 @@ test("runRuntimeValidationExecutor: all distinct commands → deduplicatedHits i
 
     const result = await runRuntimeValidationExecutor(bundle, dir);
 
-    assert.match(
-      result.progress_summary,
-      /2 unique command\(s\) run/,
-      "both commands are unique",
-    );
-    assert.match(
-      result.progress_summary,
-      /0 served from deduplication cache/,
-      "no dedup hits",
-    );
+    expect(result.progress_summary, "both commands are unique").toMatch(/2 unique command\(s\) run/);
+    expect(result.progress_summary, "no dedup hits").toMatch(/0 served from deduplication cache/);
   });
 });
 
@@ -403,21 +369,9 @@ test("runRuntimeValidationExecutor: all tasks share one command → uniqueComman
 
     const result = await runRuntimeValidationExecutor(bundle, dir);
 
-    assert.match(
-      result.progress_summary,
-      /3 task\(s\)/,
-      "summary mentions total task count",
-    );
-    assert.match(
-      result.progress_summary,
-      /1 unique command\(s\) run/,
-      "only 1 unique command",
-    );
-    assert.match(
-      result.progress_summary,
-      /2 served from deduplication cache/,
-      "task count minus 1 are dedup hits",
-    );
+    expect(result.progress_summary, "summary mentions total task count").toMatch(/3 task\(s\)/);
+    expect(result.progress_summary, "only 1 unique command").toMatch(/1 unique command\(s\) run/);
+    expect(result.progress_summary, "task count minus 1 are dedup hits").toMatch(/2 served from deduplication cache/);
   });
 });
 
@@ -455,11 +409,8 @@ test("unionFindFromGroups emits shared-file merge trace when AUDIT_CODE_VERBOSE 
     const mergeLines = stderrLines.filter((l) =>
       l.includes("[audit-code:packet-planning]") && l.includes("shared-file merge"),
     );
-    assert.ok(mergeLines.length > 0, "expected at least one shared-file merge trace line");
-    assert.ok(
-      mergeLines.some((l) => l.includes("g1") || l.includes("g2")),
-      "merge trace should mention the merged group keys",
-    );
+    expect(mergeLines.length > 0, "expected at least one shared-file merge trace line").toBeTruthy();
+    expect(mergeLines.some((l) => l.includes("g1") || l.includes("g2")), "merge trace should mention the merged group keys").toBeTruthy();
   } finally {
     process.stderr.write = origWrite;
     if (prevVerbose === undefined) {
@@ -487,7 +438,7 @@ test("unionFindFromGroups emits edge-driven merge trace when AUDIT_CODE_VERBOSE 
     const edgeLines = stderrLines.filter((l) =>
       l.includes("[audit-code:packet-planning]") && l.includes("edge-driven merge"),
     );
-    assert.ok(edgeLines.length > 0, "expected at least one edge-driven merge trace line");
+    expect(edgeLines.length > 0, "expected at least one edge-driven merge trace line").toBeTruthy();
   } finally {
     process.stderr.write = origWrite;
     if (prevVerbose === undefined) {
@@ -513,7 +464,7 @@ test("unionFindFromGroups emits no stderr when AUDIT_CODE_VERBOSE is unset", asy
     const planningLines = stderrLines.filter((l) =>
       l.includes("[audit-code:packet-planning]"),
     );
-    assert.equal(planningLines.length, 0, "no packet-planning traces without AUDIT_CODE_VERBOSE");
+    expect(planningLines.length, "no packet-planning traces without AUDIT_CODE_VERBOSE").toBe(0);
   } finally {
     process.stderr.write = origWrite;
     if (prevVerbose === undefined) {
@@ -549,11 +500,8 @@ test("chunkPacketTasks emits token-budget split trace when AUDIT_CODE_VERBOSE is
     const splitLines = stderrLines.filter((l) =>
       l.includes("[audit-code:packet-planning]") && l.includes("token-budget split"),
     );
-    assert.ok(splitLines.length > 0, "expected at least one token-budget split trace");
-    assert.ok(
-      splitLines.some((l) => l.includes("targetPacketTokens=1")),
-      "split trace should include targetPacketTokens",
-    );
+    expect(splitLines.length > 0, "expected at least one token-budget split trace").toBeTruthy();
+    expect(splitLines.some((l) => l.includes("targetPacketTokens=1")), "split trace should include targetPacketTokens").toBeTruthy();
   } finally {
     process.stderr.write = origWrite;
     if (prevVerbose === undefined) {
@@ -583,7 +531,7 @@ test("chunkPacketTasks emits no stderr when AUDIT_CODE_VERBOSE is unset", async 
     const planningLines = stderrLines.filter((l) =>
       l.includes("[audit-code:packet-planning]"),
     );
-    assert.equal(planningLines.length, 0, "no packet-planning traces without AUDIT_CODE_VERBOSE");
+    expect(planningLines.length, "no packet-planning traces without AUDIT_CODE_VERBOSE").toBe(0);
   } finally {
     process.stderr.write = origWrite;
     if (prevVerbose === undefined) {
@@ -662,14 +610,14 @@ test("selectLensVerificationFiles emits structured stderr when file list is trun
       return obj.event === "truncated_verification_file_list";
     } catch { return false; }
   });
-  assert.equal(truncLines.length, 1, "expected exactly one truncated_verification_file_list line");
+  expect(truncLines.length, "expected exactly one truncated_verification_file_list line").toBe(1);
   const parsed = JSON.parse(truncLines[0].trim());
-  assert.equal(parsed.level, "warn");
-  assert.equal(parsed.source, "audit-code:selectiveDeepening");
-  assert.equal(parsed.lens, lens);
-  assert.equal(parsed.kept, MAX_LENS_VERIFICATION_FILES);
-  assert.equal(parsed.total, fileCount);
-  assert.ok(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp");
+  expect(parsed.level).toBe("warn");
+  expect(parsed.source).toBe("audit-code:selectiveDeepening");
+  expect(parsed.lens).toBe(lens);
+  expect(parsed.kept).toBe(MAX_LENS_VERIFICATION_FILES);
+  expect(parsed.total).toBe(fileCount);
+  expect(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp").toBeTruthy();
 });
 
 test("buildLensVerificationTask emits structured stderr when result-summary list is truncated", async () => {
@@ -701,14 +649,14 @@ test("buildLensVerificationTask emits structured stderr when result-summary list
       return obj.event === "truncated_result_summary_list";
     } catch { return false; }
   });
-  assert.equal(truncLines.length, 1, "expected exactly one truncated_result_summary_list line");
+  expect(truncLines.length, "expected exactly one truncated_result_summary_list line").toBe(1);
   const parsed = JSON.parse(truncLines[0].trim());
-  assert.equal(parsed.level, "warn");
-  assert.equal(parsed.source, "audit-code:selectiveDeepening");
-  assert.equal(parsed.lens, lens);
-  assert.equal(parsed.kept, MAX_LENS_VERIFICATION_RESULT_SUMMARIES);
-  assert.equal(parsed.total, sourceCount);
-  assert.ok(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp");
+  expect(parsed.level).toBe("warn");
+  expect(parsed.source).toBe("audit-code:selectiveDeepening");
+  expect(parsed.lens).toBe(lens);
+  expect(parsed.kept).toBe(MAX_LENS_VERIFICATION_RESULT_SUMMARIES);
+  expect(parsed.total).toBe(sourceCount);
+  expect(typeof parsed.ts === "string" && !isNaN(Date.parse(parsed.ts)), "ts is a valid ISO timestamp").toBeTruthy();
 });
 
 test("No truncation stderr is emitted when counts are within limits", async () => {
@@ -741,7 +689,7 @@ test("No truncation stderr is emitted when counts are within limits", async () =
       );
     } catch { return false; }
   });
-  assert.equal(truncLines.length, 0, "no truncation stderr when within limits");
+  expect(truncLines.length, "no truncation stderr when within limits").toBe(0);
 });
 
 // FND-OBS-c8d43100/48c05a13/6e84f23c/99e3a861/bf5c7331 tests: audit-dispatch-observability.test.mjs

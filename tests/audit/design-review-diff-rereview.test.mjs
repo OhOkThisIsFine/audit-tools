@@ -10,8 +10,7 @@
  *     stale when a structural input's projection changed, missing without a flag,
  *     and satisfied for the legacy (flag-but-no-snapshot) path.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,11 +92,7 @@ test("projection: provenance + per-file metrics are stripped (cosmetic edit proj
     // graph edge confidence churned (analyzer provenance)
     graph_bundle: { graphs: { imports: [{ from: "src/a.ts", to: "src/b.ts", confidence: 0.1 }] } },
   });
-  assert.equal(
-    stableStringifyProjection(projectDesignReviewInputs(a)),
-    stableStringifyProjection(projectDesignReviewInputs(b)),
-    "cosmetic/provenance-only edits must project identically",
-  );
+  expect(stableStringifyProjection(projectDesignReviewInputs(a)), "cosmetic/provenance-only edits must project identically").toBe(stableStringifyProjection(projectDesignReviewInputs(b)));
 });
 
 test("projection: array ordering is non-load-bearing (reordered files project identically)", () => {
@@ -112,10 +107,7 @@ test("projection: array ordering is non-load-bearing (reordered files project id
       ],
     },
   });
-  assert.equal(
-    stableStringifyProjection(projectDesignReviewInputs(a)),
-    stableStringifyProjection(projectDesignReviewInputs(reversed)),
-  );
+  expect(stableStringifyProjection(projectDesignReviewInputs(a))).toBe(stableStringifyProjection(projectDesignReviewInputs(reversed)));
 });
 
 test("projection: a real structural change projects differently", () => {
@@ -128,10 +120,7 @@ test("projection: a real structural change projects differently", () => {
       ],
     },
   });
-  assert.notEqual(
-    stableStringifyProjection(projectDesignReviewInputs(a)),
-    stableStringifyProjection(projectDesignReviewInputs(withNewUnit)),
-  );
+  expect(stableStringifyProjection(projectDesignReviewInputs(a))).not.toBe(stableStringifyProjection(projectDesignReviewInputs(withNewUnit)));
 });
 
 // ── Staleness + delta ─────────────────────────────────────────────────────────
@@ -150,14 +139,14 @@ test("isDesignReviewStale: false on cosmetic edit, true on structural change", (
       ],
     },
   });
-  assert.equal(isDesignReviewStale(snap, cosmetic), false);
+  expect(isDesignReviewStale(snap, cosmetic)).toBe(false);
 
   const structural = bundle({
     surface_manifest: {
       surfaces: [{ id: "S1", kind: "interface", entrypoint: "src/a.ts" }],
     },
   });
-  assert.equal(isDesignReviewStale(snap, structural), true);
+  expect(isDesignReviewStale(snap, structural)).toBe(true);
 });
 
 test("computeDesignReReviewDelta: reports only the changed input; allUnchanged otherwise", () => {
@@ -165,20 +154,16 @@ test("computeDesignReReviewDelta: reports only the changed input; allUnchanged o
   const snap = snapshotFrom(base);
 
   const sameDelta = computeDesignReReviewDelta(snap, base);
-  assert.equal(sameDelta.allUnchanged, true);
-  assert.equal(sameDelta.changedInputs.length, 0);
+  expect(sameDelta.allUnchanged).toBe(true);
+  expect(sameDelta.changedInputs.length).toBe(0);
 
   const changed = bundle({
     risk_register: { items: [{ unit_id: "U1", risk_score: 99, signals: ["x", "y"] }] },
   });
   const delta = computeDesignReReviewDelta(snap, changed);
-  assert.equal(delta.allUnchanged, false);
-  assert.deepEqual(
-    delta.changedInputs.map((c) => c.label),
-    ["risk_register"],
-    "only risk_register changed",
-  );
-  assert.ok(delta.changedInputs[0].lines.length > 0);
+  expect(delta.allUnchanged).toBe(false);
+  expect(delta.changedInputs.map((c) => c.label), "only risk_register changed").toEqual(["risk_register"]);
+  expect(delta.changedInputs[0].lines.length > 0).toBeTruthy();
 });
 
 // ── Render ──────────────────────────────────────────────────────────────────────
@@ -194,10 +179,10 @@ test("renderDesignReReviewSection: carries prior verdict + diff, instructs diff-
     snap,
     computeDesignReReviewDelta(snap, changed),
   );
-  assert.match(section, /Diff-Based Re-Review/);
-  assert.match(section, /prior verdict/i);
-  assert.match(section, /DR-001/);
-  assert.match(section, /risk_register/);
+  expect(section).toMatch(/Diff-Based Re-Review/);
+  expect(section).toMatch(/prior verdict/i);
+  expect(section).toMatch(/DR-001/);
+  expect(section).toMatch(/risk_register/);
 });
 
 test("renderDesignReReviewSection: allUnchanged → re-affirm-verbatim wording", () => {
@@ -207,7 +192,7 @@ test("renderDesignReReviewSection: allUnchanged → re-affirm-verbatim wording",
     snap,
     computeDesignReReviewDelta(snap, base),
   );
-  assert.match(section, /No upstream semantic change/i);
+  expect(section).toMatch(/No upstream semantic change/i);
 });
 
 // ── state.ts integration ────────────────────────────────────────────────────────
@@ -239,7 +224,7 @@ test("state.ts: completed pass with a fresh snapshot is satisfied", () => {
   const obl = deriveAuditState(b).obligations.find(
     (o) => o.id === "design_review_contract_completed",
   );
-  assert.equal(obl.state, "satisfied");
+  expect(obl.state).toBe("satisfied");
 });
 
 test("state.ts: completed pass goes stale when a structural input's projection changes", () => {
@@ -256,7 +241,7 @@ test("state.ts: completed pass goes stale when a structural input's projection c
   const obl = deriveAuditState(b).obligations.find(
     (o) => o.id === "design_review_contract_completed",
   );
-  assert.equal(obl.state, "stale");
+  expect(obl.state).toBe("stale");
 });
 
 test("state.ts: a cosmetic-only change keeps a completed pass satisfied (no re-stale)", () => {
@@ -279,7 +264,7 @@ test("state.ts: a cosmetic-only change keeps a completed pass satisfied (no re-s
   const obl = deriveAuditState(b).obligations.find(
     (o) => o.id === "design_review_contract_completed",
   );
-  assert.equal(obl.state, "satisfied");
+  expect(obl.state).toBe("satisfied");
 });
 
 test("state.ts: legacy flag-but-no-snapshot path stays satisfied (never spuriously re-fires)", () => {
@@ -294,7 +279,7 @@ test("state.ts: legacy flag-but-no-snapshot path stays satisfied (never spurious
   // No design_review_snapshots on the bundle.
   const state = deriveAuditState(b);
   for (const id of ["design_review_contract_completed", "design_review_conceptual_completed"]) {
-    assert.equal(state.obligations.find((o) => o.id === id).state, "satisfied");
+    expect(state.obligations.find((o) => o.id === id).state).toBe("satisfied");
   }
 });
 
@@ -313,35 +298,33 @@ test("capture → load roundtrip + buildDesignReReviewSection emits the re-revie
     );
 
     const loaded = await loadDesignReviewSnapshots(dir);
-    assert.ok(loaded.contract, "snapshot should load");
-    assert.equal(loaded.contract.pass, "contract");
-    assert.equal(loaded.contract.prior_findings[0].id, "DR-001");
+    expect(loaded.contract, "snapshot should load").toBeTruthy();
+    expect(loaded.contract.pass).toBe("contract");
+    expect(loaded.contract.prior_findings[0].id).toBe("DR-001");
 
     // No change → buildDesignReReviewSection still returns a section (re-affirm).
     const sameSection = await buildDesignReReviewSection(dir, base, "contract");
-    assert.match(sameSection, /No upstream semantic change/i);
+    expect(sameSection).toMatch(/No upstream semantic change/i);
 
     // Structural change → diff-scoped section naming the changed input.
     const changed = bundle({
       critical_flows: { flows: [{ id: "F1", name: "login", entrypoints: [], paths: ["src/a.ts"], concerns: ["auth"] }] },
     });
     const section = await buildDesignReReviewSection(dir, changed, "contract");
-    assert.match(section, /Diff-Based Re-Review/);
-    assert.match(section, /critical_flows/);
-    assert.match(section, /DR-001/);
+    expect(section).toMatch(/Diff-Based Re-Review/);
+    expect(section).toMatch(/critical_flows/);
+    expect(section).toMatch(/DR-001/);
 
     // No snapshot for conceptual → no section (first authoring).
     const none = await buildDesignReReviewSection(dir, base, "conceptual");
-    assert.equal(none, undefined);
+    expect(none).toBe(undefined);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("DESIGN_REVIEW_INPUTS covers exactly the structural artifacts the review reads", () => {
-  assert.deepEqual(
-    [...DESIGN_REVIEW_INPUTS].sort(),
-    [
+  expect([...DESIGN_REVIEW_INPUTS].sort()).toEqual([
       "critical_flows",
       "design_assessment",
       "graph_bundle",
@@ -349,6 +332,5 @@ test("DESIGN_REVIEW_INPUTS covers exactly the structural artifacts the review re
       "risk_register",
       "surface_manifest",
       "unit_manifest",
-    ],
-  );
+    ]);
 });

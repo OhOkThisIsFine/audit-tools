@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { runSlidingWindow } = await import("audit-tools/shared/quota/slidingWindow");
 
@@ -10,10 +9,10 @@ test("runs all tasks and returns results in order", async () => {
     () => Promise.resolve("c"),
   ];
   const { results } = await runSlidingWindow(tasks, 2);
-  assert.equal(results.length, 3);
-  assert.equal(results[0].status, "fulfilled");
-  assert.equal(results[0].value, "a");
-  assert.equal(results[2].value, "c");
+  expect(results.length).toBe(3);
+  expect(results[0].status).toBe("fulfilled");
+  expect(results[0].value).toBe("a");
+  expect(results[2].value).toBe("c");
 });
 
 test("maintains concurrency limit", async () => {
@@ -29,9 +28,9 @@ test("maintains concurrency limit", async () => {
   });
 
   const { results } = await runSlidingWindow(tasks, 2);
-  assert.equal(results.length, 6);
-  assert.ok(maxObserved <= 2, `max concurrent was ${maxObserved}, expected <= 2`);
-  assert.equal(maxObserved, 2, "should use full concurrency when possible");
+  expect(results.length).toBe(6);
+  expect(maxObserved <= 2, `max concurrent was ${maxObserved}, expected <= 2`).toBeTruthy();
+  expect(maxObserved, "should use full concurrency when possible").toBe(2);
 });
 
 test("isolates failures without stopping other tasks", async () => {
@@ -41,12 +40,12 @@ test("isolates failures without stopping other tasks", async () => {
     () => Promise.resolve("also ok"),
   ];
   const { results } = await runSlidingWindow(tasks, 3);
-  assert.equal(results[0].status, "fulfilled");
-  assert.equal(results[0].value, "ok");
-  assert.equal(results[1].status, "rejected");
-  assert.equal(results[1].reason.message, "fail");
-  assert.equal(results[2].status, "fulfilled");
-  assert.equal(results[2].value, "also ok");
+  expect(results[0].status).toBe("fulfilled");
+  expect(results[0].value).toBe("ok");
+  expect(results[1].status).toBe("rejected");
+  expect(results[1].reason.message).toBe("fail");
+  expect(results[2].status).toBe("fulfilled");
+  expect(results[2].value).toBe("also ok");
 });
 
 test("fires onComplete callback for each task", async () => {
@@ -58,22 +57,22 @@ test("fires onComplete callback for each task", async () => {
   await runSlidingWindow(tasks, 2, (index, result) => {
     completed.push({ index, status: result.status });
   });
-  assert.equal(completed.length, 2);
-  assert.ok(completed.some((c) => c.index === 0));
-  assert.ok(completed.some((c) => c.index === 1));
+  expect(completed.length).toBe(2);
+  expect(completed.some((c) => c.index === 0)).toBeTruthy();
+  expect(completed.some((c) => c.index === 1)).toBeTruthy();
 });
 
 test("handles empty task list", async () => {
   const { results } = await runSlidingWindow([], 5);
-  assert.equal(results.length, 0);
+  expect(results.length).toBe(0);
 });
 
 test("handles concurrency greater than task count", async () => {
   const tasks = [() => Promise.resolve(1), () => Promise.resolve(2)];
   const { results } = await runSlidingWindow(tasks, 10);
-  assert.equal(results.length, 2);
-  assert.equal(results[0].value, 1);
-  assert.equal(results[1].value, 2);
+  expect(results.length).toBe(2);
+  expect(results[0].value).toBe(1);
+  expect(results[1].value).toBe(2);
 });
 
 test("fires onComplete callback for a rejected task", async () => {
@@ -84,10 +83,10 @@ test("fires onComplete callback for a rejected task", async () => {
   await runSlidingWindow(tasks, 1, (index, result) => {
     completed.push({ index, result });
   });
-  assert.equal(completed.length, 1, "onComplete should fire once for the rejected task");
-  assert.equal(completed[0].index, 0);
-  assert.equal(completed[0].result.status, "rejected");
-  assert.equal(completed[0].result.reason.message, "boom");
+  expect(completed.length, "onComplete should fire once for the rejected task").toBe(1);
+  expect(completed[0].index).toBe(0);
+  expect(completed[0].result.status).toBe("rejected");
+  expect(completed[0].result.reason.message).toBe("boom");
 });
 
 test("handles invalid concurrency (zero and negative values)", async () => {
@@ -96,14 +95,14 @@ test("handles invalid concurrency (zero and negative values)", async () => {
   const tasks = [() => Promise.resolve("x"), () => Promise.resolve("y")];
 
   const zero = await runSlidingWindow(tasks, 0);
-  assert.equal(zero.results.length, 2, "results array should have length equal to task count");
-  assert.equal(zero.results[0], undefined, "no tasks should execute with concurrency=0");
-  assert.equal(zero.results[1], undefined, "no tasks should execute with concurrency=0");
+  expect(zero.results.length, "results array should have length equal to task count").toBe(2);
+  expect(zero.results[0], "no tasks should execute with concurrency=0").toBe(undefined);
+  expect(zero.results[1], "no tasks should execute with concurrency=0").toBe(undefined);
 
   const neg = await runSlidingWindow(tasks, -1);
-  assert.equal(neg.results.length, 2, "results array should have length equal to task count");
-  assert.equal(neg.results[0], undefined, "no tasks should execute with concurrency=-1");
-  assert.equal(neg.results[1], undefined, "no tasks should execute with concurrency=-1");
+  expect(neg.results.length, "results array should have length equal to task count").toBe(2);
+  expect(neg.results[0], "no tasks should execute with concurrency=-1").toBe(undefined);
+  expect(neg.results[1], "no tasks should execute with concurrency=-1").toBe(undefined);
 });
 
 test("sliding window launches new worker as soon as one completes", async () => {
@@ -118,6 +117,6 @@ test("sliding window launches new worker as soon as one completes", async () => 
   const start2Idx = timeline.indexOf("start-2");
   const end0Idx = timeline.indexOf("end-0");
   const end1Idx = timeline.indexOf("end-1");
-  assert.ok(start2Idx > end0Idx, "task 2 should start after task 0 ends");
-  assert.ok(start2Idx < end1Idx, "task 2 should start before task 1 ends (sliding behavior)");
+  expect(start2Idx > end0Idx, "task 2 should start after task 0 ends").toBeTruthy();
+  expect(start2Idx < end1Idx, "task 2 should start before task 1 ends (sliding behavior)").toBeTruthy();
 });

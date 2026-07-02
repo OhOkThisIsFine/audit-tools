@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,13 +23,13 @@ test("appends one JSON object per event with an ISO timestamp", async () => {
     logger.event({ kind: "executor_end", duration_ms: 12 });
 
     const lines = (await readFile(path, "utf8")).trim().split("\n");
-    assert.equal(lines.length, 2);
+    expect(lines.length).toBe(2);
     const first = JSON.parse(lines[0]);
-    assert.equal(first.ts, "1970-01-01T00:00:00.000Z");
-    assert.equal(first.kind, "obligation");
-    assert.equal(first.obligation, "repo_manifest");
+    expect(first.ts).toBe("1970-01-01T00:00:00.000Z");
+    expect(first.kind).toBe("obligation");
+    expect(first.obligation).toBe("repo_manifest");
     const second = JSON.parse(lines[1]);
-    assert.equal(second.duration_ms, 12);
+    expect(second.duration_ms).toBe(12);
   });
 });
 
@@ -41,7 +41,7 @@ test("disabled logger writes nothing", async () => {
     await assert.rejects(() => access(path));
 
     const sink = RunLogger.disabled();
-    assert.equal(sink.isEnabled, false);
+    expect(sink.isEnabled).toBe(false);
     // @ts-expect-error — "noop" is not a RunLogEventKind; disabled logger must still not throw
     sink.event({ kind: "noop" });
   });
@@ -57,9 +57,9 @@ test("non-serializable event writes minimal fallback marker", async () => {
 
     const line = (await readFile(path, "utf8")).trim();
     const parsed = JSON.parse(line); // must not throw
-    assert.equal(parsed.kind, "obligation");
-    assert.equal(parsed.note, "unserializable_event");
-    assert.equal(typeof parsed.ts, "string");
+    expect(parsed.kind).toBe("obligation");
+    expect(parsed.note).toBe("unserializable_event");
+    expect(typeof parsed.ts).toBe("string");
   });
 });
 
@@ -74,8 +74,8 @@ test("injectable now clock is used in the non-serializable fallback path", async
     const line = (await readFile(path, "utf8")).trim();
     const parsed = JSON.parse(line);
     // Confirms now() was called inside the catch block, not bypassed.
-    assert.equal(parsed.ts, "1970-01-01T00:00:00.000Z");
-    assert.equal(parsed.note, "unserializable_event");
+    expect(parsed.ts).toBe("1970-01-01T00:00:00.000Z");
+    expect(parsed.note).toBe("unserializable_event");
   });
 });
 
@@ -97,7 +97,7 @@ test("RunLogEvent compile-time type constraints", async () => {
     note: "done",
   };
   // Ensure the valid event is used (prevents unused-variable lint noise).
-  assert.equal(typeof validEvent.kind, "string");
+  expect(typeof validEvent.kind).toBe("string");
 
   // @ts-expect-error — unknown field (misspelled "durtion_ms") must be a compile-time error
   const _bad1 = /** @type {import("../../src/shared/observability/runLog.ts").RunLogEvent} */ ({ kind: "executor_end", durtion_ms: 5 });
@@ -119,11 +119,11 @@ test("a BigInt payload triggers the unserializable_event fallback marker", async
 
     const line = (await readFile(path, "utf8")).trim();
     const parsed = JSON.parse(line); // must not throw
-    assert.deepEqual(parsed, {
+    expect(parsed).toEqual({
       ts: "1970-01-01T00:00:00.000Z",
       kind: "outcome",
       note: "unserializable_event",
     });
-    assert.equal(typeof parsed.ts, "string");
+    expect(typeof parsed.ts).toBe("string");
   });
 });

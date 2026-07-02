@@ -18,8 +18,7 @@
  * regression (a reintroduced second identity rule / a second mint loop) fails
  * here rather than silently drifting.
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,18 +65,9 @@ function definesFunction(src, name) {
 
 test("finding-identity-single-source/1a: shared findingIdentitySignature.ts defines the authority", () => {
   const src = read(SHARED_IDENTITY);
-  assert.ok(
-    definesFunction(src, "findingIdentitySignature"),
-    "shared/src/findingIdentitySignature.ts must define findingIdentitySignature",
-  );
-  assert.ok(
-    definesFunction(src, "normalizeAnchorPath"),
-    "shared/src/findingIdentitySignature.ts must define normalizeAnchorPath",
-  );
-  assert.ok(
-    definesFunction(src, "normalizeTitle"),
-    "shared/src/findingIdentitySignature.ts must define normalizeTitle",
-  );
+  expect(definesFunction(src, "findingIdentitySignature"), "shared/src/findingIdentitySignature.ts must define findingIdentitySignature").toBeTruthy();
+  expect(definesFunction(src, "normalizeAnchorPath"), "shared/src/findingIdentitySignature.ts must define normalizeAnchorPath").toBeTruthy();
+  expect(definesFunction(src, "normalizeTitle"), "shared/src/findingIdentitySignature.ts must define normalizeTitle").toBeTruthy();
 });
 
 test("finding-identity-single-source/1b: no other src module reimplements the finding-identity signature", () => {
@@ -96,21 +86,14 @@ test("finding-identity-single-source/1b: no other src module reimplements the fi
         offenders.push(file.replace(/\\/g, "/"));
       }
     }
-    assert.deepEqual(
-      offenders,
-      [],
-      `Only shared/src/findingIdentitySignature.ts may define ${name}; a delegating re-export is fine. Offenders: ${offenders.join(", ")}`,
-    );
+    expect(offenders, `Only shared/src/findingIdentitySignature.ts may define ${name}; a delegating re-export is fine. Offenders: ${offenders.join(", ")}`).toEqual([]);
   }
 });
 
 // ── Guard 2: single mintUniqueId collision-suffix loop (drift-plan P5) ─────────
 
 test("finding-identity-single-source/2a: shared ids.ts defines mintUniqueId", () => {
-  assert.ok(
-    definesFunction(read(SHARED_IDS), "mintUniqueId"),
-    "shared/src/ids.ts must define mintUniqueId",
-  );
+  expect(definesFunction(read(SHARED_IDS), "mintUniqueId"), "shared/src/ids.ts must define mintUniqueId").toBeTruthy();
 });
 
 test("finding-identity-single-source/2b: no other src module reimplements a mint-unique-id collision loop", () => {
@@ -127,9 +110,5 @@ test("finding-identity-single-source/2b: no other src module reimplements a mint
       offenders.push(file.replace(/\\/g, "/"));
     }
   }
-  assert.deepEqual(
-    offenders,
-    [],
-    `Only shared/src/ids.ts may implement the unique-id collision loop; route through mintUniqueId. Offenders: ${offenders.join(", ")}`,
-  );
+  expect(offenders, `Only shared/src/ids.ts may implement the unique-id collision loop; route through mintUniqueId. Offenders: ${offenders.join(", ")}`).toEqual([]);
 });

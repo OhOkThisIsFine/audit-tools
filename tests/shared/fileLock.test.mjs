@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { rm, writeFile, utimes, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -25,12 +25,9 @@ test("FileLockTimeoutError has correct name, message, and prototype chain", () =
   const lockPath = "/tmp/some-path.lock";
   const err = new FileLockTimeoutError(lockPath);
 
-  assert.ok(err instanceof Error, "should be an instance of Error");
-  assert.equal(err.name, "FileLockTimeoutError", "name must be FileLockTimeoutError");
-  assert.ok(
-    err.message.includes(lockPath),
-    `message should contain the lock path; got: ${err.message}`,
-  );
+  expect(err instanceof Error, "should be an instance of Error").toBeTruthy();
+  expect(err.name, "name must be FileLockTimeoutError").toBe("FileLockTimeoutError");
+  expect(err.message.includes(lockPath), `message should contain the lock path; got: ${err.message}`).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -41,11 +38,11 @@ test("acquireLock creates the lock file and releaseLock removes it", async () =>
     const lockPath = tmpLockPath(dir);
 
     const token = await acquireLock(lockPath);
-    assert.equal(typeof token, "string", "acquireLock should return a token string");
-    assert.ok(token.length > 0, "token should be non-empty");
+    expect(typeof token, "acquireLock should return a token string").toBe("string");
+    expect(token.length > 0, "token should be non-empty").toBeTruthy();
 
     const info = await stat(lockPath);
-    assert.ok(info.isFile(), "lock file should exist after acquireLock");
+    expect(info.isFile(), "lock file should exist after acquireLock").toBeTruthy();
 
     await releaseLock(lockPath, token);
 
@@ -80,11 +77,11 @@ test("withFileLock executes callback and always releases lock", async () => {
     const returnValue = await withFileLock(lockPath, async () => {
       // Lock file should exist while callback is running.
       const info = await stat(lockPath);
-      assert.ok(info.isFile(), "lock file should exist inside callback");
+      expect(info.isFile(), "lock file should exist inside callback").toBeTruthy();
       return 42;
     });
 
-    assert.equal(returnValue, 42, "withFileLock should return the callback's return value");
+    expect(returnValue, "withFileLock should return the callback's return value").toBe(42);
 
     await assert.rejects(
       () => stat(lockPath),
@@ -106,7 +103,7 @@ test("acquireLock throws FileLockTimeoutError when lock is held past timeout", a
       const err = await assert.rejects(
         () => acquireLock(lockPath, 200),
         (e) => {
-          assert.equal(e.name, "FileLockTimeoutError", "error.name should be FileLockTimeoutError");
+          expect(e.name, "error.name should be FileLockTimeoutError").toBe("FileLockTimeoutError");
           return true;
         },
       );
@@ -138,10 +135,7 @@ test("acquireLock unlinks a stale lock file and acquires successfully", async ()
 
     // A fresh lock file should now exist.
     const info = await stat(lockPath);
-    assert.ok(
-      info.mtimeMs > Date.now() - 5000,
-      "newly acquired lock file should have a recent mtime",
-    );
+    expect(info.mtimeMs > Date.now() - 5000, "newly acquired lock file should have a recent mtime").toBeTruthy();
 
     // Clean up: acquire so we have the token, then release.
     // (assert.doesNotReject returns undefined, not the token; re-acquire is not
@@ -170,15 +164,8 @@ test("stale-lock removal emits a structured log event with kind=step and note=st
     const staleLockEvents = logger.events.filter(
       (ev) => ev.kind === "step" && ev.note === "stale_lock_removed",
     );
-    assert.ok(
-      staleLockEvents.length >= 1,
-      "at least one stale_lock_removed event should be emitted",
-    );
-    assert.equal(
-      staleLockEvents[0].lock_path,
-      lockPath,
-      "lock_path field must match the lockPath argument",
-    );
+    expect(staleLockEvents.length >= 1, "at least one stale_lock_removed event should be emitted").toBeTruthy();
+    expect(staleLockEvents[0].lock_path, "lock_path field must match the lockPath argument").toBe(lockPath);
   });
 });
 
@@ -199,33 +186,19 @@ test("lock timeout emits a structured log event with kind=error and note=lock_ti
       await acquireLock(lockPath, timeoutMs, logger);
     } catch (err) {
       threw = true;
-      assert.ok(
-        err instanceof FileLockTimeoutError,
-        "thrown error must be FileLockTimeoutError",
-      );
+      expect(err instanceof FileLockTimeoutError, "thrown error must be FileLockTimeoutError").toBeTruthy();
     } finally {
       await releaseLock(lockPath, token);
     }
 
-    assert.ok(threw, "acquireLock should have thrown FileLockTimeoutError");
+    expect(threw, "acquireLock should have thrown FileLockTimeoutError").toBeTruthy();
 
     const timeoutEvents = logger.events.filter(
       (ev) => ev.kind === "error" && ev.note === "lock_timeout",
     );
-    assert.ok(
-      timeoutEvents.length >= 1,
-      "at least one lock_timeout event should be emitted before the throw",
-    );
-    assert.equal(
-      timeoutEvents[0].lock_path,
-      lockPath,
-      "lock_path field must match the lockPath argument",
-    );
-    assert.equal(
-      timeoutEvents[0].timeout_ms,
-      timeoutMs,
-      "timeout_ms field must match the timeoutMs argument",
-    );
+    expect(timeoutEvents.length >= 1, "at least one lock_timeout event should be emitted before the throw").toBeTruthy();
+    expect(timeoutEvents[0].lock_path, "lock_path field must match the lockPath argument").toBe(lockPath);
+    expect(timeoutEvents[0].timeout_ms, "timeout_ms field must match the timeoutMs argument").toBe(timeoutMs);
   });
 });
 
@@ -256,7 +229,7 @@ test("acquireLock without a logger still throws FileLockTimeoutError on timeout"
       await assert.rejects(
         () => acquireLock(lockPath, 200),
         (err) => {
-          assert.ok(err instanceof FileLockTimeoutError);
+          expect(err instanceof FileLockTimeoutError).toBeTruthy();
           return true;
         },
       );
@@ -290,7 +263,7 @@ test("acquireLock does not call stat on every retry cycle", async () => {
       await releaseLock(lockPath, token);
     }
 
-    assert.ok(timedOut, "acquireLock should have timed out while lock is held");
+    expect(timedOut, "acquireLock should have timed out while lock is held").toBeTruthy();
 
     // The lock file should still exist: if stat was called on every cycle it
     // could theoretically misbehave, but the key assertion is that we timed out
@@ -300,7 +273,7 @@ test("acquireLock does not call stat on every retry cycle", async () => {
     // Lock was released in finally above, so ENOENT is also fine.
     // The important contract is that it timed out (i.e., did not erroneously
     // clear a non-stale lock via excessive stat calls).
-    assert.ok(timedOut, "should have timed out: stat throttling must not break the poll loop");
+    expect(timedOut, "should have timed out: stat throttling must not break the poll loop").toBeTruthy();
     void info;
   });
 });
@@ -328,10 +301,7 @@ test("acquireLock still detects and removes a stale lock with throttled stat", a
 
     // Verify a fresh lock now exists.
     const info = await stat(lockPath);
-    assert.ok(
-      info.mtimeMs > Date.now() - 5000,
-      "newly acquired lock file should have a recent mtime",
-    );
+    expect(info.mtimeMs > Date.now() - 5000, "newly acquired lock file should have a recent mtime").toBeTruthy();
 
     const { unlink } = await import("node:fs/promises");
     await unlink(lockPath).catch(() => {});
@@ -344,11 +314,11 @@ test("withFileLock without a logger still executes fn and releases the lock", as
 
     const result = await withFileLock(lockPath, async () => {
       const info = await stat(lockPath);
-      assert.ok(info.isFile(), "lock file should exist inside callback");
+      expect(info.isFile(), "lock file should exist inside callback").toBeTruthy();
       return "ok";
     });
 
-    assert.equal(result, "ok");
+    expect(result).toBe("ok");
     await assert.rejects(() => stat(lockPath), { code: "ENOENT" });
   });
 });
@@ -361,12 +331,12 @@ test("releaseLock with wrong token does not unlink the lock", async () => {
     const lockPath = tmpLockPath(dir);
 
     const token = await acquireLock(lockPath);
-    assert.equal(typeof token, "string", "acquireLock should return a token string");
+    expect(typeof token, "acquireLock should return a token string").toBe("string");
 
     // Calling releaseLock with a different token must leave the lock file intact.
     await releaseLock(lockPath, "wrong-token-xyz");
     const info = await stat(lockPath);
-    assert.ok(info.isFile(), "lock file should still exist after releaseLock with wrong token");
+    expect(info.isFile(), "lock file should still exist after releaseLock with wrong token").toBeTruthy();
 
     // The original token holder can still release the lock.
     await releaseLock(lockPath, token);
@@ -396,11 +366,11 @@ test("stale-lock steal does not cascade when original holder releases", async ()
 
     // Holder B steals the stale lock: detect stale, unlink, re-acquire.
     const tokenB = await acquireLock(lockPath, 2000);
-    assert.notEqual(tokenA, tokenB, "tokens must be distinct");
+    expect(tokenA, "tokens must be distinct").not.toBe(tokenB);
 
     // Verify that the lock file now contains token B.
     const content = await readFileFn(lockPath, "utf8");
-    assert.equal(content, tokenB, "lock file should contain holder B's token after steal");
+    expect(content, "lock file should contain holder B's token after steal").toBe(tokenB);
 
     // Holder A finishes and calls releaseLock with token A.
     // This must NOT delete holder B's lock.
@@ -408,7 +378,7 @@ test("stale-lock steal does not cascade when original holder releases", async ()
 
     // Lock file should still exist (holder B's lock was NOT deleted).
     const info = await stat(lockPath);
-    assert.ok(info.isFile(), "holder B's lock must still exist after holder A releases with stale token");
+    expect(info.isFile(), "holder B's lock must still exist after holder A releases with stale token").toBeTruthy();
 
     // Holder B releases with token B — now the file is removed.
     await releaseLock(lockPath, tokenB);
@@ -442,8 +412,8 @@ test("withFileLock provides mutual exclusion under normal (non-stale) conditions
 
     await Promise.all(acquirers);
 
-    assert.equal(maxConcurrent, 1, "at most one holder at any instant");
-    assert.equal(completions, 4, "all four callers complete");
+    expect(maxConcurrent, "at most one holder at any instant").toBe(1);
+    expect(completions, "all four callers complete").toBe(4);
     // Lock is released when all done.
     await assert.rejects(() => stat(lockPath), { code: "ENOENT" });
   });
@@ -482,11 +452,7 @@ test("withFileLock preserves original fn() error when releaseLock also throws", 
           throw original;
         }),
       (err) => {
-        assert.equal(
-          err,
-          original,
-          "must surface fn()'s original error, not the secondary release error",
-        );
+        expect(err, "must surface fn()'s original error, not the secondary release error").toBe(original);
         return true;
       },
     );
@@ -513,7 +479,7 @@ test("withFileLock surfaces the releaseLock error when fn() succeeds", async () 
           return "ok";
         }),
       (err) => {
-        assert.ok(err instanceof Error, "the release error should propagate");
+        expect(err instanceof Error, "the release error should propagate").toBeTruthy();
         return true;
       },
     );
@@ -543,8 +509,8 @@ test("acquireLock honours the timeout deadline without large overshoot", async (
     // Deadline is checked before stale-check IO and the backoff sleep is clamped
     // to the time left, so we neither give up early nor overshoot by a full
     // backoff interval.
-    assert.ok(elapsed >= timeoutMs - 60, `should not give up early; elapsed=${elapsed}ms`);
-    assert.ok(elapsed <= timeoutMs + 600, `should not overshoot the deadline; elapsed=${elapsed}ms`);
+    expect(elapsed >= timeoutMs - 60, `should not give up early; elapsed=${elapsed}ms`).toBeTruthy();
+    expect(elapsed <= timeoutMs + 600, `should not overshoot the deadline; elapsed=${elapsed}ms`).toBeTruthy();
   });
 });
 
@@ -570,10 +536,7 @@ test("acquireLock uses exponential backoff — far fewer wakeups than a fixed 50
       );
       // A fixed 50ms poll over 1.2s would sleep ~24 times; exponential backoff
       // (50,100,200,400,500,…) reaches the deadline in well under 15 wakeups.
-      assert.ok(
-        sleepCalls < 15,
-        `expected <15 backoff sleeps over 1.2s, got ${sleepCalls}`,
-      );
+      expect(sleepCalls < 15, `expected <15 backoff sleeps over 1.2s, got ${sleepCalls}`).toBeTruthy();
     } finally {
       globalThis.setTimeout = realSetTimeout;
       await releaseLock(lockPath, token);
@@ -619,8 +582,8 @@ test("concurrent acquirers racing a stale lock keep strict mutual exclusion (max
     // mutual exclusion holds even THROUGH the concurrent stale-steal, not just
     // distinct tokens. (Previously relaxed to distinct-tokens; re-strictened once
     // the double-hold race in fileLock.ts was fixed — see docs/backlog.md.)
-    assert.equal(maxConcurrent, 1, "at most one holder at any instant, even through a concurrent stale-steal");
-    assert.equal(new Set(tokens).size, N, "every acquirer must obtain a distinct token");
+    expect(maxConcurrent, "at most one holder at any instant, even through a concurrent stale-steal").toBe(1);
+    expect(new Set(tokens).size, "every acquirer must obtain a distinct token").toBe(N);
     await rmFs(lockPath, { force: true }); // best-effort cleanup
   });
 });

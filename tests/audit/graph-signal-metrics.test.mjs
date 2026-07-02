@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { deriveGraphSignals } = await import(
@@ -37,33 +37,33 @@ test("complexity/duplication present for js/ts with measure+reach tags", () => {
   const fileContents = Object.fromEntries(files.map((f) => [f.path, f.content]));
   const bundle = buildGraphBundle(manifest(files), undefined, { fileContents });
 
-  assert.ok(bundle.node_metrics, "node_metrics attached");
+  expect(bundle.node_metrics, "node_metrics attached").toBeTruthy();
   const ts = bundle.node_metrics["src/a.ts"];
-  assert.ok(ts.complexity, "ts has complexity");
-  assert.ok(ts.duplication, "ts has duplication");
-  assert.equal(ts.complexity.measure, "cyclomatic-approx");
-  assert.equal(ts.complexity.reach, "js-ts-effective");
-  assert.equal(ts.duplication.measure, "duplicate-line-count");
-  assert.equal(ts.duplication.reach, "js-ts-effective");
+  expect(ts.complexity, "ts has complexity").toBeTruthy();
+  expect(ts.duplication, "ts has duplication").toBeTruthy();
+  expect(ts.complexity.measure).toBe("cyclomatic-approx");
+  expect(ts.complexity.reach).toBe("js-ts-effective");
+  expect(ts.duplication.measure).toBe("duplicate-line-count");
+  expect(ts.duplication.reach).toBe("js-ts-effective");
   // if + for => 2 branches + base path = 3
-  assert.equal(ts.complexity.value, 3);
+  expect(ts.complexity.value).toBe(3);
   // foo(); appears twice => 1 duplicated occurrence
-  assert.equal(ts.duplication.value, 1);
+  expect(ts.duplication.value).toBe(1);
 
   // non-js/ts files: ABSENT (no entry), never zero-filled
-  assert.equal(bundle.node_metrics["src/b.json"], undefined);
-  assert.equal(bundle.node_metrics["README.md"], undefined);
-  assert.equal(computeNodeMetricsForFile("src/b.json", "{}"), undefined);
+  expect(bundle.node_metrics["src/b.json"]).toBe(undefined);
+  expect(bundle.node_metrics["README.md"]).toBe(undefined);
+  expect(computeNodeMetricsForFile("src/b.json", "{}")).toBe(undefined);
 });
 
 test("legacy bundle without node_metrics parses and yields empty complexity/duplication", () => {
   const legacy = edgeBundle([{ from: "a", to: "b" }]);
   const parsed = GraphBundleSchema.safeParse(legacy);
-  assert.equal(parsed.success, true, "legacy bundle parses under .strict()");
+  expect(parsed.success, "legacy bundle parses under .strict()").toBe(true);
 
   const signals = deriveGraphSignals(legacy);
-  assert.deepEqual(signals.complexity, []);
-  assert.deepEqual(signals.duplication, []);
+  expect(signals.complexity).toEqual([]);
+  expect(signals.duplication).toEqual([]);
 });
 
 test("a bundle WITH node_metrics also parses", () => {
@@ -75,13 +75,13 @@ test("a bundle WITH node_metrics also parses", () => {
     },
   });
   const parsed = GraphBundleSchema.safeParse(withMetrics);
-  assert.equal(parsed.success, true);
+  expect(parsed.success).toBe(true);
 
   const signals = deriveGraphSignals(withMetrics);
-  assert.equal(signals.complexity.length, 1);
-  assert.equal(signals.complexity[0].node, "src/a.ts");
-  assert.equal(signals.complexity[0].value, 3);
-  assert.deepEqual(signals.duplication, []);
+  expect(signals.complexity.length).toBe(1);
+  expect(signals.complexity[0].node).toBe("src/a.ts");
+  expect(signals.complexity[0].value).toBe(3);
+  expect(signals.duplication).toEqual([]);
 });
 
 test("complexity/duplication signals sort by node id", () => {
@@ -93,10 +93,7 @@ test("complexity/duplication signals sort by node id", () => {
     },
   });
   const signals = deriveGraphSignals(bundle);
-  assert.deepEqual(
-    signals.complexity.map((c) => c.node),
-    ["src/a.ts", "src/m.ts", "src/z.ts"],
-  );
+  expect(signals.complexity.map((c) => c.node)).toEqual(["src/a.ts", "src/m.ts", "src/z.ts"]);
 });
 
 test("malformed node_metrics degrades to empty, never throws", () => {
@@ -110,8 +107,8 @@ test("malformed node_metrics degrades to empty, never throws", () => {
     assert.doesNotThrow(() => {
       signals = deriveGraphSignals(bad);
     });
-    assert.deepEqual(signals.complexity, []);
-    assert.deepEqual(signals.duplication, []);
+    expect(signals.complexity).toEqual([]);
+    expect(signals.duplication).toEqual([]);
   }
 });
 
@@ -122,7 +119,7 @@ test("seams: a bridge edge is detected", () => {
     { from: "b", to: "c" },
   ]);
   const signals = deriveGraphSignals(bundle);
-  assert.deepEqual(signals.seams, [
+  expect(signals.seams).toEqual([
     { from: "a", to: "b" },
     { from: "b", to: "c" },
   ]);
@@ -136,7 +133,7 @@ test("seams: an edge inside a cycle is NOT a bridge", () => {
     { from: "c", to: "a" },
   ]);
   const signals = deriveGraphSignals(bundle);
-  assert.deepEqual(signals.seams, []);
+  expect(signals.seams).toEqual([]);
 });
 
 test("seams: parallel edges of differing kind are NOT a bridge", () => {
@@ -159,7 +156,7 @@ test("seams: parallel edges of differing kind are NOT a bridge", () => {
     },
   };
   const signals = deriveGraphSignals(bundle);
-  assert.deepEqual(signals.seams, []);
+  expect(signals.seams).toEqual([]);
 });
 
 test("seams: self-loops are dropped", () => {
@@ -168,7 +165,7 @@ test("seams: self-loops are dropped", () => {
     { from: "a", to: "b" },
   ]);
   const signals = deriveGraphSignals(bundle);
-  assert.deepEqual(signals.seams, [{ from: "a", to: "b" }]);
+  expect(signals.seams).toEqual([{ from: "a", to: "b" }]);
 });
 
 test("seams: empty graph -> empty seams, no throw", () => {
@@ -176,7 +173,7 @@ test("seams: empty graph -> empty seams, no throw", () => {
   assert.doesNotThrow(() => {
     signals = deriveGraphSignals(edgeBundle([]));
   });
-  assert.deepEqual(signals.seams, []);
+  expect(signals.seams).toEqual([]);
 });
 
 test("seams: disconnected components terminate and detect bridges in each", () => {
@@ -188,7 +185,7 @@ test("seams: disconnected components terminate and detect bridges in each", () =
     { from: "z", to: "x" },
   ]);
   const signals = deriveGraphSignals(bundle);
-  assert.deepEqual(signals.seams, [{ from: "a", to: "b" }]);
+  expect(signals.seams).toEqual([{ from: "a", to: "b" }]);
 });
 
 test("seams sort deterministically by from-then-to", () => {
@@ -199,7 +196,7 @@ test("seams sort deterministically by from-then-to", () => {
   ]);
   // star at a: a-b, a-c, plus separate m-n. All bridges.
   const signals = deriveGraphSignals(bundle);
-  assert.deepEqual(signals.seams, [
+  expect(signals.seams).toEqual([
     { from: "a", to: "b" },
     { from: "a", to: "c" },
     { from: "m", to: "n" },
@@ -221,9 +218,9 @@ test("two derivations are identical (determinism)", () => {
   );
   const first = deriveGraphSignals(bundle);
   const second = deriveGraphSignals(bundle);
-  assert.deepEqual(first.complexity, second.complexity);
-  assert.deepEqual(first.duplication, second.duplication);
-  assert.deepEqual(first.seams, second.seams);
+  expect(first.complexity).toEqual(second.complexity);
+  expect(first.duplication).toEqual(second.duplication);
+  expect(first.seams).toEqual(second.seams);
 });
 
 test("deriveGraphSignals performs no IO and does not mutate input", () => {
@@ -234,5 +231,5 @@ test("deriveGraphSignals performs no IO and does not mutate input", () => {
   });
   const snapshot = JSON.stringify(bundle);
   deriveGraphSignals(bundle);
-  assert.equal(JSON.stringify(bundle), snapshot, "input bundle unchanged");
+  expect(JSON.stringify(bundle), "input bundle unchanged").toBe(snapshot);
 });

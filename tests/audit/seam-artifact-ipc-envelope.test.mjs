@@ -11,8 +11,7 @@
  * Finding: N-TEST-SEAM-artifact-ipc-envelope
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // ── Shared validator (remediator's expectation) ─────────────────────────────
 const {
@@ -36,11 +35,7 @@ test("auditor AUDIT_FINDINGS_CONTRACT_VERSION matches shared AUDIT_FINDINGS_CONT
   // Fix: make packages/audit-code/src/reporting/synthesis.ts import and
   // re-export AUDIT_FINDINGS_CONTRACT_VERSION from audit-tools/shared rather
   // than defining its own copy.
-  assert.equal(
-    AUDITOR_CONTRACT_VERSION,
-    SHARED_CONTRACT_VERSION,
-    `contract_version mismatch: auditor writes "${AUDITOR_CONTRACT_VERSION}" but shared (remediator) expects "${SHARED_CONTRACT_VERSION}"`,
-  );
+  expect(AUDITOR_CONTRACT_VERSION, `contract_version mismatch: auditor writes "${AUDITOR_CONTRACT_VERSION}" but shared (remediator) expects "${SHARED_CONTRACT_VERSION}"`).toBe(SHARED_CONTRACT_VERSION);
 });
 
 // ── 2. Shared validator accepts a minimal auditor-shaped payload ─────────────
@@ -95,41 +90,27 @@ test("isValidAuditFindingsReport accepts a payload stamped with AUDITOR_CONTRACT
   // mismatch surfaces as a warning, not an error) but the version-identity
   // test above will fail first.
   const result = isValidAuditFindingsReport(payload);
-  assert.equal(
-    result,
-    true,
-    `Shared validator rejected the auditor payload. Issues: ${JSON.stringify(validateAuditFindingsReport(payload))}`,
-  );
+  expect(result, `Shared validator rejected the auditor payload. Issues: ${JSON.stringify(validateAuditFindingsReport(payload))}`).toBe(true);
 });
 
 test("validateAuditFindingsReport returns no errors for a valid auditor payload", () => {
   const issues = validateAuditFindingsReport(buildAuditorPayload());
   const errors = issues.filter((i) => i.severity === "error");
-  assert.deepEqual(
-    errors,
-    [],
-    `Unexpected validation errors: ${JSON.stringify(errors)}`,
-  );
+  expect(errors, `Unexpected validation errors: ${JSON.stringify(errors)}`).toEqual([]);
 });
 
 test("validateAuditFindingsReport flags absent contract_version as error", () => {
   const { contract_version: _, ...noVersion } = buildAuditorPayload();
   const issues = validateAuditFindingsReport(noVersion);
   const errors = issues.filter((i) => i.severity === "error");
-  assert.ok(
-    errors.some((e) => e.message.includes("contract_version")),
-    `Expected a contract_version error, got: ${JSON.stringify(errors)}`,
-  );
+  expect(errors.some((e) => e.message.includes("contract_version")), `Expected a contract_version error, got: ${JSON.stringify(errors)}`).toBeTruthy();
 });
 
 test("validateAuditFindingsReport flags absent findings array as error", () => {
   const { findings: _, ...noFindings } = buildAuditorPayload();
   const issues = validateAuditFindingsReport(noFindings);
   const errors = issues.filter((i) => i.severity === "error");
-  assert.ok(
-    errors.some((e) => e.message.toLowerCase().includes("findings")),
-    `Expected a findings error, got: ${JSON.stringify(errors)}`,
-  );
+  expect(errors.some((e) => e.message.toLowerCase().includes("findings")), `Expected a findings error, got: ${JSON.stringify(errors)}`).toBeTruthy();
 });
 
 // ── 3. WorkBlock → RemediationBlock mapping ──────────────────────────────────
@@ -151,30 +132,14 @@ test("parseAuditFindingsReport maps WorkBlock.id → RemediationBlock.block_id",
   const payload = buildAuditorPayload();
   const result = parseAuditFindingsReport(payload);
 
-  assert.equal(result.findings.length, 1, "one finding expected");
-  assert.equal(result.blocks.length, 1, "one block expected");
+  expect(result.findings.length, "one finding expected").toBe(1);
+  expect(result.blocks.length, "one block expected").toBe(1);
 
   const block = result.blocks[0];
-  assert.equal(
-    block.block_id,
-    "WB-001",
-    `block_id should equal WorkBlock.id ("WB-001"), got "${block.block_id}"`,
-  );
-  assert.deepEqual(
-    block.items,
-    ["SEAM-001"],
-    "block.items should match WorkBlock.finding_ids",
-  );
-  assert.equal(
-    block.parallel_safe,
-    true,
-    "block with empty depends_on should be parallel_safe",
-  );
-  assert.deepEqual(
-    block.dependencies,
-    [],
-    "block with empty depends_on should have no dependencies",
-  );
+  expect(block.block_id, `block_id should equal WorkBlock.id ("WB-001"), got "${block.block_id}"`).toBe("WB-001");
+  expect(block.items, "block.items should match WorkBlock.finding_ids").toEqual(["SEAM-001"]);
+  expect(block.parallel_safe, "block with empty depends_on should be parallel_safe").toBe(true);
+  expect(block.dependencies, "block with empty depends_on should have no dependencies").toEqual([]);
 });
 
 test("parseAuditFindingsReport propagates depends_on into block.dependencies and clears parallel_safe", { skip: !parseAuditFindingsReport }, () => {
@@ -202,7 +167,7 @@ test("parseAuditFindingsReport propagates depends_on into block.dependencies and
   });
   const result = parseAuditFindingsReport(payload);
   const blockB = result.blocks.find((b) => b.block_id === "WB-B");
-  assert.ok(blockB, "WB-B block not found");
-  assert.deepEqual(blockB.dependencies, ["WB-A"]);
-  assert.equal(blockB.parallel_safe, false);
+  expect(blockB, "WB-B block not found").toBeTruthy();
+  expect(blockB.dependencies).toEqual(["WB-A"]);
+  expect(blockB.parallel_safe).toBe(false);
 });

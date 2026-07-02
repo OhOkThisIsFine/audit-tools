@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // Slice D — production wiring of the external-analyzer acquisition engine.
 // Covers the hermeticity gate (disabled ⇒ empty marker, nothing spawned) and the
@@ -31,14 +30,14 @@ test("disabled (no option) ⇒ hermetic empty marker, nothing spawned, results u
     "/repo",
     { run },
   );
-  assert.equal(spawned, false, "no subprocess may spawn when disabled");
-  assert.deepEqual(result.artifacts_written, [
+  expect(spawned, "no subprocess may spawn when disabled").toBe(false);
+  expect(result.artifacts_written).toEqual([
     "external_analyzer_acquisition.json",
   ]);
   const marker = result.updated.external_analyzer_acquisition;
-  assert.equal(marker.enabled, false);
-  assert.deepEqual(marker.tool_statuses, []);
-  assert.equal(result.updated.external_analyzer_results, undefined);
+  expect(marker.enabled).toBe(false);
+  expect(marker.tool_statuses).toEqual([]);
+  expect(result.updated.external_analyzer_results).toBe(undefined);
 });
 
 test("enabled but no root ⇒ empty marker (defence-in-depth)", async () => {
@@ -47,8 +46,8 @@ test("enabled but no root ⇒ empty marker (defence-in-depth)", async () => {
     undefined,
     { enabled: true },
   );
-  assert.equal(result.updated.external_analyzer_acquisition.enabled, false);
-  assert.deepEqual(result.artifacts_written, [
+  expect(result.updated.external_analyzer_acquisition.enabled).toBe(false);
+  expect(result.artifacts_written).toEqual([
     "external_analyzer_acquisition.json",
   ]);
 });
@@ -107,23 +106,20 @@ test("enabled ⇒ gitleaks (PATH-resolved) findings upserted + marker records st
   );
 
   const marker = result.updated.external_analyzer_acquisition;
-  assert.equal(marker.enabled, true);
+  expect(marker.enabled).toBe(true);
   const gitleaksStatus = marker.tool_statuses.find((s) => s.tool === "gitleaks");
-  assert.ok(gitleaksStatus, "marker must carry a gitleaks status");
-  assert.equal(gitleaksStatus.status, "findings");
+  expect(gitleaksStatus, "marker must carry a gitleaks status").toBeTruthy();
+  expect(gitleaksStatus.status).toBe("findings");
 
   // Findings upserted into external_analyzer_results, raw secret dropped.
-  assert.ok(result.artifacts_written.includes("external_analyzer_results.json"));
+  expect(result.artifacts_written.includes("external_analyzer_results.json")).toBeTruthy();
   const gitleaksResults = result.updated.external_analyzer_results.find(
     (r) => r.tool === "gitleaks",
   );
-  assert.ok(gitleaksResults, "external_analyzer_results must contain gitleaks");
-  assert.equal(gitleaksResults.results.length, 1);
+  expect(gitleaksResults, "external_analyzer_results must contain gitleaks").toBeTruthy();
+  expect(gitleaksResults.results.length).toBe(1);
   const finding = gitleaksResults.results[0];
-  assert.equal(finding.path, "src/a.ts");
-  assert.equal(finding.category, "security");
-  assert.ok(
-    !JSON.stringify(finding).includes("SHOULD-NOT-LEAK"),
-    "raw secret value must never be carried into the artifact",
-  );
+  expect(finding.path).toBe("src/a.ts");
+  expect(finding.category).toBe("security");
+  expect(!JSON.stringify(finding).includes("SHOULD-NOT-LEAK"), "raw secret value must never be carried into the artifact").toBeTruthy();
 });

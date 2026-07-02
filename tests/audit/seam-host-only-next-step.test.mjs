@@ -42,8 +42,7 @@
  * Finding: N-TEST-SEAM-host-only-next-step
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
@@ -125,45 +124,31 @@ const CMD_NEXT_STEP_HANDLED_KINDS = new Set([
 
 test("A1: every kind from runDeterministicForNextStep is handled in cmdNextStep", () => {
   for (const kind of RETURN_KINDS_FROM_NEXT_STEP_HELPERS) {
-    assert.ok(
-      CMD_NEXT_STEP_HANDLED_KINDS.has(kind),
-      `runDeterministicForNextStep kind "${kind}" has no handler branch in cmdNextStep`,
-    );
+    expect(CMD_NEXT_STEP_HANDLED_KINDS.has(kind), `runDeterministicForNextStep kind "${kind}" has no handler branch in cmdNextStep`).toBeTruthy();
   }
 });
 
 test("A2: cmdNextStep does not handle phantom kinds absent from runDeterministicForNextStep", () => {
   for (const kind of CMD_NEXT_STEP_HANDLED_KINDS) {
-    assert.ok(
-      RETURN_KINDS_FROM_NEXT_STEP_HELPERS.has(kind),
-      `cmdNextStep handles kind "${kind}" but it is not in runDeterministicForNextStep's return union`,
-    );
+    expect(RETURN_KINDS_FROM_NEXT_STEP_HELPERS.has(kind), `cmdNextStep handles kind "${kind}" but it is not in runDeterministicForNextStep's return union`).toBeTruthy();
   }
 });
 
 test("A3: both sets have the same cardinality (no hidden divergence)", () => {
-  assert.equal(
-    RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size,
-    CMD_NEXT_STEP_HANDLED_KINDS.size,
-    `Kind-set size mismatch: runDeterministicForNextStep has ${RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size} kinds, ` +
-      `cmdNextStep handles ${CMD_NEXT_STEP_HANDLED_KINDS.size}`,
-  );
+  expect(RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size, `Kind-set size mismatch: runDeterministicForNextStep has ${RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size} kinds, ` +
+      `cmdNextStep handles ${CMD_NEXT_STEP_HANDLED_KINDS.size}`).toBe(CMD_NEXT_STEP_HANDLED_KINDS.size);
 });
 
 // ── B. VERSION-IDENTITY — STEP_CONTRACT_VERSION format ───────────────────────
 
 test("B1: STEP_CONTRACT_VERSION is a non-empty string", () => {
-  assert.equal(typeof STEP_CONTRACT_VERSION, "string");
-  assert.ok(STEP_CONTRACT_VERSION.length > 0, "STEP_CONTRACT_VERSION must be non-empty");
+  expect(typeof STEP_CONTRACT_VERSION).toBe("string");
+  expect(STEP_CONTRACT_VERSION.length > 0, "STEP_CONTRACT_VERSION must be non-empty").toBeTruthy();
 });
 
 test("B2: STEP_CONTRACT_VERSION matches the expected versioned-string format", () => {
   // Format: "<product>-step/v<N>alpha<N>" or "<product>-step/v<N>" etc.
-  assert.match(
-    STEP_CONTRACT_VERSION,
-    /^[\w-]+\/v\d/,
-    `STEP_CONTRACT_VERSION "${STEP_CONTRACT_VERSION}" does not match "<product>/v<N>" format`,
-  );
+  expect(STEP_CONTRACT_VERSION, `STEP_CONTRACT_VERSION "${STEP_CONTRACT_VERSION}" does not match "<product>/v<N>" format`).toMatch(/^[\w-]+\/v\d/);
 });
 
 test("B3: STEP_CONTRACT_VERSION is stamped onto every StepArtifact produced by writeCurrentStep", async () => {
@@ -171,11 +156,7 @@ test("B3: STEP_CONTRACT_VERSION is stamped onto every StepArtifact produced by w
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
-    assert.equal(
-      step.contract_version,
-      STEP_CONTRACT_VERSION,
-      "writeCurrentStep must stamp contract_version with STEP_CONTRACT_VERSION",
-    );
+    expect(step.contract_version, "writeCurrentStep must stamp contract_version with STEP_CONTRACT_VERSION").toBe(STEP_CONTRACT_VERSION);
   });
 });
 
@@ -191,11 +172,7 @@ test("C1: all three StepStatus values are accepted by writeCurrentStep", async (
       const artifactsDir = join(dir, `artifacts-${status}`);
       await mkdir(artifactsDir, { recursive: true });
       const step = await writeCurrentStep({ ...baseParams(artifactsDir), status });
-      assert.equal(
-        step.status,
-        status,
-        `writeCurrentStep with status "${status}" must return step.status === "${status}"`,
-      );
+      expect(step.status, `writeCurrentStep with status "${status}" must return step.status === "${status}"`).toBe(status);
     }
   });
 });
@@ -204,13 +181,13 @@ test("C2: the terminal status values align with the semantic contract (complete/
   const terminalStatuses = ["complete", "blocked"];
   const nonTerminalStatuses = ["ready"];
   for (const s of terminalStatuses) {
-    assert.ok(VALID_STEP_STATUSES.includes(s), `terminal status "${s}" must be in StepStatus`);
+    expect(VALID_STEP_STATUSES.includes(s), `terminal status "${s}" must be in StepStatus`).toBeTruthy();
   }
   for (const s of nonTerminalStatuses) {
-    assert.ok(VALID_STEP_STATUSES.includes(s), `non-terminal status "${s}" must be in StepStatus`);
+    expect(VALID_STEP_STATUSES.includes(s), `non-terminal status "${s}" must be in StepStatus`).toBeTruthy();
   }
   // No overlap with undefined/unknown values
-  assert.equal(VALID_STEP_STATUSES.length, 3, "StepStatus must have exactly three members");
+  expect(VALID_STEP_STATUSES.length, "StepStatus must have exactly three members").toBe(3);
 });
 
 // ── D. ALLOWED-COMMANDS NON-EMPTY for non-terminal steps ────────────────────
@@ -241,10 +218,7 @@ test("D1: non-terminal step kinds are written with a non-empty allowed_commands 
         stepKind,
         allowedCommands: ["audit-code next-step --root /repo"],
       });
-      assert.ok(
-        Array.isArray(step.allowed_commands) && step.allowed_commands.length > 0,
-        `non-terminal step kind "${stepKind}" must include at least one allowed_command`,
-      );
+      expect(Array.isArray(step.allowed_commands) && step.allowed_commands.length > 0, `non-terminal step kind "${stepKind}" must include at least one allowed_command`).toBeTruthy();
     }
   });
 });
@@ -259,10 +233,7 @@ test("D2: the continuation command written for non-terminal steps contains 'next
       stepKind: "dispatch_review",
       allowedCommands: [continueCommand],
     });
-    assert.ok(
-      step.allowed_commands.some((cmd) => cmd.includes("next-step")),
-      `allowed_commands must include a 'next-step' continuation; got: ${JSON.stringify(step.allowed_commands)}`,
-    );
+    expect(step.allowed_commands.some((cmd) => cmd.includes("next-step")), `allowed_commands must include a 'next-step' continuation; got: ${JSON.stringify(step.allowed_commands)}`).toBeTruthy();
   });
 });
 
@@ -287,10 +258,7 @@ test("E1: writeCurrentStep produces a StepArtifact with all required fields", as
       "artifact_paths",
     ];
     for (const field of required) {
-      assert.ok(
-        field in step,
-        `StepArtifact must include required field "${field}"`,
-      );
+      expect(field in step, `StepArtifact must include required field "${field}"`).toBeTruthy();
     }
   });
 });
@@ -301,21 +269,18 @@ test("E2: StepArtifact field types are correct", async () => {
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
 
-    assert.equal(typeof step.contract_version, "string");
-    assert.equal(typeof step.step_kind, "string");
-    assert.equal(typeof step.prompt_path, "string");
-    assert.equal(typeof step.status, "string");
+    expect(typeof step.contract_version).toBe("string");
+    expect(typeof step.step_kind).toBe("string");
+    expect(typeof step.prompt_path).toBe("string");
+    expect(typeof step.status).toBe("string");
     // run_id may be string or null
-    assert.ok(
-      step.run_id === null || typeof step.run_id === "string",
-      "run_id must be string or null",
-    );
-    assert.ok(Array.isArray(step.allowed_commands), "allowed_commands must be an array");
-    assert.equal(typeof step.stop_condition, "string");
-    assert.equal(typeof step.repo_root, "string");
-    assert.equal(typeof step.artifacts_dir, "string");
-    assert.equal(typeof step.artifact_paths, "object");
-    assert.ok(step.artifact_paths !== null, "artifact_paths must not be null");
+    expect(step.run_id === null || typeof step.run_id === "string", "run_id must be string or null").toBeTruthy();
+    expect(Array.isArray(step.allowed_commands), "allowed_commands must be an array").toBeTruthy();
+    expect(typeof step.stop_condition).toBe("string");
+    expect(typeof step.repo_root).toBe("string");
+    expect(typeof step.artifacts_dir).toBe("string");
+    expect(typeof step.artifact_paths).toBe("object");
+    expect(step.artifact_paths !== null, "artifact_paths must not be null").toBeTruthy();
   });
 });
 
@@ -328,14 +293,14 @@ test("E3: StepArtifact is JSON-round-trip stable (serialization contract)", asyn
     const json = JSON.stringify(step);
     const parsed = JSON.parse(json);
 
-    assert.equal(parsed.contract_version, step.contract_version);
-    assert.equal(parsed.step_kind, step.step_kind);
-    assert.equal(parsed.status, step.status);
-    assert.equal(parsed.run_id, step.run_id);
-    assert.deepEqual(parsed.allowed_commands, step.allowed_commands);
-    assert.equal(parsed.stop_condition, step.stop_condition);
-    assert.equal(parsed.repo_root, step.repo_root);
-    assert.equal(parsed.artifacts_dir, step.artifacts_dir);
+    expect(parsed.contract_version).toBe(step.contract_version);
+    expect(parsed.step_kind).toBe(step.step_kind);
+    expect(parsed.status).toBe(step.status);
+    expect(parsed.run_id).toBe(step.run_id);
+    expect(parsed.allowed_commands).toEqual(step.allowed_commands);
+    expect(parsed.stop_condition).toBe(step.stop_condition);
+    expect(parsed.repo_root).toBe(step.repo_root);
+    expect(parsed.artifacts_dir).toBe(step.artifacts_dir);
   });
 });
 
@@ -345,24 +310,12 @@ test("E4: artifact_paths always includes current_step and current_prompt keys", 
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
 
-    assert.ok(
-      "current_step" in step.artifact_paths,
-      "artifact_paths must include 'current_step'",
-    );
-    assert.ok(
-      "current_prompt" in step.artifact_paths,
-      "artifact_paths must include 'current_prompt'",
-    );
-    assert.ok(
-      typeof step.artifact_paths.current_step === "string" &&
-        step.artifact_paths.current_step.endsWith("current-step.json"),
-      "current_step must end with 'current-step.json'",
-    );
-    assert.ok(
-      typeof step.artifact_paths.current_prompt === "string" &&
-        step.artifact_paths.current_prompt.endsWith("current-prompt.md"),
-      "current_prompt must end with 'current-prompt.md'",
-    );
+    expect("current_step" in step.artifact_paths, "artifact_paths must include 'current_step'").toBeTruthy();
+    expect("current_prompt" in step.artifact_paths, "artifact_paths must include 'current_prompt'").toBeTruthy();
+    expect(typeof step.artifact_paths.current_step === "string" &&
+        step.artifact_paths.current_step.endsWith("current-step.json"), "current_step must end with 'current-step.json'").toBeTruthy();
+    expect(typeof step.artifact_paths.current_prompt === "string" &&
+        step.artifact_paths.current_prompt.endsWith("current-prompt.md"), "current_prompt must end with 'current-prompt.md'").toBeTruthy();
   });
 });
 
@@ -387,8 +340,8 @@ const ALL_STEP_KINDS = [
 test("F1: all StepKind values are non-empty strings that survive JSON round-trip", () => {
   for (const kind of ALL_STEP_KINDS) {
     const rt = JSON.parse(JSON.stringify(kind));
-    assert.equal(rt, kind, `StepKind "${kind}" must survive JSON round-trip unchanged`);
-    assert.ok(kind.length > 0, `StepKind "${kind}" must be non-empty`);
+    expect(rt, `StepKind "${kind}" must survive JSON round-trip unchanged`).toBe(kind);
+    expect(kind.length > 0, `StepKind "${kind}" must be non-empty`).toBeTruthy();
   }
 });
 
@@ -397,10 +350,7 @@ test("F2: every non-terminal kind in ALL_STEP_KINDS appears in NON_TERMINAL_STEP
   const nonTerminalSet = new Set(NON_TERMINAL_STEP_KINDS);
   for (const kind of ALL_STEP_KINDS) {
     if (!terminalKinds.has(kind)) {
-      assert.ok(
-        nonTerminalSet.has(kind),
-        `StepKind "${kind}" is not categorized as terminal or non-terminal — update NON_TERMINAL_STEP_KINDS`,
-      );
+      expect(nonTerminalSet.has(kind), `StepKind "${kind}" is not categorized as terminal or non-terminal — update NON_TERMINAL_STEP_KINDS`).toBeTruthy();
     }
   }
 });
@@ -414,11 +364,7 @@ test("F3: writeCurrentStep writes step_kind verbatim for each non-terminal kind"
         ...baseParams(artifactsDir),
         stepKind,
       });
-      assert.equal(
-        step.step_kind,
-        stepKind,
-        `step_kind must round-trip: expected "${stepKind}", got "${step.step_kind}"`,
-      );
+      expect(step.step_kind, `step_kind must round-trip: expected "${stepKind}", got "${step.step_kind}"`).toBe(stepKind);
     }
   });
 });
@@ -430,7 +376,7 @@ test("G1: progress is omitted when not supplied", async () => {
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
-    assert.ok(!("progress" in step), "progress must be absent when not supplied");
+    expect(!("progress" in step), "progress must be absent when not supplied").toBeTruthy();
   });
 });
 
@@ -444,9 +390,9 @@ test("G2: progress is included when supplied and survives JSON round-trip", asyn
       max_concurrent_agents: 2,
     };
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), progress });
-    assert.deepEqual(step.progress, progress);
+    expect(step.progress).toEqual(progress);
     const rt = JSON.parse(JSON.stringify(step));
-    assert.deepEqual(rt.progress, progress);
+    expect(rt.progress).toEqual(progress);
   });
 });
 
@@ -455,7 +401,7 @@ test("G3: allowed_mcp_tools is omitted when not supplied", async () => {
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
-    assert.ok(!("allowed_mcp_tools" in step), "allowed_mcp_tools must be absent when not supplied");
+    expect(!("allowed_mcp_tools" in step), "allowed_mcp_tools must be absent when not supplied").toBeTruthy();
   });
 });
 
@@ -465,7 +411,7 @@ test("G4: allowed_mcp_tools included when supplied", async () => {
     await mkdir(artifactsDir, { recursive: true });
     const tools = ["mcp__tool_a", "mcp__tool_b"];
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), allowedMcpTools: tools });
-    assert.deepEqual(step.allowed_mcp_tools, tools);
+    expect(step.allowed_mcp_tools).toEqual(tools);
   });
 });
 
@@ -474,7 +420,7 @@ test("G5: access field is omitted when not supplied", async () => {
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
-    assert.ok(!("access" in step), "access must be absent when not supplied");
+    expect(!("access" in step), "access must be absent when not supplied").toBeTruthy();
   });
 });
 
@@ -484,6 +430,6 @@ test("G6: access field is included when supplied", async () => {
     await mkdir(artifactsDir, { recursive: true });
     const access = { read_paths: ["/repo/src"], write_paths: ["/repo/dist"] };
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), access });
-    assert.deepEqual(step.access, access);
+    expect(step.access).toEqual(access);
   });
 });

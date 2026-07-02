@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 // Parse/aggregate/render unit coverage lives with the module in
 // audit-tools/shared (tests/agent-reflections.test.mjs there); this file keeps
@@ -24,8 +23,8 @@ test("renderAuditReportMarkdown includes a Process Feedback section only when re
       { task_id: "A", instruction_clarity: "clear", severity: "info", tool_friction: ["minor"] },
     ],
   });
-  assert.match(withReflections, /## Process Feedback/);
+  expect(withReflections).toMatch(/## Process Feedback/);
 
   const without = renderAuditReportMarkdown(base, {});
-  assert.doesNotMatch(without, /## Process Feedback/);
+  expect(without).not.toMatch(/## Process Feedback/);
 });

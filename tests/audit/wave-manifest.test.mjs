@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, onTestFinished, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -35,16 +35,16 @@ await test("buildWaveSlotEntry maps all slot fields and projects task_ids", () =
 
   const entry = buildWaveSlotEntry(slot);
 
-  assert.equal(entry.run_id, slot.runId);
-  assert.equal(entry.task_path, slot.paths.taskPath);
-  assert.equal(entry.prompt_path, slot.paths.promptPath);
-  assert.equal(entry.result_path, slot.paths.resultPath);
-  assert.equal(entry.stdout_path, slot.paths.stdoutPath);
-  assert.equal(entry.stderr_path, slot.paths.stderrPath);
-  assert.equal(entry.status_path, slot.paths.statusPath);
-  assert.equal(entry.audit_results_path, slot.auditResultsPath);
-  assert.equal(entry.pending_tasks_path, slot.pendingTasksPath);
-  assert.deepEqual(entry.task_ids, ["T-1", "T-2"]);
+  expect(entry.run_id).toBe(slot.runId);
+  expect(entry.task_path).toBe(slot.paths.taskPath);
+  expect(entry.prompt_path).toBe(slot.paths.promptPath);
+  expect(entry.result_path).toBe(slot.paths.resultPath);
+  expect(entry.stdout_path).toBe(slot.paths.stdoutPath);
+  expect(entry.stderr_path).toBe(slot.paths.stderrPath);
+  expect(entry.status_path).toBe(slot.paths.statusPath);
+  expect(entry.audit_results_path).toBe(slot.auditResultsPath);
+  expect(entry.pending_tasks_path).toBe(slot.pendingTasksPath);
+  expect(entry.task_ids).toEqual(["T-1", "T-2"]);
 });
 
 await test("buildWaveSlotEntry with an empty group yields an empty task_ids array", () => {
@@ -64,22 +64,22 @@ await test("buildWaveSlotEntry with an empty group yields an empty task_ids arra
   };
 
   const entry = buildWaveSlotEntry(slot);
-  assert.deepEqual(entry.task_ids, []);
+  expect(entry.task_ids).toEqual([]);
 });
 
 // ── readWaveManifest ──────────────────────────────────────────────────────────
 
 await test("readWaveManifest returns null when the manifest file does not exist", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-read-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
   const result = await readWaveManifest(dir);
-  assert.equal(result, null);
+  expect(result).toBe(null);
 });
 
 await test("readWaveManifest rethrows errors that are not a missing-file error", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-bad-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
   // Write invalid JSON to the manifest path so we get a parse error.
   const manifestFile = waveManifestPath(dir);
@@ -95,9 +95,9 @@ await test("readWaveManifest rethrows errors that are not a missing-file error",
       // Error that names the path ("Invalid JSON in <path>: ..."). The contract
       // readWaveManifest must honor is: rethrow a parse error (NOT swallow it as
       // a missing-file null), so assert on the message rather than the subclass.
-      assert.ok(err instanceof Error, `expected an Error, got ${err?.constructor?.name}`);
-      assert.match(err.message, /Invalid JSON/i);
-      assert.equal(err.code, undefined, "a parse error must not be reported as ENOENT");
+      expect(err instanceof Error, `expected an Error, got ${err?.constructor?.name}`).toBeTruthy();
+      expect(err.message).toMatch(/Invalid JSON/i);
+      expect(err.code, "a parse error must not be reported as ENOENT").toBe(undefined);
       return true;
     },
   );
@@ -107,7 +107,7 @@ await test("readWaveManifest rethrows errors that are not a missing-file error",
 
 await test("writeWaveManifest stamps contract_version and persists all manifest fields", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-write-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
   const manifest = {
     obligation_id: "audit_tasks_completed",
@@ -134,26 +134,26 @@ await test("writeWaveManifest stamps contract_version and persists all manifest 
   // Read back and verify contract_version is stamped.
   const { readJsonFile } = await import("audit-tools/shared");
   const written = await readJsonFile(waveManifestPath(dir));
-  assert.equal(written.contract_version, "audit-code-wave/v1alpha1");
-  assert.equal(written.obligation_id, manifest.obligation_id);
-  assert.equal(written.started_at, manifest.started_at);
-  assert.equal(written.pid, manifest.pid);
-  assert.deepEqual(written.slots, manifest.slots);
+  expect(written.contract_version).toBe("audit-code-wave/v1alpha1");
+  expect(written.obligation_id).toBe(manifest.obligation_id);
+  expect(written.started_at).toBe(manifest.started_at);
+  expect(written.pid).toBe(manifest.pid);
+  expect(written.slots).toEqual(manifest.slots);
 
   // Verify round-trip via readWaveManifest.
   const roundTripped = await readWaveManifest(dir);
-  assert.ok(roundTripped !== null);
-  assert.equal(roundTripped.contract_version, "audit-code-wave/v1alpha1");
-  assert.equal(roundTripped.obligation_id, manifest.obligation_id);
-  assert.equal(roundTripped.pid, manifest.pid);
-  assert.deepEqual(roundTripped.slots, manifest.slots);
+  expect(roundTripped !== null).toBeTruthy();
+  expect(roundTripped.contract_version).toBe("audit-code-wave/v1alpha1");
+  expect(roundTripped.obligation_id).toBe(manifest.obligation_id);
+  expect(roundTripped.pid).toBe(manifest.pid);
+  expect(roundTripped.slots).toEqual(manifest.slots);
 });
 
 // ── removeWaveManifest ────────────────────────────────────────────────────────
 
 await test("removeWaveManifest does not throw when the manifest file is absent", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-remove-absent-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
   // Should resolve without error even though no manifest exists.
   await assert.doesNotReject(() => removeWaveManifest(dir));
@@ -161,7 +161,7 @@ await test("removeWaveManifest does not throw when the manifest file is absent",
 
 await test("removeWaveManifest removes an existing manifest file", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "wave-manifest-remove-exists-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
 
   const manifest = {
     obligation_id: "audit_tasks_completed",
@@ -174,11 +174,11 @@ await test("removeWaveManifest removes an existing manifest file", async (t) => 
 
   // Verify it exists first.
   const before = await readWaveManifest(dir);
-  assert.ok(before !== null, "manifest should exist after write");
+  expect(before !== null, "manifest should exist after write").toBeTruthy();
 
   await removeWaveManifest(dir);
 
   // After removal, readWaveManifest should return null.
   const after = await readWaveManifest(dir);
-  assert.equal(after, null, "manifest should be null after removal");
+  expect(after, "manifest should be null after removal").toBe(null);
 });

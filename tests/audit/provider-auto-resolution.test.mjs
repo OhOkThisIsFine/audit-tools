@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { resolveFreshSessionProviderName } =
   await import("../../src/audit/providers/index.ts");
@@ -14,7 +13,7 @@ test("omitted provider defaults to local-subprocess even when external CLIs are 
     },
   );
 
-  assert.equal(provider, "local-subprocess");
+  expect(provider).toBe("local-subprocess");
 });
 
 test("provider auto falls back to local-subprocess when no configured bridge or external provider is available", () => {
@@ -27,64 +26,52 @@ test("provider auto falls back to local-subprocess when no configured bridge or 
     },
   );
 
-  assert.equal(provider, "local-subprocess");
+  expect(provider).toBe("local-subprocess");
 });
 
 test("omitted provider does not auto-detect; active Claude Code session falls back to local-subprocess", () => {
   // Bare `undefined` no longer triggers detection — it defaults to local-subprocess.
-  assert.equal(
-    resolveFreshSessionProviderName(
+  expect(resolveFreshSessionProviderName(
       undefined,
       {},
       {
         commandExists: () => false,
         env: { CLAUDECODE: "1" },
       },
-    ),
-    "local-subprocess",
-  );
+    )).toBe("local-subprocess");
   // Even under explicit auto, a fresh `claude` cannot be spawned from inside a
   // Claude Code session: although the `claude` CLI exists, the inside-claude
   // guard forces it unavailable, so auto-resolution falls through to
   // local-subprocess (no other provider is available here).
-  assert.equal(
-    resolveFreshSessionProviderName(
+  expect(resolveFreshSessionProviderName(
       undefined,
       { provider: "auto" },
       {
         commandExists: (command) => command === "claude",
         env: { CLAUDECODE: "1" },
       },
-    ),
-    "local-subprocess",
-  );
+    )).toBe("local-subprocess");
 });
 
 test("explicit local-subprocess is honored over an active OpenCode session; auto detects it", () => {
   // An explicit provider choice is never overridden by environment detection.
-  assert.equal(
-    resolveFreshSessionProviderName(
+  expect(resolveFreshSessionProviderName(
       undefined,
       { provider: "local-subprocess" },
       {
         commandExists: () => false,
         env: { OPENCODE: "1" },
       },
-    ),
-    "local-subprocess",
-  );
+    )).toBe("local-subprocess");
   // Auto-resolution does detect an active OpenCode session.
-  assert.equal(
-    resolveFreshSessionProviderName(
+  expect(resolveFreshSessionProviderName(
       undefined,
       { provider: "auto" },
       {
         commandExists: () => false,
         env: { OPENCODE: "1" },
       },
-    ),
-    "opencode",
-  );
+    )).toBe("opencode");
 });
 
 test("provider auto selects vscode-task when running under VS Code and a vscode task template is configured", () => {
@@ -102,7 +89,7 @@ test("provider auto selects vscode-task when running under VS Code and a vscode 
     },
   );
 
-  assert.equal(provider, "vscode-task");
+  expect(provider).toBe("vscode-task");
 });
 
 test("provider auto selects subprocess-template when a generic launcher bridge is configured", () => {
@@ -120,7 +107,7 @@ test("provider auto selects subprocess-template when a generic launcher bridge i
     },
   );
 
-  assert.equal(provider, "subprocess-template");
+  expect(provider).toBe("subprocess-template");
 });
 
 test("provider auto selects Claude Code when Claude is available and OpenCode is not", () => {
@@ -133,7 +120,7 @@ test("provider auto selects Claude Code when Claude is available and OpenCode is
     },
   );
 
-  assert.equal(provider, "claude-code");
+  expect(provider).toBe("claude-code");
 });
 
 test("PB-1: bare-PATH OpenCode (no config, no Claude) is NOT auto-selected; falls through to local-subprocess", () => {
@@ -150,7 +137,7 @@ test("PB-1: bare-PATH OpenCode (no config, no Claude) is NOT auto-selected; fall
     },
   );
 
-  assert.equal(provider, "local-subprocess");
+  expect(provider).toBe("local-subprocess");
 });
 
 test("PB-1: configured OpenCode is still auto-selected when on PATH (opt-in preserved)", () => {
@@ -164,7 +151,7 @@ test("PB-1: configured OpenCode is still auto-selected when on PATH (opt-in pres
     },
   );
 
-  assert.equal(provider, "opencode");
+  expect(provider).toBe("opencode");
 });
 
 test("provider auto prefers a configured Claude Code adapter when both external CLIs are available", () => {
@@ -183,7 +170,7 @@ test("provider auto prefers a configured Claude Code adapter when both external 
     },
   );
 
-  assert.equal(provider, "claude-code");
+  expect(provider).toBe("claude-code");
 });
 
 test("provider auto prefers a configured OpenCode adapter when both external CLIs are available", () => {
@@ -202,7 +189,7 @@ test("provider auto prefers a configured OpenCode adapter when both external CLI
     },
   );
 
-  assert.equal(provider, "opencode");
+  expect(provider).toBe("opencode");
 });
 
 test("explicit provider selection still wins over auto resolution logic", () => {
@@ -220,5 +207,5 @@ test("explicit provider selection still wins over auto resolution logic", () => 
     },
   );
 
-  assert.equal(provider, "local-subprocess");
+  expect(provider).toBe("local-subprocess");
 });

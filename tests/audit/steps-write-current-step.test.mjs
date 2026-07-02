@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect, describe, it, beforeAll, afterAll } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,63 +44,70 @@ function baseParams(artifactsDir) {
 // Field mapping
 // ---------------------------------------------------------------------------
 
-test("writeCurrentStep writes prompt to current-prompt.md and returns correct StepArtifact", async (t) => {
-  const { dir, cleanup } = await makeTempDir();
-  try {
-    const artifactsDir = join(dir, "artifacts");
+describe("writeCurrentStep writes prompt to current-prompt.md and returns correct StepArtifact", () => {
+  let cleanup;
+  let params;
+  let step;
+
+  beforeAll(async () => {
+    const tmp = await makeTempDir();
+    cleanup = tmp.cleanup;
+    const artifactsDir = join(tmp.dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
 
-    const params = {
+    params = {
       ...baseParams(artifactsDir),
       allowedCommands: ["audit-code next-step", "cat some-file"],
     };
-    const step = await writeCurrentStep(params);
+    step = await writeCurrentStep(params);
+  });
 
-    await t.test("contract_version matches STEP_CONTRACT_VERSION", () => {
-      assert.strictEqual(step.contract_version, STEP_CONTRACT_VERSION);
-    });
-
-    await t.test("step_kind matches input", () => {
-      assert.strictEqual(step.step_kind, params.stepKind);
-    });
-
-    await t.test("status matches input", () => {
-      assert.strictEqual(step.status, params.status);
-    });
-
-    await t.test("run_id matches input", () => {
-      assert.strictEqual(step.run_id, params.runId);
-    });
-
-    await t.test("allowed_commands deep-equals input", () => {
-      assert.deepStrictEqual(step.allowed_commands, params.allowedCommands);
-    });
-
-    await t.test("stop_condition matches input", () => {
-      assert.strictEqual(step.stop_condition, params.stopCondition);
-    });
-
-    await t.test("repo_root matches normalized input (R3)", () => {
-      assert.strictEqual(step.repo_root, toPromptPathToken(params.repoRoot));
-    });
-
-    await t.test("artifacts_dir matches normalized input (R3)", () => {
-      assert.strictEqual(step.artifacts_dir, toPromptPathToken(params.artifactsDir));
-    });
-
-    await t.test("prompt_path file contains exact prompt string", async () => {
-      const written = await readFile(step.prompt_path, "utf8");
-      assert.strictEqual(written, params.prompt);
-    });
-
-    await t.test("current-step.json round-trips to the returned StepArtifact", async () => {
-      const raw = await readFile(step.artifact_paths.current_step, "utf8");
-      const parsed = JSON.parse(raw);
-      assert.deepStrictEqual(parsed, step);
-    });
-  } finally {
+  afterAll(async () => {
     await cleanup();
-  }
+  });
+
+  it("contract_version matches STEP_CONTRACT_VERSION", () => {
+    expect(step.contract_version).toBe(STEP_CONTRACT_VERSION);
+  });
+
+  it("step_kind matches input", () => {
+    expect(step.step_kind).toBe(params.stepKind);
+  });
+
+  it("status matches input", () => {
+    expect(step.status).toBe(params.status);
+  });
+
+  it("run_id matches input", () => {
+    expect(step.run_id).toBe(params.runId);
+  });
+
+  it("allowed_commands deep-equals input", () => {
+    expect(step.allowed_commands).toEqual(params.allowedCommands);
+  });
+
+  it("stop_condition matches input", () => {
+    expect(step.stop_condition).toBe(params.stopCondition);
+  });
+
+  it("repo_root matches normalized input (R3)", () => {
+    expect(step.repo_root).toBe(toPromptPathToken(params.repoRoot));
+  });
+
+  it("artifacts_dir matches normalized input (R3)", () => {
+    expect(step.artifacts_dir).toBe(toPromptPathToken(params.artifactsDir));
+  });
+
+  it("prompt_path file contains exact prompt string", async () => {
+    const written = await readFile(step.prompt_path, "utf8");
+    expect(written).toBe(params.prompt);
+  });
+
+  it("current-step.json round-trips to the returned StepArtifact", async () => {
+    const raw = await readFile(step.artifact_paths.current_step, "utf8");
+    const parsed = JSON.parse(raw);
+    expect(parsed).toEqual(step);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -114,7 +120,7 @@ test("writeCurrentStep omits progress when not supplied", async () => {
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
-    assert.ok(!("progress" in step), "'progress' must not be present when not supplied");
+    expect(!("progress" in step), "'progress' must not be present when not supplied").toBeTruthy();
   } finally {
     await cleanup();
   }
@@ -127,7 +133,7 @@ test("writeCurrentStep includes progress when supplied", async () => {
     await mkdir(artifactsDir, { recursive: true });
     const progress = { summary: "12 tasks remaining", pending_tasks: 12, max_concurrent_agents: 4 };
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), progress });
-    assert.deepStrictEqual(step.progress, progress);
+    expect(step.progress).toEqual(progress);
   } finally {
     await cleanup();
   }
@@ -143,7 +149,7 @@ test("writeCurrentStep omits allowed_mcp_tools when not supplied", async () => {
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
-    assert.ok(!("allowed_mcp_tools" in step), "'allowed_mcp_tools' must not be present when not supplied");
+    expect(!("allowed_mcp_tools" in step), "'allowed_mcp_tools' must not be present when not supplied").toBeTruthy();
   } finally {
     await cleanup();
   }
@@ -155,7 +161,7 @@ test("writeCurrentStep omits allowed_mcp_tools when empty array is supplied", as
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), allowedMcpTools: [] });
-    assert.ok(!("allowed_mcp_tools" in step), "'allowed_mcp_tools' must not be present for empty array");
+    expect(!("allowed_mcp_tools" in step), "'allowed_mcp_tools' must not be present for empty array").toBeTruthy();
   } finally {
     await cleanup();
   }
@@ -168,7 +174,7 @@ test("writeCurrentStep includes allowed_mcp_tools when a non-empty array is supp
     await mkdir(artifactsDir, { recursive: true });
     const tools = ["mcp__tool_a", "mcp__tool_b"];
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), allowedMcpTools: tools });
-    assert.deepStrictEqual(step.allowed_mcp_tools, tools);
+    expect(step.allowed_mcp_tools).toEqual(tools);
   } finally {
     await cleanup();
   }
@@ -184,7 +190,7 @@ test("writeCurrentStep omits access when not supplied", async () => {
     const artifactsDir = join(dir, "artifacts");
     await mkdir(artifactsDir, { recursive: true });
     const step = await writeCurrentStep(baseParams(artifactsDir));
-    assert.ok(!("access" in step), "'access' must not be present when not supplied");
+    expect(!("access" in step), "'access' must not be present when not supplied").toBeTruthy();
   } finally {
     await cleanup();
   }
@@ -197,7 +203,7 @@ test("writeCurrentStep includes access when supplied", async () => {
     await mkdir(artifactsDir, { recursive: true });
     const access = { read_paths: ["/repo/src"], write_paths: ["/repo/dist"] };
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), access });
-    assert.deepStrictEqual(step.access, access);
+    expect(step.access).toEqual(access);
   } finally {
     await cleanup();
   }
@@ -218,16 +224,10 @@ test("writeCurrentStep artifact_paths merges current_step and current_prompt wit
       artifactPaths: callerPaths,
     });
 
-    assert.ok(
-      step.artifact_paths.current_step.endsWith("current-step.json"),
-      "current_step must end with current-step.json",
-    );
-    assert.ok(
-      step.artifact_paths.current_prompt.endsWith("current-prompt.md"),
-      "current_prompt must end with current-prompt.md",
-    );
-    assert.strictEqual(step.artifact_paths.my_artifact, "/tmp/foo.json");
-    assert.strictEqual(step.artifact_paths.another, null);
+    expect(step.artifact_paths.current_step.endsWith("current-step.json"), "current_step must end with current-step.json").toBeTruthy();
+    expect(step.artifact_paths.current_prompt.endsWith("current-prompt.md"), "current_prompt must end with current-prompt.md").toBeTruthy();
+    expect(step.artifact_paths.my_artifact).toBe("/tmp/foo.json");
+    expect(step.artifact_paths.another).toBe(null);
 
     // Caller-supplied keys must not clobber the built-in keys.
     const clobberStep = await writeCurrentStep({
@@ -237,14 +237,8 @@ test("writeCurrentStep artifact_paths merges current_step and current_prompt wit
         current_prompt: "/attacker/evil.md",
       },
     });
-    assert.ok(
-      clobberStep.artifact_paths.current_step.endsWith("current-step.json"),
-      "current_step must not be overwritten by caller-supplied key",
-    );
-    assert.ok(
-      clobberStep.artifact_paths.current_prompt.endsWith("current-prompt.md"),
-      "current_prompt must not be overwritten by caller-supplied key",
-    );
+    expect(clobberStep.artifact_paths.current_step.endsWith("current-step.json"), "current_step must not be overwritten by caller-supplied key").toBeTruthy();
+    expect(clobberStep.artifact_paths.current_prompt.endsWith("current-prompt.md"), "current_prompt must not be overwritten by caller-supplied key").toBeTruthy();
   } finally {
     await cleanup();
   }
@@ -276,19 +270,16 @@ test("writeCurrentStep emits no backslash separators in any path field (R3 fix)"
       },
     });
 
-    assert.ok(!step.prompt_path.includes("\\"), "prompt_path must have no backslash");
-    assert.ok(!step.repo_root.includes("\\"), "repo_root must have no backslash");
-    assert.ok(!step.artifacts_dir.includes("\\"), "artifacts_dir must have no backslash");
-    assert.strictEqual(step.repo_root, "C:/Code/my-repo");
-    assert.strictEqual(
-      step.artifact_paths.unit_manifest,
-      "C:/Code/my-repo/.audit-tools/audit/unit_manifest.json",
-    );
+    expect(!step.prompt_path.includes("\\"), "prompt_path must have no backslash").toBeTruthy();
+    expect(!step.repo_root.includes("\\"), "repo_root must have no backslash").toBeTruthy();
+    expect(!step.artifacts_dir.includes("\\"), "artifacts_dir must have no backslash").toBeTruthy();
+    expect(step.repo_root).toBe("C:/Code/my-repo");
+    expect(step.artifact_paths.unit_manifest).toBe("C:/Code/my-repo/.audit-tools/audit/unit_manifest.json");
     // null artifact entries (not-yet-materialized) survive normalization.
-    assert.strictEqual(step.artifact_paths.not_yet, null);
+    expect(step.artifact_paths.not_yet).toBe(null);
     for (const value of Object.values(step.artifact_paths)) {
       if (value !== null) {
-        assert.ok(!value.includes("\\"), `artifact_paths value must have no backslash: ${value}`);
+        expect(!value.includes("\\"), `artifact_paths value must have no backslash: ${value}`).toBeTruthy();
       }
     }
 
@@ -296,7 +287,7 @@ test("writeCurrentStep emits no backslash separators in any path field (R3 fix)"
     const raw = await readFile(step.artifact_paths.current_step, "utf8");
     const parsed = JSON.parse(raw);
     for (const field of ["prompt_path", "repo_root", "artifacts_dir"]) {
-      assert.ok(!parsed[field].includes("\\"), `persisted ${field} must have no backslash`);
+      expect(!parsed[field].includes("\\"), `persisted ${field} must have no backslash`).toBeTruthy();
     }
   } finally {
     await cleanup();
@@ -315,12 +306,12 @@ test("writeCurrentStep canonical paths win even with Windows-style attacker over
         current_prompt: "C:\\attacker\\evil.md",
       },
     });
-    assert.ok(step.artifact_paths.current_step.endsWith("current-step.json"));
-    assert.ok(step.artifact_paths.current_prompt.endsWith("current-prompt.md"));
-    assert.ok(!step.artifact_paths.current_step.includes("attacker"));
-    assert.ok(!step.artifact_paths.current_prompt.includes("attacker"));
-    assert.ok(!step.artifact_paths.current_step.includes("\\"));
-    assert.ok(!step.artifact_paths.current_prompt.includes("\\"));
+    expect(step.artifact_paths.current_step.endsWith("current-step.json")).toBeTruthy();
+    expect(step.artifact_paths.current_prompt.endsWith("current-prompt.md")).toBeTruthy();
+    expect(!step.artifact_paths.current_step.includes("attacker")).toBeTruthy();
+    expect(!step.artifact_paths.current_prompt.includes("attacker")).toBeTruthy();
+    expect(!step.artifact_paths.current_step.includes("\\")).toBeTruthy();
+    expect(!step.artifact_paths.current_prompt.includes("\\")).toBeTruthy();
   } finally {
     await cleanup();
   }
@@ -354,28 +345,12 @@ async function collectTsFiles(rootDir) {
 
 test("R3: audit writeCurrentStep delegates to the shared single-sourced writer", async () => {
   const stepsSrc = await readFile(join(srcDir, "cli", "steps.ts"), "utf8");
-  assert.match(
-    stepsSrc,
-    /writeStepContract/,
-    "audit steps.ts must delegate to the shared writeStepContract",
-  );
-  assert.match(
-    stepsSrc,
-    /from "audit-tools\/shared"/,
-    "audit steps.ts must import the writer from audit-tools/shared",
-  );
+  expect(stepsSrc, "audit steps.ts must delegate to the shared writeStepContract").toMatch(/writeStepContract/);
+  expect(stepsSrc, "audit steps.ts must import the writer from audit-tools/shared").toMatch(/from "audit-tools\/shared"/);
   // The raw-path writer body is gone: steps.ts must no longer write the prompt
   // or the step JSON itself (those moved into shared).
-  assert.doesNotMatch(
-    stepsSrc,
-    /writeFile\s*\(/,
-    "audit steps.ts must not write current-prompt.md itself (moved to shared)",
-  );
-  assert.doesNotMatch(
-    stepsSrc,
-    /writeJsonFile\s*\(/,
-    "audit steps.ts must not write current-step.json itself (moved to shared)",
-  );
+  expect(stepsSrc, "audit steps.ts must not write current-prompt.md itself (moved to shared)").not.toMatch(/writeFile\s*\(/);
+  expect(stepsSrc, "audit steps.ts must not write current-step.json itself (moved to shared)").not.toMatch(/writeJsonFile\s*\(/);
 });
 
 test("R3: no audit source file outside steps.ts hand-builds the steps/current-step.json writer", async () => {
@@ -389,9 +364,5 @@ test("R3: no audit source file outside steps.ts hand-builds the steps/current-st
       offenders.push(file);
     }
   }
-  assert.deepEqual(
-    offenders,
-    [],
-    `only steps.ts (delegating to shared) may own the step-writer path joins; offenders: ${offenders.join(", ")}`,
-  );
+  expect(offenders, `only steps.ts (delegating to shared) may own the step-writer path joins; offenders: ${offenders.join(", ")}`).toEqual([]);
 });

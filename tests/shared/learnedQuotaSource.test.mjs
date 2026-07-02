@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +38,7 @@ test("returns null when no state entry exists for the given key", async () => {
 
     const source = new LearnedQuotaSource();
     const result = await source.queryCurrentUsage(KEY);
-    assert.equal(result, null);
+    expect(result).toBe(null);
   });
 });
 
@@ -57,10 +56,10 @@ test("returns remaining_pct=0 and reset_at when an active cooldown is present", 
     const source = new LearnedQuotaSource();
     const snapshot = await source.queryCurrentUsage(KEY);
 
-    assert.ok(snapshot !== null, "snapshot should not be null");
-    assert.equal(snapshot.remaining_pct, 0, "remaining_pct must be 0 during active cooldown");
-    assert.equal(snapshot.reset_at, cooldownUntil, "reset_at must equal cooldown_until");
-    assert.equal(snapshot.source, "learned");
+    expect(snapshot !== null, "snapshot should not be null").toBeTruthy();
+    expect(snapshot.remaining_pct, "remaining_pct must be 0 during active cooldown").toBe(0);
+    expect(snapshot.reset_at, "reset_at must equal cooldown_until").toBe(cooldownUntil);
+    expect(snapshot.source).toBe("learned");
   });
 });
 
@@ -78,10 +77,10 @@ test("returns remaining_pct=null and reset_at=null when cooldown has expired", a
     const source = new LearnedQuotaSource();
     const snapshot = await source.queryCurrentUsage(KEY);
 
-    assert.ok(snapshot !== null, "snapshot should not be null for an existing entry");
-    assert.equal(snapshot.remaining_pct, null, "remaining_pct must be null when cooldown has expired");
-    assert.equal(snapshot.reset_at, null, "reset_at must be null when cooldown has expired");
-    assert.equal(snapshot.source, "learned");
+    expect(snapshot !== null, "snapshot should not be null for an existing entry").toBeTruthy();
+    expect(snapshot.remaining_pct, "remaining_pct must be null when cooldown has expired").toBe(null);
+    expect(snapshot.reset_at, "reset_at must be null when cooldown has expired").toBe(null);
+    expect(snapshot.source).toBe("learned");
   });
 });
 
@@ -98,8 +97,8 @@ test("returns remaining_pct=null and reset_at=null when cooldown_until is null",
     const source = new LearnedQuotaSource();
     const snapshot = await source.queryCurrentUsage(KEY);
 
-    assert.ok(snapshot !== null, "snapshot should not be null for an existing entry");
-    assert.equal(snapshot.remaining_pct, null, "remaining_pct must be null when cooldown_until is null");
-    assert.equal(snapshot.reset_at, null, "reset_at must be null when cooldown_until is null");
+    expect(snapshot !== null, "snapshot should not be null for an existing entry").toBeTruthy();
+    expect(snapshot.remaining_pct, "remaining_pct must be null when cooldown_until is null").toBe(null);
+    expect(snapshot.reset_at, "reset_at must be null when cooldown_until is null").toBe(null);
   });
 });

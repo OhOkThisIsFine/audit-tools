@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +7,7 @@ const { artifactTreeLockPath, withFileLock } = await import("audit-tools/shared"
 
 test("artifactTreeLockPath is under the artifacts dir, single-sourced", () => {
   const p = artifactTreeLockPath("/x/.audit-tools/audit");
-  assert.equal(p, join("/x/.audit-tools/audit", "artifact-tree.lock"));
+  expect(p).toBe(join("/x/.audit-tools/audit", "artifact-tree.lock"));
 });
 
 test("artifact-tree lock serializes concurrent read-modify-write critical sections", async () => {
@@ -36,6 +35,6 @@ test("artifact-tree lock serializes concurrent read-modify-write critical sectio
     criticalSection("c"),
   ]);
 
-  assert.equal(maxConcurrent, 1, "no two critical sections ever overlap");
-  assert.equal(order.length, 3, "all three committed");
+  expect(maxConcurrent, "no two critical sections ever overlap").toBe(1);
+  expect(order.length, "all three committed").toBe(3);
 });

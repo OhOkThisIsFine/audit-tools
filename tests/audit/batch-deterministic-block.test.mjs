@@ -5,8 +5,7 @@
  * graph_enrichment_current → design_assessment_current) and halts at the first
  * host_delegation: intent_checkpoint_executor → kind "confirm_intent".
  */
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -62,15 +61,11 @@ test("runDeterministicForNextStep advances through all deterministic obligations
     });
 
     // (1) First host-delegation after the deterministic block must be confirm_intent.
-    assert.equal(
-      result.kind,
-      "confirm_intent",
-      `Expected kind "confirm_intent" but got "${result.kind}"`,
-    );
+    expect(result.kind, `Expected kind "confirm_intent" but got "${result.kind}"`).toBe("confirm_intent");
 
     // (2) Must not have returned a blocked or semantic_review kind.
-    assert.notEqual(result.kind, "blocked");
-    assert.notEqual(result.kind, "semantic_review");
+    expect(result.kind).not.toBe("blocked");
+    expect(result.kind).not.toBe("semantic_review");
 
     // (3) The result bundle should reflect deterministic obligations satisfied.
     //     Re-derive state from the bundle to inspect obligations.
@@ -90,16 +85,13 @@ test("runDeterministicForNextStep advances through all deterministic obligations
     for (const id of DETERMINISTIC_OBLIGATIONS) {
       const obl = state.obligations.find((o) => o.id === id);
       if (obl) {
-        assert.ok(
-          obl.state === "satisfied" || obl.state === "present",
-          `Obligation ${id} should be satisfied/present after the deterministic block, but got "${obl.state}"`,
-        );
+        expect(obl.state === "satisfied" || obl.state === "present", `Obligation ${id} should be satisfied/present after the deterministic block, but got "${obl.state}"`).toBeTruthy();
       }
       // If the obligation is absent from state it was satisfied and pruned — OK.
     }
 
     // (4) The bundle must have repo_manifest (confirms intake ran).
-    assert.ok(bundle.repo_manifest, "repo_manifest must be present after deterministic block");
+    expect(bundle.repo_manifest, "repo_manifest must be present after deterministic block").toBeTruthy();
 
     // (5) No agent obligation (audit_tasks_completed) should be pending yet —
     //     planning hasn't run (it comes after intent_checkpoint). design_review_completed
@@ -110,17 +102,10 @@ test("runDeterministicForNextStep advances through all deterministic obligations
         (o.state === "missing" || o.state === "stale") &&
         o.id === "audit_tasks_completed",
     );
-    assert.equal(
-      agentObl,
-      undefined,
-      `audit_tasks_completed obligation should not be pending before intent checkpoint; found: ${JSON.stringify(agentObl)}`,
-    );
+    expect(agentObl, `audit_tasks_completed obligation should not be pending before intent checkpoint; found: ${JSON.stringify(agentObl)}`).toBe(undefined);
 
     // (6) intent_checkpoint_current must be missing (it's the obligation the call halted at).
     const intentObl = state.obligations.find((o) => o.id === "intent_checkpoint_current");
-    assert.ok(
-      intentObl == null || intentObl.state === "missing" || intentObl.state === "stale",
-      `intent_checkpoint_current should be unsatisfied (the stop point), but got: ${JSON.stringify(intentObl)}`,
-    );
+    expect(intentObl == null || intentObl.state === "missing" || intentObl.state === "stale", `intent_checkpoint_current should be unsatisfied (the stop point), but got: ${JSON.stringify(intentObl)}`).toBeTruthy();
   });
 });

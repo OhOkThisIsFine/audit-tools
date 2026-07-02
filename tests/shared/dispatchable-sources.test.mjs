@@ -6,8 +6,7 @@
  * the pool→source index.
  */
 
-import test, { afterEach } from "node:test";
-import assert from "node:assert/strict";
+import { test, afterEach, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -50,10 +49,10 @@ test("sourceProviderConfig bridges a source to its provider's config block", () 
     api_key_env: "K",
     parameters: { temperature: 0.2 },
   });
-  assert.equal(oc.openai_compatible.base_url, "http://nim/v1");
-  assert.equal(oc.openai_compatible.model, "m");
-  assert.equal(oc.openai_compatible.api_key_env, "K");
-  assert.equal(oc.openai_compatible.temperature, 0.2);
+  expect(oc.openai_compatible.base_url).toBe("http://nim/v1");
+  expect(oc.openai_compatible.model).toBe("m");
+  expect(oc.openai_compatible.api_key_env).toBe("K");
+  expect(oc.openai_compatible.temperature).toBe(0.2);
 
   const cx = sourceProviderConfig({
     provider: "codex",
@@ -61,26 +60,26 @@ test("sourceProviderConfig bridges a source to its provider's config block", () 
     model: "gpt-5",
     parameters: { sandbox_mode: "workspace-write" },
   });
-  assert.equal(cx.codex.command, "codex");
-  assert.equal(cx.codex.model, "gpt-5");
-  assert.equal(cx.codex.sandbox_mode, "workspace-write");
+  expect(cx.codex.command).toBe("codex");
+  expect(cx.codex.model).toBe("gpt-5");
+  expect(cx.codex.sandbox_mode).toBe("workspace-write");
 
   // local-subprocess takes no construction config.
-  assert.deepEqual(sourceProviderConfig({ provider: "local-subprocess" }), {});
+  expect(sourceProviderConfig({ provider: "local-subprocess" })).toEqual({});
 });
 
 test("dispatchableSourceId: explicit id wins; else provider:model keeps two sources distinct", () => {
-  assert.equal(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" }), "nim-A");
+  expect(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" })).toBe("nim-A");
   const a = dispatchableSourceId({ provider: "openai-compatible", model: "m1" });
   const b = dispatchableSourceId({ provider: "openai-compatible", model: "m2" });
-  assert.notEqual(a, b);
+  expect(a).not.toBe(b);
 });
 
 test("dispatchableSourceId folds the account segment into the pool id", () => {
-  assert.equal(dispatchableSourceId({ provider: "claude-code", model: "m" }, "acctB"), "claude-code#acctB/m");
-  assert.equal(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" }, "k"), "nim-A#k");
+  expect(dispatchableSourceId({ provider: "claude-code", model: "m" }, "acctB")).toBe("claude-code#acctB/m");
+  expect(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" }, "k")).toBe("nim-A#k");
   // No account → unchanged (legacy key, no migration).
-  assert.equal(dispatchableSourceId({ provider: "claude-code", model: "m" }, null), "claude-code/m");
+  expect(dispatchableSourceId({ provider: "claude-code", model: "m" }, null)).toBe("claude-code/m");
 });
 
 test("buildSourcePool keys a same-provider source on the account read from its OWN credential (§5b)", async () => {
@@ -88,13 +87,13 @@ test("buildSourcePool keys a same-provider source on the account read from its O
   // pool keyed (claude-code, orgB), distinct from a host pool on account A.
   const source = { provider: "claude-code", credentials_path: writeClaudeCreds("orgB") };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
-  assert.equal(pool.id, "claude-code#orgB/*");
+  expect(pool.id).toBe("claude-code#orgB/*");
 });
 
 test("buildSourcePool: explicit source.account overrides the credential read", async () => {
   const source = { provider: "claude-code", account: "declared-X", credentials_path: writeClaudeCreds("orgB") };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
-  assert.equal(pool.id, "claude-code#declared-X/*");
+  expect(pool.id).toBe("claude-code#declared-X/*");
 });
 
 test("buildHostModelPools stamps the host account (from the host credential) into every pool id", async () => {
@@ -112,8 +111,8 @@ test("buildHostModelPools stamps the host account (from the host credential) int
     // Caller builds an account-less key; buildHostModelPools re-stamps it.
     resolve: () => ({ poolKey: "claude-code/*", discoveredLimits: null }),
   });
-  assert.equal(pools.length, 1);
-  assert.equal(pools[0].id, "claude-code#orgA/*");
+  expect(pools.length).toBe(1);
+  expect(pools[0].id).toBe("claude-code#orgA/*");
 });
 
 test("collectDispatchableSources: explicit sources + legacy openai_compatible folded in when not primary", () => {
@@ -124,15 +123,12 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
     },
     "claude-code",
   );
-  assert.equal(got.length, 2);
-  assert.ok(got.some((s) => s.provider === "codex"));
-  assert.ok(got.some((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1"));
+  expect(got.length).toBe(2);
+  expect(got.some((s) => s.provider === "codex")).toBeTruthy();
+  expect(got.some((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1")).toBeTruthy();
 
   // When openai-compatible IS the primary, it is the primary worker, not a spill source.
-  assert.deepEqual(
-    collectDispatchableSources({ openai_compatible: { base_url: "x", model: "m" } }, "openai-compatible"),
-    [],
-  );
+  expect(collectDispatchableSources({ openai_compatible: { base_url: "x", model: "m" } }, "openai-compatible")).toEqual([]);
 
   // Two explicit NIM endpoints → two sources (distinct), no special-casing.
   const two = collectDispatchableSources(
@@ -144,8 +140,8 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
     },
     "claude-code",
   );
-  assert.equal(two.length, 2);
-  assert.notEqual(dispatchableSourceId(two[0]), dispatchableSourceId(two[1]));
+  expect(two.length).toBe(2);
+  expect(dispatchableSourceId(two[0])).not.toBe(dispatchableSourceId(two[1]));
 });
 
 test("withSourceConfig overlays the source's provider block; no source = passthrough", () => {
@@ -155,14 +151,14 @@ test("withSourceConfig overlays the source's provider block; no source = passthr
     endpoint: "http://nim/v1",
     model: "m",
   });
-  assert.equal(merged.timeout_ms, 5); // untouched
-  assert.equal(merged.openai_compatible.base_url, "http://nim/v1"); // overlaid
-  assert.equal(withSourceConfig(base, undefined), base); // passthrough
+  expect(merged.timeout_ms).toBe(5); // untouched
+  expect(merged.openai_compatible.base_url).toBe("http://nim/v1"); // overlaid
+  expect(withSourceConfig(base, undefined)).toBe(base); // passthrough
 });
 
 test("sourceByPoolId indexes only source-backed pools by id", () => {
   const src = { provider: "openai-compatible", endpoint: "x", model: "m" };
   const map = sourceByPoolId([{ id: "p1", source: src }, { id: "p2" }]);
-  assert.equal(map.size, 1);
-  assert.equal(map.get("p1"), src);
+  expect(map.size).toBe(1);
+  expect(map.get("p1")).toBe(src);
 });

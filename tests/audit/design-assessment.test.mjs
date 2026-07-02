@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 
 const { buildDesignAssessment } = await import("../../src/audit/extractors/designAssessment.ts");
@@ -15,8 +15,8 @@ function makeParams(overrides = {}) {
 
 test("empty project produces no findings", () => {
   const result = buildDesignAssessment(makeParams());
-  assert.equal(result.findings.length, 0);
-  assert.ok(result.generated_at);
+  expect(result.findings.length).toBe(0);
+  expect(result.generated_at).toBeTruthy();
 });
 
 test("detects import cycle", () => {
@@ -36,10 +36,10 @@ test("detects import cycle", () => {
   const cycleFindings = result.findings.filter(
     (f) => f.category === "dependency_cycle",
   );
-  assert.ok(cycleFindings.length > 0, "should detect at least one cycle");
-  assert.equal(cycleFindings[0].lens, "architecture");
-  assert.equal(cycleFindings[0].systemic, true);
-  assert.equal(cycleFindings[0].severity, "medium");
+  expect(cycleFindings.length > 0, "should detect at least one cycle").toBeTruthy();
+  expect(cycleFindings[0].lens).toBe("architecture");
+  expect(cycleFindings[0].systemic).toBe(true);
+  expect(cycleFindings[0].severity).toBe("medium");
 });
 
 test("large cycle gets high severity", () => {
@@ -61,8 +61,8 @@ test("large cycle gets high severity", () => {
   const cycleFindings = result.findings.filter(
     (f) => f.category === "dependency_cycle",
   );
-  assert.ok(cycleFindings.length > 0);
-  assert.equal(cycleFindings[0].severity, "high");
+  expect(cycleFindings.length > 0).toBeTruthy();
+  expect(cycleFindings[0].severity).toBe("high");
 });
 
 test("detects hub modules with high fan-in and fan-out", () => {
@@ -80,8 +80,8 @@ test("detects hub modules with high fan-in and fan-out", () => {
   const hubFindings = result.findings.filter(
     (f) => f.category === "hub_module",
   );
-  assert.ok(hubFindings.length > 0, "should detect hub module");
-  assert.ok(hubFindings[0].title.includes("hub.ts"));
+  expect(hubFindings.length > 0, "should detect hub module").toBeTruthy();
+  expect(hubFindings[0].title.includes("hub.ts")).toBeTruthy();
 });
 
 test("does not flag hub when fan-in/out below threshold", () => {
@@ -101,7 +101,7 @@ test("does not flag hub when fan-in/out below threshold", () => {
   const hubFindings = result.findings.filter(
     (f) => f.category === "hub_module",
   );
-  assert.equal(hubFindings.length, 0);
+  expect(hubFindings.length).toBe(0);
 });
 
 // Threshold boundary tests for hub_module detection.
@@ -126,7 +126,7 @@ test("does not flag hub at threshold-1 fan-in and threshold-1 fan-out", () => {
   const hubFindings = result.findings.filter(
     (f) => f.category === "hub_module",
   );
-  assert.equal(hubFindings.length, 0, "7 fan-in and 7 fan-out should not trigger hub detection");
+  expect(hubFindings.length, "7 fan-in and 7 fan-out should not trigger hub detection").toBe(0);
 });
 
 test("detects hub at exactly threshold fan-in and threshold fan-out", () => {
@@ -141,8 +141,8 @@ test("detects hub at exactly threshold fan-in and threshold fan-out", () => {
   const hubFindings = result.findings.filter(
     (f) => f.category === "hub_module",
   );
-  assert.ok(hubFindings.length > 0, "8 fan-in and 8 fan-out should trigger hub detection");
-  assert.ok(hubFindings[0].title.includes("hub.ts"));
+  expect(hubFindings.length > 0, "8 fan-in and 8 fan-out should trigger hub detection").toBeTruthy();
+  expect(hubFindings[0].title.includes("hub.ts")).toBeTruthy();
 });
 
 test("detects orphan units", () => {
@@ -167,8 +167,8 @@ test("detects orphan units", () => {
   const orphanFindings = result.findings.filter(
     (f) => f.category === "orphan_units",
   );
-  assert.ok(orphanFindings.length > 0);
-  assert.ok(orphanFindings[0].summary.includes("orphan"));
+  expect(orphanFindings.length > 0).toBeTruthy();
+  expect(orphanFindings[0].summary.includes("orphan")).toBeTruthy();
 });
 
 test("detects risk concentration", () => {
@@ -197,8 +197,8 @@ test("detects risk concentration", () => {
   const concFindings = result.findings.filter(
     (f) => f.category === "risk_concentration",
   );
-  assert.ok(concFindings.length > 0);
-  assert.equal(concFindings[0].lens, "architecture");
+  expect(concFindings.length > 0).toBeTruthy();
+  expect(concFindings[0].lens).toBe("architecture");
 });
 
 test("detects dominant monolith unit", () => {
@@ -217,8 +217,8 @@ test("detects dominant monolith unit", () => {
   const monoFindings = result.findings.filter(
     (f) => f.category === "monolith_unit",
   );
-  assert.ok(monoFindings.length > 0);
-  assert.ok(monoFindings[0].title.includes("monolith"));
+  expect(monoFindings.length > 0).toBeTruthy();
+  expect(monoFindings[0].title.includes("monolith")).toBeTruthy();
 });
 
 test("detects critical flow gaps", () => {
@@ -245,8 +245,8 @@ test("detects critical flow gaps", () => {
   const gapFindings = result.findings.filter(
     (f) => f.category === "flow_gap",
   );
-  assert.ok(gapFindings.length > 0);
-  assert.ok(gapFindings[0].title.includes("auth-flow"));
+  expect(gapFindings.length > 0).toBeTruthy();
+  expect(gapFindings[0].title.includes("auth-flow")).toBeTruthy();
 });
 
 test("finding ids are unique and sequentially assigned", () => {
@@ -269,8 +269,8 @@ test("finding ids are unique and sequentially assigned", () => {
     }),
   );
   const ids = result.findings.map((f) => f.id);
-  assert.equal(new Set(ids).size, ids.length, "all finding ids should be unique");
-  assert.ok(ids.every((id) => id.startsWith("DA-")));
+  expect(new Set(ids).size, "all finding ids should be unique").toBe(ids.length);
+  expect(ids.every((id) => id.startsWith("DA-"))).toBeTruthy();
 });
 
 test("finding id generation is instance-scoped across two buildDesignAssessment calls (COR-003)", () => {
@@ -304,22 +304,19 @@ test("finding id generation is instance-scoped across two buildDesignAssessment 
   const second = buildDesignAssessment(params());
 
   // Both runs actually produced findings (otherwise the assertion is vacuous).
-  assert.ok(first.findings.length > 0);
+  expect(first.findings.length > 0).toBeTruthy();
   // Within each run the ids are unique and DA-prefixed.
   for (const result of [first, second]) {
     const ids = result.findings.map((f) => f.id);
-    assert.equal(new Set(ids).size, ids.length, "ids unique within a single call");
-    assert.ok(ids.every((id) => id.startsWith("DA-")));
+    expect(new Set(ids).size, "ids unique within a single call").toBe(ids.length);
+    expect(ids.every((id) => id.startsWith("DA-"))).toBeTruthy();
   }
   // Instance-scoped (not shared module state): the second call restarts its own
   // sequence rather than continuing the first, so identical input -> identical
   // id sequence.
-  assert.deepEqual(
-    second.findings.map((f) => f.id),
-    first.findings.map((f) => f.id),
-  );
-  assert.equal(first.findings[0].id, "DA-001");
-  assert.equal(second.findings[0].id, "DA-001");
+  expect(second.findings.map((f) => f.id)).toEqual(first.findings.map((f) => f.id));
+  expect(first.findings[0].id).toBe("DA-001");
+  expect(second.findings[0].id).toBe("DA-001");
 });
 
 test("all findings use architecture lens and systemic flag", () => {
@@ -342,8 +339,8 @@ test("all findings use architecture lens and systemic flag", () => {
   );
 
   for (const finding of result.findings) {
-    assert.equal(finding.lens, "architecture", `${finding.id} should use architecture lens`);
-    assert.equal(finding.systemic, true, `${finding.id} should be systemic`);
+    expect(finding.lens, `${finding.id} should use architecture lens`).toBe("architecture");
+    expect(finding.systemic, `${finding.id} should be systemic`).toBe(true);
   }
 });
 
@@ -369,8 +366,8 @@ test("detectUnitSprawl does not throw RangeError for large unit manifests (COR-3
   }, "buildDesignAssessment should not throw for a 100k-unit manifest");
 
   // The result must be an object with a findings array (even if empty).
-  assert.ok(result !== undefined);
-  assert.ok(Array.isArray(result.findings));
+  expect(result !== undefined).toBeTruthy();
+  expect(Array.isArray(result.findings)).toBeTruthy();
 });
 
 test("detectUnitSprawl correctly identifies the dominant unit after the fix (COR-3eaa834c)", () => {
@@ -384,11 +381,11 @@ test("detectUnitSprawl correctly identifies the dominant unit after the fix (COR
 
   const result = buildDesignAssessment(makeParams({ unitManifest: { units } }));
   const monoFindings = result.findings.filter((f) => f.category === "monolith_unit");
-  assert.ok(monoFindings.length > 0, "should detect a monolith_unit finding");
-  assert.ok(monoFindings[0].title.includes("monolith"), "finding should reference the dominant unit");
+  expect(monoFindings.length > 0, "should detect a monolith_unit finding").toBeTruthy();
+  expect(monoFindings[0].title.includes("monolith"), "finding should reference the dominant unit").toBeTruthy();
 
   // Confirm the maxFiles value is correct (20), not Infinity or 0.
-  assert.match(monoFindings[0].summary ?? monoFindings[0].title, /20/, "finding should mention the 20-file count");
+  expect(monoFindings[0].summary ?? monoFindings[0].title, "finding should mention the 20-file count").toMatch(/20/);
 });
 
 // ---------------------------------------------------------------------------
@@ -409,9 +406,9 @@ test("detectCycles (via buildDesignAssessment): finds a simple two-node cycle", 
     }),
   );
   const cycleFindings = result.findings.filter((f) => f.category === "dependency_cycle");
-  assert.equal(cycleFindings.length, 1, "Should detect exactly one cycle");
+  expect(cycleFindings.length, "Should detect exactly one cycle").toBe(1);
   const cycleNodes = cycleFindings[0].affected_files.map((af) => af.path);
-  assert.ok(cycleNodes.includes("A") || cycleNodes.includes("B"), "Cycle should contain A or B");
+  expect(cycleNodes.includes("A") || cycleNodes.includes("B"), "Cycle should contain A or B").toBeTruthy();
 });
 
 test("detectCycles (via buildDesignAssessment): returns no cycle findings for a DAG", () => {
@@ -428,7 +425,7 @@ test("detectCycles (via buildDesignAssessment): returns no cycle findings for a 
     }),
   );
   const cycleFindings = result.findings.filter((f) => f.category === "dependency_cycle");
-  assert.equal(cycleFindings.length, 0, "A DAG should produce no cycle findings");
+  expect(cycleFindings.length, "A DAG should produce no cycle findings").toBe(0);
 });
 
 test("detectCycles (via buildDesignAssessment): longer three-node cycle is detected", () => {
@@ -446,10 +443,10 @@ test("detectCycles (via buildDesignAssessment): longer three-node cycle is detec
     }),
   );
   const cycleFindings = result.findings.filter((f) => f.category === "dependency_cycle");
-  assert.ok(cycleFindings.length > 0, "Three-node cycle should be detected");
+  expect(cycleFindings.length > 0, "Three-node cycle should be detected").toBeTruthy();
   // All three nodes must appear in the cycle's affected_files
   const paths = cycleFindings[0].affected_files.map((af) => af.path);
-  assert.ok(paths.includes("A") || paths.includes("B") || paths.includes("C"), "Cycle nodes should be reported");
+  expect(paths.includes("A") || paths.includes("B") || paths.includes("C"), "Cycle nodes should be reported").toBeTruthy();
 });
 
 test("detectCycles (via buildDesignAssessment): two independent cycles are both detected", () => {
@@ -468,7 +465,7 @@ test("detectCycles (via buildDesignAssessment): two independent cycles are both 
     }),
   );
   const cycleFindings = result.findings.filter((f) => f.category === "dependency_cycle");
-  assert.equal(cycleFindings.length, 2, "Both independent cycles should be detected");
+  expect(cycleFindings.length, "Both independent cycles should be detected").toBe(2);
 });
 
 // ---------------------------------------------------------------------------
@@ -484,7 +481,7 @@ test("detectUnitSprawl produces no monolith_unit finding when no unit dominates 
 
   const result = buildDesignAssessment(makeParams({ unitManifest: { units } }));
   const monoFindings = result.findings.filter((f) => f.category === "monolith_unit");
-  assert.equal(monoFindings.length, 0, "no monolith_unit finding when no unit dominates");
+  expect(monoFindings.length, "no monolith_unit finding when no unit dominates").toBe(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -510,13 +507,10 @@ test("detects unit fragmentation when >50 units and >60% are single-file", () =>
 
   const result = buildDesignAssessment(makeParams({ unitManifest: { units } }));
   const fragFindings = result.findings.filter((f) => f.category === "unit_fragmentation");
-  assert.ok(fragFindings.length > 0, "should detect unit_fragmentation with 40/51 single-file units");
-  assert.ok(
-    fragFindings[0].summary.includes("40") && fragFindings[0].summary.includes("51"),
-    `finding summary should mention 40 single-file units and 51 total: ${fragFindings[0].summary}`,
-  );
-  assert.equal(fragFindings[0].systemic, true);
-  assert.equal(fragFindings[0].lens, "architecture");
+  expect(fragFindings.length > 0, "should detect unit_fragmentation with 40/51 single-file units").toBeTruthy();
+  expect(fragFindings[0].summary.includes("40") && fragFindings[0].summary.includes("51"), `finding summary should mention 40 single-file units and 51 total: ${fragFindings[0].summary}`).toBeTruthy();
+  expect(fragFindings[0].systemic).toBe(true);
+  expect(fragFindings[0].lens).toBe("architecture");
 });
 
 test("does NOT flag unit fragmentation when >50 units but <=60% are single-file", () => {
@@ -538,7 +532,7 @@ test("does NOT flag unit fragmentation when >50 units but <=60% are single-file"
 
   const result = buildDesignAssessment(makeParams({ unitManifest: { units } }));
   const fragFindings = result.findings.filter((f) => f.category === "unit_fragmentation");
-  assert.equal(fragFindings.length, 0, "should NOT detect unit_fragmentation when ratio ~58.8% < 60%");
+  expect(fragFindings.length, "should NOT detect unit_fragmentation when ratio ~58.8% < 60%").toBe(0);
 });
 
 test("does NOT flag unit fragmentation when <=50 units even if all are single-file", () => {
@@ -552,7 +546,7 @@ test("does NOT flag unit fragmentation when <=50 units even if all are single-fi
 
   const result = buildDesignAssessment(makeParams({ unitManifest: { units } }));
   const fragFindings = result.findings.filter((f) => f.category === "unit_fragmentation");
-  assert.equal(fragFindings.length, 0, "50 single-file units should NOT trigger fragmentation (boundary: >50 required)");
+  expect(fragFindings.length, "50 single-file units should NOT trigger fragmentation (boundary: >50 required)").toBe(0);
 });
 
 // ── Hidden coupling (consumes the git-history co_change bucket, F6) ────────────
@@ -575,11 +569,11 @@ test("hidden coupling: co-change pair with NO structural edge is flagged", () =>
     }),
   );
   const hidden = result.findings.filter((f) => f.category === "hidden_coupling");
-  assert.equal(hidden.length, 1);
-  assert.equal(hidden[0].lens, "architecture");
-  assert.equal(hidden[0].systemic, true);
-  assert.deepEqual(hidden[0].affected_files.map((f) => f.path), ["a.ts", "b.ts"]);
-  assert.match(hidden[0].summary, /no import\/call\/reference edge/);
+  expect(hidden.length).toBe(1);
+  expect(hidden[0].lens).toBe("architecture");
+  expect(hidden[0].systemic).toBe(true);
+  expect(hidden[0].affected_files.map((f) => f.path)).toEqual(["a.ts", "b.ts"]);
+  expect(hidden[0].summary).toMatch(/no import\/call\/reference edge/);
 });
 
 test("hidden coupling: a structurally-linked co-change pair is NOT hidden (either direction)", () => {
@@ -592,11 +586,7 @@ test("hidden coupling: a structurally-linked co-change pair is NOT hidden (eithe
       ),
     }),
   );
-  assert.equal(
-    result.findings.filter((f) => f.category === "hidden_coupling").length,
-    0,
-    "a co-change pair the dependency graph already shows is not hidden",
-  );
+  expect(result.findings.filter((f) => f.category === "hidden_coupling").length, "a co-change pair the dependency graph already shows is not hidden").toBe(0);
 });
 
 test("hidden coupling: below the confidence floor (≤2 commits) is not flagged", () => {
@@ -607,7 +597,7 @@ test("hidden coupling: below the confidence floor (≤2 commits) is not flagged"
       ]),
     }),
   );
-  assert.equal(result.findings.filter((f) => f.category === "hidden_coupling").length, 0);
+  expect(result.findings.filter((f) => f.category === "hidden_coupling").length).toBe(0);
 });
 
 test("hidden coupling: no co_change bucket (git-history not mined) → no findings, nothing renumbered", () => {
@@ -618,10 +608,10 @@ test("hidden coupling: no co_change bucket (git-history not mined) → no findin
       },
     }),
   );
-  assert.equal(without.findings.filter((f) => f.category === "hidden_coupling").length, 0);
+  expect(without.findings.filter((f) => f.category === "hidden_coupling").length).toBe(0);
   // The cycle finding keeps its id regardless of the new detector being appended.
   const cycle = without.findings.find((f) => f.category === "dependency_cycle");
-  assert.equal(cycle.id, "DA-001");
+  expect(cycle.id).toBe("DA-001");
 });
 
 test("hidden coupling: strongest-first and capped at 10", () => {
@@ -635,7 +625,7 @@ test("hidden coupling: strongest-first and capped at 10", () => {
     makeParams({ graphBundle: coChangeBundle(many) }),
   );
   const hidden = result.findings.filter((f) => f.category === "hidden_coupling");
-  assert.equal(hidden.length, 10, "capped at 10");
+  expect(hidden.length, "capped at 10").toBe(10);
   // Strongest coupling surfaces first (highest confidence = a14/b14).
-  assert.ok(hidden[0].title.includes("a14.ts"));
+  expect(hidden[0].title.includes("a14.ts")).toBeTruthy();
 });

@@ -7,8 +7,7 @@
  *   FND-ARC-df11fab8  — dominant unit (packages-audit-code file count)
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -37,24 +36,15 @@ test("io/artifacts.ts ArtifactPayloadMap carries phase-block comments (ARC-dd468
     "Phase 4",
   ];
   for (const comment of requiredComments) {
-    assert.ok(
-      src.includes(comment),
-      `ArtifactPayloadMap must include a '${comment}' section comment — regression guard for ARC-dd468422`,
-    );
+    expect(src.includes(comment), `ArtifactPayloadMap must include a '${comment}' section comment — regression guard for ARC-dd468422`).toBeTruthy();
   }
 
   // ArtifactDefinition must carry a phase field (typed ArtifactPhase).
-  assert.ok(
-    src.includes("phase: ArtifactPhase"),
-    "ArtifactDefinition must have a 'phase: ArtifactPhase' field",
-  );
+  expect(src.includes("phase: ArtifactPhase"), "ArtifactDefinition must have a 'phase: ArtifactPhase' field").toBeTruthy();
 
   // ArtifactBundle must be derived from ArtifactPayloadMap (Partial<…>), not a
   // hand-rolled list of 30+ independent optional fields.
-  assert.ok(
-    src.includes("Partial<ArtifactPayloadMap>"),
-    "ArtifactBundle must be typed as Partial<ArtifactPayloadMap>",
-  );
+  expect(src.includes("Partial<ArtifactPayloadMap>"), "ArtifactBundle must be typed as Partial<ArtifactPayloadMap>").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -74,41 +64,21 @@ test("io/artifacts.ts ArtifactPayloadMap carries phase-block comments (ARC-dd468
 // The finding predates recent work; it's accepted as a stable architectural
 // decision with no actionable remediation.
 //
-// Regression assertion: each package's test script uses the expected framework
-// so a future refactor can't silently swap frameworks without this test
-// catching the change.
+// Regression assertion: the whole suite runs on the single canonical runner
+// (vitest) so a future refactor can't silently reintroduce a second framework
+// without this test catching the change.
 // ---------------------------------------------------------------------------
 
-test("each package's test framework matches the documented intentional split (ARC-843ce274-2)", async () => {
+test("the whole suite runs on the single canonical runner — vitest (ARC-843ce274-2)", async () => {
   const pkg = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
   const scripts = pkg.scripts ?? {};
 
-  // After the monorepo→single-package collapse the two runners stay separated
-  // WITHIN one package: shared + audit dirs run under node:test (test:node),
-  // remediate runs under vitest (test:remediate).
-  const nodeScript = scripts["test:node"] ?? "";
-  const remediateScript = scripts["test:remediate"] ?? "";
-
-  // shared + audit: node --test over tests/shared + tests/audit
-  assert.ok(
-    nodeScript.includes("node") && nodeScript.includes("--test"),
-    `test:node must use node --test; got: ${nodeScript}`,
-  );
-  assert.ok(
-    nodeScript.includes("tests/shared") && nodeScript.includes("tests/audit"),
-    `test:node must cover tests/shared and tests/audit; got: ${nodeScript}`,
-  );
-  assert.ok(
-    !nodeScript.includes("vitest"),
-    `test:node must NOT use vitest (intentional split); got: ${nodeScript}`,
-  );
-
-  // remediate: vitest
-  assert.ok(
-    remediateScript.includes("vitest"),
-    `test:remediate must use vitest; got: ${remediateScript}`,
-  );
-
+  // One runner for all three areas (audit + shared + remediate). The node:test
+  // split (test:node / `node --test` / tsx/esm loader) was retired.
+  const testScript = scripts.test ?? "";
+  expect(testScript.includes("vitest"), `test script must run vitest; got: ${testScript}`).toBeTruthy();
+  expect(!("test:node" in scripts), `test:node must not exist — node:test was retired; got: ${scripts["test:node"]}`).toBeTruthy();
+  expect(!testScript.includes("--test"), `test script must not use node --test; got: ${testScript}`).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -151,15 +121,9 @@ test("audit-code src/ is decomposed into at least 10 subdirectories (ARC-df11fab
     "validation",
   ];
 
-  assert.ok(
-    subdirs.length >= 10,
-    `audit-code src/ must have at least 10 subdirectories (structural decomposition); found ${subdirs.length}: ${subdirs.join(", ")}`,
-  );
+  expect(subdirs.length >= 10, `audit-code src/ must have at least 10 subdirectories (structural decomposition); found ${subdirs.length}: ${subdirs.join(", ")}`).toBeTruthy();
 
   for (const expected of expectedSubdirs) {
-    assert.ok(
-      subdirs.includes(expected),
-      `audit-code src/ must contain '${expected}' subdirectory`,
-    );
+    expect(subdirs.includes(expected), `audit-code src/ must contain '${expected}' subdirectory`).toBeTruthy();
   }
 });

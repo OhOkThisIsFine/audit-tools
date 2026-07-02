@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { applyEdgeReasoning, collectLowConfidenceEdges, buildEdgeReasoningPrompt } =
   await import("../../src/audit/orchestrator/edgeReasoning.ts");
@@ -43,8 +42,8 @@ function edgeSignatures(bundle) {
 
 test("collectLowConfidenceEdges returns only edges below the 0.65 floor", () => {
   const candidates = collectLowConfidenceEdges(sampleBundle());
-  assert.equal(candidates.length, 2);
-  assert.ok(candidates.every((e) => e.confidence < 0.65));
+  expect(candidates.length).toBe(2);
+  expect(candidates.every((e) => e.confidence < 0.65)).toBeTruthy();
 });
 
 test("applyEdgeReasoning rewrites only `reason`; the edge set is invariant", () => {
@@ -62,34 +61,25 @@ test("applyEdgeReasoning rewrites only `reason`; the edge set is invariant", () 
     ],
   });
 
-  assert.equal(summary.rewritten, 2);
-  assert.equal(summary.candidates, 2);
+  expect(summary.rewritten).toBe(2);
+  expect(summary.candidates).toBe(2);
 
   // Golden edge-set equality: identity fields unchanged.
-  assert.deepEqual(edgeSignatures(bundle), before);
+  expect(edgeSignatures(bundle)).toEqual(before);
 
   // Reasons updated on the two low-confidence edges only.
-  assert.equal(
-    bundle.graphs.imports.find((e) => e.kind === "heuristic-container-edge").reason,
-    "a.ts and lib share the lib/ module root.",
-  );
-  assert.equal(
-    bundle.graphs.references[0].reason,
-    "auth.ts reads the session cookie set by session.ts.",
-  );
+  expect(bundle.graphs.imports.find((e) => e.kind === "heuristic-container-edge").reason).toBe("a.ts and lib share the lib/ module root.");
+  expect(bundle.graphs.references[0].reason).toBe("auth.ts reads the session cookie set by session.ts.");
   // High-confidence import edge reason is untouched.
-  assert.equal(
-    bundle.graphs.imports.find((e) => e.kind === "esm").reason,
-    "import",
-  );
+  expect(bundle.graphs.imports.find((e) => e.kind === "esm").reason).toBe("import");
 });
 
 test("applyEdgeReasoning is a no-op without rewrites", () => {
   const bundle = sampleBundle();
   const before = JSON.stringify(bundle);
   const summary = applyEdgeReasoning(bundle, undefined);
-  assert.equal(summary.rewritten, 0);
-  assert.equal(JSON.stringify(bundle), before);
+  expect(summary.rewritten).toBe(0);
+  expect(JSON.stringify(bundle)).toBe(before);
 });
 
 test("applyEdgeReasoning ignores blank reasons", () => {
@@ -97,14 +87,14 @@ test("applyEdgeReasoning ignores blank reasons", () => {
   const summary = applyEdgeReasoning(bundle, {
     rewrites: [{ from: "a.ts", to: "lib", kind: "heuristic-container-edge", reason: "   " }],
   });
-  assert.equal(summary.rewritten, 0);
+  expect(summary.rewritten).toBe(0);
 });
 
 test("buildEdgeReasoningPrompt lists each candidate edge", () => {
   const prompt = buildEdgeReasoningPrompt(collectLowConfidenceEdges(sampleBundle()));
-  assert.match(prompt, /heuristic-container-edge/);
-  assert.match(prompt, /heuristic-auth-session-link/);
-  assert.match(prompt, /"rewrites"/);
+  expect(prompt).toMatch(/heuristic-container-edge/);
+  expect(prompt).toMatch(/heuristic-auth-session-link/);
+  expect(prompt).toMatch(/"rewrites"/);
 });
 
 test("graph-enrichment executor applies edge reasoning when gated on and writes the graph", async () => {
@@ -127,17 +117,11 @@ test("graph-enrichment executor applies edge reasoning when gated on and writes 
     },
   });
 
-  assert.ok(
-    result.artifacts_written.includes("graph_bundle.json"),
-    "graph_bundle.json is written when reasoning rewrote a reason",
-  );
-  assert.deepEqual(edgeSignatures(result.updated.graph_bundle), before);
-  assert.equal(
-    result.updated.graph_bundle.graphs.imports.find(
+  expect(result.artifacts_written.includes("graph_bundle.json"), "graph_bundle.json is written when reasoning rewrote a reason").toBeTruthy();
+  expect(edgeSignatures(result.updated.graph_bundle)).toEqual(before);
+  expect(result.updated.graph_bundle.graphs.imports.find(
       (e) => e.kind === "heuristic-container-edge",
-    ).reason,
-    "clearer container reason",
-  );
+    ).reason).toBe("clearer container reason");
 });
 
 test("graph-enrichment executor leaves the floor byte-identical when reasoning is off", async () => {
@@ -160,6 +144,6 @@ test("graph-enrichment executor leaves the floor byte-identical when reasoning i
     },
   });
 
-  assert.deepEqual(result.artifacts_written, ["analyzer_capability.json"]);
-  assert.equal(JSON.stringify(floor), floorJson, "floor unchanged when reasoning off");
+  expect(result.artifacts_written).toEqual(["analyzer_capability.json"]);
+  expect(JSON.stringify(floor), "floor unchanged when reasoning off").toBe(floorJson);
 });

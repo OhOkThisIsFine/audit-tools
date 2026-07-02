@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -17,26 +17,17 @@ const repoRoot = join(here, "..", "..");
 test("every host in INSTALL_HOST_ORDER has a complete descriptor with verify", () => {
   for (const hostKey of INSTALL_HOST_ORDER) {
     const def = INSTALL_HOST_DEFINITIONS[hostKey];
-    assert.ok(def, `Descriptor must exist for host "${hostKey}"`);
-    assert.equal(def.host, hostKey, `Descriptor.host must match key "${hostKey}"`);
-    assert.ok(typeof def.label === "string" && def.label.length > 0,
-      `Descriptor for "${hostKey}" must have a non-empty label`);
-    assert.ok(typeof def.support_level === "string",
-      `Descriptor for "${hostKey}" must have a support_level`);
-    assert.ok(typeof def.setup_kind === "string",
-      `Descriptor for "${hostKey}" must have a setup_kind`);
-    assert.ok(typeof def.summary === "string" && def.summary.length > 0,
-      `Descriptor for "${hostKey}" must have a non-empty summary`);
-    assert.ok(typeof def.primary_path_key === "string",
-      `Descriptor for "${hostKey}" must have a primary_path_key`);
-    assert.ok(Array.isArray(def.supporting_path_keys),
-      `Descriptor for "${hostKey}" must have supporting_path_keys array`);
-    assert.ok(Array.isArray(def.steps) && def.steps.length > 0,
-      `Descriptor for "${hostKey}" must have a non-empty steps array`);
-    assert.ok(def.profile && typeof def.profile === "object",
-      `Descriptor for "${hostKey}" must have a profile object`);
-    assert.ok(typeof def.verify === "function",
-      `Descriptor for "${hostKey}" must have a verify function`);
+    expect(def, `Descriptor must exist for host "${hostKey}"`).toBeTruthy();
+    expect(def.host, `Descriptor.host must match key "${hostKey}"`).toBe(hostKey);
+    expect(typeof def.label === "string" && def.label.length > 0, `Descriptor for "${hostKey}" must have a non-empty label`).toBeTruthy();
+    expect(typeof def.support_level === "string", `Descriptor for "${hostKey}" must have a support_level`).toBeTruthy();
+    expect(typeof def.setup_kind === "string", `Descriptor for "${hostKey}" must have a setup_kind`).toBeTruthy();
+    expect(typeof def.summary === "string" && def.summary.length > 0, `Descriptor for "${hostKey}" must have a non-empty summary`).toBeTruthy();
+    expect(typeof def.primary_path_key === "string", `Descriptor for "${hostKey}" must have a primary_path_key`).toBeTruthy();
+    expect(Array.isArray(def.supporting_path_keys), `Descriptor for "${hostKey}" must have supporting_path_keys array`).toBeTruthy();
+    expect(Array.isArray(def.steps) && def.steps.length > 0, `Descriptor for "${hostKey}" must have a non-empty steps array`).toBeTruthy();
+    expect(def.profile && typeof def.profile === "object", `Descriptor for "${hostKey}" must have a profile object`).toBeTruthy();
+    expect(typeof def.verify === "function", `Descriptor for "${hostKey}" must have a verify function`).toBeTruthy();
   }
 });
 
@@ -48,21 +39,21 @@ test("descriptor table covers exactly codex, opencode, vscode, and antigravity",
     "opencode",
     "vscode",
   ];
-  assert.deepEqual(definedHosts, expectedHosts);
+  expect(definedHosts).toEqual(expectedHosts);
   // The MCP surface (claude-desktop host) was removed; it must not reappear.
-  assert.equal(INSTALL_HOST_DEFINITIONS["claude-desktop"], undefined);
+  expect(INSTALL_HOST_DEFINITIONS["claude-desktop"]).toBe(undefined);
 });
 
 test("getInstallHostKeys returns single key for known hosts", () => {
   for (const hostKey of INSTALL_HOST_ORDER) {
     const keys = getInstallHostKeys(hostKey);
-    assert.deepEqual(keys, [hostKey]);
+    expect(keys).toEqual([hostKey]);
   }
 });
 
 test("getInstallHostKeys returns all hosts for 'all'", () => {
   const keys = getInstallHostKeys("all");
-  assert.deepEqual(keys, INSTALL_HOST_ORDER);
+  expect(keys).toEqual(INSTALL_HOST_ORDER);
 });
 
 test("getInstallHostKeys throws for unknown host", () => {
@@ -74,32 +65,32 @@ test("getInstallHostKeys throws for unknown host", () => {
 test("getInstallProfile derives correct flags from host descriptors", () => {
   // codex should set writeAgents
   const codexProfile = getInstallProfile("codex");
-  assert.equal(codexProfile.writeAgents, true);
-  assert.equal(codexProfile.writeVSCode, false);
+  expect(codexProfile.writeAgents).toBe(true);
+  expect(codexProfile.writeVSCode).toBe(false);
 
   // vscode should set writeVSCode and writeCopilotInstructions
   const vscodeProfile = getInstallProfile("vscode");
-  assert.equal(vscodeProfile.writeVSCode, true);
-  assert.equal(vscodeProfile.writeCopilotInstructions, true);
-  assert.equal(vscodeProfile.writeAgents, false);
+  expect(vscodeProfile.writeVSCode).toBe(true);
+  expect(vscodeProfile.writeCopilotInstructions).toBe(true);
+  expect(vscodeProfile.writeAgents).toBe(false);
 
   // 'all' should merge all profiles
   const allProfile = getInstallProfile("all");
-  assert.equal(allProfile.writeAgents, true);
-  assert.equal(allProfile.writeVSCode, true);
-  assert.equal(allProfile.writeAntigravity, true);
+  expect(allProfile.writeAgents).toBe(true);
+  expect(allProfile.writeVSCode).toBe(true);
+  expect(allProfile.writeAntigravity).toBe(true);
 });
 
 test("install profile skips descriptors whose profile predicate is false", () => {
   // opencode profile does not set writeVSCode
   const openProfile = getInstallProfile("opencode");
-  assert.equal(openProfile.writeVSCode, false);
-  assert.equal(openProfile.writeAntigravity, false);
+  expect(openProfile.writeVSCode).toBe(false);
+  expect(openProfile.writeAntigravity).toBe(false);
   // The MCP surface was removed, so there is no writeClaudeDesktop profile flag.
-  assert.equal("writeClaudeDesktop" in openProfile, false);
+  expect("writeClaudeDesktop" in openProfile).toBe(false);
   // but does set writeOpenCode and writeAgents
-  assert.equal(openProfile.writeOpenCode, true);
-  assert.equal(openProfile.writeAgents, true);
+  expect(openProfile.writeOpenCode).toBe(true);
+  expect(openProfile.writeAgents).toBe(true);
 });
 
 // ── INV-audit-infra-07: renderGeminiCommandToml emits escaped body ───────────
@@ -111,30 +102,21 @@ test("renderGeminiCommandToml embeds escaped body (not raw promptBody) in TOML o
   const toml = renderGeminiCommandToml(rawBody);
 
   // The TOML must contain the escaped forms.
-  assert.ok(
-    toml.includes('\\"hello\\"'),
-    "TOML output must escape double-quotes in the prompt body",
-  );
-  assert.ok(
-    toml.includes("C:\\\\path\\\\to\\\\file"),
-    "TOML output must escape backslashes in the prompt body",
-  );
+  expect(toml.includes('\\"hello\\"'), "TOML output must escape double-quotes in the prompt body").toBeTruthy();
+  expect(toml.includes("C:\\\\path\\\\to\\\\file"), "TOML output must escape backslashes in the prompt body").toBeTruthy();
   // The raw unescaped content must NOT appear verbatim inside the TOML string.
   const promptSectionStart = toml.indexOf('prompt = """');
-  assert.ok(promptSectionStart >= 0, "TOML output must contain the prompt field");
+  expect(promptSectionStart >= 0, "TOML output must contain the prompt field").toBeTruthy();
   const promptContent = toml.slice(promptSectionStart);
-  assert.ok(
-    !promptContent.includes('"hello"') || promptContent.includes('\\"hello\\"'),
-    "Raw unescaped double-quotes must not appear in the TOML prompt body",
-  );
+  expect(!promptContent.includes('"hello"') || promptContent.includes('\\"hello\\"'), "Raw unescaped double-quotes must not appear in the TOML prompt body").toBeTruthy();
 });
 
 test("renderGeminiCommandToml handles a body without special characters unchanged", () => {
   const plainBody = "Run audit-code next-step for the repo.";
   const toml = renderGeminiCommandToml(plainBody);
-  assert.ok(toml.includes(plainBody), "Plain body must appear verbatim in TOML output");
-  assert.ok(toml.includes('prompt = """'), "TOML must use multi-line basic string syntax");
-  assert.ok(toml.startsWith("# /audit-code"), "TOML must start with the header comment");
+  expect(toml.includes(plainBody), "Plain body must appear verbatim in TOML output").toBeTruthy();
+  expect(toml.includes('prompt = """'), "TOML must use multi-line basic string syntax").toBeTruthy();
+  expect(toml.startsWith("# /audit-code"), "TOML must start with the header comment").toBeTruthy();
 });
 
 // ── INV-audit-infra-09: no stale MCP tool references in rendered assets ─────
@@ -154,20 +136,14 @@ test("renderAntigravityAssets text does not reference removed MCP tools (INV-aud
       `call\`[^]*\`${tool}|call.*\`${tool}\`|\`${tool}\`.*call|\\bcall ${tool}\\b`,
       "g",
     );
-    assert.ok(
-      !inInstructionContext.test(source),
-      `Rendered host assets must not instruct the agent to call removed MCP tool '${tool}'`,
-    );
+    expect(!inInstructionContext.test(source), `Rendered host assets must not instruct the agent to call removed MCP tool '${tool}'`).toBeTruthy();
     // The direct string reference that was found in the VsCodeAgentFile / MCP
     // agent instruction text — a plain inline mention in a rendered template string.
     const inRenderContext = new RegExp(
       `call \`${tool}\`|call.*${tool}.*those tools return`,
       "g",
     );
-    assert.ok(
-      !inRenderContext.test(source),
-      `Rendered host asset template must not reference removed MCP tool '${tool}'`,
-    );
+    expect(!inRenderContext.test(source), `Rendered host asset template must not reference removed MCP tool '${tool}'`).toBeTruthy();
   }
 });
 
@@ -176,16 +152,10 @@ test("renderAntigravityAssets text does not reference removed MCP tools (INV-aud
 test("AgentReflection severity enum includes 'critical' (INV-audit-infra-10)", async () => {
   const { ReflectionSeveritySchema } = await import("audit-tools/shared");
   const severityEnum = ReflectionSeveritySchema.options;
-  assert.ok(
-    severityEnum.includes("critical"),
-    `AgentReflection severity enum must include 'critical' to match finding severity; got: ${JSON.stringify(severityEnum)}`,
-  );
+  expect(severityEnum.includes("critical"), `AgentReflection severity enum must include 'critical' to match finding severity; got: ${JSON.stringify(severityEnum)}`).toBeTruthy();
   // All expected severity levels must be present.
   for (const level of ["info", "low", "medium", "high", "critical"]) {
-    assert.ok(
-      severityEnum.includes(level),
-      `severity enum must include '${level}'`,
-    );
+    expect(severityEnum.includes(level), `severity enum must include '${level}'`).toBeTruthy();
   }
 });
 
@@ -201,15 +171,9 @@ test("INV-repo-assets-01: SKILL.md source carries next-step invocation with capa
     "--host-output-tokens",
   ];
   for (const flag of REQUIRED_FLAGS) {
-    assert.ok(
-      skill.includes(flag),
-      `SKILL.md must carry capability handshake flag '${flag}' (INV-repo-assets-01)`,
-    );
+    expect(skill.includes(flag), `SKILL.md must carry capability handshake flag '${flag}' (INV-repo-assets-01)`).toBeTruthy();
   }
-  assert.ok(
-    skill.includes("audit-code next-step"),
-    "SKILL.md must include an 'audit-code next-step' invocation (INV-repo-assets-01)",
-  );
+  expect(skill.includes("audit-code next-step"), "SKILL.md must include an 'audit-code next-step' invocation (INV-repo-assets-01)").toBeTruthy();
 });
 
 test("INV-repo-assets-03: SKILL.md contains no hardcoded model names or tier-map tables", () => {
@@ -226,10 +190,7 @@ test("INV-repo-assets-03: SKILL.md contains no hardcoded model names or tier-map
     /CAPABILITY_TIER_MAP/,
   ];
   for (const pattern of FORBIDDEN_PATTERNS) {
-    assert.ok(
-      !pattern.test(skill),
-      `SKILL.md must not contain hardcoded model identity '${pattern}' (INV-repo-assets-03)`,
-    );
+    expect(!pattern.test(skill), `SKILL.md must not contain hardcoded model identity '${pattern}' (INV-repo-assets-03)`).toBeTruthy();
   }
 });
 
@@ -252,26 +213,14 @@ test("INV-repo-assets-04: all three loader assets carry the same capability hand
   ];
 
   for (const flag of HANDSHAKE_FLAGS) {
-    assert.ok(
-      skill.includes(flag),
-      `SKILL.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`,
-    );
-    assert.ok(
-      prompt.includes(flag),
-      `audit-code.prompt.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`,
-    );
-    assert.ok(
-      toml.includes(flag),
-      `audit-code.toml must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`,
-    );
+    expect(skill.includes(flag), `SKILL.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`).toBeTruthy();
+    expect(prompt.includes(flag), `audit-code.prompt.md must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`).toBeTruthy();
+    expect(toml.includes(flag), `audit-code.toml must carry handshake flag '${flag}' (INV-repo-assets-04 parity)`).toBeTruthy();
   }
 
   // All three must reference the next-step command.
   for (const [name, content] of [["SKILL.md", skill], ["prompt.md", prompt], ["toml", toml]]) {
-    assert.ok(
-      content.includes("next-step"),
-      `${name} must include 'next-step' invocation (INV-repo-assets-04 parity)`,
-    );
+    expect(content.includes("next-step"), `${name} must include 'next-step' invocation (INV-repo-assets-04 parity)`).toBeTruthy();
   }
 });
 
@@ -302,9 +251,6 @@ test("verify function receives correct context shape", async () => {
   }
 
   // The verify function should have attempted to collect at least one check
-  assert.ok(
-    fakeChecks.length > 0,
-    "codex verify should collect at least one check via collectVerifyCheck",
-  );
-  assert.equal(fakeChecks[0].id, "codex_global_surface");
+  expect(fakeChecks.length > 0, "codex verify should collect at least one check via collectVerifyCheck").toBeTruthy();
+  expect(fakeChecks[0].id).toBe("codex_global_surface");
 });

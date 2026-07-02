@@ -4,7 +4,7 @@
  *
  * Each test block is tagged with the invariant ID it covers.
  */
-import test from "node:test";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -18,7 +18,7 @@ const AUDIT_CODE_SCHEMAS = resolve(REPO_ROOT, "schemas");
 
 test("INV-shared-core-01: finding.schema.json required keys match Finding TS type", () => {
   const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "finding.schema.json");
-  assert.ok(existsSync(schemaPath), `schema not found: ${schemaPath}`);
+  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
   const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
 
   // The required fields from finding.schema.json must all be present on the
@@ -36,10 +36,7 @@ test("INV-shared-core-01: finding.schema.json required keys match Finding TS typ
   ]);
 
   for (const key of schemaRequired) {
-    assert.ok(
-      findingFields.has(key),
-      `Schema required field "${key}" is missing from the TS Finding type — schema/TS drift detected`,
-    );
+    expect(findingFields.has(key), `Schema required field "${key}" is missing from the TS Finding type — schema/TS drift detected`).toBeTruthy();
   }
 });
 
@@ -53,24 +50,18 @@ test("INV-shared-core-01: finding.schema.json severity enum matches SEVERITIES",
 
   // Every schema severity must be in the TS enum.
   for (const sev of schemaEnum) {
-    assert.ok(
-      tsEnum.includes(sev),
-      `Schema severity enum value "${sev}" not in SEVERITIES — schema/TS drift`,
-    );
+    expect(tsEnum.includes(sev), `Schema severity enum value "${sev}" not in SEVERITIES — schema/TS drift`).toBeTruthy();
   }
 
   // Every TS severity must be in the schema.
   for (const sev of tsEnum) {
-    assert.ok(
-      schemaEnum.includes(sev),
-      `SEVERITIES value "${sev}" missing from finding.schema.json — schema/TS drift`,
-    );
+    expect(schemaEnum.includes(sev), `SEVERITIES value "${sev}" missing from finding.schema.json — schema/TS drift`).toBeTruthy();
   }
 });
 
 test("INV-shared-core-01: audit_result.schema.json required keys are present in the shared contract", () => {
   const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "audit_result.schema.json");
-  assert.ok(existsSync(schemaPath), `schema not found: ${schemaPath}`);
+  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
   const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
 
   // The audit_result schema required keys are: task_id, unit_id, pass_id, lens,
@@ -78,10 +69,7 @@ test("INV-shared-core-01: audit_result.schema.json required keys are present in 
   const required = schema.required ?? [];
   const expectedKeys = ["task_id", "unit_id", "pass_id", "lens", "file_coverage", "findings"];
   for (const key of expectedKeys) {
-    assert.ok(
-      required.includes(key),
-      `Expected "${key}" to be in audit_result.schema.json required array`,
-    );
+    expect(required.includes(key), `Expected "${key}" to be in audit_result.schema.json required array`).toBeTruthy();
   }
 });
 
@@ -90,11 +78,7 @@ test("INV-shared-core-01: audit_result.schema.json required keys are present in 
 test("INV-shared-core-02: CAPABILITY_TIER_MAP is not exported from shared", async () => {
   const shared = await import("../../src/shared/index.ts");
   // CAPABILITY_TIER_MAP was an internal map; it must not be exported.
-  assert.equal(
-    shared["CAPABILITY_TIER_MAP"],
-    undefined,
-    "CAPABILITY_TIER_MAP must not be exported from shared (INV-shared-core-02)",
-  );
+  expect(shared["CAPABILITY_TIER_MAP"], "CAPABILITY_TIER_MAP must not be exported from shared (INV-shared-core-02)").toBe(undefined);
 });
 
 test("INV-shared-core-02: rollingDispatch derives pool rank from pool.rank, not from provider name", async () => {
@@ -143,19 +127,15 @@ test("INV-shared-core-02: rollingDispatch derives pool rank from pool.rank, not 
   const session = { quota: { enabled: false } };
   // small-pool first in array — if ranking used provider name (same), order would decide.
   const slot = selectProvider(highComplexityPacket, [smallPool, deepPool], tracker, {}, session);
-  assert.ok(slot !== null, "expected a pool to be selected");
-  assert.equal(
-    slot.poolId,
-    "deep-pool",
-    "High-complexity packet must prefer pool with rank=deep; rank derives from pool.rank, not provider name",
-  );
+  expect(slot !== null, "expected a pool to be selected").toBeTruthy();
+  expect(slot.poolId, "High-complexity packet must prefer pool with rank=deep; rank derives from pool.rank, not provider name").toBe("deep-pool");
 });
 
 // ── INV-shared-core-03: Both orchestrators delegate provider wiring to shared factory ──
 
 test("INV-shared-core-03: shared providerFactory exports createFreshSessionProvider", async () => {
   const { createFreshSessionProvider } = await import("../../src/shared/providers/providerFactory.ts");
-  assert.equal(typeof createFreshSessionProvider, "function", "createFreshSessionProvider must be exported from shared");
+  expect(typeof createFreshSessionProvider, "createFreshSessionProvider must be exported from shared").toBe("function");
 });
 
 test("INV-shared-core-03: FreshSessionProviderDeps interface exposes createClaudeCodeProvider and createOpenCodeProvider", async () => {
@@ -180,7 +160,7 @@ test("INV-shared-core-03: FreshSessionProviderDeps interface exposes createClaud
 
   // Requesting "claude-code" must call createClaudeCodeProvider from deps.
   createFreshSessionProvider("claude-code", {}, deps);
-  assert.ok(claudeCodeCreated, "createClaudeCodeProvider must be called by the factory");
+  expect(claudeCodeCreated, "createClaudeCodeProvider must be called by the factory").toBeTruthy();
 });
 
 // ── INV-shared-core-04: Shared obligation abstraction ────────────────────────
@@ -197,11 +177,11 @@ test("INV-shared-core-04: ObligationEntry is exported from shared types", async 
     ],
   });
 
-  assert.equal(ledger.contract_version, CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION);
-  assert.equal(ledger.goal_id, "test-goal");
-  assert.equal(ledger.obligations.length, 1);
-  assert.equal(ledger.obligations[0].id, "OBL-1");
-  assert.ok(typeof ledger.obligations[0].depends_on !== "undefined", "ObligationEntry must have depends_on");
+  expect(ledger.contract_version).toBe(CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION);
+  expect(ledger.goal_id).toBe("test-goal");
+  expect(ledger.obligations.length).toBe(1);
+  expect(ledger.obligations[0].id).toBe("OBL-1");
+  expect(typeof ledger.obligations[0].depends_on !== "undefined", "ObligationEntry must have depends_on").toBeTruthy();
 });
 
 // ── INV-shared-core-05: Finding identity subset ───────────────────────────────
@@ -229,18 +209,18 @@ test("INV-shared-core-05: findingIdentity strips contract_* fields", async () =>
   const identity = findingIdentity(finding);
 
   // Identity must contain the canonical fields.
-  assert.equal(identity.id, "FINDING-001");
-  assert.equal(identity.title, "Test Finding");
-  assert.equal(identity.severity, "high");
-  assert.equal(identity.lens, "security");
-  assert.equal(identity.summary, "A test finding");
-  assert.deepEqual(identity.affected_files, [{ path: "src/foo.ts" }]);
+  expect(identity.id).toBe("FINDING-001");
+  expect(identity.title).toBe("Test Finding");
+  expect(identity.severity).toBe("high");
+  expect(identity.lens).toBe("security");
+  expect(identity.summary).toBe("A test finding");
+  expect(identity.affected_files).toEqual([{ path: "src/foo.ts" }]);
 
   // Identity must NOT carry contract_* fields.
-  assert.equal(identity["contract_goal_id"], undefined, "contract_goal_id must not appear in FindingIdentity");
-  assert.equal(identity["contract_obligation_ids"], undefined, "contract_obligation_ids must not appear");
-  assert.equal(identity["verification_obligation_ids"], undefined, "verification_obligation_ids must not appear");
-  assert.equal(identity["targeted_commands"], undefined, "targeted_commands must not appear");
+  expect(identity["contract_goal_id"], "contract_goal_id must not appear in FindingIdentity").toBe(undefined);
+  expect(identity["contract_obligation_ids"], "contract_obligation_ids must not appear").toBe(undefined);
+  expect(identity["verification_obligation_ids"], "verification_obligation_ids must not appear").toBe(undefined);
+  expect(identity["targeted_commands"], "targeted_commands must not appear").toBe(undefined);
 });
 
 test("INV-shared-core-05: findingIdentity round-trips through JSON without contract_* fields", async () => {
@@ -264,10 +244,7 @@ test("INV-shared-core-05: findingIdentity round-trips through JSON without contr
 
   // No contract_* keys should survive round-trip.
   for (const key of Object.keys(roundTripped)) {
-    assert.ok(
-      !key.startsWith("contract_") && key !== "verification_obligation_ids" && key !== "targeted_commands",
-      `Unexpected key in FindingIdentity after JSON round-trip: ${key}`,
-    );
+    expect(!key.startsWith("contract_") && key !== "verification_obligation_ids" && key !== "targeted_commands", `Unexpected key in FindingIdentity after JSON round-trip: ${key}`).toBeTruthy();
   }
 });
 
@@ -278,11 +255,8 @@ test("INV-shared-core-06: validateAuditFindingsReport flags missing contract_ver
 
   const issues = validateAuditFindingsReport({ findings: [], work_blocks: [] });
   const errors = issues.filter(i => i.severity === "error");
-  assert.ok(errors.length > 0, "missing contract_version must produce an error issue");
-  assert.ok(
-    errors.some(i => i.message.includes("contract_version")),
-    `expected contract_version error, got: ${JSON.stringify(errors)}`,
-  );
+  expect(errors.length > 0, "missing contract_version must produce an error issue").toBeTruthy();
+  expect(errors.some(i => i.message.includes("contract_version")), `expected contract_version error, got: ${JSON.stringify(errors)}`).toBeTruthy();
 });
 
 test("INV-shared-core-06 / OBL-C002-VERSION-TRUST: validateAuditFindingsReport emits error (not warning) on mismatched contract_version", async () => {
@@ -296,41 +270,30 @@ test("INV-shared-core-06 / OBL-C002-VERSION-TRUST: validateAuditFindingsReport e
   // OBL-C002-VERSION-TRUST: mismatch must be an error, not a warning, so
   // isValidAuditFindingsReport returns false for mismatched versions.
   const errors = issues.filter(i => i.severity === "error");
-  assert.ok(errors.length > 0, "mismatched contract_version must produce an error (not a warning)");
-  assert.ok(
-    errors.some(i => i.message.includes("unexpected-version")),
-    "error must cite the mismatched version value",
-  );
+  expect(errors.length > 0, "mismatched contract_version must produce an error (not a warning)").toBeTruthy();
+  expect(errors.some(i => i.message.includes("unexpected-version")), "error must cite the mismatched version value").toBeTruthy();
   // Confirm no warnings emitted for this case — it's an error.
   const warnings = issues.filter(i => i.severity === "warning");
-  assert.equal(warnings.length, 0, "version mismatch must not produce a warning; it is an error");
+  expect(warnings.length, "version mismatch must not produce a warning; it is an error").toBe(0);
 });
 
 test("INV-shared-core-06 / OBL-C002-VERSION-TRUST: isValidAuditFindingsReport returns false for mismatched contract_version", async () => {
   const { isValidAuditFindingsReport } = await import("../../src/shared/validation/findingsReport.ts");
 
   // Present-but-mismatched version must cause rejection (return false), not just a warning.
-  assert.equal(
-    isValidAuditFindingsReport({
+  expect(isValidAuditFindingsReport({
       contract_version: "audit-tools/audit-findings/v0alpha0",
       findings: [],
       work_blocks: [],
       summary: { finding_count: 0 },
-    }),
-    false,
-    "isValidAuditFindingsReport must return false when contract_version is present but mismatched",
-  );
+    }), "isValidAuditFindingsReport must return false when contract_version is present but mismatched").toBe(false);
 
   // Any non-canonical version string must be rejected.
-  assert.equal(
-    isValidAuditFindingsReport({
+  expect(isValidAuditFindingsReport({
       contract_version: "some-other-tool/v1",
       findings: [],
       work_blocks: [],
-    }),
-    false,
-    "isValidAuditFindingsReport must return false for any non-canonical contract_version",
-  );
+    }), "isValidAuditFindingsReport must return false for any non-canonical contract_version").toBe(false);
 });
 
 test("INV-shared-core-06: validateAuditFindingsReport passes with correct contract_version", async () => {
@@ -343,17 +306,17 @@ test("INV-shared-core-06: validateAuditFindingsReport passes with correct contra
     summary: { finding_count: 0 },
   });
   const errors = issues.filter(i => i.severity === "error");
-  assert.equal(errors.length, 0, `expected no errors for valid report, got: ${JSON.stringify(errors)}`);
+  expect(errors.length, `expected no errors for valid report, got: ${JSON.stringify(errors)}`).toBe(0);
 });
 
 test("INV-shared-core-06: validateAuditFindingsReport rejects non-object", async () => {
   const { validateAuditFindingsReport } = await import("../../src/shared/validation/findingsReport.ts");
 
   const issues = validateAuditFindingsReport(null);
-  assert.ok(issues.some(i => i.severity === "error"), "null value must produce an error");
+  expect(issues.some(i => i.severity === "error"), "null value must produce an error").toBeTruthy();
 
   const issues2 = validateAuditFindingsReport("not an object");
-  assert.ok(issues2.some(i => i.severity === "error"), "string value must produce an error");
+  expect(issues2.some(i => i.severity === "error"), "string value must produce an error").toBeTruthy();
 });
 
 // ── INV-shared-core-07: ObligationEntry.depends_on cycle-checked at construction ─
@@ -402,14 +365,14 @@ test("INV-shared-core-07: buildObligationLedger accepts a valid DAG with no cycl
       { id: "C", description: "c", kind: "behavioral", depends_on: ["A", "B"], status: "pending" },
     ],
   });
-  assert.equal(ledger.obligations.length, 3);
-  assert.equal(ledger.goal_id, "g");
+  expect(ledger.obligations.length).toBe(3);
+  expect(ledger.goal_id).toBe("g");
 });
 
 test("INV-shared-core-07: buildObligationLedger accepts empty obligations list", async () => {
   const { buildObligationLedger } = await import("../../src/shared/types/obligationLedger.ts");
   const ledger = buildObligationLedger({ goal_id: "g", obligations: [] });
-  assert.equal(ledger.obligations.length, 0);
+  expect(ledger.obligations.length).toBe(0);
 });
 
 // ── INV-shared-core-08: ClaudeCodeConfig.dangerously_skip_permissions flagged ─
@@ -423,11 +386,8 @@ test("INV-shared-core-08: validateSessionConfig warns when dangerously_skip_perm
   });
 
   const warnings = issues.filter(i => i.severity === "warning");
-  assert.ok(warnings.length > 0, "dangerously_skip_permissions=true must produce a warning");
-  assert.ok(
-    warnings.some(i => i.message.toLowerCase().includes("dangerously_skip_permissions")),
-    `expected dangerously_skip_permissions in warning message, got: ${JSON.stringify(warnings)}`,
-  );
+  expect(warnings.length > 0, "dangerously_skip_permissions=true must produce a warning").toBeTruthy();
+  expect(warnings.some(i => i.message.toLowerCase().includes("dangerously_skip_permissions")), `expected dangerously_skip_permissions in warning message, got: ${JSON.stringify(warnings)}`).toBeTruthy();
 });
 
 test("INV-shared-core-08: validateSessionConfig does not warn when dangerously_skip_permissions is absent", async () => {
@@ -437,7 +397,7 @@ test("INV-shared-core-08: validateSessionConfig does not warn when dangerously_s
     provider: "claude-code",
     claude_code: { command: "claude" },
   });
-  assert.equal(issues.length, 0, "no issues for a safe session config");
+  expect(issues.length, "no issues for a safe session config").toBe(0);
 });
 
 test("INV-shared-core-08: validateSessionConfig does not warn when dangerously_skip_permissions=false", async () => {
@@ -446,7 +406,7 @@ test("INV-shared-core-08: validateSessionConfig does not warn when dangerously_s
   const issues = validateSessionConfig({
     claude_code: { dangerously_skip_permissions: false },
   });
-  assert.equal(issues.length, 0, "false value must not produce a warning");
+  expect(issues.length, "false value must not produce a warning").toBe(0);
 });
 
 // ── INV-shared-core-09: Validation primitives stay pure and composable ────────
@@ -459,8 +419,8 @@ test("INV-shared-core-09: prefixValidationIssues is idempotent (no double-prefix
   const once = prefixValidationIssues("foo", issues);
   const twice = prefixValidationIssues("foo", once);
 
-  assert.equal(once[0].path, "foo.bar", "first call must prepend prefix");
-  assert.equal(twice[0].path, "foo.bar", "second call must not double-prefix");
+  expect(once[0].path, "first call must prepend prefix").toBe("foo.bar");
+  expect(twice[0].path, "second call must not double-prefix").toBe("foo.bar");
 });
 
 test("INV-shared-core-09: requireKeys returns issues rather than throwing", async () => {
@@ -469,12 +429,12 @@ test("INV-shared-core-09: requireKeys returns issues rather than throwing", asyn
   // requireKeys must return an array of issues, never throw.
   // Even for non-objects or missing keys it must return, not throw.
   const issues1 = requireKeys("not-an-object", "root", ["id", "title"]);
-  assert.ok(Array.isArray(issues1), "requireKeys must return an array");
-  assert.ok(issues1.length > 0, "requireKeys must produce an issue for non-objects");
+  expect(Array.isArray(issues1), "requireKeys must return an array").toBeTruthy();
+  expect(issues1.length > 0, "requireKeys must produce an issue for non-objects").toBeTruthy();
 
   const issues2 = requireKeys({ id: "x" }, "root", ["id", "title"]);
-  assert.ok(Array.isArray(issues2), "requireKeys must return an array for missing keys");
-  assert.ok(issues2.length > 0, "requireKeys must produce an issue for missing 'title'");
+  expect(Array.isArray(issues2), "requireKeys must return an array for missing keys").toBeTruthy();
+  expect(issues2.length > 0, "requireKeys must produce an issue for missing 'title'").toBeTruthy();
 });
 
 // ── INV-shared-core-12: Codex/Antigravity env signals are documented behavioral contracts ─
@@ -491,11 +451,7 @@ test("INV-shared-core-12: CODEX env var resolves auto provider to codex (in-sess
     {},
     { env: { CODEX: "1" }, commandExists: () => false },
   );
-  assert.equal(
-    resolved,
-    "codex",
-    "CODEX env var must route to codex provider (in-session behavioral contract)",
-  );
+  expect(resolved, "CODEX env var must route to codex provider (in-session behavioral contract)").toBe("codex");
 });
 
 test("INV-shared-core-12: ANTIGRAVITY env var resolves auto provider to antigravity when a template is configured", async () => {
@@ -505,11 +461,7 @@ test("INV-shared-core-12: ANTIGRAVITY env var resolves auto provider to antigrav
     { antigravity: { command_template: ["ag", "--run"] } },
     { env: { ANTIGRAVITY: "1" }, commandExists: () => false },
   );
-  assert.equal(
-    resolved,
-    "antigravity",
-    "ANTIGRAVITY env var + command_template must route to antigravity (behavioral contract)",
-  );
+  expect(resolved, "ANTIGRAVITY env var + command_template must route to antigravity (behavioral contract)").toBe("antigravity");
 });
 
 test("INV-shared-core-12: TERM_PROGRAM=antigravity also resolves to antigravity with a template", async () => {
@@ -519,11 +471,7 @@ test("INV-shared-core-12: TERM_PROGRAM=antigravity also resolves to antigravity 
     { antigravity: { command_template: ["ag", "--run"] } },
     { env: { TERM_PROGRAM: "antigravity" }, commandExists: () => false },
   );
-  assert.equal(
-    resolved,
-    "antigravity",
-    "TERM_PROGRAM=antigravity is equivalent to ANTIGRAVITY env var (behavioral contract)",
-  );
+  expect(resolved, "TERM_PROGRAM=antigravity is equivalent to ANTIGRAVITY env var (behavioral contract)").toBe("antigravity");
 });
 
 test("INV-shared-core-12: providerFactory.ts has no TODO(verify) comments for Codex/Antigravity signals", async () => {
@@ -535,10 +483,7 @@ test("INV-shared-core-12: providerFactory.ts has no TODO(verify) comments for Co
   const source = readFileSync(factoryPath, "utf8");
   // ARC-94fc2498: the TODO(verify) comments that flagged these as unconfirmed
   // signals must be gone — replaced with documented behavioral contracts.
-  assert.ok(
-    !source.includes("TODO(verify)"),
-    "providerFactory.ts must not contain TODO(verify) comments — signals are now documented behavioral contracts (ARC-94fc2498)",
-  );
+  expect(!source.includes("TODO(verify)"), "providerFactory.ts must not contain TODO(verify) comments — signals are now documented behavioral contracts (ARC-94fc2498)").toBeTruthy();
 });
 
 // ── INV-shared-core-13: RunLogger is the structured logging contract ───────────
@@ -550,12 +495,12 @@ test("INV-shared-core-12: providerFactory.ts has no TODO(verify) comments for Co
 test("INV-shared-core-13: RunLogger exports the full structured logging contract", async () => {
   const { RunLogger } = await import("../../src/shared/observability/runLog.ts");
   // RunLogger must have the three-part contract: constructor, .event(), .disabled()
-  assert.equal(typeof RunLogger, "function", "RunLogger must be a class");
+  expect(typeof RunLogger, "RunLogger must be a class").toBe("function");
   const logger = new RunLogger("/tmp/noop-test.jsonl", { enabled: false });
-  assert.equal(typeof logger.event, "function", "RunLogger instance must have .event()");
-  assert.equal(typeof logger.isEnabled, "boolean", "RunLogger instance must have .isEnabled");
+  expect(typeof logger.event, "RunLogger instance must have .event()").toBe("function");
+  expect(typeof logger.isEnabled, "RunLogger instance must have .isEnabled").toBe("boolean");
   const disabled = RunLogger.disabled();
-  assert.equal(disabled.isEnabled, false, "RunLogger.disabled() must return a disabled logger");
+  expect(disabled.isEnabled, "RunLogger.disabled() must return a disabled logger").toBe(false);
   // Disabled logger must accept all event kinds without throwing.
   for (const kind of ["obligation", "executor_start", "executor_end", "artifact_write",
                        "scope", "outcome", "provider_launch", "step", "state", "error"]) {
@@ -586,11 +531,11 @@ test("INV-shared-core-13: RunLogEventKind covers all orchestrator lifecycle even
       logger.event({ kind, note: `test-${kind}` });
     }
     const lines = (await readFile(logPath, "utf8")).trim().split("\n");
-    assert.equal(lines.length, kinds.length, "each emitted event must produce one NDJSON line");
+    expect(lines.length, "each emitted event must produce one NDJSON line").toBe(kinds.length);
     for (let i = 0; i < kinds.length; i++) {
       const parsed = JSON.parse(lines[i]);
-      assert.equal(parsed.kind, kinds[i], `line ${i} must have kind=${kinds[i]}`);
-      assert.equal(typeof parsed.ts, "string", "each line must have an ISO timestamp");
+      expect(parsed.kind, `line ${i} must have kind=${kinds[i]}`).toBe(kinds[i]);
+      expect(typeof parsed.ts, "each line must have an ISO timestamp").toBe("string");
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -625,12 +570,12 @@ test("INV-shared-core-14: createFreshSessionProvider emits provider_launch RunLo
     createFreshSessionProvider(undefined, {}, deps);
 
     const content = await readFile(logPath, "utf8");
-    assert.ok(content.trim().length > 0, "auto-resolution must produce at least one RunLogger event");
+    expect(content.trim().length > 0, "auto-resolution must produce at least one RunLogger event").toBeTruthy();
     const event = JSON.parse(content.trim().split("\n")[0]);
-    assert.equal(event.kind, "provider_launch", "auto-resolution must emit a provider_launch event");
-    assert.equal(typeof event.provider, "string", "provider_launch event must have provider field");
-    assert.equal(typeof event.ts, "string", "provider_launch event must have a timestamp");
-    assert.equal(event.phase, "provider_auto_resolution", "event must carry phase=provider_auto_resolution");
+    expect(event.kind, "auto-resolution must emit a provider_launch event").toBe("provider_launch");
+    expect(typeof event.provider, "provider_launch event must have provider field").toBe("string");
+    expect(typeof event.ts, "provider_launch event must have a timestamp").toBe("string");
+    expect(event.phase, "event must carry phase=provider_auto_resolution").toBe("provider_auto_resolution");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -659,11 +604,7 @@ test("INV-shared-core-14: createFreshSessionProvider does NOT emit RunLogger eve
     createFreshSessionProvider("local-subprocess", {}, deps);
 
     const content = await readFile(logPath, "utf8").catch(() => "");
-    assert.equal(
-      content.trim(),
-      "",
-      "explicit provider name must not produce a RunLogger event (only auto-resolution does)",
-    );
+    expect(content.trim(), "explicit provider name must not produce a RunLogger event (only auto-resolution does)").toBe("");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -696,16 +637,10 @@ test("INV-shared-core-14: FreshSessionProviderDeps.runLogger is optional (no log
 
 test("INV-shared-core-15b: ci.yml runs a single-package build + verify gate (no shared-first / workspace ceremony)", () => {
   const ciPath = resolve(REPO_ROOT, ".github/workflows/ci.yml");
-  assert.ok(existsSync(ciPath), `ci.yml not found at ${ciPath}`);
+  expect(existsSync(ciPath), `ci.yml not found at ${ciPath}`).toBeTruthy();
   const content = readFileSync(ciPath, "utf8");
-  assert.ok(
-    content.includes("npm run verify:release"),
-    "ci.yml must run the single-package verify:release gate — CRIT-single-package",
-  );
-  assert.ok(
-    !content.includes("--workspaces") && !content.includes("packages/shared"),
-    "ci.yml must not reference workspaces or packages/shared after the single-package collapse — CRIT-single-package",
-  );
+  expect(content.includes("npm run verify:release"), "ci.yml must run the single-package verify:release gate — CRIT-single-package").toBeTruthy();
+  expect(!content.includes("--workspaces") && !content.includes("packages/shared"), "ci.yml must not reference workspaces or packages/shared after the single-package collapse — CRIT-single-package").toBeTruthy();
 });
 
 // ── INV-shared-core-16: CRIT-tests-with-source — pre-commit gate enforces green ─
@@ -720,32 +655,23 @@ test("INV-shared-core-15b: ci.yml runs a single-package build + verify gate (no 
 
 test("INV-shared-core-16: pre-commit-gate.mjs exists and blocks git commit on check failure", () => {
   const gatePath = resolve(REPO_ROOT, ".claude/hooks/pre-commit-gate.mjs");
-  assert.ok(existsSync(gatePath), `.claude/hooks/pre-commit-gate.mjs must exist — CRIT-tests-with-source`);
+  expect(existsSync(gatePath), `.claude/hooks/pre-commit-gate.mjs must exist — CRIT-tests-with-source`).toBeTruthy();
 
   const source = readFileSync(gatePath, "utf8");
 
   // Gate must intercept git commit invocations.
-  assert.ok(
-    source.includes("git") && source.includes("commit"),
-    "pre-commit-gate.mjs must detect git commit invocations",
-  );
+  expect(source.includes("git") && source.includes("commit"), "pre-commit-gate.mjs must detect git commit invocations").toBeTruthy();
 
   // Gate must run npm run check (the full workspace typecheck).
-  assert.ok(
-    source.includes("npm run check"),
-    "pre-commit-gate.mjs must invoke 'npm run check' — CRIT-tests-with-source",
-  );
+  expect(source.includes("npm run check"), "pre-commit-gate.mjs must invoke 'npm run check' — CRIT-tests-with-source").toBeTruthy();
 
   // Gate must exit non-zero to block the commit when check fails.
-  assert.ok(
-    source.includes("process.exit(2)"),
-    "pre-commit-gate.mjs must call process.exit(2) to block a failing commit — CRIT-tests-with-source",
-  );
+  expect(source.includes("process.exit(2)"), "pre-commit-gate.mjs must call process.exit(2) to block a failing commit — CRIT-tests-with-source").toBeTruthy();
 });
 
 test("INV-shared-core-16: async-typecheck hook exists and covers all three packages", () => {
   const hookPath = resolve(REPO_ROOT, ".claude/hooks/async-typecheck.mjs");
-  assert.ok(existsSync(hookPath), `.claude/hooks/async-typecheck.mjs must exist — CRIT-tests-with-source`);
+  expect(existsSync(hookPath), `.claude/hooks/async-typecheck.mjs must exist — CRIT-tests-with-source`).toBeTruthy();
 
   const source = readFileSync(hookPath, "utf8");
 
@@ -753,22 +679,16 @@ test("INV-shared-core-16: async-typecheck hook exists and covers all three packa
   // subsystems (src/shared, src/audit, src/remediate) so a type break in any of
   // them triggers a typecheck. The hook matches `src/(shared|audit|remediate)/`.
   for (const sub of ["shared", "audit", "remediate"]) {
-    assert.ok(
-      source.includes(sub),
-      `async-typecheck.mjs must reference src subsystem '${sub}' — CRIT-tests-with-source (gate must cover all subsystems)`,
-    );
+    expect(source.includes(sub), `async-typecheck.mjs must reference src subsystem '${sub}' — CRIT-tests-with-source (gate must cover all subsystems)`).toBeTruthy();
   }
 
   // Hook must run the whole-package typecheck.
-  assert.ok(
-    source.includes("npm run check"),
-    "async-typecheck.mjs must invoke 'npm run check' — CRIT-tests-with-source",
-  );
+  expect(source.includes("npm run check"), "async-typecheck.mjs must invoke 'npm run check' — CRIT-tests-with-source").toBeTruthy();
 });
 
 test("INV-shared-core-16: settings.json registers pre-commit-gate as a PreToolUse hook on Bash+PowerShell", () => {
   const settingsPath = resolve(REPO_ROOT, ".claude/settings.json");
-  assert.ok(existsSync(settingsPath), ".claude/settings.json must exist");
+  expect(existsSync(settingsPath), ".claude/settings.json must exist").toBeTruthy();
 
   const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
 
@@ -780,10 +700,7 @@ test("INV-shared-core-16: settings.json registers pre-commit-gate as a PreToolUs
   const gateHooks = preToolUse.filter(
     (h) => JSON.stringify(h).includes("pre-commit-gate"),
   );
-  assert.ok(
-    gateHooks.length > 0,
-    "settings.json PreToolUse must include at least one pre-commit-gate.mjs hook — CRIT-tests-with-source",
-  );
+  expect(gateHooks.length > 0, "settings.json PreToolUse must include at least one pre-commit-gate.mjs hook — CRIT-tests-with-source").toBeTruthy();
 });
 
 // ── INV-shared-core-11: spawnLoggedCommand applies no command wrapping ───────
@@ -840,8 +757,8 @@ test("INV-shared-core-11: spawnLoggedCommand spawns the command unwrapped", asyn
     },
   );
 
-  assert.equal(calls.length, 1);
+  expect(calls.length).toBe(1);
   // The command must not have been wrapped (no cmd.exe / shell prefix).
-  assert.equal(calls[0].command, "my-cli", "command must reach spawn unwrapped");
-  assert.deepEqual(calls[0].args, ["--arg"], "args must reach spawn unwrapped");
+  expect(calls[0].command, "command must reach spawn unwrapped").toBe("my-cli");
+  expect(calls[0].args, "args must reach spawn unwrapped").toEqual(["--arg"]);
 });

@@ -20,7 +20,7 @@ per-provider `RUN_CODEX_E2E=1` gate). Run it at release with a live Codex
 backend present:
 
 ```
-RUN_PROVIDER_MATRIX_E2E=1 node --import tsx/esm --test tests/audit/provider-matrix-dispatch-e2e.test.mjs
+RUN_PROVIDER_MATRIX_E2E=1 npx vitest run tests/audit/provider-matrix-dispatch-e2e.test.mjs
 ```
 
 ## How to run a row

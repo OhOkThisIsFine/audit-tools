@@ -7,8 +7,7 @@
  * roster left every non-primary pool with `pool.hostModel !== parseProviderModelKey(pool.id).model`.
  */
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 const { buildHostModelPools, buildSourcePool } = await import(
   "../../src/shared/quota/apiPool.ts"
@@ -19,11 +18,7 @@ const STUB_QUOTA = { name: "stub", async queryCurrentUsage() { return null; } };
 
 /** The invariant under test, stated once. */
 function assertModelMatchesKey(pool) {
-  assert.equal(
-    pool.hostModel,
-    parseProviderModelKey(pool.id).model,
-    `pool ${pool.id}: hostModel ${pool.hostModel} must equal the model parsed from its quota key`,
-  );
+  expect(pool.hostModel, `pool ${pool.id}: hostModel ${pool.hostModel} must equal the model parsed from its quota key`).toBe(parseProviderModelKey(pool.id).model);
 }
 
 test("buildHostModelPools: every per-rank roster pool carries the model its key was derived from", async () => {
@@ -48,12 +43,9 @@ test("buildHostModelPools: every per-rank roster pool carries the model its key 
     }),
   });
 
-  assert.equal(pools.length, 3);
+  expect(pools.length).toBe(3);
   // Each pool's hostModel must match its OWN key, not the scalar.
-  assert.deepEqual(
-    pools.map((p) => p.hostModel),
-    ["model-small", "model-standard", "model-deep"],
-  );
+  expect(pools.map((p) => p.hostModel)).toEqual(["model-small", "model-standard", "model-deep"]);
   for (const pool of pools) assertModelMatchesKey(pool);
 });
 
@@ -67,14 +59,14 @@ test("buildHostModelPools: scalar/absent handshake (no roster) — null model ma
     roster: null,
     resolve: () => ({ poolKey: "claude-code/*", discoveredLimits: null }),
   });
-  assert.equal(pools.length, 1);
-  assert.equal(pools[0].hostModel, null); // provider/* → no model
+  expect(pools.length).toBe(1);
+  expect(pools[0].hostModel).toBe(null); // provider/* → no model
   assertModelMatchesKey(pools[0]);
 });
 
 test("buildSourcePool: a provider-shaped source pool carries the model its key was derived from", async () => {
   const source = { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m1" };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
-  assert.equal(pool.hostModel, "m1");
+  expect(pool.hostModel).toBe("m1");
   assertModelMatchesKey(pool);
 });
