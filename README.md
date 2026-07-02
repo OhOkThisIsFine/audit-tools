@@ -8,7 +8,7 @@ own CLI and host slash-command, and each is useful on its own:
 
 They **compose but don't depend on each other**: audit-code's findings are clean input to
 remediate-code, but you can run either alone. Audit a repo and stop. Or point remediate-code
-at a plain-English request with no audit in sight — or hand it audit findings *and* extra
+at a plain-English request with no audit in sight - or hand it audit findings *and* extra
 suggestions at the same time.
 
 Each tool writes its results to `.audit-tools/` as a machine contract (JSON) plus a
@@ -19,22 +19,35 @@ human-readable render (markdown):
 | audit-code | `audit-findings.json` | `audit-report.md` |
 | remediate-code | `remediation-outcomes.json` | `remediation-report.md` |
 
+## Philosophy
+
+- Use mechanical/deterministic tools where possible without LLM involvement.
+- Use LLM judgement when it can give a significant advantage over mechanical tools.
+- Use tightly-bound and well-defined tasks when LLMs are involved, so that the
+  performance gap between weak and strong models shrinks.
+- Don't grade your own homework - if an LLM analyzes something important or complex,
+  then it should dispatch an independent adversarial agent to check its conclusions.
+- Keep everything IDE- and provider- and model- and language-agnostic where possible,
+  but detect the repo's structure/language and pull in useful tools for that case.
+- Balance rigor with token efficiency - batch tasks into logical units of reasonable
+  size so LLMs focus on related items without dispatching 100 agents for 100 files.
+
 ## Install
 
 ```bash
 npm install -g audit-tools
 ```
 
-This puts both `audit-code` and `remediate-code` on your `PATH` and, via the package
-postinstall, deploys slash-command assets for supported hosts (Claude Code, Codex,
-OpenCode, VS Code, Antigravity).
+This puts both `audit-code` and `remediate-code` on your `PATH` and deploys slash-command 
+assets for supported hosts (Claude, Codex, OpenCode, VS Code, Antigravity, etc.).
 
 ## Usage
 
-The tools are meant to be run as slash-commands inside a host agent. Just invoke the command —
-no manual path, provider, or model flags. The agent works its way through the whole workflow
-on its own, running against your active conversation model, and only stops to ask you when it
-needs a real decision (scope, ambiguous intent, whether to open a PR, and the like).
+The tools are meant to be run as slash-commands inside a host agent. Just invoke the 
+command - no manual path, provider, or model flags. The agent you're conversing with works
+its way through the whole workflow on its own, dispatching subagents where appropriate, and 
+only stops to ask you when it needs a real decision (but it does its best to ask those 
+questions at the outset so it can run autonomously for as long as possible).
 
 **Audit a code base:**
 
@@ -42,32 +55,40 @@ needs a real decision (scope, ambiguous intent, whether to open a PR, and the li
 /audit-code
 ```
 
-You'll confirm scope and which lenses to apply (security, correctness, reliability,
+You'll confirm scope, depth, and which lenses to apply (security, correctness, reliability,
 data-integrity, etc.), then it runs to completion and leaves `audit-findings.json` +
 `audit-report.md` in `.audit-tools/`.
 
 **Remediate issues or implement changes:**
 
 ```text
-/remediate-code path/to/audit-findings.json
-/remediate-code split the auth module and make session refresh easier to test
-/remediate-code path/to/audit-findings.json — and prioritize the error-handling issues
+/remediate-code
+# auto-detects audit-findings.json and other sources of remediation targets
+
+/remediate-code fix the stupid OAuth issues I keep running into
+# turns your desires into structured plans, then remediates
+
+/remediate-code implement C:/1337h4x/top-secret-plans.txt - also make a mobile app I can
+use to track the progress of my nefarious machinations
+# synthesizes structured findings + free-form feedback, plans out the whole refactor
 ```
 
-It plans the changes, implements and verifies them, and lands the result — a commit by
-default, or a PR / publish if you ask. You confirm scope and the closing action up front and
-review a summary before anything is committed.
+It plans the changes, implements and verifies them, and lands the result - a commit, a 
+PR / publish, whatever. You confirm scope and the closing action up front, and review 
+a summary before anything is committed.
 
 ### What to expect
 
 - **It drives itself.** A single slash-command runs the full workflow; it pauses only for
-  clarifications, not to hand each step back to you.
+  clarifications, and tries to front-load those questions so it can run uninterrupted.
 - **Runs are resumable.** State persists to `.audit-tools/` in the target repo, so an
   interrupted run picks up where it left off.
 - **Work runs in parallel** where it safely can, even allowing for coordination between
   different IDEs, different providers, CLIs, local models, etc.
 - **Effort scales to the work.** Trivial work gets light review; risky or complex work
   gets deeper scrutiny.
+- **Quota-aware dispatch.** When work is parallelizable, will dispatch agents according to
+  the resources you have available, and the quota and rate limits it can detect.
 
 ### The pipelines, step by step
 
@@ -105,7 +126,7 @@ review a summary before anything is committed.
 
 ### CLI (backend / fallback)
 
-The slash-commands are the product; the same engines are also directly runnable:
+The slash-commands are the product; the same engines are also directly runnable via CLI:
 
 ```bash
 audit-code next-step        # advance an audit one step
@@ -126,7 +147,7 @@ npm test        # build + test
 ```
 
 Missing `node_modules` makes `audit-tools/shared` resolve a stale `dist/`, producing
-misleading "no exported member" type errors — so install before build/check/test.
+misleading "no exported member" type errors, so install before build/check/test.
 
 See [`CLAUDE.md`](CLAUDE.md) for architecture and design decisions, the specs in
 [`spec/`](spec/), and the product/operator/contract guides in `docs/audit-pkg/`.
