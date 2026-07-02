@@ -16,9 +16,17 @@
   per-file/per-language fidelity gate + entrypoints from surface_manifest/critical_flows); (3) remediate-code
   SKILL.md no-drift guard test; (4) validator intra-result duplicate finding-id hard-reject; (5) churn/context/
   enforce review pass (`docs/reviews/churn-context-enforce-pass-2026-07-02.md`).
+- **This lap (post-0.31.0):** fixed the contract-pipeline **repair-revert** bug — a judge-driven repair
+  regenerates the AGGREGATED `finalized_module_contracts` / `module_contracts` `.input.json`, never the
+  per-module shards it was merged from, so a later upstream cascade re-merged the STALE shards and silently
+  reverted the approved repair (then the convergence guard mis-blamed the design). Root-cause fix restores the
+  invariant *shards are the single source of truth*: `propagateAggregateToShards` (`src/remediate/steps/
+  contractPipeline.ts`, called from `ingestContractArtifacts`) decomposes an ingested aggregate back into its
+  shards, so any later re-merge reproduces the repair. Regression test in `tests/remediate/dc3.test.ts`
+  ("repair write-through"). With the invariant restored, the backlog's proposed defense fixes (b) convergence-guard
+  regression detection and (c) don't-cascade-on-file_scope are moot — the revert can no longer occur.
 - **Immediate next:** none pending from this sprint.
-- **Open items from this run** (all in `docs/backlog.md`): the contract-pipeline stale-shard-revert +
-  convergence-guard mis-attribution bug (Open bugs); churn N1 (per-dispatch analyzer-anchor path index) and
+- **Open items from this run** (all in `docs/backlog.md`): churn N1 (per-dispatch analyzer-anchor path index) and
   N4 (cap renderTaskAnalyzerSignals output) follow-ons; live validation of the 5 new analyzers (clippy/rubocop
   are fixture-only here — no Rust/Ruby repo). Design-direction items filed: guidance-file discovery should
   contextualize not suppress; parallel dispatch over overlapping files is the target; multi-IDE concurrent runs.
