@@ -1,197 +1,139 @@
-# Multi-IDE concurrent runs — design of record
+# Multi-agent cooperative runs — design of record
 
-Everything-agnostic. Target: N IDEs / hosts driving **independent** audit AND remediate runs against
-ONE repo simultaneously, without corruption. Not just atomic + resumable — *isolated*.
+Everything-agnostic. Target (Ethan, 2026-07-02): an **arbitrary number of agents / IDEs / providers all
+contribute to the SAME audit or remediation run**. Start an audit in one IDE; run `/audit-code` in a
+second IDE and it **joins** the same run, taking on appropriate unclaimed tasks. Symmetric peers — no
+primary/secondary — each following the process, feeding off each other's results as they land, never
+taking the same task and colliding.
 
-Supersedes the single-writer state model. Design record for the backlog forward track
-"Multi-IDE concurrent runs" (Ethan, 2026-07-02) and the durable trap
-[[concurrent-nextstep-staleness-cascade-wipe]].
+Supersedes the single-writer state model and the durable trap
+[[concurrent-nextstep-staleness-cascade-wipe]]. (Corrects a first draft that solved the OPPOSITE problem
+— isolating N private runs; the goal is cooperation on ONE shared run.)
 
-## The problem, precisely
+## The model
 
-Two concurrency semantics are conflated today:
+**One shared audit run and one shared remediation run per repo** — the shared `.audit-tools/audit` /
+`.audit-tools/remediation` tree *is* the run; the run is not a private namespace. Any agent running the
+slash command is a peer that **joins**: each `next-step` claims one unclaimed unit of work, executes it,
+merges its result into shared state, releases the claim. At every claim/selection point a peer sees the
+results peers have already landed. An agent dying mid-unit lets its claim go stale → another peer
+reclaims it (automatic failure recovery). No per-agent run, no roster to maintain — the live claims ARE
+the roster.
 
-- **(A) Concurrent independent runs** — IDE-1 audits the repo while IDE-2 runs a *different* audit
-  (different scope/lens), or two independent remediations proceed at once. They must NOT share
-  findings / bundle / state. **This is the gap.**
-- **(B) Concurrent workers within one run** — already solved (rolling dispatch, `node-claims.json`,
-  per-node worktrees, `rolling-session.lock`, `base-branch.lock`).
+## The substrate already (mostly) exists
 
-Today's locks give **serialization onto shared state**, not **isolation**. Consequences:
+- **Cross-process claim primitive — reuse verbatim.** `ClaimRegistry`
+  (`src/shared/quota/claimRegistry.ts`) is filesystem-backed (`node-claims.json`), lock-serialized
+  (`withFileLock`), token + heartbeat + stale-reclaim (`STALE_LOCK_MS`). `nodeId → ClaimRecord`, caller
+  supplies the path — pointing two coordinators at one file is "the whole point" (its own comment). It is
+  the exact mutual-exclusion needed for cross-IDE task claiming.
+- **Remediate already joins cooperatively.** Two rolling drivers (host-subagent + in-process provider)
+  claim *disjoint* nodes through one shared `ClaimRegistry` and work in parallel; a node one holds returns
+  `{acquired:false}` to the other (`src/remediate/steps/rollingSession.ts`, `dispatch.ts`
+  `driveRollingImplementDispatch`). This IS the multi-peer-on-one-run model — generalize it to *cross-IDE*
+  peers and to audit.
+- **Audit task pool + append-safe results already exist.** `audit_tasks[]` is a pool of independently
+  dispatchable tasks; `audit_results.jsonl` is append-only; merge dedups by `task_id`
+  (`src/audit/cli/reviewRun.ts`, `ledger.ts`). The data plane is ready for concurrent contributors.
 
-| Layer | Today | Under two independent runs |
-|---|---|---|
-| audit `.audit-tools/audit/` bundle | single shared tree, no invocation-level run id (a "run" = a worker task) | two audits silently **merge into one bundle** — `artifact-tree.lock` just orders the corruption |
-| remediate `state.json` | singleton, one `plan_id` | second run's `plan_id` **overwrites** the first |
-| `steps/current-step.json` (both) | single slot, **no lock** | last-writer-wins → host reads the *other* run's step; step/state desync |
-| audit `artifact_metadata.json` | per-file, per-repo | shared staleness → run B's edits fire staleness on run A |
+## The three gaps to close
 
-Recon detail: `docs/reviews/` is not needed — the map lives in this doc's *Current layout* section
-below, sourced from the 2026-07-02 recon (paths + lines cited inline).
+### G1 — Audit holds the coarse lock across execution → serializes peers
+`runAuditStepLocked` (`src/audit/cli/auditStep.ts:75-88`) wraps the WHOLE step — load → `advanceAudit`
+(**including the executor / LLM work**) → persist — in `artifactTreeLockPath`. A second IDE's `next-step`
+therefore **blocks** on the lock and runs strictly after the first. Split the step into three phases;
+only the first and third take the short lock:
 
-## Core move: an invocation-level run identity, and namespace the whole mutable tree under it
+1. **Claim phase (short lock):** load state, `reclaimStale()`, compute the obligation frontier,
+   enumerate claimable units, `claim()` the highest-priority unclaimed one, write THIS agent's
+   step/prompt, release the lock. If nothing is claimable → write a **cooperative-wait** step and stop.
+2. **Execute phase (NO lock):** the executor / dispatch / LLM work runs here — where peers overlap in
+   time. The claim is heartbeated so a long unit isn't reclaimed.
+3. **Merge phase (short lock):** ingest the result into shared state (append ledger + persist derived
+   artifacts, the existing merge-and-ingest), `release()` the claim, release the lock.
 
-Introduce an explicit **session/run id at the orchestrator-invocation level** for BOTH orchestrators
-(audit has none today) and move the ENTIRE mutable state tree under `runs/<runId>/`. Locks become
-**per-run** (different runs touch different subtrees → no contention → true parallelism, not
-serialization). A small cross-run **registry** with its own lock handles only register/resolve/retire.
+This preserves the O2 invariant that mattered (no load against a partially-written bundle — merges are
+still serialized) while removing the part that serialized *execution*.
 
-### Target on-disk layout
+### G2 — Audit has no task-level claiming
+Add a shared audit `ClaimRegistry` at `.audit-tools/audit/node-claims.json`. Claimable units:
 
-```
-.audit-tools/
-  audit/
-    registry.json                 # index of runs (own lock: registry.lock)
-    runs/
-      <auditRunId>/
-        audit_state.json
-        artifact_metadata.json
-        <all bundle artifacts: repo_manifest.json … audit-findings.json>
-        run-ledger.json
-        worker-runs/<taskRunId>/…  # the former runs/<ISO>_… worker dirs, re-parented
-        steps/current-step.json + current-prompt.md
-        artifact-tree.lock         # per-run, replaces the global one
-    audit-report.md               # promoted "latest completed" render (repo-canonical)
-    audit-findings.json           # promoted "latest completed" contract (repo-canonical)
-  remediation/
-    registry.json                 # own lock: registry.lock
-    runs/
-      <remRunId>/
-        state.json                # was singleton — now per-run
-        state.lock
-        steps/current-step.json + current-prompt.md
-        implement/…               # rolling-session.json/.lock, node-claims.json, dispatch-*.json
-    remediation-report.md         # promoted latest render
-    remediation-outcomes.json     # promoted latest contract
-  worktrees/…                     # already per-run named (remediate-<blockId>-<runId>)
-```
+- **Pooled obligation `audit_tasks`** — each pending task is a claimable node (`nodeId = task_id`). N
+  peers claim N distinct tasks → real parallel contribution. Results already append-safe + dedup-by-id.
+- **Serial obligations** (`repo_manifest`, `file_disposition`, structure/graph/design, `synthesis`, …)
+  — the obligation itself is ONE claimable node (`nodeId = obligation:<name>`). One peer wins and does
+  it; a peer whose only frontier work is a serial obligation already held returns a **cooperative-wait**
+  step ("peer is working `<unit>`; nothing else claimable — retry shortly") rather than blocking. When
+  the serial step lands and opens a pool, waiting peers pick up tasks.
 
-Deliverables (`audit-report.md` / `audit-findings.json` / remediation pair) stay at the canonical
-`.audit-tools/` spot as the **latest-completed promotion** (force-tracked per
-[[gitignore-deliverable-tracking]]); the per-run copy is retained under `runs/<runId>/`. On completion a
-run promotes its pair to canonical (last-writer-wins is correct here — the human wants "the most recent
-finished audit"), and the registry records which runId the canonical copy came from. A remediate run
-consuming audit output resolves a **specific** audit runId (or the canonical latest) — never an
-ambiguous shared file mid-flight.
+### G3 — Single shared step slot → peers clobber each other's prompt
+`current-step.json` / `current-prompt.md` is one slot per orchestrator (`stepContractWriter.ts`). Each
+peer works a *different* unit but shares run state, so each needs its own step/prompt: write
+`steps/<agentId>/current-step.json` + `current-prompt.md`, where `agentId` is minted per invocation
+(pid+time+rand, same shape as a claim owner token — it also becomes the claim owner). Keep the shared
+`steps/current-step.json` as a latest-pointer for observability/back-compat, but each peer reads its own.
 
-## Run resolution — conversation-first, NO manual `--run-id` for the single-IDE case
+## Remediate — already cooperative; make JOIN the default second-invocation path
 
-"A needed manual flag is a bug signal" ([[enforce-robustness-in-tooling-not-host-discretion]]). The run
-id must round-trip through the host, but **as an opaque token the tool emits and the workflow threads
-back automatically** — a session cookie, not a human-typed flag. Mechanics:
+Implement is already claim-based rolling dispatch over a shared `ClaimRegistry` — cross-IDE peers slot in
+with no change to the claim mechanism. Remaining:
 
-1. **First next-step, no `--run-id`, no active run** → tool **mints** a runId, creates `runs/<id>/`,
-   registers it, and emits `run_id` in the step contract (`current-step.json`).
-2. **Subsequent next-steps** → the slash workflow (SKILL.md / wrapper) passes the emitted `--run-id`
-   back **automatically** from conversation context — invisible to Ethan, exactly like today's
-   resume-the-one-existing-run. This is mechanical continuity threaded by the wrapper, not host
-   discretion or human memory.
-3. **No `--run-id`, exactly ONE active run in registry** → resume it. Preserves today's zero-flag
-   single-IDE ergonomics *exactly*.
-4. **No `--run-id`, MULTIPLE existing runs** → tool **stops and surfaces the run manifest describing
-   WHAT each run is working on** (runId, orchestrator, the scope/coverage it claims, its current
-   obligation/phase) and asks the host/user to resume one or start a new run against the uncovered
-   scope — the same "contextualize, don't guess" disambiguation pattern already shipped for remediate
-   intake discovery ([[guidance-discovery-contextualizes]], `intakeResolver.ts` `allExisting` manifest).
-   The point is not *who* is running each — it's *what is already claimed vs. free*.
-5. **Explicit `--run-id`** → that run (errors clearly if retired/unknown).
+- **Serial phases claim `phase:<name>`** (plan / document / triage / close) so two joining peers don't
+  both plan; the non-winner picks an implementable claimable block or gets a cooperative-wait step.
+- **A plain second `next-step` enters the rolling join path** rather than contending on `state.json`
+  (largely true via rolling today — verify + wire the entry so it's the default, not opt-in).
+- `state.json` mutations stay lock-safe via the existing `state.lock`.
 
-The registry is the single source for "what runs exist and what each covers"; run resolution is a
-deterministic function of (supplied run-id, registry contents) — enforced in the tool, no host
-reasoning.
+## Agent identity
 
-### Registry shape (both orchestrators, mirrored)
+Per-invocation `agentId`, minted like a claim owner token (`pid-time-rand`); it scopes the step slot and
+owns the peer's claims. Not persisted as a run. `ClaimRegistry.listClaims()` answers "who is working
+what" — no separate roster.
 
-Tracks **work, not identity** — no host/IDE label (Ethan, 2026-07-02: "we don't care who's doing what —
-we care what's already being worked on and what isn't"). No heartbeat/TTL either (Ethan: "TTL is not a
-strong signal; changes to the codebase / git repo are stronger"). A run's *freshness relative to the
-current tree* is judged by the **existing staleness / dependency-DAG machinery** against the run's own
-artifacts (`artifact_metadata.json` hashes, git HEAD), never wall-clock.
+## What this deletes / does NOT need (ideal-code — [[prefer-ideal-code-no-backcompat]])
 
-```jsonc
-// .audit-tools/{audit,remediation}/registry.json
-{
-  "runs": {
-    "<runId>": {
-      "orchestrator": "audit" | "remediate",
-      "started_at": "<ISO>",
-      "status": "active" | "complete",
-      "coverage": "<what this run claims: audit scope/lens set, or remediate plan source + finding ids>"
-    }
-  }
-}
-```
-
-Registry writes go through `withFileLock(registryLockPath())` — a *tiny* critical section
-(register / update-coverage / retire), never held across an advance. `coverage` is what the manifest
-shows so a new run can pick uncovered work. There is no time-based `abandoned` state: a run entry
-persists until explicitly retired; whether its results are *stale* against the current codebase is a
-staleness question answered by the DAG at resume, not a liveness question answered by a clock. Runs and
-their worktrees/results are **never auto-pruned** (preserve-worktrees precedent,
-`spec/dispatch-token-budget-gate.md`); an explicit `retire-run <id>` affordance handles cleanup.
-
-## Locking after the move
-
-- **Per-run `artifact-tree.lock` / `state.lock`** — unchanged mechanism (`src/shared/quota/fileLock.ts`,
-  `withFileLock`, PID-token steal, 30s stale, 50→500ms backoff), just re-pathed under `runs/<runId>/`.
-  Two runs never contend → real parallelism.
-- **`steps/` gets covered by the per-run artifact/state lock** (it now lives inside `runs/<runId>/` and
-  is written inside the same advance critical section) — closes the unlocked-single-slot hazard on both
-  sides (`stepContractWriter.ts` currently takes no lock).
-- **New `registry.lock`** — the only cross-run lock; tiny scope.
-- Existing per-run remediate locks (`rolling-session.lock`, `base-branch.lock`, `node-claims.json`) are
-  already correctly per-run — they slot under `runs/<runId>/implement/` unchanged.
-
-## What this deletes (ideal-code, no back-compat — [[prefer-ideal-code-no-backcompat]])
-
-- The flat audit paths (`.audit-tools/audit/audit_state.json`, `…/artifact_metadata.json`,
-  `…/steps/…`, the top-level `…/audit/runs/<ISO>_…` worker dirs) — replaced by `runs/<runId>/…`.
-  Single atomic replace per the atomic-replace-ordering invariant.
-- The global `artifact-tree.lock` at `.audit-tools/audit/` — replaced by the per-run lock.
-- Remediate's singleton `state.json` at `.audit-tools/remediation/state.json` — moved under
-  `runs/<runId>/state.json`. `randomRunId()` already exists (`nextStep.ts:316`); it becomes the
-  directory key, not just a field inside a singleton.
-
-No migration shim for old flat layout: single user, no external consumers; a stale `.audit-tools/`
-is regenerated by a fresh run.
-
-## Implementation slices (each a green atomic commit)
-
-Ordered so the tree is never half-migrated. Each ships new mechanism + deletion together.
-
-1. **`runs/<runId>/` path module + registry (shared).** Add per-run path derivation to the
-   `.audit-tools` path module (`src/shared/io/auditToolsPaths.ts`) — `auditRunDir(runId)`,
-   `remediationRunDir(runId)`, `registryPath/registryLockPath`, per-run `artifactTreeLockPath(runId)`.
-   Add `src/shared/io/runRegistry.ts` (register / resolveRun(runIdArg, registry) / heartbeat / retire,
-   all `withFileLock`). Unit-test resolution truth-table (§Run resolution 1–5). No caller rewired yet
-   → land behind the not-yet-used module (green, unused-export gated — wire in the same slice's tail or
-   mark test-covered).
-2. **Remediate onto per-run state.** Re-path `store.ts` (`stateFilePath`/`stateLockPath` take runId),
-   thread runId from `nextStep.ts` resolution through every state read/write and `steps/` write. Delete
-   the singleton path. Resolution: mint on first `pending`, resume via registry otherwise, manifest on
-   multiple. Remediate suite (vitest) green. Smaller blast radius than audit → do first.
-3. **Audit onto per-run tree.** Re-parent the whole bundle + `artifact_metadata.json` + `run-ledger.json`
-   + worker `runs/` + `steps/` under `runs/<runId>/`; per-run `artifact-tree.lock`; thread runId through
-   `advance.ts`, `auditStep.ts`, `nextStepHelpers.ts`, `reviewRun.ts`, `runArtifacts.ts`. Delete flat
-   paths + global lock. Audit suite (node:test) green.
-4. **Deliverable promotion + cross-orchestrator resolve.** On completion, promote per-run pair →
-   canonical `.audit-tools/…` and record source runId in registry. Remediate intake resolves a specific
-   audit runId or canonical latest (extend `intakeResolver.ts` discovery to list per-run findings).
-5. **Manifest step + host wiring.** Add the multi-run disambiguation step (mirror the intake-manifest
-   step shape) to both orchestrators; update both SKILL.md workflows to thread the emitted `run_id`
-   automatically on subsequent next-steps. Update durable trap
-   [[concurrent-nextstep-staleness-cascade-wipe]] → resolved (isolation, not "one call at a time").
+- **No `runs/<runId>/` isolation, no run registry, no `resolveRun` ambiguity** — the first-draft slice-1
+  code (`runRegistry.ts`, per-run path helpers) is reverted as the wrong model. The shared tree is
+  already the shared run.
+- **The coarse "whole audit step under one lock"** — replaced by the claim/execute/merge split (single
+  atomic replace per the atomic-replace-ordering invariant).
 
 ## Decisions (settled, Ethan 2026-07-02)
 
-- **D1 — RETIRE the "one sequential CLI call at a time" trap.** Per-run isolation makes concurrent
-  *different-run* calls a supported feature; concurrent *same-run* next-steps just wait on the per-run
-  lock. The lock is the mechanical enforcement — no host-remembered rule. Slice 5 rewrites the durable
-  trap [[concurrent-nextstep-staleness-cascade-wipe]] to "resolved by per-run isolation."
-- **D2 — NO TTL / heartbeat liveness.** Wall-clock is not a strong signal; codebase/git changes are.
-  A registry entry persists until explicitly retired; its *staleness vs. the current tree* is answered by
-  the existing dependency-DAG/`artifact_metadata` machinery at resume, not a clock. Never auto-prune;
-  `retire-run <id>` is the only removal path.
-- **D3 — NO `host_label`.** The registry tracks *what is being worked on*, not *who*. The manifest's
-  discriminator is `coverage` (scope/lens or plan+finding-ids) so a new run can claim uncovered work.
-```
+- **Cooperative, not isolated** — peers contribute to ONE shared run; no primary/secondary.
+- **No TTL/heartbeat as run-liveness** (D2 from the first draft still holds) — a *claim's* heartbeat is a
+  short work-lease (that's what `STALE_LOCK_MS` reclaim is for), but the RUN itself has no wall-clock
+  liveness; run progress is the shared ledger/state, staleness is the dependency-DAG at merge.
+- **No host/agent label in shared state** (D3 holds) — coordination is about WHAT is claimed, not WHO.
+  `agentId` is a claim owner token, not a human/IDE identity.
+
+## Implementation slices (each a green atomic commit)
+
+0. **Revert the isolation code** (`runRegistry.ts`, per-run path helpers, index exports, test) — design
+   correction. *(this commit)*
+1. **Audit lock-split** — claim → execute → merge in `auditStep.ts` / `advance.ts`; short lock only
+   around load+decide+persist, executor outside. Single-agent behavior identical; unblocks parallel
+   execution. (Enabler; no claiming yet.)
+2. **Audit task claiming** — shared `ClaimRegistry` at `audit_tasks`; per-peer task claim + heartbeat +
+   release; cooperative-wait step when the frontier is a held serial obligation.
+3. **Per-agent step slot** (both orchestrators) — `steps/<agentId>/…` + shared latest-pointer.
+4. **Remediate phase-claim + default join** — `phase:<name>` claims for serial phases; make a second
+   next-step join the rolling frontier by default.
+5. **Serial-obligation claim wrapper (audit)** — `obligation:<name>` claim so two peers never both run
+   `repo_manifest`/`synthesis`; wire cooperative-wait uniformly.
+6. **Rewrite the durable trap** [[concurrent-nextstep-staleness-cascade-wipe]] → resolved by claim-based
+   cooperation (execution outside the lock, claims prevent double-work, merges serialized).
+
+## Open decisions (surface before slice 2)
+
+- **OD1 — Cooperative-wait shape.** When a joining peer finds only a held serial obligation, does its
+  `next-step` return (a) a "retry — peer working `<unit>`" contract the host re-invokes after a short
+  delay, or (b) block on a short bounded wait then re-resolve? Recommend (a) — non-blocking, host-paced,
+  matches the "one bounded step" model.
+- **OD2 — Multiple DISTINCT shared runs on one repo.** Default is one shared audit + one shared
+  remediation. Do we ever need two *different* concurrent shared audits (e.g. different scope) on one
+  repo? Recommend NO for now — YAGNI; the shared tree is the run. Revisit only on a real need.
+- **OD3 — Claim heartbeat cadence during a long executor.** `STALE_LOCK_MS` is the reclaim window; a
+  unit that runs longer than that without a heartbeat gets reclaimed (double-worked, tolerable via
+  dedup-by-id but wasteful). Confirm the heartbeat interval / whether long audit tasks need a longer
+  lease than the shared `STALE_LOCK_MS`.

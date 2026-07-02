@@ -109,19 +109,21 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   shards are disjoint output files and source reads are read-only, so parallel drafting on overlapping source is
   already safe; the rule only ever mattered at implement/merge. Relates to [[remediator-must-decompose-and-boundary-enforce]],
   [[decomposition-colocate-source-and-tests]], [[enforce-robustness-in-tooling-not-host-discretion]].
-- **Multi-IDE concurrent runs — audit AND remediate runnable from several IDEs simultaneously (Ethan, 2026-07-02).**
-  Beyond atomic + resumable: the artifact/state layer must support running audits and remediations
-  concurrently from multiple IDEs/hosts against the same repo without corruption. Today concurrency is
-  actively dangerous (see the durable trap: concurrent next-step wipes ingested results,
-  [[concurrent-nextstep-staleness-cascade-wipe]]) — state writes are single-writer-assumed. Target: proper
-  multi-runner isolation (per-run state namespaces + locking that permits independent concurrent runs, not
-  just the current withFileLock mutual-exclusion on one shared state) so N IDEs can each drive their own
-  audit/remediate run at once. **Design of record: [`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md)**
-  (2026-07-02) — invocation-level run id for BOTH orchestrators (audit has none today), whole mutable tree
-  namespaced under `runs/<runId>/`, per-run locks (isolation not serialization), a cross-run registry with
-  conversation-first run resolution (mint→resume-the-one→manifest-on-many, zero flag for single-IDE), and a
-  5-slice atomic-replace implementation plan. Three open decisions (D1 retire the "one call at a time" trap,
-  D2 abandoned-run TTL/reaping, D3 host_label strength) gate slice 2 — pending Ethan.
+- **Multi-agent COOPERATIVE runs — arbitrary agents/IDEs/providers contribute to the SAME audit/remediation (Ethan, 2026-07-02).**
+  NOT isolated independent runs — the opposite: start an audit in one IDE, run `/audit-code` in a second,
+  and it JOINS the same run, taking on unclaimed tasks. Symmetric peers (no primary/secondary), feeding off
+  each other's results as they land, never colliding on the same task. **Design of record:
+  [`spec/multi-agent-cooperative-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md)** (file kept at the
+  original path). Model: ONE shared run per orchestrator per repo (the shared `.audit-tools/` tree IS the run);
+  peers join via the existing cross-process `ClaimRegistry` (`src/shared/quota/claimRegistry.ts` —
+  token+heartbeat+stale-reclaim, already backs remediate's cooperative rolling dispatch). Three gaps: G1 audit
+  holds the coarse `artifact-tree.lock` across the LLM executor → serializes peers (split into claim→execute→
+  merge, only claim+merge locked); G2 no task-level claiming in audit (add shared `node-claims.json` keyed by
+  task_id / `obligation:<name>`); G3 single shared step slot clobbers (per-agent `steps/<agentId>/`). Remediate
+  is already cooperative for implement; needs `phase:<name>` claims + join-by-default. 6 slices; slice 0 (revert
+  the wrong isolation code) done this commit. Open decisions OD1 (cooperative-wait shape) / OD2 (multiple
+  distinct shared runs — recommend NO/YAGNI) / OD3 (claim heartbeat cadence vs long audit tasks) gate slice 2.
+  **Supersedes** the durable trap [[concurrent-nextstep-staleness-cascade-wipe]] once shipped.
 - **Spec-doc rewrite pass — SHIPPED (2026-07-02).** All six flagged docs rewritten against real source:
   1. `spec/audit/dependency-map.md`, `spec/audit/artifact-contract.md`, `spec/audit/executor-catalog.md`
      — rewritten to the real 31-entry `ARTIFACT_DEFINITIONS`, the real `ARTIFACT_DEPENDS_ON_MAP` (canonical

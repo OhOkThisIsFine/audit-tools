@@ -26,11 +26,12 @@
   "commit or stash `<path>`" directive (was: opaque git error → identical auto-retries → human triage), work
   preserved under quarantine. (`src/remediate/steps/dispatch.ts`.) Tests: `intake-resolver.test.ts`,
   `next-step-resume-gates.test.ts`, `dispatch-worktree.test.ts`. Full remediate suite green (2111/0).
-- **Immediate next:** Multi-IDE concurrent runs — design of record written
-  ([`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md)); blocked on
-  three Ethan decisions (D1/D2/D3 in that doc's *Open decisions*) before slice-2 implementation starts.
-  Slices 1 (shared per-run path module + registry) and 2 (remediate onto per-run state) are the first
-  build units; audit re-parent is slice 3.
+- **Immediate next:** Multi-agent COOPERATIVE runs — arbitrary agents/IDEs join and contribute to ONE
+  shared audit/remediation (NOT isolated runs; first draft was corrected). Design of record:
+  [`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md). Reuses the
+  existing cross-process `ClaimRegistry`. Slice 0 (revert the wrong isolation code) done. Next build unit:
+  slice 1 = audit lock-split (claim→execute→merge; executor OUT of `artifact-tree.lock`). Open decisions
+  OD1/OD2/OD3 in the doc gate slice 2 (task claiming) — pending Ethan.
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.
