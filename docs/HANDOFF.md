@@ -8,12 +8,23 @@
 
 ## Live state
 
-- On npm as `latest`. Last published: v0.30.61 (2026-07-02) — osv-scanner as the second `binary`-runner
-  external analyzer (+ the `BinarySpec.archived` engine generalization for non-archived release assets)
-  and Ethan's README.md rewrite (leaner, tool-parity-first framing; the doc-contract test was updated to
-  check durable concepts instead of exact heading strings). Both global bins reinstalled + verified at
-  0.30.61.
-- **Immediate next:** none — nothing pending from this sprint.
+- On npm as `latest` at v0.30.61. **Merged to main but NOT yet published:** the T5 forward-tracks
+  remediation (merge `8e3d4319`, 2026-07-02) — 5 nodes shipped via the full contract pipeline:
+  (1) five new external analyzers clippy/rubocop/hadolint/actionlint/type-coverage (candidates + clippy/rubocop
+  adapters + HADOLINT/ACTIONLINT BinarySpecs; `BinarySpec.checksumsAsset` generalized to a fn for hadolint's
+  per-asset `.sha256`); (2) knip↔graph cross-check as a pure render-time join (normalized in-degree index +
+  per-file/per-language fidelity gate + entrypoints from surface_manifest/critical_flows); (3) remediate-code
+  SKILL.md no-drift guard test; (4) validator intra-result duplicate finding-id hard-reject; (5) churn/context/
+  enforce review pass (`docs/reviews/churn-context-enforce-pass-2026-07-02.md`). Build+check+touched suites green;
+  full suite green at close.
+- **Immediate next:** decide version bump + `npm publish` for the merged T5 work (patch vs minor — it adds
+  analyzers + a validator hard-reject behavior change), then reinstall global bins. Until published, `latest`
+  is still 0.30.61.
+- **New open items from this run** (all in `docs/backlog.md`): the contract-pipeline stale-shard-revert +
+  convergence-guard mis-attribution bug (Open bugs); churn N1 (per-dispatch analyzer-anchor path index) and
+  N4 (cap renderTaskAnalyzerSignals output) follow-ons; live validation of the 5 new analyzers (clippy/rubocop
+  are fixture-only here — no Rust/Ruby repo). Design-direction items also filed: guidance-file discovery should
+  contextualize not suppress; parallel dispatch over overlapping files is the target; multi-IDE concurrent runs.
 - Ethan runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
