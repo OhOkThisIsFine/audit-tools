@@ -6,6 +6,8 @@ const { normalizeEslintJson } = await import("../../src/audit/adapters/eslint.ts
 const { normalizeNpmAuditJson } = await import("../../src/audit/adapters/npmAudit.ts");
 const { normalizeSemgrepJson } = await import("../../src/audit/adapters/semgrep.ts");
 const { normalizeGenericExternalResults } = await import("../../src/audit/adapters/normalizeExternal.ts");
+const { normalizeClippyJson, parseClippy } = await import("../../src/audit/adapters/clippy.ts");
+const { normalizeRubocopJson, parseRubocop } = await import("../../src/audit/adapters/rubocop.ts");
 
 test("normalizeCoverageSummary keeps only below-threshold files and preserves severity boundaries", () => {
   const normalized = normalizeCoverageSummary([
@@ -397,6 +399,89 @@ test("normalizeCoverageSummary pins the lines_pct=50 boundary to medium and line
     "medium",
     "lines_pct=50 is not strictly below 50 so severity must be 'medium'",
   );
+});
+
+// --- CP-NODE-1: dedicated clippy / rubocop severity adapters ---
+
+const CLIPPY_STREAM = [
+  JSON.stringify({
+    reason: "compiler-message",
+    message: {
+      level: "error",
+      message: "mismatched types",
+      code: { code: "E0308" },
+      spans: [{ file_name: "src/lib.rs", line_start: 3, line_end: 3, is_primary: true }],
+    },
+  }),
+  JSON.stringify({
+    reason: "compiler-message",
+    message: {
+      level: "warning",
+      message: "unused import",
+      code: { code: "clippy::unused" },
+      spans: [{ file_name: "src/main.rs", line_start: 1, line_end: 1, is_primary: true }],
+    },
+  }),
+].join("\n");
+
+test("normalizeClippyJson maps clippy severities and validates through the generic seam", () => {
+  const normalized = normalizeClippyJson(CLIPPY_STREAM);
+  assert.equal(normalized.tool, "clippy");
+  assert.deepEqual(
+    normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule })),
+    [
+      { severity: "high", path: "src/lib.rs", rule: "E0308" },
+      { severity: "medium", path: "src/main.rs", rule: "clippy::unused" },
+    ],
+  );
+  for (const r of normalized.results) {
+    assert.ok(VALID_SEVERITIES.has(r.severity), `severity '${r.severity}' must be a schema enum member`);
+  }
+});
+
+test("normalizeClippyJson downgrades malformed input to an empty result set (no throw)", () => {
+  for (const bad of ["", "not json", "{}", "garbage\nmore garbage"]) {
+    const normalized = normalizeClippyJson(bad);
+    assert.equal(normalized.tool, "clippy");
+    assert.deepEqual(normalized.results, []);
+  }
+  assert.deepEqual(parseClippy("not json"), []);
+});
+
+const RUBOCOP_REPORT = JSON.stringify({
+  files: [
+    {
+      path: "app/foo.rb",
+      offenses: [
+        { severity: "fatal", message: "fatal issue", cop_name: "Lint/Fatal", location: { start_line: 2 } },
+        { severity: "convention", message: "style nit", cop_name: "Style/Nit", location: { line: 9 } },
+      ],
+    },
+  ],
+});
+
+test("normalizeRubocopJson maps rubocop severities (fatal→high, convention→low) through the generic seam", () => {
+  const normalized = normalizeRubocopJson(RUBOCOP_REPORT);
+  assert.equal(normalized.tool, "rubocop");
+  assert.deepEqual(
+    normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule, line_start: r.line_start })),
+    [
+      { severity: "high", path: "app/foo.rb", rule: "Lint/Fatal", line_start: 2 },
+      { severity: "low", path: "app/foo.rb", rule: "Style/Nit", line_start: 9 },
+    ],
+  );
+  for (const r of normalized.results) {
+    assert.ok(VALID_SEVERITIES.has(r.severity), `severity '${r.severity}' must be a schema enum member`);
+  }
+});
+
+test("normalizeRubocopJson downgrades malformed input to an empty result set (no throw)", () => {
+  for (const bad of ["", "not json", "{}", JSON.stringify({ files: "nope" })]) {
+    const normalized = normalizeRubocopJson(bad);
+    assert.equal(normalized.tool, "rubocop");
+    assert.deepEqual(normalized.results, []);
+  }
+  assert.deepEqual(parseRubocop("not json"), []);
 });
 
 test("normalizeGenericExternalResults maps native severity aliases onto schema enum (COR-0a17639f)", () => {

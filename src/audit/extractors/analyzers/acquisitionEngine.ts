@@ -133,6 +133,26 @@ export function detectPythonEcosystem(root: string): boolean {
   return hasAnyMarker(root, ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"]);
 }
 
+export function detectRustEcosystem(root: string): boolean {
+  return hasAnyMarker(root, ["Cargo.toml"]);
+}
+
+export function detectRubyEcosystem(root: string): boolean {
+  return hasAnyMarker(root, ["Gemfile", "Gemfile.lock", ".rubocop.yml"]);
+}
+
+export function detectDockerEcosystem(root: string): boolean {
+  return hasAnyMarker(root, ["Dockerfile"]);
+}
+
+/**
+ * GitHub Actions workflows live under `.github/workflows/`. actionlint only makes
+ * sense when that directory exists, so its presence is the ecosystem marker.
+ */
+export function detectGithubActionsEcosystem(root: string): boolean {
+  return hasAnyMarker(root, [join(".github", "workflows")]);
+}
+
 /**
  * Map a runner to the capability-probe argv (`--version`) and the argv prefix
  * used to run a pinned tool ephemerally. No OS→runner assumption is baked in:

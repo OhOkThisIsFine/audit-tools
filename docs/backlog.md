@@ -7,6 +7,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **remediate-code contract pipeline: an upstream re-ingest silently REVERTS an approved downstream design repair to its stale per-module shard, then the convergence guard mis-blames the design (2026-07-02).** Observed on the T5 forward-tracks run. Sequence: (1) the conceptual-design critique found 2 blocking defects in the knip module; (2) the contract-repair phase let me rewrite `finalized_module_contracts.input.json` to a corrected render-time-join design, which passed independent re-review (approved); (3) LATER, a legitimate edit to fix a citation-grounding gate required re-supplying `module_decomposition.input.json` (adding a real path to the churn module's `file_scope`); (4) re-ingesting the decomposition cascaded staleness and re-derived `module_contracts` + `finalized_module_contracts` by RE-MERGING the per-module shards under `.audit-tools/remediation/intake/contract/module-waves/{module_contract_drafting,contract_finalization}/*.json` — which still held the ORIGINAL pre-repair knip design. The approved repair (which lived only in the merged `finalized_module_contracts`, never back-propagated to the knip shard) was silently discarded; (5) the next critique correctly re-raised the two now-reverted blockers, and the convergence-termination guard mis-attributed it to a "non-converging design" and blocked pending a user decision — when in fact the design HAD converged and a cascade wiped it. Root causes / fixes: (a) a design repair must write through to the per-module shard(s) it corrects (the merge source of truth), not only the merged artifact — otherwise any later re-merge reverts it; OR the merge must prefer the repaired merged artifact over stale shards. (b) The convergence guard must distinguish "design keeps failing review" from "an approved design was reverted by an upstream cascade" (e.g. detect that the re-raised blocker's prior repair is no longer present in the current artifact = a regression, not non-convergence). (c) Editing a citation-grounding-relevant field (`file_scope`) should not force a full upstream re-ingest that nukes downstream repairs. This is the [[concurrent-nextstep-staleness-cascade-wipe]] class ("no host-side unblock; hand-editing gitignored run-state cascades") surfacing inside the single-run contract pipeline, not just across concurrent runs.
 - **Quota-aware dispatch pre-wall pacing — SHIPPED as the token-budget gate (2026-06-30); live validation env-bound.**
   Was: 4 concurrent workers walled the account 5-hour cap with no proactive pacing. Root cause (verified, see
   `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`): the proactive `/usage` endpoint WORKS and its
@@ -62,12 +63,19 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   an unfinished prior run exists, `next-step` should stop and require explicit confirmation
   (resume-old vs discard-and-start-fresh) rather than silently resuming the old one; a branch-switch
   failure during that resume should abort loudly, not continue on a different branch than intended.
-- **remediate-code: `--guidance-file` doesn't override the `confirm_auto_discovered_input` offer.**
-  Same session: after declining an auto-discovered stale `audit-findings.json` candidate once, the
-  *next* `next-step --guidance-file <same file>` call re-offered the identical candidate again instead
-  of proceeding to intake synthesis — only switching to `--input <path>` (pointing directly at the
-  guidance file) broke the loop. Two wasted round-trips. `--guidance-file` should short-circuit
-  default-candidate discovery entirely, matching what the loader's own documented flow implies.
+- **remediate-code: auto-discovery should CONTEXTUALIZE, not compete with, an explicit `--guidance-file`/`--input`.**
+  (Ethan, 2026-07-02 — supersedes the earlier "`--guidance-file` should short-circuit discovery" framing;
+  that was wrong.) Observed: after declining an auto-discovered stale `audit-findings.json` once, the next
+  `next-step --guidance-file <same file>` re-offered the identical candidate instead of proceeding; only
+  `--input <path>` broke the loop (two wasted round-trips). But the desired fix is NOT to suppress discovery
+  when an explicit source is given. The tool SHOULD still discover every other potential remediation source
+  and surface them ALL to the orchestrating host as *context* — each with a timestamp, path, type, and any
+  other useful provenance (staleness, size, origin) — alongside the explicitly-supplied source. The host
+  agent then decides what to do with the whole set (use one, merge several, ignore the stale ones). So the
+  redesign: replace the single-candidate `confirm_auto_discovered_input` gate with a discovered-sources
+  MANIFEST handed to the host at intake; the explicit `--guidance-file`/`--input` is the primary source but
+  never silently blocks awareness of the others. This also composes with the stale-unfinished-run entry
+  above (a prior run's leftover is just one more timestamped discovered source, not a silent hijacker).
 - **remediate-code: `accept-node`'s cherry-pick has no protection against pre-existing dirty tracked files unrelated to the node.** 2026-07-01: a docs-only node's merge (`CP-NODE-3`, backlog.md-only diff) failed twice with "local changes to docs/backlog.md would be overwritten by merge" because the MAIN tree (not the node's worktree) carried unrelated uncommitted edits to that same file from a prior, never-committed sprint. Auto-retry (2/2 budget) replayed the identical failure both times and routed to human triage even though the fix was simply "commit the unrelated pre-existing WIP first" — the tool never surfaced *that* as the actionable cause, only the raw git error. Fix: `accept-node` should detect a dirty main-tree file that collides with the node's touched paths and either auto-stash/restore around the cherry-pick or surface a clearer "main tree has uncommitted changes to `<path>` — commit or stash before merging" directive instead of relying on the host to diagnose a raw cherry-pick error.
 - **Consent-gate for proposed analyzers — confirmed no gap; LLM-proposal channel deferred.** 2026-07-01
   verification: (1) `admitSpawn` (`src/audit/extractors/analyzers/acquisitionEngine.ts`) already gates
@@ -87,6 +95,27 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
+- **Parallel dispatch over OVERLAPPING files — make it the tool's job, and the target design (Ethan, 2026-07-02).**
+  Today the decomposition avoids implement-time cherry-pick collisions by partitioning modules onto
+  DISJOINT file scopes (e.g. five external analyzers forced into ONE serial `candidates.ts` module). That
+  disjoint-file rule is a HOST-remembered crutch, not a tool guarantee — it must move into the remediator,
+  and more importantly the crutch is not the goal. The goal: contracts precise enough that we CAN dispatch
+  agents in parallel even when they edit the same file. Concretely — (a) contract-level per-file edit-region
+  ownership (each node declares the exact region/anchor it appends to or edits, so two nodes on `candidates.ts`
+  are provably non-conflicting), and (b) a merge that tolerates disjoint hunks in the same file (cherry-pick /
+  3-way apply per node, not whole-file ownership). Under that, the analyzer work is N parallel nodes, not one
+  serial node. NOTE (settled this session): the constraint never applied to contract *drafting* — the per-module
+  shards are disjoint output files and source reads are read-only, so parallel drafting on overlapping source is
+  already safe; the rule only ever mattered at implement/merge. Relates to [[remediator-must-decompose-and-boundary-enforce]],
+  [[decomposition-colocate-source-and-tests]], [[enforce-robustness-in-tooling-not-host-discretion]].
+- **Multi-IDE concurrent runs — audit AND remediate runnable from several IDEs simultaneously (Ethan, 2026-07-02).**
+  Beyond atomic + resumable: the artifact/state layer must support running audits and remediations
+  concurrently from multiple IDEs/hosts against the same repo without corruption. Today concurrency is
+  actively dangerous (see the durable trap: concurrent next-step wipes ingested results,
+  [[concurrent-nextstep-staleness-cascade-wipe]]) — state writes are single-writer-assumed. Target: proper
+  multi-runner isolation (per-run state namespaces + locking that permits independent concurrent runs, not
+  just the current withFileLock mutual-exclusion on one shared state) so N IDEs can each drive their own
+  audit/remediate run at once. Not clearly captured in docs before this note; scope as its own track.
 - **Spec-doc rewrite pass — SHIPPED (2026-07-02).** All six flagged docs rewritten against real source:
   1. `spec/audit/dependency-map.md`, `spec/audit/artifact-contract.md`, `spec/audit/executor-catalog.md`
      — rewritten to the real 31-entry `ARTIFACT_DEFINITIONS`, the real `ARTIFACT_DEPENDS_ON_MAP` (canonical
@@ -178,6 +207,10 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   [`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md).
   **Remaining:** C3/C5/C6/E4/E5 are low-value / need design intent — unscheduled. Re-run the lens broadly when
   worthwhile. (Ethan, 2026-06-24.)
+
+- **Packet-prompt analyzer-signal churn — index per dispatch, don't re-flatten per (task × file).** `analyzerSignalAnchorsForPath` (`src/audit/orchestrator/fileAnchors.ts:150-169`) re-flattens+filters the whole `externalAnalyzerResults` set on every call; `renderTaskAnalyzerSignals` calls it per path and `buildTaskSections` per task (`src/audit/cli/dispatch/packetPrompt.ts:176-178,207,220`) → O(tasks × files × total-results) per dispatch since CP-NODE-2 widened the caller to every task section. Fix: build a `Map<normalizedPath, FileAnchor[]>` once per dispatch, read the index. (churn/VERIFIED, 2026-07-02 lens re-run.)
+
+- **Packet-prompt analyzer-signal context — cap per-task signal lines like the anchor preview.** `renderTaskAnalyzerSignals` emits all analyzer-signal lines uncapped/full-detail (`src/audit/cli/dispatch/packetPrompt.ts:182-194`), unlike the sibling `.slice(0, 24)` anchor preview (`packetPrompt.ts:28`). Add a per-task cap + omitted-count footer pointing at packet.json. (context/VERIFIED, 2026-07-02 lens re-run.)
 
 - **Schema-enforced generation everywhere possible — make malformed output impossible, not merely repairable.**
   Every structured-contract emission in the project — every dispatch path, every emitting agent, both orchestrators —
