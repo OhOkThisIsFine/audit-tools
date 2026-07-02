@@ -403,11 +403,34 @@ export {
   auditFindingsPath,
   promotedAuditReportPath,
   promotedAuditFindingsPath,
+  runsContainerDir,
+  runDir,
+  registryPath,
+  registryLockPath,
+  isRunIdSafe,
   AUDIT_REPORT_FILENAME,
   AUDIT_FINDINGS_FILENAME,
   REMEDIATION_REPORT_FILENAME,
   REMEDIATION_OUTCOMES_FILENAME,
 } from "./io/auditToolsPaths.js";
+
+// IO: cross-run registry for multi-IDE concurrent runs (per-run isolation +
+// deterministic conversation-first run resolution). See
+// `spec/multi-ide-concurrent-runs-design.md`.
+export type {
+  RunOrchestrator,
+  RunStatus,
+  RunRecord,
+  RunRegistry,
+  RunResolution,
+} from "./io/runRegistry.js";
+export {
+  registerRun,
+  updateRun,
+  retireRun,
+  loadRegistry,
+  resolveRun,
+} from "./io/runRegistry.js";
 
 // IO: tool-emitted end-of-run friction capture (single-sourced shape + persist
 // helper for BOTH orchestrators — cannot drift, never couples to any one repo's

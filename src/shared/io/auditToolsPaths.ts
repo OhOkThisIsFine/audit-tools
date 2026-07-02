@@ -49,6 +49,52 @@ export function remediationArtifactsDir(root: string): string {
 }
 
 /**
+ * Multi-run layout (see `spec/multi-ide-concurrent-runs-design.md`). Each
+ * orchestrator's default artifacts dir (`.audit-tools/audit` /
+ * `.audit-tools/remediation`) is a **base** that holds a cross-run
+ * `registry.json` plus a `runs/` container; each run's own mutable tree lives at
+ * `runs/<runId>/` and IS the `artifactsDir` handed to all existing downstream
+ * helpers (steps, artifact-tree.lock, incoming, findings) — so those re-parent
+ * under the run for free. The registry + resolver sit ABOVE, choosing which run
+ * dir to hand downstream. Per-run isolation replaces the former single shared
+ * tree, giving true parallelism (not serialization) across concurrent runs.
+ *
+ * A runId must be path- AND git-ref-safe (it also names a worktree branch); mint
+ * ids from `[A-Za-z0-9_-]` only and validate with `isRunIdSafe`.
+ */
+export function runsContainerDir(baseArtifactsDir: string): string {
+  return join(baseArtifactsDir, "runs");
+}
+
+/**
+ * `<baseArtifactsDir>/runs/<runId>` — a single run's artifacts dir. This is what
+ * every existing `artifactsDir`-taking helper operates on under the multi-run
+ * layout; the run dir IS the artifacts dir.
+ */
+export function runDir(baseArtifactsDir: string, runId: string): string {
+  return join(runsContainerDir(baseArtifactsDir), runId);
+}
+
+/** `<baseArtifactsDir>/registry.json` — cross-run index (what runs exist + what each covers). */
+export function registryPath(baseArtifactsDir: string): string {
+  return join(baseArtifactsDir, "registry.json");
+}
+
+/**
+ * `<baseArtifactsDir>/registry.lock` — the ONLY cross-run lock. Guards the tiny
+ * register / update-coverage / retire critical section, never held across an
+ * advance. Distinct from each run's per-run `artifact-tree.lock` / `state.lock`.
+ */
+export function registryLockPath(baseArtifactsDir: string): string {
+  return join(baseArtifactsDir, "registry.lock");
+}
+
+/** A runId is safe iff it is non-empty and only `[A-Za-z0-9_-]` (path + git-ref safe). */
+export function isRunIdSafe(runId: string): boolean {
+  return runId.length > 0 && /^[A-Za-z0-9_-]+$/.test(runId);
+}
+
+/**
  * `<artifactsDir>/steps` — where each orchestrator writes `current-step.json`
  * and `current-prompt.md`. Takes an already-resolved artifacts dir (audit or
  * remediation), not a root, because both halves share this child name.
