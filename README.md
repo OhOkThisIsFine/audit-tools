@@ -87,7 +87,7 @@ report opens with a triaged summary and drills down by severity:
 /remediate-code fix the stupid OAuth issues I keep running into
 # turns your desires into structured plans, then remediates
 
-/remediate-code implement ~/plans/top-secret-plans.txt - also make a mobile app I can
+/remediate-code implement ~/1337h4x/top-secret-plans.txt - also make a mobile app I can
 use to track the progress of my nefarious machinations
 # synthesizes structured findings + free-form feedback, plans out the whole refactor
 ```
