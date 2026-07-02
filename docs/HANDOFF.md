@@ -13,7 +13,17 @@
   follow-ons from the 2026-07-02 lens pass. v0.31.1 fixed the contract-pipeline repair-revert bug. v0.31.0
   shipped the T5 forward-tracks remediation (five external analyzers, knip↔graph cross-check, validator
   duplicate-id reject).
-- **This lap (v0.31.3):** two remediate-code fixes, both "move host-remembered correctness into the tool".
+- **This lap (repo-internal, unpublished — `a71f509`):** hardened the `pre-commit-gate.mjs` hook against
+  hook-skip commits. The gate detected `git commit` but let `--no-verify`/`-n` and `core.hooksPath` overrides
+  through — each disables the hook, making green-at-every-commit a no-op. Now rejects (exit 2) any detected
+  commit statement carrying a skip token before running `check`. Test: `shared-core-invariants.test.mjs`
+  INV-shared-core-16 (4 bypass payloads → exit 2, 2 benign → exit 0). Also closed 2 of the 3 ecc-evaluation
+  spawn-safety leads: CVE-2024-27980 + tree-kill verified already-safe (no change); worktree node_modules sync
+  remains open (`docs/backlog.md` → forward tracks). Hook+test not in the published `files` set → commit+push
+  only, no npm publish. **Known limitation (fail-safe):** the regex gate also matches skip tokens inside a
+  commit-message body, so a message *mentioning* `--no-verify`/`core.hooksPath` is blocked — reword to commit
+  (it blocks, never wrongly allows).
+- **Prior lap (v0.31.3):** two remediate-code fixes, both "move host-remembered correctness into the tool".
   (1) **Intake hijack + discovery-contextualize.** A `--guidance-file` now trips the `input_conflict`
   resume-vs-restart gate against a run past intake (was: silently resumed/executed the old unrelated run) —
   `NextStepOptions.guidanceFileSupplied` threaded into `buildPreIntakeObligations`. The single-candidate
