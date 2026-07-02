@@ -44,6 +44,12 @@
   don't both plan + make a second next-step join the rolling frontier by default (implement is already
   cooperative; the shared step-writer fix already covers remediate's step slot). Then slice 5 = rewrite
   the [[concurrent-nextstep-staleness-cascade-wipe]] trap as resolved.
+- **Slice 4 (remediate phase mutex) SHIPPED:** a single `phase:main` mutex wraps the MAIN advance in
+  `decideNextStepLoop` (claimWithBackoff + heartbeat + `phase_busy` cooperative-wait), serializing the
+  serial phases (planning/triage/close) while leaving implement pooled (per-run `node-claims`). Remediate
+  now joins by default. **Only slice 5 remains:** rewrite the durable trap
+  [[concurrent-nextstep-staleness-cascade-wipe]] as resolved (docs-only) — the cooperative model
+  (per-run isolation + claims + per-agent step slot + serialized advances) supersedes "one call at a time".
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.

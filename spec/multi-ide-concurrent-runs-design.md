@@ -161,8 +161,18 @@ what" — no separate roster.
    dispatch `runId` is already per-invocation (ms-precision `buildRunId`), so concurrent peers' per-run
    files (`runs/<runId>/dispatch-plan.json`, result-map, pending-audit-tasks) already auto-isolate — no
    extra work needed. Tests: `step-contract-writer.test.mjs` (per-agent slot + shared mirror).
-4. **Remediate phase-claim + default join** — `phase:<name>` claims for serial phases; make a second
-   next-step join the rolling frontier by default.
+4. **Remediate phase mutex + default join — ✅ SHIPPED.** In `decideNextStepLoop` (`nextStep.ts`) a
+   single `phase:main` mutex (repo-level remediation `nodeClaimsPath`, `poolId = stateRunId`) wraps the
+   MAIN advance via `claimWithBackoff` + `withClaimHeartbeat`, released in `finally`; a peer that can't win
+   returns a non-persisting `phase_busy` cooperative-wait step (new step kind). State is re-loaded fresh
+   under the mutex (safe: for an established run the pre-intake gates are no-ops). This serializes the
+   SERIAL phases (planning/triage/close) so two peers never clobber `state.json`, but does NOT serialize
+   the heavy implement work — that runs out-of-process via the per-run implement `node-claims` (a distinct
+   file under `runs/<runId>/implement/`), so each peer emits its dispatch and claims disjoint nodes during
+   its mutex turn, then runs them in parallel. Mirrors audit slice 1. Implement was already cooperative;
+   the per-agent step slot came free with the shared slice-3 writer, so a second `remediate-code next-step`
+   now joins by default. Tests: `phase-mutex-cooperative.test.ts` (phase_busy on contention + no state
+   advance; normal advance when free).
 5. **Rewrite the durable trap** [[concurrent-nextstep-staleness-cascade-wipe]] → resolved by claim-based
    cooperation (execution outside the lock, claims prevent double-work, merges serialized).
 

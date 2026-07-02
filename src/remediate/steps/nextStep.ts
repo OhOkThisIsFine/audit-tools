@@ -30,7 +30,9 @@ import {
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { ownershipSubWaves } from "../dispatch/ownershipScheduler.js";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
-import type { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
+import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
+import { claimWithBackoff, withClaimHeartbeat } from "../../shared/quota/claimLease.js";
+import { nodeClaimsPath } from "../../shared/io/auditToolsPaths.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep, RemediationDispatchPlan } from "./types.js";
 import { dependencyVerifiedComplete } from "./stepUtils.js";
@@ -2146,6 +2148,50 @@ ${resetLine}
     allowedCommands: [nextCommand],
     stopCondition:
       "Stop and wait for the provider reset. Re-running next-step resumes the stranded nodes.",
+  });
+}
+
+// Cooperative multi-agent (slice 4): the single mutex node guarding this run's
+// in-process serial state-machine advance, and the heartbeat interval (well inside
+// STALE_LOCK_MS so a live long phase is never reclaimed).
+const REMEDIATE_PHASE_NODE = "phase:main";
+const PHASE_CLAIM_HEARTBEAT_MS = 10_000;
+
+// Cooperative multi-agent (slice 4, spec/multi-ide-concurrent-runs-design.md):
+// emitted when another agent/IDE currently holds the phase mutex and is advancing
+// this run's serial state machine. A non-blocking "retry shortly" — the host
+// re-runs next-step and joins once the peer yields (or finishes into the pooled
+// implement phase this peer can then join).
+async function buildPhaseBusyStep(params: {
+  root: string;
+  artifactsDir: string;
+  runId: string;
+}): Promise<RemediationStep> {
+  const { root, artifactsDir, runId } = params;
+  const nextCommand = loaderCommand("next-step");
+  return writeCurrentStep({
+    stepKind: "phase_busy",
+    status: "ready",
+    runId,
+    repoRoot: root,
+    artifactsDir,
+    prompt: `
+# Remediation busy — another agent is advancing this run
+
+Another agent/IDE is currently advancing this remediation's state machine (a
+serial phase — plan, triage, or close). Nothing is wrong; this is the cooperative
+multi-agent guard that stops two agents from running the same phase at once.
+
+Wait a few seconds, then run:
+
+\`${nextCommand}\`
+
+Once the peer yields — or the run reaches the parallel implement phase — your
+next-step joins in and takes on unclaimed work.
+`,
+    allowedCommands: [nextCommand],
+    stopCondition:
+      "Stop briefly, then re-run next-step to join the run once the peer yields the phase.",
   });
 }
 
@@ -4776,13 +4822,45 @@ async function decideNextStepLoop(
 
   await countStep(state);
 
-  const main = await advance(
-    { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
-    state,
-    ctx,
-  );
-  if (main.step) return main.step;
-  // The unhandled catch-all always emits on a non-null state, so a null step here
-  // is unreachable; keep an explicit fallback rather than a non-null assertion.
-  return handleUnhandledState(root, artifactsDir, state);
+  // Cooperative multi-agent (slice 4): a single phase mutex serializes the
+  // in-process MAIN advance so two joining peers never run the same SERIAL phase
+  // (planning / triage / close) and clobber state.json. This does NOT serialize
+  // the heavy implement work — that runs out-of-process via per-node claims; the
+  // mutex only guards the quick in-process advance + dispatch-emission, during
+  // which each peer claims its own disjoint nodes. Mirrors audit's bundle-mutation
+  // mutex (slice 1). Registry is the repo-level remediation node-claims file
+  // (distinct from the per-run implement node-claims under runs/<runId>/implement).
+  const phaseRegistry = new ClaimRegistry(nodeClaimsPath(artifactsDir));
+  const phaseRunId = stateRunId(state);
+  const phaseClaim = await claimWithBackoff(phaseRegistry, REMEDIATE_PHASE_NODE, {
+    poolId: phaseRunId,
+  });
+  if (!phaseClaim.acquired) {
+    return buildPhaseBusyStep({ root, artifactsDir, runId: phaseRunId });
+  }
+  try {
+    // Re-load fresh under the mutex: a peer may have advanced (and persisted)
+    // state between our initial load and winning the claim. For an established
+    // run (the multi-agent case) the pre-intake gates above were all no-ops, so
+    // the reload is simply the latest persisted state.
+    const advanceState = (await store.loadState()) ?? state;
+    const main = await withClaimHeartbeat(
+      phaseRegistry,
+      REMEDIATE_PHASE_NODE,
+      phaseClaim.ownerToken,
+      { intervalMs: PHASE_CLAIM_HEARTBEAT_MS },
+      () =>
+        advance(
+          { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
+          advanceState,
+          ctx,
+        ),
+    );
+    if (main.step) return main.step;
+    // The unhandled catch-all always emits on a non-null state, so a null step
+    // here is unreachable; keep an explicit fallback rather than a non-null assert.
+    return handleUnhandledState(root, artifactsDir, advanceState);
+  } finally {
+    await phaseRegistry.release(REMEDIATE_PHASE_NODE, phaseClaim.ownerToken);
+  }
 }
