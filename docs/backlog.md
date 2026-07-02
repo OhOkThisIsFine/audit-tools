@@ -202,22 +202,23 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   to key a graph-context lookup off of. The lesson generalizes: always verify which of several dispatch-prompt
   mechanisms is actually the LIVE one before scoping a fix around it.
   [[deterministic-analyzers-own-vs-acquire]] [[graph-signals-thin-substrate-extraction-persist]]
-- **Three borrow-level leads from the `affaan-m/ecc` evaluation (2026-06-28).** ecc itself is not adoptable/applicable
-  (agent-config distribution OS, wrong domain/stack — see `ecc-evaluation.md` on user Desktop), but a deeper pass
-  surfaced three idea/reference-level leads worth acting on, none requiring vendoring:
-  1. **Windows spawn-safety hardening** (highest value). ecc's `scripts/hooks/mcp-health-check.js` handles the same
-     Windows shim class as our `resolveWindowsShimSpawnCommand` (`src/shared/providers/opencodeLaunch.ts`) +
-     `spawnLoggedCommand.ts`, and additionally guards **CVE-2024-27980** (Windows `.cmd`/`.bat` arg shell-metachar
-     injection — only shell-wrap `.cmd`/`.bat`, with a metachar-safety check) and does `taskkill /T` **tree-kill** so
-     shell-wrapped children don't orphan on cancel. Action: (a) borrow the bare-command extension-probe fallback;
-     (b) confirm our provider cancel/timeout path **tree-kills** on Windows (cmd.exe-wrapped children); (c) security-
-     review our spawn path for CVE-2024-27980 (we just added `windowsVerbatimArguments` to the cmd.exe shim — verify
-     arg-injection safety). Relates to the just-shipped headless-codex Windows spawn fixes.
-  2. **Worktree shared-dep sync** — ecc2's `sync_shared_dependency_dirs` (`ecc2/src/worktree/mod.rs`) mechanizes
-     node_modules sync into fresh worktrees; directly addresses [[worktree-tests-miss-integration-guards]] /
+- **Borrow-level leads from the `affaan-m/ecc` evaluation (2026-06-28) — 1 & 3 CLOSED (2026-07-02), 2 remains.**
+  ecc itself is not adoptable/applicable (agent-config distribution OS, wrong domain/stack — see `ecc-evaluation.md`
+  on user Desktop), but a deeper pass surfaced three idea/reference-level leads, none requiring vendoring:
+  1. **Windows spawn-safety hardening — ✅ verified already-safe (2026-07-02), no change needed.** CVE-2024-27980:
+     the cmd.exe shim caret-escapes shell metachars (`quoteForShellInterpreterCmd`, `src/shared/tooling/exec.ts:191`)
+     and sets `windowsVerbatimArguments` only when spawning cmd.exe directly (`spawnLoggedCommand.ts:301`), so
+     config-derived args (e.g. `input.repoRoot`) can't inject — no vulnerable path found. Tree-kill: the cancel/
+     timeout path already `taskkill /pid <pid> /T /F`s the whole tree on win32 (`spawnLoggedCommand.ts:116` `killTree`).
+  3. **Hook bypass coverage — ✅ FIXED (2026-07-02).** Was: `.claude/hooks/pre-commit-gate.mjs` detected `git commit`
+     but let `git -c core.hooksPath=… commit`, `git -c core.hooksPath= commit`, and `--no-verify`/`-n` through — each
+     disables the hook, making the green-at-every-commit gate a no-op. Fix: once a commit is detected the gate now
+     rejects (exit 2) any statement containing `--no-verify`/`-n` or `core.hooksPath`, before the slow `npm run check`.
+     Test: `shared-core-invariants.test.mjs` INV-shared-core-16 (spawns the hook against 4 bypass payloads → exit 2;
+     2 benign → exit 0). Repo-internal (hook + test, not in published package) — commit+push only, no npm publish.
+  2. **Worktree shared-dep sync (STILL OPEN)** — ecc2's `sync_shared_dependency_dirs` (`ecc2/src/worktree/mod.rs`)
+     mechanizes node_modules sync into fresh worktrees; directly addresses [[worktree-tests-miss-integration-guards]] /
      fresh-worktree-no-node_modules. Borrow-idea for our per-node remediation worktree setup.
-  3. **Hook bypass coverage** — ecc's `block-no-verify.js` also blocks the `git -c core.hooksPath=` bypass; confirm
-     our `.claude/hooks/` commit gate (`pre-commit-gate.mjs`) blocks that vector too, not just `--no-verify`.
 - **Codebase-wide churn / context / enforce-in-tooling pass — remainder.** Run one perspective over the whole
   codebase: hunt (a) **unnecessary churn** — anywhere we recompute / re-derive / re-dispatch more than the actual
   delta demands; (b) **unnecessary context** — anywhere we ship more than needed into a prompt or step; (c)

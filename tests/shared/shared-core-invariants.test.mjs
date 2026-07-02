@@ -7,6 +7,7 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -667,6 +668,34 @@ test("INV-shared-core-16: pre-commit-gate.mjs exists and blocks git commit on ch
 
   // Gate must exit non-zero to block the commit when check fails.
   expect(source.includes("process.exit(2)"), "pre-commit-gate.mjs must call process.exit(2) to block a failing commit — CRIT-tests-with-source").toBeTruthy();
+});
+
+test("INV-shared-core-16: pre-commit-gate.mjs rejects hook-bypass commits (--no-verify / core.hooksPath)", () => {
+  const gatePath = resolve(REPO_ROOT, ".claude/hooks/pre-commit-gate.mjs");
+  const runGate = (command) =>
+    spawnSync(process.execPath, [gatePath], {
+      input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }),
+      encoding: "utf8",
+    });
+
+  // Bypass vectors must be blocked (exit 2) — these disable the hook, making the
+  // gate a no-op. The bypass check runs before `npm run check`, so this is fast.
+  for (const bypass of [
+    "git commit --no-verify -m x",
+    "git commit -n -m x",
+    "git -c core.hooksPath=/tmp commit -m x",
+    "git -c core.hooksPath= commit -m x",
+  ]) {
+    const r = runGate(bypass);
+    expect(r.status, `pre-commit-gate must block bypass: ${bypass}\n${r.stderr}`).toBe(2);
+  }
+
+  // A non-commit command must pass through untouched (exit 0), never triggering
+  // the bypass block on an unrelated `-n`.
+  for (const benign of ["git status -n", "echo done"]) {
+    const r = runGate(benign);
+    expect(r.status, `pre-commit-gate must allow non-commit: ${benign}\n${r.stderr}`).toBe(0);
+  }
 });
 
 test("INV-shared-core-16: async-typecheck hook exists and covers all three packages", () => {

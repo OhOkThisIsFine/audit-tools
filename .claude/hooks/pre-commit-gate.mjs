@@ -19,6 +19,19 @@ try {
 // not the word "commit" elsewhere (e.g. git log --grep=commit).
 if (!/\bgit\b[^\n|;&]*\bcommit\b/.test(cmd)) process.exit(0);
 
+// Gate-bypass vectors — a commit that disables hooks makes this gate a no-op,
+// so refuse it outright (the gate can't run `check` if git skips the hook, and
+// silently allowing the bypass defeats green-at-every-commit). Covers the
+// `--no-verify`/`-n` flag and any `core.hooksPath` override (`-c core.hooksPath=…`
+// or the GIT_CONFIG_* env form), matched anywhere in the statement.
+if (/--no-verify\b|(^|[\s;&|])-n(?=[\s;&|]|$)|\bcore\.hooksPath\b/.test(cmd)) {
+  console.error(
+    'pre-commit gate: commit rejected — hook-bypass flag detected (`--no-verify`/`-n` or `core.hooksPath` override). ' +
+      'These skip the green-at-every-commit gate. Remove the bypass and commit normally; if `npm run check` fails, fix it first.',
+  );
+  process.exit(2);
+}
+
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 try {
   execSync('npm run check', {
