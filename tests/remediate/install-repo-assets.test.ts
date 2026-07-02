@@ -95,6 +95,22 @@ describe("global-first install helpers", () => {
   });
 });
 
+describe("committed host-asset no-drift guard", () => {
+  it("committed .agent/skills/remediate-code/SKILL.md matches canonical skills/remediate-code/SKILL.md", () => {
+    const lf = (text: string) => text.replace(/\r\n/g, "\n");
+    const installed = lf(
+      readFileSync(join(PKG_ROOT, ".agent", "skills", "remediate-code", "SKILL.md"), "utf8"),
+    );
+    const canonical = lf(
+      readFileSync(join(PKG_ROOT, "skills", "remediate-code", "SKILL.md"), "utf8"),
+    );
+    expect(
+      installed,
+      "Committed .agent/skills/remediate-code/SKILL.md drifted from the canonical skills/remediate-code/SKILL.md. Re-run `remediate-code install` (or regenerate the asset).",
+    ).toBe(canonical);
+  });
+});
+
 describe("runValidateCommand", () => {
   it("returns 0 when type checking succeeds", () => {
     const logs: string[] = [];
