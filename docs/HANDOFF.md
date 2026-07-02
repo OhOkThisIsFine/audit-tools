@@ -8,12 +8,20 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.31.3** (both global bins reinstalled + verified). v0.31.3 shipped two
-  remediate-code intake/merge tool-enforce fixes (see *This lap*). v0.31.2 shipped the two churn/context
+- On npm as `latest` at **v0.31.4** (both global bins reinstalled + verified). v0.31.4 folded the
+  worktree node_modules link into `createWorktree` (enforce-in-tooling; closes ecc-evaluation lead 2).
+  v0.31.3 shipped two remediate-code intake/merge tool-enforce fixes. v0.31.2 shipped the two churn/context
   follow-ons from the 2026-07-02 lens pass. v0.31.1 fixed the contract-pipeline repair-revert bug. v0.31.0
   shipped the T5 forward-tracks remediation (five external analyzers, knip↔graph cross-check, validator
   duplicate-id reject).
-- **This lap (repo-internal, unpublished — `a71f509`):** hardened the `pre-commit-gate.mjs` hook against
+- **This lap (v0.31.4 — `091e403`):** folded `ensureWorktreeNodeModules` into `createWorktree`
+  (`src/remediate/steps/{dispatch,rollingSession}.ts`). The main-checkout node_modules junction into a fresh
+  worktree was a maintainer-remembered paired call at both worktree-creation sites — a future 3rd creator could
+  omit it and silently fail per-node verify. Now a worktree can't be created without the link. Behavior-neutral
+  (both sites already made the call). Closes ecc-evaluation lead 2. Test: `rolling-provider-dispatch.test.ts` G3.
+  ecc-evaluation leads 1 & 3 also closed earlier this session (spawn-safety verified already-safe; commit-gate
+  bypass hardened, repo-internal). ecc track fully closed.
+- **Prior lap (repo-internal, unpublished — `a71f509`):** hardened the `pre-commit-gate.mjs` hook against
   hook-skip commits. The gate detected `git commit` but let `--no-verify`/`-n` and `core.hooksPath` overrides
   through — each disables the hook, making green-at-every-commit a no-op. Now rejects (exit 2) any detected
   commit statement carrying a skip token before running `check`. Test: `shared-core-invariants.test.mjs`
