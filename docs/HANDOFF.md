@@ -27,11 +27,14 @@
   preserved under quarantine. (`src/remediate/steps/dispatch.ts`.) Tests: `intake-resolver.test.ts`,
   `next-step-resume-gates.test.ts`, `dispatch-worktree.test.ts`. Full remediate suite green (2111/0).
 - **Immediate next:** Multi-agent COOPERATIVE runs — arbitrary agents/IDEs join and contribute to ONE
-  shared audit/remediation (NOT isolated runs; first draft was corrected). Design of record:
+  shared audit/remediation. Design of record:
   [`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md). Reuses the
-  existing cross-process `ClaimRegistry`. Slice 0 (revert the wrong isolation code) done. Next build unit:
-  slice 1 = audit lock-split (claim→execute→merge; executor OUT of `artifact-tree.lock`). Open decisions
-  OD1/OD2/OD3 in the doc gate slice 2 (task claiming) — pending Ethan.
+  cross-process `ClaimRegistry`. Slices 0 (revert isolation) + **1 (audit lock-split + `bundle-mutation`
+  claim, executor out of `artifact-tree.lock`, heartbeat + merge-time ownership gate) SHIPPED** (all
+  OD1/OD2/OD3 settled). **Next build unit: slice 2** = audit task-POOL claiming (partition the
+  `audit_tasks` packet by per-`task_id` claim so N peers' hosts run disjoint tasks) + a configurable
+  per-registry stale-window on `ClaimRegistry` (OD3 long lease). Then slice 3 (per-agent step slot), 4
+  (remediate phase-claim + default join), 5 (rewrite the staleness-cascade-wipe trap as resolved).
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.

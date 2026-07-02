@@ -110,18 +110,31 @@ what" — no separate roster.
 ## Implementation slices (each a green atomic commit)
 
 0. **Revert the isolation code** (`runRegistry.ts`, per-run path helpers, index exports, test) — design
-   correction. *(this commit)*
-1. **Audit lock-split** — claim → execute → merge in `auditStep.ts` / `advance.ts`; short lock only
-   around load+decide+persist, executor outside. Single-agent behavior identical; unblocks parallel
-   execution. (Enabler; no claiming yet.)
-2. **Audit task claiming** — shared `ClaimRegistry` at `audit_tasks`; per-peer task claim + heartbeat +
-   release; cooperative-wait step when the frontier is a held serial obligation.
+   correction. *(done)*
+1. **Audit lock-split WITH exclusive bundle-mutation claim — ✅ SHIPPED.** In `auditStep.ts`:
+   `classifyStep` probes (short lock) whether the current step runs a deterministic bundle-mutating
+   runner. If so: `claimWithBackoff` the single `bundle-mutation` mutex node in a shared audit
+   `ClaimRegistry` (`.audit-tools/audit/node-claims.json`); re-load fresh under the claim; execute the
+   runner UNLOCKED under `withClaimHeartbeat`; persist under a short lock gated by a merge-time ownership
+   re-validation (`registry.heartbeat` — OD3 layer 2); release in `finally`. A peer that can't win the
+   mutex returns a non-persisting cooperative-wait result (OD1 backoff already exhausted inside
+   `claimWithBackoff`). The host-delegation handoff / complete / no-runner path keeps the original
+   short-lock RMW (`runAuditStepLocked`), no claim. Single-agent behavior identical (always wins its own
+   mutex). **Why one mutex, not `obligation:<id>`:** a single node avoids the "obligation advanced while I
+   waited" mismatch — the winner re-loads and executes whatever is current. **Why coupled to the split:**
+   `writeCoreArtifacts(prune:true)` is a full-bundle replace, so executing outside the lock is only safe
+   because the mutex makes bundle mutation serial (audit's frontier is singular); without it two unlocked
+   executors clobber each other's persist (the wipe trap). Reusable helpers: `claimWithBackoff` /
+   `withClaimHeartbeat` (`src/shared/quota/claimLease.ts`). Tests: `tests/shared/claim-lease.test.mjs`;
+   full shared+audit suite green (3434/0).
+2. **Audit task-POOL claiming** — when the current obligation is `audit_tasks`, partition the packet by
+   per-task `claim(task_id)` so N peers' hosts run DISJOINT tasks; workers append to `audit_results.jsonl`
+   (already append-safe, no bundle persist); ingest stays an exclusive obligation-claim (slice 1).
+   Includes the configurable per-registry stale-window on `ClaimRegistry` (OD3 lease) + heartbeat cadence.
 3. **Per-agent step slot** (both orchestrators) — `steps/<agentId>/…` + shared latest-pointer.
 4. **Remediate phase-claim + default join** — `phase:<name>` claims for serial phases; make a second
    next-step join the rolling frontier by default.
-5. **Serial-obligation claim wrapper (audit)** — `obligation:<name>` claim so two peers never both run
-   `repo_manifest`/`synthesis`; wire cooperative-wait uniformly.
-6. **Rewrite the durable trap** [[concurrent-nextstep-staleness-cascade-wipe]] → resolved by claim-based
+5. **Rewrite the durable trap** [[concurrent-nextstep-staleness-cascade-wipe]] → resolved by claim-based
    cooperation (execution outside the lock, claims prevent double-work, merges serialized).
 
 ## Decisions on the open questions (settled, Ethan 2026-07-02)
