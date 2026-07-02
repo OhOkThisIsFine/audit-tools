@@ -124,16 +124,27 @@ what" — no separate roster.
 6. **Rewrite the durable trap** [[concurrent-nextstep-staleness-cascade-wipe]] → resolved by claim-based
    cooperation (execution outside the lock, claims prevent double-work, merges serialized).
 
-## Open decisions (surface before slice 2)
+## Decisions on the open questions (settled, Ethan 2026-07-02)
 
-- **OD1 — Cooperative-wait shape.** When a joining peer finds only a held serial obligation, does its
-  `next-step` return (a) a "retry — peer working `<unit>`" contract the host re-invokes after a short
-  delay, or (b) block on a short bounded wait then re-resolve? Recommend (a) — non-blocking, host-paced,
-  matches the "one bounded step" model.
-- **OD2 — Multiple DISTINCT shared runs on one repo.** Default is one shared audit + one shared
-  remediation. Do we ever need two *different* concurrent shared audits (e.g. different scope) on one
-  repo? Recommend NO for now — YAGNI; the shared tree is the run. Revisit only on a real need.
-- **OD3 — Claim heartbeat cadence during a long executor.** `STALE_LOCK_MS` is the reclaim window; a
-  unit that runs longer than that without a heartbeat gets reclaimed (double-worked, tolerable via
-  dedup-by-id but wasteful). Confirm the heartbeat interval / whether long audit tasks need a longer
-  lease than the shared `STALE_LOCK_MS`.
+- **OD1 — Cooperative-wait = bounded backoff THEN hand back.** A peer whose only frontier work is a
+  held serial obligation does a few short **in-process bounded waits of increasing duration**
+  (re-resolving the frontier between them, to catch a quick opening cheaply); if still blocked, it
+  returns the **non-blocking "retry — peer working `<unit>`" contract** for the host to re-invoke. Best
+  of both: fast pickup when the serial step finishes quickly, host-paced when it doesn't.
+- **OD2 — One shared run each (YAGNI).** Exactly one shared audit + one shared remediation per repo; the
+  shared tree IS the run. No multi-distinct-run namespacing. Revisit only on a real need.
+- **OD3 — Long per-task lease + heartbeats + a REVOCATION protocol.** Audit task claims get a lease
+  longer than the shared `STALE_LOCK_MS` (long tasks aren't reclaimed prematurely) AND the executing
+  peer heartbeats on a timer. The critical addition: when A's lease *does* go stale and B reclaims it,
+  and A later wakes, **A must be told its claim is void and abandon its work** — never write a stale
+  result over B's. Mechanism (all token-checked, already supported by `ClaimRegistry`):
+  1. **Merge-time ownership re-validation (mandatory gate).** Before ingesting its result A calls
+     `heartbeat(nodeId, ownerToken)` (or `isClaimed` + token compare); if it returns `false` (B now
+     owns, or the claim is gone), A **discards its result and abandons** — the merge is refused. This is
+     the hard guarantee: a superseded peer can never land a result, enforced at the single merge
+     chokepoint, not by A "remembering."
+  2. **Mid-execution bail (optimization).** A's periodic heartbeat returning `false` signals revocation
+     early, so A can stop wasted work before finishing — but correctness rests on gate (1), not on A
+     noticing in time.
+  The lease length and heartbeat interval are a `(taskLeaseMs, heartbeatMs)` pair with
+  `heartbeatMs << taskLeaseMs << (typical task duration ceiling)`; concrete values set in slice 2.
