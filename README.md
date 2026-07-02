@@ -1,15 +1,15 @@
 # audit-tools
 
-One npm package shipping **two independent code tools** over a shared library. Each has its
+One npm package shipping two independent code tools over a shared library. Each has its
 own CLI and host slash-command, and each is useful on its own:
 
-- **`audit-code`** (`/audit-code`) — audits a repository and produces a findings report.
-- **`remediate-code`** (`/remediate-code`) — implements changes from findings, free-form intent, or both together.
+- **`audit-code`** (`/audit-code`) — audits a repository/project and produces a findings report.
+- **`remediate-code`** (`/remediate-code`) — implements changes from findings and/or free-form intent.
 
-They **compose but don't depend on each other**: audit-code's findings are valid input to
+They **compose but don't depend on each other**: audit-code's findings are clean input to
 remediate-code, but you can run either alone. Audit a repo and stop. Or point remediate-code
 at a plain-English request with no audit in sight — or hand it audit findings *and* extra
-instructions at the same time.
+suggestions at the same time.
 
 Each tool writes its results to `.audit-tools/` as a machine contract (JSON) plus a
 human-readable render (markdown):
@@ -36,17 +36,17 @@ no manual path, provider, or model flags. The agent works its way through the wh
 on its own, running against your active conversation model, and only stops to ask you when it
 needs a real decision (scope, ambiguous intent, whether to open a PR, and the like).
 
-**Audit a repository:**
+**Audit a code base:**
 
 ```text
 /audit-code
 ```
 
-You'll confirm scope and which lenses to review (security, correctness, reliability, and
-data-integrity are always on), then it runs to completion and leaves `audit-findings.json` +
+You'll confirm scope and which lenses to apply (security, correctness, reliability,
+data-integrity, etc.), then it runs to completion and leaves `audit-findings.json` +
 `audit-report.md` in `.audit-tools/`.
 
-**Remediate — from findings, a request, or both:**
+**Remediate issues or implement changes:**
 
 ```text
 /remediate-code path/to/audit-findings.json
@@ -63,11 +63,11 @@ review a summary before anything is committed.
 - **It drives itself.** A single slash-command runs the full workflow; it pauses only for
   clarifications, not to hand each step back to you.
 - **Runs are resumable.** State persists to `.audit-tools/` in the target repo, so an
-  interrupted run picks up where it left off — just invoke the command again.
-- **Work runs in parallel** where it safely can, and remediation always re-validates its
-  changes rather than trusting any input blindly.
-- **Effort scales to the work.** Trivial changes get light review; risky or complex ones get
-  deeper scrutiny before anything lands.
+  interrupted run picks up where it left off.
+- **Work runs in parallel** where it safely can, even allowing for coordination between
+  different IDEs, different providers, CLIs, local models, etc.
+- **Effort scales to the work.** Trivial work gets light review; risky or complex work
+  gets deeper scrutiny.
 
 ### The pipelines, step by step
 
