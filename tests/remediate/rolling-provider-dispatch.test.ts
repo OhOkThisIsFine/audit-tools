@@ -161,6 +161,20 @@ describe("G3: ensureWorktreeNodeModules", () => {
     expect(() => ensureWorktreeNodeModules(main, wt)).not.toThrow();
     expect(existsSync(join(wt, "node_modules"))).toBe(false);
   });
+
+  it("createWorktree links node_modules itself (guarantee is not caller-remembered)", () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return; // git unavailable → skip
+    mkdirSync(join(repo, "node_modules"), { recursive: true });
+    writeFileSync(join(repo, "node_modules", "marker.txt"), "dep\n");
+
+    const branch = worktreeBranchForBlock("NM", "RID");
+    const wt = join(repo, ".wt-NM");
+    // No separate ensureWorktreeNodeModules call — createWorktree must fold it in.
+    createWorktree(repo, wt, branch);
+
+    expect(existsSync(join(wt, "node_modules", "marker.txt"))).toBe(true);
+  });
 });
 
 // ===========================================================================

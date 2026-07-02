@@ -628,6 +628,11 @@ export function createWorktree(root: string, worktreePath: string, branchName: s
       `git worktree add failed (exit ${result.status ?? "unknown"}):\n${stderr || stdout}`,
     );
   }
+  // Link the main checkout's (gitignored → absent-in-worktree) node_modules so
+  // per-node verify can resolve deps. Folded into creation, not left to each
+  // caller to remember — a fresh worktree without it silently fails verify with
+  // missing-module errors. Best-effort + idempotent (see ensureWorktreeNodeModules).
+  ensureWorktreeNodeModules(root, worktreePath);
 }
 
 /**
@@ -1781,12 +1786,11 @@ export async function executeNodeInWorktree(args: {
   try {
     // Idempotent reset of any worktree dir AND leftover branch from a prior attempt
     // (a `rate_limited` re-queue re-enters for the same block with its branch still
-    // present), then create this node's isolated worktree, link the main checkout's
-    // node_modules (gitignored → absent in a fresh worktree) so verify can run, and
-    // seed untracked declared targets a committed-files-only worktree can't see.
+    // present), then create this node's isolated worktree (createWorktree also links
+    // the main checkout's node_modules so verify can resolve deps), and seed
+    // untracked declared targets a committed-files-only worktree can't see.
     resetNodeWorktreeAndBranch(root, wt, branch);
     createWorktree(root, wt, branch);
-    ensureWorktreeNodeModules(root, wt);
     seedUntrackedDeclaredPaths(root, wt, seedPaths);
     const result = await dispatchNode({ block, slot, worktreeRoot: wt, resultPath });
     // Shared post-worker lifecycle. Verify commands are DERIVED from the node's

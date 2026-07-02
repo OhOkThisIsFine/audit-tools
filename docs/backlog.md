@@ -216,9 +216,14 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
      rejects (exit 2) any statement containing `--no-verify`/`-n` or `core.hooksPath`, before the slow `npm run check`.
      Test: `shared-core-invariants.test.mjs` INV-shared-core-16 (spawns the hook against 4 bypass payloads → exit 2;
      2 benign → exit 0). Repo-internal (hook + test, not in published package) — commit+push only, no npm publish.
-  2. **Worktree shared-dep sync (STILL OPEN)** — ecc2's `sync_shared_dependency_dirs` (`ecc2/src/worktree/mod.rs`)
-     mechanizes node_modules sync into fresh worktrees; directly addresses [[worktree-tests-miss-integration-guards]] /
-     fresh-worktree-no-node_modules. Borrow-idea for our per-node remediation worktree setup.
+  2. **Worktree shared-dep sync — ✅ DONE (2026-07-02).** The mechanism already existed
+     (`ensureWorktreeNodeModules`, `src/remediate/steps/dispatch.ts`: junction-links the main checkout's
+     gitignored `node_modules` into each fresh worktree so per-node verify resolves deps) — audit-code creates
+     no worktrees, so no parity gap. This lap closed the remaining latent failure mode: the link was a
+     maintainer-remembered paired call after `createWorktree` at BOTH call sites (`dispatch.ts` + `rollingSession.ts`),
+     so a future 3rd worktree creator could forget it and silently fail verify. Folded the link INTO `createWorktree`
+     (enforce-in-tooling, not host discretion) — a worktree can no longer be created without it. Test:
+     `rolling-provider-dispatch.test.ts` G3 ("createWorktree links node_modules itself"). [[worktree-tests-miss-integration-guards]]
 - **Codebase-wide churn / context / enforce-in-tooling pass — remainder.** Run one perspective over the whole
   codebase: hunt (a) **unnecessary churn** — anywhere we recompute / re-derive / re-dispatch more than the actual
   delta demands; (b) **unnecessary context** — anywhere we ship more than needed into a prompt or step; (c)

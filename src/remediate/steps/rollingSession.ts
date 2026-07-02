@@ -9,7 +9,6 @@ import {
   prepareImplementDispatch,
   createWorktree,
   resetNodeWorktreeAndBranch,
-  ensureWorktreeNodeModules,
   seedUntrackedDeclaredPaths,
   declaredPathsFromPlan,
   worktreePath,
@@ -154,8 +153,7 @@ function createNodeWorktree(
   // bare removeWorktree leaves the branch behind and `git worktree add -b` then
   // fails "branch already exists" (parity with the in-process driver's reset).
   resetNodeWorktreeAndBranch(root, wt, branch);
-  createWorktree(root, wt, branch);
-  ensureWorktreeNodeModules(root, wt);
+  createWorktree(root, wt, branch); // also links main node_modules (folded in)
   // Bring in declared targets that are untracked/ignored in the main tree — a
   // committed-files-only worktree otherwise can't see them (BUG: a config node
   // couldn't reach its own untracked opencode.json / .gemini/*.toml targets).
