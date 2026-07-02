@@ -1255,3 +1255,152 @@ test("validateAuditResults: small total_lines mismatch stays an advisory warning
     "a small mismatch must not produce any hard-reject error",
   );
 });
+
+// ── CP-NODE-4: intra-result duplicate finding-id hard-reject ───────────────────
+
+test("CP-NODE-4: distinct finding ids in the same result produce zero id-duplication issues", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-ids",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "SEC-001",
+            title: "First",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "First finding.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
+            evidence: ["e"],
+          },
+          {
+            id: "SEC-002",
+            title: "Second",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "Second finding.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 2 }],
+            evidence: ["e"],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-ids",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    { lineIndex: { "src/api/auth.ts": 10 } },
+  );
+
+  const dupIdIssues = issues.filter((i) => /finding id .* is duplicated/i.test(i.message));
+  assert.equal(dupIdIssues.length, 0, `expected no duplicate-id issues; got: ${JSON.stringify(dupIdIssues)}`);
+});
+
+test("CP-NODE-4: two findings in one result sharing an id produce exactly one duplicate-id error", () => {
+  const issues = validateAuditResults(
+    [
+      {
+        task_id: "task-dupid",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+        findings: [
+          {
+            id: "SEC-DUP",
+            title: "First",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "First finding.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
+            evidence: ["e"],
+          },
+          {
+            id: "SEC-DUP",
+            title: "Second",
+            category: "security",
+            severity: "high",
+            confidence: "high",
+            lens: "security",
+            summary: "Second finding sharing the id.",
+            affected_files: [{ path: "src/api/auth.ts", line_start: 2 }],
+            evidence: ["e"],
+          },
+        ],
+      },
+    ],
+    [
+      {
+        task_id: "task-dupid",
+        unit_id: "unit-1",
+        pass_id: "pass:security",
+        lens: "security",
+        file_paths: ["src/api/auth.ts"],
+        rationale: "fixture",
+      },
+    ],
+    { lineIndex: { "src/api/auth.ts": 10 } },
+  );
+
+  const dupIdIssues = issues.filter(
+    (i) => i.severity === "error" && i.field === "findings[1].id" && /finding id .* is duplicated/i.test(i.message),
+  );
+  assert.equal(dupIdIssues.length, 1, `expected exactly one duplicate-id error at findings[1].id; got: ${JSON.stringify(issues)}`);
+  assert.match(dupIdIssues[0].message, /SEC-DUP/);
+});
+
+test("CP-NODE-4: the same finding id reused across DIFFERENT results does not flag as a duplicate", () => {
+  const task = {
+    task_id: "task-cross",
+    unit_id: "unit-1",
+    pass_id: "pass:security",
+    lens: "security",
+    file_paths: ["src/api/auth.ts"],
+    rationale: "fixture",
+  };
+  const makeResult = () => ({
+    task_id: "task-cross",
+    unit_id: "unit-1",
+    pass_id: "pass:security",
+    lens: "security",
+    file_coverage: [{ path: "src/api/auth.ts", total_lines: 10 }],
+    findings: [
+      {
+        id: "SEC-SHARED",
+        title: "T",
+        category: "security",
+        severity: "high",
+        confidence: "high",
+        lens: "security",
+        summary: "S",
+        affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
+        evidence: ["e"],
+      },
+    ],
+  });
+
+  const issues = validateAuditResults(
+    [makeResult(), makeResult()],
+    [task],
+    { lineIndex: { "src/api/auth.ts": 10 } },
+  );
+
+  const dupIdIssues = issues.filter((i) => /finding id .* is duplicated/i.test(i.message));
+  assert.equal(dupIdIssues.length, 0, `same id across separate results must not flag; got: ${JSON.stringify(dupIdIssues)}`);
+});
