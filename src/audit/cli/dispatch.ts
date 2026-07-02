@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { readJsonFile, writeJsonFile, computeDispatchCapacity } from "audit-tools/shared";
 import type { SessionConfig, CapacityPool } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
-import { isFileMissingError } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath } from "audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { writePacketSchemaFiles } from "../io/runArtifacts.js";
@@ -118,7 +118,12 @@ export {
   resolveRunScopedArg,
 };
 
-
+// Lease window for a cooperative audit-task claim (slice 2). Long because the
+// claim is held across an OUT-OF-PROCESS host worker run with no live heartbeat,
+// so it must bound a worker's whole runtime; a genuinely-crashed peer's claim is
+// reclaimed after this window. Correctness for the rare legitimate overrun rests
+// on dedup-by-task_id at ingest, not on this value being exact.
+const AUDIT_TASK_CLAIM_LEASE_MS = 20 * 60_000;
 
 export async function prepareDispatchArtifacts(params: {
   packageRoot: string;
@@ -205,9 +210,35 @@ export async function prepareDispatchArtifacts(params: {
       priorResultTaskIds.add(task.task_id);
     }
   }
-  const dispatchTasks = priorResultTaskIds.size > 0
+  const candidateTasks = priorResultTaskIds.size > 0
     ? tasks.filter((task) => !priorResultTaskIds.has(task.task_id))
     : tasks;
+
+  // Cooperative multi-agent task claiming (slice 2,
+  // spec/multi-ide-concurrent-runs-design.md). Claim each candidate task in the
+  // shared per-run task-claims registry so concurrent peers dispatch DISJOINT
+  // subsets: a task a live peer holds (in-flight on that peer's host) is omitted
+  // here — its result will arrive via the shared ledger, and a crashed peer's
+  // claim goes stale (long lease) for reclaim. Claims for tasks we end up NOT
+  // emitting (deferred by the top-K budget cap) are released below so peers can
+  // take them. The A-8 hybrid in-process driver already owns a coordinator-
+  // assigned disjoint partition (`tasksOverride`), so it is exempt.
+  const taskClaims = params.tasksOverride
+    ? null
+    : new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
+  const dispatchTasks = taskClaims
+    ? await (async () => {
+        // poolId = runId so THIS run's repeated dispatch re-grants its own
+        // in-flight tasks (idempotent), while a different IDE's run (distinct
+        // runId) is partitioned off. See ClaimRegistry.claimMany.
+        const { granted } = await taskClaims.claimMany(
+          candidateTasks.map((task) => task.task_id),
+          runId,
+        );
+        const grantedSet = new Set(granted);
+        return candidateTasks.filter((task) => grantedSet.has(task.task_id));
+      })()
+    : candidateTasks;
 
   const lineIndex = Object.fromEntries(
     dispatchTasks.flatMap((task) =>
@@ -311,6 +342,19 @@ export async function prepareDispatchArtifacts(params: {
   const { emitPackets, deferredPackets } =
     filterPackets(packets, sessionConfig);
   const budgetCapped = deferredPackets.length > 0;
+
+  // Release claims we took on tasks that were NOT emitted this round (deferred by
+  // the top-K budget cap): holding them would hoard deferred work a peer could
+  // otherwise pick up. Only the emitted subset stays claimed (in-flight to us).
+  if (taskClaims) {
+    const emittedTaskIds = new Set(
+      emitPackets.flatMap((packet) => packet.task_ids),
+    );
+    const deferredClaimed = dispatchTasks
+      .map((task) => task.task_id)
+      .filter((taskId) => !emittedTaskIds.has(taskId));
+    if (deferredClaimed.length > 0) await taskClaims.clear(deferredClaimed);
+  }
 
   const plan: DispatchPlanEntry[] = [];
   const resultMapEntries: DispatchResultMapEntry[] = [];

@@ -77,24 +77,33 @@ async function writeClaimMap(registryPath: string, claims: ClaimMap): Promise<vo
   await writeFile(registryPath, `${JSON.stringify(claims, null, 2)}\n`, "utf8");
 }
 
-function isStale(record: ClaimRecord, now: number): boolean {
-  return now - record.heartbeatAt > STALE_LOCK_MS;
-}
-
 /**
  * File-backed claim registry. The caller owns the path (and may point two
  * coordinators at the same file — that is the whole point). Every mutating op
  * runs its entire read-modify-write inside `withFileLock(registryPath + '.lock')`
  * so concurrent loops are serialized and the single-grant invariant holds.
+ *
+ * The stale-reclaim window defaults to the file lock's `STALE_LOCK_MS` but is
+ * per-registry configurable (`staleMs`): a claim guarding a long unit of work
+ * (e.g. an audit task whose LLM execution outruns 30s) needs a longer lease than
+ * a short state mutation, so a genuinely-live owner heartbeating on a timer is
+ * never reclaimed mid-flight (OD3, `spec/multi-ide-concurrent-runs-design.md`).
  */
 export class ClaimRegistry {
   private readonly lockPath: string;
+  private readonly staleMs: number;
 
   constructor(
     private readonly registryPath: string,
     private readonly now: () => number = () => Date.now(),
+    staleMs: number = STALE_LOCK_MS,
   ) {
     this.lockPath = `${registryPath}.lock`;
+    this.staleMs = staleMs;
+  }
+
+  private isStale(record: ClaimRecord, now: number): boolean {
+    return now - record.heartbeatAt > this.staleMs;
   }
 
   /**
@@ -108,13 +117,75 @@ export class ClaimRegistry {
       const claims = await readClaimMap(this.registryPath);
       const now = this.now();
       const existing = claims[nodeId];
-      if (existing && !isStale(existing, now)) {
+      if (existing && !this.isStale(existing, now)) {
         return { acquired: false, heldBy: existing.ownerToken };
       }
       const ownerToken = mintOwnerToken();
       claims[nodeId] = { ownerToken, poolId, heartbeatAt: now };
       await writeClaimMap(this.registryPath, claims);
       return { acquired: true, ownerToken };
+    });
+  }
+
+  /**
+   * Claim as many of `nodeIds` as are free (unclaimed or stale) in ONE lock-held
+   * read-modify-write — the batch analogue of `claim`, so a peer partitioning a
+   * pool of N tasks pays a single file write instead of N. Returns the granted
+   * subset (nodeIds this call now owns) with their fresh owner tokens.
+   *
+   * `poolId` doubles as the OWNER identity for re-grant: a node already held by a
+   * DIFFERENT live pool is omitted (that peer's disjoint partition), but a node
+   * already held by the SAME `poolId` is RE-GRANTED (heartbeat refreshed). This
+   * makes a caller that re-runs the partition under a stable poolId idempotent —
+   * it reclaims its own in-flight nodes instead of skipping them — while distinct
+   * pools still partition disjointly. (Audit passes the runId as poolId: one run's
+   * repeated dispatch re-grants; two IDEs' runs skip each other.)
+   */
+  async claimMany(
+    nodeIds: readonly string[],
+    poolId: string,
+  ): Promise<{ granted: string[]; ownerTokenByNode: Record<string, string> }> {
+    return withFileLock(this.lockPath, async () => {
+      const claims = await readClaimMap(this.registryPath);
+      const now = this.now();
+      const granted: string[] = [];
+      const ownerTokenByNode: Record<string, string> = {};
+      for (const nodeId of nodeIds) {
+        const existing = claims[nodeId];
+        // Skip only when a DIFFERENT pool holds it live; my own live claim is
+        // re-grantable (idempotent re-partition).
+        if (existing && !this.isStale(existing, now) && existing.poolId !== poolId) {
+          continue;
+        }
+        const ownerToken = mintOwnerToken();
+        claims[nodeId] = { ownerToken, poolId, heartbeatAt: now };
+        granted.push(nodeId);
+        ownerTokenByNode[nodeId] = ownerToken;
+      }
+      if (granted.length > 0) await writeClaimMap(this.registryPath, claims);
+      return { granted, ownerTokenByNode };
+    });
+  }
+
+  /**
+   * Unconditionally remove claims for `nodeIds` (no token check), returning how
+   * many were present. For authoritative release points where the work is known
+   * done regardless of who dispatched it — e.g. releasing a task claim once its
+   * result has been ingested — and for releasing over-claimed (deferred) nodes a
+   * peer should be free to take. Distinct from `release`, which is token-checked.
+   */
+  async clear(nodeIds: readonly string[]): Promise<number> {
+    return withFileLock(this.lockPath, async () => {
+      const claims = await readClaimMap(this.registryPath);
+      let removed = 0;
+      for (const nodeId of nodeIds) {
+        if (claims[nodeId]) {
+          delete claims[nodeId];
+          removed += 1;
+        }
+      }
+      if (removed > 0) await writeClaimMap(this.registryPath, claims);
+      return removed;
     });
   }
 
@@ -163,7 +234,7 @@ export class ClaimRegistry {
       const now = this.now();
       const reclaimed: string[] = [];
       for (const [nodeId, record] of Object.entries(claims)) {
-        if (isStale(record, now)) {
+        if (this.isStale(record, now)) {
           delete claims[nodeId];
           reclaimed.push(nodeId);
         }
@@ -186,7 +257,7 @@ export class ClaimRegistry {
     return withFileLock(this.lockPath, async () => {
       const claims = await readClaimMap(this.registryPath);
       const existing = claims[nodeId];
-      return existing !== undefined && !isStale(existing, this.now());
+      return existing !== undefined && !this.isStale(existing, this.now());
     });
   }
 }
