@@ -711,6 +711,114 @@ describe("resolveIntakeStep", () => {
     expect(result.step.step_kind).not.toBe("confirm_auto_discovered_input");
   });
 
+  it("N-R01: a --guidance-file (conversationStart present) skips the discovered-sources gate — explicit source is not blocked", async () => {
+    // The decline→re-offer loop fix: a discovered candidate must NOT re-trigger the
+    // confirmation once the host supplied guidance (conversation-start.md exists).
+    const artifactsDir = join(TEST_DIR, "artifacts-guidance-skips-gate");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(join(intakeDir, "conversation-start.md"), "Fix the flaky test.", "utf8");
+
+    const auditFindingsPath = join(TEST_DIR, "audit-findings-guidance.json");
+    await writeFile(
+      auditFindingsPath,
+      JSON.stringify({ contract_version: "audit-findings/v1alpha1", findings: [], work_blocks: [] }),
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [auditFindingsPath],
+        missing: [],
+        checked: [auditFindingsPath],
+        allExisting: [auditFindingsPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    // Proceeds with the guidance (conversation manifest), never re-blocks on the candidate.
+    expect(result.step.step_kind).not.toBe("confirm_auto_discovered_input");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+  });
+
+  it("N-R01: a declined ack routes to collect_starting_point, not a re-offer of the same candidate", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-auto-declined");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    const auditFindingsPath = join(TEST_DIR, "audit-findings-declined.json");
+    await writeFile(
+      auditFindingsPath,
+      JSON.stringify({ contract_version: "audit-findings/v1alpha1", findings: [], work_blocks: [] }),
+      "utf8",
+    );
+    await writeFile(
+      join(artifactsDir, "confirm_auto_discovered_input_ack.json"),
+      JSON.stringify({ status: "declined" }),
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [auditFindingsPath],
+        missing: [],
+        checked: [auditFindingsPath],
+        allExisting: [auditFindingsPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("collect_starting_point");
+  });
+
+  it("N-R01: the discovered-sources manifest lists EVERY existing candidate, not just the best", async () => {
+    const artifactsDir = join(TEST_DIR, "artifacts-multi-source");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    const jsonPath = join(TEST_DIR, "multi-findings.json");
+    const mdPath = join(TEST_DIR, "multi-report.md");
+    await writeFile(
+      jsonPath,
+      JSON.stringify({ contract_version: "audit-findings/v1alpha1", findings: [], work_blocks: [] }),
+      "utf8",
+    );
+    await writeFile(mdPath, "# Report\n", "utf8");
+
+    const stubs = makeStubs();
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [jsonPath],
+        missing: [],
+        checked: [jsonPath, mdPath],
+        allExisting: [jsonPath, mdPath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("confirm_auto_discovered_input");
+    const prompt = await readFile(result.step.prompt_path, "utf8");
+    expect(prompt).toContain(jsonPath);
+    expect(prompt).toContain(mdPath);
+    // Each discovered source carries provenance metadata (type/mtime).
+    expect(prompt).toMatch(/type: (document|structured_audit)/);
+  });
+
   it("discards existing summary and brief when the manifest is refreshed", async () => {
     // Arrange: pre-populate artifactsDir with a completed intake referencing file A,
     // then call resolveIntakeStep with inputResolution.supplied=true pointing at

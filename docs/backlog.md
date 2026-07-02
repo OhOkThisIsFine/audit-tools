@@ -52,30 +52,32 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   `--production` tested-but-unwired sweep ran 2026-06-27 (~26 confirmed dead + deleted); re-run when
   worthwhile. [[deterministic-analyzers-own-vs-acquire]]
 
-- **remediate-code: stale unfinished run silently hijacks a fresh `--guidance-file`/`--input` call.**
-  2026-07-01: a `next-step --guidance-file <new-scope>` call on a repo with an old unfinished run
-  (`remediation/audit-full-sweep-20260630`) picked up and closed THAT run instead of starting fresh
-  intake from the guidance file — reconciled 13 stale results and produced a ~1800-line diff unrelated
-  to the new scope. It also hit a branch-switch error (blocked by uncommitted host files) and silently
-  proceeded past it rather than surfacing the conflict. Host had to notice via `git status` after the
-  fact and discard the diff by hand. Fix: when new intake (`--guidance-file`/`--input`) is supplied and
-  an unfinished prior run exists, `next-step` should stop and require explicit confirmation
-  (resume-old vs discard-and-start-fresh) rather than silently resuming the old one; a branch-switch
-  failure during that resume should abort loudly, not continue on a different branch than intended.
-- **remediate-code: auto-discovery should CONTEXTUALIZE, not compete with, an explicit `--guidance-file`/`--input`.**
-  (Ethan, 2026-07-02 — supersedes the earlier "`--guidance-file` should short-circuit discovery" framing;
-  that was wrong.) Observed: after declining an auto-discovered stale `audit-findings.json` once, the next
-  `next-step --guidance-file <same file>` re-offered the identical candidate instead of proceeding; only
-  `--input <path>` broke the loop (two wasted round-trips). But the desired fix is NOT to suppress discovery
-  when an explicit source is given. The tool SHOULD still discover every other potential remediation source
-  and surface them ALL to the orchestrating host as *context* — each with a timestamp, path, type, and any
-  other useful provenance (staleness, size, origin) — alongside the explicitly-supplied source. The host
-  agent then decides what to do with the whole set (use one, merge several, ignore the stale ones). So the
-  redesign: replace the single-candidate `confirm_auto_discovered_input` gate with a discovered-sources
-  MANIFEST handed to the host at intake; the explicit `--guidance-file`/`--input` is the primary source but
-  never silently blocks awareness of the others. This also composes with the stale-unfinished-run entry
-  above (a prior run's leftover is just one more timestamped discovered source, not a silent hijacker).
-- **remediate-code: `accept-node`'s cherry-pick has no protection against pre-existing dirty tracked files unrelated to the node.** 2026-07-01: a docs-only node's merge (`CP-NODE-3`, backlog.md-only diff) failed twice with "local changes to docs/backlog.md would be overwritten by merge" because the MAIN tree (not the node's worktree) carried unrelated uncommitted edits to that same file from a prior, never-committed sprint. Auto-retry (2/2 budget) replayed the identical failure both times and routed to human triage even though the fix was simply "commit the unrelated pre-existing WIP first" — the tool never surfaced *that* as the actionable cause, only the raw git error. Fix: `accept-node` should detect a dirty main-tree file that collides with the node's touched paths and either auto-stash/restore around the cherry-pick or surface a clearer "main tree has uncommitted changes to `<path>` — commit or stash before merging" directive instead of relying on the host to diagnose a raw cherry-pick error.
+- **remediate-code: stale-unfinished-run hijack + auto-discovery-should-contextualize — ✅ FIXED (v0.31.3).**
+  (1) A `--guidance-file` (like `--input`) now trips the `input_conflict` gate against a run already past
+  intake: `NextStepOptions.guidanceFileSupplied` is threaded from `index.ts` into `buildPreIntakeObligations`'s
+  `input_conflict` derive (`src/remediate/steps/nextStep.ts`), so a new guidance source stops for an explicit
+  resume-vs-restart choice instead of silently resuming (and executing) the old, unrelated run.
+  (2) The single-candidate `confirm_auto_discovered_input` gate is now a discovered-sources MANIFEST
+  (`src/remediate/steps/intakeResolver.ts`): it lists EVERY existing default candidate
+  (`InputResolution.allExisting`) with provenance (type/mtime/finding-count), is SKIPPED entirely when the
+  host supplied an explicit source (`intake.conversationStart` from `--guidance-file`, or `--input`) — which
+  broke the decline→re-offer loop — and a `{status:"declined"}` ack now routes to `collect_starting_point`
+  (ask for an explicit `--input`) rather than re-offering the declined candidate. Tests:
+  `intake-resolver.test.ts` (guidance skips gate / declined routes / manifest lists all),
+  `next-step-resume-gates.test.ts` (guidance trips input_conflict). **Residual (small):** the "silently
+  proceeded past a branch-switch error" symptom is now largely averted (the conflict gate stops before the
+  resume/branch-switch), but a loud-abort on any branch-switch failure during a resume is not independently
+  enforced — revisit only if it resurfaces. [[guidance-discovery-contextualizes]]
+- **remediate-code: `accept-node` dirty-main-tree cherry-pick collision — ✅ FIXED (v0.31.3).**
+  Was: a node whose touched path collides with unrelated uncommitted WIP in the MAIN tree failed the
+  cherry-pick with the opaque "local changes would be overwritten by merge", replayed identically on every
+  auto-retry, and routed to human triage without naming the actionable cause. Fix
+  (`src/remediate/steps/dispatch.ts`): `dirtyMainTreeCollisions(root, branch)` intersects the branch's edited
+  files with `git status --porcelain`; `acceptNodeWorktree` runs it up front (after rebase, before the
+  expensive verify) and, on a hit, quarantines the node's committed work (like every sibling error path) and
+  returns a precise directive — "main tree has uncommitted changes to `<path>` — commit or stash it before
+  merging". Test: `dispatch-worktree.test.ts` (surfaces collision as actionable directive, work preserved,
+  main WIP untouched).
 - **Consent-gate for proposed analyzers — confirmed no gap; LLM-proposal channel deferred.** 2026-07-01
   verification: (1) `admitSpawn` (`src/audit/extractors/analyzers/acquisitionEngine.ts`) already gates
   EVERY `defaultRun: false` candidate — including `jscpd` (`defaultRun: false` in

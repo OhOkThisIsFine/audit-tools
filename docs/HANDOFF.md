@@ -8,30 +8,28 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.31.2** (both global bins reinstalled + verified). v0.31.2 shipped the two
-  VERIFIED churn/context follow-ons from the 2026-07-02 lens pass (see *This lap* below). v0.31.1 fixed the
-  contract-pipeline repair-revert bug. v0.31.0 shipped the T5 forward-tracks remediation via the full contract pipeline:
-  (1) five new external analyzers clippy/rubocop/hadolint/actionlint/type-coverage (candidates + clippy/rubocop
-  adapters + HADOLINT/ACTIONLINT BinarySpecs; `BinarySpec.checksumsAsset` generalized to a fn for hadolint's
-  per-asset `.sha256`); (2) knip↔graph cross-check as a pure render-time join (normalized in-degree index +
-  per-file/per-language fidelity gate + entrypoints from surface_manifest/critical_flows); (3) remediate-code
-  SKILL.md no-drift guard test; (4) validator intra-result duplicate finding-id hard-reject; (5) churn/context/
-  enforce review pass (`docs/reviews/churn-context-enforce-pass-2026-07-02.md`).
-- **This lap (v0.31.2):** shipped the two VERIFIED churn/context follow-ons from the 2026-07-02 lens pass.
-  (N1) The per-task/per-file analyzer-signal rendering re-flattened the whole `externalAnalyzerResults` set on
-  every call → O(tasks × files × total-results) per dispatch. Now `buildAnalyzerSignalAnchorIndex`
-  (`src/audit/orchestrator/fileAnchors.ts`) builds a path-keyed `Map<string, FileAnchor[]>` ONCE per dispatch
-  (in `dispatch.ts`, beside `buildKnipGraphIndex`); `analyzerSignalAnchorsForPath` is now an O(1) index read.
-  (N4) `renderTaskAnalyzerSignals` (`src/audit/cli/dispatch/packetPrompt.ts`) capped at 24 lines +
-  omitted-count footer, mirroring the isolated-large-file anchor preview's `.slice(0, 24)`. Regression tests in
-  `tests/audit/dispatch-helpers.test.mjs` (N4 cap) — pre-index tests re-pointed through the index builder.
+- On npm as `latest` at **v0.31.3** (both global bins reinstalled + verified). v0.31.3 shipped two
+  remediate-code intake/merge tool-enforce fixes (see *This lap*). v0.31.2 shipped the two churn/context
+  follow-ons from the 2026-07-02 lens pass. v0.31.1 fixed the contract-pipeline repair-revert bug. v0.31.0
+  shipped the T5 forward-tracks remediation (five external analyzers, knip↔graph cross-check, validator
+  duplicate-id reject).
+- **This lap (v0.31.3):** two remediate-code fixes, both "move host-remembered correctness into the tool".
+  (1) **Intake hijack + discovery-contextualize.** A `--guidance-file` now trips the `input_conflict`
+  resume-vs-restart gate against a run past intake (was: silently resumed/executed the old unrelated run) —
+  `NextStepOptions.guidanceFileSupplied` threaded into `buildPreIntakeObligations`. The single-candidate
+  `confirm_auto_discovered_input` gate is now a discovered-sources MANIFEST (lists EVERY existing candidate via
+  `InputResolution.allExisting` with type/mtime/finding-count), SKIPPED when an explicit source is present
+  (breaks the old decline→re-offer loop), and a declined ack routes to `collect_starting_point`.
+  (`src/remediate/steps/{nextStep,intakeResolver}.ts`, `index.ts`.)
+  (2) **accept-node dirty-main-tree collision.** `dirtyMainTreeCollisions` detects a main-tree dirty file
+  colliding with the node's touched paths BEFORE the cherry-pick; surfaces the actionable
+  "commit or stash `<path>`" directive (was: opaque git error → identical auto-retries → human triage), work
+  preserved under quarantine. (`src/remediate/steps/dispatch.ts`.) Tests: `intake-resolver.test.ts`,
+  `next-step-resume-gates.test.ts`, `dispatch-worktree.test.ts`. Full remediate suite green (2111/0).
 - **Immediate next:** none pending from this sprint.
-- **Open items from this run** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop
-  are fixture-only here — no Rust/Ruby repo). Design-direction items filed: guidance-file discovery should
-  contextualize not suppress; parallel dispatch over overlapping files is the target; multi-IDE concurrent runs.
-  Two release-gate traps bit this run (both cross-cutting guards the per-node worktrees miss): the new dated
-  review doc had to be registered in the doc-manifest, and `INV-K` id tokens in source tripped the glossary-ids
-  guard — run `npm run verify:release` before tagging, not just node-level verifies.
+- **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
+  here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
+  multi-IDE concurrent runs.
 - Ethan runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
