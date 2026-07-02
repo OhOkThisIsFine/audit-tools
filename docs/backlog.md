@@ -207,10 +207,6 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   **Remaining:** C3/C5/C6/E4/E5 are low-value / need design intent — unscheduled. Re-run the lens broadly when
   worthwhile. (Ethan, 2026-06-24.)
 
-- **Packet-prompt analyzer-signal churn — index per dispatch, don't re-flatten per (task × file).** `analyzerSignalAnchorsForPath` (`src/audit/orchestrator/fileAnchors.ts:150-169`) re-flattens+filters the whole `externalAnalyzerResults` set on every call; `renderTaskAnalyzerSignals` calls it per path and `buildTaskSections` per task (`src/audit/cli/dispatch/packetPrompt.ts:176-178,207,220`) → O(tasks × files × total-results) per dispatch since CP-NODE-2 widened the caller to every task section. Fix: build a `Map<normalizedPath, FileAnchor[]>` once per dispatch, read the index. (churn/VERIFIED, 2026-07-02 lens re-run.)
-
-- **Packet-prompt analyzer-signal context — cap per-task signal lines like the anchor preview.** `renderTaskAnalyzerSignals` emits all analyzer-signal lines uncapped/full-detail (`src/audit/cli/dispatch/packetPrompt.ts:182-194`), unlike the sibling `.slice(0, 24)` anchor preview (`packetPrompt.ts:28`). Add a per-task cap + omitted-count footer pointing at packet.json. (context/VERIFIED, 2026-07-02 lens re-run.)
-
 - **Schema-enforced generation everywhere possible — make malformed output impossible, not merely repairable.**
   Every structured-contract emission in the project — every dispatch path, every emitting agent, both orchestrators —
   should use the provider's strongest available output-constraint mechanism (forced tool-call / JSON-schema-constrained

@@ -9,6 +9,9 @@ const {
   resolveTierBudgets,
 } = await import("../../src/audit/cli/dispatch.ts");
 const { renderRollingDispatchPrompt } = await import("../../src/audit/cli/prompts.ts");
+const { buildAnalyzerSignalAnchorIndex } = await import(
+  "../../src/audit/orchestrator/fileAnchors.ts"
+);
 
 // ── filterPackets ─────────────────────────────────────────────────────────────
 
@@ -278,11 +281,34 @@ test("buildTaskSections — renders external analyzer signal detail for tagged t
     },
   ];
 
-  const sections = buildTaskSections([task], lensDefs, lineIndex, externalAnalyzerResults);
+  const sections = buildTaskSections([task], lensDefs, lineIndex, buildAnalyzerSignalAnchorIndex(externalAnalyzerResults));
   const joined = sections.join("\n");
 
   assert.match(joined, /External analyzer signals for this task/);
   assert.match(joined, /src\/t1\.ts:12 \[exports\] Unused export 'helper'/);
+});
+
+test("buildTaskSections — caps analyzer signal lines at 24 with an omitted-count footer (N4)", () => {
+  const task = { ...makeAuditTask("t1"), tags: ["external_analyzer_signal"] };
+  const lensDefs = makeLensDefs();
+  const lineIndex = { "src/t1.ts": 500 };
+  const results = Array.from({ length: 30 }, (_, i) => ({
+    id: `knip-${i}`,
+    category: "unused-export",
+    severity: "low",
+    path: "src/t1.ts",
+    line_start: i + 1,
+    summary: `Unused export 'helper${i}'`,
+    rule: "exports",
+  }));
+  const externalAnalyzerResults = [{ tool: "knip", results }];
+
+  const sections = buildTaskSections([task], lensDefs, lineIndex, buildAnalyzerSignalAnchorIndex(externalAnalyzerResults));
+  const joined = sections.join("\n");
+  const shown = sections.filter((line) => /^- src\/t1\.ts:\d+ \[exports\]/.test(line));
+
+  assert.equal(shown.length, 24);
+  assert.match(joined, /…and 6 more analyzer signal\(s\); see the full set in packet\.json\./);
 });
 
 test("buildTaskSections — omits the analyzer signal section for tasks without the tag, even when results exist", () => {
@@ -298,7 +324,7 @@ test("buildTaskSections — omits the analyzer signal section for tasks without 
     },
   ];
 
-  const sections = buildTaskSections([task], lensDefs, lineIndex, externalAnalyzerResults);
+  const sections = buildTaskSections([task], lensDefs, lineIndex, buildAnalyzerSignalAnchorIndex(externalAnalyzerResults));
   const joined = sections.join("\n");
 
   assert.doesNotMatch(joined, /External analyzer signals for this task/);
@@ -317,7 +343,7 @@ test("buildTaskSections — omits the analyzer signal section when tagged but no
     },
   ];
 
-  const sections = buildTaskSections([task], lensDefs, lineIndex, externalAnalyzerResults);
+  const sections = buildTaskSections([task], lensDefs, lineIndex, buildAnalyzerSignalAnchorIndex(externalAnalyzerResults));
   const joined = sections.join("\n");
 
   assert.doesNotMatch(joined, /External analyzer signals for this task/);
@@ -358,7 +384,7 @@ test("buildTaskSections — renders the knip↔graph cross-check tag inline for 
     [task],
     lensDefs,
     lineIndex,
-    externalAnalyzerResults,
+    buildAnalyzerSignalAnchorIndex(externalAnalyzerResults),
     index,
   );
   const joined = sections.join("\n");
