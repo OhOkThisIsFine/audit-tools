@@ -46,7 +46,7 @@
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.
-- Ethan runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
+- the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
 
@@ -116,7 +116,7 @@ validation on a real deepening-capable run remains env-bound (T6-class).
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist
   (Antigravity/OpenCode); provider `queryLimits` (revisit if a provider gains a proactive endpoint);
-  headroom proxy final opt-in flip (Ethan's own decision, proxy already verified healthy); narrow staleness
+  headroom proxy final opt-in flip (the owner's own decision, proxy already verified healthy); narrow staleness
   on prose-heavy artifacts (bounded semantic judgment, defer until churn is measured); cross-provider quota
   live-endpoint confirmation (Claude/Codex live-confirmed, Copilot/Antigravity gated→degrade).
   *(full detail in `docs/backlog.md` → "Deferred / waiting")*

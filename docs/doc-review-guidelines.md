@@ -60,12 +60,12 @@ Every item resolves to exactly one:
   files, below).
 - **design-decision** — anything with judgment in it: a policy/convention, a
   conceptual claim, a "should we still do this", a vague backlog item, an A→B
-  spec. → **escalated to Ethan, never auto-applied.**
+  spec. → **escalated to the owner, never auto-applied.**
 
 The split is the entire safety surface. The classifying rule:
 
 > **Factual** = verifiable true/false against code (apply).
-> **Policy / conceptual / judgment** = needs Ethan (escalate).
+> **Policy / conceptual / judgment** = needs the owner (escalate).
 > A policy is **not** stale because no code "uses" it — code-absence is the
 > policy *working* ("never hardcode model identities" is load-bearing precisely
 > when nothing violates it). Never flag a policy as obsolete by absence.
@@ -127,7 +127,7 @@ its own). Hunt for:
 - **Bloat** — a concept doc grown into a changelog/log; propose trim to the durable core.
 - **Split** — rare; only when one doc carries two genuinely-unrelated durable concepts.
 
-Each proposal quotes the docs involved and names the target home; Ethan makes the merge/retire
+Each proposal quotes the docs involved and names the target home; the owner makes the merge/retire
 call. Surface these in the findings file under a **"Doc-set condensation"** heading.
 
 ## Scope — every doc, routed by type
@@ -220,17 +220,17 @@ timeless doc are exactly the status-noise we flag).
 
 When a raw backlog item looks ripe to become a spec:
 
-- **Quote the raw item verbatim** so Ethan sees exactly what is being
+- **Quote the raw item verbatim** so the owner sees exactly what is being
   interpreted.
 - Draft a **conceptual** spec — make the desired thing clear; **no file
   citations** (files change before implementation).
 - This is a **discussion seed in the findings file**, never an edit to
-  `backlog.md`. Promotion raw → specced is always Ethan's manual call.
+  `backlog.md`. Promotion raw → specced is always the owner's manual call.
 
 ## Output contract (machine-readable for the SessionStart hook)
 
 `doc-review-findings.md` must contain a single delimited block holding **only the
-items that need Ethan** — proposed instruction-file edits and design decisions.
+items that need the owner** — proposed instruction-file edits and design decisions.
 A local SessionStart hook reads this block and surfaces it at the start of every
 conversation. Keep the FYI ("what I auto-applied") outside the block.
 
@@ -272,7 +272,7 @@ the disposition is shared across machines.
 ## Hard invariants
 
 - Verify from code, never from prose.
-- No code anchor → it is a question for Ethan, never a silent deletion.
+- No code anchor → it is a question for the owner, never a silent deletion.
 - Instruction files (`CLAUDE.md`, `AGENTS*.md`) are **never** auto-edited.
 - The **full** green gate — `env -u CLAUDECODE npm run build && npm run check &&
   npm test` — passes before any `main` push. Never `build`+`check` alone: the

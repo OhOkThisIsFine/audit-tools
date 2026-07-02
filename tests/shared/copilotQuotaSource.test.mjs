@@ -108,7 +108,7 @@ test("reads the gho token from the gh CLI hosts.yml", async () => {
   const fetchImpl = recordingFetch(ok(LIVE));
   const src = new CopilotQuotaSource({
     copilotConfigPath: NOPATH,
-    ghHostsPath: tmp("hosts.yml", `github.com:\n  oauth_token: ${GHO}\n  user: ethan\n`),
+    ghHostsPath: tmp("hosts.yml", `github.com:\n  oauth_token: ${GHO}\n  user: testuser\n`),
     fetchImpl, now: () => NOW, env: {},
   });
   assert.equal((await src.queryCurrentUsage("github-copilot/*")).remaining_pct, 0.25);

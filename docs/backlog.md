@@ -96,7 +96,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
-- **Last-writer-wins seams → default LWW, but compare-on-conflict (Ethan, 2026-07-02).** Policy idea:
+- **Last-writer-wins seams → default LWW, but compare-on-conflict (the owner, 2026-07-02).** Policy idea:
   wherever a write is last-writer-wins, keep LWW as the cheap default but, when a write would clobber a
   *newer* non-mergeable result, compare a monotonic marker and keep the newer/better rather than the
   race winner. **Scope today is narrow:** the correctness-critical data seams are already NOT LWW — the
@@ -110,7 +110,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   under concurrency. Low value (cosmetic) but a clean general guard for any future LWW seam. Relates to
   [[multi-ide-concurrent-runs-design]], [[enforce-robustness-in-tooling-not-host-discretion]].
 
-- **Parallel dispatch over OVERLAPPING files — make it the tool's job, and the target design (Ethan, 2026-07-02).**
+- **Parallel dispatch over OVERLAPPING files — make it the tool's job, and the target design (the owner, 2026-07-02).**
   Today the decomposition avoids implement-time cherry-pick collisions by partitioning modules onto
   DISJOINT file scopes (e.g. five external analyzers forced into ONE serial `candidates.ts` module). That
   disjoint-file rule is a HOST-remembered crutch, not a tool guarantee — it must move into the remediator,
@@ -227,7 +227,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   graph-build, X1 prompt-render trim) and closed X-cluster state-projection as not-worth-it; full record in
   [`docs/reviews/churn-context-enforce-pass-2026-06-27.md`](reviews/churn-context-enforce-pass-2026-06-27.md).
   **Remaining:** C3/C5/C6/E4/E5 are low-value / need design intent — unscheduled. Re-run the lens broadly when
-  worthwhile. (Ethan, 2026-06-24.)
+  worthwhile. (the owner, 2026-06-24.)
 
 - **Schema-enforced generation everywhere possible — make malformed output impossible, not merely repairable.**
   Every structured-contract emission in the project — every dispatch path, every emitting agent, both orchestrators —
@@ -240,7 +240,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   disk past both an absolute floor and a ratio. **Open: CE-004** — the always-on conversation host (`claude-code`)
   advertises *no* API-level constraint mechanism, so on the primary path this reduces to the repair floor (no emit-time
   prevention) — env-bound on a provider gaining a constraint endpoint; plus broader semantic-validity checks beyond
-  `total_lines` (fabricated paths / out-of-range spans already gated; more are candidates). (Ethan, 2026-06-24.)
+  `total_lines` (fabricated paths / out-of-range spans already gated; more are candidates). (the owner, 2026-06-24.)
 
 - **Tool-enforced dispatch broker with a capability-tiered driver — rolling dispatch the host can't get wrong.**
   Desired end-state:
@@ -261,7 +261,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   recordLimit + bounded escalation, and driver SELECTION + prompt rendering (`selectDispatchDriver`,
   `renderDispatchDriverInstruction`, single-sourced across both orchestrators) are **shipped**. **Open (env-bound):**
   live Y-dispatcher validation (needs a nested-agent host + a live run) + proactive pre-wall quota-aware pacing.
-  (Ethan, 2026-06-24.) See the enforcement/driving/judgment separation principle in memory.
+  (the owner, 2026-06-24.) See the enforcement/driving/judgment separation principle in memory.
 
 - **Deterministic analyzers: own-vs-acquire — build the agnostic acquisition engine, don't expand a fixed bundle.**
   A fixed bundle of analyzers fails the everything-agnostic test (it privileges whatever ecosystems we bundled
@@ -291,7 +291,7 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   runs without asking; the LLM proposes ecosystem-appropriate tools for the repo; anything beyond the defaults needs
   per-run user consent (ephemeral, nothing persisted) — confirmed already-covered by the existing `admitSpawn` gate,
   see the consent-gate backlog entry above. No exhaustive allowlist to curate.
-  (Ethan, 2026-06-24.)
+  (the owner, 2026-06-24.)
 
 - **Remaining deterministic-analyzer work (DEFERRED).** The external analyzers landed as
   fixture-validated **adapters** (parse + normalize + degrade-to-empty behind the seam); actually

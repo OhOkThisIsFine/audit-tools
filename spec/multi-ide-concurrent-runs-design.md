@@ -1,6 +1,6 @@
 # Multi-agent cooperative runs — design of record
 
-Everything-agnostic. Target (Ethan, 2026-07-02): an **arbitrary number of agents / IDEs / providers all
+Everything-agnostic. Target (the owner, 2026-07-02): an **arbitrary number of agents / IDEs / providers all
 contribute to the SAME audit or remediation run**. Start an audit in one IDE; run `/audit-code` in a
 second IDE and it **joins** the same run, taking on appropriate unclaimed tasks. Symmetric peers — no
 primary/secondary — each following the process, feeding off each other's results as they land, never
@@ -98,7 +98,7 @@ what" — no separate roster.
 - **The coarse "whole audit step under one lock"** — replaced by the claim/execute/merge split (single
   atomic replace per the atomic-replace-ordering invariant).
 
-## Decisions (settled, Ethan 2026-07-02)
+## Decisions (settled, the owner 2026-07-02)
 
 - **Cooperative, not isolated** — peers contribute to ONE shared run; no primary/secondary.
 - **No TTL/heartbeat as run-liveness** (D2 from the first draft still holds) — a *claim's* heartbeat is a
@@ -180,7 +180,7 @@ what" — no separate roster.
    destructive stale-sweep — the "one sequential call at a time" rule is superseded (residual: an external
    linter reformat of `intent_checkpoint.json` still causes re-derive churn, not data loss).
 
-## Decisions on the open questions (settled, Ethan 2026-07-02)
+## Decisions on the open questions (settled, the owner 2026-07-02)
 
 - **OD1 — Cooperative-wait = bounded backoff THEN hand back.** A peer whose only frontier work is a
   held serial obligation does a few short **in-process bounded waits of increasing duration**

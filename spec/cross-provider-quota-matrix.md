@@ -97,7 +97,7 @@ primary_window (5h), secondary_window (weekly) }, credits, additional_rate_limit
 Each window (`RateLimitWindowSnapshot`): `{ used_percent (0–100), limit_window_seconds,
 reset_after_seconds, reset_at (unix sec) }`. (Codex-API-key auth instead → `{base}/api/codex/usage`.)
 
-**✓ LIVE-CONFIRMED 2026-06-17** (Ethan OK'd; `CodexQuotaSource` production path + raw probe): real 200,
+**✓ LIVE-CONFIRMED 2026-06-17** (the owner OK'd; `CodexQuotaSource` production path + raw probe): real 200,
 top-level keys `[user_id, account_id, email, plan_type, rate_limit, code_review_rate_limit,
 additional_rate_limits, credits, spend_control, rate_limit_reached_type, promo, referral_beacon,
 rate_limit_reset_credits]`; `rate_limit.{primary,secondary}_window` carried `used_percent / reset_at /

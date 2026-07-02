@@ -65,4 +65,4 @@ not just its contents:
 - **Routine (soft, nightly):** the doc-review routine reviews every doc against this philosophy on
   the two perspectives defined in [`doc-review-guidelines.md`](doc-review-guidelines.md) — items
   *within* a doc (fit + staleness) and the doc *set* (does each doc belong / can it be condensed).
-  Anything with judgment escalates to Ethan; nothing condenses or retires a doc autonomously.
+  Anything with judgment escalates to the owner; nothing condenses or retires a doc autonomously.

@@ -3,7 +3,7 @@
 // SessionStart hook — surface open doc-review escalations.
 //
 // The nightly doc-review cloud routine pushes its findings to the `doc-review`
-// branch. The part that needs Ethan (proposed instruction-file edits + design
+// branch. The part that needs the owner (proposed instruction-file edits + design
 // decisions) lives between DOC-REVIEW-OPEN markers in doc-review-findings.md.
 // This hook reads that block and prints it so it lands in session context.
 //

@@ -2,7 +2,7 @@
 
 > Dedicated pass applying the append-only-ledger + granular-staleness + enforce-in-tooling
 > perspective over the whole codebase (backlog → "Codebase-wide review for churn / context /
-> enforce-in-tooling", Ethan 2026-06-24). Three parallel review agents, one per category.
+> enforce-in-tooling", the owner 2026-06-24). Three parallel review agents, one per category.
 > **Advisory** — findings below are verification-tiered; only ✅-VERIFIED items are acted on or
 > promoted to backlog. Unverified items are leads for a follow-on lap, not facts.
 

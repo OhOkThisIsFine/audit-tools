@@ -18,7 +18,7 @@ import { AGENT_FEEDBACK_FILENAME } from "../agentReflections.js";
  * re-spelled here, so a renamed deliverable can never drift out of the ignore
  * set.
  *
- * Two tiers (from docs/backlog.md, Ethan 2026-06-22):
+ * Two tiers (from docs/backlog.md, the owner 2026-06-22):
  *  - ALWAYS-ignore: generated host/skill/install assets + the per-run friction
  *    CAPTURE sidecar. These are build/install artifacts; never tracked, every
  *    platform, unconditionally.

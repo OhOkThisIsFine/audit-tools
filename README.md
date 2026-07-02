@@ -38,15 +38,15 @@ human-readable render (markdown):
 npm install -g audit-tools
 ```
 
-This puts both `audit-code` and `remediate-code` on your `PATH` and deploys slash-command 
+This puts both `audit-code` and `remediate-code` on your `PATH` and deploys slash-command
 assets for supported hosts (Claude, Codex, OpenCode, VS Code, Antigravity, etc.).
 
 ## Usage
 
-The tools are meant to be run as slash-commands inside a host agent. Just invoke the 
+The tools are meant to be run as slash-commands inside a host agent. Just invoke the
 command - no manual path, provider, or model flags. The agent you're conversing with works
-its way through the whole workflow on its own, dispatching subagents where appropriate, and 
-only stops to ask you when it needs a real decision (but it does its best to ask those 
+its way through the whole workflow on its own, dispatching subagents where appropriate, and
+only stops to ask you when it needs a real decision (but it does its best to ask those
 questions at the outset so it can run autonomously for as long as possible).
 
 **Audit a code base:**
@@ -56,8 +56,27 @@ questions at the outset so it can run autonomously for as long as possible).
 ```
 
 You'll confirm scope, depth, and which lenses to apply (security, correctness, reliability,
-data-integrity, etc.), then it runs to completion and leaves `audit-findings.json` +
-`audit-report.md` in `.audit-tools/`.
+data-integrity, etc.), then it runs autonomously to completion and leaves
+`audit-findings.json` + `audit-report.md` in `.audit-tools/`.
+
+Every finding in the report is adversarially verified against current source by an
+independent reviewer before it's kept — false positives are pruned, not shipped. The
+report opens with a triaged summary and drills down by severity:
+
+```text
+# Audit findings — verified & pruned
+
+- Verified-real findings: 186 (of 204 extracted; 10 false, 8 uncertain)
+- By severity: high 7 · medium 97 · low 78 · info 4
+- By lens: tests 69 · maintainability 68 · correctness 24 · observability 17 · ...
+
+## High (7)
+### Citation-grounding retry leaves extracted plan completion marker
+- Lens: correctness · Category: incorrect-state-transition · Confidence: high
+- Summary: The promotion path writes the plan before running the citation-grounding
+  backstop ... a later step treats the pipeline as complete, bypassing the retry.
+- Affected: src/remediate/steps/contractPipeline.ts:540-548
+```
 
 **Remediate issues or implement changes:**
 
@@ -68,13 +87,13 @@ data-integrity, etc.), then it runs to completion and leaves `audit-findings.jso
 /remediate-code fix the stupid OAuth issues I keep running into
 # turns your desires into structured plans, then remediates
 
-/remediate-code implement C:/1337h4x/top-secret-plans.txt - also make a mobile app I can
+/remediate-code implement ~/plans/top-secret-plans.txt - also make a mobile app I can
 use to track the progress of my nefarious machinations
 # synthesizes structured findings + free-form feedback, plans out the whole refactor
 ```
 
-It plans the changes, implements and verifies them, and lands the result - a commit, a 
-PR / publish, whatever. You confirm scope and the closing action up front, and review 
+It plans the changes, implements and verifies them, and lands the result - a commit, a
+PR / publish, whatever. You confirm scope and the closing action up front, and review
 a summary before anything is committed.
 
 ### What to expect

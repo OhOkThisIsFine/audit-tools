@@ -8,7 +8,7 @@ This doc covers *how concurrency is gated given a quota reading*. For *who track
 why*, see [`docs/quota-dispatch-design.md`](../docs/quota-dispatch-design.md) — the model this gate
 consumes.
 
-## The rule (Ethan, 2026-06-30)
+## The rule (the owner, 2026-06-30)
 Concurrency is governed by two named things, plus one learned ramp cap folded under "token budget":
 1. **IDE/provider subagent allowance** — a hard ceiling ONLY when a host actually reports one
    (`CapacityPool.hostConcurrencyLimit`). Most IDEs report none → no ceiling from here.

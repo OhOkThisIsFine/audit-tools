@@ -126,7 +126,7 @@ the `implementation_dag` skeleton **deterministically**, not authored. The mappi
 > - The remaining half (patch-vs-rewrite repair shape, `renderContractRepairPrompt`) is real but
 >   **high-complexity / thin-ROI**: the full-rewrite path already validates fail-closed; a patch
 >   applier adds a patch schema + mutation engine + a new "valid patch, wrong target" failure surface.
->   Note the repair loop is **hot** (Ethan: `needs_repair` fires on ~every remediation run), so the
+>   Note the repair loop is **hot** (the owner: `needs_repair` fires on ~every remediation run), so the
 >   patch shape *would* save real repair tokens — but not enough to justify the new machinery now.
 >   It is an easy lever to revisit if repair-token cost ever bites; if so, scope it to the repair
 >   *shape* only and keep the staleness DAG as the downstream authority.

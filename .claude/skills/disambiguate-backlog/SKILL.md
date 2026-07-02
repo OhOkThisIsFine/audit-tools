@@ -5,8 +5,8 @@ description: >-
   every open backlog item (docs/backlog.md) and meta-audit reflection
   (agent-feedback.jsonl / meta-audit-log.md), decide which are under-specified,
   then pin them down one at a time with reviewer+adversary-characterized
-  propositions (pros/cons) for Ethan to judge, writing the agreed spec back into
-  backlog.md or memory. Use this whenever Ethan wants to disambiguate, pin down,
+  propositions (pros/cons) for the owner to judge, writing the agreed spec back into
+  backlog.md or memory. Use this whenever the owner wants to disambiguate, pin down,
   clarify, spec out, triage, or surface design gaps in backlog / meta-audit /
   reflection items — including phrasings like "tighten up the backlog", "which
   backlog items are vague", "turn these raw items into specs", "run the design-gap
@@ -21,14 +21,14 @@ description: >-
 A live, conversational pass that turns vague tracked work into clear specs:
 collect the open work items, find the ones with real ambiguity, and pin each one
 down *in conversation* — propose concrete ways to resolve it, characterize each
-with honest pros and cons, and let Ethan judge, in the loop, now. On agreement,
+with honest pros and cons, and let the owner judge, in the loop, now. On agreement,
 the resolved spec is written back so the ambiguity is closed for good.
 
 Scope is two raw-signal sources, nothing else:
 
 - **`docs/backlog.md`** — every entry under *Open bugs / frictions*, *Forward
   tracks*, *Deferred / waiting*. (Skip *Durable traps* — it's reference, not
-  work-to-spec; only touch a trap if Ethan asks.)
+  work-to-spec; only touch a trap if the owner asks.)
 - **meta-audit reflections** — worker feedback: `meta-audit-log.md` if present
   (gitignored, append-only) plus any `agent-feedback.jsonl` under
   `.audit-tools/**`. Shape: `{ instruction_clarity, ambiguities[],
@@ -39,7 +39,7 @@ Scope is two raw-signal sources, nothing else:
 ## Why it works this way
 
 Disambiguation is **judgment** — there's no mechanical "right answer" to apply,
-which is exactly why it needs Ethan rather than an autonomous fix. And judgment is
+which is exactly why it needs the owner rather than an autonomous fix. And judgment is
 best exercised in a back-and-forth: a one-shot report loses the exchange that
 actually closes a gap. Doing it live, one item at a time, with concrete
 propositions to react to, is how a vague item becomes a real spec in one sitting.
@@ -70,7 +70,7 @@ Not every item has a design gap. For each, decide one of:
 - **ready** — clear enough to act on as written; no judgment owed. Skip.
 - **shipped / stale** — code shows it's already done or obsolete. **Don't fix it
   here** — this skill closes *design gaps*, not bookkeeping; flag it as closable
-  with the proof and let Ethan decide, never silently delete. Distinguish
+  with the proof and let the owner decide, never silently delete. Distinguish
   **fully-shipped** (no open remainder → delete the whole entry on his ok) from
   **partial** (shipped substrate + still-open work → the open remainder is the real
   item; trim away the "what shipped" tail). A standalone `_SHIPPED …_` / `**FIXED**`
@@ -79,12 +79,12 @@ Not every item has a design gap. For each, decide one of:
 Verify every classification **from code/disk, never from the prose** — an item
 reading "build X" may already be half-built. Present the classification as a
 short manifest first: *N items, M need disambiguation, K look shipped/stale.*
-Let Ethan confirm or re-scope before you spend agent budget going deep.
+Let the owner confirm or re-scope before you spend agent budget going deep.
 
 ### 3. Characterize — reviewer + adversary, per in-scope item
 
 For each needs-disambiguation item, the goal is **propositions with pros and
-cons**, not a single recommendation. Ethan judges; you supply the option space.
+cons**, not a single recommendation. the owner judges; you supply the option space.
 
 Dispatch two independent subagents (use the `Agent` tool — `Explore` for the
 read-heavy verification, `general-purpose` for drafting):
@@ -105,14 +105,14 @@ enforce-robustness-in-tooling) so propositions are pre-filtered for fit. A
 proposition that violates a standing decision is a con worth naming, not a silent
 drop.
 
-### 4. Judge — one item at a time, Ethan decides
+### 4. Judge — one item at a time, the owner decides
 
 Surface items **one at a time**, highest blast-radius / most-blocking first.
 
 **Translate before you present — this is the make-or-break step.** The reviewer
 and adversary speak in the repo's internal vocabulary (artifact names, test ids
 like "A-9", terms like "disposition", "blast-radius classifier", "sidecar
-branch"). Ethan is judging the *decision*, not grading the analysis — and a wall
+branch"). the owner is judging the *decision*, not grading the analysis — and a wall
 of jargon makes the choice feel opaque even when the analysis is sound. Before
 showing anything, rewrite it so the **choice itself is legible**:
 
@@ -120,7 +120,7 @@ showing anything, rewrite it so the **choice itself is legible**:
   options vary along (e.g. "where it runs" × "how cautious it is"). Name the dials
   first; the propositions are just corners of that space. A small table beats a
   list when there are two axes.
-- **State each option as what actually happens and what it costs *Ethan*** — in a
+- **State each option as what actually happens and what it costs *the owner*** — in a
   sentence a smart outsider to this repo would follow. Not "reuses the
   default-escalate three-agent gate" but "a cloud bot fixes anything that passes
   an automated check and opens the PR itself."
@@ -128,7 +128,7 @@ showing anything, rewrite it so the **choice itself is legible**:
   coined phrase) is load-bearing, say what it *means* and why it matters; if it
   isn't, cut it. A refuted premise is "the thing we assumed is true isn't —
   here's the proof," not a citation dump.
-- **Give a recommendation with a one-line reason**, then stop. Ethan asked for
+- **Give a recommendation with a one-line reason**, then stop. the owner asked for
   propositions characterized by pros/cons so *he* judges — but an unranked menu is
   its own kind of unclear. Point to the option you'd pick and why; he overrides
   freely.
@@ -137,11 +137,11 @@ Suggested shape (adapt freely — legibility over template):
 
 ```
 ## <plain restatement of what this item is trying to do>
-> <raw item quoted verbatim — so Ethan sees exactly what's being interpreted>
+> <raw item quoted verbatim — so the owner sees exactly what's being interpreted>
 
 **The real choice:** <the 1–2 axes, in plain words>
 
-<table or short list of options, each = what happens + what it costs Ethan,
+<table or short list of options, each = what happens + what it costs the owner,
  jargon expanded or removed>
 
 **The catch:** <only design-shaping constraints — a standing decision the
@@ -153,7 +153,7 @@ Suggested shape (adapt freely — legibility over template):
 **Clarify the end-goal only — never touch sequencing.** This skill answers
 *"what is the desired thing?"*, full stop. *When* to build it, *whether* now is
 the right time, what has to be fixed first — all of that is decided elsewhere
-(e.g. when Ethan actually runs remediate-code), never here. Concretely:
+(e.g. when the owner actually runs remediate-code), never here. Concretely:
 
 - **Don't relate the design to other backlog items or known bugs.** It's
   tempting to note "blocked by bug X" or "do the safe half first because of Y" —
@@ -185,7 +185,7 @@ write back a half-specced entry with residual open questions. The whole point is
 to complete the disambiguation or leave it; clearing it up partway and parking
 the remainder in the backlog is a failure mode, not an outcome.
 
-Closing the gap means capturing the resolution where it belongs. When Ethan
+Closing the gap means capturing the resolution where it belongs. When the owner
 settles an item:
 
 - **Specced (raw → A→B):** rewrite that backlog entry in place as the agreed
@@ -202,10 +202,10 @@ settles an item:
   shipped tail and keep only the still-open remainder. If a shipped fix carries a
   durable trap/convention worth keeping, move it to its durable home (Durable traps,
   `CLAUDE.md`/memory) in the same edit, then delete the backlog entry — never retain
-  the entry just to host the rule. Cite the proof Ethan agreed to.
-- **Deferred/unchanged:** leave it; optionally tighten wording if Ethan asked.
+  the entry just to host the rule. Cite the proof the owner agreed to.
+- **Deferred/unchanged:** leave it; optionally tighten wording if the owner asked.
 
-Only Ethan's explicit agreement triggers a write — never promote on your own read.
+Only the owner's explicit agreement triggers a write — never promote on your own read.
 After edits, keep the tree green per `CLAUDE.md` (the doc edits are prose, but if
 a touched item names a generated asset, run the gate before considering it done).
 
@@ -226,7 +226,7 @@ landed, not parked at the commit boundary.)
 - **Verify from code, never from prose.** A backlog item's own wording is the
   thing under question — confirm what's true against the actual code/disk.
 - **Propositions, not verdicts.** Your job is the characterized option space;
-  the judgment is Ethan's.
+  the judgment is the owner's.
 - **Reviewer and adversary are independent.** Don't let one agent produce both —
   that defeats the gate.
 - **Write only on explicit agreement.** No silent promotion or deletion.
@@ -235,4 +235,4 @@ landed, not parked at the commit boundary.)
   future pass. Complete it or leave it whole.
 - **Don't touch instruction-file policy** (`CLAUDE.md`, `AGENTS*.md`) as a
   backlog edit; a resolution that changes policy is escalated as its own
-  proposition, applied only on Ethan's call.
+  proposition, applied only on the owner's call.

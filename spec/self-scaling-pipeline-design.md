@@ -2,7 +2,7 @@
 
 > Supersedes the earlier "give document input a separate lean fast path" framing of the
 > *Make the loop cheaper* backlog item. Durable conceptual design; no dated status here.
-> (Ethan + agent, 2026-06-26, distilled from the loop laps 1–3 cost analysis.)
+> (the owner + agent, 2026-06-26, distilled from the loop laps 1–3 cost analysis.)
 
 ## Problem
 

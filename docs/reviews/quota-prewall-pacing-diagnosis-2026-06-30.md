@@ -55,7 +55,7 @@ relate our own token consumption to percent consumed — i.e. LEARN tokens-per-p
 Δutilization vs tokens-dispatched (persist in quota-state). Underused richer fields: per-limit
 `severity` (escalates near the cap) and `is_active` (marks the binding window directly).
 
-## Corrected concurrency model (Ethan, 2026-06-30)
+## Corrected concurrency model (the owner, 2026-06-30)
 Concurrency is limited by ONLY two things — everything else in the scheduler is invented and must be
 stripped:
 1. **IDE/provider subagent allowance** — a hard ceiling ONLY when the host actually reports one
