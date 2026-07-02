@@ -173,8 +173,12 @@ what" — no separate roster.
    the per-agent step slot came free with the shared slice-3 writer, so a second `remediate-code next-step`
    now joins by default. Tests: `phase-mutex-cooperative.test.ts` (phase_busy on contention + no state
    advance; normal advance when free).
-5. **Rewrite the durable trap** [[concurrent-nextstep-staleness-cascade-wipe]] → resolved by claim-based
-   cooperation (execution outside the lock, claims prevent double-work, merges serialized).
+5. **Durable trap rewritten — ✅ SHIPPED.** [[concurrent-nextstep-staleness-cascade-wipe]] is resolved:
+   audit `runAuditStep` AND `merge-and-ingest` (via the `result_ingestion_executor` runner) both acquire
+   the `bundle-mutation` mutex and execute outside the coarse lock with reload + ownership re-validation;
+   remediate serializes the MAIN advance on `phase:main`. Concurrent runners can no longer interleave a
+   destructive stale-sweep — the "one sequential call at a time" rule is superseded (residual: an external
+   linter reformat of `intent_checkpoint.json` still causes re-derive churn, not data loss).
 
 ## Decisions on the open questions (settled, Ethan 2026-07-02)
 

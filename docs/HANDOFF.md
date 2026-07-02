@@ -26,15 +26,9 @@
   "commit or stash `<path>`" directive (was: opaque git error → identical auto-retries → human triage), work
   preserved under quarantine. (`src/remediate/steps/dispatch.ts`.) Tests: `intake-resolver.test.ts`,
   `next-step-resume-gates.test.ts`, `dispatch-worktree.test.ts`. Full remediate suite green (2111/0).
-- **Immediate next:** Multi-agent COOPERATIVE runs — arbitrary agents/IDEs join and contribute to ONE
-  shared audit/remediation. Design of record:
-  [`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md). Reuses the
-  cross-process `ClaimRegistry`. Slices 0 (revert isolation) + **1 (audit lock-split + `bundle-mutation`
-  claim, executor out of `artifact-tree.lock`, heartbeat + merge-time ownership gate) SHIPPED** (all
-  OD1/OD2/OD3 settled). Slice **2 (audit task-POOL claiming) SHIPPED**: `prepareDispatchArtifacts`
-  `claimMany`s candidate `task_id`s in a shared long-lease `task-claims.json`, dispatches only the
-  disjoint granted subset, releases deferred + terminal (ingest-time) claims; dedup-by-task_id is the
-  overrun backstop. Slice **3 (per-agent step slot) SHIPPED**: `stepContractWriter` writes each
+- **Immediate next:** none pending — the multi-agent cooperative-runs track is complete (see below).
+  Next candidates are the other forward tracks in `docs/backlog.md` (parallel dispatch over overlapping
+  files; the deferred T5 items). Env-bound follow-up for the shipped track: live two-IDE validation. Slice **3 (per-agent step slot) SHIPPED**: `stepContractWriter` writes each
   `next-step` process's prompt+JSON to a per-process `steps/<agentId>/` slot and returns `prompt_path`
   there (host already uses the returned path → concurrency-safe, no SKILL change) + a shared
   `steps/current-*` latest copy for back-compat; dispatch `runId` already auto-isolates per-run files, so
@@ -44,12 +38,11 @@
   don't both plan + make a second next-step join the rolling frontier by default (implement is already
   cooperative; the shared step-writer fix already covers remediate's step slot). Then slice 5 = rewrite
   the [[concurrent-nextstep-staleness-cascade-wipe]] trap as resolved.
-- **Slice 4 (remediate phase mutex) SHIPPED:** a single `phase:main` mutex wraps the MAIN advance in
-  `decideNextStepLoop` (claimWithBackoff + heartbeat + `phase_busy` cooperative-wait), serializing the
-  serial phases (planning/triage/close) while leaving implement pooled (per-run `node-claims`). Remediate
-  now joins by default. **Only slice 5 remains:** rewrite the durable trap
-  [[concurrent-nextstep-staleness-cascade-wipe]] as resolved (docs-only) — the cooperative model
-  (per-run isolation + claims + per-agent step slot + serialized advances) supersedes "one call at a time".
+- **Multi-agent COOPERATIVE runs — ✅ COMPLETE (all 6 slices shipped, 2026-07-02).** Audit + remediate now
+  let an arbitrary number of agents/IDEs join and contribute to ONE shared run (bundle-mutation mutex +
+  disjoint task claims + per-agent step slot + per-run dispatch isolation + remediate phase mutex). The
+  durable staleness-cascade-wipe trap is resolved; "one sequential call at a time" is superseded.
+  **Remaining (env-bound):** live validation with two real IDEs driving one repo simultaneously.
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.

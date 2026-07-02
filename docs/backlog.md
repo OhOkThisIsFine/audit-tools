@@ -109,21 +109,20 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   shards are disjoint output files and source reads are read-only, so parallel drafting on overlapping source is
   already safe; the rule only ever mattered at implement/merge. Relates to [[remediator-must-decompose-and-boundary-enforce]],
   [[decomposition-colocate-source-and-tests]], [[enforce-robustness-in-tooling-not-host-discretion]].
-- **Multi-agent COOPERATIVE runs — arbitrary agents/IDEs/providers contribute to the SAME audit/remediation (Ethan, 2026-07-02).**
-  NOT isolated independent runs — the opposite: start an audit in one IDE, run `/audit-code` in a second,
-  and it JOINS the same run, taking on unclaimed tasks. Symmetric peers (no primary/secondary), feeding off
-  each other's results as they land, never colliding on the same task. **Design of record:
-  [`spec/multi-agent-cooperative-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md)** (file kept at the
-  original path). Model: ONE shared run per orchestrator per repo (the shared `.audit-tools/` tree IS the run);
-  peers join via the existing cross-process `ClaimRegistry` (`src/shared/quota/claimRegistry.ts` —
-  token+heartbeat+stale-reclaim, already backs remediate's cooperative rolling dispatch). Three gaps: G1 audit
-  holds the coarse `artifact-tree.lock` across the LLM executor → serializes peers (split into claim→execute→
-  merge, only claim+merge locked); G2 no task-level claiming in audit (add shared `node-claims.json` keyed by
-  task_id / `obligation:<name>`); G3 single shared step slot clobbers (per-agent `steps/<agentId>/`). Remediate
-  is already cooperative for implement; needs `phase:<name>` claims + join-by-default. 6 slices; slice 0 (revert
-  the wrong isolation code) done this commit. Open decisions OD1 (cooperative-wait shape) / OD2 (multiple
-  distinct shared runs — recommend NO/YAGNI) / OD3 (claim heartbeat cadence vs long audit tasks) gate slice 2.
-  **Supersedes** the durable trap [[concurrent-nextstep-staleness-cascade-wipe]] once shipped.
+- **Multi-agent COOPERATIVE runs — ✅ SHIPPED (2026-07-02).** Arbitrary agents/IDEs/providers now
+  contribute to the SAME audit/remediation: start an audit in one IDE, run `/audit-code` in a second and it
+  JOINS, taking unclaimed tasks; symmetric peers, no primary/secondary, no collisions. Design of record:
+  [`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md). All slices
+  landed: **0** revert the wrong isolation draft; **1** audit `bundle-mutation` mutex + lock-split (executor
+  runs outside the coarse lock, heartbeat + merge-time ownership re-validation); **2** audit task-POOL
+  claiming (`prepareDispatchArtifacts` `claimMany`s disjoint `task_id`s in `task-claims.json`, `poolId=runId`
+  idempotency, releases deferred + terminal claims, dedup backstop); **3** per-agent step slot
+  (`steps/<agentId>/` + shared latest copy; dispatch runId already auto-isolates per-run files); **4**
+  remediate `phase:main` mutex serializing the serial phases (planning/triage/close) while implement stays
+  pooled, `phase_busy` cooperative-wait. Reusable primitives: `ClaimRegistry.claimMany/clear` + configurable
+  `staleMs`, `claimWithBackoff`/`withClaimHeartbeat` (`src/shared/quota/claimLease.ts`). Resolves the durable
+  trap [[concurrent-nextstep-staleness-cascade-wipe]] (concurrent next-step/merge-and-ingest now mutually
+  exclude on the mutex). **Remaining (env-bound):** live validation with two real IDEs driving one repo.
 - **Spec-doc rewrite pass — SHIPPED (2026-07-02).** All six flagged docs rewritten against real source:
   1. `spec/audit/dependency-map.md`, `spec/audit/artifact-contract.md`, `spec/audit/executor-catalog.md`
      — rewritten to the real 31-entry `ARTIFACT_DEFINITIONS`, the real `ARTIFACT_DEPENDS_ON_MAP` (canonical
