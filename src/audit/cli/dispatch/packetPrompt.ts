@@ -10,6 +10,10 @@ import {
   buildFileAnchorSummary,
   type FileAnchorSummary,
 } from "../../orchestrator/fileAnchors.js";
+import {
+  classifyKnipLead,
+  type KnipGraphIndex,
+} from "../../orchestrator/knipGraphCrosscheck.js";
 import { artifactNameForId } from "../args.js";
 import { withinRoot } from "./paths.js";
 import { isIsolatedLargeFilePacket } from "./packetFilter.js";
@@ -151,9 +155,20 @@ export async function extractPacketAnchor(params: {
  * worker with enough detail to confirm-or-refute against the packet graph
  * context, in ANY packet — not only isolated-large-file packets.
  */
+/**
+ * A knip lead's anchor `name` is its `rule`, which for knip is always
+ * `knip-<issueType>` (see the knip candidate's `parse`). Only knip leads get the
+ * render-time graph cross-check tag — other analyzers (eslint/semgrep/…) are not
+ * "unused export" claims the dependency graph can adjudicate.
+ */
+function isKnipLead(anchorName: string): boolean {
+  return anchorName.startsWith("knip-");
+}
+
 function renderTaskAnalyzerSignals(
   task: AuditTask,
   externalAnalyzerResults: ExternalAnalyzerResults[] | undefined,
+  knipGraphIndex?: KnipGraphIndex,
 ): string[] {
   if (!task.tags?.includes("external_analyzer_signal") || !externalAnalyzerResults?.length) {
     return [];
@@ -166,10 +181,16 @@ function renderTaskAnalyzerSignals(
   }
   return [
     "External analyzer signals for this task (leads — confirm or refute against real evidence, do not treat as a finding on their own):",
-    ...signals.map(
-      ({ path, signal }) =>
-        `- ${path}${signal.line ? `:${signal.line}` : ""} [${signal.name}] ${signal.detail ?? ""}`.trimEnd(),
-    ),
+    ...signals.map(({ path, signal }) => {
+      // Advisory-only knip↔graph cross-check tag: LIKELY-DEAD / HAS-IMPORTERS /
+      // UNVERIFIED / ENTRYPOINT. Rendered inline; degrades to no tag when the
+      // graph index is unavailable or the lead is not a knip lead.
+      const tag =
+        knipGraphIndex && isKnipLead(signal.name)
+          ? ` {graph-crosscheck: ${classifyKnipLead(path, knipGraphIndex)}}`
+          : "";
+      return `- ${path}${signal.line ? `:${signal.line}` : ""} [${signal.name}]${tag} ${signal.detail ?? ""}`.trimEnd();
+    }),
   ];
 }
 
@@ -181,6 +202,7 @@ export function buildTaskSections(
   lensDefs: Record<string, { description: string; do_not_report: string }>,
   lineIndex: Record<string, number>,
   externalAnalyzerResults?: ExternalAnalyzerResults[],
+  knipGraphIndex?: KnipGraphIndex,
 ): string[] {
   return packetTasks.flatMap((task) => {
     const lensDef = lensDefs[task.lens];
@@ -195,7 +217,11 @@ export function buildTaskSections(
       path,
       total_lines: task.file_line_counts?.[path] ?? lineIndex[path] ?? 0,
     }));
-    const analyzerSignalLines = renderTaskAnalyzerSignals(task, externalAnalyzerResults);
+    const analyzerSignalLines = renderTaskAnalyzerSignals(
+      task,
+      externalAnalyzerResults,
+      knipGraphIndex,
+    );
     return [
       `### ${task.task_id}`,
       `unit_id: ${task.unit_id}`,

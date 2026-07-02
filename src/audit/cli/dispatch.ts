@@ -67,6 +67,7 @@ import {
   buildPacketPrompt,
   buildLargeFileSection,
 } from "./dispatch/packetPrompt.js";
+import { buildKnipGraphIndex } from "../orchestrator/knipGraphCrosscheck.js";
 import {
   withinRoot,
   dispatchResultMapPath,
@@ -326,6 +327,17 @@ export async function prepareDispatchArtifacts(params: {
   let largestEstimatedTokens = 0;
   const warnings: Array<{ code: string; message: string }> = [];
 
+  // Render-time knip↔graph cross-check index (CP-NODE-2): normalized in-degree +
+  // entrypoint set + analyzers_used, built once from the artifact bundle and
+  // threaded into task-section rendering to annotate knip "unused export" leads
+  // (LIKELY-DEAD / HAS-IMPORTERS / UNVERIFIED / ENTRYPOINT). Advisory only;
+  // degrades to un-annotated leads when any artifact is missing.
+  const knipGraphIndex = buildKnipGraphIndex({
+    graphBundle: bundle.graph_bundle,
+    surfaceManifest: bundle.surface_manifest,
+    criticalFlows: bundle.critical_flows,
+  });
+
   for (const packet of emitPackets) {
     const promptPath = packetPromptPath(taskResultsDir, packet.packet_id);
     const packetTasks = packet.task_ids
@@ -362,7 +374,7 @@ export async function prepareDispatchArtifacts(params: {
       ? await extractPacketAnchor({ packet, reviewRoot, bundle, taskResultsDir, warnings })
       : { anchorPath: null, anchorSummary: null };
     const largeFileSection = buildLargeFileSection(largeFileMode, anchorSummary, anchorPath);
-    const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex, bundle.external_analyzer_results);
+    const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex, bundle.external_analyzer_results, knipGraphIndex);
     // The worker writes its AuditResult[] array directly to this packet result
     // file (its prompt's result_path == this entry's result_path); merge-and-
     // ingest recovers each task_id from that one array file. Per-task result
