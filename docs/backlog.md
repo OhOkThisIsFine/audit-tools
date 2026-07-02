@@ -96,6 +96,20 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
+- **Last-writer-wins seams → default LWW, but compare-on-conflict (Ethan, 2026-07-02).** Policy idea:
+  wherever a write is last-writer-wins, keep LWW as the cheap default but, when a write would clobber a
+  *newer* non-mergeable result, compare a monotonic marker and keep the newer/better rather than the
+  race winner. **Scope today is narrow:** the correctness-critical data seams are already NOT LWW — the
+  audit bundle / remediate `state.json` are mutex-serialized with reload + merge-time ownership
+  re-validation (a superseded peer abandons, never overwrites), and results are append-only + dedup'd.
+  The one true LWW seam is the **cosmetic** shared `steps/current-*` latest-pointer
+  (`src/shared/io/stepContractWriter.ts` — nothing correctness-critical reads it; peers use the returned
+  per-agent `prompt_path` / stdout). Concrete change if pursued: stamp each step with an
+  `emitted_at`/generation and make the shared-pointer write a locked read-compare-write that only
+  overwrites when strictly newer, so the pointer deterministically reflects the actually-latest step
+  under concurrency. Low value (cosmetic) but a clean general guard for any future LWW seam. Relates to
+  [[multi-ide-concurrent-runs-design]], [[enforce-robustness-in-tooling-not-host-discretion]].
+
 - **Parallel dispatch over OVERLAPPING files — make it the tool's job, and the target design (Ethan, 2026-07-02).**
   Today the decomposition avoids implement-time cherry-pick collisions by partitioning modules onto
   DISJOINT file scopes (e.g. five external analyzers forced into ONE serial `candidates.ts` module). That
