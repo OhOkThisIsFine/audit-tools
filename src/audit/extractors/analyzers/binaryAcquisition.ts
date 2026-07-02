@@ -51,8 +51,14 @@ export interface BinarySpec {
   versionProbeArgs: string[];
   /** Asset filename for a platform/arch, or null when unsupported. */
   assetFor(platform: NodeJS.Platform, arch: string): string | null;
-  /** Checksums-file asset name (lists `<sha256>  <asset>` lines). */
-  checksumsAsset: string;
+  /**
+   * Checksums-file asset name (lists `<sha256>  <asset>` lines). Either a single
+   * release-wide file (gitleaks/osv-scanner/actionlint), or — when a project
+   * ships one checksum file PER asset (hadolint's `<asset>.sha256`, each holding
+   * only that asset's `<sha256> *<asset>` line) — a function deriving the
+   * checksum-file name from the asset being downloaded.
+   */
+  checksumsAsset: string | ((assetName: string) => string);
   /** `${releaseUrlBase}/${assetName}` is the download URL (asset + checksums). */
   releaseUrlForAsset(assetName: string): string;
   /**
@@ -149,7 +155,11 @@ export async function resolveBinary(
   let assetBytes: Uint8Array | null;
   let checksumsBytes: Uint8Array | null;
   try {
-    checksumsBytes = await fetch(spec.releaseUrlForAsset(spec.checksumsAsset));
+    const checksumsAssetName =
+      typeof spec.checksumsAsset === "function"
+        ? spec.checksumsAsset(assetName)
+        : spec.checksumsAsset;
+    checksumsBytes = await fetch(spec.releaseUrlForAsset(checksumsAssetName));
     assetBytes = await fetch(spec.releaseUrlForAsset(assetName));
   } catch (error) {
     return {

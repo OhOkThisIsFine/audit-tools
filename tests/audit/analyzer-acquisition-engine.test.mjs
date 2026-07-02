@@ -444,6 +444,33 @@ test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to sk
   );
 });
 
+// CP-NODE-1: each newly-registered analyzer is consent-gated end-to-end — with
+// detect() forced true and no consent token, the engine must report `skipped`
+// and spawn ZERO subprocesses (the consent chokepoint short-circuits the probe).
+const { EXTERNAL_ANALYZER_CANDIDATES } = await import(
+  "../../src/audit/extractors/analyzers/candidates.ts"
+);
+
+for (const id of ["clippy", "rubocop", "hadolint", "actionlint", "type-coverage"]) {
+  test(`CP-NODE-1: ${id} is consent-gated — no token => skipped, zero subprocess spawn`, () => {
+    const real = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === id);
+    assert.ok(real, `${id} must be registered`);
+    assert.equal(real.defaultRun, false, `${id} must be defaultRun:false`);
+
+    const spawned = [];
+    const spy = (argv, cwd) => {
+      spawned.push(argv);
+      return fakeRunner({ toolStdout: "[]" })(argv, cwd);
+    };
+    // Force detect() true so the ONLY thing withholding the spawn is consent.
+    const forced = { ...real, detect: () => true };
+    const out = runExternalAnalyzer(forced, "/root", { run: spy, analyzers: {} });
+    assert.equal(out.status.status, "skipped", `${id} without consent => skipped`);
+    assert.match(out.status.error, /consent token/i);
+    assert.equal(spawned.length, 0, `${id} must spawn ZERO subprocesses without consent`);
+  });
+}
+
 test("detectNodeEcosystem: deterministic marker-file detection", async () => {
   const root = await mkdtemp(join(tmpdir(), "f5-detect-"));
   try {
