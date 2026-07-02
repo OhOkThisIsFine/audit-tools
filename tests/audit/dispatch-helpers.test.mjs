@@ -323,6 +323,49 @@ test("buildTaskSections — omits the analyzer signal section when tagged but no
   assert.doesNotMatch(joined, /External analyzer signals for this task/);
 });
 
+test("buildTaskSections — renders the knip↔graph cross-check tag inline for a knip lead (CP-NODE-2)", async () => {
+  const { buildKnipGraphIndex } = await import(
+    "../../src/audit/orchestrator/knipGraphCrosscheck.ts"
+  );
+  const task = { ...makeAuditTask("t1"), tags: ["external_analyzer_signal"] };
+  const lensDefs = makeLensDefs();
+  const lineIndex = { "src/t1.ts": 50 };
+  const externalAnalyzerResults = [
+    {
+      tool: "knip",
+      results: [
+        {
+          id: "knip-exports:src/t1.ts:helper:12",
+          category: "maintainability",
+          severity: "low",
+          path: "src/t1.ts",
+          line_start: 12,
+          summary: "knip: unused export 'helper'",
+          rule: "knip-exports",
+        },
+      ],
+    },
+  ];
+  // Empty graph + entrypoints, but the TS analyzer ran → in-degree 0,
+  // non-entrypoint, own analyzer present → LIKELY-DEAD.
+  const index = buildKnipGraphIndex({
+    graphBundle: { graphs: {}, analyzers_used: ["typescript"] },
+    surfaceManifest: { surfaces: [] },
+    criticalFlows: { flows: [] },
+  });
+
+  const sections = buildTaskSections(
+    [task],
+    lensDefs,
+    lineIndex,
+    externalAnalyzerResults,
+    index,
+  );
+  const joined = sections.join("\n");
+
+  assert.match(joined, /\[knip-exports\] \{graph-crosscheck: LIKELY-DEAD\}/);
+});
+
 // ── collectOversizedWarnings ──────────────────────────────────────────────────
 
 function makeWaveSchedule(confidence, contextTokens = 10000, outputTokens = 2000) {
