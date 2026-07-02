@@ -11,15 +11,28 @@ Docs drift; an agent that *remembers* to re-check them is a latent failure mode
 re-check into tooling: every night, against the live codebase, with three
 independent agents gating every change.
 
-## The rubric source: the documentation philosophy
+## The rubric sources: two philosophies
 
-Every judgement in this routine measures against
-[`documentation-philosophy.md`](documentation-philosophy.md) — the canonical statement of
-what this repo's docs are for and how they're shaped (durable concepts not current state;
-one home per concept; status-noise forbidden; the condensation bias). That doc is the
-*what*; this file is the *how* (the three-agent gate, dispositions, pipeline). Load the
-philosophy at the start of every run; when it and these mechanics ever conflict, the
-philosophy wins and this file is the thing to fix.
+Every judgement in this routine measures against **two** canonical rubrics, loaded at the
+start of every run:
+
+1. **[`documentation-philosophy.md`](documentation-philosophy.md)** — the *doc-shape* rubric:
+   what this repo's docs are for and how they're shaped (durable concepts not current state;
+   one home per concept; status-noise forbidden; the condensation bias). Governs whether a doc
+   is *well-formed as a doc*. When it and this file's mechanics ever conflict, it wins and this
+   file is the thing to fix.
+2. **[`project-philosophy.md`](project-philosophy.md)** — the *content-conformance* rubric: the
+   project's organizing convictions, split into those that govern the product itself (Part A) and
+   those that govern its development (Part B). Governs whether a doc's *claims and guidance align
+   with the project's stated philosophy* — e.g. a doc that recommends hardcoding a model, forking
+   planning per-language, gating LLM review behind a provider, or leaning on host discretion where
+   the tool should enforce, **contradicts** a conviction. `project-philosophy.md` is itself a map
+   that points at each conviction's canonical home (`CLAUDE.md` / `spec/` / memory); where the map
+   and a home disagree, the **home** is ground truth (verify against it, not the map).
+
+Doc-shape is a *factual/structural* judgement (can auto-apply narrow fixes). **Content-conformance
+is always a judgement call → design-decision → escalate to the owner** (see *Philosophy-conformance
+review* below); the routine never rewrites a doc's substance to fit a conviction on its own.
 
 ## Two perspectives — review the items AND the doc set
 
@@ -110,6 +123,32 @@ auto-applied. Two smells force the question (do not silently "fix" either):
   traps, `CLAUDE.md`) — move it there in the same edit, then delete the backlog entry; never
   retain the entry just to host the rule.
 
+## Philosophy-conformance review — every doc, every run
+
+In addition to doc-shape (well-formed?) and factual accuracy (true vs code?), every doc is asked
+each run: **does its content conform to the project's philosophy** ([`project-philosophy.md`](project-philosophy.md),
+verified against each conviction's canonical home)? This catches a doc that is well-formed and
+factually accurate yet **advocates or documents something that cuts against a stated conviction** —
+the class the other two checks miss. Smells that trigger it (non-exhaustive — the convictions in
+`project-philosophy.md` are the full rubric):
+
+- Hardcoded model/provider/window/tier assumptions presented as normal (violates *everything-agnostic*, A4).
+- Per-language / per-ecosystem forks of planning logic (violates *language-neutral*, A4).
+- Correctness resting on the host *remembering / noticing / being careful*, or a manual flag treated as
+  the fix (violates *enforce-in-tooling*, A3 — "a needed manual flag is a bug signal").
+- LLM review gated behind "if a provider exists"; CLI treated as the primary product (violates
+  *conversation-first* / *LLM always in the loop*, A2/A5).
+- "Deterministic by default / 100% deterministic" framing (violates *right tool, not dogma*, A2).
+- A separate lean/fast path proposed instead of one self-scaling pipeline (violates A6).
+- Deferring the clean endpoint on effort/complexity grounds (violates *ideal-code-over-compatibility*, B1).
+
+**Every conformance finding is a design-decision → escalate**, never auto-applied: judging "does this
+contradict a conviction" is exactly the judgment the owner must make, and the fix is often to change the
+*code/policy*, not the doc. Quote the offending item, name the conviction (with its `project-philosophy.md`
+section + canonical home), and surface it under the escalation block's **"Design decisions for you"**.
+`project-philosophy.md` and the two rubric files (`documentation-philosophy.md`, this spec) are reviewed
+for their own conformance like any other doc.
+
 ## Doc-set condensation review — the corpus as a whole (perspective 2)
 
 Once per run, after the per-doc work, step back and review the **whole document set** against
@@ -179,14 +218,16 @@ timeless doc are exactly the status-noise we flag).
 
 ## Pipeline (one nightly run)
 
-0. Load [`documentation-philosophy.md`](documentation-philosophy.md) — the rubric source
-   every disposition measures against.
+0. Load both rubric sources — [`documentation-philosophy.md`](documentation-philosophy.md)
+   (doc-shape) and [`project-philosophy.md`](project-philosophy.md) (content-conformance) —
+   every disposition measures against them.
 1. On the `doc-review` branch, `git fetch` `main`; check out `main`'s HEAD content
    to review against. Load the ledger.
 2. **Reviewer** over every in-scope item (perspective 1, within-doc): read
    `diff lastChecked..HEAD` for scope, full code on demand. Emit per-item
    `{ disposition, edit?, question?, a2b_draft?, evidence }`. Stamp ledger for
-   examined items. Also run the **per-doc existence-review** and the
+   examined items. Also run the **per-doc existence-review**, the
+   **philosophy-conformance review** (content vs `project-philosophy.md`), and the
    **doc-set condensation review** (perspective 2) — emit those as escalations.
 3. **Adversary** independently over every item: `agree | refute` + evidence.
 4. Agree → stands. Contested → **Judge** → final disposition + apply/escalate
