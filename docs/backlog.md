@@ -96,6 +96,15 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
+- **Consolidate the test runners onto vitest (the owner, 2026-07-02).** Today `src/audit` tests run on
+  `node:test` (`tests/audit/*.test.mjs`, `node:assert`, via the `tsx/esm` loader) while `src/remediate`
+  runs on vitest (`tests/remediate/*.test.ts`). Two runners is a parity/drift hazard and buys nothing —
+  node:test's zero-dep advantage is moot since the audit tests already run through a TS loader and vitest
+  is already a dependency. Target: one runner (vitest) for both areas. Work: rewrite audit tests'
+  `node:assert` → vitest `expect`, `await t.test(...)` subtests → `describe/it`; fold `test:node` into the
+  vitest include globs; drop the `--import tsx/esm --test` scripts; update `CLAUDE.md`/README test
+  commands. Own sprint — touches every audit test file. Keep green at every commit.
+
 - **Last-writer-wins seams → default LWW, but compare-on-conflict (the owner, 2026-07-02).** Policy idea:
   wherever a write is last-writer-wins, keep LWW as the cheap default but, when a write would clobber a
   *newer* non-mergeable result, compare a monotonic marker and keep the newer/better rather than the
