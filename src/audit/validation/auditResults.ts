@@ -862,10 +862,19 @@ function validateResultFindings(
     return false; // signal to skip verification
   }
 
+  const seenFindingIds = new Set<string>();
   for (let j = 0; j < findings.length; j++) {
     const label = `findings[${j}]`;
     const finding = findings[j];
     issues.push(...validateFinding(finding, label, taskId, resultIndex));
+
+    if (isRecord(finding) && isNonEmptyString(finding.id)) {
+      if (seenFindingIds.has(finding.id)) {
+        pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: `${label}.id`, message: `finding id '${finding.id}' is duplicated. Declare each finding id once.` });
+      } else {
+        seenFindingIds.add(finding.id);
+      }
+    }
 
     if (!isRecord(finding) || !Array.isArray(finding.affected_files)) continue;
 
