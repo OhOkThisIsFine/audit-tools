@@ -83,6 +83,19 @@ export function nodeClaimsPath(artifactsDir: string): string {
 }
 
 /**
+ * `<artifactsDir>/task-claims.json` — a SEPARATE `ClaimRegistry` file for
+ * per-`task_id` audit-task claims (slice 2). Kept distinct from
+ * `node-claims.json` (the short-lived, heartbeated `bundle-mutation` mutex)
+ * because task claims use a much LONGER lease: they are held across an
+ * out-of-process host worker run with no live heartbeat, so their reclaim window
+ * must bound a worker's whole runtime. Separate files keep the two lease windows
+ * from cross-contaminating (a registry's stale-window is per-instance).
+ */
+export function taskClaimsPath(artifactsDir: string): string {
+  return join(artifactsDir, "task-claims.json");
+}
+
+/**
  * `<artifactsDir>/incoming` — the drop directory for upstream worker results
  * and externally supplied evidence. Takes an already-resolved artifacts dir.
  */

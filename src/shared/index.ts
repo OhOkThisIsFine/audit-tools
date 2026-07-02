@@ -398,6 +398,7 @@ export {
   stepsDir,
   artifactTreeLockPath,
   nodeClaimsPath,
+  taskClaimsPath,
   incomingDir,
   outputDirFor,
   auditReportPath,

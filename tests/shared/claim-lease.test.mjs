@@ -117,6 +117,95 @@ test("withClaimHeartbeat refreshes a held claim and runs fn to completion", asyn
   }
 });
 
+test("claimMany grants only free nodes; a second peer gets the disjoint remainder", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
+    const peerA = new CR(path);
+    const peerB = new CR(path);
+
+    const a = await peerA.claimMany(["t1", "t2", "t3", "t4"], "A");
+    assert.deepEqual(a.granted.sort(), ["t1", "t2", "t3", "t4"]);
+    for (const id of a.granted) assert.equal(typeof a.ownerTokenByNode[id], "string");
+
+    // Peer B asks for an overlapping set; gets only the tasks A didn't already hold.
+    const b = await peerB.claimMany(["t3", "t4", "t5", "t6"], "B");
+    assert.deepEqual(b.granted.sort(), ["t5", "t6"], "disjoint from A's live claims");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("claimMany re-grants the SAME pool's own live claims (idempotent re-partition)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
+    const reg = new CR(path);
+
+    // Run "R1" claims its partition, then re-runs the SAME partition (e.g. a
+    // second prepare-dispatch within one audit run before ingest): it must
+    // re-grant its own in-flight tasks, not skip them.
+    const first = await reg.claimMany(["t1", "t2", "t3"], "R1");
+    assert.deepEqual(first.granted.sort(), ["t1", "t2", "t3"]);
+    const again = await reg.claimMany(["t1", "t2", "t3"], "R1");
+    assert.deepEqual(again.granted.sort(), ["t1", "t2", "t3"], "same run re-grants its own claims");
+
+    // A DIFFERENT run (distinct poolId) is still partitioned off.
+    const other = await reg.claimMany(["t1", "t2", "t4"], "R2");
+    assert.deepEqual(other.granted.sort(), ["t4"], "different run skips R1's live claims");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("clear removes claims unconditionally (no token) and reports the count", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
+    const reg = new CR(path);
+    await reg.claimMany(["t1", "t2", "t3"], "A");
+
+    const removed = await reg.clear(["t1", "t3", "missing"]);
+    assert.equal(removed, 2, "only present nodes count; missing ignored");
+
+    // t1/t3 are now free for anyone; t2 still held.
+    const re = await reg.claimMany(["t1", "t2", "t3"], "B");
+    assert.deepEqual(re.granted.sort(), ["t1", "t3"], "cleared nodes reclaimable, t2 still held");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("ClaimRegistry honors a per-registry stale window (OD3 long lease)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    let clock = 1_000;
+    const now = () => clock;
+    // Long lease: 10_000ms window on a registry pointed at the same file.
+    const longPath = join(dir, "long-claims.json");
+    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
+    const reg = new CR(longPath, now, 10_000);
+
+    const mine = await reg.claim("t1", "peerA");
+    assert.equal(mine.acquired, true);
+
+    // 5s later: within the 10s window → still owned, a rival cannot claim.
+    clock = 6_000;
+    const rivalEarly = await reg.claim("t1", "peerB");
+    assert.equal(rivalEarly.acquired, false, "not stale before the configured window");
+
+    // 11s after the claim: past the 10s window → reclaimable.
+    clock = 12_000;
+    const rivalLate = await reg.claim("t1", "peerB");
+    assert.equal(rivalLate.acquired, true, "reclaimable once past the configured window");
+  } finally {
+    await cleanup();
+  }
+});
+
 test("withClaimHeartbeat fires onRevoked when the claim was reclaimed by a peer", async () => {
   const { registry, cleanup } = await tempRegistry();
   try {

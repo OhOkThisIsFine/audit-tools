@@ -31,10 +31,13 @@
   [`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md). Reuses the
   cross-process `ClaimRegistry`. Slices 0 (revert isolation) + **1 (audit lock-split + `bundle-mutation`
   claim, executor out of `artifact-tree.lock`, heartbeat + merge-time ownership gate) SHIPPED** (all
-  OD1/OD2/OD3 settled). **Next build unit: slice 2** = audit task-POOL claiming (partition the
-  `audit_tasks` packet by per-`task_id` claim so N peers' hosts run disjoint tasks) + a configurable
-  per-registry stale-window on `ClaimRegistry` (OD3 long lease). Then slice 3 (per-agent step slot), 4
-  (remediate phase-claim + default join), 5 (rewrite the staleness-cascade-wipe trap as resolved).
+  OD1/OD2/OD3 settled). Slice **2 (audit task-POOL claiming) SHIPPED**: `prepareDispatchArtifacts`
+  `claimMany`s candidate `task_id`s in a shared long-lease `task-claims.json`, dispatches only the
+  disjoint granted subset, releases deferred + terminal (ingest-time) claims; dedup-by-task_id is the
+  overrun backstop. **Next build unit: slice 3** = per-agent step slot (`steps/<agentId>/`) + the
+  per-PEER runDir orchestration so two peers' simultaneous `audit_tasks` dispatches don't collide on
+  shared per-run files (the claim *partitioning* is done; per-peer dispatch-run wiring is what's left).
+  Then slice 4 (remediate phase-claim + default join), 5 (rewrite the staleness-cascade-wipe trap).
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.

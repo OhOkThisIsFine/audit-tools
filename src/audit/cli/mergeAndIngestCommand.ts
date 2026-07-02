@@ -1,6 +1,6 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile } from "audit-tools/shared";
+import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile, ClaimRegistry, taskClaimsPath } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { validateAuditResults, defaultFindingLensFromResult, emitCoverageLineCountFriction } from "../validation/auditResults.js";
@@ -651,6 +651,20 @@ export async function mergeAndIngest(params: {
       buildPendingAuditTasks(result.updated_bundle),
     );
     await writeJsonFile(tasksPath, updatedPendingTasks);
+  }
+
+  // Cooperative multi-agent (slice 2): release the task claims for every task
+  // that reached a TERMINAL outcome this round — passing (ingested; now filtered
+  // from pending) and failing (will be re-dispatched, so its claim must free up).
+  // `notDispatched` (budget-capped) is deliberately left claimed/unclaimed as-is:
+  // it may be a live peer's in-flight work, never ours to clear here. Cleared
+  // unconditionally (no token) since an ingested/terminal result is authoritative.
+  const terminalTaskIds = [
+    ...passing.map((r) => r.task_id),
+    ...failing.map((f) => f.task_id),
+  ];
+  if (terminalTaskIds.length > 0) {
+    await new ClaimRegistry(taskClaimsPath(artifactsDir)).clear(terminalTaskIds);
   }
 
   const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);

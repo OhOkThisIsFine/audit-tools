@@ -127,10 +127,26 @@ what" — no separate roster.
    executors clobber each other's persist (the wipe trap). Reusable helpers: `claimWithBackoff` /
    `withClaimHeartbeat` (`src/shared/quota/claimLease.ts`). Tests: `tests/shared/claim-lease.test.mjs`;
    full shared+audit suite green (3434/0).
-2. **Audit task-POOL claiming** — when the current obligation is `audit_tasks`, partition the packet by
-   per-task `claim(task_id)` so N peers' hosts run DISJOINT tasks; workers append to `audit_results.jsonl`
-   (already append-safe, no bundle persist); ingest stays an exclusive obligation-claim (slice 1).
-   Includes the configurable per-registry stale-window on `ClaimRegistry` (OD3 lease) + heartbeat cadence.
+2. **Audit task-POOL claiming — ✅ SHIPPED (mechanism).** In `prepareDispatchArtifacts`
+   (`src/audit/cli/dispatch.ts`): before packetization, `claimMany` the candidate `task_id`s in a shared
+   per-run task-claims registry (`.audit-tools/audit/task-claims.json`, SEPARATE file from the slice-1
+   `node-claims.json` mutex because it uses a long ~20min lease — a claim is held across an
+   out-of-process worker with no live heartbeat); dispatch only the granted (disjoint) subset — a task a
+   live peer holds is omitted. After the top-K `filterPackets`, `clear` the claims on DEFERRED (not-
+   emitted) tasks so peers can take them. At ingest (`mergeAndIngestCommand.ts`, after `runAuditStep`
+   succeeds), `clear` the claims for every TERMINAL task (passing + failing); `notDispatched` is left
+   alone (may be a peer's). Correctness backstop for a rare lease overrun = the existing dedup-by-task_id
+   at ingest. New `ClaimRegistry.claimMany`/`clear` + per-registry configurable `staleMs` (OD3 lease).
+   **Idempotency crux (`poolId = runId`):** `claimMany` re-grants a node already held by the SAME `poolId`
+   and only skips a DIFFERENT live pool's nodes. Dispatch passes `runId` as poolId, so a run's *repeated*
+   `prepare-dispatch` (multiple dispatch calls occur within one run before ingest) re-grants its own
+   in-flight tasks — without this the second call skipped everything and the plan came back empty/`partial`
+   (caught by the wrapper e2e). Two IDEs have distinct `runId`s, so they still partition disjointly.
+   The A-8 hybrid in-process driver (`tasksOverride`) is exempt (owns a coordinator-assigned partition).
+   Tests: `claim-lease.test.mjs` (claimMany disjoint / same-pool re-grant / clear / stale window). **Boundary — deferred to
+   slice 3:** the per-PEER runDir + step-slot orchestration so two peers' *simultaneous* `audit_tasks`
+   next-steps don't collide on shared per-run files (`dispatch-plan.json`, result-map). The claim
+   *partitioning* is done; wiring each peer to its own dispatch run is the per-agent-step-slot work.
 3. **Per-agent step slot** (both orchestrators) — `steps/<agentId>/…` + shared latest-pointer.
 4. **Remediate phase-claim + default join** — `phase:<name>` claims for serial phases; make a second
    next-step join the rolling frontier by default.
