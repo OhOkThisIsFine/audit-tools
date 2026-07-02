@@ -8,15 +8,16 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.31.0** (published 2026-07-02, CI-verified installable; both global bins
-  reinstalled + verified at 0.31.0). Shipped the T5 forward-tracks remediation via the full contract pipeline:
+- On npm as `latest` at **v0.31.1** (published 2026-07-02, CI-verified installable; both global bins
+  reinstalled + verified at 0.31.1). v0.31.1 fixed the contract-pipeline repair-revert bug (see *This lap* below).
+  v0.31.0 shipped the T5 forward-tracks remediation via the full contract pipeline:
   (1) five new external analyzers clippy/rubocop/hadolint/actionlint/type-coverage (candidates + clippy/rubocop
   adapters + HADOLINT/ACTIONLINT BinarySpecs; `BinarySpec.checksumsAsset` generalized to a fn for hadolint's
   per-asset `.sha256`); (2) knip↔graph cross-check as a pure render-time join (normalized in-degree index +
   per-file/per-language fidelity gate + entrypoints from surface_manifest/critical_flows); (3) remediate-code
   SKILL.md no-drift guard test; (4) validator intra-result duplicate finding-id hard-reject; (5) churn/context/
   enforce review pass (`docs/reviews/churn-context-enforce-pass-2026-07-02.md`).
-- **This lap (post-0.31.0):** fixed the contract-pipeline **repair-revert** bug — a judge-driven repair
+- **This lap (v0.31.1):** fixed the contract-pipeline **repair-revert** bug — a judge-driven repair
   regenerates the AGGREGATED `finalized_module_contracts` / `module_contracts` `.input.json`, never the
   per-module shards it was merged from, so a later upstream cascade re-merged the STALE shards and silently
   reverted the approved repair (then the convergence guard mis-blamed the design). Root-cause fix restores the
