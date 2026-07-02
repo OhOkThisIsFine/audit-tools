@@ -141,31 +141,64 @@ function addAnchor(
 }
 
 /**
- * External-analyzer signal anchors (rule/line/summary) for one path. Split out
- * of {@link buildFileAnchorSummary} so packet-level prompt rendering (any
- * multi-file packet, not just isolated-large-file mode) can surface the same
- * grounded lead detail without paying for whole-file content scanning — this
- * sub-extraction needs only `path` + `externalAnalyzerResults`, never `content`.
+ * Path-keyed index of external-analyzer signal anchors (rule/line/summary),
+ * built ONCE per dispatch from the whole `externalAnalyzerResults` set so
+ * per-task/per-file prompt rendering is an O(1) map read rather than an
+ * O(tasks × files × total-results) re-flatten. Key = normalized lowercased
+ * path; each bucket is pre-sorted by (line_start, id), matching the original
+ * per-path ordering. See {@link analyzerSignalAnchorsForPath} for the reader.
  */
-export function analyzerSignalAnchorsForPath(
-  path: string,
+export type AnalyzerSignalAnchorIndex = Map<string, FileAnchor[]>;
+
+export function buildAnalyzerSignalAnchorIndex(
   externalAnalyzerResults: ExternalAnalyzerResults[] | undefined,
-): FileAnchor[] {
-  const normalizedPath = normalizePath(path).toLowerCase();
-  return (externalAnalyzerResults ?? [])
-    .flatMap((tool) => tool.results ?? [])
-    .filter((result) => normalizePath(result.path).toLowerCase() === normalizedPath)
-    .sort(
+): AnalyzerSignalAnchorIndex {
+  // Group raw signals by path first so the (line_start, id) sort — and thus the
+  // rendered order — is byte-identical to the pre-index per-path extraction.
+  const grouped = new Map<string, ExternalAnalyzerResults["results"]>();
+  for (const tool of externalAnalyzerResults ?? []) {
+    for (const result of tool.results ?? []) {
+      const key = normalizePath(result.path).toLowerCase();
+      const bucket = grouped.get(key);
+      if (bucket) {
+        bucket.push(result);
+      } else {
+        grouped.set(key, [result]);
+      }
+    }
+  }
+  const index: AnalyzerSignalAnchorIndex = new Map();
+  for (const [key, results] of grouped) {
+    results.sort(
       (a, b) =>
         (a.line_start ?? 0) - (b.line_start ?? 0) ||
         a.id.localeCompare(b.id),
-    )
-    .map((signal) => ({
-      kind: "analyzer_signal" as const,
-      name: truncate(signal.rule ?? signal.category, 80),
-      line: signal.line_start,
-      detail: truncate(signal.summary, 180),
-    }));
+    );
+    index.set(
+      key,
+      results.map((signal) => ({
+        kind: "analyzer_signal" as const,
+        name: truncate(signal.rule ?? signal.category, 80),
+        line: signal.line_start,
+        detail: truncate(signal.summary, 180),
+      })),
+    );
+  }
+  return index;
+}
+
+/**
+ * External-analyzer signal anchors (rule/line/summary) for one path — an O(1)
+ * read of the pre-built {@link AnalyzerSignalAnchorIndex}. Split out of
+ * {@link buildFileAnchorSummary} so packet-level prompt rendering (any
+ * multi-file packet, not just isolated-large-file mode) can surface the same
+ * grounded lead detail without paying for whole-file content scanning.
+ */
+export function analyzerSignalAnchorsForPath(
+  path: string,
+  index: AnalyzerSignalAnchorIndex | undefined,
+): FileAnchor[] {
+  return index?.get(normalizePath(path).toLowerCase()) ?? [];
 }
 
 function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): GraphEdge[] {
@@ -303,7 +336,10 @@ export function buildFileAnchorSummary(params: {
     });
   }
 
-  const analyzerSignals = analyzerSignalAnchorsForPath(path, params.externalAnalyzerResults);
+  const analyzerSignals = analyzerSignalAnchorsForPath(
+    path,
+    buildAnalyzerSignalAnchorIndex(params.externalAnalyzerResults),
+  );
   for (const signal of analyzerSignals) {
     addAnchor(anchors, seen, signal);
   }

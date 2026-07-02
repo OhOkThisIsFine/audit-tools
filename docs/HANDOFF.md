@@ -8,27 +8,25 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.31.1** (published 2026-07-02, CI-verified installable; both global bins
-  reinstalled + verified at 0.31.1). v0.31.1 fixed the contract-pipeline repair-revert bug (see *This lap* below).
-  v0.31.0 shipped the T5 forward-tracks remediation via the full contract pipeline:
+- On npm as `latest` at **v0.31.2** (both global bins reinstalled + verified). v0.31.2 shipped the two
+  VERIFIED churn/context follow-ons from the 2026-07-02 lens pass (see *This lap* below). v0.31.1 fixed the
+  contract-pipeline repair-revert bug. v0.31.0 shipped the T5 forward-tracks remediation via the full contract pipeline:
   (1) five new external analyzers clippy/rubocop/hadolint/actionlint/type-coverage (candidates + clippy/rubocop
   adapters + HADOLINT/ACTIONLINT BinarySpecs; `BinarySpec.checksumsAsset` generalized to a fn for hadolint's
   per-asset `.sha256`); (2) knip↔graph cross-check as a pure render-time join (normalized in-degree index +
   per-file/per-language fidelity gate + entrypoints from surface_manifest/critical_flows); (3) remediate-code
   SKILL.md no-drift guard test; (4) validator intra-result duplicate finding-id hard-reject; (5) churn/context/
   enforce review pass (`docs/reviews/churn-context-enforce-pass-2026-07-02.md`).
-- **This lap (v0.31.1):** fixed the contract-pipeline **repair-revert** bug — a judge-driven repair
-  regenerates the AGGREGATED `finalized_module_contracts` / `module_contracts` `.input.json`, never the
-  per-module shards it was merged from, so a later upstream cascade re-merged the STALE shards and silently
-  reverted the approved repair (then the convergence guard mis-blamed the design). Root-cause fix restores the
-  invariant *shards are the single source of truth*: `propagateAggregateToShards` (`src/remediate/steps/
-  contractPipeline.ts`, called from `ingestContractArtifacts`) decomposes an ingested aggregate back into its
-  shards, so any later re-merge reproduces the repair. Regression test in `tests/remediate/dc3.test.ts`
-  ("repair write-through"). With the invariant restored, the backlog's proposed defense fixes (b) convergence-guard
-  regression detection and (c) don't-cascade-on-file_scope are moot — the revert can no longer occur.
+- **This lap (v0.31.2):** shipped the two VERIFIED churn/context follow-ons from the 2026-07-02 lens pass.
+  (N1) The per-task/per-file analyzer-signal rendering re-flattened the whole `externalAnalyzerResults` set on
+  every call → O(tasks × files × total-results) per dispatch. Now `buildAnalyzerSignalAnchorIndex`
+  (`src/audit/orchestrator/fileAnchors.ts`) builds a path-keyed `Map<string, FileAnchor[]>` ONCE per dispatch
+  (in `dispatch.ts`, beside `buildKnipGraphIndex`); `analyzerSignalAnchorsForPath` is now an O(1) index read.
+  (N4) `renderTaskAnalyzerSignals` (`src/audit/cli/dispatch/packetPrompt.ts`) capped at 24 lines +
+  omitted-count footer, mirroring the isolated-large-file anchor preview's `.slice(0, 24)`. Regression tests in
+  `tests/audit/dispatch-helpers.test.mjs` (N4 cap) — pre-index tests re-pointed through the index builder.
 - **Immediate next:** none pending from this sprint.
-- **Open items from this run** (all in `docs/backlog.md`): churn N1 (per-dispatch analyzer-anchor path index) and
-  N4 (cap renderTaskAnalyzerSignals output) follow-ons; live validation of the 5 new analyzers (clippy/rubocop
+- **Open items from this run** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop
   are fixture-only here — no Rust/Ruby repo). Design-direction items filed: guidance-file discovery should
   contextualize not suppress; parallel dispatch over overlapping files is the target; multi-IDE concurrent runs.
   Two release-gate traps bit this run (both cross-cutting guards the per-node worktrees miss): the new dated
@@ -95,8 +93,9 @@ validation on a real deepening-capable run remains env-bound (T6-class).
    `total_lines` gate (CE-009) shipped; validator intra-result duplicate finding-id hard-reject shipped
    v0.31.0. Open: the always-on conversation host advertises no API-level constraint mechanism (provider-
    blocked); further semantic-validity checks are unbuilt candidates.
-4. **Codebase-wide churn/context/enforce pass.** The 2026-07-02 pass ran (v0.31.0) and filed N1/N4 to
-   backlog; C3/C5/C6/E4/E5 remain low-value/needs-design-intent. Re-run the lens broadly if worthwhile.
+4. **Codebase-wide churn/context/enforce pass.** The 2026-07-02 pass ran (v0.31.0); its N1 (per-dispatch
+   analyzer-anchor path index) and N4 (cap analyzer-signal lines) follow-ons shipped this lap. C3/C5/C6/E4/E5
+   remain low-value/needs-design-intent. Re-run the lens broadly if worthwhile.
 5. **remediate-code full installer/generator parity** (only the SKILL.md drift-guard test shipped v0.31.0;
    the ~1200-line multi-host installer parity remains a forward track — see `docs/backlog.md`).
 

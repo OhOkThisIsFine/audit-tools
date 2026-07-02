@@ -4,10 +4,10 @@ import { writeJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../../types.js";
 import type { ReviewPacket } from "../../types/reviewPlanning.js";
 import type { ArtifactBundle } from "../../io/artifacts.js";
-import type { ExternalAnalyzerResults } from "../../types/externalAnalyzer.js";
 import {
   analyzerSignalAnchorsForPath,
   buildFileAnchorSummary,
+  type AnalyzerSignalAnchorIndex,
   type FileAnchorSummary,
 } from "../../orchestrator/fileAnchors.js";
 import {
@@ -165,23 +165,30 @@ function isKnipLead(anchorName: string): boolean {
   return anchorName.startsWith("knip-");
 }
 
+// Per-task analyzer-signal line cap, mirroring the isolated-large-file anchor
+// preview's `.slice(0, 24)` — a task with hundreds of leads would otherwise
+// bloat the packet prompt; the omitted count points the worker at packet.json.
+const MAX_ANALYZER_SIGNAL_LINES = 24;
+
 function renderTaskAnalyzerSignals(
   task: AuditTask,
-  externalAnalyzerResults: ExternalAnalyzerResults[] | undefined,
+  analyzerSignalIndex: AnalyzerSignalAnchorIndex | undefined,
   knipGraphIndex?: KnipGraphIndex,
 ): string[] {
-  if (!task.tags?.includes("external_analyzer_signal") || !externalAnalyzerResults?.length) {
+  if (!task.tags?.includes("external_analyzer_signal") || !analyzerSignalIndex?.size) {
     return [];
   }
   const signals = task.file_paths.flatMap((path) =>
-    analyzerSignalAnchorsForPath(path, externalAnalyzerResults).map((signal) => ({ path, signal })),
+    analyzerSignalAnchorsForPath(path, analyzerSignalIndex).map((signal) => ({ path, signal })),
   );
   if (signals.length === 0) {
     return [];
   }
+  const shown = signals.slice(0, MAX_ANALYZER_SIGNAL_LINES);
+  const omitted = signals.length - shown.length;
   return [
     "External analyzer signals for this task (leads — confirm or refute against real evidence, do not treat as a finding on their own):",
-    ...signals.map(({ path, signal }) => {
+    ...shown.map(({ path, signal }) => {
       // Advisory-only knip↔graph cross-check tag: LIKELY-DEAD / HAS-IMPORTERS /
       // UNVERIFIED / ENTRYPOINT. Rendered inline; degrades to no tag when the
       // graph index is unavailable or the lead is not a knip lead.
@@ -191,6 +198,9 @@ function renderTaskAnalyzerSignals(
           : "";
       return `- ${path}${signal.line ? `:${signal.line}` : ""} [${signal.name}]${tag} ${signal.detail ?? ""}`.trimEnd();
     }),
+    ...(omitted > 0
+      ? [`- …and ${omitted} more analyzer signal(s); see the full set in packet.json.`]
+      : []),
   ];
 }
 
@@ -201,7 +211,7 @@ export function buildTaskSections(
   packetTasks: AuditTask[],
   lensDefs: Record<string, { description: string; do_not_report: string }>,
   lineIndex: Record<string, number>,
-  externalAnalyzerResults?: ExternalAnalyzerResults[],
+  analyzerSignalIndex?: AnalyzerSignalAnchorIndex,
   knipGraphIndex?: KnipGraphIndex,
 ): string[] {
   return packetTasks.flatMap((task) => {
@@ -219,7 +229,7 @@ export function buildTaskSections(
     }));
     const analyzerSignalLines = renderTaskAnalyzerSignals(
       task,
-      externalAnalyzerResults,
+      analyzerSignalIndex,
       knipGraphIndex,
     );
     return [

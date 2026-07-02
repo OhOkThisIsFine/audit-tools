@@ -68,6 +68,7 @@ import {
   buildLargeFileSection,
 } from "./dispatch/packetPrompt.js";
 import { buildKnipGraphIndex } from "../orchestrator/knipGraphCrosscheck.js";
+import { buildAnalyzerSignalAnchorIndex } from "../orchestrator/fileAnchors.js";
 import {
   withinRoot,
   dispatchResultMapPath,
@@ -337,6 +338,10 @@ export async function prepareDispatchArtifacts(params: {
     surfaceManifest: bundle.surface_manifest,
     criticalFlows: bundle.critical_flows,
   });
+  // Path-keyed analyzer-signal anchor index, built once per dispatch (N1): the
+  // per-task/per-file rendering below is then an O(1) map read, not an
+  // O(tasks × files × total-results) re-flatten of the whole signal set.
+  const analyzerSignalIndex = buildAnalyzerSignalAnchorIndex(bundle.external_analyzer_results);
 
   for (const packet of emitPackets) {
     const promptPath = packetPromptPath(taskResultsDir, packet.packet_id);
@@ -374,7 +379,7 @@ export async function prepareDispatchArtifacts(params: {
       ? await extractPacketAnchor({ packet, reviewRoot, bundle, taskResultsDir, warnings })
       : { anchorPath: null, anchorSummary: null };
     const largeFileSection = buildLargeFileSection(largeFileMode, anchorSummary, anchorPath);
-    const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex, bundle.external_analyzer_results, knipGraphIndex);
+    const taskSections = buildTaskSections(packetTasks, lensDefs, lineIndex, analyzerSignalIndex, knipGraphIndex);
     // The worker writes its AuditResult[] array directly to this packet result
     // file (its prompt's result_path == this entry's result_path); merge-and-
     // ingest recovers each task_id from that one array file. Per-task result
