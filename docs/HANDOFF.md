@@ -8,23 +8,23 @@
 
 ## Live state
 
-- On npm as `latest` at v0.30.61. **Merged to main but NOT yet published:** the T5 forward-tracks
-  remediation (merge `8e3d4319`, 2026-07-02) — 5 nodes shipped via the full contract pipeline:
+- On npm as `latest` at **v0.31.0** (published 2026-07-02, CI-verified installable; both global bins
+  reinstalled + verified at 0.31.0). Shipped the T5 forward-tracks remediation via the full contract pipeline:
   (1) five new external analyzers clippy/rubocop/hadolint/actionlint/type-coverage (candidates + clippy/rubocop
   adapters + HADOLINT/ACTIONLINT BinarySpecs; `BinarySpec.checksumsAsset` generalized to a fn for hadolint's
   per-asset `.sha256`); (2) knip↔graph cross-check as a pure render-time join (normalized in-degree index +
   per-file/per-language fidelity gate + entrypoints from surface_manifest/critical_flows); (3) remediate-code
   SKILL.md no-drift guard test; (4) validator intra-result duplicate finding-id hard-reject; (5) churn/context/
-  enforce review pass (`docs/reviews/churn-context-enforce-pass-2026-07-02.md`). Build+check+touched suites green;
-  full suite green at close.
-- **Immediate next:** decide version bump + `npm publish` for the merged T5 work (patch vs minor — it adds
-  analyzers + a validator hard-reject behavior change), then reinstall global bins. Until published, `latest`
-  is still 0.30.61.
-- **New open items from this run** (all in `docs/backlog.md`): the contract-pipeline stale-shard-revert +
+  enforce review pass (`docs/reviews/churn-context-enforce-pass-2026-07-02.md`).
+- **Immediate next:** none pending from this sprint.
+- **Open items from this run** (all in `docs/backlog.md`): the contract-pipeline stale-shard-revert +
   convergence-guard mis-attribution bug (Open bugs); churn N1 (per-dispatch analyzer-anchor path index) and
   N4 (cap renderTaskAnalyzerSignals output) follow-ons; live validation of the 5 new analyzers (clippy/rubocop
-  are fixture-only here — no Rust/Ruby repo). Design-direction items also filed: guidance-file discovery should
+  are fixture-only here — no Rust/Ruby repo). Design-direction items filed: guidance-file discovery should
   contextualize not suppress; parallel dispatch over overlapping files is the target; multi-IDE concurrent runs.
+  Two release-gate traps bit this run (both cross-cutting guards the per-node worktrees miss): the new dated
+  review doc had to be registered in the doc-manifest, and `INV-K` id tokens in source tripped the glossary-ids
+  guard — run `npm run verify:release` before tagging, not just node-level verifies.
 - Ethan runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
@@ -74,22 +74,22 @@ gates, merge-to-base). Selective-deepening convergence (both known loops) has a 
 validation on a real deepening-capable run remains env-bound (T6-class).
 
 ### T5 — Product / analysis forward tracks
-1. **Dead-code analyzer (knip) — slice 3, graph cross-check.** Slices 1+2 shipped. Open: `graph_bundle.json`
-   doesn't exist yet at knip's dispatch time (obligation ordering), so a cross-check against in/out-degree +
-   entrypoint provenance can't happen inline. Candidate designs (and a corrected note on why the 2026-07-01
-   attempt on option (b) was reverted, not shipped) are in [`docs/backlog.md`](backlog.md).
-2. **Deterministic analyzers — own-vs-acquire acquisition engine.** Git-history mining, gitleaks secret
-   scanning, and now jscpd (duplication detection, 2026-07-01) are acquired. The generic acquire-any-
-   ecosystem-tool engine itself (capability-probe → run ephemerally → normalize via the existing adapter
-   seam → degrade-to-empty) is proven by two independent analyzers now, but rubocop/clippy/hadolint/
-   actionlint/type-coverage/osv-scanner etc. remain unregistered gaps. See
-   [`docs/backlog.md`](backlog.md) for the 3-part plan. *([[deterministic-analyzers-own-vs-acquire]])*
-3. **Schema-enforced generation — CE-004 residual + broader semantic checks.** Emit-time constraint seam
-   and the `total_lines` semantic gate (CE-009) are shipped. Open: the always-on conversation host
-   advertises no API-level constraint mechanism (blocked on the provider, not our code), plus broader
-   semantic-validity checks beyond `total_lines` are unbuilt candidates.
-4. **Codebase-wide churn/context/enforce pass — remainder (C3/C5/C6/E4/E5).** Low-value or needs design
-   intent first; not scheduled. Re-run the lens broadly if worthwhile later.
+1. **Dead-code analyzer (knip) — slice 3, graph cross-check — ✅ SHIPPED v0.31.0** as a pure render-time
+   join (normalized in-degree index + per-file/per-language fidelity gate + entrypoints from
+   surface_manifest/critical_flows), sidestepping the obligation-ordering blocker. Nothing open.
+2. **Deterministic analyzers — own-vs-acquire acquisition engine.** Git-history mining, gitleaks, jscpd,
+   osv-scanner, and now (v0.31.0) clippy (cargo), rubocop (bundle), hadolint + actionlint (binary),
+   type-coverage (npx) are all registered — the cargo/bundle runner families are now exercised. **Open:**
+   clippy/rubocop landed fixture-only (no Rust/Ruby repo here → live spawn unvalidated); remaining
+   ecosystem gaps if any. *([[deterministic-analyzers-own-vs-acquire]])*
+3. **Schema-enforced generation — CE-004 residual + broader semantic checks.** Emit-time constraint seam +
+   `total_lines` gate (CE-009) shipped; validator intra-result duplicate finding-id hard-reject shipped
+   v0.31.0. Open: the always-on conversation host advertises no API-level constraint mechanism (provider-
+   blocked); further semantic-validity checks are unbuilt candidates.
+4. **Codebase-wide churn/context/enforce pass.** The 2026-07-02 pass ran (v0.31.0) and filed N1/N4 to
+   backlog; C3/C5/C6/E4/E5 remain low-value/needs-design-intent. Re-run the lens broadly if worthwhile.
+5. **remediate-code full installer/generator parity** (only the SKILL.md drift-guard test shipped v0.31.0;
+   the ~1200-line multi-host installer parity remains a forward track — see `docs/backlog.md`).
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist

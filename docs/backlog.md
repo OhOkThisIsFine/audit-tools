@@ -253,8 +253,9 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   don't hand-roll a Ruby analyzer, shell out to the mature one). Concretely:
   (1) **Own only truly-agnostic extractors** — signals with no ecosystem tool: git-history mining (shipped) and
   text/git-based secret scanning (acquired via gitleaks, shipped).
-  (2) **Acquire everything ecosystem-specific on demand** (eslint, jscpd shipped 2026-07-01; osv-scanner shipped
-  2026-07-02; rubocop, clippy, mutation testing, hadolint, actionlint, type-coverage remain gaps): detect ecosystem
+  (2) **Acquire everything ecosystem-specific on demand** (eslint, jscpd shipped 2026-07-01; osv-scanner,
+  clippy, rubocop, hadolint, actionlint, type-coverage shipped 2026-07-02 as v0.31.0 — clippy/rubocop
+  fixture-only here, live spawn unvalidated; mutation testing remains a gap): detect ecosystem
   deterministically → capability-probe the runner (`npx`/`pipx`/`cargo`/`bundle`/…) → run ephemerally → normalize
   through the existing adapter seam → degrade-to-empty when runtime/tool is absent. The build is the *engine*; each
   tool is a registry entry + one normalizing adapter. jscpd (duplication detection) is the proof-of-generalization
@@ -264,7 +265,9 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   raw executable, not an archive — which required (and got) one small, real engine generalization rather than a
   workaround: `BinarySpec.archived?: boolean` (`binaryAcquisition.ts`, default `true` for back-compat) skips the
   `tar` extraction step and writes the SHA256-verified bytes directly as the cached executable. Confirms the binary
-  path isn't gitleaks-shaped either. clippy (`cargo`) and rubocop (`bundle`) remain the two unexercised runners.
+  path isn't gitleaks-shaped either. clippy (`cargo`) and rubocop (`bundle`) exercised the two former-unexercised
+  runner families as of v0.31.0 (fixture-validated; hadolint used a `checksumsAsset` fn generalization for its
+  per-asset `.sha256` files).
   (3) **Selection/safety gate without a maintained allowlist** — enforcement is mechanical run-safety written once
   (capability-probe, pin versions, sandboxed/read-only, degrade-to-empty, report-skipped-never-silently); a small
   value-curated DEFAULT set (high-likelihood × high-leverage × low-overhead — eslint/semgrep/gitleaks/git-mining/…)
