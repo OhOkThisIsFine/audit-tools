@@ -505,6 +505,14 @@ export async function ingestContractArtifacts(
     }
     await writeContractArtifact(artifactsDir, name, payload);
     ingested.push(name);
+    // Repair-revert fix: a judge-driven repair regenerates the AGGREGATED
+    // module-phase artifact (`finalized_module_contracts` / `module_contracts`)
+    // directly, never the per-module shards it was merged from. Write the
+    // repaired aggregate back through to the shards so shards ≡ aggregate stays
+    // an invariant — otherwise a later upstream cascade (e.g. a
+    // module_decomposition edit) re-merges the STALE shards and silently reverts
+    // the approved repair. No-op for every non-module-phase artifact.
+    await propagateAggregateToShards(artifactsDir, name, payload);
     // Snapshot a freshly-produced review verdict + the upstreams it reviewed, so
     // a later staleness re-emit can be diff-based (B2). No-op for non-review
     // artifacts. Captured at ingest, when the upstreams are in the exact state
@@ -1347,6 +1355,42 @@ function mergeModuleShards(
     module_contracts: moduleContracts,
     created_at: new Date().toISOString(),
   };
+}
+
+/**
+ * Write-through invariant (repair-revert fix): the per-module shards under
+ * `module-waves/<phase>/` are the single source of truth for the aggregated
+ * module-phase artifacts — the aggregate is a pure re-merge of them. A
+ * judge-driven repair, however, regenerates the AGGREGATED `.input.json`
+ * (`finalized_module_contracts` / `module_contracts`) directly, never the
+ * shards. Decompose an ingested aggregate back into its shards (matched by
+ * module `name`, in decomposition order) so a later cascade that re-merges the
+ * shards reproduces the repair instead of reverting to the pre-repair design.
+ * No-op for any artifact that is not an aggregated module-phase artifact, or a
+ * payload lacking a `module_contracts[]` array.
+ */
+async function propagateAggregateToShards(
+  artifactsDir: string,
+  name: ContractPipelineArtifactName,
+  payload: unknown,
+): Promise<void> {
+  const phase = (
+    Object.entries(PARALLEL_MODULE_PHASES).find(
+      ([, artifact]) => artifact === name,
+    )?.[0]
+  ) as ParallelModulePhase | undefined;
+  if (!phase) return;
+  if (!isRecord(payload) || !Array.isArray(payload.module_contracts)) return;
+  const contracts = payload.module_contracts;
+  const modules = await readDecomposedModules(artifactsDir);
+  for (const mod of modules) {
+    const entry = contracts.find(
+      (c): c is Record<string, unknown> => isRecord(c) && c.name === mod.name,
+    );
+    if (entry) {
+      await writeJsonFile(moduleShardPath(artifactsDir, phase, mod.name), entry);
+    }
+  }
 }
 
 // ── Step builder ──────────────────────────────────────────────────────────────

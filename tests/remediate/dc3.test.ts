@@ -32,6 +32,7 @@ import {
   ingestContractArtifacts,
   isParallelModulePhase,
   nextMissingContractPhase,
+  archiveContractArtifact,
 } from "../../src/remediate/steps/contractPipeline.js";
 import {
   contractInputFilePath,
@@ -387,6 +388,75 @@ describe("DC-3 contract_finalization — per-module wave fan-out", () => {
     await buildNextContractPipelineStep(STEP_OPTIONS);
     expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(false);
     expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("contract_finalization");
+  });
+});
+
+describe("DC-3 repair write-through (revert-prevention)", () => {
+  beforeEach(async () => {
+    await writeRaw("goal_spec", makeGoalSpec());
+    await writeRaw("context_bundle", makeContextBundle());
+    await writeRaw("module_decomposition", makeThreeModuleDecomposition());
+  });
+
+  it("a repaired finalized aggregate writes through to the per-module shards, so a re-merge reproduces the repair (not the pre-repair design)", async () => {
+    // 1. Drive drafting → merged module_contracts.
+    const draftStep = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const draftPrompt = await promptOf(draftStep!);
+    for (const name of THREE_MODULE_NAMES) {
+      await writeShardFromPrompt(draftPrompt, name, draftingShard(name));
+    }
+    await buildNextContractPipelineStep(STEP_OPTIONS); // merge module_contracts
+
+    // 2. seam report present → drive finalization → merged finalized aggregate.
+    await writeRaw("seam_reconciliation_report", {
+      contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
+      goal_id: "G1",
+      mismatches: [],
+      created_at: CREATED_AT,
+    });
+    const finalStep = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const finalPrompt = await promptOf(finalStep!);
+    for (const name of THREE_MODULE_NAMES) {
+      await writeShardFromPrompt(finalPrompt, name, finalizedShard(name));
+    }
+    await buildNextContractPipelineStep(STEP_OPTIONS); // merge finalized_module_contracts
+    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(true);
+
+    // 3. Simulate a judge-driven repair: regenerate the AGGREGATED
+    //    finalized_module_contracts.input.json with one module contract corrected
+    //    (validation_boundary rewritten). writeRaw runs ingest, which must write
+    //    the repair THROUGH to the per-module shard.
+    const repaired = finalizedShard("mod-alpha");
+    repaired.validation_boundary = "REPAIRED boundary for mod-alpha";
+    await writeRaw("finalized_module_contracts", {
+      contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+      goal_id: "G1",
+      module_contracts: [
+        repaired,
+        finalizedShard("mod-beta"),
+        finalizedShard("mod gamma/extra"),
+      ],
+      created_at: CREATED_AT,
+    });
+
+    // The mod-alpha finalization shard on disk now carries the repair.
+    const alphaShardPath = shardPathFromPrompt(finalPrompt, "mod-alpha");
+    const alphaShard = JSON.parse(await readFile(alphaShardPath, "utf8"));
+    expect(alphaShard.validation_boundary).toBe("REPAIRED boundary for mod-alpha");
+
+    // 4. Simulate the cascade that used to revert the repair: archive the merged
+    //    finalized aggregate, then re-run next-step — it re-merges from shards.
+    //    Because the shards hold the repair, the re-merge reproduces it.
+    await archiveContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", "stale");
+    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(false);
+    expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("contract_finalization");
+
+    await buildNextContractPipelineStep(STEP_OPTIONS); // re-merge from shards
+    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(true);
+    const env = await readContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts");
+    const remerged = (env as any).payload;
+    const alpha = remerged.module_contracts.find((m: any) => m.name === "mod-alpha");
+    expect(alpha.validation_boundary).toBe("REPAIRED boundary for mod-alpha");
   });
 });
 
