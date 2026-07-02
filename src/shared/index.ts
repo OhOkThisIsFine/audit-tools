@@ -397,6 +397,7 @@ export {
   remediationArtifactsDir,
   stepsDir,
   artifactTreeLockPath,
+  nodeClaimsPath,
   incomingDir,
   outputDirFor,
   auditReportPath,
@@ -788,6 +789,15 @@ export {
 } from "./quota/fileLock.js";
 export type { ClaimRecord, ClaimResult } from "./quota/claimRegistry.js";
 export { ClaimRegistry } from "./quota/claimRegistry.js";
+export type {
+  ClaimBackoffOptions,
+  ClaimHeartbeatOptions,
+} from "./quota/claimLease.js";
+export {
+  claimWithBackoff,
+  withClaimHeartbeat,
+  DEFAULT_CLAIM_BACKOFF_MS,
+} from "./quota/claimLease.js";
 export { runSlidingWindow } from "./quota/slidingWindow.js";
 export type { SlidingWindowResult } from "./quota/slidingWindow.js";
 export {

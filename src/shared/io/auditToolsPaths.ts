@@ -70,6 +70,19 @@ export function artifactTreeLockPath(artifactsDir: string): string {
 }
 
 /**
+ * `<artifactsDir>/node-claims.json` — the shared cross-process `ClaimRegistry`
+ * file for cooperative multi-agent runs (see
+ * `spec/multi-ide-concurrent-runs-design.md`). Peers claim the current
+ * bundle-mutating obligation (`obligation:<id>`) and — from slice 2 — individual
+ * `audit_tasks` (`<task_id>`) here so no two agents run the same unit. Distinct
+ * from `artifact-tree.lock` (a short atomicity lock); a claim is a heartbeated
+ * work-lease that survives a long executor.
+ */
+export function nodeClaimsPath(artifactsDir: string): string {
+  return join(artifactsDir, "node-claims.json");
+}
+
+/**
  * `<artifactsDir>/incoming` — the drop directory for upstream worker results
  * and externally supplied evidence. Takes an already-resolved artifacts dir.
  */
