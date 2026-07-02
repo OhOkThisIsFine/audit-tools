@@ -137,14 +137,17 @@ what" — no separate roster.
   longer than the shared `STALE_LOCK_MS` (long tasks aren't reclaimed prematurely) AND the executing
   peer heartbeats on a timer. The critical addition: when A's lease *does* go stale and B reclaims it,
   and A later wakes, **A must be told its claim is void and abandon its work** — never write a stale
-  result over B's. Mechanism (all token-checked, already supported by `ClaimRegistry`):
-  1. **Merge-time ownership re-validation (mandatory gate).** Before ingesting its result A calls
-     `heartbeat(nodeId, ownerToken)` (or `isClaimed` + token compare); if it returns `false` (B now
-     owns, or the claim is gone), A **discards its result and abandons** — the merge is refused. This is
-     the hard guarantee: a superseded peer can never land a result, enforced at the single merge
-     chokepoint, not by A "remembering."
-  2. **Mid-execution bail (optimization).** A's periodic heartbeat returning `false` signals revocation
-     early, so A can stop wasted work before finishing — but correctness rests on gate (1), not on A
-     noticing in time.
-  The lease length and heartbeat interval are a `(taskLeaseMs, heartbeatMs)` pair with
-  `heartbeatMs << taskLeaseMs << (typical task duration ceiling)`; concrete values set in slice 2.
+  result over B's. Mechanism (all token-checked, already supported by `ClaimRegistry`) — TWO layers of the SAME
+  ownership re-validation, because `heartbeat(nodeId, ownerToken)` already returns `false` when the token
+  no longer owns the node (it is an ownership check, not merely a lease refresh):
+  1. **Heartbeat-driven continuous re-validation (primary).** A's periodic `heartbeat` both refreshes the
+     lease AND re-validates ownership every tick. The moment a heartbeat returns `false` (B reclaimed the
+     stale lease), A **stops and abandons** — it does not finish, does not write. This is the ongoing
+     revocation signal, not an afterthought: a superseded peer learns it is superseded at the next tick.
+  2. **Merge-time ownership gate (mandatory backstop).** Before ingesting, A re-checks ownership
+     (`heartbeat`/`isClaimed` + token compare); `false` ⇒ **discard result, refuse the merge**. This
+     closes the narrow race where revocation lands between A's last heartbeat and its ingest, enforced at
+     the single merge chokepoint — so correctness never depends on the heartbeat timer's granularity.
+  Layer (1) makes revocation *timely*; layer (2) makes it *airtight*. The lease length and heartbeat
+  interval are a `(taskLeaseMs, heartbeatMs)` pair with `heartbeatMs << taskLeaseMs << (typical task
+  duration ceiling)`; concrete values set in slice 2.
