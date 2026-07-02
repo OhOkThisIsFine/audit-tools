@@ -34,10 +34,16 @@
   OD1/OD2/OD3 settled). Slice **2 (audit task-POOL claiming) SHIPPED**: `prepareDispatchArtifacts`
   `claimMany`s candidate `task_id`s in a shared long-lease `task-claims.json`, dispatches only the
   disjoint granted subset, releases deferred + terminal (ingest-time) claims; dedup-by-task_id is the
-  overrun backstop. **Next build unit: slice 3** = per-agent step slot (`steps/<agentId>/`) + the
-  per-PEER runDir orchestration so two peers' simultaneous `audit_tasks` dispatches don't collide on
-  shared per-run files (the claim *partitioning* is done; per-peer dispatch-run wiring is what's left).
-  Then slice 4 (remediate phase-claim + default join), 5 (rewrite the staleness-cascade-wipe trap).
+  overrun backstop. Slice **3 (per-agent step slot) SHIPPED**: `stepContractWriter` writes each
+  `next-step` process's prompt+JSON to a per-process `steps/<agentId>/` slot and returns `prompt_path`
+  there (host already uses the returned path → concurrency-safe, no SKILL change) + a shared
+  `steps/current-*` latest copy for back-compat; dispatch `runId` already auto-isolates per-run files, so
+  the slice-2 boundary is closed. **The audit-side cooperative story is now complete** (bundle mutex +
+  disjoint task claims + per-run isolation + per-agent step/prompt + stdout handoff). **Next: slice 4** =
+  remediate `phase:<name>` claims for serial phases (plan/document/triage/close) so two joining peers
+  don't both plan + make a second next-step join the rolling frontier by default (implement is already
+  cooperative; the shared step-writer fix already covers remediate's step slot). Then slice 5 = rewrite
+  the [[concurrent-nextstep-staleness-cascade-wipe]] trap as resolved.
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.

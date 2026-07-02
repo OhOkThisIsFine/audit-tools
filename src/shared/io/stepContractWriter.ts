@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readdir, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { stepsDir } from "./auditToolsPaths.js";
 import { writeJsonFile } from "./json.js";
@@ -31,14 +31,67 @@ import { toPromptPathToken } from "../tooling/exec.js";
  * `writeStepContract` with its concrete types; neither writes raw paths.
  */
 
-/** Path of `current-step.json` for a given artifacts dir. */
-export function currentStepPath(artifactsDir: string): string {
-  return join(stepsDir(artifactsDir), "current-step.json");
+/**
+ * Path of `current-step.json`. With no `agentId` this is the SHARED
+ * `steps/current-step.json` "latest" slot (single-agent default + back-compat);
+ * with an `agentId` it is the per-agent `steps/<agentId>/current-step.json` slot
+ * (cooperative multi-agent, spec/multi-ide-concurrent-runs-design.md). Each
+ * `writeStepContract` returns the per-agent path so a concurrent peer never reads
+ * another peer's prompt from a clobbered shared file.
+ */
+export function currentStepPath(artifactsDir: string, agentId?: string): string {
+  const dir = agentId ? join(stepsDir(artifactsDir), agentId) : stepsDir(artifactsDir);
+  return join(dir, "current-step.json");
 }
 
-/** Path of `current-prompt.md` for a given artifacts dir. */
-export function currentPromptPath(artifactsDir: string): string {
-  return join(stepsDir(artifactsDir), "current-prompt.md");
+/** Path of `current-prompt.md` (shared with no `agentId`, per-agent with one). */
+export function currentPromptPath(artifactsDir: string, agentId?: string): string {
+  const dir = agentId ? join(stepsDir(artifactsDir), agentId) : stepsDir(artifactsDir);
+  return join(dir, "current-prompt.md");
+}
+
+/**
+ * Per-PROCESS agent id: one `next-step` invocation = one process = one id = one
+ * `steps/<agentId>/` slot. Concurrent invocations are separate processes with
+ * distinct ids, so their step/prompt files never collide. Not host-supplied (no
+ * manual flag) — minted here, path- and ref-safe. Lazily cached for the process.
+ */
+let cachedProcessAgentId: string | null = null;
+export function processAgentId(): string {
+  if (cachedProcessAgentId === null) {
+    const rand = Math.random().toString(36).slice(2, 8);
+    cachedProcessAgentId = `a-${process.pid}-${Date.now().toString(36)}-${rand}`;
+  }
+  return cachedProcessAgentId;
+}
+
+// Best-effort GC of stale per-agent step slots so they don't accumulate across
+// many next-step processes. Removes `steps/<id>/` subdirs whose `current-step.json`
+// is older than the TTL; never touches the shared `current-*` files (they live
+// directly in `steps/`, not a subdir) and never throws.
+const STEP_SLOT_TTL_MS = 60 * 60_000;
+async function gcStaleAgentSlots(stepsDirPath: string, keepAgentId: string): Promise<void> {
+  try {
+    const entries = await readdir(stepsDirPath, { withFileTypes: true });
+    const now = Date.now();
+    await Promise.all(
+      entries
+        .filter((e) => e.isDirectory() && e.name !== keepAgentId)
+        .map(async (e) => {
+          const slot = join(stepsDirPath, e.name);
+          try {
+            const st = await stat(join(slot, "current-step.json"));
+            if (now - st.mtimeMs > STEP_SLOT_TTL_MS) {
+              await rm(slot, { recursive: true, force: true });
+            }
+          } catch {
+            /* missing marker / race — leave it, next pass may collect it */
+          }
+        }),
+    );
+  } catch {
+    /* steps dir unreadable — nothing to collect */
+  }
 }
 
 /**
@@ -126,15 +179,18 @@ export async function writeStepContract<
   TArtifactValue extends string | null = string | null,
 >(input: WriteStepContractInput<TStepKind, TArtifactValue>): Promise<TStep> {
   const stepsDirPath = stepsDir(input.artifactsDir);
-  await mkdir(stepsDirPath, { recursive: true });
+  const agentId = processAgentId();
+  const agentSlotDir = join(stepsDirPath, agentId);
+  await mkdir(agentSlotDir, { recursive: true });
 
-  const promptPath = currentPromptPath(input.artifactsDir);
-  const stepPath = currentStepPath(input.artifactsDir);
-  await writeFile(
-    promptPath,
-    input.trimPromptStart ? input.prompt.trimStart() : input.prompt,
-    "utf8",
-  );
+  // The returned/canonical paths are the PER-AGENT slot so a concurrent peer
+  // never reads this step from a shared file another peer has clobbered.
+  const promptPath = currentPromptPath(input.artifactsDir, agentId);
+  const stepPath = currentStepPath(input.artifactsDir, agentId);
+  const promptContent = input.trimPromptStart
+    ? input.prompt.trimStart()
+    : input.prompt;
+  await writeFile(promptPath, promptContent, "utf8");
 
   const callerArtifactPaths = input.artifactPaths ?? {};
   const normalizedArtifactPaths: Record<string, string | null> = {};
@@ -153,6 +209,9 @@ export async function writeStepContract<
     step_kind: input.stepKind,
     status: input.status,
     run_id: input.runId,
+    // Per-process agent id owning this step slot (observability; the host uses
+    // the returned prompt_path, not this).
+    agent_id: agentId,
     allowed_commands: input.allowedCommands,
     stop_condition: input.stopCondition,
     // Orchestrator-specific optional fields ride here; the canonical path
@@ -165,5 +224,16 @@ export async function writeStepContract<
   } as unknown as TStep;
 
   await writeJsonFile(stepPath, step);
+
+  // Shared "latest" pointer: mirror this step's prompt + JSON into the shared
+  // `steps/current-*` slot. NOT the canonical handoff (the returned per-agent
+  // path is) — it exists for single-agent back-compat, human/debug inspection,
+  // and helper-based readers (`currentPromptPath(artifactsDir)`). Last-writer-
+  // wins under concurrency, which is fine because nothing correctness-critical
+  // reads it (peers use the returned per-agent prompt_path / stdout contract).
+  await writeFile(currentPromptPath(input.artifactsDir), promptContent, "utf8");
+  await writeJsonFile(currentStepPath(input.artifactsDir), step);
+
+  await gcStaleAgentSlots(stepsDirPath, agentId);
   return step;
 }

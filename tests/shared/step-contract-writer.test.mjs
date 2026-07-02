@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const { writeStepContract, currentStepPath, currentPromptPath } = await import("../../src/shared/io/stepContractWriter.ts");
+const { writeStepContract, currentStepPath, currentPromptPath, processAgentId } = await import("../../src/shared/io/stepContractWriter.ts");
 const { stepsDir } = await import("../../src/shared/io/auditToolsPaths.ts");
 
 async function makeTempDir() {
@@ -173,4 +173,50 @@ test("currentStepPath/currentPromptPath live under the shared stepsDir", () => {
   const artifactsDir = join(tmpdir(), "some-artifacts");
   assert.equal(currentStepPath(artifactsDir), join(stepsDir(artifactsDir), "current-step.json"));
   assert.equal(currentPromptPath(artifactsDir), join(stepsDir(artifactsDir), "current-prompt.md"));
+});
+
+test("currentStepPath/currentPromptPath insert a per-agent subdir when given an agentId", () => {
+  const artifactsDir = join(tmpdir(), "some-artifacts");
+  assert.equal(
+    currentStepPath(artifactsDir, "a-1"),
+    join(stepsDir(artifactsDir), "a-1", "current-step.json"),
+  );
+  assert.equal(
+    currentPromptPath(artifactsDir, "a-1"),
+    join(stepsDir(artifactsDir), "a-1", "current-prompt.md"),
+  );
+});
+
+test("writeStepContract returns a PER-AGENT prompt_path and also mirrors a shared latest pointer", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  try {
+    const artifactsDir = join(dir, ".audit-tools", "audit");
+    const step = await writeStepContract(baseInput(artifactsDir, { prompt: "AGENT PROMPT" }));
+    const agentId = processAgentId();
+
+    // Returned/canonical paths are the per-agent slot (concurrency-safe handoff).
+    assert.ok(step.agent_id === agentId, "contract carries the process agent id");
+    assert.ok(
+      step.prompt_path.includes(agentId),
+      "returned prompt_path points at the per-agent slot",
+    );
+    assert.equal(
+      await readFile(currentPromptPath(artifactsDir, agentId), "utf8"),
+      "AGENT PROMPT",
+      "per-agent prompt file has the content",
+    );
+
+    // Shared latest pointer is ALSO written (single-agent back-compat / helpers).
+    assert.equal(
+      await readFile(currentPromptPath(artifactsDir), "utf8"),
+      "AGENT PROMPT",
+      "shared latest current-prompt.md mirrors the step",
+    );
+    const sharedStep = JSON.parse(
+      await readFile(currentStepPath(artifactsDir), "utf8"),
+    );
+    assert.equal(sharedStep.agent_id, agentId, "shared latest current-step.json mirrors the step");
+  } finally {
+    await cleanup();
+  }
 });

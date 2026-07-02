@@ -147,7 +147,20 @@ what" — no separate roster.
    slice 3:** the per-PEER runDir + step-slot orchestration so two peers' *simultaneous* `audit_tasks`
    next-steps don't collide on shared per-run files (`dispatch-plan.json`, result-map). The claim
    *partitioning* is done; wiring each peer to its own dispatch run is the per-agent-step-slot work.
-3. **Per-agent step slot** (both orchestrators) — `steps/<agentId>/…` + shared latest-pointer.
+3. **Per-agent step slot — ✅ SHIPPED.** The real gap was NOT the step JSON (every `next-step` prints
+   the full contract to STDOUT — per-invocation-safe) but the PROMPT FILE: the host reads it from a file
+   via the returned `prompt_path`, so a concurrent clobber of the shared `steps/current-prompt.md` would
+   make one peer read another's prompt (→ run the other's disjoint tasks). Fix in `stepContractWriter.ts`:
+   a per-PROCESS `processAgentId()` (one `next-step` process = one id = one `steps/<agentId>/` slot);
+   `writeStepContract` writes the prompt+JSON there and returns `prompt_path`/`current_*` pointing at it,
+   so the host (which already uses the returned `prompt_path`) is concurrency-safe with NO host/SKILL
+   change. A shared `steps/current-*` "latest" copy is ALSO written (single-agent back-compat + the
+   ~55 helper-based tests + human debug; last-writer-wins, nothing correctness-critical reads it).
+   Best-effort TTL GC prunes stale `steps/<id>/` slots. `currentStepPath`/`currentPromptPath` gained an
+   optional `agentId` (default = shared path, back-compat). Also **closed the slice-2 boundary**: audit's
+   dispatch `runId` is already per-invocation (ms-precision `buildRunId`), so concurrent peers' per-run
+   files (`runs/<runId>/dispatch-plan.json`, result-map, pending-audit-tasks) already auto-isolate — no
+   extra work needed. Tests: `step-contract-writer.test.mjs` (per-agent slot + shared mirror).
 4. **Remediate phase-claim + default join** — `phase:<name>` claims for serial phases; make a second
    next-step join the rolling frontier by default.
 5. **Rewrite the durable trap** [[concurrent-nextstep-staleness-cascade-wipe]] → resolved by claim-based
