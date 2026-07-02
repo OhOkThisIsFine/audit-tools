@@ -116,7 +116,12 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   [[concurrent-nextstep-staleness-cascade-wipe]]) — state writes are single-writer-assumed. Target: proper
   multi-runner isolation (per-run state namespaces + locking that permits independent concurrent runs, not
   just the current withFileLock mutual-exclusion on one shared state) so N IDEs can each drive their own
-  audit/remediate run at once. Not clearly captured in docs before this note; scope as its own track.
+  audit/remediate run at once. **Design of record: [`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md)**
+  (2026-07-02) — invocation-level run id for BOTH orchestrators (audit has none today), whole mutable tree
+  namespaced under `runs/<runId>/`, per-run locks (isolation not serialization), a cross-run registry with
+  conversation-first run resolution (mint→resume-the-one→manifest-on-many, zero flag for single-IDE), and a
+  5-slice atomic-replace implementation plan. Three open decisions (D1 retire the "one call at a time" trap,
+  D2 abandoned-run TTL/reaping, D3 host_label strength) gate slice 2 — pending Ethan.
 - **Spec-doc rewrite pass — SHIPPED (2026-07-02).** All six flagged docs rewritten against real source:
   1. `spec/audit/dependency-map.md`, `spec/audit/artifact-contract.md`, `spec/audit/executor-catalog.md`
      — rewritten to the real 31-entry `ARTIFACT_DEFINITIONS`, the real `ARTIFACT_DEPENDS_ON_MAP` (canonical

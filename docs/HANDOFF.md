@@ -26,7 +26,11 @@
   "commit or stash `<path>`" directive (was: opaque git error → identical auto-retries → human triage), work
   preserved under quarantine. (`src/remediate/steps/dispatch.ts`.) Tests: `intake-resolver.test.ts`,
   `next-step-resume-gates.test.ts`, `dispatch-worktree.test.ts`. Full remediate suite green (2111/0).
-- **Immediate next:** none pending from this sprint.
+- **Immediate next:** Multi-IDE concurrent runs — design of record written
+  ([`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md)); blocked on
+  three Ethan decisions (D1/D2/D3 in that doc's *Open decisions*) before slice-2 implementation starts.
+  Slices 1 (shared per-run path module + registry) and 2 (remediate onto per-run state) are the first
+  build units; audit re-parent is slice 3.
 - **Open items** (all in `docs/backlog.md`): live validation of the 5 new analyzers (clippy/rubocop fixture-only
   here — no Rust/Ruby repo). Design-direction tracks remain: parallel dispatch over overlapping files;
   multi-IDE concurrent runs.
