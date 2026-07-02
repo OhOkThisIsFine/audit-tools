@@ -137,7 +137,7 @@ the check for its type:
 
 | Type | Files | Check | Auto-apply? |
 |---|---|---|---|
-| **design / concept** | `docs/documentation-philosophy.md`, `docs/backlog-remediation-design.md`, `docs/quota-dispatch-design.md`, `docs/glossary-ids.md`, `docs/end-of-sprint-report-template.md` | Claims vs code (drift); flag current-state / changelog creep (docs are timeless concepts, not status). | factual-stale → yes |
+| **design / concept** | `docs/documentation-philosophy.md`, `docs/project-philosophy.md`, `docs/backlog-remediation-design.md`, `docs/quota-dispatch-design.md`, `docs/glossary-ids.md`, `docs/end-of-sprint-report-template.md` | Claims vs code (drift); flag current-state / changelog creep (docs are timeless concepts, not status). `project-philosophy.md` is an orienting **map** (product-vs-development split) that points at each conviction's canonical home — verify its one-line restatements still match those homes; it deliberately references, never re-owns, so a home change makes its pointer stale, not the home. | factual-stale → yes |
 | **instruction / policy** | `CLAUDE.md`, `AGENTS.md` | Factual claims only (file/command/path staleness). Policy & conventions untouchable. | **No — escalate-only.** Highest blast radius: a wrong edit deletes a guardrail governing all agents. |
 | **ops / usage** | `README.md` | Do the documented commands / paths still resolve and run. | factual-stale → yes |
 | **package docs (audit)** | `docs/audit-pkg/product.md`, `docs/audit-pkg/contracts.md`, `docs/audit-pkg/development.md`, `docs/audit-pkg/operator-guide.md`, `docs/audit-pkg/release.md` | Claims vs code/spec (these page the normative `spec/audit/*`); flag current-state / changelog creep. | factual-stale → yes |
