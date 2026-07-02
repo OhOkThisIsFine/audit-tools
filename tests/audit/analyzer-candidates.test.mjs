@@ -13,6 +13,16 @@ const {
   parseJscpd,
   osvScannerCandidate,
   parseOsvScanner,
+  clippyCandidate,
+  rubocopCandidate,
+  hadolintCandidate,
+  parseHadolint,
+  HADOLINT_VERSION,
+  actionlintCandidate,
+  parseActionlint,
+  ACTIONLINT_VERSION,
+  typeCoverageCandidate,
+  parseTypeCoverage,
 } = await import("../../src/audit/extractors/analyzers/candidates.ts");
 const { OWNED_TOOL_IDS, registerExternalAnalyzers } = await import(
   "../../src/audit/extractors/analyzers/acquisitionEngine.ts"
@@ -307,3 +317,281 @@ test("parseOsvScanner degrades to empty on malformed/empty input", () => {
   assert.deepEqual(parseOsvScanner("{}"), []);
   assert.deepEqual(parseOsvScanner(JSON.stringify({ results: "not-an-array" })), []);
 });
+
+// --- CP-NODE-1: clippy / rubocop / hadolint / actionlint / type-coverage ---
+
+const NEW_ANALYZER_IDS = ["clippy", "rubocop", "hadolint", "actionlint", "type-coverage"];
+
+test("all five new analyzers are registered, consent-gated (defaultRun:false)", () => {
+  for (const id of NEW_ANALYZER_IDS) {
+    const c = EXTERNAL_ANALYZER_CANDIDATES.find((x) => x.id === id);
+    assert.ok(c, `${id} must be registered`);
+    assert.equal(c.defaultRun, false, `${id} must be consent-gated`);
+  }
+});
+
+test("new analyzers emit ONLY the generic item shape (no classification field)", () => {
+  const samples = [
+    parseClippySample(),
+    parseRubocop_shape(),
+    parseHadolintSample(),
+    parseActionlintSample(),
+    parseTypeCoverageSample(),
+  ];
+  const allowed = new Set([
+    "id",
+    "category",
+    "severity",
+    "path",
+    "line_start",
+    "line_end",
+    "summary",
+    "rule",
+    "raw",
+  ]);
+  for (const items of samples) {
+    for (const item of items) {
+      for (const key of Object.keys(item)) {
+        assert.ok(allowed.has(key), `unexpected field '${key}' — no classification allowed`);
+      }
+      assert.equal("classification" in item, false, "classification must never be emitted");
+    }
+  }
+});
+
+// clippy — cargo runner, --message-format=json, no --fix; NDJSON parse.
+test("clippy: cargo runner, read-only argv (no --fix), detects Rust", () => {
+  assert.equal(clippyCandidate.runner, "cargo");
+  assert.equal(clippyCandidate.spec, "clippy");
+  const argv = clippyCandidate.buildArgv(["cargo", "clippy"], "/repo");
+  assert.ok(argv.includes("--message-format=json"));
+  assert.ok(!argv.some((a) => /--fix/.test(a)), "clippy argv must never request fixes");
+  assert.equal(clippyCandidate.detect("/repo"), false);
+});
+
+function parseClippySample() {
+  // Real cargo message-format=json stream: one JSON object per line.
+  const stream = [
+    JSON.stringify({ reason: "compiler-artifact", package_id: "x" }),
+    JSON.stringify({
+      reason: "compiler-message",
+      message: {
+        level: "warning",
+        message: "unused variable: `x`",
+        code: { code: "clippy::unused" },
+        spans: [{ file_name: "src/main.rs", line_start: 10, line_end: 10, is_primary: true }],
+      },
+    }),
+    JSON.stringify({
+      reason: "compiler-message",
+      message: {
+        level: "error",
+        message: "mismatched types",
+        code: null,
+        spans: [{ file_name: "src/lib.rs", line_start: 3, line_end: 4, is_primary: true }],
+      },
+    }),
+    JSON.stringify({ reason: "build-finished", success: true }),
+  ].join("\n");
+  return clippyCandidate.parse(stream);
+}
+
+test("parseClippy maps compiler-message diagnostics (NDJSON), skips non-diagnostic lines", () => {
+  const items = parseClippySample();
+  assert.equal(items.length, 2);
+  const warn = items.find((i) => i.severity === "medium");
+  const err = items.find((i) => i.severity === "high");
+  assert.equal(warn.path, "src/main.rs");
+  assert.equal(warn.line_start, 10);
+  assert.equal(warn.rule, "clippy::unused");
+  assert.equal(warn.category, "correctness");
+  assert.equal(err.path, "src/lib.rs");
+  assert.equal(err.rule, "clippy");
+});
+
+test("parseClippy degrades to empty on malformed/empty input", () => {
+  assert.deepEqual(clippyCandidate.parse(""), []);
+  assert.deepEqual(clippyCandidate.parse("not json"), []);
+  assert.deepEqual(clippyCandidate.parse("{}"), []);
+});
+
+// rubocop — bundle runner, --format json, no autocorrect.
+test("rubocop: bundle runner, read-only argv (no --autocorrect), detects Ruby", () => {
+  assert.equal(rubocopCandidate.runner, "bundle");
+  const argv = rubocopCandidate.buildArgv(["bundle", "exec", "rubocop"], "/repo");
+  assert.ok(argv.includes("--format") && argv.includes("json"));
+  assert.ok(
+    !argv.some((a) => /--autocorrect|^-a$|^-A$/.test(a)),
+    "rubocop argv must never request autocorrect",
+  );
+  assert.equal(rubocopCandidate.detect("/repo"), false);
+});
+
+function parseRubocop_shape() {
+  const report = JSON.stringify({
+    files: [
+      {
+        path: "app/models/user.rb",
+        offenses: [
+          {
+            severity: "warning",
+            message: "Line is too long.",
+            cop_name: "Layout/LineLength",
+            location: { start_line: 7, last_line: 7 },
+          },
+          {
+            severity: "error",
+            message: "Syntax error.",
+            cop_name: "Lint/Syntax",
+            location: { line: 12 },
+          },
+        ],
+      },
+    ],
+  });
+  return rubocopCandidate.parse(report);
+}
+
+test("parseRubocop maps files[].offenses[] with severity mapping", () => {
+  const items = parseRubocop_shape();
+  assert.equal(items.length, 2);
+  assert.equal(items[0].path, "app/models/user.rb");
+  assert.equal(items[0].line_start, 7);
+  assert.equal(items[0].severity, "medium");
+  assert.equal(items[0].rule, "Layout/LineLength");
+  assert.equal(items[1].severity, "high");
+  assert.equal(items[1].line_start, 12);
+});
+
+test("parseRubocop degrades to empty on malformed/empty input", () => {
+  assert.deepEqual(rubocopCandidate.parse(""), []);
+  assert.deepEqual(rubocopCandidate.parse("not json"), []);
+  assert.deepEqual(rubocopCandidate.parse("{}"), []);
+  assert.deepEqual(rubocopCandidate.parse(JSON.stringify({ files: "nope" })), []);
+});
+
+// hadolint — binary runner, RAW (non-archived) asset, per-asset checksum file.
+test("hadolint: binary runner, non-archived asset, detects Dockerfile", () => {
+  assert.equal(hadolintCandidate.runner, "binary");
+  assert.equal(hadolintCandidate.binary.archived, false);
+  assert.equal(hadolintCandidate.detect("/repo"), false);
+  const argv = hadolintCandidate.buildArgv(["/cache/hadolint"], "/repo");
+  assert.equal(argv[0], "/cache/hadolint");
+  assert.ok(argv.includes("--format") && argv.includes("json"));
+});
+
+test("hadolint binary spec maps platform/arch to real release assets + per-asset checksum file", () => {
+  const spec = hadolintCandidate.binary;
+  assert.equal(spec.version, HADOLINT_VERSION);
+  assert.equal(spec.assetFor("linux", "x64"), "hadolint-linux-x86_64");
+  assert.equal(spec.assetFor("linux", "arm64"), "hadolint-linux-arm64");
+  assert.equal(spec.assetFor("darwin", "x64"), "hadolint-macos-x86_64");
+  assert.equal(spec.assetFor("darwin", "arm64"), "hadolint-macos-arm64");
+  assert.equal(spec.assetFor("win32", "x64"), "hadolint-windows-x86_64.exe");
+  assert.equal(spec.assetFor("win32", "arm64"), null, "no windows/arm64 asset");
+  assert.equal(spec.assetFor("linux", "ia32"), null, "no 32-bit asset");
+  assert.equal(spec.assetFor("sunos", "x64"), null, "unsupported OS → null");
+  // Per-asset checksum file derivation.
+  assert.equal(typeof spec.checksumsAsset, "function");
+  assert.equal(spec.checksumsAsset("hadolint-linux-x86_64"), "hadolint-linux-x86_64.sha256");
+});
+
+test("parseHadolint maps the flat array shape; degrades to empty", () => {
+  const report = JSON.stringify([
+    { file: "Dockerfile", line: 3, column: 1, code: "DL3008", level: "warning", message: "Pin versions in apt-get install." },
+    { file: "Dockerfile", line: 5, column: 1, code: "DL3002", level: "error", message: "Do not switch to root." },
+  ]);
+  const items = parseHadolint(report);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].path, "Dockerfile");
+  assert.equal(items[0].line_start, 3);
+  assert.equal(items[0].rule, "DL3008");
+  assert.equal(items[0].severity, "medium");
+  assert.equal(items[0].category, "config_deployment");
+  assert.equal(items[1].severity, "high");
+  assert.deepEqual(parseHadolint(""), []);
+  assert.deepEqual(parseHadolint("not json"), []);
+  assert.deepEqual(parseHadolint("{}"), []);
+});
+
+function parseHadolintSample() {
+  return parseHadolint(
+    JSON.stringify([{ file: "Dockerfile", line: 1, code: "DL3006", level: "warning", message: "Tag the image." }]),
+  );
+}
+
+// actionlint — binary runner, ARCHIVED asset, -format {{json .}}.
+test("actionlint: binary runner, archived asset, detects .github/workflows, JSON template argv", () => {
+  assert.equal(actionlintCandidate.runner, "binary");
+  assert.equal(actionlintCandidate.binary.archived, true);
+  assert.equal(actionlintCandidate.detect("/repo"), false);
+  const argv = actionlintCandidate.buildArgv(["/cache/actionlint"], "/repo");
+  assert.deepEqual(argv, ["/cache/actionlint", "-format", "{{json .}}"]);
+});
+
+test("actionlint binary spec maps platform/arch to real release assets (archive ext)", () => {
+  const spec = actionlintCandidate.binary;
+  assert.equal(spec.version, ACTIONLINT_VERSION);
+  assert.equal(spec.assetFor("linux", "x64"), `actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz`);
+  assert.equal(spec.assetFor("linux", "arm64"), `actionlint_${ACTIONLINT_VERSION}_linux_arm64.tar.gz`);
+  assert.equal(spec.assetFor("darwin", "arm64"), `actionlint_${ACTIONLINT_VERSION}_darwin_arm64.tar.gz`);
+  assert.equal(spec.assetFor("win32", "x64"), `actionlint_${ACTIONLINT_VERSION}_windows_amd64.zip`);
+  assert.equal(spec.assetFor("linux", "ia32"), `actionlint_${ACTIONLINT_VERSION}_linux_386.tar.gz`);
+  assert.equal(spec.assetFor("sunos", "x64"), null, "unsupported OS → null");
+  assert.equal(spec.checksumsAsset, `actionlint_${ACTIONLINT_VERSION}_checksums.txt`);
+});
+
+test("parseActionlint maps the array shape; degrades to empty", () => {
+  const report = JSON.stringify([
+    { message: "shellcheck reported issue", filepath: ".github/workflows/ci.yml", line: 21, column: 9, kind: "shellcheck" },
+  ]);
+  const items = parseActionlint(report);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].path, ".github/workflows/ci.yml");
+  assert.equal(items[0].line_start, 21);
+  assert.equal(items[0].rule, "shellcheck");
+  assert.equal(items[0].category, "config_deployment");
+  assert.deepEqual(parseActionlint(""), []);
+  assert.deepEqual(parseActionlint("not json"), []);
+  assert.deepEqual(parseActionlint("{}"), []);
+});
+
+function parseActionlintSample() {
+  return parseActionlint(
+    JSON.stringify([{ message: "m", filepath: ".github/workflows/x.yml", line: 1, kind: "syntax-check" }]),
+  );
+}
+
+// type-coverage — npx runner, --json, per-any items.
+test("type-coverage: npx runner, --json argv, detects Node", () => {
+  assert.equal(typeCoverageCandidate.runner, "npx");
+  const argv = typeCoverageCandidate.buildArgv(["npx", "-y", "type-coverage@2"], "/repo");
+  assert.ok(argv.includes("--json"));
+  assert.equal(typeCoverageCandidate.detect("/repo"), false);
+});
+
+test("parseTypeCoverage maps anys[] sites; degrades to empty", () => {
+  const report = JSON.stringify({
+    percentage: 95.5,
+    total: 1000,
+    correct: 955,
+    anys: [
+      { file: "src/a.ts", line: 4, character: 10, text: "foo" },
+      { file: "src/b.ts", line: 8, character: 2, text: "bar" },
+    ],
+  });
+  const items = parseTypeCoverage(report);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].path, "src/a.ts");
+  assert.equal(items[0].line_start, 4);
+  assert.equal(items[0].rule, "type-coverage-any");
+  assert.equal(items[0].category, "maintainability");
+  assert.match(items[0].summary, /foo/);
+  assert.deepEqual(parseTypeCoverage(""), []);
+  assert.deepEqual(parseTypeCoverage("not json"), []);
+  assert.deepEqual(parseTypeCoverage("{}"), []);
+});
+
+function parseTypeCoverageSample() {
+  return parseTypeCoverage(JSON.stringify({ anys: [{ file: "src/x.ts", line: 1, text: "z" }] }));
+}

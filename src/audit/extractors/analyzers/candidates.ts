@@ -4,8 +4,14 @@ import type { ExternalAnalyzerCandidate } from "./acquisitionEngine.js";
 import {
   detectNodeEcosystem,
   detectPythonEcosystem,
+  detectRustEcosystem,
+  detectRubyEcosystem,
+  detectDockerEcosystem,
+  detectGithubActionsEcosystem,
 } from "./acquisitionEngine.js";
 import type { BinarySpec } from "./binaryAcquisition.js";
+import { parseClippy } from "../../adapters/clippy.js";
+import { parseRubocop } from "../../adapters/rubocop.js";
 
 /**
  * The value-curated EXTERNAL analyzer candidate registry. This is the only place
@@ -501,6 +507,270 @@ const osvScannerCandidate: ExternalAnalyzerCandidate = {
   parse: parseOsvScanner,
 };
 
+// ---------------------------------------------------------------------------
+// clippy — Rust lints via `cargo clippy --message-format=json` (read-only).
+// ---------------------------------------------------------------------------
+const clippyCandidate: ExternalAnalyzerCandidate = {
+  id: "clippy",
+  runner: "cargo",
+  // The `cargo` runner prefix is `["cargo", spec]`; spec is the cargo subcommand.
+  spec: "clippy",
+  // CONSENT-GATED: compiles the crate (heavier), needs the Rust toolchain.
+  defaultRun: false,
+  detect: (root) => detectRustEcosystem(root),
+  // Read-only: NO `--fix`. `--message-format=json` streams NDJSON diagnostics;
+  // clippy's own args go after `--`. The engine spawns with cwd=root so no
+  // positional path is needed.
+  buildArgv: (prefix) => [...prefix, "--message-format=json", "--quiet"],
+  parse: parseClippy,
+};
+
+// ---------------------------------------------------------------------------
+// rubocop — Ruby lints via `bundle exec rubocop --format json` (read-only).
+// ---------------------------------------------------------------------------
+const rubocopCandidate: ExternalAnalyzerCandidate = {
+  id: "rubocop",
+  runner: "bundle",
+  // The `bundle` runner prefix is `["bundle", "exec", spec]`.
+  spec: "rubocop",
+  // CONSENT-GATED: needs the project's bundle/ruby toolchain + rubocop config.
+  defaultRun: false,
+  detect: (root) => detectRubyEcosystem(root),
+  // Read-only: NO `--autocorrect`/`-a`/`-A`. `--format json` → single JSON doc.
+  buildArgv: (prefix, root) => [...prefix, "--format", "json", root],
+  parse: parseRubocop,
+};
+
+// ---------------------------------------------------------------------------
+// hadolint — Dockerfile linter, shipped as a RAW (non-archived) release binary
+// (`hadolint-linux-x86_64`, `hadolint-windows-x86_64.exe`, …). Each asset has
+// its OWN `<asset>.sha256` checksum file (not a release-wide checksums.txt).
+// ---------------------------------------------------------------------------
+const HADOLINT_VERSION = "2.14.0";
+const HADOLINT_RELEASE_BASE = `https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}`;
+
+/** Map Node's platform/arch onto hadolint's release asset naming. */
+function hadolintAsset(platform: NodeJS.Platform, arch: string): string | null {
+  if (platform === "win32") {
+    // hadolint publishes only an x86_64 Windows asset.
+    return arch === "x64" ? "hadolint-windows-x86_64.exe" : null;
+  }
+  const os = platform === "darwin" ? "macos" : platform === "linux" ? "linux" : null;
+  if (!os) return null;
+  const cpu = arch === "x64" ? "x86_64" : arch === "arm64" ? "arm64" : null;
+  if (!cpu) return null;
+  return `hadolint-${os}-${cpu}`;
+}
+
+const HADOLINT_BINARY: BinarySpec = {
+  binaryName: "hadolint",
+  version: HADOLINT_VERSION,
+  versionProbeArgs: ["hadolint", "--version"],
+  assetFor: hadolintAsset,
+  // Per-asset checksum file: `<asset>.sha256` holds `<sha256> *<asset>`.
+  checksumsAsset: (asset) => `${asset}.sha256`,
+  releaseUrlForAsset: (asset) => `${HADOLINT_RELEASE_BASE}/${asset}`,
+  // The release asset IS the raw executable — no archive to extract.
+  archived: false,
+};
+
+/**
+ * Parse hadolint's `--format json` stdout — a FLAT array of objects grounded
+ * against hadolint's JSON formatter: `[{ file, line, column, code, level,
+ * message }]`. `level` ∈ error|warning|info|style. Degrades to `[]` on
+ * empty/malformed/non-array input.
+ */
+function parseHadolint(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+  let findings: unknown;
+  try {
+    findings = JSON.parse(stdout || "[]");
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(findings)) return [];
+  return findings
+    .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === "object")
+    .map((f) => {
+      const file = typeof f.file === "string" ? f.file : "";
+      const line = typeof f.line === "number" ? f.line : undefined;
+      const code = typeof f.code === "string" && f.code.length > 0 ? f.code : "hadolint";
+      const level = typeof f.level === "string" ? f.level.toLowerCase() : "";
+      const severity = level === "error" ? "high" : level === "warning" ? "medium" : "low";
+      const message =
+        typeof f.message === "string" && f.message.trim().length > 0 ? f.message : code;
+      return {
+        id: `hadolint:${code}:${file}:${line ?? 0}`,
+        category: "config_deployment",
+        severity,
+        path: file,
+        line_start: line,
+        summary: message,
+        rule: code,
+      };
+    })
+    .filter((item) => item.path.length > 0);
+}
+
+const hadolintCandidate: ExternalAnalyzerCandidate = {
+  id: "hadolint",
+  runner: "binary",
+  spec: HADOLINT_VERSION,
+  binary: HADOLINT_BINARY,
+  // CONSENT-GATED: same tier as the other acquired binaries.
+  defaultRun: false,
+  detect: (root) => detectDockerEcosystem(root),
+  // Read-only by nature (a linter). `--format json`; lint the repo's Dockerfile.
+  buildArgv: (prefix, root) => [...prefix, "--format", "json", join(root, "Dockerfile")],
+  parse: parseHadolint,
+};
+
+// ---------------------------------------------------------------------------
+// actionlint — GitHub Actions workflow linter, shipped as an ARCHIVED release
+// asset (`actionlint_<v>_<os>_<arch>.tar.gz`/`.zip`) + a release-wide
+// `actionlint_<v>_checksums.txt`.
+// ---------------------------------------------------------------------------
+const ACTIONLINT_VERSION = "1.7.12";
+const ACTIONLINT_RELEASE_BASE = `https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}`;
+
+/** Map Node's platform/arch onto actionlint's release asset naming. */
+function actionlintAsset(platform: NodeJS.Platform, arch: string): string | null {
+  const os =
+    platform === "win32"
+      ? "windows"
+      : platform === "darwin"
+        ? "darwin"
+        : platform === "linux"
+          ? "linux"
+          : null;
+  if (!os) return null;
+  const cpu =
+    arch === "x64"
+      ? "amd64"
+      : arch === "arm64"
+        ? "arm64"
+        : arch === "ia32"
+          ? "386"
+          : arch === "arm"
+            ? "armv6"
+            : null;
+  if (!cpu) return null;
+  // actionlint does not publish a windows/armv6 asset.
+  if (os === "windows" && cpu === "armv6") return null;
+  const ext = os === "windows" ? "zip" : "tar.gz";
+  return `actionlint_${ACTIONLINT_VERSION}_${os}_${cpu}.${ext}`;
+}
+
+const ACTIONLINT_BINARY: BinarySpec = {
+  binaryName: "actionlint",
+  version: ACTIONLINT_VERSION,
+  versionProbeArgs: ["actionlint", "--version"],
+  assetFor: actionlintAsset,
+  checksumsAsset: `actionlint_${ACTIONLINT_VERSION}_checksums.txt`,
+  releaseUrlForAsset: (asset) => `${ACTIONLINT_RELEASE_BASE}/${asset}`,
+  // .tar.gz / .zip archive → extract (archived defaults to true; set explicitly).
+  archived: true,
+};
+
+/**
+ * Parse actionlint's `-format '{{json .}}'` stdout — a JSON array grounded
+ * against actionlint's template output: `[{ message, filepath, line, column,
+ * kind }]`. Degrades to `[]` on empty/malformed/non-array input.
+ */
+function parseActionlint(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+  let findings: unknown;
+  try {
+    findings = JSON.parse(stdout || "[]");
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(findings)) return [];
+  return findings
+    .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === "object")
+    .map((f) => {
+      const path = typeof f.filepath === "string" ? f.filepath : "";
+      const line = typeof f.line === "number" ? f.line : undefined;
+      const kind = typeof f.kind === "string" && f.kind.length > 0 ? f.kind : "actionlint";
+      const message =
+        typeof f.message === "string" && f.message.trim().length > 0 ? f.message : kind;
+      return {
+        id: `actionlint:${kind}:${path}:${line ?? 0}`,
+        category: "config_deployment",
+        severity: "medium",
+        path,
+        line_start: line,
+        summary: message,
+        rule: kind,
+      };
+    })
+    .filter((item) => item.path.length > 0);
+}
+
+const actionlintCandidate: ExternalAnalyzerCandidate = {
+  id: "actionlint",
+  runner: "binary",
+  spec: ACTIONLINT_VERSION,
+  binary: ACTIONLINT_BINARY,
+  // CONSENT-GATED: same tier as the other acquired binaries.
+  defaultRun: false,
+  detect: (root) => detectGithubActionsEcosystem(root),
+  // Read-only by nature. `-format '{{json .}}'` → JSON array on stdout; run with
+  // cwd=root so actionlint discovers `.github/workflows/` itself.
+  buildArgv: (prefix) => [...prefix, "-format", "{{json .}}"],
+  parse: parseActionlint,
+};
+
+// ---------------------------------------------------------------------------
+// type-coverage — TypeScript type-coverage ratio reporter via npx (read-only).
+// ---------------------------------------------------------------------------
+/**
+ * Parse type-coverage's `--json --detail` stdout — grounded against
+ * type-coverage's JSON shape: `{ percentage, total, correct, anys: [{ file,
+ * line, character, text }] }`. Each `anys` entry is one implicit/explicit `any`
+ * site; degrades to `[]` on empty/malformed input or a missing `anys` array.
+ */
+function parseTypeCoverage(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"]> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout || "{}");
+  } catch {
+    return [];
+  }
+  const anys =
+    payload && typeof payload === "object" && Array.isArray((payload as { anys?: unknown }).anys)
+      ? ((payload as { anys: Record<string, unknown>[] }).anys)
+      : [];
+  return anys
+    .filter((a): a is Record<string, unknown> => Boolean(a) && typeof a === "object")
+    .map((a) => {
+      const file = typeof a.file === "string" ? a.file : "";
+      const line = typeof a.line === "number" ? a.line : undefined;
+      const text = typeof a.text === "string" && a.text.length > 0 ? a.text : "untyped value";
+      return {
+        id: `type-coverage:${file}:${line ?? 0}`,
+        category: "maintainability",
+        severity: "low",
+        path: file,
+        line_start: line,
+        summary: `type-coverage: '${text}' has an implicit/explicit any — add an explicit type.`,
+        rule: "type-coverage-any",
+      };
+    })
+    .filter((item) => item.path.length > 0);
+}
+
+const typeCoverageCandidate: ExternalAnalyzerCandidate = {
+  id: "type-coverage",
+  runner: "npx",
+  spec: "type-coverage@2",
+  // CONSENT-GATED: needs a TS project; same tier as eslint/knip.
+  defaultRun: false,
+  detect: (root) => detectNodeEcosystem(root),
+  // Read-only. `--json --detail` prints per-`any` sites as JSON on stdout; run
+  // with cwd=root so it resolves the project tsconfig itself.
+  buildArgv: (prefix) => [...prefix, "--json", "--detail"],
+  parse: parseTypeCoverage,
+};
+
 /** The curated external analyzer candidate set. gitleaks is the default member. */
 export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   gitleaksCandidate,
@@ -509,6 +779,11 @@ export const EXTERNAL_ANALYZER_CANDIDATES: ExternalAnalyzerCandidate[] = [
   knipCandidate,
   jscpdCandidate,
   osvScannerCandidate,
+  clippyCandidate,
+  rubocopCandidate,
+  hadolintCandidate,
+  actionlintCandidate,
+  typeCoverageCandidate,
 ];
 
 export {
@@ -524,4 +799,14 @@ export {
   osvScannerCandidate,
   parseOsvScanner,
   OSV_SCANNER_VERSION,
+  clippyCandidate,
+  rubocopCandidate,
+  hadolintCandidate,
+  parseHadolint,
+  HADOLINT_VERSION,
+  actionlintCandidate,
+  parseActionlint,
+  ACTIONLINT_VERSION,
+  typeCoverageCandidate,
+  parseTypeCoverage,
 };
