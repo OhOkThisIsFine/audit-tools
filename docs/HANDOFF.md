@@ -8,7 +8,7 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.3** (both global bins reinstalled + verified live). Per-lap shipped detail
+- On npm as `latest` at **v0.32.4** (both global bins reinstalled + verified live). Per-lap shipped detail
   is NOT narrated here (changelog creep — see `git log` and project memory [[live-status]]); this section is
   the current-state + open-work roadmap only.
 - **Immediate next:** none pending. All T1–T5 code-complete tracks shipped; remaining work is deferred T5
