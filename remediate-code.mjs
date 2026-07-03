@@ -7,12 +7,12 @@ import { pathToFileURL } from "url";
 import { dirname, join } from "path";
 import { existsSync, readdirSync, statSync } from "fs";
 import { spawnSync } from "child_process";
-import {
-  installBootstrap,
-  ensureBootstrap,
-  verifyInstalledBootstrap,
-  installHostPrompt,
-} from "./wrapper/remediate-code-wrapper-install-hosts.mjs";
+
+// The installer (B2) is imported LAZILY inside main() only when an install verb
+// is invoked, so the thin wrapper still loads (and hits the dist-not-found guard)
+// on a published install where wrapper/ is present but for the normal run path we
+// never pay to resolve it — and unit tests that copy this file alone still load.
+const INSTALLER_MODULE = "./wrapper/remediate-code-wrapper-install-hosts.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distEntry = join(__dirname, "dist", "remediate", "index.js");
@@ -108,20 +108,12 @@ export async function main(argv = process.argv.slice(2)) {
   // Route installer verbs to the B2 bootstrap handlers BEFORE dist delegation —
   // these manage repo-local host assets and never touch the built orchestrator.
   const verb = argv[0];
-  if (verb === "install") {
-    await installBootstrap(argv.slice(1));
-    return;
-  }
-  if (verb === "ensure") {
-    await ensureBootstrap(argv.slice(1));
-    return;
-  }
-  if (verb === "verify-install") {
-    await verifyInstalledBootstrap(argv.slice(1));
-    return;
-  }
-  if (verb === "install-host") {
-    await installHostPrompt(argv.slice(1));
+  if (verb === "install" || verb === "ensure" || verb === "verify-install" || verb === "install-host") {
+    const installer = await import(INSTALLER_MODULE);
+    if (verb === "install") await installer.installBootstrap(argv.slice(1));
+    else if (verb === "ensure") await installer.ensureBootstrap(argv.slice(1));
+    else if (verb === "verify-install") await installer.verifyInstalledBootstrap(argv.slice(1));
+    else await installer.installHostPrompt(argv.slice(1));
     return;
   }
 

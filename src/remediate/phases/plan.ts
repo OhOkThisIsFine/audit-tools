@@ -576,7 +576,7 @@ export function splitBlocksByContextBudget(
           // Sub-blocks inherit the parent's declared surface; the per-sub-block
           // narrowing is a downstream (M1-DECOMPOSE) concern.
           touched_files: [...(block.touched_files ?? [])],
-          // INV-A3-07: a split same-file block keeps its co-file parallel
+          // A split same-file block keeps its co-file parallel
           // eligibility — carry cofile_parallel_safe onto every sub-block.
           ...(block.cofile_parallel_safe !== undefined
             ? { cofile_parallel_safe: block.cofile_parallel_safe }
@@ -774,7 +774,7 @@ export function buildCoverageLedger(params: {
  * a genuine ordering dependency (an existing dependency edge between the two
  * blocks) keeps them serialized — and ordered blocks were never unioned anyway,
  * they simply run in dependency order. A single finding whose fix spans multiple
- * regions of one file is one block already and is never split (INV-A3-08).
+ * regions of one file is one block already and is never split.
  *
  * File identity uses `canonicalizeFilePath` (the one M1-BOUNDARY scheme) so
  * `src/A.ts`, `./src/A.ts`, `src\A.ts` and case variants collide on one key.
