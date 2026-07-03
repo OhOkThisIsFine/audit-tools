@@ -5,6 +5,28 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ---
 
+## Live-validation guide — READ FIRST if you're running a live audit/remediate
+
+Most open items below are **code-complete and only await a real run to confirm**. Each such item
+carries a **⬇ Live-run watch** line: exactly what to observe during the run to confirm it validated —
+or to catch it failing. Pick a run config from this matrix; watch the items it lights up.
+
+| Run config | Items it exercises (watch their ⬇ lines) |
+|---|---|
+| **Any** live audit, any provider | Selective-deepening convergence · knip `files`/`dependencies` dead-code leads |
+| **Metered provider + LARGE target**, ideally `AUDIT_TOOLS_LIVE_QUOTA=1` (forces the wall) | Quota-aware dispatch · M-QUOTA friction escalation · pre-wall pacing · retryable resume |
+| **Codex backend** (`--provider codex`; Codex CLI is a nested-agent host) | Y-dispatcher driver selection · cross-provider quota (Codex live endpoint) |
+| **openai-compatible / NIM backend** (`RUN_NIM_E2E=1` for the gated e2e) | openai-compatible dispatch pool · CE-004 emit-time-constraint build opportunity |
+| **Rust or Ruby target repo** | clippy (cargo) + rubocop (bundle) live spawn |
+
+**General fail-signals to log on ANY live run** (add a line under *Open bugs* if you hit one): a run
+that wedges and needs `force-synthesis` to finish · orphaned pending `deepening:*` tasks · a *crash*
+(not a graceful pause) when a rate limit is hit · an analyzer that silently skipped when it should have
+spawned · knip dead-code leads that never reach the per-file lens. After a run, its findings are the
+corpus to hand-label for the A2 oracle (see Deferred / waiting).
+
+---
+
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
 - **Quota-aware dispatch — SHIPPED; live validation env-bound.** The token-budget dispatch gate is
@@ -13,6 +35,12 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   on a real rate-limited multi-worker run — cold-start calibration slope + the resume path especially
   want a live check. Relates to [[claude-usage-endpoint-body-shape]] / [[claude-quota-credential-resolution]] /
   [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
+  - **⬇ Live-run watch** (metered provider + large target; `AUDIT_TOOLS_LIVE_QUOTA=1` to force it): at the
+    rate wall the run must **pause gracefully, not crash**, and leave every in-flight worktree intact; on
+    resume it continues from the pause with no lost/redone work. Early on, the tokens-per-percent slope
+    should *learn* (dispatch pacing adjusts after the first window reading) rather than stay at the
+    cold-start default. FAIL = crash/stall at the wall, discarded worktrees, or a resume that re-does or
+    drops packets.
 
 - **Friction detection — M-QUOTA escalation chain WIRED on BOTH orchestrators; only live validation env-bound.** The
   `recordLimit → escalate → strand → quota_escalation friction` chain is end-to-end on the remediate
@@ -23,6 +51,10 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   `tests/audit/rolling-audit-dispatch.test.mjs` (§5, 4-pool same-packet escalation → friction capture).
   **Still open (env-bound only):** live validation on a real rate-limited run.
   [[meta-audit-friction-must-be-tool-enforced]]
+  - **⬇ Live-run watch** (same wall run as quota-aware dispatch): when a packet escalates across pools at
+    the wall, a **`quota_escalation` friction event** must be captured at the step boundary — check the
+    run's friction log / meta-audit surface after the run and confirm the event is present with the
+    escalated packet id. FAIL = wall hit but no friction event recorded (the chain didn't fire live).
 
 - **Selective-deepening convergence — both known loops FIXED; live validation env-bound.** Loop #1
   (packet-result `task_id` ≠ assigned `deepening:*` id): prompt-side fix in `buildTaskSections`. Loop #2
@@ -39,6 +71,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
     `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
     coverage — no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
     `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
+  - **⬇ Live-run watch** (any audit whose findings trigger deepening — i.e. low-confidence/high-risk areas
+    that spawn `deepening:*` tasks): every `deepening:*` task must **converge and complete** within a bounded
+    number of rounds; the run reaches synthesis on its own. FAIL = orphaned pending `deepening:*` tasks, the
+    same finding re-deepened every round (idempotency collision), or the run only finishing via
+    `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
 ## Forward tracks
 
@@ -47,6 +84,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   out-of-range-span checks are all shipped. The only residual is env-bound: the always-on conversation
   host (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to
   the repair floor (no emit-time prevention). Unblocks only on a provider gaining a constraint endpoint.
+  - **⬇ Build lever (openai-compatible / NIM path):** NIM/vLLM/OpenAI-compatible endpoints *do* support
+    guided decoding (`guided_json` / `response_format: json_schema`). Plumbing the AuditResult schema into
+    that provider's request is a real, contained build that gives emit-time constraint on that path (the
+    claude-code host stays repair-floor — genuinely host-blocked, not a defect). **⬇ Live-run watch** on an
+    openai-compatible run: results conform on first emit (repair rounds for schema-shape errors drop to ~0).
 
 - **Tool-enforced dispatch broker with capability-tiered driver.** Desired end-state: (1) a gated
   primitive set as the single dispatch chokepoint (read quota, estimate tokens locally, dispatch/await);
@@ -55,6 +97,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   classifier, broker primitive, `HostSessionQuotaSource`, and driver selection/prompt rendering are
   **shipped**. **Open (env-bound):** live Y-dispatcher validation (needs a nested-agent host + live run)
   + proactive pre-wall quota-aware pacing.
+  - **⬇ Live-run watch** (Codex backend, which nests agents): the driver-selection step must pick the
+    **Y-dispatcher** path (thin dispatcher agent, no judgment) rather than slot-pull — confirm from the
+    run's driver-selection log. Separately, on a metered run, pacing should slow *before* the wall (proactive)
+    rather than only reacting after a 429. FAIL = slot-pull chosen on a nesting-capable host, or pacing that
+    only ever reacts post-wall.
 
 - **Deterministic analyzers: own-vs-acquire engine.** The acquisition engine, registry
   (`EXTERNAL_ANALYZER_CANDIDATES`), adapters (eslint, semgrep, gitleaks, jscpd, osv-scanner, clippy,
@@ -67,6 +114,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   the static registry, it must route through the same `admitSpawn` chokepoint; and
   `ExternalAcquisitionConfig.consent_token` must be stripped/redacted before any persistence of
   `SessionConfig` to a shared artifact. [[deterministic-analyzers-own-vs-acquire]]
+  - **⬇ Live-run watch** (audit a **Rust** repo for clippy / a **Ruby** repo for rubocop, with the per-run
+    consent token so the gate admits the non-default tool): the tool must actually **spawn and normalize**
+    output into leads (cargo-clippy / bundle-rubocop), not skip. FAIL = "skipped" status when the ecosystem
+    is present + consent given, or a parse that drops all output. (No Rust/Ruby toolchain on the box →
+    install `rustup` / `ruby`+`bundler` first, or point at a repo that vendors them.)
 
 - **Dead-code signal — RESOLVED 2026-07-03, soundness bar retired.** The knip analyzer candidate now
   emits whole-file (`files`) and unused-dependency (`dependencies`) leads alongside unused-export leads
@@ -83,11 +135,19 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   Antigravity gated→degrade) is environment-bound. Per-provider recipes:
   [`cross-provider-quota-matrix.md`](../spec/cross-provider-quota-matrix.md). Red line: self-monitoring
   own-provider only, never IDE-GUI automation.
+  - **⬇ Live-run watch** (run under each provider whose IDE/CLI you have — Codex CLI is available now):
+    the provider's `QuotaSource` must return **live numbers off its real endpoint**, not the fixture/degrade
+    fallback — confirm the quota reads are non-empty and move as the run consumes budget. Codex + Claude are
+    reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
+    real endpoint is reachable.
 
 ## Deferred / waiting
 
 - **A2 finding-quality oracle** — the `score-audit` scorer is built; needs operator-authored
   `corpus/<run-id>.labels.json` (hand-labeled real audit runs) before it can score precision/recall.
+  - **⬇ To close (after any live audit):** take that run's findings, hand-label each true-positive /
+    false-positive into `corpus/<run-id>.labels.json`, then run `score-audit` → precision/recall. The
+    labeling is ground-truth human judgment (can't be automated); one solid labeled run unblocks the oracle.
 - **A7 multi-host validation** — `npm run verify:hosts` (automated, in `verify:release`) is built and
   green; the provider-matrix e2e is gated behind `RUN_PROVIDER_MATRIX_E2E=1`. **Remaining:** the
   release-time manual GUI checklist ([`host-validation.md`](../spec/host-validation.md)) for GUI-only
