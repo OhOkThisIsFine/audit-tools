@@ -7,6 +7,12 @@ import { pathToFileURL } from "url";
 import { dirname, join } from "path";
 import { existsSync, readdirSync, statSync } from "fs";
 import { spawnSync } from "child_process";
+import {
+  installBootstrap,
+  ensureBootstrap,
+  verifyInstalledBootstrap,
+  installHostPrompt,
+} from "./wrapper/remediate-code-wrapper-install-hosts.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distEntry = join(__dirname, "dist", "remediate", "index.js");
@@ -98,7 +104,27 @@ export function applyWrapperExitAction(
   exit(action.code);
 }
 
-export function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2)) {
+  // Route installer verbs to the B2 bootstrap handlers BEFORE dist delegation —
+  // these manage repo-local host assets and never touch the built orchestrator.
+  const verb = argv[0];
+  if (verb === "install") {
+    await installBootstrap(argv.slice(1));
+    return;
+  }
+  if (verb === "ensure") {
+    await ensureBootstrap(argv.slice(1));
+    return;
+  }
+  if (verb === "verify-install") {
+    await verifyInstalledBootstrap(argv.slice(1));
+    return;
+  }
+  if (verb === "install-host") {
+    await installHostPrompt(argv.slice(1));
+    return;
+  }
+
   ensureBuilt();
   if (!existsSync(distEntry)) {
     console.error("remediate-code: dist/remediate/index.js not found. Run: npm run build");
@@ -112,5 +138,8 @@ export function main(argv = process.argv.slice(2)) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  main();
+  main().catch((error) => {
+    console.error(error?.stack ?? String(error));
+    process.exit(1);
+  });
 }
