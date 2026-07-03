@@ -8,10 +8,12 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.0** (both global bins reinstalled + verified live). v0.32.0 shipped the two
-  remaining forward tracks: **(A) same-file parallel dispatch** (optimistic + git-enforced — see below) and
-  **(B) remediate-code multi-host installer parity**. See `docs/backlog.md` → Forward tracks for the full
-  shipped detail; both entries are marked ✅ SHIPPED.
+- On npm as `latest` at **v0.32.2** (both global bins reinstalled + verified live). v0.32.2 closed the four
+  2026-07-02 contract-pipeline / intake frictions (intake guidance-file hijack, citation-grounding new-file
+  infinite loop, polarity identifier-token masking; envelope re-derive confirmed a no-op) — see the "This lap"
+  bullet below and `docs/backlog.md` → the now-✅ entries under "Open bugs / frictions — continued". v0.32.1
+  fixed the implement-dispatch data-loss modes; v0.32.0 shipped **(A) same-file parallel dispatch** (optimistic
+  + git-enforced) and **(B) remediate-code multi-host installer parity** (both ✅ in Forward tracks).
 - **This lap (v0.32.0):** two forward tracks via a full `/remediate-code` contract-pipeline run.
   **Track A** pivoted (owner-approved) from the falsified semantic-anchor design to **optimistic same-file
   dispatch enforced at merge by actual git hunks**: `RemediationBlock.cofile_parallel_safe` (mechanical flag,
