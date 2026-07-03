@@ -1,6 +1,6 @@
 {
   "name": "audit-tools",
-  "version": "0.32.4",
+  "version": "0.32.5",
   "private": false,
   "description": "Portable hybrid code auditing + remediation orchestrators for arbitrary repositories.",
   "type": "module",
