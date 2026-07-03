@@ -799,7 +799,13 @@ export async function driveRollingDispatch(
     // schedulable for the next sub-wave; different-file nodes share a sub-wave and
     // parallelize up to the quota cap the dispatcher enforces (INV-SOO-03/05).
     const subWaves = ownershipSubWaves(
-      level.map((b) => ({ block_id: b.block_id, write_paths: scopeForBlock(b) })),
+      level.map((b) => ({
+        block_id: b.block_id,
+        write_paths: scopeForBlock(b),
+        ...(b.cofile_parallel_safe !== undefined
+          ? { cofile_parallel_safe: b.cofile_parallel_safe }
+          : {}),
+      })),
       options.root,
     );
 
