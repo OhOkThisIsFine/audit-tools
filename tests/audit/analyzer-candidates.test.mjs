@@ -94,7 +94,7 @@ test("knip is consent-gated like eslint/semgrep, npx runner, no positional/cwd a
     "--reporter",
     "json",
     "--include",
-    "exports,types,nsExports,nsTypes",
+    "exports,types,nsExports,nsTypes,files,dependencies",
     "--no-exit-code",
   ]);
 });
@@ -130,23 +130,58 @@ test("parseKnip maps unused-export issues across all four report types", () => {
   expect(byRule["knip-nsTypes"].path).toBe("src/bar.ts");
 });
 
-test("parseKnip ignores non-export-shaped issue types (files/dependencies/etc) and degrades to empty on malformed input", () => {
+test("parseKnip degrades to empty on malformed/empty input", () => {
   expect(parseKnip("")).toEqual([]);
   expect(parseKnip("not json")).toEqual([]);
   expect(parseKnip("{}")).toEqual([]);
-  const withUnrelatedTypes = JSON.stringify({
+});
+
+// Whole-file dead code (`files`) and unused manifest dependencies (`dependencies`)
+// are a distinct signal class from unused exports — the one the crude low-in-degree
+// `deletion_candidate` graph signal only approximates. Both are surfaced as LEADS.
+test("parseKnip surfaces whole-file + dependency dead-code leads alongside exports", () => {
+  const report = JSON.stringify({
     issues: [
       {
         file: "src/dead.ts",
-        files: [{}],
-        dependencies: [{ name: "leftpad" }],
+        files: [{ name: "src/dead.ts", pos: 0 }],
         exports: [{ name: "onlyThis", line: 1 }],
+      },
+      {
+        file: "package.json",
+        dependencies: [
+          { name: "leftpad", line: 12 },
+          { name: "unusedDep" },
+        ],
       },
     ],
   });
-  const items = parseKnip(withUnrelatedTypes);
-  expect(items.length).toBe(1);
-  expect(items[0].rule).toBe("knip-exports");
+  const items = parseKnip(report);
+  const byRule = items.reduce((acc, i) => {
+    (acc[i.rule] ??= []).push(i);
+    return acc;
+  }, {});
+
+  // One whole-file lead for the unused module (path === the file itself).
+  expect(byRule["knip-files"].length).toBe(1);
+  expect(byRule["knip-files"][0].path).toBe("src/dead.ts");
+  expect(byRule["knip-files"][0].category).toBe("maintainability");
+  expect(byRule["knip-files"][0].summary).toMatch(/appears unused/);
+  expect(byRule["knip-files"][0].summary).toMatch(/confirm truly dead or refute/);
+
+  // One dependency lead per unused dependency name (path === the manifest).
+  expect(byRule["knip-dependencies"].length).toBe(2);
+  expect(byRule["knip-dependencies"].map((i) => i.path)).toEqual(["package.json", "package.json"]);
+  expect(byRule["knip-dependencies"].map((i) => i.id)).toEqual([
+    "knip-dependencies:package.json:leftpad",
+    "knip-dependencies:package.json:unusedDep",
+  ]);
+  expect(byRule["knip-dependencies"][0].line_start).toBe(12);
+  expect(byRule["knip-dependencies"][0].summary).toMatch(/appears unused/);
+
+  // The export lead still flows on the same row.
+  expect(byRule["knip-exports"].length).toBe(1);
+  expect(byRule["knip-exports"][0].path).toBe("src/dead.ts");
 });
 
 test("parseSemgrep + parseEslint degrade to empty on malformed input", () => {

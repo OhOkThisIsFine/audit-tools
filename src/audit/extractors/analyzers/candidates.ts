@@ -226,15 +226,17 @@ const eslintCandidate: ExternalAnalyzerCandidate = {
 
 /**
  * Parse knip's `--reporter json` stdout — `{ issues: [{ file, exports?, types?,
- * nsExports?, nsTypes? }] }`, each per-type array holding `{ name, line, col }`
- * (grounded against `node_modules/knip/dist/reporters/json.js` in this repo, not
- * guessed). Only the four "unused export"-shaped report types are consumed —
- * unused files/dependencies are a different signal class this candidate does
- * not surface. Every item is a LEAD, not a confirmed finding: standalone knip
- * cannot see dispatch-table/re-export-alias/dynamic wiring, so it is tagged
- * `external_analyzer_signal` (the same generic seam every candidate uses) and
- * left to the per-file lens subauditor to confirm-or-refute, never merged as a
- * finding directly.
+ * nsExports?, nsTypes?, files?, dependencies? }] }`, each per-type array holding
+ * `{ name, line, col }` (grounded against `node_modules/knip/dist/reporters/json.js`
+ * in this repo, not guessed). Two signal classes are surfaced: unused *exports*
+ * (the four symbol-level types below) and whole-file / dependency dead code
+ * (`files` = a module nothing imports; `dependencies` = a manifest entry nothing
+ * uses) — the latter is the class the crude low-in-degree `deletion_candidate`
+ * graph signal only approximates. Every item is a LEAD, not a confirmed finding:
+ * standalone knip cannot see dispatch-table/re-export-alias/dynamic/entrypoint
+ * wiring, so it is tagged `external_analyzer_signal` (the same generic seam every
+ * candidate uses) and left to the per-file lens subauditor to confirm-or-refute,
+ * never merged as a finding directly.
  */
 const KNIP_EXPORT_ISSUE_TYPES = ["exports", "types", "nsExports", "nsTypes"] as const;
 
@@ -275,6 +277,40 @@ function parseKnip(stdout: string): ReturnType<ExternalAnalyzerCandidate["parse"
         });
       }
     }
+    // Whole-file dead code: a non-empty `files` array on this row means the module
+    // itself is imported by nothing. One lead per file (path === the file).
+    if (Array.isArray(row.files) && row.files.length > 0) {
+      items.push({
+        id: `knip-files:${file}`,
+        category: "maintainability",
+        severity: "low",
+        path: file,
+        summary: `knip: file '${file}' appears unused (nothing imports it) — unverified against the graph; confirm truly dead or refute as a dynamic/entrypoint-only module before reporting.`,
+        rule: "knip-files",
+      });
+    }
+    // Unused manifest dependencies: declared in `file` (a package.json) but used
+    // nowhere knip can see. One lead per dependency name.
+    if (Array.isArray(row.dependencies)) {
+      for (const symbol of row.dependencies) {
+        if (!symbol || typeof symbol !== "object") continue;
+        const name = typeof (symbol as { name?: unknown }).name === "string"
+          ? (symbol as { name: string }).name
+          : "unknown";
+        const line = typeof (symbol as { line?: unknown }).line === "number"
+          ? (symbol as { line: number }).line
+          : undefined;
+        items.push({
+          id: `knip-dependencies:${file}:${name}`,
+          category: "maintainability",
+          severity: "low",
+          path: file,
+          line_start: line,
+          summary: `knip: dependency '${name}' declared in '${file}' appears unused — unverified; confirm truly unused or refute as dynamic/optional/peer/tooling usage before reporting.`,
+          rule: "knip-dependencies",
+        });
+      }
+    }
   }
   return items;
 }
@@ -296,7 +332,7 @@ const knipCandidate: ExternalAnalyzerCandidate = {
     "--reporter",
     "json",
     "--include",
-    "exports,types,nsExports,nsTypes",
+    "exports,types,nsExports,nsTypes,files,dependencies",
     "--no-exit-code",
   ],
   parse: parseKnip,

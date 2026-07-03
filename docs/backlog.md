@@ -42,20 +42,11 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Forward tracks
 
-- **Last-writer-wins seams → default LWW, but compare-on-conflict.** Policy idea: wherever a write is
-  last-writer-wins, keep LWW as the cheap default but compare a monotonic marker on conflict and keep
-  the newer/better. **Scope today is narrow:** correctness-critical seams are already NOT LWW (mutex-
-  serialized with reload + merge-time ownership re-validation). The one true LWW seam is the **cosmetic**
-  shared `steps/current-*` latest-pointer (`src/shared/io/stepContractWriter.ts`). Low value but a clean
-  general guard for future seams. [[multi-ide-concurrent-runs-design]],
-  [[enforce-robustness-in-tooling-not-host-discretion]].
-
-- **Schema-enforced generation — CE-004 residual.** Emit-time constraint seam + `total_lines` gate
-  (CE-009) + validator duplicate finding-id hard-reject are shipped. **Open:** the always-on conversation
+- **Schema-enforced generation — CE-004 residual (env-bound only).** Emit-time constraint seam +
+  `total_lines` gate (CE-009) + validator duplicate finding-id hard-reject + fabricated-path +
+  out-of-range-span checks are all shipped. The only residual is env-bound: the always-on conversation
   host (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to
-  the repair floor (no emit-time prevention). Env-bound on a provider gaining a constraint endpoint.
-  Further semantic-validity checks beyond `total_lines` / fabricated paths / out-of-range spans are
-  unbuilt candidates.
+  the repair floor (no emit-time prevention). Unblocks only on a provider gaining a constraint endpoint.
 
 - **Tool-enforced dispatch broker with capability-tiered driver.** Desired end-state: (1) a gated
   primitive set as the single dispatch chokepoint (read quota, estimate tokens locally, dispatch/await);
@@ -68,26 +59,30 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 - **Deterministic analyzers: own-vs-acquire engine.** The acquisition engine, registry
   (`EXTERNAL_ANALYZER_CANDIDATES`), adapters (eslint, semgrep, gitleaks, jscpd, osv-scanner, clippy,
   rubocop, hadolint, actionlint, type-coverage), and consent gate (`admitSpawn`) are shipped. **Open:**
-  clippy/rubocop landed fixture-only (no Rust/Ruby repo → live spawn unvalidated); mutation testing
-  remains a gap. **Forward constraint:** if a future LLM-proposal channel is built for analyzer ids beyond
+  clippy/rubocop landed fixture-only (no Rust/Ruby repo → live spawn unvalidated). *(Mutation testing was
+  considered and dropped 2026-07-03: it doesn't fit the acquire+scan model — Stryker must run the full
+  test suite per mutant and needs a per-repo test-runner config we don't own, so it either no-ops or is
+  its own subsystem. Not an analyzer-registry add. Re-file as a scoped forward track only if a lightweight
+  mutation signal appears.)* **Forward constraint:** if a future LLM-proposal channel is built for analyzer ids beyond
   the static registry, it must route through the same `admitSpawn` chokepoint; and
   `ExternalAcquisitionConfig.consent_token` must be stripped/redacted before any persistence of
   `SessionConfig` to a shared artifact. [[deterministic-analyzers-own-vs-acquire]]
 
-- **Remaining deterministic-analyzer work (DEFERRED).** Dead-code as a sound signal needs the full file
-  universe + entrypoint provenance — knip/ts-prune territory, not a hand-rolled edge query (the shipped
-  `deletion_candidate` low-in-degree signal covers the cheap version). Graph-query heuristics and
-  extraction-persisted complexity/duplication/seams remain DONE (`deriveGraphSignals` pure reader).
+- **Dead-code signal — RESOLVED 2026-07-03, soundness bar retired.** The knip analyzer candidate now
+  emits whole-file (`files`) and unused-dependency (`dependencies`) leads alongside unused-export leads
+  (`candidates.ts` `parseKnip` + `--include`), covering the class the crude low-in-degree
+  `deletion_candidate` graph signal only approximated. Deliberately **NOT** pursuing a "sound" dead-code
+  signal (entrypoint provenance + dynamic-import tracing): true soundness is undecidable in a
+  language-neutral static auditor (dynamic/dispatch/reflection wiring), and it fights the
+  leads-not-verdicts architecture the per-file lens already implements. Everything here is a LEAD the
+  lens confirms/refutes — never a direct finding. Graph-query heuristics + extraction-persisted
+  complexity/duplication/seams remain DONE (`deriveGraphSignals` pure reader).
 
 - **Cross-provider quota — live-endpoint confirmation.** Per-provider mappings validated against
   live-shaped fixtures; confirming each source against its **real** endpoint (Claude/Codex live; Copilot/
   Antigravity gated→degrade) is environment-bound. Per-provider recipes:
   [`cross-provider-quota-matrix.md`](../spec/cross-provider-quota-matrix.md). Red line: self-monitoring
   own-provider only, never IDE-GUI automation.
-
-- **Codebase-wide churn/context/enforce pass — remainder.** The 2026-06-27 pass shipped its actionable
-  findings. C3/C5/C6/E4/E5 are low-value / need design intent — unscheduled. Re-run the lens broadly
-  when worthwhile.
 
 ## Deferred / waiting
 
@@ -102,10 +97,6 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 - **Gated live e2es** skip without creds: `RUN_PROVIDER_MATRIX_E2E=1`, `RUN_NIM_E2E=1`,
   `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_AUTONOMY_E2E=1`.
 - **Provider `queryLimits`** deferred — revisit if a provider gains a real proactive rate-limit endpoint.
-- **headroom proxy — final opt-in validation before global flip.** Proxy runs natively on Windows;
-  `127.0.0.1:8787` livez/health 200, `/v1/messages` forwards intact. **Pending (user-owned):** one
-  opt-in session confirming contract JSON survives compression before flipping the global
-  `ANTHROPIC_BASE_URL`. [[headroom-proxy-broken-windows-no-rust-core]]
 - **Narrow staleness on prose-heavy artifacts via bounded semantic judgment.** Prose-heavy fields feed
   downstream LLM prompts; a cosmetic edit forces wasteful re-emit. The narrowing = bounded judgment on
   meaning change, fail-safe to re-derive. Efficiency-only; defer until re-emit churn is measured.
