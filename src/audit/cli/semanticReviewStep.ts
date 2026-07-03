@@ -3,7 +3,10 @@ import type { HostModelRosterEntry, SessionConfig, ResolvedProviderName } from "
 import { classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
-import { createFreshSessionProvider } from "../providers/index.js";
+import {
+  createFreshSessionProvider,
+  resolveFreshSessionProviderName,
+} from "../providers/index.js";
 import { renderCommand } from "./args.js";
 import { writeCurrentStep } from "./steps.js";
 import {
@@ -81,13 +84,18 @@ export async function renderSemanticReviewStep(params: {
   const sessionConfig = await loadSessionConfig(artifactsDir).catch(
     () => ({} as SessionConfig),
   );
-  const provider = createFreshSessionProvider(undefined, sessionConfig);
+  const providerName = resolveFreshSessionProviderName(
+    sessionConfig.provider === undefined ? "auto" : undefined,
+    sessionConfig,
+  );
+  const provider = createFreshSessionProvider(providerName, sessionConfig);
   const dispatch = await prepareDispatchArtifacts({
     packageRoot,
     runId: activeReviewRun.run_id,
     artifactsDir,
     root,
     sessionConfig,
+    providerName,
     hostModel: sessionConfig.block_quota?.host_model ?? null,
     queryLimits: provider.queryLimits?.bind(provider),
     hostActiveSubagentLimit: params.hostMaxActiveSubagents,
@@ -103,8 +111,7 @@ export async function renderSemanticReviewStep(params: {
   // the live packet frontier / concurrency cap, and render the matching host
   // instruction. Only meaningful when there is a quota (a real fan-out); the
   // no-quota path launches one subagent per entry with no rolling loop.
-  const hostProvider: ResolvedProviderName =
-    (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
+  const hostProvider: ResolvedProviderName = providerName;
   const driverInstruction = dispatch.dispatch_quota_path
     ? renderDispatchDriverInstruction(
         selectDispatchDriver({

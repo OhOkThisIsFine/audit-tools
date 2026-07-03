@@ -125,3 +125,21 @@ test("validate fails loudly on corrupted artifact json", async () => {
     expect(combined).toMatch(/json|parse|invalid/i);
   });
 });
+
+test("loadSessionConfig default leaves provider unspecified for auto-resolution", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+
+    const { loadSessionConfig } = await import(
+      "../../src/audit/supervisor/sessionConfig.ts"
+    );
+    const config = await loadSessionConfig(artifactsDir);
+    const persisted = JSON.parse(
+      await readFile(join(artifactsDir, "session-config.json"), "utf8"),
+    );
+
+    expect(config.provider).toBeUndefined();
+    expect(persisted.provider).toBeUndefined();
+  });
+});

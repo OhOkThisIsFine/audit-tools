@@ -120,3 +120,14 @@ async function runQuotaKeepDir(argv) {
   );
   return { ...result, stateDir };
 }
+
+test("explicit provider is used for capacity preview pools", async () => {
+  const { stdout } = await runQuota(["--provider", "codex", "--host-models", ROSTER]);
+  const preview = parsePreview(stdout);
+
+  expect(preview.pools.length, "roster still creates one pool per rank").toBe(3);
+  for (const pool of preview.pools) {
+    expect(pool.providerName).toBe("codex");
+    expect(pool.id.startsWith("codex/")).toBeTruthy();
+  }
+});

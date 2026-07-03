@@ -1,5 +1,8 @@
 import { getArtifactsDir, getExplicitProvider, getFlag, getHostContextTokens, getHostMaxActiveSubagents, getHostModel, getHostModelId, getHostModelRoster, getHostOutputTokens, getRootDir } from "./args.js";
-import { createFreshSessionProvider } from "../providers/index.js";
+import {
+  createFreshSessionProvider,
+  resolveFreshSessionProviderName,
+} from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
 import { packageRoot } from "./paths.js";
@@ -18,7 +21,12 @@ export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
     );
     sessionConfig = {} as SessionConfig;
   }
-  const provider = createFreshSessionProvider(getExplicitProvider(argv), sessionConfig);
+  const providerName = resolveFreshSessionProviderName(
+    getExplicitProvider(argv) ??
+      (sessionConfig.provider === undefined ? "auto" : undefined),
+    sessionConfig,
+  );
+  const provider = createFreshSessionProvider(providerName, sessionConfig);
   const hostModel = getHostModel(argv) ?? sessionConfig.block_quota?.host_model ?? null;
   const result = await prepareDispatchArtifacts({
     packageRoot,
@@ -26,6 +34,7 @@ export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
     artifactsDir,
     root: getFlag(argv, "--root") ? getRootDir(argv) : undefined,
     sessionConfig,
+    providerName,
     hostModel,
     queryLimits: provider.queryLimits?.bind(provider),
     hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),

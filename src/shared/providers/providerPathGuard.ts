@@ -62,7 +62,6 @@ export function setCommandExistsForTesting(
  */
 const SELF_SPAWN_ENV_SIGNAL: Partial<Record<ResolvedProviderName, string>> = {
   "claude-code": "CLAUDECODE",
-  codex: "CODEX",
 };
 
 /**
@@ -76,6 +75,14 @@ export function isSelfSpawnBlocked(
   provider: ResolvedProviderName,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
+  if (provider === "codex") {
+    return Boolean(
+      env.CODEX ||
+        env.CODEX_SHELL ||
+        env.CODEX_THREAD_ID ||
+        env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
+    );
+  }
   const signal = SELF_SPAWN_ENV_SIGNAL[provider];
   return signal !== undefined && Boolean(env[signal]);
 }

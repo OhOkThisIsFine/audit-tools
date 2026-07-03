@@ -476,3 +476,19 @@ test("chooseAutoProvider: insideCodex in-session rung fires before codexAvailabl
   );
   expect(resolved).toBe("codex");
 });
+
+test("chooseAutoProvider: Codex Desktop session markers resolve codex", () => {
+  const resolved = resolveFreshSessionProviderName(
+    "auto",
+    {},
+    {
+      env: {
+        CODEX_SHELL: "1",
+        CODEX_THREAD_ID: "thread-123",
+        CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop",
+      },
+      commandExists: noCommands,
+    },
+  );
+  expect(resolved).toBe("codex");
+});

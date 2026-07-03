@@ -37,7 +37,10 @@ export async function cmdQuota(argv: string[]): Promise<void> {
   }
   const explicitProvider = getExplicitProvider(argv);
   const hostModel = getHostModel(argv);
-  const providerName = resolveFreshSessionProviderName(explicitProvider, sessionConfig);
+  const providerName = resolveFreshSessionProviderName(
+    explicitProvider ?? (sessionConfig.provider === undefined ? "auto" : undefined),
+    sessionConfig,
+  );
   const providerModelKey = buildProviderModelKey(providerName, hostModel);
 
   const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });
@@ -63,6 +66,7 @@ export async function cmdQuota(argv: string[]): Promise<void> {
   // command never calls finalizeDispatchQuota, so nothing is written to disk.
   const dispatchPool = await buildDispatchPool({
     sessionConfig,
+    providerName,
     hostModel,
     queryLimits: undefined,
     hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),

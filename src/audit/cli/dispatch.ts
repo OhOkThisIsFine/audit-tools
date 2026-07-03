@@ -12,7 +12,11 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readJsonFile, writeJsonFile, computeDispatchCapacity } from "audit-tools/shared";
-import type { SessionConfig, CapacityPool } from "audit-tools/shared";
+import type {
+  SessionConfig,
+  CapacityPool,
+  ResolvedProviderName,
+} from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
 import { isFileMissingError, ClaimRegistry, taskClaimsPath } from "audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -131,6 +135,7 @@ export async function prepareDispatchArtifacts(params: {
   artifactsDir: string;
   root?: string;
   sessionConfig?: SessionConfig;
+  providerName?: ResolvedProviderName | null;
   hostModel?: string | null;
   queryLimits?: (model: string | null) => Promise<ProviderRateLimits | null>;
   hostActiveSubagentLimit?: number | null;
@@ -289,6 +294,7 @@ export async function prepareDispatchArtifacts(params: {
   } else {
     dispatchPool = await buildDispatchPool({
       sessionConfig,
+      providerName: params.providerName,
       hostModel: params.hostModel,
       queryLimits: params.queryLimits,
       hostActiveSubagentLimit: params.hostActiveSubagentLimit,

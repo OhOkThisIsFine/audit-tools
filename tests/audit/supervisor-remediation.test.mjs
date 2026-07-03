@@ -256,7 +256,6 @@ test("persistAnalyzerSettings writes DEFAULT_SESSION_CONFIG + settings when no c
   await withTempDir("audit-code-persist-analyzer-new-", async (artifactsDir) => {
     const result = await persistAnalyzerSettings(artifactsDir, { semgrep: "permanent" });
 
-    expect(result.provider).toBe("local-subprocess");
     expect(result.analyzers).toEqual({ semgrep: "permanent" });
 
     const persisted = JSON.parse(
@@ -295,7 +294,6 @@ test("persistAnalyzerSettings falls back to DEFAULT_SESSION_CONFIG when persiste
 
     const result = await persistAnalyzerSettings(artifactsDir, { eslint: "skip" });
 
-    expect(result.provider).toBe("local-subprocess");
     expect(result.analyzers).toEqual({ eslint: "skip" });
 
     const persisted = JSON.parse(await readFile(configPath, "utf8"));

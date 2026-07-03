@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { writeJsonFile, buildHostModelPools } from "audit-tools/shared";
 import type {
   ProviderRateLimits,
+  ResolvedProviderName,
   SessionConfig,
   DispatchModelTier,
   HostModelRosterEntry,
@@ -80,6 +81,7 @@ export interface ResolvedDispatchPool {
  */
 export async function buildDispatchPool(params: {
   sessionConfig: SessionConfig;
+  providerName?: ResolvedProviderName | null;
   hostModel: string | null | undefined;
   queryLimits: ((model: string | null) => Promise<ProviderRateLimits | null>) | undefined;
   hostActiveSubagentLimit: number | null | undefined;
@@ -100,7 +102,12 @@ export async function buildDispatchPool(params: {
   onEscalation?: (escalation: HostSessionEscalation) => void;
 }): Promise<ResolvedDispatchPool> {
   const { sessionConfig, queryLimits, hostActiveSubagentLimit } = params;
-  const quotaProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
+  const quotaProviderName =
+    params.providerName ??
+    resolveFreshSessionProviderName(
+      sessionConfig.provider === undefined ? "auto" : undefined,
+      sessionConfig,
+    );
   const hostModel = resolveHostModel({
     providerName: quotaProviderName,
     sessionConfig,

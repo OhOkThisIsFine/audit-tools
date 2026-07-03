@@ -11,7 +11,7 @@ import {
 import { validateSessionConfig } from "../validation/sessionConfig.js";
 
 const SESSION_CONFIG_FILENAME = "session-config.json";
-const DEFAULT_SESSION_CONFIG: SessionConfig = { provider: "local-subprocess" };
+const DEFAULT_SESSION_CONFIG: SessionConfig = {};
 
 export function getSessionConfigPath(artifactsDir: string): string {
   return join(artifactsDir, SESSION_CONFIG_FILENAME);
