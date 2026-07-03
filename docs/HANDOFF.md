@@ -8,19 +8,29 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.31.4** (both global bins reinstalled + verified). v0.31.4 folded the
-  worktree node_modules link into `createWorktree` (enforce-in-tooling; closes ecc-evaluation lead 2).
-  v0.31.3 shipped two remediate-code intake/merge tool-enforce fixes. v0.31.2 shipped the two churn/context
-  follow-ons from the 2026-07-02 lens pass. v0.31.1 fixed the contract-pipeline repair-revert bug. v0.31.0
-  shipped the T5 forward-tracks remediation (five external analyzers, knip↔graph cross-check, validator
-  duplicate-id reject).
-- **This lap (v0.31.4 — `091e403`):** folded `ensureWorktreeNodeModules` into `createWorktree`
-  (`src/remediate/steps/{dispatch,rollingSession}.ts`). The main-checkout node_modules junction into a fresh
-  worktree was a maintainer-remembered paired call at both worktree-creation sites — a future 3rd creator could
-  omit it and silently fail per-node verify. Now a worktree can't be created without the link. Behavior-neutral
-  (both sites already made the call). Closes ecc-evaluation lead 2. Test: `rolling-provider-dispatch.test.ts` G3.
-  ecc-evaluation leads 1 & 3 also closed earlier this session (spawn-safety verified already-safe; commit-gate
-  bypass hardened, repo-internal). ecc track fully closed.
+- On npm as `latest` at **v0.32.0** (both global bins reinstalled + verified live). v0.32.0 shipped the two
+  remaining forward tracks: **(A) same-file parallel dispatch** (optimistic + git-enforced — see below) and
+  **(B) remediate-code multi-host installer parity**. See `docs/backlog.md` → Forward tracks for the full
+  shipped detail; both entries are marked ✅ SHIPPED.
+- **This lap (v0.32.0):** two forward tracks via a full `/remediate-code` contract-pipeline run.
+  **Track A** pivoted (owner-approved) from the falsified semantic-anchor design to **optimistic same-file
+  dispatch enforced at merge by actual git hunks**: `RemediationBlock.cofile_parallel_safe` (mechanical flag,
+  set when `mergeBlocksSharingFiles` keeps independent same-file blocks separate + copied through
+  `splitBlocksByContextBudget`); `ownershipSubWaves` batches both-flagged same-file nodes; `gitHunksForBranch`
+  + relaxed `detectOverlappingEdits` on actual hunks; serialized cherry-pick stays the correctness authority.
+  **Track B** = `wrapper/remediate-code-wrapper-install-hosts.mjs` (+ renderers/io/opencode/legacy), committed
+  host assets (`.agent` SKILL is a source byte-copy), `scripts/remediate/verify-hosts.mjs` +
+  `verify:remediate-hosts` in `verify:release`, body-derived drift guard.
+  **Recovery note:** the run's own rolling accept/merge phase hit tool data-loss bugs (nodes silently
+  stranded / false-`resolved_no_change`, cross-node verify deadlock — logged in `docs/backlog.md` frictions);
+  the deliverable was landed via the **combined-reconciliation escape hatch** (per-node worktree implement →
+  hand cherry-pick → full-suite once → merge-to-base), NOT the tool's own close phase. The
+  `.audit-tools/remediation` run state is therefore abandoned/incomplete (gitignored, local-only) — safe to
+  delete; the merged code on `main` is authoritative and full-suite green.
+- **Prior lap (v0.31.4 — `091e403`):** folded `ensureWorktreeNodeModules` into `createWorktree`
+  (`src/remediate/steps/{dispatch,rollingSession}.ts`) so a worktree can't be created without the
+  node_modules junction. v0.31.3 shipped two remediate-code intake/merge tool-enforce fixes. v0.31.0 shipped
+  the T5 forward-tracks remediation (five external analyzers). ecc-evaluation track fully closed.
 - **Prior lap (repo-internal, unpublished — `a71f509`):** hardened the `pre-commit-gate.mjs` hook against
   hook-skip commits. The gate detected `git commit` but let `--no-verify`/`-n` and `core.hooksPath` overrides
   through — each disables the hook, making green-at-every-commit a no-op. Now rejects (exit 2) any detected
@@ -54,18 +64,14 @@
   timeout). Framework-consistency guards updated (`shared-tests-invariants` INV-shared-tests-02,
   `audit-infra-architecture` ARC-843ce274-2). **No npm publish** — tests aren't in the published `files`
   set and dist is unchanged; commit+push to main only.
-- **Immediate next:** none pending — the multi-agent cooperative-runs track is complete (see below).
-  Next candidates are the other forward tracks in `docs/backlog.md` (parallel dispatch over overlapping
-  files; the deferred T5 items). Env-bound follow-up for the shipped track: live two-IDE validation. Slice **3 (per-agent step slot) SHIPPED**: `stepContractWriter` writes each
-  `next-step` process's prompt+JSON to a per-process `steps/<agentId>/` slot and returns `prompt_path`
-  there (host already uses the returned path → concurrency-safe, no SKILL change) + a shared
-  `steps/current-*` latest copy for back-compat; dispatch `runId` already auto-isolates per-run files, so
-  the slice-2 boundary is closed. **The audit-side cooperative story is now complete** (bundle mutex +
-  disjoint task claims + per-run isolation + per-agent step/prompt + stdout handoff). **Next: slice 4** =
-  remediate `phase:<name>` claims for serial phases (plan/document/triage/close) so two joining peers
-  don't both plan + make a second next-step join the rolling frontier by default (implement is already
-  cooperative; the shared step-writer fix already covers remediate's step slot). Then slice 5 = rewrite
-  the [[concurrent-nextstep-staleness-cascade-wipe]] trap as resolved.
+- **Immediate next:** none pending. Both remaining forward tracks shipped this lap (parallel dispatch over
+  overlapping files → optimistic+git-enforced; remediate-code installer parity). The **highest-priority new
+  open item** is a real tool bug this run exposed: the implement-dispatch accept/merge phase silently strands
+  / false-`resolved_no_change`s nodes and over-couples per-node verify (`docs/backlog.md` → Open bugs /
+  frictions, "Implement-dispatch silently strands/false-resolves nodes") — worth fixing before the next
+  heavy remediate run so it doesn't need the combined-reconciliation hand-recovery again. Other candidates:
+  deferred T5 items (clippy/rubocop live spawn; schema CE-004; churn C3/C5/C6/E4/E5); env-bound live
+  validations. Delete the abandoned `.audit-tools/remediation` run state (gitignored) whenever convenient.
 - **Multi-agent COOPERATIVE runs — ✅ COMPLETE (all 6 slices shipped, 2026-07-02).** Audit + remediate now
   let an arbitrary number of agents/IDEs join and contribute to ONE shared run (bundle-mutation mutex +
   disjoint task claims + per-agent step slot + per-run dispatch isolation + remediate phase mutex). The

@@ -161,19 +161,29 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   under concurrency. Low value (cosmetic) but a clean general guard for any future LWW seam. Relates to
   [[multi-ide-concurrent-runs-design]], [[enforce-robustness-in-tooling-not-host-discretion]].
 
-- **Parallel dispatch over OVERLAPPING files — make it the tool's job, and the target design (the owner, 2026-07-02).**
-  Today the decomposition avoids implement-time cherry-pick collisions by partitioning modules onto
-  DISJOINT file scopes (e.g. five external analyzers forced into ONE serial `candidates.ts` module). That
-  disjoint-file rule is a HOST-remembered crutch, not a tool guarantee — it must move into the remediator,
-  and more importantly the crutch is not the goal. The goal: contracts precise enough that we CAN dispatch
-  agents in parallel even when they edit the same file. Concretely — (a) contract-level per-file edit-region
-  ownership (each node declares the exact region/anchor it appends to or edits, so two nodes on `candidates.ts`
-  are provably non-conflicting), and (b) a merge that tolerates disjoint hunks in the same file (cherry-pick /
-  3-way apply per node, not whole-file ownership). Under that, the analyzer work is N parallel nodes, not one
-  serial node. NOTE (settled this session): the constraint never applied to contract *drafting* — the per-module
-  shards are disjoint output files and source reads are read-only, so parallel drafting on overlapping source is
-  already safe; the rule only ever mattered at implement/merge. Relates to [[remediator-must-decompose-and-boundary-enforce]],
-  [[decomposition-colocate-source-and-tests]], [[enforce-robustness-in-tooling-not-host-discretion]].
+- **Parallel dispatch over OVERLAPPING files — ✅ SHIPPED as optimistic dispatch + git-enforced merge (v0.32.0, 2026-07-03).**
+  The originally-proposed design (contract-level per-file edit-region/semantic-anchor ownership + hunk-level
+  merge) was falsified during the contract pipeline and PIVOTED (owner-approved): disjointness of same-file
+  edits CANNOT be proven at decomposition time — `plan.ts` sees only `affected_files:{path,reason}` (no
+  line/symbol/region signal; `concrete_change` is authored later) and no symbol→line resolver exists, so
+  semantic anchors would be inert scaffolding. What shipped instead is **optimistic same-file dispatch enforced
+  at merge by actual git hunks**: `RemediationBlock.cofile_parallel_safe` (a mechanical flag — set when
+  `mergeBlocksSharingFiles` keeps INDEPENDENT-finding same-file blocks separate instead of unioning them, and
+  copied through `splitBlocksByContextBudget`); `ownershipSubWaves` batches two same-file nodes iff BOTH
+  flagged; `gitHunksForBranch` + a relaxed `detectOverlappingEdits` tolerate disjoint ACTUAL hunks while the
+  already-serialized cherry-pick (rebase-conflict → quarantine → triage retry) is the correctness authority —
+  no hand-rolled merge engine. Design of record: `finalized_module_contracts` (this run) +
+  [[decomposition-colocate-source-and-tests]] [[enforce-robustness-in-tooling-not-host-discretion]]. The
+  five-analyzers-in-`candidates.ts` case is now N parallel-eligible nodes, not one serial node.
+- **remediate-code multi-host installer/generator parity — ✅ SHIPPED (v0.32.0, 2026-07-03).**
+  `wrapper/remediate-code-wrapper-install-hosts.mjs` (+ `-renderers`, `-io`, `-opencode`, `-legacy`) mirror the
+  audit installer, remediate-scoped; every host asset renders from the ONE canonical body via shared
+  `renderHostAsset`; committed `.github/prompts/remediate-code.prompt.md`, `.github/agents/remediator.agent.md`,
+  `.gemini/commands/remediate-code.toml`; `.agent/skills/remediate-code/SKILL.md` is a byte-copy of the source
+  SKILL (renderHostAsset has no SKILL kind — mirrors audit). `scripts/remediate/verify-hosts.mjs` +
+  `verify:remediate-hosts` wired into `verify:release`; `tests/remediate/host-bootstrap-descriptors-remediate.test.ts`
+  drift-guard derives the `--host-*` flag set FROM the canonical body (six flags incl. `--host-model-id`) so a
+  dropped flag fails the guard. remediate-code.mjs routes install/ensure/verify-install (lazy installer import).
 - **Multi-agent COOPERATIVE runs — ✅ SHIPPED (2026-07-02).** Arbitrary agents/IDEs/providers now
   contribute to the SAME audit/remediation: start an audit in one IDE, run `/audit-code` in a second and it
   JOINS, taking unclaimed tasks; symmetric peers, no primary/secondary, no collisions. Design of record:
