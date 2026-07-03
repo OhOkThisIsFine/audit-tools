@@ -120,6 +120,16 @@ function reverifyBlockedItemAgainstTree(
       ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
       : undefined) ??
     state.plan?.blocks.find((b) => b.items.includes(item.finding_id));
+  // Deliverable-existence guard (2026-07-03): a node cannot be "already satisfied" if
+  // its declared deliverables aren't in the tree. A passing `targeted_command` may be
+  // satisfied by a SIBLING's work while THIS node's file was never created — proven
+  // 2026-07-03, a node was false-reconciled to `resolved_no_change` though its code was
+  // never on the branch. Require every declared touched path to exist before trusting
+  // the command result. (An edit-node's paths pre-exist, so this only fires on a
+  // never-created new-file deliverable — exactly the false-resolve case.)
+  for (const rel of block?.touched_files ?? []) {
+    if (!existsSync(join(options.root, rel))) return "unsatisfied";
+  }
   const commands = block?.targeted_commands;
   if (!commands || commands.length === 0) return "indeterminate";
   return verifyNodeInWorktree(options.root, commands).passed

@@ -38,6 +38,8 @@ import {
   enforceWriteScope,
   adjudicateWriteScope,
   verifyCommandsForEdits,
+  selfContainedVerifyCommands,
+  pathTokensInCommand,
   buildNodeDisposition,
   attributeSiblingRed,
   worktreeBranchForBlock,
@@ -289,6 +291,68 @@ describe("isWholeSuiteTestCommand", () => {
     expect(isBuildFreeVerifyCommand("npx vitest run tests/remediate")).toBe(true);
     // ...but the scope guard catches it.
     expect(isWholeSuiteTestCommand("npx vitest run tests/remediate")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selfContainedVerifyCommands — drop a per-node verify command that references a
+// SIBLING node's not-yet-created deliverable (the cross-node deadlock proven
+// 2026-07-03: a node's targeted_command was `node scripts/remediate/verify-hosts.mjs`,
+// another node's pending output → guaranteed-fail per-node verify).
+// ---------------------------------------------------------------------------
+
+describe("pathTokensInCommand", () => {
+  it("extracts repo-relative path-like tokens (slash + extension)", () => {
+    expect(pathTokensInCommand("node scripts/remediate/verify-hosts.mjs")).toEqual([
+      "scripts/remediate/verify-hosts.mjs",
+    ]);
+    expect(pathTokensInCommand("npx vitest run tests/remediate/foo.test.ts")).toEqual([
+      "tests/remediate/foo.test.ts",
+    ]);
+  });
+  it("returns none for commands with no path tokens", () => {
+    expect(pathTokensInCommand("npm run check")).toEqual([]);
+    expect(pathTokensInCommand("vitest run")).toEqual([]);
+  });
+});
+
+describe("selfContainedVerifyCommands", () => {
+  let tmp: string;
+  beforeEach(async () => {
+    tmp = join(__dirname, `.tmp-selfcontained-${process.pid}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(join(tmp, "scripts"), { recursive: true });
+    await writeFile(join(tmp, "scripts", "present.mjs"), "// present\n");
+  });
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("keeps a command referencing only the node's OWN declared path", () => {
+    const cmds = selfContainedVerifyCommands(
+      ["node scripts/remediate/verify-hosts.mjs"],
+      ["scripts/remediate/verify-hosts.mjs"],
+      tmp,
+    );
+    expect(cmds).toEqual(["node scripts/remediate/verify-hosts.mjs"]);
+  });
+
+  it("keeps a command whose path already exists in the tree", () => {
+    const cmds = selfContainedVerifyCommands(["node scripts/present.mjs"], [], tmp);
+    expect(cmds).toEqual(["node scripts/present.mjs"]);
+  });
+
+  it("drops a command referencing a sibling's not-yet-created deliverable", () => {
+    // Not the node's own path and not present in the tree → cross-node deadlock.
+    const cmds = selfContainedVerifyCommands(
+      ["node scripts/remediate/verify-hosts.mjs"],
+      ["src/remediate/steps/dispatch.ts"],
+      tmp,
+    );
+    expect(cmds).toEqual([]);
+  });
+
+  it("keeps a path-free command (e.g. npm run check) unconditionally", () => {
+    expect(selfContainedVerifyCommands(["npm run check"], [], tmp)).toEqual(["npm run check"]);
   });
 });
 

@@ -131,19 +131,29 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   `normalization`, `failing`, and any `OBL-*-fail-*` id embedded in a positive). Authors must scrub hidden
   substrings and never embed a `fail`-containing obligation id in the positive assertion. Tool fix: use a real
   polarity signal (leading "If …"/explicit label) instead of naive substring matching.
-- **Implement-dispatch silently strands/false-resolves nodes; per-node verify is over-coupled (2026-07-03).**
-  During the parallel-dispatch+installer-parity remediation run, the rolling accept/merge phase lost data three
-  ways: (1) a node whose cherry-pick failed on an UNRELATED dirty main-tree file was counted `accepted` while
-  `merged:false` — its code stranded in a quarantine ref while the tool advanced; (2) triage reconciled two nodes
-  to `resolved_no_change` even though their code was NOT on the branch (one was never implemented), corrupting run
-  state vs. git; (3) a node's accept-verify ran a `targeted_command` referencing ANOTHER node's not-yet-created
-  file (`node scripts/remediate/verify-hosts.mjs`) → guaranteed-fail deadlock. Tool fixes: accept must not count a
-  merge-failed node as accepted (keep it pending, never advance dependents); triage's "already satisfied" check
-  must confirm the node's declared deliverables exist on the branch before `resolved_no_change`; per-node verify
-  must be self-contained (derive from the node's OWN touched files/tests, never a sibling's). Recovery that
-  worked: combined-reconciliation — implement each node in an isolated worktree, hand-cherry-pick every node
-  commit onto the integration branch, run the FULL suite once, merge-to-base
-  ([[decomposition-colocate-source-and-tests]], [[worktree-tests-miss-integration-guards]]).
+- **Implement-dispatch silently strands/false-resolves nodes; per-node verify is over-coupled — ✅ FIXED (2026-07-03).**
+  All three data-loss modes closed in the merge/triage/verify tooling (enforce-in-tooling, not host discretion):
+  (1) **Merge-failed node no longer advances as accepted.** `mergeImplementResults` (`src/remediate/steps/dispatch.ts`)
+  loads the recorded per-node accept outcome ONCE per block and computes `acceptHardFailed` (outcome=error|timeout
+  with merged=false → edits quarantined, NOT in the main tree). The collapsed-loop resolve branch now BLOCKS any
+  `resolved`/`resolved_no_change` claim outright when the accept hard-failed — regardless of label — so a mislabeled
+  no-change can't strand and no dependent builds on missing code (the old `resolvedFindingIds`-only gate missed the
+  no-change label). The existing resolved-but-merged:false gate still covers the outcome=success/committed-nothing case.
+  (2) **Triage reconcile requires the deliverable to exist.** `reverifyBlockedItemAgainstTree` (`src/remediate/phases/triage.ts`)
+  now checks every declared `touched_files` path exists in the tree BEFORE trusting a passing `targeted_command` —
+  a command satisfied by a SIBLING's work can no longer false-reconcile a never-created node to `resolved_no_change`
+  (returns `unsatisfied` → retry). An edit-node's paths pre-exist, so the guard only fires on a genuinely-missing
+  new-file deliverable.
+  (3) **Per-node verify is self-contained.** `acceptNodeWorktree` filters the node's host/auditor-authored
+  `additionalVerifyCommands` through `selfContainedVerifyCommands` (new): a command whose path token is neither the
+  node's own path (write set ∪ actual branch edits) nor already present in the worktree references a sibling's
+  not-yet-created deliverable and is DROPPED (deferred to the integration/close gate), killing the
+  `node scripts/remediate/verify-hosts.mjs` cross-node deadlock. The derived-from-branch commands were already
+  self-contained. Tests: `dispatch-merge-tolerance.test.ts` (hard-failure guard blocks mislabeled no-change;
+  leaves legitimate outcome=success no-change alone), `dispatch-evidence-and-writescope.test.ts`
+  (`selfContainedVerifyCommands`/`pathTokensInCommand`), `phase-triage.test.ts` (missing-deliverable forces retry).
+  Full suite green (5562/0). ([[decomposition-colocate-source-and-tests]], [[worktree-tests-miss-integration-guards]],
+  [[implement-dispatch-strands-nodes]])
 
 ## Forward tracks
 

@@ -593,7 +593,12 @@ describe("runTriagePhase", () => {
   // and human triage. `exit 0`/`exit 1` are shell builtins on both cmd.exe and
   // /bin/sh; root must exist for the spawn cwd, so use TEST_DIR.
   function planWithBlocks(
-    blocks: { block_id: string; items: string[]; targeted_commands?: string[] }[],
+    blocks: {
+      block_id: string;
+      items: string[];
+      targeted_commands?: string[];
+      touched_files?: string[];
+    }[],
   ) {
     return {
       plan_id: "P1",
@@ -604,7 +609,7 @@ describe("runTriagePhase", () => {
         block_id: b.block_id,
         items: b.items,
         parallel_safe: true,
-        touched_files: [],
+        touched_files: b.touched_files ?? [],
         ...(b.targeted_commands ? { targeted_commands: b.targeted_commands } : {}),
       })),
     };
@@ -642,6 +647,37 @@ describe("runTriagePhase", () => {
       status: "triage",
       plan: planWithBlocks([
         { block_id: "B1", items: ["F1"], targeted_commands: ["exit 1"] },
+      ]),
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "blocked",
+          failure_reason: "test assertion failed",
+          block_id: "B1",
+        },
+      },
+    }) as RemediationState;
+
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    expect(next.status).toBe("implementing");
+    expect(state.items!.F1.status).toBe("pending");
+    expect(state.items!.F1.rework_count).toBe(1);
+  });
+
+  it("does NOT reconcile to resolved_no_change when a declared deliverable is missing from the tree (even if targeted_commands pass)", async () => {
+    // Deliverable-existence guard (2026-07-03): a passing targeted_command can be
+    // satisfied by a SIBLING's work while THIS node's declared new-file was never
+    // created. `exit 0` would otherwise reconcile it to resolved_no_change and strand
+    // the never-implemented node; the missing touched_file must force a retry instead.
+    const state = makeBaseState({
+      status: "triage",
+      plan: planWithBlocks([
+        {
+          block_id: "B1",
+          items: ["F1"],
+          targeted_commands: ["exit 0"],
+          touched_files: ["scripts/remediate/never-created.mjs"],
+        },
       ]),
       items: {
         F1: {

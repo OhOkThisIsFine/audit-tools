@@ -64,14 +64,17 @@
   timeout). Framework-consistency guards updated (`shared-tests-invariants` INV-shared-tests-02,
   `audit-infra-architecture` ARC-843ce274-2). **No npm publish** — tests aren't in the published `files`
   set and dist is unchanged; commit+push to main only.
-- **Immediate next:** none pending. Both remaining forward tracks shipped this lap (parallel dispatch over
-  overlapping files → optimistic+git-enforced; remediate-code installer parity). The **highest-priority new
-  open item** is a real tool bug this run exposed: the implement-dispatch accept/merge phase silently strands
-  / false-`resolved_no_change`s nodes and over-couples per-node verify (`docs/backlog.md` → Open bugs /
-  frictions, "Implement-dispatch silently strands/false-resolves nodes") — worth fixing before the next
-  heavy remediate run so it doesn't need the combined-reconciliation hand-recovery again. Other candidates:
-  deferred T5 items (clippy/rubocop live spawn; schema CE-004; churn C3/C5/C6/E4/E5); env-bound live
-  validations. Delete the abandoned `.audit-tools/remediation` run state (gitignored) whenever convenient.
+- **This lap (repo-internal, publishable):** fixed the three implement-dispatch data-loss modes the v0.32.0
+  run exposed — merge-failed nodes no longer advance as accepted (hard-failure guard blocks any resolve claim
+  when the accept quarantined, regardless of label), triage's already-satisfied reconcile now requires the
+  node's declared `touched_files` to exist before `resolved_no_change`, and per-node verify drops a
+  `targeted_command` that references a sibling's not-yet-created file (`selfContainedVerifyCommands`). Files:
+  `src/remediate/steps/dispatch.ts`, `src/remediate/phases/triage.ts` (+ 3 test files). Full suite green
+  (5562/0). Detail: `docs/backlog.md` → the now-✅ "Implement-dispatch silently strands/false-resolves nodes".
+- **Immediate next:** none pending. The highest-priority tool bug (implement-dispatch strand/false-resolve/
+  over-coupled verify) is now fixed. Remaining candidates: deferred T5 items (clippy/rubocop live spawn; schema
+  CE-004; churn C3/C5/C6/E4/E5); env-bound live validations. Delete the abandoned `.audit-tools/remediation`
+  run state (gitignored) whenever convenient.
 - **Multi-agent COOPERATIVE runs — ✅ COMPLETE (all 6 slices shipped, 2026-07-02).** Audit + remediate now
   let an arbitrary number of agents/IDEs join and contribute to ONE shared run (bundle-mutation mutex +
   disjoint task claims + per-agent step slot + per-run dispatch isolation + remediate phase mutex). The

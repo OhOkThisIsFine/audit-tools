@@ -498,4 +498,31 @@ describe("mergeImplementResults — merge-state gate (verify/merge must actually
     ]);
     expect(merged.items!["N-x"].status).toBe("resolved");
   });
+
+  it("hard-failure guard blocks a node whose accept FAILED even if the worker mislabeled it no-change", async () => {
+    // The 2026-07-03 strand: accept failed (collision/verify → quarantine, merged:false)
+    // but the worker reported resolved_no_change, so the finding never entered
+    // resolvedFindingIds and the old resolved-only gate skipped it → its quarantined
+    // code silently stranded while the tool advanced. The hard-failure guard blocks ALL
+    // the block's non-terminal items on an error/timeout accept, not just resolved ones.
+    await saveState(makeNodeState());
+    await writeAcceptOutcome({ outcome: "error", verifyPassed: false, merged: false });
+    const merged = await mergeWith([
+      { finding_id: "N-x", status: "resolved_no_change", evidence: ["claimed no-change but accept failed"] },
+    ]);
+    expect(merged.items!["N-x"].status).toBe("blocked");
+    expect(merged.items!["N-x"].failure_reason).toMatch(/accept failed|quarantined/i);
+  });
+
+  it("hard-failure guard leaves a legitimate no-change closure (outcome=success) alone", async () => {
+    // A real resolved_no_change makes no edits → acceptNodeWorktree returns
+    // outcome=success, merged=false (nothing to land), NO quarantine. The guard keys on
+    // error/timeout, so this stays resolved_no_change.
+    await saveState(makeNodeState());
+    await writeAcceptOutcome({ outcome: "success", verifyPassed: true, merged: false });
+    const merged = await mergeWith([
+      { finding_id: "N-x", status: "resolved_no_change", evidence: ["npm run check -> ok (0 errors)"] },
+    ]);
+    expect(merged.items!["N-x"].status).toBe("resolved_no_change");
+  });
 });

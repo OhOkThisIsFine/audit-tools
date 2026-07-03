@@ -1544,10 +1544,28 @@ export async function acceptNodeWorktree(
       targetedCommands === undefined
         ? deriveVerifyCommandsFromBranch(root, branch)
         : targetedCommands;
-    const verifyCommands =
-      targetedCommands === undefined
-        ? [...new Set([...baseCommands, ...buildFreeVerifyCommands(additionalVerifyCommands)])]
-        : baseCommands;
+    let verifyCommands: string[];
+    if (targetedCommands === undefined) {
+      // Self-contained per-node verify (2026-07-03): the derived `baseCommands` come
+      // from this node's ACTUAL branch edits (self-contained by construction), but the
+      // node's host/auditor-authored `additionalVerifyCommands` can reference a sibling
+      // node's not-yet-created deliverable → a guaranteed-fail deadlock. Drop any such
+      // cross-node command (deferred to the integration/close gate). Own paths = the
+      // node's declared write set ∪ the files it actually edited on its branch.
+      const edited = gitEditedFilesForBranch(root, branch);
+      const ownPaths = [
+        ...(params.writePaths ?? []),
+        ...(edited.available ? edited.files : []),
+      ];
+      const additional = selfContainedVerifyCommands(
+        buildFreeVerifyCommands(additionalVerifyCommands),
+        ownPaths,
+        wt,
+      );
+      verifyCommands = [...new Set([...baseCommands, ...additional])];
+    } else {
+      verifyCommands = baseCommands;
+    }
     const verify =
       verifyCommands.length > 0
         ? verifyNodeInWorktree(wt, verifyCommands)
@@ -1984,6 +2002,44 @@ function buildFreeVerifyCommands(commands: string[] | undefined): string[] {
         !isWholeSuiteTestCommand(c),
     )
     .map(normalizeNodeTestCommand);
+}
+
+/**
+ * Repo-relative path-like tokens in a shell command — tokens containing a `/` and a
+ * file extension (e.g. `scripts/remediate/verify-hosts.mjs`, `tests/x.test.ts`).
+ * Used to decide whether a targeted verify command is self-contained.
+ */
+export function pathTokensInCommand(cmd: string): string[] {
+  const tokens = cmd.match(/(?:[\w.@-]+\/)+[\w.@-]+\.\w+/g) ?? [];
+  return [...new Set(tokens.map((t) => t.replace(/\\/g, "/")))];
+}
+
+/**
+ * Keep only the targeted verify commands that are SELF-CONTAINED for this node:
+ * every path-like token they reference is either one of the node's own paths (its
+ * declared write set ∪ the files it actually edited on its branch) or already
+ * present in the tree. A command referencing a path this node doesn't own and that
+ * isn't in the tree depends on a SIBLING node's not-yet-created deliverable —
+ * running it in per-node verify is a guaranteed-fail deadlock (proven 2026-07-03: a
+ * node's `targeted_command` was `node scripts/remediate/verify-hosts.mjs`, another
+ * node's pending output). Per-node verify must be self-contained; such a cross-node
+ * command is dropped here and deferred to the integration/close gate. A command with
+ * no path tokens (e.g. `npm run check`) is always kept.
+ */
+export function selfContainedVerifyCommands(
+  commands: string[],
+  ownPaths: Iterable<string>,
+  treeRoot: string,
+): string[] {
+  const owned = new Set([...ownPaths].map((p) => p.replace(/\\/g, "/")));
+  return commands.filter((cmd) => {
+    for (const token of pathTokensInCommand(cmd)) {
+      if (owned.has(token)) continue;
+      if (existsSync(join(treeRoot, token))) continue;
+      return false;
+    }
+    return true;
+  });
 }
 
 /** A repo-relative test path → the runner that executes that file directly. */
@@ -3897,6 +3953,21 @@ async function mergeImplementResultsIntoState(
     // ACTUAL git edits fall outside the declared scope.
     const resolvedFindingIds: string[] = [];
 
+    // The recorded per-node accept outcome is the ground truth (never the worker's
+    // result file). Absent on the interim main-tree path (which writes none) → the
+    // gates below stay inert there. A HARD accept failure (outcome=error|timeout with
+    // merged=false) means the node's committed edits were QUARANTINED and are NOT in the
+    // main tree; the worker's own status is then untrustworthy (proven 2026-07-03: a
+    // node whose accept failed on a dirty-main-tree collision reported resolved_no_change
+    // and silently stranded, because the resolvedFindingIds gate below only re-blocks
+    // actual-change `resolved` items). When hard-failed, the collapsed loop's resolve
+    // branch blocks the item outright so no dependent builds on missing code.
+    const acceptOutcome = await loadNodeAcceptOutcome(options.artifactsDir, runId, blockId);
+    const acceptHardFailed =
+      !!acceptOutcome &&
+      !acceptOutcome.merged &&
+      (acceptOutcome.outcome === "error" || acceptOutcome.outcome === "timeout");
+
     for (const itemResult of unresolved) {
       // OBL-INV-RSD-01: do NOT throw on an unknown finding_id that did not remap
       // to a known node alias. Block the owning block's non-terminal items so the
@@ -3940,6 +4011,24 @@ async function mergeImplementResultsIntoState(
         continue;
       }
       if (itemResult.status === "resolved" || itemResult.status === "resolved_no_change") {
+        if (acceptHardFailed) {
+          // The tool-owned accept hard-failed (quarantined, not in the main tree), so
+          // this worker's resolved/resolved_no_change claim can't be trusted — block it
+          // regardless of label so a mislabeled no-change can't strand and no dependent
+          // builds on missing code. Routed to triage with the failing output.
+          stateItem.status = "blocked";
+          markTerminal(stateItem);
+          stateItem.failure_reason =
+            `Node ${blockId} reported finding ${itemResult.finding_id} ` +
+            `${itemResult.status}, but its tool-owned accept failed ` +
+            `(outcome=${acceptOutcome!.outcome}, merged=false); the edits were quarantined ` +
+            `and are NOT in the main tree. Routed to triage so dependents never build on ` +
+            `missing code.` +
+            (acceptOutcome!.diagnostic
+              ? `\nFailing command output:\n${acceptOutcome!.diagnostic}`
+              : "");
+          continue;
+        }
         const spec = stateItem.item_spec;
         // The worker's explicit `resolved_no_change` is a no-change signal in its
         // own right; the spec heuristic is the fallback for a plain `resolved`.
@@ -4108,17 +4197,17 @@ async function mergeImplementResultsIntoState(
     // finding "resolved" but whose tool-owned verify/merge did NOT land its edits
     // (acceptNodeWorktree returned merged:false — verify failed, a cherry-pick
     // conflict, or no actual edit) must never stand as resolved: its fix is not in
-    // the main tree. The recorded per-node accept outcome is the ground truth, never
-    // the worker's result file. Keyed on resolvedFindingIds, so a legitimate
-    // no-change closure (which makes no edits by design, and is not in that set)
-    // stays exempt. Worktree-dispatched blocks have a record; the interim main-tree
-    // path writes none, so this gate is inert there.
+    // the main tree. Keyed on resolvedFindingIds, so a legitimate no-change closure
+    // (which makes no edits by design, and is not in that set) stays exempt. This
+    // covers the outcome=success/merged:false case (worker reported an actual-change
+    // "resolved" but committed nothing); the hard-failure case (outcome=error|timeout)
+    // is caught earlier, in the collapsed loop's resolve branch, so a mislabeled
+    // `resolved_no_change` can't slip past this resolvedFindingIds keying.
     if (resolvedFindingIds.length > 0) {
-      const acceptOutcome = await loadNodeAcceptOutcome(options.artifactsDir, runId, blockId);
       if (acceptOutcome && !acceptOutcome.merged) {
         for (const findingId of resolvedFindingIds) {
           const stateItem = state.items[findingId];
-          if (!stateItem) continue;
+          if (!stateItem || isTerminalStatus(stateItem.status)) continue;
           stateItem.status = "blocked";
           markTerminal(stateItem);
           stateItem.failure_reason =
