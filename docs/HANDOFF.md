@@ -8,14 +8,15 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.4** (both global bins reinstalled + verified live). Per-lap shipped detail
+- On npm as `latest` at **v0.32.5** (both global bins reinstalled + verified live). Per-lap shipped detail
   is NOT narrated here (changelog creep — see `git log` and project memory [[live-status]]); this section is
   the current-state + open-work roadmap only.
 - **Immediate next:** none pending. All T1–T5 code-complete tracks shipped; remaining work is deferred T5
   residuals + env-bound live validations (see below).
 - **Open items** (all in `docs/backlog.md`): env-bound live validations (quota pre-wall pacing, friction
   escalation, selective-deepening convergence, multi-IDE cooperative runs, clippy/rubocop live spawn);
-  provider-blocked schema CE-004; low-value churn C3/C5/C6/E4/E5; the LWW compare-on-conflict forward track.
+  provider-blocked schema CE-004. *(Resolved 2026-07-03 v0.32.5: knip dead-code widen shipped; mutation
+  testing + sound-dead-code bar dropped; LWW forward-track dropped; churn C3/C5/C6/E4/E5 dispositioned.)*
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
@@ -70,22 +71,24 @@ validation on a real deepening-capable run remains env-bound (T6-class).
    surface_manifest/critical_flows), sidestepping the obligation-ordering blocker. Nothing open.
 2. **Deterministic analyzers — own-vs-acquire acquisition engine.** Git-history mining, gitleaks, jscpd,
    osv-scanner, and now (v0.31.0) clippy (cargo), rubocop (bundle), hadolint + actionlint (binary),
-   type-coverage (npx) are all registered — the cargo/bundle runner families are now exercised. **Open:**
-   clippy/rubocop landed fixture-only (no Rust/Ruby repo here → live spawn unvalidated); remaining
-   ecosystem gaps if any. *([[deterministic-analyzers-own-vs-acquire]])*
-3. **Schema-enforced generation — CE-004 residual + broader semantic checks.** Emit-time constraint seam +
-   `total_lines` gate (CE-009) shipped; validator intra-result duplicate finding-id hard-reject shipped
-   v0.31.0. Open: the always-on conversation host advertises no API-level constraint mechanism (provider-
-   blocked); further semantic-validity checks are unbuilt candidates.
-4. **Codebase-wide churn/context/enforce pass.** The 2026-07-02 pass ran (v0.31.0); its N1 (per-dispatch
-   analyzer-anchor path index) and N4 (cap analyzer-signal lines) follow-ons shipped this lap. C3/C5/C6/E4/E5
-   remain low-value/needs-design-intent. Re-run the lens broadly if worthwhile.
+   type-coverage (npx) are all registered — the cargo/bundle runner families are now exercised. knip
+   widened v0.32.5 to also emit whole-file + unused-dependency dead-code leads. **Open:** clippy/rubocop
+   landed fixture-only (no Rust/Ruby repo here → live spawn unvalidated). *Mutation testing was evaluated
+   and dropped (doesn't fit acquire+scan — its own subsystem if ever wanted).* *([[deterministic-analyzers-own-vs-acquire]])*
+3. **Schema-enforced generation — CE-004 residual (env-bound only).** Emit-time constraint seam +
+   `total_lines` gate (CE-009) + duplicate finding-id hard-reject + fabricated-path/out-of-range-span checks
+   all shipped. Sole residual: the always-on conversation host advertises no API-level constraint mechanism
+   (provider-blocked). The "further semantic checks" framing is retired — the named candidates are built.
+4. **Codebase-wide churn/context/enforce pass — ✅ CLOSED.** The 2026-07-02 pass ran (v0.31.0); N1/N4
+   follow-ons shipped. C3/C5/C6/E4/E5 dispositioned 2026-07-03: C3/C5/C6 dropped (premature-opt on
+   already-cheap paths), E5 dropped (tolerant-by-design), E4 confirmed intentional + wired to the
+   cyclic-seam resolver (`contractPipelineGates.ts` + `cyclicSeamResolution.ts`). Nothing open.
 5. **remediate-code multi-host installer/generator parity — ✅ SHIPPED (v0.32.0).** Nothing open.
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist
   (Antigravity/OpenCode); provider `queryLimits` (revisit if a provider gains a proactive endpoint);
-  headroom proxy final opt-in flip (the owner's own decision, proxy already verified healthy); narrow staleness
+  narrow staleness
   on prose-heavy artifacts (bounded semantic judgment, defer until churn is measured); cross-provider quota
   live-endpoint confirmation (Claude/Codex live-confirmed, Copilot/Antigravity gated→degrade).
   *(full detail in `docs/backlog.md` → "Deferred / waiting")*
