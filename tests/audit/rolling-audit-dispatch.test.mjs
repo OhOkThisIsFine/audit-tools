@@ -398,6 +398,72 @@ test("A8a: a packet id containing ':' does not crash the dispatcher (Windows-saf
   }
 });
 
+// ── 5. Quota-escalation parity with remediate ─────────────────────────────────
+
+test("A8a: a same-packet account wall escalates through the retained host-session source and captures a quota_escalation friction (parity with remediate)", async (t) => {
+  // Parity coverage for the audit-side quota escalation feed. The shared engine +
+  // HostSessionQuotaSource escalation is unit-tested in tests/shared; this pins the
+  // AUDIT glue: the retained host-session source built for the dispatch is fed by
+  // makeAuditProviderPacketDispatcher's rate_limited evidence via recordRateLimit,
+  // isPacketEscalated strands the packet once the bound is crossed, and the driver's
+  // onEscalation routes a `quota_escalation` fact to the friction chokepoint.
+  const { artifactsDir, runDir } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  // A single task → a single packet, so the same packet re-limits across every pool
+  // (the escalation tracker is per-packet; interleaved packets would reset it).
+  const oneTask = tasks().slice(0, 1);
+
+  // Four pools that ALL rate-limit the packet with a parseable host-session-limit
+  // string. Default bound is 3 consecutive same-packet re-limits, so the 4th pool's
+  // re-limit (count 4 > 3) escalates — before pool exhaustion would strand it.
+  const pools = ["pa", "pb", "pc", "pd"].map((id) => ({
+    id,
+    providerName: "openai-compatible",
+    hostModel: null,
+    hostConcurrencyLimit: null,
+    quotaStateEntry: null,
+    discoveredLimits: null,
+    quotaSourceSnapshot: null,
+  }));
+
+  const LIMIT_TEXT = "session limit reached. Resets in 1h";
+  const attemptedPools = new Set();
+  const stranding = async (packet, slot) => {
+    attemptedPools.add(slot?.poolId);
+    return { packet, outcome: "rate_limited", rateLimit: { channel: "error", text: LIMIT_TEXT } };
+  };
+
+  const result = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: { provider: "openai-compatible", quota: { enabled: false } },
+    timeoutMs: 1000,
+    tasksOverride: oneTask,
+    poolsOverride: pools,
+    dispatchPacket: stranding,
+    ingest: async () => {
+      throw new Error("ingestion must be skipped on a full strand");
+    },
+  });
+
+  // The packet stranded (escalation guard, not clean completion) → no ingest.
+  expect(result.stranded_ids.length > 0, "escalated packet strands").toBeTruthy();
+  expect(result.ingest, "no ingestion on a full strand").toBe(null);
+  // Early strand: escalation fired on the 4th re-limit, so all four pools were
+  // attempted but the strand is the escalation guard, not exhaustion of a 5th pool.
+  expect(attemptedPools.size, "same packet re-limited across all four pools").toBe(4);
+
+  // The audit driver routed the escalation to the friction chokepoint.
+  const friction = JSON.parse(
+    await readFile(join(artifactsDir, "friction", `${RUN_ID}.json`), "utf8"),
+  );
+  const escalation = friction.frictions.find((f) => f.id.startsWith("quota_escalation:"));
+  expect(escalation, "a quota_escalation friction is captured for the audit run").toBeTruthy();
+  expect(escalation.severity).toBe("high");
+});
+
 test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) when every accepted result is ingestion-invalid", async (t) => {
   // A packet `outcome:"success"` only means the provider wrote a result file. When
   // every provider-accepted result is contract-invalid, mergeAndIngest raises a hard

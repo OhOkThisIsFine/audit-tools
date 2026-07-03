@@ -14,13 +14,14 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   want a live check. Relates to [[claude-usage-endpoint-body-shape]] / [[claude-quota-credential-resolution]] /
   [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
 
-- **Friction detection — M-QUOTA escalation chain WIRED; live validation env-bound.** The
+- **Friction detection — M-QUOTA escalation chain WIRED on BOTH orchestrators; only live validation env-bound.** The
   `recordLimit → escalate → strand → quota_escalation friction` chain is end-to-end on the remediate
-  driver path (generic `recordRateLimit` hook + `rateLimit:{channel,text}` on `RollingDispatchResult` +
-  retained `HostSessionQuotaSource` threaded through pool sizing AND dispatch). Unit-tested in
-  `tests/shared/rollingDispatch.test.mjs`. **Still open:** (1) live validation on a real rate-limited
-  run; (2) audit-side parity (`src/audit/orchestrator/rollingDispatch.ts` + `quotaPool.ts`) — the shared
-  primitive supports the hooks, audit just needs to thread a retained source.
+  driver path AND now the audit driver (`rollingAuditDispatch.ts` retains the `HostSessionQuotaSource`
+  from `buildDispatchPool`, threads it through pool sizing + the `recordRateLimit`/`isPacketEscalated`
+  hooks, and routes `onEscalation` to `captureStepBoundaryFriction("quota_escalation")`). Shared
+  primitive unit-tested in `tests/shared/rollingDispatch.test.mjs`; audit glue unit-tested in
+  `tests/audit/rolling-audit-dispatch.test.mjs` (§5, 4-pool same-packet escalation → friction capture).
+  **Still open (env-bound only):** live validation on a real rate-limited run.
   [[meta-audit-friction-must-be-tool-enforced]]
 
 - **Selective-deepening convergence — both known loops FIXED; live validation env-bound.** Loop #1
@@ -32,9 +33,12 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
     corrupt gitignored run-state. Marking `status:complete` in `audit_tasks.json` is ignored; writing
     `partial_completion_terminal.stranded_ids` is overwritten; appending results with unique idempotency
     keys clears the obligation but cascades stale `planning_artifacts`. **There is NO host-side unblock —
-    the fix must be a code change, then a clean re-run.** A recovery affordance the tool SHOULD expose:
-    `--force-synthesis` / partial-coverage escape that resyncs `artifact_metadata` and drives synthesis
-    from the intact ledger without hand-editing artifacts.
+    the fix must be a code change, then a clean re-run.** Recovery affordance now SHIPPED:
+    `audit-code force-synthesis` stamps a tool-owned `operator_forced` partial-completion terminal over the
+    pending task ids (durable direct write to `active-dispatch.json`, the special-loaded artifact
+    `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
+    coverage — no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
+    `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
 
 ## Forward tracks
 

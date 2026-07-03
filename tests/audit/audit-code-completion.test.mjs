@@ -404,6 +404,65 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
   });
 });
 
+test("force-synthesis strands a wedged task, stamps an operator_forced terminal, and drives synthesis from the partial ledger", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools/audit");
+    await advanceToDispatchReady(root);
+
+    const tasks = JSON.parse(
+      await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"),
+    );
+    expect(tasks.length >= 2, "need >=2 tasks so one can stay pending").toBeTruthy();
+    await disableNarrative(artifactsDir);
+
+    // Ingest results for ALL BUT the last task → the last stays pending, wedging
+    // the run on `audit_tasks_completed` (it can never reach present_report on its
+    // own; that's the recovery scenario force-synthesis exists for).
+    const partial = tasks.slice(0, -1);
+    const pendingTask = tasks[tasks.length - 1];
+    const resultsPath = join(root, "audit_results.json");
+    await writeFile(
+      resultsPath,
+      JSON.stringify(await buildSyntheticResults(partial, root), null, 2),
+    );
+    await runDistCli(
+      ["ingest-results", "--root", root, "--artifacts-dir", artifactsDir, "--results", resultsPath],
+      { cwd: root },
+    );
+
+    const forced = JSON.parse(
+      (
+        await runDistCli(
+          ["force-synthesis", "--root", root, "--artifacts-dir", artifactsDir],
+          { cwd: root },
+        )
+      ).stdout,
+    );
+    expect(forced.selected_executor).toBe("synthesis_executor");
+    expect(forced.forced_stranded_task_ids, "the pending task is stranded").toContain(
+      pendingTask.task_id,
+    );
+    expect(forced.newly_stranded_count >= 1).toBeTruthy();
+
+    // The terminal is stamped DURABLY on active-dispatch.json (a special-loaded
+    // artifact) — this run had none (host-subagent path never wrote one), so the
+    // absent-active_dispatch branch minted a minimal state carrying the terminal.
+    const active = JSON.parse(
+      await readFile(join(artifactsDir, "active-dispatch.json"), "utf8"),
+    );
+    expect(active.partial_completion_terminal.reason).toBe("operator_forced");
+    expect(active.partial_completion_terminal.stranded_ids).toContain(pendingTask.task_id);
+
+    // The run is now unblocked: next-step reaches present_report on partial
+    // coverage and promotes the report rendered from the intact ledger.
+    const presented = await nextStepUntilPresentReport(root);
+    expect(presented.status).toBe("complete");
+    expect(
+      await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8"),
+    ).toMatch(/# Audit Report/);
+  });
+});
+
 test("ingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");

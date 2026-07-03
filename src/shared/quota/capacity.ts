@@ -32,8 +32,19 @@ import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
  *   Distinct from `empty_pool` / `livelock_guard`: the strand is RETRYABLE — a
  *   later step (after the earliest reset) redispatches the stranded items clean,
  *   so the consumer must keep them PENDING, never mark them blocked/failed.
+ * - `operator_forced`: the operator explicitly abandoned the remaining items to
+ *   force the pipeline to its terminal phase (audit → synthesis, remediate →
+ *   close) on partial coverage — the tool-owned recovery escape (`force-synthesis`)
+ *   that replaces the corruption-prone hand-edits of gitignored run-state. NOT a
+ *   dispatch-engine condition: no pool was exhausted and no livelock occurred; the
+ *   strand is a deliberate operator decision, so the consumer marks the items
+ *   uncovered/blocked and proceeds, never re-dispatches them.
  */
-export type PartialCompletionReason = "empty_pool" | "livelock_guard" | "quota_paused";
+export type PartialCompletionReason =
+  | "empty_pool"
+  | "livelock_guard"
+  | "quota_paused"
+  | "operator_forced";
 
 /**
  * Consumer-neutral signal that the dispatch engine reached a terminal it cannot
@@ -120,6 +131,20 @@ export function buildQuotaPausedTerminal(
     reason: "quota_paused",
     stranded_ids: [...strandedIds],
     ...(earliestResetAt ? { earliest_reset_at: earliestResetAt } : {}),
+  };
+}
+
+/**
+ * Produce an `operator_forced` {@link PartialCompletionTerminal}: the operator
+ * deliberately abandoned the given items to force the pipeline to its terminal
+ * phase on partial coverage (the `force-synthesis` recovery escape). Unlike the
+ * quota-paused terminal these items are NOT re-dispatchable — the consumer treats
+ * them as uncovered/blocked and proceeds.
+ */
+export function buildOperatorForcedTerminal(strandedIds: string[]): PartialCompletionTerminal {
+  return {
+    reason: "operator_forced",
+    stranded_ids: [...strandedIds],
   };
 }
 
