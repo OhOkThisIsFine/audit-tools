@@ -28,6 +28,7 @@
 import {
   type ResultEmitSource,
   buildResultContentDiscriminator,
+  resultDiscriminatorForEmit,
   identityKey,
   idempotencyKey,
   newInstanceId,
@@ -136,20 +137,16 @@ export function stampLedgerKeys(result: AuditResult): AuditResult {
       unit_id: result.unit_id,
       lens: result.lens,
       pass_id: result.pass_id,
-      result_content_discriminator: buildResultContentDiscriminator({
-        source: emitSourceFor(result),
-        // Only consulted for `redispatch`; ignored for base/deepening/steward.
-        attempt: result.attempt,
-        // Only consulted for `deepening`/`steward` (each round's task_id is
-        // distinct — see the seam's doc comment); ignored otherwise.
-        task_id: result.task_id,
-        // File-split sibling discriminator (N-IDEMPOTENCY): empty for a lone task
-        // ⇒ byte-identical legacy key; non-empty ⇒ siblings get distinct keys.
-        split_discriminator: splitDiscriminatorFromTaskId(
-          result.task_id,
-          result.lens,
-        ),
-      }),
+      result_content_discriminator: buildResultContentDiscriminator(
+        resultDiscriminatorForEmit(emitSourceFor(result), {
+          attempt: result.attempt,
+          task_id: result.task_id,
+          split_discriminator: splitDiscriminatorFromTaskId(
+            result.task_id,
+            result.lens,
+          ),
+        }),
+      ),
     });
   return {
     ...result,

@@ -160,8 +160,7 @@ validation on a real deepening-capable run remains env-bound (T6-class).
 4. **Codebase-wide churn/context/enforce pass.** The 2026-07-02 pass ran (v0.31.0); its N1 (per-dispatch
    analyzer-anchor path index) and N4 (cap analyzer-signal lines) follow-ons shipped this lap. C3/C5/C6/E4/E5
    remain low-value/needs-design-intent. Re-run the lens broadly if worthwhile.
-5. **remediate-code full installer/generator parity** (only the SKILL.md drift-guard test shipped v0.31.0;
-   the ~1200-line multi-host installer parity remains a forward track — see `docs/backlog.md`).
+5. **remediate-code multi-host installer/generator parity — ✅ SHIPPED (v0.32.0).** Nothing open.
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist

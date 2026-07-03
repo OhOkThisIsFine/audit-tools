@@ -1788,7 +1788,8 @@ async function buildImplementDispatchStep(ctx: {
       // implement frontier is resolved — transition on the freshly-merged state so the
       // engine re-scans (triage / closing) without recursion.
       if (driven === null) {
-        await mergeImplementResults({ root, artifactsDir }, runId);
+        const merged = await mergeImplementResults({ root, artifactsDir }, runId);
+        return { kind: "transition", state: merged };
       }
       return { kind: "transition", state: await store.loadState() };
     }
@@ -1841,8 +1842,8 @@ async function buildImplementDispatchStep(ctx: {
           .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
           .map((i) => ({ id: i.block_id, estimatedTokens: HYBRID_NODE_TOKEN_ESTIMATE }));
         if (frontier.length === 0) {
-          await mergeImplementResults({ root, artifactsDir }, runId);
-          return { kind: "transition", state: await store.loadState() };
+          const merged = await mergeImplementResults({ root, artifactsDir }, runId);
+          return { kind: "transition", state: merged };
         }
         // One coordinator over the shared claim registry splits + claims each node to
         // exactly one pool. DC-4: the settled set is cross-cycle (persisted) — a backend
@@ -1907,8 +1908,8 @@ async function buildImplementDispatchStep(ctx: {
         // The backend carried the whole batch (or every host node was contested by a
         // peer driver) → nothing for the host this cycle; merge what landed + transition.
         if (partition.host.length === 0) {
-          await mergeImplementResults({ root, artifactsDir }, runId);
-          return { kind: "transition", state: await store.loadState() };
+          const merged = await mergeImplementResults({ root, artifactsDir }, runId);
+          return { kind: "transition", state: merged };
         }
         // Hand the host partition (pre-claimed) to the host-subagent driver.
         rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl, {

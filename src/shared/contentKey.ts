@@ -84,49 +84,71 @@ export interface TaskContentSignatureInput {
  */
 export type ResultEmitSource = 'base' | 'deepening' | 'steward' | 'redispatch';
 
-/** Inputs to `buildResultContentDiscriminator`. */
-export interface ResultContentDiscriminatorInput {
-  source: ResultEmitSource;
-  /**
-   * Required for (and ONLY meaningful for) `source: 'redispatch'`: the 1-based
-   * attempt counter that distinguishes an O3 re-dispatch from the result it
-   * replaces (R2 advisory). A re-dispatch carries a distinct discriminator so its
-   * idempotencyKey differs from the prior attempt.
-   */
-  attempt?: number;
-  /**
-   * Required for (and ONLY meaningful for) `source: 'deepening'` or `'steward'`:
-   * the result's task_id. Selective-deepening/steward tasks are re-minted under a
-   * FRESH task_id each round (`taskIdFor` hashes the growing source-result set —
-   * see `selectiveDeepening/shared.ts`), but all rounds share the same
-   * {unit_id, lens, pass_id} coordinate. Without this component every round's
-   * clean result would derive the bare `'deepening'`/`'steward'` discriminator and
-   * collide at the SAME idempotencyKey as the prior round — the ledger's INV-2
-   * replay gate would then drop the new round's result as a no-op forever
-   * (confirmed live 2026-06-30). Folding task_id in gives each round's task a
-   * distinct discriminator (⇒ distinct idempotencyKey, persists) while a genuine
-   * replay of the SAME task_id still reproduces the SAME discriminator (⇒ INV-2
-   * no-op is preserved).
-   */
-  task_id?: string;
+/**
+ * Inputs to `buildResultContentDiscriminator`. Discriminated union: `task_id`
+ * is required (at the type level) for `deepening`/`steward`, `attempt` for
+ * `redispatch`, and neither for `base` — compile-time enforcement of the
+ * constraints the runtime already checks (prevents the class of bug that
+ * caused the deepening-loop: omitting task_id silently collides keys).
+ */
+export type ResultContentDiscriminatorInput =
+  | ResultDiscriminatorBase
+  | ResultDiscriminatorRedispatch
+  | ResultDiscriminatorDeepening
+  | ResultDiscriminatorSteward;
+
+interface ResultDiscriminatorCommon {
   /**
    * Per-split discriminator (N-IDEMPOTENCY). File-split sibling tasks of one
-   * unit+lens+pass legitimately share the {unit_id, lens, pass_id} grouping
-   * coordinate but carry DISTINCT task_ids (`…:part-N`, or `…:<filePath>` for a
-   * large-file split). Without a per-split component every sibling base result
-   * would derive the SAME idempotencyKey, so `appendResultsToLedger`'s INV-2 gate
-   * would silently no-op all but the first sibling — dropping the others'
-   * findings. This component (the split's task_id, canonicalized OS-agnostically
-   * via `canonicalSplitDiscriminator`) folds into the discriminator so siblings
-   * get distinct idempotencyKeys and all persist.
-   *
-   * Contract (fold-rule): an EMPTY component (the lone, non-split base task)
-   * yields a discriminator BYTE-IDENTICAL to the legacy lone-base value, so
-   * existing ledger / baseline keys are unchanged. A non-empty component appends
-   * it, so siblings diverge. Tool-owned, never caller-chosen — callers pass the
-   * raw task_id and the canonicalization + emptiness rule live HERE.
+   * unit+lens+pass share the grouping coordinate but carry DISTINCT task_ids.
+   * Without this component every sibling base result would derive the SAME
+   * idempotencyKey. An EMPTY component yields a discriminator BYTE-IDENTICAL to
+   * the legacy lone-base value; a non-empty one appends so siblings diverge.
+   * Tool-owned, never caller-chosen.
    */
   split_discriminator?: string;
+}
+
+interface ResultDiscriminatorBase extends ResultDiscriminatorCommon {
+  source: 'base';
+}
+
+interface ResultDiscriminatorRedispatch extends ResultDiscriminatorCommon {
+  source: 'redispatch';
+  attempt: number;
+}
+
+interface ResultDiscriminatorDeepening extends ResultDiscriminatorCommon {
+  source: 'deepening';
+  task_id: string;
+}
+
+interface ResultDiscriminatorSteward extends ResultDiscriminatorCommon {
+  source: 'steward';
+  task_id: string;
+}
+
+/**
+ * Build a `ResultContentDiscriminatorInput` from an emit result that carries
+ * all fields in a flat shape. Bridges the superset-of-fields pattern (callers
+ * that have `source`, `attempt`, `task_id`, `split_discriminator` from a
+ * result record) to the discriminated union (callers constructing from
+ * scratch).
+ */
+export function resultDiscriminatorForEmit(
+  source: ResultEmitSource,
+  opts: { attempt?: number; task_id?: string; split_discriminator?: string },
+): ResultContentDiscriminatorInput {
+  switch (source) {
+    case 'base':
+      return { source, split_discriminator: opts.split_discriminator };
+    case 'redispatch':
+      return { source, attempt: opts.attempt!, split_discriminator: opts.split_discriminator };
+    case 'deepening':
+      return { source, task_id: opts.task_id!, split_discriminator: opts.split_discriminator };
+    case 'steward':
+      return { source, task_id: opts.task_id!, split_discriminator: opts.split_discriminator };
+  }
 }
 
 /** Inputs to `idempotencyKey`: the identity coordinate + the result discriminator. */

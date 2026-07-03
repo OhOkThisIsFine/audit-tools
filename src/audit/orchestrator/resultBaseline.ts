@@ -24,6 +24,7 @@
  */
 import {
   buildResultContentDiscriminator,
+  resultDiscriminatorForEmit,
   buildTaskContentSignature,
   contentKey,
   idempotencyKey,
@@ -78,12 +79,13 @@ export function deriveLiveResultKeys(input: LiveResultKeyInput): {
   idempotency_key: string;
   content_key: string;
 } {
-  const discriminator = buildResultContentDiscriminator({
-    source: input.source,
-    attempt: input.attempt,
-    task_id: input.task_id,
-    split_discriminator: splitDiscriminatorFromTaskId(input.task_id, input.lens),
-  });
+  const discriminator = buildResultContentDiscriminator(
+    resultDiscriminatorForEmit(input.source, {
+      attempt: input.attempt,
+      task_id: input.task_id,
+      split_discriminator: splitDiscriminatorFromTaskId(input.task_id, input.lens),
+    }),
+  );
   const coordinate = {
     unit_id: input.unit_id,
     lens: input.lens,

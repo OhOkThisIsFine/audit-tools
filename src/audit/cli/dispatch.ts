@@ -372,20 +372,22 @@ export async function prepareDispatchArtifacts(params: {
   let largestEstimatedTokens = 0;
   const warnings: Array<{ code: string; message: string }> = [];
 
-  // Render-time knip↔graph cross-check index (CP-NODE-2): normalized in-degree +
-  // entrypoint set + analyzers_used, built once from the artifact bundle and
-  // threaded into task-section rendering to annotate knip "unused export" leads
-  // (LIKELY-DEAD / HAS-IMPORTERS / UNVERIFIED / ENTRYPOINT). Advisory only;
-  // degrades to un-annotated leads when any artifact is missing.
-  const knipGraphIndex = buildKnipGraphIndex({
-    graphBundle: bundle.graph_bundle,
-    surfaceManifest: bundle.surface_manifest,
-    criticalFlows: bundle.critical_flows,
-  });
-  // Path-keyed analyzer-signal anchor index, built once per dispatch (N1): the
-  // per-task/per-file rendering below is then an O(1) map read, not an
-  // O(tasks × files × total-results) re-flatten of the whole signal set.
-  const analyzerSignalIndex = buildAnalyzerSignalAnchorIndex(bundle.external_analyzer_results);
+  const hasAnalyzerSignalTask = orderedTasks.some(
+    (t) => t.tags?.includes("external_analyzer_signal"),
+  );
+  // Render-time knip↔graph cross-check index (CP-NODE-2): only needed when at
+  // least one task carries an external_analyzer_signal tag (the rendering guards
+  // on the same tag before consulting either index).
+  const knipGraphIndex = hasAnalyzerSignalTask
+    ? buildKnipGraphIndex({
+        graphBundle: bundle.graph_bundle,
+        surfaceManifest: bundle.surface_manifest,
+        criticalFlows: bundle.critical_flows,
+      })
+    : undefined;
+  const analyzerSignalIndex = hasAnalyzerSignalTask
+    ? buildAnalyzerSignalAnchorIndex(bundle.external_analyzer_results)
+    : undefined;
 
   for (const packet of emitPackets) {
     const promptPath = packetPromptPath(taskResultsDir, packet.packet_id);

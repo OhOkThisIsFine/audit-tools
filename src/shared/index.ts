@@ -278,6 +278,7 @@ export type {
 export {
   buildTaskContentSignature,
   buildResultContentDiscriminator,
+  resultDiscriminatorForEmit,
   canonicalSplitDiscriminator,
   splitDiscriminatorFromTaskId,
   identityKey,
