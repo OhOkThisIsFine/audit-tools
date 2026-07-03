@@ -781,12 +781,25 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     expect(errors[0].message).toMatch(/cites no real component/);
   });
 
-  it("REJECTS a finding whose only cited path does not exist", () => {
+  it("REJECTS a finding whose only cited path is under a NON-existent directory (hallucinated location)", () => {
     const result = validateContractCitationGrounding(
-      [mkFinding({ affected_files: [{ path: "src/does-not-exist.ts" }] })],
+      [mkFinding({ affected_files: [{ path: "ghost-dir/does-not-exist.ts" }] })],
       TEST_DIR,
     );
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(1);
+  });
+
+  it("GROUNDS a brand-new file under a REAL tracked directory (create-file deliverable)", () => {
+    // A module/finding that creates a new file cannot cite an existing path for
+    // its deliverable — it grounds against its real parent directory instead, so
+    // the citation gate no longer infinite-loops on new-file modules. A path under
+    // a fabricated directory (previous test) is still rejected.
+    const result = validateContractCitationGrounding(
+      [mkFinding({ affected_files: [{ path: "src/brand-new-file.ts" }] })],
+      TEST_DIR,
+    );
+    expect(result.treeReadable).toBe(true);
+    expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
   it("fails CLOSED only when the tree is genuinely unreadable (git unavailable / not a repo)", () => {
@@ -828,11 +841,12 @@ describe("M-B3: source-grounded citation gate (repo-tree knownPaths)", () => {
     const planningStep = await buildNextContractPipelineStep(STEP_OPTIONS);
     expect(await promptOf(planningStep!)).toMatch(/Implementation Planning/);
 
-    // A DAG node whose only output_file does not exist in the working tree, and
-    // whose prose names no real symbol.
+    // A DAG node whose only output_file is under a FABRICATED directory (not a
+    // legitimate new-file location) and whose prose names no real symbol — still a
+    // hallucination the promotion backstop must catch.
     await writeRawArtifact(
       "implementation_dag",
-      traceableDag({ output_files: ["src/ghost-file-xyz.ts"], description: "do the work" }),
+      traceableDag({ output_files: ["ghost-dir/ghost-file-xyz.ts"], description: "do the work" }),
     );
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
     expect(step?.status).toBe("ready");

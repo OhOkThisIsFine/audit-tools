@@ -263,7 +263,15 @@ export async function resolveIntakeStep(params: {
 
   if (
     inputResolution.existing.length > 0 &&
-    (inputResolution.supplied || !manifest)
+    // A present conversation-start.md (a `--guidance-file` this invocation, or a
+    // leftover from a prior guidance run) is an explicit source and must win over
+    // any stale default candidate on disk: without this guard a leftover
+    // `.audit-tools/audit-findings.json` would be registered as
+    // `default_candidates` here and shadow the just-written guidance (the
+    // conversation branch below is only reached when `!manifest`). An explicit
+    // `--input` still takes precedence over conversation-start. Consistent with the
+    // discovered-sources gate above, which likewise skips on `intake.conversationStart`.
+    (inputResolution.supplied || (!manifest && !intake.conversationStart))
   ) {
     const singleInput = inputResolution.existing[0];
     let nextManifest: IntakeSourceManifest | undefined;

@@ -747,6 +747,51 @@ describe("resolveIntakeStep", () => {
     expect(result.step.step_kind).toBe("synthesize_intake");
   });
 
+  it("registers conversation-start as the source, never the stale default candidate, when a guidance file is present", async () => {
+    // Bug (2026-07-02): a fresh --guidance-file run wrote the guidance to
+    // conversation-start.md, but the source manifest was built
+    // `created_from: default_candidates` pointing at a leftover audit-findings.json —
+    // remediating the wrong (stale) source. A present conversation-start.md must win
+    // over any stale default candidate on disk (an explicit --input still wins over both).
+    const artifactsDir = join(TEST_DIR, "artifacts-guidance-source");
+    const intakeDir = join(artifactsDir, "intake");
+    await mkdir(intakeDir, { recursive: true });
+    await writeFile(join(intakeDir, "conversation-start.md"), "Fix the flaky test.", "utf8");
+
+    // A stale, unrelated audit-findings.json a default-candidate scan surfaced.
+    const stalePath = join(TEST_DIR, "audit-findings.json");
+    await writeFile(
+      stalePath,
+      JSON.stringify({ contract_version: "audit-findings/v1alpha1", findings: [], work_blocks: [] }),
+      "utf8",
+    );
+
+    const stubs = makeStubs();
+    const result = await resolveIntakeStep({
+      root: TEST_DIR,
+      artifactsDir,
+      inputResolution: {
+        supplied: false,
+        existing: [stalePath],
+        missing: [],
+        checked: [stalePath],
+        allExisting: [stalePath],
+      },
+      ...stubs,
+    });
+
+    expect(result.kind).toBe("step");
+    if (result.kind !== "step") throw new Error("expected step");
+    expect(result.step.step_kind).toBe("synthesize_intake");
+
+    const manifest = JSON.parse(
+      await readFile(join(intakeDir, "source-manifest.json"), "utf8"),
+    ) as IntakeSourceManifest;
+    expect(manifest.created_from).toBe("conversation");
+    // The stale default candidate must NOT be registered as a source.
+    expect(manifest.sources.map((s) => s.path)).not.toContain(stalePath);
+  });
+
   it("N-R01: a declined ack routes to collect_starting_point, not a re-offer of the same candidate", async () => {
     const artifactsDir = join(TEST_DIR, "artifacts-auto-declined");
     const intakeDir = join(artifactsDir, "intake");

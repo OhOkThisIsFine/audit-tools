@@ -39,6 +39,7 @@ import {
   buildBaselineSymbolCorpus,
   negativeAssertionIsScoped,
   evaluatePairing,
+  assertionPolarity,
   verifyPairingForFinding,
   obligationScopeAnchors,
   readObligationChangeClassification,
@@ -422,6 +423,36 @@ describe("evaluatePairing primitive", () => {
       ["writerecord"],
     );
     expect(v.ok).toBe(true);
+  });
+});
+
+describe("assertionPolarity — identifier-token masking", () => {
+  it("does not misclassify a positive that merely cites a `-fail-` obligation id", () => {
+    // A `\\b`-bounded keyword regex matches `fail` inside `OBL-AUTH-fail-session`
+    // (hyphen is a non-word boundary); masking the identifier token keeps the
+    // prose polarity ("returns a token" → positive).
+    expect(assertionPolarity("Returns a token for OBL-AUTH-fail-session")).toBe(
+      "positive",
+    );
+  });
+
+  it("leaves genuine prose-negative and prose-positive assertions unchanged", () => {
+    expect(assertionPolarity("rejects invalid input")).toBe("negative");
+    expect(assertionPolarity("emits canonical output")).toBe("positive");
+  });
+
+  it("keeps an explicit label authoritative regardless of embedded ids", () => {
+    expect(assertionPolarity("NEGATIVE: OBL-x-ok-path is unreachable")).toBe(
+      "negative",
+    );
+  });
+
+  it("does not let a dotted/sliced path token leak polarity", () => {
+    // `src/remediate/never-null.ts` contains `never`; masking prevents a false
+    // negative classification for an otherwise-positive assertion.
+    expect(
+      assertionPolarity("writes src/remediate/never-null.ts and succeeds"),
+    ).toBe("positive");
   });
 });
 

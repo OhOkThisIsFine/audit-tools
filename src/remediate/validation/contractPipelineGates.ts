@@ -1078,6 +1078,36 @@ function buildKnownSymbolCorpus(knownPaths: ReadonlySet<string>): Set<string> {
 }
 
 /**
+ * Every ancestor directory of a known path (`src/a/b.ts` → {src, src/a}), so a
+ * path-shaped citation to a brand-new file that does not exist yet can still
+ * ground against a REAL tracked directory. This is the create-file case a module
+ * cannot pre-ground any other way (its deliverable does not exist until it runs,
+ * so `git ls-files` never lists it) — yet the module is not hallucinating when the
+ * file lands in a real location. A fully-invented path under a non-existent
+ * directory (`made/up/dir/x.ts`) still fails, so the hallucination signal is kept
+ * for the case it can actually catch. Normalized, forward-slash, no trailing slash.
+ */
+function buildKnownDirs(knownPaths: ReadonlySet<string>): Set<string> {
+  const dirs = new Set<string>();
+  for (const path of knownPaths) {
+    let slash = path.lastIndexOf("/");
+    while (slash > 0) {
+      const dir = path.slice(0, slash);
+      if (dirs.has(dir)) break;
+      dirs.add(dir);
+      slash = dir.lastIndexOf("/");
+    }
+  }
+  return dirs;
+}
+
+/** The parent directory of a normalized path token, or "" for a top-level file. */
+function parentDir(token: string): string {
+  const slash = token.lastIndexOf("/");
+  return slash > 0 ? token.slice(0, slash) : "";
+}
+
+/**
  * A token is path-shaped when it contains a path separator or a file-extension
  * dot (`src/a.ts`, `a/b`, `foo.ts`); otherwise it is symbol-shaped (`writeRecord`,
  * `flush_buffer`). The partition decides which grounding set a citation token is
@@ -1139,6 +1169,7 @@ export function validateContractCitationGrounding(
   }
 
   const knownSymbols = buildKnownSymbolCorpus(knownPaths);
+  const knownDirs = buildKnownDirs(knownPaths);
 
   findings.forEach((finding, index) => {
     // 1. Real path citation → grounded by the shared design-finding primitive.
@@ -1161,7 +1192,12 @@ export function validateContractCitationGrounding(
     let grounded = false;
     for (const token of tokens) {
       if (isPathShaped(token)) {
-        if (knownPaths.has(token)) {
+        // A real path grounds directly; a not-yet-tracked path grounds when its
+        // parent directory is real (a legitimate brand-new-file deliverable in an
+        // existing tracked location — the create-file case, which by definition
+        // cannot cite an existing path). A path under a non-existent directory
+        // still fails, preserving the hallucination signal.
+        if (knownPaths.has(token) || knownDirs.has(parentDir(token))) {
           grounded = true;
           break;
         }

@@ -71,8 +71,19 @@
   `targeted_command` that references a sibling's not-yet-created file (`selfContainedVerifyCommands`). Files:
   `src/remediate/steps/dispatch.ts`, `src/remediate/phases/triage.ts` (+ 3 test files). Full suite green
   (5562/0). Detail: `docs/backlog.md` → the now-✅ "Implement-dispatch silently strands/false-resolves nodes".
-- **Immediate next:** none pending. The highest-priority tool bug (implement-dispatch strand/false-resolve/
-  over-coupled verify) is now fixed. Remaining candidates: deferred T5 items (clippy/rubocop live spawn; schema
+- **This lap (repo-internal, publishable):** closed the four 2026-07-02 contract-pipeline / intake frictions.
+  (1) **Intake guidance-file hijack** — a present `conversation-start.md` now wins over a stale default
+  candidate (`intakeResolver.ts` guards the default-candidate block on `!intake.conversationStart`).
+  (2) **Citation-grounding infinite loop on new-file modules** — a path-shaped citation grounds when the path
+  exists OR its parent directory is tracked (`buildKnownDirs`/`parentDir` in `contractPipelineGates.ts`), so a
+  create-file deliverable no longer re-fires the gate; a fabricated-directory path still fails.
+  (3) **Polarity substring classifier** — `assertionPolarity` masks multi-segment identifier tokens before the
+  keyword regexes so a cited `-fail-` id can't flip a positive (`changeClassification.ts`).
+  (4) **`.input.json` envelope re-derive** — confirmed already satisfied by the existing test-plan diff-carry +
+  review-snapshot reuse (no code needed). Files: `intakeResolver.ts`, `contractPipelineGates.ts`,
+  `changeClassification.ts` (+ 3 test files). Full suite green (5568/0). Detail: `docs/backlog.md` → the now-✅
+  entries under "Open bugs / frictions — continued".
+- **Immediate next:** none pending. Remaining candidates: deferred T5 items (clippy/rubocop live spawn; schema
   CE-004; churn C3/C5/C6/E4/E5); env-bound live validations. Delete the abandoned `.audit-tools/remediation`
   run state (gitignored) whenever convenient.
 - **Multi-agent COOPERATIVE runs — ✅ COMPLETE (all 6 slices shipped, 2026-07-02).** Audit + remediate now

@@ -183,18 +183,38 @@ export const POSITIVE_ASSERTION_PATTERN =
 export type AssertionPolarity = "positive" | "negative" | "both" | "none";
 
 /**
+ * Multi-segment identifier tokens (obligation ids `OBL-AUTH-fail-session`, kebab/
+ * snake symbols, dotted/sliced paths `src/x/plan.ts`, `a::b`). A keyword regex
+ * `\b`-boundary still fires on a polarity word delimited by `-`/`_`/`.`/`/`/`:`
+ * inside such a token (e.g. `fail` in `OBL-AUTH-fail-session`), flipping a positive
+ * assertion that merely *cites* an id. These carry no prose polarity, so mask them
+ * before keyword classification. A run must have at least one internal delimiter to
+ * qualify — ordinary prose words (no internal `-_./:`)  are left untouched, as are
+ * multiword phrases like "does not" (space-separated, not a single token).
+ */
+const IDENTIFIER_TOKEN_PATTERN = /[A-Za-z0-9]+(?:[-_/.:]+[A-Za-z0-9]+)+/g;
+
+/** Blank out identifier tokens so their embedded words don't leak polarity. */
+function stripIdentifierTokens(assertion: string): string {
+  return assertion.replace(IDENTIFIER_TOKEN_PATTERN, " ");
+}
+
+/**
  * Classify one assertion's polarity. An explicit `POSITIVE:` / `NEGATIVE:` label
  * is authoritative and skips the keyword fallback (so "POSITIVE: must not exceed
  * N" counts only as positive). Unlabeled assertions fall through to the keyword
- * regexes, which may match both polarities.
+ * regexes, which may match both polarities — run against an identifier-masked copy
+ * so a polarity word embedded in a cited id (e.g. `fail` in `OBL-AUTH-fail-session`)
+ * doesn't misclassify the assertion.
  */
 export function assertionPolarity(assertion: string): AssertionPolarity {
   const label = /^\s*(POSITIVE|NEGATIVE)\s*:/i.exec(assertion);
   if (label) {
     return label[1].toUpperCase() === "POSITIVE" ? "positive" : "negative";
   }
-  const neg = NEGATIVE_ASSERTION_PATTERN.test(assertion);
-  const pos = POSITIVE_ASSERTION_PATTERN.test(assertion);
+  const prose = stripIdentifierTokens(assertion);
+  const neg = NEGATIVE_ASSERTION_PATTERN.test(prose);
+  const pos = POSITIVE_ASSERTION_PATTERN.test(prose);
   if (neg && pos) return "both";
   if (neg) return "negative";
   if (pos) return "positive";

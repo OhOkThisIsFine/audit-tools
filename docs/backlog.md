@@ -96,41 +96,45 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
 
 ## Open bugs / frictions — fix in tooling (never "host remembers") — continued
 
-- **Guidance-file intake not registered as the source — default_candidates hijack (2026-07-02).** Started a
-  fresh remediate run via `next-step --guidance-file <file>`; the bootstrap DID write the guidance to
-  `intake/conversation-start.md`, but the intake source-manifest was built `created_from: default_candidates`
-  and listed a stale pre-existing `.audit-tools/audit-findings.json` (186 unrelated findings) as the ONLY
-  source — the just-written `conversation-start.md` was NOT registered. Left uncorrected, the run would have
-  remediated the stale audit instead of the supplied guidance. Host workaround this run: hand-edit the manifest
-  to point at `conversation-start.md`. Fix (tool): when a `--guidance-file` was supplied this invocation, the
-  intake resolver must register `conversation-start.md` as the (or a) source and NOT silently fall through to
-  `default_candidates` picking an unrelated on-disk artifact. Related to the v0.31.3 intake work
-  ([[guidance-discovery-contextualizes]]) but distinct — that fixed the resume/decline loop; this is
-  fresh-run source selection ignoring an explicit guidance file.
+- **Guidance-file intake not registered as the source — default_candidates hijack — ✅ FIXED (2026-07-03).**
+  Was: a fresh `next-step --guidance-file <file>` run wrote the guidance to `intake/conversation-start.md` but
+  built the source-manifest `created_from: default_candidates` pointing at a stale pre-existing
+  `.audit-tools/audit-findings.json` — remediating the wrong source. Fix (`src/remediate/steps/intakeResolver.ts`):
+  the default-candidate manifest block now also guards on `!intake.conversationStart` (mirroring the
+  discovered-sources gate above it), so a present conversation-start.md (a `--guidance-file` this invocation, or
+  a leftover from a prior guidance run) wins over any stale default candidate and falls through to the
+  conversation-manifest branch (`created_from: "conversation"`); an explicit `--input` still takes precedence
+  over both. Test: `intake-resolver.test.ts` ("registers conversation-start as the source, never the stale
+  default candidate, when a guidance file is present" — asserts `created_from: "conversation"` and the stale
+  path is not a source). [[guidance-discovery-contextualizes]]
 
-- **Contract-pipeline citation-grounding loops forever on a NEW-file module (2026-07-02).** A module whose
-  deliverable is a brand-new file (e.g. B5 = `tests/remediate/host-bootstrap-descriptors-remediate.test.ts`)
-  fails the finalization "Source-Grounded Citation Gate" because its cited path doesn't exist yet — and the
-  gate re-fires every lap, driving an infinite finalization→critique→test_plan→assessment cycle that never
-  reaches the judge/implementation. The grounding checks **git-tracked** paths (a plain working-tree file
-  does NOT satisfy it — the untracked stub still failed; `git add` cleared it). Two tool fixes: (1) the
-  grounding should treat a module's own declared new-file `file_scope` targets as legitimately-not-yet-real
-  (a create-file module can't cite an existing path by definition), or (2) recognize a real reference
-  path/symbol elsewhere in the contract (B5 cited the real `tests/audit/host-bootstrap-descriptors.test.mjs`
-  in its inputs, but the extractor only read name/outputs tokens). Host workaround this run: create + `git add`
-  a placeholder stub at the target path. [[enforce-robustness-in-tooling-not-host-discretion]]
-- **Contract-pipeline `.input.json` artifacts are consumed into `*.json` envelopes each next-step, but not all
-  re-derive (2026-07-02).** Recovering a consumed artifact from its `*.json` envelope works for
-  finalized_module_contracts/module_contracts, but `test_validator_plan` and `contract_assessment_report`
-  left NO envelope — so a pipeline lap that re-requests them forces a full regenerate (the 105-spec test plan
-  is the expensive one). Combined with the citation loop above this multiplied cost badly. Tool fix: persist
-  every phase artifact's envelope so a re-requested phase can reuse the prior output instead of regenerating.
-- **`test_validator_plan` polarity gate uses a literal-substring classifier (2026-07-02).** The "each testable
-  obligation needs a positive + negative assertion" gate classifies an assertion as negative if it contains a
-  banned substring (`no`, `not`, `fail`, …) — matching even INSIDE words (`node`, `canonical`, `agnostic`,
-  `normalization`, `failing`, and any `OBL-*-fail-*` id embedded in a positive). Authors must scrub hidden
-  substrings and never embed a `fail`-containing obligation id in the positive assertion. Tool fix: use a real
-  polarity signal (leading "If …"/explicit label) instead of naive substring matching.
+- **Contract-pipeline citation-grounding loops forever on a NEW-file module — ✅ FIXED (2026-07-03).** Was: a
+  module whose deliverable is a brand-new file cited a path not in `git ls-files`, so the finalization/promotion
+  "Source-Grounded Citation Gate" re-fired every lap → infinite finalization→critique→test_plan→assessment cycle.
+  Fix (`src/remediate/validation/contractPipelineGates.ts`): `validateContractCitationGrounding` now grounds a
+  path-shaped citation when the path exists OR its parent directory is a real tracked directory (`buildKnownDirs`
+  + `parentDir`) — a create-file deliverable can't cite an existing path by definition, but a legitimate new file
+  lives in an existing tracked location. A path under a FABRICATED directory still fails, preserving the
+  hallucination signal. Applies at both call sites (pre-critic module `file_scope` + promotion backstop). Tests:
+  `contract-pipeline-adversarial.test.ts` (new-file-in-real-dir grounds; fabricated-dir path still rejected;
+  promotion backstop rejects a fabricated-dir output_file). [[enforce-robustness-in-tooling-not-host-discretion]]
+- **Contract-pipeline `.input.json` envelope re-derive — ✅ NO CODE NEEDED (2026-07-03; confirmed already
+  satisfied).** The "full regenerate on re-request" pain was a symptom of the citation loop + spurious polarity
+  re-emits (both fixed above), not a missing reuse path. Both singleton phases already reuse prior output on
+  re-emit: `test_validator_plan` diff-carries prior specs by obligation_id (C3 `captureTestPlanCarry` /
+  `readTestPlanCarry`, consulted at `contractPipeline.ts:297`) and `contract_assessment_report` is a review
+  artifact with snapshot-based diff re-review (`captureReviewSnapshot` / `buildReReviewSection`). Both carry/
+  snapshot files live at their own paths and survive `archiveContractArtifact` (which only moves `.input.json`/
+  `.json`). Adding an envelope-reuse layer would duplicate that machinery (one-home-per-concept), so no change.
+- **`test_validator_plan` polarity gate substring classifier — ✅ FIXED (2026-07-03).** The classifier already
+  used `\b` word boundaries (so `node`/`failing`/`canonical`/`normalization` never matched — the backlog's
+  "inside words" claim was stale) and honored an explicit `POSITIVE:`/`NEGATIVE:` label. The one genuine residual
+  was a polarity word that is itself a full keyword embedded in a hyphenated identifier (`fail` in
+  `OBL-AUTH-fail-session` — `-` is a non-word boundary so `\bfail\b` fired). Fix
+  (`src/remediate/contractPipeline/changeClassification.ts`): `assertionPolarity` masks multi-segment identifier
+  tokens (`IDENTIFIER_TOKEN_PATTERN` / `stripIdentifierTokens`) before the keyword regexes, so a cited id can't
+  leak polarity; prose (no internal `-_./:`) and space-separated phrases ("does not") are untouched. Test:
+  `dc5.test.ts` "assertionPolarity — identifier-token masking".
 - **Implement-dispatch silently strands/false-resolves nodes; per-node verify is over-coupled — ✅ FIXED (2026-07-03).**
   All three data-loss modes closed in the merge/triage/verify tooling (enforce-in-tooling, not host discretion):
   (1) **Merge-failed node no longer advances as accepted.** `mergeImplementResults` (`src/remediate/steps/dispatch.ts`)
