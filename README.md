@@ -60,8 +60,8 @@ data-integrity, etc.), then it runs autonomously to completion and leaves
 `audit-findings.json` + `audit-report.md` in `.audit-tools/`.
 
 Every finding in the report is adversarially verified against current source by an
-independent reviewer before it's kept — false positives are pruned, not shipped. The
-report opens with a triaged summary and drills down by severity:
+independent reviewer before it's kept. The report opens with a triaged summary and 
+drills down by severity:
 
 ```text
 # Audit findings — verified & pruned
@@ -81,6 +81,7 @@ report opens with a triaged summary and drills down by severity:
 **Remediate issues or implement changes:**
 
 ```text
+Just run:
 /remediate-code
 # auto-detects audit-findings.json and other sources of remediation targets
 
