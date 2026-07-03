@@ -94,6 +94,57 @@ contracts/rationale in project memory or `CLAUDE.md`, never "where the code is t
   round-trips `SessionConfig` through a persisted file, the token would leak. Flag for whoever builds
   that channel: strip or redact `consent_token` before any such persistence.
 
+## Open bugs / frictions — fix in tooling (never "host remembers") — continued
+
+- **Guidance-file intake not registered as the source — default_candidates hijack (2026-07-02).** Started a
+  fresh remediate run via `next-step --guidance-file <file>`; the bootstrap DID write the guidance to
+  `intake/conversation-start.md`, but the intake source-manifest was built `created_from: default_candidates`
+  and listed a stale pre-existing `.audit-tools/audit-findings.json` (186 unrelated findings) as the ONLY
+  source — the just-written `conversation-start.md` was NOT registered. Left uncorrected, the run would have
+  remediated the stale audit instead of the supplied guidance. Host workaround this run: hand-edit the manifest
+  to point at `conversation-start.md`. Fix (tool): when a `--guidance-file` was supplied this invocation, the
+  intake resolver must register `conversation-start.md` as the (or a) source and NOT silently fall through to
+  `default_candidates` picking an unrelated on-disk artifact. Related to the v0.31.3 intake work
+  ([[guidance-discovery-contextualizes]]) but distinct — that fixed the resume/decline loop; this is
+  fresh-run source selection ignoring an explicit guidance file.
+
+- **Contract-pipeline citation-grounding loops forever on a NEW-file module (2026-07-02).** A module whose
+  deliverable is a brand-new file (e.g. B5 = `tests/remediate/host-bootstrap-descriptors-remediate.test.ts`)
+  fails the finalization "Source-Grounded Citation Gate" because its cited path doesn't exist yet — and the
+  gate re-fires every lap, driving an infinite finalization→critique→test_plan→assessment cycle that never
+  reaches the judge/implementation. The grounding checks **git-tracked** paths (a plain working-tree file
+  does NOT satisfy it — the untracked stub still failed; `git add` cleared it). Two tool fixes: (1) the
+  grounding should treat a module's own declared new-file `file_scope` targets as legitimately-not-yet-real
+  (a create-file module can't cite an existing path by definition), or (2) recognize a real reference
+  path/symbol elsewhere in the contract (B5 cited the real `tests/audit/host-bootstrap-descriptors.test.mjs`
+  in its inputs, but the extractor only read name/outputs tokens). Host workaround this run: create + `git add`
+  a placeholder stub at the target path. [[enforce-robustness-in-tooling-not-host-discretion]]
+- **Contract-pipeline `.input.json` artifacts are consumed into `*.json` envelopes each next-step, but not all
+  re-derive (2026-07-02).** Recovering a consumed artifact from its `*.json` envelope works for
+  finalized_module_contracts/module_contracts, but `test_validator_plan` and `contract_assessment_report`
+  left NO envelope — so a pipeline lap that re-requests them forces a full regenerate (the 105-spec test plan
+  is the expensive one). Combined with the citation loop above this multiplied cost badly. Tool fix: persist
+  every phase artifact's envelope so a re-requested phase can reuse the prior output instead of regenerating.
+- **`test_validator_plan` polarity gate uses a literal-substring classifier (2026-07-02).** The "each testable
+  obligation needs a positive + negative assertion" gate classifies an assertion as negative if it contains a
+  banned substring (`no`, `not`, `fail`, …) — matching even INSIDE words (`node`, `canonical`, `agnostic`,
+  `normalization`, `failing`, and any `OBL-*-fail-*` id embedded in a positive). Authors must scrub hidden
+  substrings and never embed a `fail`-containing obligation id in the positive assertion. Tool fix: use a real
+  polarity signal (leading "If …"/explicit label) instead of naive substring matching.
+- **Implement-dispatch silently strands/false-resolves nodes; per-node verify is over-coupled (2026-07-03).**
+  During the parallel-dispatch+installer-parity remediation run, the rolling accept/merge phase lost data three
+  ways: (1) a node whose cherry-pick failed on an UNRELATED dirty main-tree file was counted `accepted` while
+  `merged:false` — its code stranded in a quarantine ref while the tool advanced; (2) triage reconciled two nodes
+  to `resolved_no_change` even though their code was NOT on the branch (one was never implemented), corrupting run
+  state vs. git; (3) a node's accept-verify ran a `targeted_command` referencing ANOTHER node's not-yet-created
+  file (`node scripts/remediate/verify-hosts.mjs`) → guaranteed-fail deadlock. Tool fixes: accept must not count a
+  merge-failed node as accepted (keep it pending, never advance dependents); triage's "already satisfied" check
+  must confirm the node's declared deliverables exist on the branch before `resolved_no_change`; per-node verify
+  must be self-contained (derive from the node's OWN touched files/tests, never a sibling's). Recovery that
+  worked: combined-reconciliation — implement each node in an isolated worktree, hand-cherry-pick every node
+  commit onto the integration branch, run the FULL suite once, merge-to-base
+  ([[decomposition-colocate-source-and-tests]], [[worktree-tests-miss-integration-guards]]).
+
 ## Forward tracks
 
 - **Last-writer-wins seams → default LWW, but compare-on-conflict (the owner, 2026-07-02).** Policy idea:

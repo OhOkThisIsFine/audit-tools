@@ -576,6 +576,11 @@ export function splitBlocksByContextBudget(
           // Sub-blocks inherit the parent's declared surface; the per-sub-block
           // narrowing is a downstream (M1-DECOMPOSE) concern.
           touched_files: [...(block.touched_files ?? [])],
+          // A split same-file block keeps its co-file parallel
+          // eligibility — carry cofile_parallel_safe onto every sub-block.
+          ...(block.cofile_parallel_safe !== undefined
+            ? { cofile_parallel_safe: block.cofile_parallel_safe }
+            : {}),
         });
       }
     }
@@ -758,12 +763,22 @@ export function buildCoverageLedger(params: {
 }
 
 /**
- * Merge any blocks whose findings touch a shared file, UNLESS an explicit
- * dependency already serializes them (ordered blocks never run in parallel, so a
- * shared file between them is safe). This keeps a finding whose fix-set spans
- * blocks inside a single block and guarantees no two parallel blocks ever write
- * the same file — the documented "several blocks all editing the same file"
- * clobber. Pure; preserves the auditor's structure when nothing overlaps.
+ * Reconcile blocks whose findings touch a shared file.
+ *
+ * A3 decomposition seam: two blocks that share a canonical physical file but come
+ * from INDEPENDENT findings (distinct finding ids, no dependency edge ordering
+ * them) are NO LONGER unioned into one serial block. They are kept SEPARATE and
+ * each is flagged `cofile_parallel_safe=true` — a mechanical decision that the
+ * findings are independent, NOT a proof of edit-region disjointness; correctness
+ * is enforced later at merge by git (a real overlap surfaces as a conflict). Only
+ * a genuine ordering dependency (an existing dependency edge between the two
+ * blocks) keeps them serialized — and ordered blocks were never unioned anyway,
+ * they simply run in dependency order. A single finding whose fix spans multiple
+ * regions of one file is one block already and is never split.
+ *
+ * File identity uses `canonicalizeFilePath` (the one M1-BOUNDARY scheme) so
+ * `src/A.ts`, `./src/A.ts`, `src\A.ts` and case variants collide on one key.
+ * Pure; preserves the auditor's structure otherwise.
  */
 export function mergeBlocksSharingFiles(
   blocks: RemediationBlock[],
@@ -777,7 +792,7 @@ export function mergeBlocksSharingFiles(
   // CE-008: a block's file set is keyed by the M1-BOUNDARY canonical physical-file
   // identity, so two blocks that cite the same file under different spellings
   // (rel/abs, `./`-prefixed, mixed separators, case on a case-insensitive FS) are
-  // detected as sharing it and merged — never left to clobber it in parallel.
+  // detected as sharing it.
   const fileSet = (b: RemediationBlock): Set<string> => {
     const files = new Set<string>();
     for (const id of b.items) {
@@ -805,75 +820,29 @@ export function mergeBlocksSharingFiles(
   const ordered = (a: string, b: string): boolean =>
     reaches(a, b) || reaches(b, a);
 
-  const parent = blocks.map((_, i) => i);
-  const find = (i: number): number => {
-    while (parent[i] !== i) {
-      parent[i] = parent[parent[i]];
-      i = parent[i];
-    }
-    return i;
-  };
-  const union = (i: number, j: number): void => {
-    const ri = find(i);
-    const rj = find(j);
-    if (ri !== rj) parent[ri] = rj;
-  };
-
+  // Detect which blocks share a canonical file with another block WITHOUT a
+  // dependency edge ordering them: these are the independent co-file blocks that
+  // stay separate and get flagged parallel-safe. Ordered co-file pairs already
+  // serialize via their dependency edge and need no flag.
   const fileSets = blocks.map(fileSet);
+  const cofileIndependent = new Array<boolean>(blocks.length).fill(false);
   for (let i = 0; i < blocks.length; i++) {
     for (let j = i + 1; j < blocks.length; j++) {
-      if (find(i) === find(j)) continue;
       const shareFile = [...fileSets[i]].some((p) => fileSets[j].has(p));
-      if (shareFile && !ordered(blocks[i].block_id, blocks[j].block_id)) {
-        union(i, j);
-      }
+      if (!shareFile) continue;
+      if (ordered(blocks[i].block_id, blocks[j].block_id)) continue;
+      cofileIndependent[i] = true;
+      cofileIndependent[j] = true;
     }
   }
 
-  const groups = new Map<number, number[]>();
-  for (let i = 0; i < blocks.length; i++) {
-    const r = find(i);
-    const g = groups.get(r);
-    if (g) g.push(i);
-    else groups.set(r, [i]);
-  }
-  if (groups.size === blocks.length) return blocks; // nothing overlapped
+  if (!cofileIndependent.some(Boolean)) return blocks; // nothing to flag
 
-  const idRemap = new Map<string, string>();
-  const groupList = [...groups.values()];
-  for (const idxs of groupList) {
-    const ids = idxs.map((i) => blocks[i].block_id).sort();
-    const mergedId = ids[0];
-    for (const id of ids) idRemap.set(id, mergedId);
-  }
-
-  return groupList.map((idxs) => {
-    const groupBlocks = idxs.map((i) => blocks[i]);
-    const mergedId = idRemap.get(groupBlocks[0].block_id)!;
-    const items = [...new Set(groupBlocks.flatMap((b) => b.items))];
-    const deps = new Set<string>();
-    for (const b of groupBlocks) {
-      for (const d of b.dependencies ?? []) {
-        const remapped = idRemap.get(d) ?? d;
-        if (remapped !== mergedId) deps.add(remapped);
-      }
-    }
-    // A singleton group is unchanged except for dependency remapping — preserve
-    // its original parallel_safe rather than recomputing (and possibly flipping)
-    // it from deps. Only genuinely merged groups derive parallel_safe afresh.
-    const parallel_safe =
-      idxs.length === 1 ? groupBlocks[0].parallel_safe : deps.size === 0;
-    const touched_files = [
-      ...new Set(groupBlocks.flatMap((b) => b.touched_files ?? [])),
-    ];
-    return {
-      block_id: mergedId,
-      items,
-      parallel_safe,
-      touched_files,
-      ...(deps.size > 0 ? { dependencies: [...deps] } : {}),
-    };
-  });
+  // Keep every block SEPARATE (no union). Flag the independent co-file blocks as
+  // parallel-safe; leave others untouched.
+  return blocks.map((b, i) =>
+    cofileIndependent[i] ? { ...b, cofile_parallel_safe: true } : b,
+  );
 }
 
 /**

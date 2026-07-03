@@ -49,6 +49,14 @@ export const RemediationBlockSchema = z
      * blocks sharing one ordinal) means a single phase, i.e. no barrier.
      */
     phase_ordinal: z.number().int().nonnegative().optional(),
+    /**
+     * Whether the blocks sharing a co-file (same touched path) may still run in
+     * parallel because their edit regions are disjoint. Additive + optional:
+     * absence is equivalent to `false` (co-file blocks serialize by default), and
+     * a pre-existing block with no such key still validates. Deliberately a bare
+     * boolean — no WriteRegion / WriteAnchor / anchor apparatus lives on the block.
+     */
+    cofile_parallel_safe: z.boolean().optional(),
   })
   .strict();
 export type RemediationBlock = z.infer<typeof RemediationBlockSchema>;

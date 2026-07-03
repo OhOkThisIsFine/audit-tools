@@ -3079,6 +3079,98 @@ export function gitEditedFilesForBranch(root: string, branch: string): GitEdited
   return { available: true, files };
 }
 
+/** A single edited hunk on the NEW side of a branch diff (repo-relative path). */
+export interface GitBranchHunk {
+  /** Repo-relative forward-slash path the hunk belongs to. */
+  file: string;
+  /** 1-based first line of the hunk on the new side. */
+  startLine: number;
+  /** Number of new-side lines the hunk spans (a pure deletion has 0). */
+  lineCount: number;
+}
+
+/**
+ * Outcome of resolving a branch's ACTUAL edited HUNKS from git. Fail-closed like
+ * {@link gitEditedFilesForBranch}: on a non-repo, a failed probe, or a diff we
+ * cannot parse, `available` is false and callers MUST treat hunk info as absent
+ * (conservatively assume same-file blocks overlap — never silently drop a
+ * collision).
+ */
+export type GitBranchHunks =
+  | { available: true; hunks: GitBranchHunk[] }
+  | { available: false; reason: "not_a_repo"; error: string }
+  | { available: false; reason: "probe_failed"; error: string };
+
+/**
+ * Parse `git diff HEAD...<branch>` into per-hunk NEW-side line ranges — the
+ * ground truth for whether two same-file edits actually touch disjoint regions.
+ * Mirrors {@link gitEditedFilesForBranch}'s fail-closed / not-a-repo semantics:
+ * never throws; on a non-repo / failed probe / malformed diff returns a
+ * discriminated result marking hunks unavailable so the caller can fail closed.
+ *
+ * Paths are normalised to repo-relative forward-slash (the same scheme
+ * {@link gitEditedFilesForBranch} emits) so hunk files compare like-for-like
+ * with the file set.
+ */
+export function gitHunksForBranch(root: string, branch: string): GitBranchHunks {
+  if (!isGitWorkTree(root)) {
+    return { available: false, reason: "not_a_repo", error: "root is not a git work tree" };
+  }
+  const diff = spawnSync(
+    "git",
+    // No rename detection / context noise beyond what we parse; a plain unified
+    // diff carries the `+++ b/<path>` and `@@ … +start,count @@` headers we need.
+    ["diff", `HEAD...${branch}`],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  if (diff.error || typeof diff.status !== "number" || diff.status !== 0) {
+    const detail = (diff.stderr ?? diff.error?.message ?? "git diff failed").toString().trim();
+    return { available: false, reason: "probe_failed", error: detail };
+  }
+  return parseUnifiedDiffHunks(diff.stdout ?? "");
+}
+
+/**
+ * Parse a unified-diff body into NEW-side hunk ranges. Extracted for testability
+ * (no git spawn). Recognises `+++ b/<path>` file headers and
+ * `@@ -a,b +c,d @@` hunk headers; a header we cannot parse fails the whole probe
+ * closed (returns `probe_failed`) rather than silently producing partial hunks
+ * that would let a real overlap slip through.
+ */
+export function parseUnifiedDiffHunks(diffText: string): GitBranchHunks {
+  const hunks: GitBranchHunk[] = [];
+  let currentFile: string | null = null;
+  for (const rawLine of diffText.split(/\r?\n/)) {
+    if (rawLine.startsWith("+++ ")) {
+      // `+++ b/path` — or `+++ /dev/null` for a pure deletion (no new side).
+      const target = rawLine.slice(4).trim();
+      if (target === "/dev/null") {
+        currentFile = null;
+        continue;
+      }
+      // Strip the conventional `b/` prefix; leave already-bare paths intact.
+      const bare = target.startsWith("b/") ? target.slice(2) : target;
+      currentFile = bare.replace(/\\/g, "/");
+      continue;
+    }
+    if (rawLine.startsWith("@@")) {
+      const match = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(rawLine);
+      if (!match) {
+        return {
+          available: false,
+          reason: "probe_failed",
+          error: `unparseable hunk header: ${rawLine}`,
+        };
+      }
+      if (currentFile === null) continue; // deletion-only target: no new-side hunk.
+      const startLine = Number(match[1]);
+      const lineCount = match[2] === undefined ? 1 : Number(match[2]);
+      hunks.push({ file: currentFile, startLine, lineCount });
+    }
+  }
+  return { available: true, hunks };
+}
+
 /** The decision a write-scope gate makes given the resolved edit set. */
 export interface WriteScopeDecision {
   blocked: boolean;
@@ -3444,6 +3536,13 @@ export interface BlockEditedFiles {
   block_id: string;
   /** Repo-relative forward-slash paths the block's worker actually changed. */
   files: Set<string>;
+  /**
+   * The block's ACTUAL edited hunks (new-side line ranges), when git could
+   * resolve them. When absent / unavailable, {@link detectOverlappingEdits} MUST
+   * fail closed and treat any same-file pairing as a potential collision — a
+   * missing hunk map is never disjointness evidence.
+   */
+  hunks?: GitBranchHunks;
 }
 
 /** One detected overlap: two merged blocks whose actual edits hit the same file. */
@@ -3467,29 +3566,85 @@ export interface OverlappingEdit {
 export function detectOverlappingEdits(
   editedByBlock: BlockEditedFiles[],
 ): OverlappingEdit[] {
-  const pathToBlocks = new Map<string, Set<string>>();
-  for (const { block_id, files } of editedByBlock) {
+  const isSanctionedSideOutput = (rel: string): boolean =>
+    rel.endsWith(".result.json") || rel.endsWith(AGENT_FEEDBACK_FILENAME);
+
+  // path → block_id → the block's hunks for that path (undefined when hunk info
+  // is unavailable for the block, which forces the conservative fail-closed path).
+  const pathToBlockHunks = new Map<string, Map<string, GitBranchHunk[] | undefined>>();
+  for (const { block_id, files, hunks } of editedByBlock) {
     for (const file of files) {
       const rel = file.replace(/\\/g, "/");
       // Sanctioned non-source outputs never constitute a lost-update conflict.
-      if (rel.endsWith(".result.json")) continue;
-      if (rel.endsWith(AGENT_FEEDBACK_FILENAME)) continue;
-      let owners = pathToBlocks.get(rel);
-      if (!owners) {
-        owners = new Set<string>();
-        pathToBlocks.set(rel, owners);
+      if (isSanctionedSideOutput(rel)) continue;
+      let byBlock = pathToBlockHunks.get(rel);
+      if (!byBlock) {
+        byBlock = new Map();
+        pathToBlockHunks.set(rel, byBlock);
       }
-      owners.add(block_id);
+      // Hunk info is only usable when git resolved it AND this block edited this
+      // file per its hunk set. `available:false` (or an absent map) → undefined,
+      // which detectOverlap treats as "cannot prove disjoint" → collision stands.
+      const fileHunks =
+        hunks?.available === true
+          ? hunks.hunks.filter((h) => h.file === rel)
+          : undefined;
+      byBlock.set(block_id, fileHunks);
     }
   }
+
   const overlaps: OverlappingEdit[] = [];
-  for (const [path, owners] of pathToBlocks) {
-    if (owners.size > 1) {
-      overlaps.push({ path, block_ids: [...owners].sort() });
+  for (const [path, byBlock] of pathToBlockHunks) {
+    if (byBlock.size <= 1) continue;
+    const owners = [...byBlock.keys()].sort();
+    // A file is a lost-update hazard iff SOME pair of owning blocks has edits we
+    // cannot prove disjoint. If EVERY pair's hunks are known and disjoint, the
+    // cherry-picks compose cleanly → not a collision. Any pair with unavailable
+    // hunks fails closed (treated as overlapping).
+    let collides = false;
+    outer: for (let i = 0; i < owners.length; i++) {
+      for (let j = i + 1; j < owners.length; j++) {
+        const a = byBlock.get(owners[i]);
+        const b = byBlock.get(owners[j]);
+        if (a === undefined || b === undefined) {
+          collides = true; // fail closed: no proof of disjointness.
+          break outer;
+        }
+        if (hunkRangesOverlap(a, b)) {
+          collides = true;
+          break outer;
+        }
+      }
+    }
+    if (collides) {
+      overlaps.push({ path, block_ids: owners });
     }
   }
   // Deterministic ordering so the diagnostic + tests are stable.
   return overlaps.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * True when any hunk in `a` shares a new-side line with any hunk in `b`. Each
+ * hunk spans `[startLine, startLine + lineCount - 1]`; a zero-line hunk (pure
+ * deletion at `startLine`) is treated as touching the single anchor line
+ * `startLine` so a deletion adjacent to another block's insertion is still a
+ * conflict. Purely non-overlapping ranges (e.g. lines 1–5 vs 40–50) return
+ * false → the two edits are disjoint and compose cleanly.
+ */
+function hunkRangesOverlap(a: GitBranchHunk[], b: GitBranchHunk[]): boolean {
+  const span = (h: GitBranchHunk): [number, number] => {
+    const count = h.lineCount > 0 ? h.lineCount : 1;
+    return [h.startLine, h.startLine + count - 1];
+  };
+  for (const ha of a) {
+    const [aStart, aEnd] = span(ha);
+    for (const hb of b) {
+      const [bStart, bEnd] = span(hb);
+      if (aStart <= bEnd && bStart <= aEnd) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -3938,7 +4093,15 @@ async function mergeImplementResultsIntoState(
       ? gitEditedFilesForBranch(options.root, worktreeBranch)
       : null;
     if (branchEdited?.available) {
-      editedByBlock.push({ block_id: blockId, files: branchEdited.files });
+      // Resolve the block's ACTUAL edited hunks too, so overlap detection can
+      // spare same-file blocks whose real line-ranges are disjoint. Unavailable
+      // hunks fail closed inside detectOverlappingEdits (still flagged).
+      const branchHunks = gitHunksForBranch(options.root, worktreeBranch);
+      editedByBlock.push({
+        block_id: blockId,
+        files: branchEdited.files,
+        hunks: branchHunks,
+      });
     }
 
     // Merge-state gate (authoritative, OBL-DS-06): a node that self-reported a

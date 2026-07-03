@@ -17,6 +17,11 @@
  * scope is conservatively NON-disjoint so it never batches with a peer
  * (INV-SOO-01 / CE-008).
  *
+ * Same-file relaxation: two nodes writing the SAME canonical file batch into one
+ * sub-wave IFF BOTH set `cofile_parallel_safe === true` (their edits are declared
+ * region-disjoint upstream). If either lacks the flag they serialize into
+ * successive sub-waves exactly as before — the conservative default is unchanged.
+ *
  * Pure and deterministic — no I/O, no Set/Map iteration-order leak — so the
  * admission order is reproducible and unit-testable against a precomputed level.
  */
@@ -28,6 +33,12 @@ export interface OwnershipSchedulerNode {
   block_id: string;
   /** Declared write-scope paths (repo-relative or absolute); empty ⇒ unresolved. */
   write_paths: string[];
+  /**
+   * When BOTH of two same-canonical-file nodes set this true, they may batch into
+   * ONE sub-wave (region-disjoint, non-conflicting edits verified safe upstream).
+   * Absent/false ⇒ the node serializes vs. any same-file peer exactly as before.
+   */
+  cofile_parallel_safe?: boolean;
 }
 
 /**
@@ -69,7 +80,10 @@ export function ownershipSubWaves(
 
   while (remaining.length > 0) {
     const wave: OwnershipSchedulerNode[] = [];
-    const claimed = new Set<string>();
+    // canonical key → the node that claimed it in THIS sub-wave. Retained (not a
+    // bare Set) so a same-file peer can consult the incumbent's flag: two nodes
+    // co-batch on a shared key IFF both are `cofile_parallel_safe`.
+    const claimant = new Map<string, OwnershipSchedulerNode>();
     let waveHasEmptyScopeNode = false;
     const leftover: OwnershipSchedulerNode[] = [];
 
@@ -89,23 +103,30 @@ export function ownershipSubWaves(
       }
 
       // A real-scope node cannot share a wave with an empty-scope node, nor with
-      // any node it shares a canonical path with.
+      // any node it shares a canonical path with — UNLESS both this node and every
+      // same-file incumbent it collides with are `cofile_parallel_safe`.
       if (waveHasEmptyScopeNode) {
         leftover.push(node);
         continue;
       }
       let overlaps = false;
       for (const key of scope) {
-        if (claimed.has(key)) {
-          overlaps = true;
-          break;
+        const incumbent = claimant.get(key);
+        if (incumbent !== undefined) {
+          const bothSafe =
+            node.cofile_parallel_safe === true &&
+            incumbent.cofile_parallel_safe === true;
+          if (!bothSafe) {
+            overlaps = true;
+            break;
+          }
         }
       }
       if (overlaps) {
         leftover.push(node);
         continue;
       }
-      for (const key of scope) claimed.add(key);
+      for (const key of scope) claimant.set(key, node);
       wave.push(node);
     }
 

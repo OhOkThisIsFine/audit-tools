@@ -459,16 +459,16 @@ describe("runPlanPhase — audit-findings.json consume path", () => {
 describe("mergeBlocksSharingFiles", () => {
   const f = (id: string, file: string) => mkFinding(id, id, { files: [file] });
 
-  it("merges parallel blocks that touch a shared file", () => {
+  it("A3: independent parallel blocks sharing a file stay SEPARATE, each cofile_parallel_safe", () => {
     const findings = [f("F-1", "shared.ts"), f("F-2", "shared.ts")];
     const blocks = [
       { block_id: "B-001", items: ["F-1"], parallel_safe: true },
       { block_id: "B-002", items: ["F-2"], parallel_safe: true },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].items.sort()).toEqual(["F-1", "F-2"]);
-    expect(merged[0].parallel_safe).toBe(true);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((b) => b.block_id).sort()).toEqual(["B-001", "B-002"]);
+    for (const b of merged) expect(b.cofile_parallel_safe).toBe(true);
   });
 
   it("does not merge blocks already serialized by a dependency", () => {
@@ -496,18 +496,18 @@ describe("mergeBlocksSharingFiles", () => {
     expect(merged).toHaveLength(2);
   });
 
-  it("CE-008: merges blocks citing one physical file under different spellings", () => {
-    // `src/x.ts` vs `./src/x.ts` are the SAME physical file; comparing raw
-    // strings would leave them in separate parallel blocks that clobber it.
-    // Pinning the share check to the M1-BOUNDARY canonical identity unions them.
+  it("CE-008/A3: blocks citing one physical file under different spellings share via canonical identity", () => {
+    // `src/x.ts` vs `./src/x.ts` are the SAME physical file. Under A3 they are no
+    // longer unioned, but the canonical-identity share detection still applies —
+    // both independent blocks are flagged cofile_parallel_safe.
     const findings = [f("F-1", "src/x.ts"), f("F-2", "./src/x.ts")];
     const blocks = [
       { block_id: "B-001", items: ["F-1"], parallel_safe: true },
       { block_id: "B-002", items: ["F-2"], parallel_safe: true },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any, "/repo");
-    expect(merged).toHaveLength(1);
-    expect(merged[0].items.sort()).toEqual(["F-1", "F-2"]);
+    expect(merged).toHaveLength(2);
+    for (const b of merged) expect(b.cofile_parallel_safe).toBe(true);
   });
 
   it("CE-008: distinct files under different spellings still do NOT merge", () => {
@@ -520,9 +520,10 @@ describe("mergeBlocksSharingFiles", () => {
     expect(merged).toHaveLength(2);
   });
 
-  it("remaps an external dependency onto the merged block id", () => {
-    // B-001 and B-002 share a file and merge to B-001; B-003 depended on B-002,
-    // so after the merge it must depend on B-001 instead.
+  it("A3: independent co-file blocks are NOT unioned, so no dependency remap occurs", () => {
+    // B-001 and B-002 are independent findings on shared.ts — under A3 they stay
+    // separate (flagged parallel-safe), NOT unioned. B-003 depends on B-002 and
+    // keeps that edge unchanged (nothing was remapped).
     const findings = [
       f("F-1", "shared.ts"),
       f("F-2", "shared.ts"),
@@ -539,9 +540,15 @@ describe("mergeBlocksSharingFiles", () => {
       },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any);
-    expect(merged).toHaveLength(2);
+    expect(merged).toHaveLength(3);
+    expect(
+      merged.find((b) => b.block_id === "B-001")!.cofile_parallel_safe,
+    ).toBe(true);
+    expect(
+      merged.find((b) => b.block_id === "B-002")!.cofile_parallel_safe,
+    ).toBe(true);
     const b3 = merged.find((b) => b.block_id === "B-003")!;
-    expect(b3.dependencies).toEqual(["B-001"]);
+    expect(b3.dependencies).toEqual(["B-002"]);
   });
 });
 
@@ -834,8 +841,8 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
     await rm(PIPELINE_TEST_DIR, { recursive: true, force: true });
   });
 
-  it("normalizeExtractedPlan path: merges blocks that share a file (MNT-1905694f)", async () => {
-    // Two findings that both touch shared.ts but are in separate blocks.
+  it("normalizeExtractedPlan path: A3 keeps independent file-sharing blocks separate + parallel-safe (MNT-1905694f)", async () => {
+    // Two independent findings that both touch shared.ts in separate blocks.
     const sharedFile = "src/shared.ts";
     const fA = mkFinding("F-A", "Finding A", { files: [sharedFile], evidence: ["evidence A"] });
     const fB = mkFinding("F-B", "Finding B", { files: [sharedFile], evidence: ["evidence B"] });
@@ -853,11 +860,9 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
 
     const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
 
-    // The two separate blocks should be merged into one because they share a file.
-    expect(result.blocks).toHaveLength(1);
-    const merged = result.blocks[0];
-    expect(merged.items).toContain("F-A");
-    expect(merged.items).toContain("F-B");
+    // A3: independent same-file blocks are NOT unioned — kept separate, each flagged.
+    expect(result.blocks).toHaveLength(2);
+    for (const b of result.blocks) expect(b.cofile_parallel_safe).toBe(true);
   });
 
   it("normalizeExtractedPlan path: dependency-ordered file-sharing blocks stay separate and non-parallel-safe", async () => {
@@ -981,11 +986,15 @@ describe("applyPlanPipeline (MNT-1905694f)", () => {
     const options = { root: PIPELINE_TEST_DIR, artifactsDir: pipelineArtifactsDir, input: reportPath };
     const result = await runPlanPhase(state as any, options as any);
 
-    // runPlanPhase must still merge file-sharing blocks.
+    // A3: runPlanPhase keeps independent file-sharing blocks separate + flagged.
     expect(result.plan).toBeDefined();
-    expect(result.plan!.blocks).toHaveLength(1);
-    expect(result.plan!.blocks[0].items).toContain("F-A");
-    expect(result.plan!.blocks[0].items).toContain("F-B");
+    expect(result.plan!.blocks).toHaveLength(2);
+    for (const b of result.plan!.blocks) {
+      expect(b.cofile_parallel_safe).toBe(true);
+    }
+    const allItems = result.plan!.blocks.flatMap((b) => b.items);
+    expect(allItems).toContain("F-A");
+    expect(allItems).toContain("F-B");
 
     // And the file-hash snapshot must have been taken.
     const integrity = await checkAffectedFileIntegrity(

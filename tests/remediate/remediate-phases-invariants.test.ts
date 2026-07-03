@@ -70,7 +70,7 @@ describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline app
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("merges two parallel-safe blocks sharing a file after applyPlanPipeline", async () => {
+  it("A3: keeps two independent parallel-safe blocks sharing a file separate + flagged after applyPlanPipeline", async () => {
     const findings = [
       mkFinding("F1", "src/shared.ts"),
       mkFinding("F2", "src/shared.ts"),
@@ -87,9 +87,10 @@ describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline app
       candidate_closing_actions: ["none" as const],
     };
     const result = await applyPlanPipeline(plan, { root: TEST_DIR });
-    // After merge: two blocks sharing the same file should become one
-    expect(result.blocks.length).toBe(1);
-    expect(result.blocks[0].items.sort()).toEqual(["F1", "F2"]);
+    // A3: independent same-file blocks stay separate + flagged (merge still runs
+    // before split — the pipeline order invariant is preserved).
+    expect(result.blocks.length).toBe(2);
+    for (const b of result.blocks) expect(b.cofile_parallel_safe).toBe(true);
   });
 
   it("preserves dep-ordered blocks that share a file (INV-02 via applyPlanPipeline)", async () => {
@@ -149,7 +150,7 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
     expect(ids).toEqual(["B1", "B2"]);
   });
 
-  it("merges two parallel-safe blocks that share a file (no dep between them)", () => {
+  it("A3: two independent parallel-safe blocks sharing a file stay SEPARATE, each flagged", () => {
     const findings = [
       mkFinding("F1", ["src/shared.ts"]),
       mkFinding("F2", ["src/shared.ts"]),
@@ -159,9 +160,9 @@ describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized bl
       { block_id: "B2", items: ["F2"], parallel_safe: true },
     ];
     const merged = mergeBlocksSharingFiles(blocks, findings as any, "/tmp");
-    // The two blocks share a file and have no ordering dependency — must merge.
-    expect(merged).toHaveLength(1);
-    expect(merged[0].items.sort()).toEqual(["F1", "F2"]);
+    // A3: independent same-file blocks are NOT unioned — kept separate + flagged.
+    expect(merged).toHaveLength(2);
+    for (const b of merged) expect(b.cofile_parallel_safe).toBe(true);
   });
 
   it("singleton block is returned unchanged", () => {
