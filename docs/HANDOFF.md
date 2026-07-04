@@ -8,32 +8,17 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.6**. Per-lap shipped detail is NOT narrated here (changelog creep — see
-  `git log` and project memory [[live-status]]); this section is the current-state + open-work roadmap only.
+- On npm as `latest` at **v0.32.7** (the prior batch — CE-004 guided_json, verify-runner fix, friction
+  per-category walk, cwd-drift anchoring, release/test-speed, staleness path-sort — plus the 2026-07-04
+  packaging + contract-pipeline fixes are all published). Per-lap shipped detail is NOT narrated here
+  (changelog creep — see `git log` and project memory [[live-status]]); this section is current-state +
+  open-work roadmap only. Tree is clean on `main`, nothing unpublished.
 - **Immediate next:** (1) the owner is running the paused audit-tools self-audit to completion in a fresh
   conversation — note it will dispatch at the codex-pinned concurrency until the dispatch rework lands.
   (2) **Dispatch admission-control rework** — design of record captured at
   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (status: proposed).
   Resolve its *Open tensions* (esp. output-token unknowability; ledger-is-a-proxy / possibly over-built vs
   reactive-only) **before** building. See T5.3 below.
-- Several fixes on `main` since v0.32.6, **not yet published** (batch with the dispatch rework rather than
-  cut a release): staleness-churn path-sort (2026-07-03); the `audit-findings-186` remediation (session-config
-  swallow-catch security fix, CE-004 guided_json lever, host-asset drift-guard extension); a **remediate
-  verify-runner fix** (per-node verify ran `.mjs` tests via retired `node:test` → false-quarantined every
-  real-change node; now vitest — `741432c4`, [[remediate-verify-runner-mjs-vitest-bug]]); the **friction
-  per-category walk** (`054c9ef9`, see below); the **cwd-drift repo-root anchoring fix** (`671be48b` —
-  `repo_root` climbs out of a drifted `.audit-tools` cwd, nested tree now impossible,
-  [[cwd-drift-repo-root-anchoring]]); and **release/test-speed** work (verify:release split into
-  `verify:checks` + vitest; `ci.yml`/`publish-package.yml` run the cheap chain + a 4-way sharded vitest
-  matrix as parallel jobs; the monster e2e test files converted to `test.concurrent` — vitest was ~93% of
-  the gate and 4 files were 65% of test-work; full-suite wall ~365s→~160s, see [[audit-tools-release-publish-flow]]).
-  Also (2026-07-04): a **P0 packaging fix** — `zod-to-json-schema` was a production runtime import declared
-  as a devDep → packaged/global installs crashed at `next-step` (only `smoke:packaged` caught it; published
-  v0.32.6 predates the import so npm `latest` was unaffected); the **CE-006 scope-gate FP** (descriptive
-  "repo-wide" prose no longer trips the negative-scoping veto); and **producer/consumer DAG-edge derivation**
-  — implementation ordering is now tool-derived from `artifact:<name>` tokens in finalized `inputs`/`outputs`
-  (feeds both `phase_cut` and node `depends_on`), instead of relying on the host to hand-add edges, plus a
-  `validateImplementationDAG` **acyclicity check** so a host-authored cyclic `depends_on` is rejected.
 - **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (quarantine
   re-verify affordance, finalization re-dispatch cost); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
   a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);
