@@ -8,11 +8,13 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.7** (the prior batch — CE-004 guided_json, verify-runner fix, friction
-  per-category walk, cwd-drift anchoring, release/test-speed, staleness path-sort — plus the 2026-07-04
-  packaging + contract-pipeline fixes are all published). Per-lap shipped detail is NOT narrated here
-  (changelog creep — see `git log` and project memory [[live-status]]); this section is current-state +
-  open-work roadmap only. Tree is clean on `main`, nothing unpublished.
+- On npm as `latest` at **v0.32.7**. Per-lap shipped detail is NOT narrated here (changelog creep — see
+  `git log` and project memory [[live-status]]); this section is current-state + open-work roadmap only.
+- **Committed to `main` but NOT yet republished:** the doc-review pass (status-noise trims, HANDOFF
+  condensation, fact fixes) **plus the first `license` field + `LICENSE` file (ISC)**. Docs don't need a
+  release; the license metadata is a real package delta that should ride the **next** publish. Republish +
+  global-bin reinstall was deliberately deferred to avoid swapping the installed bin mid-run while the
+  owner's self-audit is live — fold it into the next release rather than cutting a version for docs alone.
 - **Immediate next:** (1) the owner is running the paused audit-tools self-audit to completion in a fresh
   conversation — note it will dispatch at the codex-pinned concurrency until the dispatch rework lands.
   (2) **Dispatch admission-control rework** — see T5.3 below (design of record + *Open tensions* to resolve
