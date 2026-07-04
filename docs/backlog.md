@@ -29,6 +29,49 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **`next-step` resolves `repo_root`/`artifacts_dir` from raw cwd → a drifted cwd mints a phantom nested
+  `.audit-tools/.audit-tools/` tree (observed 2026-07-04).** During a remediate run the PowerShell cwd
+  drifted into `.audit-tools/`, and the next `remediate-code next-step` built its whole artifact tree at
+  `.audit-tools/.audit-tools/remediation` with `repo_root: .../.audit-tools`, silently forking run-state
+  away from the real run. Fix (tool-should-decide): anchor `repo_root` by walking up to the git root (or the
+  nearest existing `.audit-tools` marker), never trusting bare cwd; and refuse to create a nested
+  `.audit-tools/.audit-tools`. "Set cwd correctly" is a host crutch — the tool must be cwd-robust.
+
+- **CE-006 negative-scoping gate false-positives on the literal words "repo-wide"/"unscoped" in the
+  assertion prose (observed 2026-07-04).** The `test_validator_plan` structural gate rejected every
+  invariant spec's negative assertion as "unscoped, repo-wide" because the *text* contained the phrase
+  "not an unscoped repo-wide check" — i.e. it substring-matched the words used to DESCRIBE what to avoid,
+  even though each negative named a real `scope_anchor`. Fix: detect an unscoped negative structurally
+  (does it reference one of the spec's `scope_anchors`? is it a whole-suite/grep-all target?), not by
+  keyword-matching the prose. A gate that flags the words "repo-wide" forces the host to euphemise.
+
+- **No tool affordance to re-verify/re-accept a QUARANTINED implement node after fixing the cause
+  (observed 2026-07-04).** When a node's accept-verify fails, its commit is preserved at
+  `refs/remediation-quarantine/<run>/<block>` but there is no `remediate-code reverify-node --id … --run-id …`
+  (or `accept-node --retry`) to re-run verify against that preserved commit once the failure cause is fixed.
+  Recovery is manual `git cherry-pick -x` of the quarantine refs + a hand-run whole-suite verify, and the
+  gitignored run-state stays permanently marked "failed" (branch becomes the only source of truth). Add a
+  re-verify/re-accept path so a fixed verify environment can cleanly re-drive quarantined nodes.
+
+- **Contract-pipeline `contract_finalization` re-dispatches 12 heavyweight per-module agents for what is
+  mostly a deterministic transform (inefficient-feeding, observed 2026-07-04).** Finalization = the draft
+  module contract + the seam-reconciliation decisions attached as `seam_adjustments`; it needs no fresh
+  source read. Fanning out 12 sub-agents to re-read every file scope again costs ~1.4M tokens for a merge a
+  deterministic step could do (attach each module's seam adjustments from `seam_reconciliation_report`,
+  coerce `inputs`/`outputs` to `string[]`). Make finalization a deterministic attach step (LLM only where a
+  seam decision genuinely needs judgment). Related shape bug: draft shards may emit `inputs`/`outputs` as
+  arrays of objects, but the finalized schema requires `string[]` — single-source the field type across the
+  draft and finalized contracts so no coercion is needed.
+
+- **Contract producer/consumer artifact tokens do NOT derive implementation-DAG ordering edges
+  (`derive.ts` sets `depends_on:[]`; observed 2026-07-04).** A finalized contract can declare
+  `outputs: ["PRODUCES artifact:X …"]` on one module and `inputs: ["CONSUMES artifact:X …"]` on another, but
+  the pipeline never matches those tokens — `phase_cut` puts all modules in one parallel phase and cross-node
+  ordering holds ONLY because the host hand-adds `depends_on` edges in `implementation_dag`. That is an
+  auditor-agnostic-robustness gap: a weaker host omits the edge and a hard ordering (e.g. roster-fix before
+  fan-out) silently degrades to prose. Fix: derive dependency edges from matching producer/consumer artifact
+  names in the finalized contracts, so the ordering is tool-enforced, not host-remembered.
+
 - **Capability handshake is inherited from the run/original auditor, not the current one.** When a
   different auditor resumes an audit (run started in Codex, resumed by Claude Code), a `next-step` that
   omits the capability flags resolves the dispatch pool from the **stored session config**
