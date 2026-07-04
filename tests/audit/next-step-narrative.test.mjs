@@ -59,7 +59,7 @@ async function nextStepToComplete(root) {
   throw new Error("next-step did not reach present_report:complete within 5 calls");
 }
 
-test("next-step pauses for the synthesis narrative, then completes after it is provided", async () => {
+test.concurrent("next-step pauses for the synthesis narrative, then completes after it is provided", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-narrative-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -144,7 +144,7 @@ test("next-step pauses for the synthesis narrative, then completes after it is p
   }
 });
 
-test("next-step omits the narrative when synthesis.narrative is disabled", async () => {
+test.concurrent("next-step omits the narrative when synthesis.narrative is disabled", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-narrative-off-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");

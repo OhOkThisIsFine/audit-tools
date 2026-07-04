@@ -109,15 +109,22 @@ test("verify:hosts can keep its artifacts for inspection (keepArtifacts)", async
 
 // ── (4) release-gate wiring: verify:release invokes verify:hosts ahead of publish
 
-test("verify:release invokes verify:hosts ahead of the publish smoke steps", () => {
+test("verify:release runs verify:hosts ahead of the publish smoke steps", () => {
   const pkg = readPackageJson();
   const verifyRelease = pkg.scripts["verify:release"];
   expect(verifyRelease, "package.json must define a verify:release script").toBeTruthy();
-  expect(verifyRelease, "verify:release must invoke verify:hosts").toMatch(/\bnpm run verify:hosts\b/);
-  // It must gate BEFORE the publish smoke steps, not after.
-  const hostsIdx = verifyRelease.indexOf("verify:hosts");
-  const smokeIdx = verifyRelease.indexOf("smoke:packaged-audit-code");
-  expect(smokeIdx >= 0, "verify:release must still run the packaged smoke step").toBeTruthy();
+  // The cheap deterministic chain (check/deadcode/doc-manifest/build/hosts/smokes)
+  // lives in verify:checks; verify:release composes it with the vitest suite, and CI
+  // runs verify:checks + a sharded vitest matrix as parallel jobs. The hosts-ahead-of
+  // -smokes ordering therefore lives in verify:checks.
+  expect(verifyRelease, "verify:release must compose the verify:checks gate").toMatch(/\bnpm run verify:checks\b/);
+  const verifyChecks = pkg.scripts["verify:checks"];
+  expect(verifyChecks, "package.json must define a verify:checks script").toBeTruthy();
+  expect(verifyChecks, "verify:checks must invoke verify:hosts").toMatch(/\bnpm run verify:hosts\b/);
+  // verify:hosts must gate BEFORE the publish smoke steps, not after.
+  const hostsIdx = verifyChecks.indexOf("verify:hosts");
+  const smokeIdx = verifyChecks.indexOf("smoke:packaged-audit-code");
+  expect(smokeIdx >= 0, "verify:checks must still run the packaged smoke step").toBeTruthy();
   expect(hostsIdx < smokeIdx, "verify:hosts must run ahead of the publish smoke steps").toBeTruthy();
 
   // The script itself must exist and point at the real runner.

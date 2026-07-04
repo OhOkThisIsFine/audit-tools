@@ -29,13 +29,36 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`next-step` resolves `repo_root`/`artifacts_dir` from raw cwd → a drifted cwd mints a phantom nested
-  `.audit-tools/.audit-tools/` tree (observed 2026-07-04).** During a remediate run the PowerShell cwd
-  drifted into `.audit-tools/`, and the next `remediate-code next-step` built its whole artifact tree at
-  `.audit-tools/.audit-tools/remediation` with `repo_root: .../.audit-tools`, silently forking run-state
-  away from the real run. Fix (tool-should-decide): anchor `repo_root` by walking up to the git root (or the
-  nearest existing `.audit-tools` marker), never trusting bare cwd; and refuse to create a nested
-  `.audit-tools/.audit-tools`. "Set cwd correctly" is a host crutch — the tool must be cwd-robust.
+- **CI test redundancy: the vitest suite runs ~3× per push across workflows (observed 2026-07-04).** After
+  sharding `ci.yml` + `publish-package.yml` (vitest = ~93% of the release gate; now sharded 4 ways → ~2×
+  faster gate), `audit-code-test-suite.yml` still runs the *full* `npm test` on Node 20 **and** 22 (its
+  distinct value is Node-20 type-stripping coverage `ci.yml` lacks). Net: a normal `src/` push runs the
+  suite in `ci.yml` (Node 22) + `audit-code-test-suite.yml` (Node 20 + 22) = 3 full runs. Follow-up:
+  shard `audit-code-test-suite.yml` too, and/or fold the Node-20 line into a single sharded matrix so the
+  suite runs once per Node line, sharded — not 3× whole. Deferred (not on the release-blocking path; only
+  `publish-package.yml` gates the `/ship` wait).
+
+- **Optional: cut vitest `collect` (~186s) / per-file isolation overhead (noted 2026-07-04).** Full-suite
+  `collect` is ~186s of module load/transform for 430 files; default `pool: 'forks'` adds per-file process
+  startup. `pool: 'threads'` and/or `isolate: false` could help, but many audit/remediate tests mutate fs
+  and spawn subprocesses → isolation-off risks cross-test bleed. Only pursue with per-file verification.
+  Lower priority than the sharding already shipped.
+
+- **Friction (ambiguous-direction): a backlog item that prescribes the *fix mechanism* over-reaches; state
+  the invariant/bug, not the implementation (observed 2026-07-04).** The now-fixed cwd-drift bullet
+  prescribed "anchor `repo_root` by walking up to the git root (or nearest `.audit-tools` marker)". Taken
+  literally that re-homes legitimate sub-project / temp roots to an ancestor repo — the implementer's first
+  cut did exactly that and broke `cli-remediation` tests. The correct fix was narrower: *climb out of
+  `.audit-tools` only*, never trust a cwd inside it. Lesson for backlog hygiene: an item states the
+  invariant to hold ("`repo_root` must never resolve inside `.audit-tools`; never nest the tree") and the
+  bug, and leaves the mechanism to the implementer — over-specifying the fix smuggles in an untested design.
+
+- **Friction (inefficient-feeding): concurrent agents share one working tree with no per-agent doc-staging
+  lane (observed 2026-07-04).** Two agents worked `main` in the same checkout simultaneously; the second
+  couldn't touch shared docs (`docs/backlog.md`, `docs/HANDOFF.md`) held uncommitted by the first without
+  risking a clobber, so it deferred every doc update via a handoff message. There is no mechanism for
+  parallel agents to stage doc edits independently (per-agent worktree, doc-fragment files merged later, or
+  an advisory doc lock). Until there is, cross-agent doc updates serialize through hand-back prose.
 
 - **CE-006 negative-scoping gate false-positives on the literal words "repo-wide"/"unscoped" in the
   assertion prose (observed 2026-07-04).** The `test_validator_plan` structural gate rejected every

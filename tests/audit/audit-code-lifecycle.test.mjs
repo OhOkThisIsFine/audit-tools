@@ -86,7 +86,7 @@ async function withTempRepo(fn) {
   }
 }
 
-test("audit-code wrapper supports repeated bounded advance-audit invocations with a stable artifact directory", async () => {
+test.concurrent("audit-code wrapper supports repeated bounded advance-audit invocations with a stable artifact directory", async () => {
   await withTempRepo(async (root) => {
     // Provider confirmation auto-completes headlessly under advance-audit.
     const first = JSON.parse(
@@ -176,7 +176,7 @@ test("audit-code wrapper supports repeated bounded advance-audit invocations wit
   });
 });
 
-test("audit-code wrapper accepts external analyzer evidence on the advance-audit surface", async () => {
+test.concurrent("audit-code wrapper accepts external analyzer evidence on the advance-audit surface", async () => {
   await withTempRepo(async (root) => {
     const analyzerPath = join(root, "external_analyzer_results.json");
     await writeFile(

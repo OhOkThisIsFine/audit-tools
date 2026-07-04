@@ -477,7 +477,7 @@ function assertSharedHostInstallResponse(parsed, root, paths) {
   expect(parsed.unsupported_hosts.length).toBe(0);
 }
 
-test("audit-code wrapper advance-audit runs one bounded deterministic advance and prints the execution envelope", async () => {
+test.concurrent("audit-code wrapper advance-audit runs one bounded deterministic advance and prints the execution envelope", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     // First advance: provider confirmation gate auto-completes headlessly.
@@ -506,7 +506,7 @@ test("audit-code wrapper advance-audit runs one bounded deterministic advance an
   });
 });
 
-test("audit-code wrapper can explain a resolved task id", async () => {
+test.concurrent("audit-code wrapper can explain a resolved task id", async () => {
   await withTempRepo(async (root) => {
     await startDispatchRun(root);
     const tasks = JSON.parse(
@@ -524,7 +524,7 @@ test("audit-code wrapper can explain a resolved task id", async () => {
   });
 });
 
-test("next-step reaches a ready review dispatch step from repo root under local-subprocess", async () => {
+test.concurrent("next-step reaches a ready review dispatch step from repo root under local-subprocess", async () => {
   await withTempRepo(async (root) => {
     const step = await startDispatchRun(root);
 
@@ -565,7 +565,7 @@ test("next-step reaches a ready review dispatch step from repo root under local-
   });
 });
 
-test("merge-and-ingest blocks when assigned task results are missing", async () => {
+test.concurrent("merge-and-ingest blocks when assigned task results are missing", async () => {
   await withTempRepo(async (root) => {
     const step = await startDispatchRun(root);
     const runId = step.run_id;
@@ -589,7 +589,7 @@ test("merge-and-ingest blocks when assigned task results are missing", async () 
   });
 });
 
-test("merge-and-ingest accepts packet task result files as the legacy result array", async () => {
+test.concurrent("merge-and-ingest accepts packet task result files as the legacy result array", async () => {
   await withTempRepo(async (root) => {
     const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
       await setupMergeFixture(root);
@@ -626,7 +626,7 @@ test("merge-and-ingest accepts packet task result files as the legacy result arr
   });
 });
 
-test("merge-and-ingest is idempotent on re-run and never truncates results", async () => {
+test.concurrent("merge-and-ingest is idempotent on re-run and never truncates results", async () => {
   await withTempRepo(async (root) => {
     const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
       await setupMergeFixture(root);
@@ -657,7 +657,7 @@ test("merge-and-ingest is idempotent on re-run and never truncates results", asy
   });
 });
 
-test("merge-and-ingest self-heals a stale completion marker by re-ingesting a stranded on-disk result", async () => {
+test.concurrent("merge-and-ingest self-heals a stale completion marker by re-ingesting a stranded on-disk result", async () => {
   await withTempRepo(async (root) => {
     const fileExists = async (p) => {
       try {
@@ -730,7 +730,7 @@ test("merge-and-ingest self-heals a stale completion marker by re-ingesting a st
   });
 });
 
-test("all packets dispatched in one round, merge ingests everything", async () => {
+test.concurrent("all packets dispatched in one round, merge ingests everything", async () => {
   await withTempRepo(async (root) => {
     const dispatchStep = await startDispatchRun(root);
     const runId = dispatchStep.run_id;
@@ -786,7 +786,7 @@ test("all packets dispatched in one round, merge ingests everything", async () =
   });
 });
 
-test("submit-packet rejects duplicate task result ids", async () => {
+test.concurrent("submit-packet rejects duplicate task result ids", async () => {
   await withTempRepo(async (root) => {
     const { runId, artifactsDir, packet, entries, packetTasks } =
       await setupSubmitPacketFixture(root);
@@ -815,7 +815,7 @@ test("submit-packet rejects duplicate task result ids", async () => {
   });
 });
 
-test("submit-packet rejects task results outside the packet", async () => {
+test.concurrent("submit-packet rejects task results outside the packet", async () => {
   await withTempRepo(async (root) => {
     const { runId, artifactsDir, packet, entries, packetTasks, tasks } =
       await setupSubmitPacketFixture(root);
@@ -847,7 +847,7 @@ test("submit-packet rejects task results outside the packet", async () => {
   });
 });
 
-test("submit-packet rejects missing assigned task results", async () => {
+test.concurrent("submit-packet rejects missing assigned task results", async () => {
   await withTempRepo(async (root) => {
     const { runId, artifactsDir, packet, entries, packetTasks } =
       await setupSubmitPacketFixture(root);
@@ -872,7 +872,7 @@ test("submit-packet rejects missing assigned task results", async () => {
   });
 });
 
-test("merge-and-ingest proceeds despite unexpected files in task-results/", async () => {
+test.concurrent("merge-and-ingest proceeds despite unexpected files in task-results/", async () => {
   await withTempRepo(async (root) => {
     const { runId, artifactsDir, runDir, tasks, taskById, plan, resultMap } =
       await setupMergeFixture(root);
@@ -899,7 +899,7 @@ test("merge-and-ingest proceeds despite unexpected files in task-results/", asyn
   });
 });
 
-test("isCanonicalResultFilename separates canonical results from stray files", () => {
+test.concurrent("isCanonicalResultFilename separates canonical results from stray files", () => {
   // Canonical per-task result name: <stem>_<12-hex digest>.json (artifactNameForId).
   expect(isCanonicalResultFilename("unit_foo_0123456789ab.json")).toBe(true);
   expect(isCanonicalResultFilename("lens_security_packet-1_a1b2c3d4e5f6.json")).toBe(true);
@@ -911,7 +911,7 @@ test("isCanonicalResultFilename separates canonical results from stray files", (
   expect(isCanonicalResultFilename("audit_result_packet1.json")).toBe(false);
 });
 
-test("merge-and-ingest rejects swapped task result files", async () => {
+test.concurrent("merge-and-ingest rejects swapped task result files", async () => {
   await withTempRepo(async (root) => {
     const dispatchStep = await startDispatchRun(root);
     const runId = dispatchStep.run_id;
@@ -957,7 +957,7 @@ test("merge-and-ingest rejects swapped task result files", async () => {
   });
 });
 
-test("wrapper build freshness ignores package metadata churn when dist is newer than source inputs", async () => {
+test.concurrent("wrapper build freshness ignores package metadata churn when dist is newer than source inputs", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-build-freshness-"));
   try {
     const sourceDir = join(tempDir, "src");
@@ -995,7 +995,7 @@ test("wrapper build freshness ignores package metadata churn when dist is newer 
   }
 });
 
-test("assertWorkspaceInstalled flags missing or foreign audit-tools/shared", () => {
+test.concurrent("assertWorkspaceInstalled flags missing or foreign audit-tools/shared", () => {
   const checkoutRoot = join(here, "fixture-checkout");
 
   // Not resolvable at all → dependencies were never installed.
@@ -1036,7 +1036,7 @@ test("assertWorkspaceInstalled flags missing or foreign audit-tools/shared", () 
   );
 });
 
-test("audit-code wrapper prints help text", async () => {
+test.concurrent("audit-code wrapper prints help text", async () => {
   const { stdout } = await runWrapper(["--help"]);
   expect(stdout.includes("Usage: node audit-code.mjs <command>")).toBeTruthy();
   expect(stdout.includes("Primary usage (conversation-first):")).toBeTruthy();
@@ -1051,7 +1051,7 @@ test("audit-code wrapper prints help text", async () => {
   expect(!stdout.includes("run-to-completion")).toBeTruthy();
 });
 
-test("audit-code wrapper bare invocation prints help and exits 0 without starting an audit", async () => {
+test.concurrent("audit-code wrapper bare invocation prints help and exits 0 without starting an audit", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-bare-help-"));
   try {
     const { stdout } = await runWrapper([], { cwd: tempDir });
@@ -1064,7 +1064,7 @@ test("audit-code wrapper bare invocation prints help and exits 0 without startin
   }
 });
 
-test("audit-code wrapper rejects unknown commands with exit 1 and help text", async () => {
+test.concurrent("audit-code wrapper rejects unknown commands with exit 1 and help text", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-unknown-cmd-"));
   try {
     const { child, stdoutRef, stderrRef } = spawnWrapper(["definitely-not-a-command"], {
@@ -1085,12 +1085,12 @@ test("audit-code wrapper rejects unknown commands with exit 1 and help text", as
   }
 });
 
-test("audit-code wrapper prints package version", async () => {
+test.concurrent("audit-code wrapper prints package version", async () => {
   const { stdout } = await runWrapper(["--version"]);
   expect(stdout.trim()).toBe(packageVersion);
 });
 
-test("audit-code wrapper prints the canonical prompt asset path", async () => {
+test.concurrent("audit-code wrapper prints the canonical prompt asset path", async () => {
   const { stdout } = await runWrapper(["prompt-path"]);
   const promptPath = stdout.trim();
 
@@ -1101,7 +1101,7 @@ test("audit-code wrapper prints the canonical prompt asset path", async () => {
   expect(info.isFile()).toBe(true);
 });
 
-test("slash prompt is a tiny next-step loader without dispatch branches", async () => {
+test.concurrent("slash prompt is a tiny next-step loader without dispatch branches", async () => {
   const prompt = await readFile(
     join(repoRoot, "skills", "audit-code", "audit-code.prompt.md"),
     "utf8",
@@ -1115,7 +1115,7 @@ test("slash prompt is a tiny next-step loader without dispatch branches", async 
   expect(prompt).not.toMatch(/Step 2/i);
 });
 
-test("audit-code ensure lazily bootstraps and refreshes repo-local host assets", async () => {
+test.concurrent("audit-code ensure lazily bootstraps and refreshes repo-local host assets", async () => {
   await withTempRepo(async (root) => {
     const quiet = await runWrapper(["ensure", "--quiet"], { cwd: root });
     expect(quiet.stdout).toBe("");
@@ -1160,7 +1160,7 @@ test("audit-code ensure lazily bootstraps and refreshes repo-local host assets",
   });
 });
 
-test("audit-code ensure refreshes stale OpenCode audit permissions", async () => {
+test.concurrent("audit-code ensure refreshes stale OpenCode audit permissions", async () => {
   await withTempRepo(async (root) => {
     await runWrapper(["install"], { cwd: root });
     const opencodeConfigPath = join(root, "opencode.json");
@@ -1250,7 +1250,7 @@ const repoLocalHostCases = [
 ];
 
 for (const { name, assertHost } of repoLocalHostCases) {
-  test(`audit-code wrapper bootstraps repo-local ${name} host integration`, async () => {
+  test.concurrent(`audit-code wrapper bootstraps repo-local ${name} host integration`, async () => {
     await withTempRepo(async (root) => {
       const { parsed, paths } = await setupRepoLocalHostInstallFixture(root);
 
@@ -1260,7 +1260,7 @@ for (const { name, assertHost } of repoLocalHostCases) {
   });
 }
 
-test("repo-local host install writes shared manifest and cleanup behavior", async () => {
+test.concurrent("repo-local host install writes shared manifest and cleanup behavior", async () => {
   await withTempRepo(async (root) => {
     const { parsed, paths } = await setupRepoLocalHostInstallFixture(root);
     const installedPromptContent = await readFile(paths.installedPromptPath, "utf8");
@@ -1301,7 +1301,7 @@ test("repo-local host install writes shared manifest and cleanup behavior", asyn
   });
 });
 
-test("verify-install summarizes repo-local host integration status", async () => {
+test.concurrent("verify-install summarizes repo-local host integration status", async () => {
   await withTempRepo(async (root) => {
     const { parsed } = await setupRepoLocalHostInstallFixture(root);
     const { parsed: verifiedInstall } = await runWrapperJsonOutput(
@@ -1319,7 +1319,7 @@ test("verify-install summarizes repo-local host integration status", async () =>
   });
 });
 
-test("audit-code install removes legacy generated repo-local Codex skill copies", async () => {
+test.concurrent("audit-code install removes legacy generated repo-local Codex skill copies", async () => {
   await withTempRepo(async (root) => {
     const sourceSkill = await readFile(
       join(repoRoot, "skills", "audit-code", "SKILL.md"),
@@ -1356,7 +1356,7 @@ test("audit-code install removes legacy generated repo-local Codex skill copies"
   });
 });
 
-test("audit-code installer merges existing host config instead of clobbering it", async () => {
+test.concurrent("audit-code installer merges existing host config instead of clobbering it", async () => {
   await withTempRepo(async (root) => {
     await mkdir(join(root, ".vscode"), { recursive: true });
     await writeFile(
@@ -1467,7 +1467,7 @@ test("audit-code installer merges existing host config instead of clobbering it"
   });
 });
 
-test("audit-code wrapper updates managed compatibility blocks without clobbering existing instructions", async () => {
+test.concurrent("audit-code wrapper updates managed compatibility blocks without clobbering existing instructions", async () => {
   await withTempRepo(async (root) => {
     const agentsPath = join(root, "AGENTS.md");
     await writeFile(agentsPath, "# Existing Team Instructions\n");
@@ -1493,7 +1493,7 @@ test("audit-code wrapper updates managed compatibility blocks without clobbering
   });
 });
 
-test("audit-code wrapper keeps the Copilot-specific installer as a compatibility alias", async () => {
+test.concurrent("audit-code wrapper keeps the Copilot-specific installer as a compatibility alias", async () => {
   await withTempRepo(async (root) => {
     const { stdout } = await runWrapper(
       ["install-host", "--host", "copilot"],
@@ -1520,7 +1520,7 @@ test("audit-code wrapper keeps the Copilot-specific installer as a compatibility
   });
 });
 
-test("build helpers are isolated from install helpers", async () => {
+test.concurrent("build helpers are isolated from install helpers", async () => {
   // shouldBuildDistForPaths and assertWorkspaceInstalled are importable directly
   // from audit-code-wrapper-build.mjs and produce the same results as the
   // re-exports from audit-code-wrapper-lib.mjs.
@@ -1582,7 +1582,7 @@ test("build helpers are isolated from install helpers", async () => {
   expect(getInstallProfile("opencode")).toEqual(_getInstallProfile("opencode"));
 });
 
-test("OpenCode permission helpers are importable from the dedicated module", () => {
+test.concurrent("OpenCode permission helpers are importable from the dedicated module", () => {
   // assertOpenCodeAuditPermissionConfig throws when required bash rules are missing.
   const badPermission = {
     read: "allow",
@@ -1619,16 +1619,16 @@ test("OpenCode permission helpers are importable from the dedicated module", () 
   expect(built.agent?.auditor?.permission?.read).toBe("allow");
 });
 
-test("OPENCODE_AUDIT_BASH_PERMISSION includes Select-String", () => {
+test.concurrent("OPENCODE_AUDIT_BASH_PERMISSION includes Select-String", () => {
   expect(OPENCODE_AUDIT_BASH_PERMISSION["Select-String *"], "OPENCODE_AUDIT_BASH_PERMISSION must include 'Select-String *': 'allow' as the source of truth").toBe("allow");
 });
 
-test("renderOpenCodePermissionConfig bash block includes Select-String", () => {
+test.concurrent("renderOpenCodePermissionConfig bash block includes Select-String", () => {
   const config = renderOpenCodePermissionConfig();
   expect(config.bash["Select-String *"], "renderOpenCodePermissionConfig() must return a bash block containing 'Select-String *': 'allow'").toBe("allow");
 });
 
-test("buildMergedOpenCodeProjectConfig preserves '*': 'allow' on external_directory even when existing config has a more restrictive value", () => {
+test.concurrent("buildMergedOpenCodeProjectConfig preserves '*': 'allow' on external_directory even when existing config has a more restrictive value", () => {
   // User had '*': 'ask' on external_directory — managed rule must override to 'allow'
   const askExisting = { permission: { external_directory: { "*": "ask" } } };
   const mergedAsk = buildMergedOpenCodeProjectConfig(askExisting, "/tmp/repo");
@@ -1645,7 +1645,7 @@ test("buildMergedOpenCodeProjectConfig preserves '*': 'allow' on external_direct
   expect(mergedUndefined.permission.external_directory["*"], "managed rule must produce 'allow' even when existing external_directory is undefined").toBe("allow");
 });
 
-test("buildMergedOpenCodeProjectConfig does not let user external_directory override the managed allow rule (parity with edit/bash behavior)", () => {
+test.concurrent("buildMergedOpenCodeProjectConfig does not let user external_directory override the managed allow rule (parity with edit/bash behavior)", () => {
   // A user-owned external_directory object with no '*' key still gets '*': 'allow'
   const noStarExisting = { permission: { external_directory: { "some/path/**": "ask" } } };
   const mergedNoStar = buildMergedOpenCodeProjectConfig(noStarExisting, "/tmp/repo");

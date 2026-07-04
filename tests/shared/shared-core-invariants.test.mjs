@@ -640,7 +640,11 @@ test("INV-shared-core-15b: ci.yml runs a single-package build + verify gate (no 
   const ciPath = resolve(REPO_ROOT, ".github/workflows/ci.yml");
   expect(existsSync(ciPath), `ci.yml not found at ${ciPath}`).toBeTruthy();
   const content = readFileSync(ciPath, "utf8");
-  expect(content.includes("npm run verify:release"), "ci.yml must run the single-package verify:release gate — CRIT-single-package").toBeTruthy();
+  // The gate is split for speed: verify:checks (cheap deterministic chain) runs as
+  // one job, the vitest suite runs as a sharded matrix. Both must be present so the
+  // full gate can't silently lose a half.
+  expect(content.includes("npm run verify:checks"), "ci.yml must run the single-package verify:checks gate — CRIT-single-package").toBeTruthy();
+  expect(/vitest run --shard=/.test(content), "ci.yml must run the sharded vitest test matrix — CRIT-single-package").toBeTruthy();
   expect(!content.includes("--workspaces") && !content.includes("packages/shared"), "ci.yml must not reference workspaces or packages/shared after the single-package collapse — CRIT-single-package").toBeTruthy();
 });
 

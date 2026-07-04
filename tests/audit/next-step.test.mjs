@@ -37,7 +37,7 @@ async function withTempRepo(fn) {
   }
 }
 
-test("next-step emits present_report for a complete audit", async () => {
+test.concurrent("next-step emits present_report for a complete audit", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -204,7 +204,7 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
   throw new Error("next-step did not advance past structure-phase pauses");
 }
 
-test("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", async () => {
+test.concurrent("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", async () => {
   await withTempRepo(async (root) => {
     // The fixture has a .ts file but no local `typescript`. Pin an isolated,
     // empty analyzer cache so `typescript` resolves "absent" deterministically —
@@ -245,7 +245,7 @@ test("next-step proposes an analyzer install, then proceeds after a skip decisio
   });
 });
 
-test("next-step defaults to dispatch_review when host dispatch capability is not configured", async () => {
+test.concurrent("next-step defaults to dispatch_review when host dispatch capability is not configured", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     const currentStep = JSON.parse(
@@ -261,7 +261,7 @@ test("next-step defaults to dispatch_review when host dispatch capability is not
   });
 });
 
-test("next-step reads host_can_dispatch_subagents from session-config", async () => {
+test.concurrent("next-step reads host_can_dispatch_subagents from session-config", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -284,7 +284,7 @@ test("next-step reads host_can_dispatch_subagents from session-config", async ()
   });
 });
 
-test("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or session value is set", async () => {
+test.concurrent("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or session value is set", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
@@ -296,7 +296,7 @@ test("next-step reads AUDIT_CODE_HOST_CAN_DISPATCH when no flag or session value
   });
 });
 
-test("next-step true emits dispatch_review and prepares dispatch artifacts", async () => {
+test.concurrent("next-step true emits dispatch_review and prepares dispatch artifacts", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
@@ -315,7 +315,7 @@ test("next-step true emits dispatch_review and prepares dispatch artifacts", asy
   });
 });
 
-test("next-step false emits single_task_fallback and does not prepare dispatch", async () => {
+test.concurrent("next-step false emits single_task_fallback and does not prepare dispatch", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
@@ -332,7 +332,7 @@ test("next-step false emits single_task_fallback and does not prepare dispatch",
   });
 });
 
-test("advancePastDesignReview throws on unknown pause kind", async () => {
+test.concurrent("advancePastDesignReview throws on unknown pause kind", async () => {
   // Stub runWrapper to return a single step with an unrecognised step_kind.
   // We call advancePastDesignReview directly by monkey-patching its dependency
   // indirectly: write a tiny wrapper that returns a fake step JSON and call the

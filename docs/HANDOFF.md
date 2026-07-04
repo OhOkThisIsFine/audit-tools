@@ -20,11 +20,15 @@
   cut a release): staleness-churn path-sort (2026-07-03); the `audit-findings-186` remediation (session-config
   swallow-catch security fix, CE-004 guided_json lever, host-asset drift-guard extension); a **remediate
   verify-runner fix** (per-node verify ran `.mjs` tests via retired `node:test` → false-quarantined every
-  real-change node; now vitest — `741432c4`, [[remediate-verify-runner-mjs-vitest-bug]]); and the **friction
-  per-category walk** (`054c9ef9`, see below).
-- **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (cwd-drift nested tree,
-  CE-006 keyword FP, quarantine re-verify affordance, finalization re-dispatch cost, producer/consumer edge
-  derivation); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
+  real-change node; now vitest — `741432c4`, [[remediate-verify-runner-mjs-vitest-bug]]); the **friction
+  per-category walk** (`054c9ef9`, see below); the **cwd-drift repo-root anchoring fix** (`671be48b` —
+  `repo_root` climbs out of a drifted `.audit-tools` cwd, nested tree now impossible,
+  [[cwd-drift-repo-root-anchoring]]); and **release/test-speed** work (verify:release split into
+  `verify:checks` + vitest; `ci.yml`/`publish-package.yml` run the cheap chain + a 4-way sharded vitest
+  matrix as parallel jobs; the monster e2e test files converted to `test.concurrent` — vitest was ~93% of
+  the gate and 4 files were 65% of test-work; full-suite wall ~365s→~160s, see [[audit-tools-release-publish-flow]]).
+- **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (CE-006 keyword FP,
+  quarantine re-verify affordance, finalization re-dispatch cost, producer/consumer edge derivation); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
   a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);
   remediate-side `opencode.json` drift/`INV-RCI-16` reconciliation; env-bound live validations (quota pre-wall
   pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn); provider-blocked
@@ -44,6 +48,10 @@
 - **Release:** `env -u CLAUDECODE npm run release:patch:publish`; recover a bad attempt with
   `gh release delete vX.Y.Z --cleanup-tag` + forward-bump. Run gate/test with `env -u CLAUDECODE`.
   Run `env -u CLAUDECODE npm run verify:release` locally before tagging (local pre-tag gate is only `check`).
+  CI gate is split for speed (2026-07-04): `verify:release` = `verify:checks` (cheap deterministic chain) +
+  vitest; `ci.yml`/`publish-package.yml` run `verify:checks` and a **4-way sharded vitest matrix** as
+  parallel jobs, publish `needs:` both. vitest was ~93% of the old serial gate → sharding is the only lever
+  that moved release latency. Remaining redundancy (suite runs 3× per push) tracked in `docs/backlog.md`.
 - **Branch-strand trap (bit twice already):** a remediation run leaves you checked out on its
   worktree branch — commit/push docs from `main` (verify `git rev-parse --abbrev-ref HEAD`) or the commit
   strands off main.

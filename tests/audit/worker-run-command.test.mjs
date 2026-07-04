@@ -44,7 +44,7 @@ function buildTask(overrides = {}) {
 // Guard: missing --task flag
 // ---------------------------------------------------------------------------
 
-test("cmdWorkerRun throws when --task flag is missing", async () => {
+test.concurrent("cmdWorkerRun throws when --task flag is missing", async () => {
   await assert.rejects(
     () => cmdWorkerRun([]),
     /worker-run requires --task/,
@@ -55,7 +55,7 @@ test("cmdWorkerRun throws when --task flag is missing", async () => {
 // Guard: looksLikeCliFlag on audit_results_path
 // ---------------------------------------------------------------------------
 
-test("cmdWorkerRun writes a failed WorkerResult when audit_results_path looks like a CLI flag", async () => {
+test.concurrent("cmdWorkerRun writes a failed WorkerResult when audit_results_path looks like a CLI flag", async () => {
   const { dir, cleanup } = await makeTempDir();
   try {
     const resultPath = join(dir, "result.json");
@@ -96,7 +96,7 @@ test("cmdWorkerRun writes a failed WorkerResult when audit_results_path looks li
 // (TST-edfe6e13 fix: removed local partitionIssues duplicate.)
 // ---------------------------------------------------------------------------
 
-test("cmdWorkerRun: valid audit results reach runAuditStep (partition: errors fatal, warnings not)", async () => {
+test.concurrent("cmdWorkerRun: valid audit results reach runAuditStep (partition: errors fatal, warnings not)", async () => {
   // We inject a fake runAuditStep so we can observe the validation branch.
   // The result has a valid file_coverage entry and passes schema validation,
   // so no errors are emitted and runAuditStep is reached.
@@ -191,7 +191,7 @@ test("cmdWorkerRun: valid audit results reach runAuditStep (partition: errors fa
 
 // ---------------------------------------------------------------------------
 
-test("cmdWorkerRun writes a failed WorkerResult when agent mode yields zero matched results", async () => {
+test.concurrent("cmdWorkerRun writes a failed WorkerResult when agent mode yields zero matched results", async () => {
   const { dir, cleanup } = await makeTempDir();
   try {
     const artifactsDir = join(dir, ".audit-tools/audit");
@@ -261,7 +261,7 @@ test("cmdWorkerRun writes a failed WorkerResult when agent mode yields zero matc
 // REL-e49452af: result-file write failure propagates after fallback write
 // ---------------------------------------------------------------------------
 
-test("cmdWorkerRun re-throws when writeJsonFile fails for the final result write", async () => {
+test.concurrent("cmdWorkerRun re-throws when writeJsonFile fails for the final result write", async () => {
   const { dir, cleanup } = await makeTempDir();
   try {
     // Make result_path a directory so the atomic write (rename into it) fails.

@@ -93,7 +93,7 @@ async function persistEdgeReasoningState(root, artifactsDir, { flag, strip = fal
   );
 }
 
-test("next-step emits a single host edge-reasoning step, then rewrites only the reason", async () => {
+test.concurrent("next-step emits a single host edge-reasoning step, then rewrites only the reason", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -163,7 +163,7 @@ test("next-step emits a single host edge-reasoning step, then rewrites only the 
   }
 });
 
-test("next-step emits a dispatch task carrying the edge-reasoning prompt when the host can dispatch", async () => {
+test.concurrent("next-step emits a dispatch task carrying the edge-reasoning prompt when the host can dispatch", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-dispatch-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -201,7 +201,7 @@ test("next-step emits a dispatch task carrying the edge-reasoning prompt when th
   }
 });
 
-test("next-step does not pause for edge reasoning when the flag is off (graph unchanged)", async () => {
+test.concurrent("next-step does not pause for edge reasoning when the flag is off (graph unchanged)", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-off-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -232,7 +232,7 @@ test("next-step does not pause for edge reasoning when the flag is off (graph un
   }
 });
 
-test("next-step does not pause for edge reasoning when there are no low-confidence edges", async () => {
+test.concurrent("next-step does not pause for edge reasoning when there are no low-confidence edges", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-edge-reasoning-empty-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");

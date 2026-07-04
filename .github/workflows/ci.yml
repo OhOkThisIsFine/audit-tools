@@ -50,14 +50,15 @@ env:
   NPM_CONFIG_LOGLEVEL: notice
 
 jobs:
-  contract:
-    # Skip the release-bump commit (`release: vX.Y.Z`, pushed by
-    # release-and-publish.mjs): its full verify:release runs on Linux in
-    # publish-package.yml before the upload, so re-running it here is a pure
-    # duplicate. Every other push/PR still runs the contract gate.
+  # The verify:release gate is split into the cheap deterministic chain (`checks`)
+  # and the vitest suite sharded N ways (`test`) so PR/push feedback is bounded by
+  # the slowest job, not the sum. Mirrors publish-package.yml. Both jobs carry the
+  # same release-bump skip guard: the `release: vX.Y.Z` commit's authoritative gate
+  # runs on Linux in publish-package.yml, so re-running it here is a pure duplicate.
+  checks:
     if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: v') }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
@@ -80,18 +81,18 @@ jobs:
           set -euo pipefail
           trap 'echo "::error::npm ci failed. Inspect the uploaded ci-npm-logs artifact and rerun npm ci locally to reproduce."' ERR
           npm ci --prefer-offline --no-audit --no-fund
-      - name: Verify release contract
-        timeout-minutes: 25
+      - name: Verify release checks (non-test gate)
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
-          trap 'echo "::error::npm run verify:release failed. Download the ci-npm-logs artifact and rerun npm run verify:release locally before retrying."' ERR
-          npm run verify:release
+          trap 'echo "::error::npm run verify:checks failed. Download the ci-npm-logs artifact and rerun npm run verify:checks locally before retrying."' ERR
+          npm run verify:checks
       - name: Upload npm debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ci-npm-logs
+          name: ci-npm-logs-checks
           path: |
             ~/.npm/_logs
             npm-debug.log*
@@ -100,4 +101,52 @@ jobs:
         if: ${{ failure() }}
         shell: bash
         run: |
-          echo "::error::audit-tools CI contract failed. Review the ci-npm-logs artifact, confirm package-lock.json is committed, and rerun npm ci && npm run verify:release locally."
+          echo "::error::audit-tools CI checks failed. Review the ci-npm-logs-checks artifact, confirm package-lock.json is committed, and rerun npm ci && npm run verify:checks locally."
+
+  test:
+    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: v') }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      # Keep the denominator in the `vitest run --shard` command below in sync
+      # with the length of this list.
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.CI_NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm ci failed. Inspect the uploaded ci-npm-logs-test artifact and rerun npm ci locally to reproduce."' ERR
+          npm ci --prefer-offline --no-audit --no-fund
+      - name: Build
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+      - name: Run tests (shard ${{ matrix.shard }}/4)
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::vitest shard ${{ matrix.shard }}/4 failed. Download the ci-npm-logs-test artifact and rerun npx vitest run --shard=${{ matrix.shard }}/4 locally before retrying."' ERR
+          npx vitest run --shard=${{ matrix.shard }}/4
+      - name: Upload npm debug logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-npm-logs-test-shard-${{ matrix.shard }}
+          path: |
+            ~/.npm/_logs
+            npm-debug.log*
+          if-no-files-found: ignore

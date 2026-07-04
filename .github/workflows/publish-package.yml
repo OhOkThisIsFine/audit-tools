@@ -34,7 +34,85 @@ env:
   NPM_CONFIG_LOGLEVEL: notice
 
 jobs:
+  # The release gate is split into two parallel job classes so the publish path
+  # is bounded by the SLOWEST gate job rather than the SUM of every step:
+  #   - `gate`  : the cheap deterministic chain (check, deadcode, doc-manifest,
+  #               build, host verifies, packaged smokes) — seconds of wall-clock.
+  #   - `test`  : the vitest suite, sharded N ways across parallel runners. vitest
+  #               is ~93% of the old serial gate; sharding it is the only lever
+  #               that materially cuts release latency.
+  # `publish` needs both, so a failure in any shard or the cheap chain blocks the
+  # upload exactly as the former monolithic `verify:release` step did.
+  gate:
+    if: |
+      (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefer-offline --no-audit --no-fund
+      - name: Verify release checks (non-test gate)
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::npm run verify:checks failed."' ERR
+          npm run verify:checks
+
+  test:
+    if: |
+      (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      # Keep the denominator in the `vitest run --shard` command below in sync
+      # with the length of this list.
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefer-offline --no-audit --no-fund
+      - name: Build
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+      - name: Run tests (shard ${{ matrix.shard }}/4)
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'echo "::error::vitest shard ${{ matrix.shard }}/4 failed."' ERR
+          npx vitest run --shard=${{ matrix.shard }}/4
+
   publish:
+    needs: [gate, test]
     # Single package `audit-tools`: release tags are plain `vX.Y.Z`.
     if: |
       (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
@@ -89,13 +167,15 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --prefer-offline --no-audit --no-fund
-      - name: Verify release gate
-        timeout-minutes: 25
+      - name: Build dist for packing
+        timeout-minutes: 10
         shell: bash
         run: |
           set -euo pipefail
-          trap 'echo "::error::npm run verify:release failed."' ERR
-          npm run verify:release
+          # The gate + test jobs already ran the full verify chain. This job only
+          # needs a fresh dist/ so `npm publish --ignore-scripts` packs the shipped
+          # files (files[] includes dist/**) without re-running prepack.
+          npm run build
       - name: Resolve publish metadata
         id: publish_meta
         timeout-minutes: 2
@@ -141,9 +221,10 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
-          # --ignore-scripts: the "Verify release gate" step already ran verify:release
-          # and built dist; without this, `npm publish` re-runs verify:release via
-          # prepublishOnly on EVERY retry attempt (≈6 min each), blowing the step timeout.
+          # --ignore-scripts: the gate + test jobs already ran verify:release and
+          # this job rebuilt dist; without it, `npm publish` re-runs verify:release
+          # via prepublishOnly on EVERY retry attempt (≈6 min each), blowing the
+          # step timeout.
           BACKOFF_SECONDS=(5 15)
           for attempt in 1 2 3; do
             if output=$(npm publish --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then

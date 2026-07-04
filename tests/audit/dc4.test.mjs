@@ -111,7 +111,7 @@ async function readActiveDispatch(artifactsDir) {
 // 1. PAUSE — resumable waiting_for_provider on a full strand (spill-first gate)
 // ───────────────────────────────────────────────────────────────────────────
 
-test("DC-4 pause: a full strand pauses to a resumable waiting_for_provider state (not an immediate terminal)", async (t) => {
+test.concurrent("DC-4 pause: a full strand pauses to a resumable waiting_for_provider state (not an immediate terminal)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -139,7 +139,7 @@ test("DC-4 pause: a full strand pauses to a resumable waiting_for_provider state
   expect(!active.partial_completion_terminal, "a resumable pause is NOT a partial-completion terminal").toBeTruthy();
 });
 
-test("DC-4 spill-first gate: the pause never fires while a pool still has capacity (no strand → no pause)", async (t) => {
+test.concurrent("DC-4 spill-first gate: the pause never fires while a pool still has capacity (no strand → no pause)", async (t) => {
   const { artifactsDir, runDir, taskList } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -177,7 +177,7 @@ test("DC-4 spill-first gate: the pause never fires while a pool still has capaci
   expect(!active.paused_state, "no paused state persisted on a clean completion").toBeTruthy();
 });
 
-test("DC-4 resume: re-discovered net-new capacity clears the pause (back to running)", async (t) => {
+test.concurrent("DC-4 resume: re-discovered net-new capacity clears the pause (back to running)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -209,7 +209,7 @@ test("DC-4 resume: re-discovered net-new capacity clears the pause (back to runn
   expect(!afterResume.paused_state, "the paused state is cleared on resume").toBeTruthy();
 });
 
-test("DC-4 settled set: a spilled-then-exhausted pool is never re-offered as net-new (INV-S03)", async (t) => {
+test.concurrent("DC-4 settled set: a spilled-then-exhausted pool is never re-offered as net-new (INV-S03)", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -235,7 +235,7 @@ test("DC-4 settled set: a spilled-then-exhausted pool is never re-offered as net
   expect(result.paused_state.lifecycle.pause_count, "pause_count advanced (no resume)").toBe(1);
 });
 
-test("DC-4 terminal: the pause promotes to a partial-completion terminal after the livelock limit", async (t) => {
+test.concurrent("DC-4 terminal: the pause promotes to a partial-completion terminal after the livelock limit", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
 
@@ -286,7 +286,7 @@ function bundleWithUnits(checkpoint) {
   };
 }
 
-test("DC-4 scope-annotate: design-review units show [in scope] / [excluded: reason] from excluded_scope", () => {
+test.concurrent("DC-4 scope-annotate: design-review units show [in scope] / [excluded: reason] from excluded_scope", () => {
   const checkpoint = {
     schema_version: "intent-checkpoint/v1",
     confirmed_at: "2026-06-19T00:00:00Z",
@@ -299,7 +299,7 @@ test("DC-4 scope-annotate: design-review units show [in scope] / [excluded: reas
   expect(prompt, "excluded unit carries the structured reason").toMatch(/unit-excl \[excluded: third-party code\]/);
 });
 
-test("DC-4 scope-annotate: a disposition_overrides 'excluded' status also marks a unit excluded", () => {
+test.concurrent("DC-4 scope-annotate: a disposition_overrides 'excluded' status also marks a unit excluded", () => {
   const checkpoint = {
     schema_version: "intent-checkpoint/v1",
     confirmed_at: "2026-06-19T00:00:00Z",
@@ -315,7 +315,7 @@ test("DC-4 scope-annotate: a disposition_overrides 'excluded' status also marks 
   expect(disp.reason).toBe("generated");
 });
 
-test("DC-4 scope-annotate (no-verbatim): free_form_intent is NEVER threaded into the prompt", () => {
+test.concurrent("DC-4 scope-annotate (no-verbatim): free_form_intent is NEVER threaded into the prompt", () => {
   const secret = "EXCLUDE-EVERYTHING-UNDER-vendor-AND-be-extra-careful-with-auth";
   const checkpoint = {
     schema_version: "intent-checkpoint/v1",
@@ -334,7 +334,7 @@ test("DC-4 scope-annotate (no-verbatim): free_form_intent is NEVER threaded into
   }
 });
 
-test("DC-4 scope-annotate: a unit with ANY in-scope file stays in scope (not excluded)", () => {
+test.concurrent("DC-4 scope-annotate: a unit with ANY in-scope file stays in scope (not excluded)", () => {
   const checkpoint = {
     schema_version: "intent-checkpoint/v1",
     confirmed_at: "2026-06-19T00:00:00Z",
@@ -347,7 +347,7 @@ test("DC-4 scope-annotate: a unit with ANY in-scope file stays in scope (not exc
   expect(disp.kind, "a partially-excluded unit is not fully excluded").toBe("in_scope");
 });
 
-test("DC-4 scope-annotate: no checkpoint → every unit defaults to [in scope]", () => {
+test.concurrent("DC-4 scope-annotate: no checkpoint → every unit defaults to [in scope]", () => {
   const prompt = renderDesignReviewPrompt(bundleWithUnits(undefined));
   expect(prompt).toMatch(/unit-incl \[in scope\]/);
   expect(prompt).toMatch(/unit-excl \[in scope\]/);
@@ -357,7 +357,7 @@ test("DC-4 scope-annotate: no checkpoint → every unit defaults to [in scope]",
 // 3. FOLD-INGEST — CE-009 folded-vs-separate stale-set equivalence
 // ───────────────────────────────────────────────────────────────────────────
 
-test("DC-4 fold-ingest (CE-009): folded ingestion leaves the SAME staleness set as a separate ingest round", async () => {
+test.concurrent("DC-4 fold-ingest (CE-009): folded ingestion leaves the SAME staleness set as a separate ingest round", async () => {
   await withTempDir("dc4-ce009-", async (root) => {
     await writeFixtureRepo(root);
     const { planning, lineIndex } = await advanceFixtureToPlanning(root);

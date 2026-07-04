@@ -11,13 +11,21 @@ Remote `audit-tools`, branch `main` (not origin, not master).
 **ONE package** (`audit-tools`), shipping both bins `audit-code` + `remediate-code`. Imports use the
 `audit-tools/shared` subpath export — never a separate `@audit-tools/shared` workspace dep.
 
-## 1. Preflight gate
+## 1. Preflight gate (fast local fast-fail — CI is the authoritative full gate)
+
+The full vitest suite is ~93% of the gate and takes minutes on Windows, which is *not* the authoritative
+signal (Linux CI is). CI now runs the full suite **sharded across parallel jobs** (~2× faster) as the real
+gate, so the local preflight is a quick fast-fail, not the full run.
 
 - Fresh worktree → `npm install` first (otherwise tsc resolves `audit-tools/shared` against a stale `dist/` → fake "missing export" errors).
 - `npm run build && npm run check` from repo root — zero errors.
-- Tests with CLAUDECODE unset (set = one audit-code provider test fails): Bash tool, `env -u CLAUDECODE npm test`.
-  (`npm test` = build + node:test shared+audit + vitest remediate.)
-- Failing test → rerun alone before calling it a regression; EBUSY/EPERM = flake suspect first.
+- Fast local checks with CLAUDECODE unset (set = one audit-code provider test fails), Bash tool:
+  `env -u CLAUDECODE npx vitest run --changed` (only tests touching your uncommitted edits) +
+  `env -u CLAUDECODE npm run smoke:packaged-audit-code && env -u CLAUDECODE npm run smoke:packaged-remediate-code`.
+- Want the belt-and-suspenders full local run anyway? `env -u CLAUDECODE npm run verify:release`
+  (= `verify:checks` + full vitest) — but the sharded CI gate re-runs it authoritatively either way.
+- Failing test → rerun alone before calling it a regression; EBUSY/EPERM = flake suspect first (the smokes
+  pack a tarball and are Windows-flaky on temp-dir EPERM/EBUSY).
 
 ## 2. Commit + push
 
@@ -29,10 +37,11 @@ Remote `audit-tools`, branch `main` (not origin, not master).
 - Repo root, CLAUDECODE unset: `env -u CLAUDECODE npm run release:patch:publish` (or `:minor:` / `:major:`).
   `scripts/release-and-publish.mjs` runs a fast local pre-tag gate (`npm run check` only — the full `verify:release`
   already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
-  the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`, which runs the full `verify:release`
-  chain — check + check:deadcode + check:doc-manifest + test + verify:hosts + the two `smoke:*` scripts — before
-  publish), then waits for the CI run + npm propagation. **Trusted publishing is configured + working** — no
-  tokens, no local bootstrap.
+  the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as
+  parallel jobs — `gate` (`verify:checks`: check + deadcode + doc-manifest + build + host verifies + both
+  `smoke:*`) plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job (`needs: [gate, test]`)
+  uploads. The release script then waits for the whole run + npm propagation. **Trusted publishing is
+  configured + working** — no tokens, no local bootstrap.
 - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.
 - The smokes pack ONE tarball; Windows-flaky on temp-dir EPERM/EBUSY — re-run a smoke before calling it a regression.
 - Local Windows-green ≠ Linux-CI-green — the release CI run is the real signal.
