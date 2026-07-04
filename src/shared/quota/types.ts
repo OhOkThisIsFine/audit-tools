@@ -18,6 +18,13 @@ export const HostConcurrencyLimitSourceSchema = z.enum([
   "host_reported",
   "session_config",
   "environment",
+  // Read from a host's own config file (e.g. Codex `~/.codex/config.toml`
+  // `[agents].max_threads`) — a real discovered value, not an env reading.
+  "discovered_config",
+  // A documented product default applied when the host exposes no configurable
+  // signal (e.g. Codex's default `agents.max_threads` of 6). Honestly labelled
+  // as a known constant rather than masquerading as an environment reading.
+  "known_default",
 ]);
 export type HostConcurrencyLimitSource = z.infer<
   typeof HostConcurrencyLimitSourceSchema

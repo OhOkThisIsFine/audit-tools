@@ -77,6 +77,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
+- **Minor UX nit: reusing an existing `intent_checkpoint.json` gives the host no visible notice.** Reuse is
+  by design (`conceptualDispatch.ts`: `intent_checkpoint.design_review` = source of truth) and is fine — the
+  only small transparency gain would be surfacing "reusing intent from <ts>: <lenses/depth>" so a host knows
+  intake was skipped intentionally. NOT a bug; low priority. [[guidance-discovery-contextualizes]]. Codex 2026-07-03.
+
+- **`next-step` emits repeated `staleness` chatter while regenerating artifacts.** Harmless but noisy — many
+  `staleness` records surfaced to host during artifact regen. Consider collapsing to a single summary line.
+  Codex run 2026-07-03.
+
 ## Forward tracks
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** Emit-time constraint seam +
@@ -231,6 +240,13 @@ Standing gotchas worth keeping for any agent (strong or weak):
   For a broad mechanical sweep over a shared file set, run it as ONE serial agent (or partition by
   NON-overlapping files), never an uncoordinated fan-out; and never hand-edit the same files while a
   background agent is live on them.
+- **`rtk` compresses files you need verbatim.** When reading the `audit-code` skill body or `docs/backlog.md`
+  through `rtk read`, content gets partially summarized with retrieval hashes → not exact. For any file you must
+  act on verbatim, use raw `Get-Content -Raw` (or the Read tool), not `rtk read`.
+- **`rtk proxy` runs executables, not PowerShell cmdlets.** `rtk proxy Get-Content` / `rtk proxy Get-ChildItem`
+  fail (cmdlets aren't standalone exes). Working form: `rtk proxy powershell -NoProfile -Command "..."`.
+- **`rtk proxy rg` fails with `Access is denied`** (Codex/win32). Fallback: PowerShell `Select-String` (or the
+  Grep tool).
 - **Never pass `isolation: "worktree"` to the Agent tool when dispatching a remediate-code/audit-code implement
   node.** The tool's own dispatch plan already creates and names the node's worktree; adding the Agent tool's
   OWN `isolation: "worktree"` spawns a second, unrelated git worktree and the subagent edits source files there
