@@ -29,6 +29,38 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Capability handshake is inherited from the run/original auditor, not the current one.** When a
+  different auditor resumes an audit (run started in Codex, resumed by Claude Code), a `next-step` that
+  omits the capability flags resolves the dispatch pool from the **stored session config**
+  (`resolveFreshSessionProviderName` → the pinned original provider) and sizes against *that* provider's
+  quota — e.g. a Claude-driven host fan-out was sized to Codex's `provider_default` 2-slot window. Two
+  defects: (1) step-prompt continue-commands omit the `--host-*` capability flags, so the handshake is
+  silently lost on every step after the first — "works only because the host re-appends flags the prompt
+  dropped" (auditor-agnostic-robustness violation); (2) dispatch quota/provider is keyed to the run's
+  original auditor instead of whoever drives the current step. Fix: capability (concurrency / window /
+  quota-key) must be discovered per-invocation from the **current** auditor and never inherited from the
+  run — a host-subagent-driven dispatch must size to the host's own reported capability, not the stored
+  provider pool; only per-`(provider,model)` *learned quota* persists (keyed by auditor identity). See
+  [[capability-is-per-auditor-not-per-audit]]. **Not yet fixed** — design change touching
+  `src/audit/cli/dispatch/quotaPool.ts` + `nextStepCommand.ts` + step-prompt rendering.
+  - **Design of record: [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md)** (status:
+    proposed). The fix generalized past "capability" into a full dispatch rework: **concurrency is the
+    wrong primitive** -> admit one task at a time on a live per-pool token budget (concurrency emergent);
+    self-describing per-invocation pool descriptors; a shared, `withFileLock`-guarded, account-keyed
+    (`provider#account/model`) **reservation ledger** to avoid clobbering the shared provider meter
+    (proactive for co-located consumers, reactive shared-key backoff cross-machine). See
+    [[dispatch-admission-control-design]]. **Owner not yet fully convinced** — the spec's *Open tensions*
+    section holds the unresolved objections (output-token unknowability; ledger-is-a-proxy / possibly
+    over-built vs reactive-only). Resolve those before building.
+
+- **Staleness churn from incidental array order — FIXED 2026-07-03.** `repo_manifest.files[]` was emitted
+  in raw `readdir` order → churned content_hash on every re-extraction → cascaded phantom staleness down
+  the DAG → redundant (expensive) design-review LLM re-runs on resumed audits. Fixed by path-sorting
+  `files[]` in `buildRepoManifest` (`src/audit/extractors/fileInventory.ts`); downstream extractors were
+  already order-stable. See [[staleness-churn-repo-manifest-file-order]]. Standing guard: `stableStringify`
+  preserves array order, so any new extractor emitting an incidentally-ordered array is a latent
+  churn source — emit stable-keyed order.
+
 - **Quota-aware dispatch — SHIPPED; live validation env-bound.** The token-budget dispatch gate is
   code-complete (per-`(pool,window-label)` learned tokens-per-percent slope, budget = MIN across a
   pool's windows, quota-death = retryable pause preserving worktrees). **Still open:** live validation
