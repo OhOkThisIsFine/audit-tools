@@ -115,17 +115,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   intake was skipped intentionally. NOT a bug; low priority. [[guidance-discovery-contextualizes]]. Codex 2026-07-03.
 
 - **`next-step` emits repeated `staleness` chatter while regenerating artifacts.** Harmless but noisy — many
-  `staleness` records surfaced to host during artifact regen. Consider collapsing to a single summary line.
-  Codex run 2026-07-03.
+  `staleness` records surfaced to host during artifact regen. Fix (collapse to a single summary line via
+  `nextStepCommand` aggregation) is owned by CP-NODE-7; remove this bullet once that node lands. Codex run
+  2026-07-03.
 
-- **Committed host assets drift from the renderer without a gate.** Running
+- **Committed host assets drift from the renderer without a gate — BEING REMEDIATED (CP-NODE-10).** Running
   `audit-code install` / `remediate-code install` to regenerate committed host assets also
   rewrote `AGENTS.md`, `opencode.json`, and `.github/copilot-instructions.md` with structural
   template changes unrelated to the prompt-body edit — i.e. those files had silently drifted from
   current renderer output. Only `.gemini/commands/audit-code.toml` + `.github/agents/auditor.agent.md`
-  are drift-guarded (`host-asset-renderer-drift.test.mjs`); AGENTS/opencode/copilot are not, so they
-  rot undetected. Fix: extend the no-drift guard to every committed install artifact (or regen them in
-  `verify:release`). Found 2026-07-03 while reworking the concurrency handshake.
+  were drift-guarded (`host-asset-renderer-drift.test.mjs`); AGENTS/opencode/copilot were not, so they
+  rotted undetected. Fix: extend the no-drift guard to every committed install artifact. Found 2026-07-03
+  while reworking the concurrency handshake; the guard extension + drifted-asset regen is landing via
+  CP-NODE-10 in this remediation run — remove this bullet once that node merges.
 
 ## Forward tracks
 

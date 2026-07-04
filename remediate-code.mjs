@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Thin wrapper: locates the built dist and delegates to it.
-// Supports: run, install, ensure, validate
+// Interprets the installer verbs (install, ensure, verify-install, install-host)
+// locally via the B2 bootstrap; every other verb (e.g. next-step) is forwarded
+// to dist/remediate/index.js.
 
 import { fileURLToPath } from "url";
 import { pathToFileURL } from "url";
