@@ -126,6 +126,47 @@ test("validate fails loudly on corrupted artifact json", async () => {
   });
 });
 
+test("loadSessionConfig fails closed on an invalid config field (no permissive default)", async () => {
+  await withTempRepo(async (root) => {
+    const artifactsDir = join(root, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    // A tampered/invalid config: dangerously_skip_permissions must be a boolean.
+    // Fail-closed means loadSessionConfig REJECTS rather than degrading to {}.
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify(
+        { claude_code: { dangerously_skip_permissions: "yes" } },
+        null,
+        2,
+      ),
+    );
+
+    const { loadSessionConfig } = await import(
+      "../../src/audit/supervisor/sessionConfig.ts"
+    );
+    await expect(loadSessionConfig(artifactsDir)).rejects.toThrow(
+      /session-config\.json/i,
+    );
+  });
+});
+
+test("dispatch + semantic-review load session-config fail-closed (no swallow-to-empty)", async () => {
+  // Guard: the fail-open `.catch(() => ({} as SessionConfig))` that silently
+  // degraded a tampered/invalid session-config to an empty (permissive) default
+  // must never be reintroduced at the dispatch / semantic-review seams. Both must
+  // let loadSessionConfig's validation error propagate, matching every sibling
+  // caller (advanceAuditCommand/nextStepCommand/prepareDispatchCommand/quotaCommand).
+  const sources = await Promise.all(
+    ["dispatch.ts", "semanticReviewStep.ts"].map((name) =>
+      readFile(join(repoRoot, "src", "audit", "cli", name), "utf8"),
+    ),
+  );
+  for (const source of sources) {
+    expect(source).toContain("loadSessionConfig(artifactsDir)");
+    expect(source).not.toMatch(/catch\(\s*\(\)\s*=>\s*\(\{\}\s*as SessionConfig\)\s*\)/);
+  }
+});
+
 test("loadSessionConfig default leaves provider unspecified for auto-resolution", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
