@@ -30,7 +30,7 @@ The supported user-facing surfaces are:
 5. `audit-code install` for explicit repair or force refresh
 6. `audit-code` as the repo-local backend fallback
 
-Anything below `dist/index.js` is backend or development interface.
+Anything below `dist/` is backend or development interface.
 
 ## Product model
 
