@@ -124,7 +124,7 @@ parallel-dispatch-overlapping-files-is-goal)*
 
 Arbitrary agents/IDEs/providers contribute to the SAME audit/remediation (JOIN, not isolate) — symmetric
 peers, no primary/secondary. Needs per-run state namespaces + task-claim locking, not single-writer state.
-*(home: memory: multi-ide-concurrent-runs-design)*
+*(home: `spec/multi-ide-concurrent-runs-design.md`; memory: multi-ide-concurrent-runs-design)*
 
 ## A10. Analyzers & dependencies (the product's ingestion of external tools)
 
@@ -141,7 +141,7 @@ peers, no primary/secondary. Needs per-run state namespaces + task-claim locking
   `estimateTokensFromBytes` is the standard; learned RPM/TPM limits authoritative.
 - **Quota awareness must pace, not just observe** — don't burn the window in parallel and all hit the wall
   at once; quota death is a retryable pause, not a failure. Red line: never IDE-GUI automation.
-*(home: `CLAUDE.md` → Preferences; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
+*(home: `spec/dispatch-token-budget-gate.md`, `docs/quota-dispatch-design.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
 
 ---
 
