@@ -2044,10 +2044,12 @@ export function selfContainedVerifyCommands(
 
 /** A repo-relative test path → the runner that executes that file directly. */
 function verifyRunnerForTestFile(repoRelPath: string): string | undefined {
-  // node:test suites (audit/shared) — run via the tsx loader so the TS source the
-  // test imports needs no prior build. vitest suites (remediate) — `vitest run`.
-  if (/^tests\/.+\.test\.mjs$/.test(repoRelPath)) return "node:test";
-  if (/^tests\/.+\.test\.(ts|tsx)$/.test(repoRelPath)) return "vitest";
+  // ONE vitest runner across all suites (audit / shared / remediate). The node:test
+  // split was retired 2026-07-02, so every tracked `.test.mjs` / `.test.ts` file is a
+  // vitest file — running a `.mjs` vitest suite under `node --test` throws "Vitest
+  // failed to access its internal state". vitest resolves `audit-tools/shared` via its
+  // config alias, so a per-node worktree needs no prior build (`npx vitest run <file>`).
+  if (/^tests\/.+\.test\.(mjs|ts|tsx)$/.test(repoRelPath)) return "vitest";
   return undefined;
 }
 
@@ -2065,18 +2067,12 @@ function verifyRunnerForTestFile(repoRelPath: string): string | undefined {
 /** Pure assembly (git-free) of the verify commands for a set of edited paths —
  *  the testable core of {@link deriveVerifyCommandsFromBranch}. */
 export function verifyCommandsForEdits(editedFiles: Iterable<string>): string[] {
-  const nodeTests: string[] = [];
   const vitestTests: string[] = [];
   for (const f of editedFiles) {
     const rel = f.replace(/\\/g, "/");
-    const runner = verifyRunnerForTestFile(rel);
-    if (runner === "node:test") nodeTests.push(rel);
-    else if (runner === "vitest") vitestTests.push(rel);
+    if (verifyRunnerForTestFile(rel) === "vitest") vitestTests.push(rel);
   }
   const cmds = ["npm run check"];
-  if (nodeTests.length > 0) {
-    cmds.push(`node --import tsx/esm --test ${nodeTests.sort().join(" ")}`);
-  }
   if (vitestTests.length > 0) {
     cmds.push(`npx vitest run ${vitestTests.sort().join(" ")}`);
   }
