@@ -11,8 +11,14 @@
 - On npm as `latest` at **v0.32.5** (both global bins reinstalled + verified live). Per-lap shipped detail
   is NOT narrated here (changelog creep — see `git log` and project memory [[live-status]]); this section is
   the current-state + open-work roadmap only.
-- **Immediate next:** none pending. All T1–T5 code-complete tracks shipped; remaining work is deferred T5
-  residuals + env-bound live validations (see below).
+- **Immediate next:** (1) the owner is running the paused audit-tools self-audit to completion in a fresh
+  conversation — note it will dispatch at the codex-pinned concurrency until the dispatch rework lands.
+  (2) **Dispatch admission-control rework** — design of record captured at
+  [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (status: proposed).
+  Resolve its *Open tensions* (esp. output-token unknowability; ledger-is-a-proxy / possibly over-built vs
+  reactive-only) **before** building. See T5.6 below.
+- Staleness-churn fix (path-sort `repo_manifest.files`) committed + pushed to `main` 2026-07-03, **not yet
+  published** (batch with the dispatch rework rather than cut a release for one `sort()`).
 - **Open items** (all in `docs/backlog.md`): env-bound live validations (quota pre-wall pacing, friction
   escalation, selective-deepening convergence, multi-IDE cooperative runs, clippy/rubocop live spawn);
   provider-blocked schema CE-004. *(Resolved 2026-07-03 v0.32.5: knip dead-code widen shipped; mutation
@@ -84,6 +90,14 @@ validation on a real deepening-capable run remains env-bound (T6-class).
    already-cheap paths), E5 dropped (tolerant-by-design), E4 confirmed intentional + wired to the
    cyclic-seam resolver (`contractPipelineGates.ts` + `cyclicSeamResolution.ts`). Nothing open.
 5. **remediate-code multi-host installer/generator parity — ✅ SHIPPED (v0.32.0).** Nothing open.
+6. **Dispatch admission-control rework — 🟡 DESIGN PROPOSED, not built.** Design of record:
+   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)
+   ([[dispatch-admission-control-design]], [[capability-is-per-auditor-not-per-audit]]). Root: dispatch
+   capability/quota is inherited from the run's original auditor, and `concurrency` is the wrong primitive.
+   Target: admit one task at a time on a live per-pool token budget (concurrency emergent); per-invocation
+   self-describing pool descriptors; shared account-keyed reservation ledger. **Loop-core change → full
+   pipeline.** Blocked on resolving the spec's *Open tensions* first (output-token unknowability;
+   proxy-vs-meter / over-built vs reactive-only). Staleness-churn precursor fix already shipped to `main`.
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist
