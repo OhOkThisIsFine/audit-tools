@@ -22,10 +22,12 @@ this doc is the architecture those track against.
 
 ## Reconciled seams (single source of truth per seam)
 
-- **content-key (O2↔F1):** ONE shared canonical key over `{unit_id, lens, pass_id, task-content
-  signature}`; O2 ledger re-association and F1 element staleness both import it. *Tension to resolve:
-  re-association wants stability across re-plan; staleness wants it to bump on upstream change — prove
-  one key serves both, or derive two keys from one canonical input with a documented relating invariant.*
+- **content-key (O2↔F1):** ONE canonical-input derivation chain (`src/shared/contentKey.ts`) yields three
+  nested keys — `identityKey` (grouping, excludes task-content signature), `idempotencyKey`
+  (signature-stable re-association/idempotency anchor), `contentKey` (signature-sensitive staleness
+  driver) — related by a documented invariant (equal `contentKey` ⟹ equal `idempotencyKey` ⟹ equal
+  `identityKey`). O2's ledger re-association and F1's element-staleness gate both import all three from
+  this single seam.
 - **semantic-equivalence gate (O2↔F1↔D8):** O2 exports ONE reusable gate; F1/D8 consume; `staleness.ts`
   edit order O2→F1→D8. The verdict must be cached/persisted in `artifact_metadata` so the staleness DAG
   stays reproducible across runs (LLM sampling otherwise flips it).
