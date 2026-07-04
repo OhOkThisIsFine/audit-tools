@@ -133,19 +133,21 @@ the `implementation_dag` skeleton **deterministically**, not authored. The mappi
 >
 > **Decision: S2 dropped, and `repairDownstreamPhases` has since been deleted** (it had no correct
 > caller — the staleness DAG supersedes it; see the removal comment at
-> `validation/contractPipelineGates.ts:1225-1234`). S4 (below) is unaffected and shipped. Original
-> (flawed) S2 text retained below for the record:
+> `validation/contractPipelineGates.ts:1225-1234`). S4 (below) is unaffected and shipped. The
+> original (flawed) S2 design is recorded below in past tense for the record:
 
-On `needs_repair`, the LLM emits a **targeted patch** ("add INV-X to module Y", "refine INV-Z
-text") — not a full rewrite. The tool applies the patch, re-derives downstream artifacts with the
-S1 derivers (no re-authoring), and re-runs **only the adversarial phases** the already-existing-but-
-unwired `repairDownstreamPhases` computes.
-- **Plug-in:** `renderContractRepairPrompt` (switch "rewrite in full" → a patch op); wire
-  `repairDownstreamPhases` into the repair loop (it is currently dead code); reuse the staleness DAG
-  only for what genuinely can't be re-derived.
-- **Effect:** the run's two repair rounds re-authored ~10 downstream artifacts total; this collapses
-  them to "apply small patch → re-derive → re-run critic+judge." Biggest single token saving for the
-  expensive adversarial phase.
+S2 was designed so that, on `needs_repair`, the LLM would emit a **targeted patch** ("add INV-X to
+module Y", "refine INV-Z text") rather than a full rewrite. The tool would apply the patch, re-derive
+downstream artifacts with the S1 derivers (no re-authoring), and re-run **only the adversarial
+phases** the (then existing-but-unwired) `repairDownstreamPhases` computed.
+- **Would-have-been plug-in:** `renderContractRepairPrompt` (switch "rewrite in full" → a patch op);
+  wire `repairDownstreamPhases` into the repair loop (then dead code); reuse the staleness DAG only
+  for what genuinely couldn't be re-derived.
+- **Intended effect:** the run's two repair rounds re-authored ~10 downstream artifacts total; the
+  patch shape would have collapsed them to "apply small patch → re-derive → re-run critic+judge."
+  This was the largest projected single token saving for the expensive adversarial phase — but the
+  staleness DAG already delivered the downstream half better, so S2 was dropped (see the correction
+  above).
 
 ### S3 — Skeleton scaffolding + write-time validation *(the weak-model enabler)* — ✅ SHIPPED
 The tool emits a **pre-filled skeleton**

@@ -2,6 +2,7 @@
   "name": "audit-tools",
   "version": "0.32.7",
   "private": false,
+  "license": "ISC",
   "description": "Portable hybrid code auditing + remediation orchestrators for arbitrary repositories.",
   "type": "module",
   "bin": {

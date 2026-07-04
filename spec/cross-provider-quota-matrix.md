@@ -1,10 +1,10 @@
-# Cross-provider quota-signal matrix (research deliverable)
+# Cross-provider quota-signal matrix
 
-> Research, 2026-06-16. The per-provider `QuotaSource` matrix the backlog calls for
-> (*Cross-IDE/provider quota detection*). Feeds the audit-tools cross-provider quota
-> build — the generalization of the shipped Claude `ClaudeOAuthQuotaSource` to the
-> rest of the pool. Endpoints below are **undocumented/internal** (read from each
-> tool's open source or reverse-engineered); defensive-parse + graceful-degrade always.
+> Design rationale for the shipped per-provider `QuotaSource` set — the generalization of the
+> Claude `ClaudeOAuthQuotaSource` to the rest of the pool (`src/shared/quota/`). Records why each
+> backend's signal was chosen: the endpoint, credential path, and mapping each `QuotaSource`
+> implements. Endpoints below are **undocumented/internal** (read from each tool's open source or
+> reverse-engineered); defensive-parse + graceful-degrade always.
 
 ## Goal + contract
 

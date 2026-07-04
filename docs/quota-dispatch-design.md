@@ -114,8 +114,8 @@ with two conversation-first paths: (1) if the host has built-in access to its ow
 usage, report it so the run can pace from it and it can be wired in; (2) else OFFER to
 research the provider's quota endpoint / a third-party tool that solved it, and on the
 user's consent report the findings (endpoint, credential location, response shape) so a
-new `QuotaSource` is added — the progressive-coverage flywheel. Implemented:
-`coverage.ts`, `quotaCoverageNudge.ts`, surfaced by `apiPool.ts` + both orchestrators'
+new `QuotaSource` is added — the progressive-coverage flywheel. `coverage.ts` and
+`quotaCoverageNudge.ts` realize this, surfaced by `apiPool.ts` + both orchestrators'
 dispatch prompts.
 
 ### 4b. Dev-side coverage routine (scheduled)
@@ -152,10 +152,10 @@ and vice-versa. This is the intended way to get more aggregate Claude throughput
 subagents out to a second account's CLI — so the design must keep the two readings separate
 rather than letting one credential's snapshot masquerade as both.
 
-**Implemented** (the key + resolution + stamping; see `scheduler.ts buildProviderModelKey`,
-`httpQuotaSource.ts parseProviderModelKey`, `quotaSource.ts resolveAccountIdSafe`,
-`apiPool.ts buildHostModelPools`/`buildSourcePool`, `compositeQuotaSource.ts
-buildAccountScopedQuotaSource`):
+The key + resolution + stamping is realized across `scheduler.ts` `buildProviderModelKey`,
+`httpQuotaSource.ts` `parseProviderModelKey`, `quotaSource.ts` `resolveAccountIdSafe`,
+`apiPool.ts` `buildHostModelPools`/`buildSourcePool`, and `compositeQuotaSource.ts`
+`buildAccountScopedQuotaSource`:
 - The quota key carries an **account discriminator**, not just provider/model. A bare
   `provider/model` key is only sufficient when there is exactly one account for that
   provider in the run; once a second same-provider account is a dispatch target, the

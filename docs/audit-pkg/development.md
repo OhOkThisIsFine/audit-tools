@@ -103,10 +103,11 @@ ecosystem-specific parser.
 
 Before treating a build as production-ready, verify the full review loop in one
 real host (`prepare-dispatch` → worker reviews each packet → `submit-packet` →
-`merge-and-ingest` → `validate`), then run `npm run verify:release` from a clean
-checkout. On Windows, runtime validation runs package-manager shims (`npm`,
-`npx`, `pnpm`, `yarn`) through the command shell so `.cmd` wrappers execute
-reliably — keep that covered when changing runtime command execution. If the
+`merge-and-ingest` → `validate`), then run the release gate from a clean
+checkout (see [`release.md`](release.md) for what `npm run verify:release`
+covers and when to run it). Keep runtime command execution covered when
+changing it — including the Windows package-manager-shim path (see the Windows
+notes in [`operator-guide.md`](operator-guide.md)). If the
 final `audit-report.md` cannot be promoted from `.audit-tools/audit/` to
 `.audit-tools/audit-report.md` due to local permissions, completion still succeeds and the
 pre-promotion copy under `.audit-tools/audit/` is authoritative.

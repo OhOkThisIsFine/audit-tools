@@ -71,7 +71,7 @@ design review.
 
 **Orchestrator prepares before showing the host:**
 
-*Scope pre-digest (existing, improved):*
+*Scope pre-digest:*
 - Full/delta mode, files in scope, in-scope directory breakdown
 - Excluded files displayed collapsed by directory prefix: if every file under a
   prefix shares the same status and reason, show the directory once with a file
@@ -80,12 +80,12 @@ design review.
   unusual projects. Generalize the aggregation already present in
   `buildFileDisposition` for vcs-ignored files above 200.
 
-*Disposition override proposals (new):*
+*Disposition override proposals:*
 - Scan `file_disposition` for suspicious inclusions the heuristics missed
   (build output, vendored code, generated files that slipped through)
 - Propose per-file or per-directory status corrections with reasons
 
-*Lens proposals (new):*
+*Lens proposals:*
 - Analyze `design_assessment` findings and codebase character to propose lens
   inclusions and exclusions
 - Examples: no network code → suggest dropping `operability`; heavy crypto
@@ -163,13 +163,14 @@ host_delegation agents (the conceptual pass expanding to its perspective fan-out
 under deep). Finding sets merge into synthesis as distinct report sections,
 separate from auditor findings.
 
-**Structured output:** both agents WRITE their findings JSON directly to a
-result path (via their own Write tool), then reply with a short confirmation —
-not inline emission. An earlier design tried inline emission with the skill
-writing the reply to disk; that mechanism was tried and reverted (it silently
-dropped results), so the target design itself is the worker-writes-the-file
-pattern audit-code's packet dispatch already uses
-(`src/audit/cli/dispatch/packetPrompt.ts`).
+**Structured output:** every worker — design-review agents, auditor workers, and
+the synthesis-narrative agent alike — WRITES its result JSON directly to a result
+path (via its own Write tool), then replies with a short confirmation. Inline
+emission (the worker returns the payload for the skill to capture and write) is
+rejected because it silently drops results; the worker-writes-the-file pattern is
+the design of record, matching audit-code's packet dispatch
+(`src/audit/cli/dispatch/packetPrompt.ts`, which asserts the write-instruction
+wording via a regression test).
 
 **Prompt caching:** the shared structural context block (graph, surfaces, flows,
 risk register, file inventory) is identical for both agents. It goes first in
@@ -211,12 +212,13 @@ plan/dispatch seam).
 
 ## Dispatch — rolling, quota + capability-routed
 
-**No pre-computed wave size.** Dispatch is not batched into fixed waves.
-
-**No separate concurrency cap.** With accurate token estimation, quota limits
-are the only throttle. RPM and TPM per provider/model are tracked from: prior
-quota queries, estimated in-flight token usage per task, and results as they
-arrive.
+The rolling/admission-control model — one-at-a-time admission against a live
+per-pool budget, emergent concurrency, the shared account-keyed reservation
+ledger, and folded-in ingestion — is specified in
+[`audit/dispatch-admission-control.md`](audit/dispatch-admission-control.md).
+This section covers only what is unique to the audit side: how the
+task-affinity graph is partitioned into packets, how packets are risk-routed
+across model tiers, and prompt caching.
 
 **JIT graph partition (no plan-time packets).** Each time a provider picks up the
 run it performs a capability handshake — the models it can dispatch to right now
@@ -242,25 +244,11 @@ authority or matched to a name table. Handshake, partition, and routing are neve
 persisted as decisions — the dispatch-quota/capacity artifacts record this
 session's JIT choices, not authority.
 
-**Rolling dispatch loop:**
-1. Check quota state across all providers in the confirmed pool
-2. Dispatch all packets that fit within available quota, matched to appropriate
-   providers by complexity
-3. As each result arrives: update quota estimates, immediately dispatch the next
-   fitting packet
-4. Continue until all tasks complete
-
-**Ingestion folded in:** when results arrive, ingestion and re-dispatch happen
-in the same logical turn. No separate next-step call just to ingest.
-
 **Auditor structured output:** workers WRITE `AuditResult[]` directly to their
-result path with their own Write tool, then reply with a short confirmation —
-not inline emission (an earlier design tried emitting inline for the skill to
-capture and write; that mechanism was tried and reverted because it silently
-dropped results — see `src/audit/cli/dispatch/packetPrompt.ts`, which documents
-the revert and asserts the write-instruction wording via a regression test).
-Payload stays out of orchestrator context; orchestrator only sees the path.
-Workers do not execute a submit command.
+result path with their own Write tool, then reply with a short confirmation (the
+worker-writes-the-file pattern established under *Design review → Structured
+output*). Payload stays out of orchestrator context; orchestrator only sees the
+path. Workers do not execute a submit command.
 
 **Prompt caching for workers:** schema definition, general instructions, and
 repo metadata form a fixed shared prefix identical across all workers in a run.
@@ -282,9 +270,8 @@ Always fires; never skipped unless running headless (auto-complete writes
 `status: "omitted"` so headless runs still terminate cleanly).
 
 Host agent receives the findings and produces themes, executive summary, and
-top risks, and WRITES the result to disk itself — not inline emission (see the
-dispatch section above: this pattern was tried and reverted because it
-silently dropped results).
+top risks, and WRITES the result to disk itself (the worker-writes-the-file
+pattern established under *Design review → Structured output*).
 
 The existing `synthesisNarrativePrompt.ts` is kept; the change is adding the
 host_delegation wrapper and executor registration.

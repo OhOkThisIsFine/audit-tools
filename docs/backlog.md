@@ -144,14 +144,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     multi-pool fix: codex is not a good fit for large read-heavy audit packets under a wall-clock budget;
     route only small/low-line packets to it, or drop it from the audit pool.
 
-- **Staleness churn from incidental array order — FIXED 2026-07-03.** `repo_manifest.files[]` was emitted
-  in raw `readdir` order → churned content_hash on every re-extraction → cascaded phantom staleness down
-  the DAG → redundant (expensive) design-review LLM re-runs on resumed audits. Fixed by path-sorting
-  `files[]` in `buildRepoManifest` (`src/audit/extractors/fileInventory.ts`); downstream extractors were
-  already order-stable. See [[staleness-churn-repo-manifest-file-order]]. Standing guard: `stableStringify`
-  preserves array order, so any new extractor emitting an incidentally-ordered array is a latent
-  churn source — emit stable-keyed order.
-
 - **Quota-aware dispatch — live validation env-bound.** Still open: live validation of the token-budget
   dispatch gate (per-`(pool,window-label)` learned tokens-per-percent slope, budget = MIN across a
   pool's windows, quota-death = retryable pause preserving worktrees) on a real rate-limited
@@ -178,26 +170,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (packet-result `task_id` mismatch; idempotency_key collision across rounds) have shipped fixes and need
   a real deepening-capable run to confirm. Recovery until validated: quarantine orphan pending
   `deepening:*` tasks.
-  - **TRAP (still relevant if this class regresses):** host-side unblock attempts do NOT work and actively
-    corrupt gitignored run-state. Marking `status:complete` in `audit_tasks.json` is ignored; writing
-    `partial_completion_terminal.stranded_ids` is overwritten; appending results with unique idempotency
-    keys clears the obligation but cascades stale `planning_artifacts`. **There is NO host-side unblock —
-    the fix must be a code change, then a clean re-run.** Recovery affordance now SHIPPED:
-    `audit-code force-synthesis` stamps a tool-owned `operator_forced` partial-completion terminal over the
-    pending task ids (durable direct write to `active-dispatch.json`, the special-loaded artifact
-    `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
-    coverage — no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
-    `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)
   - **⬇ Live-run watch** (any audit whose findings trigger deepening — i.e. low-confidence/high-risk areas
     that spawn `deepening:*` tasks): every `deepening:*` task must **converge and complete** within a bounded
     number of rounds; the run reaches synthesis on its own. FAIL = orphaned pending `deepening:*` tasks, the
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
-
-- **Minor UX nit: reusing an existing `intent_checkpoint.json` gives the host no visible notice.** Reuse is
-  by design (`conceptualDispatch.ts`: `intent_checkpoint.design_review` = source of truth) and is fine — the
-  only small transparency gain would be surfacing "reusing intent from <ts>: <lenses/depth>" so a host knows
-  intake was skipped intentionally. NOT a bug; low priority. [[guidance-discovery-contextualizes]]. Codex 2026-07-03.
 
 - **`next-step` emits repeated `staleness` chatter while regenerating artifacts.** Harmless but noisy — many
   `staleness` records surfaced to host during artifact regen. **Retargeted 2026-07-04:** this is NOT a
@@ -219,6 +196,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   the auditor-agent parity invariant doesn't expect the remediate commands. Reconcile the two installers'
   ownership of `opencode.json` (or the INV-RCI-16 parity rule) before the remediate-side assets can be
   regen-guarded like the audit side.
+
+- **`planning_executor` omits `task_affinity_graph.json` from `artifacts_written` → staleness never bumped
+  (found 2026-07-04, doc-review).** `src/audit/orchestrator/planningExecutors.ts` writes fresh
+  `task_affinity_graph.json` content on every planning run, but its `artifacts_written` array doesn't list
+  it. `computeArtifactMetadata` only rehashes artifacts named in `artifacts_written`, so
+  `task_affinity_graph.json`'s staleness metadata is never bumped on a 2nd-or-later planning run despite the
+  content changing — a real staleness-detection gap. Fix: add `task_affinity_graph.json` to the executor's
+  `artifacts_written`.
+
+- **`id-glossary` guard test gives zero protection for `INV-o3-*` and can't separate O1/O2 (found
+  2026-07-04, doc-review).** `tests/shared/id-glossary.test.mjs` `TOKEN_RE` = `\bINV-[A-Z]\d+\b`:
+  (1) the case-sensitive `[A-Z]` never matches the lowercase `INV-o3-*` tokens actually used in
+  `src/shared/repair/emitValidateRepair.ts` → the `INV-o3` glossary row is entirely unguarded; (2) it
+  collapses `INV-O1` / `INV-O2` into one family bucket so the guard can't distinguish them. Fix `TOKEN_RE`
+  to match the real token grammar (allow lowercase family letters + per-id, not per-family, matching).
+
+- **`riskSignal.ts` header comment is stale — says slices 3/4 unwired when they are (found 2026-07-04,
+  doc-review).** `src/remediate/riskSignal.ts` states "Slices 3 and 4 are not wired yet, so computing the
+  signal changes no pipeline behavior today", but `src/remediate/steps/contractPipeline.ts` already imports
+  and uses `adversarialDepthForTier` and wires "T1 slice 4b". Correct the comment. (The
+  `spec/self-scaling-pipeline-design.md` doc side of this was already fixed in the doc-review pass.)
 
 ## Forward tracks
 
@@ -259,16 +257,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     is present + consent given, or a parse that drops all output. (No Rust/Ruby toolchain on the box →
     install `rustup` / `ruby`+`bundler` first, or point at a repo that vendors them.)
 
-- **Dead-code signal — RESOLVED 2026-07-03, soundness bar retired.** The knip analyzer candidate now
-  emits whole-file (`files`) and unused-dependency (`dependencies`) leads alongside unused-export leads
-  (`candidates.ts` `parseKnip` + `--include`), covering the class the crude low-in-degree
-  `deletion_candidate` graph signal only approximated. Deliberately **NOT** pursuing a "sound" dead-code
-  signal (entrypoint provenance + dynamic-import tracing): true soundness is undecidable in a
-  language-neutral static auditor (dynamic/dispatch/reflection wiring), and it fights the
-  leads-not-verdicts architecture the per-file lens already implements. Everything here is a LEAD the
-  lens confirms/refutes — never a direct finding. Graph-query heuristics + extraction-persisted
-  complexity/duplication/seams remain DONE (`deriveGraphSignals` pure reader).
-
 - **Cross-provider quota — live-endpoint confirmation.** Per-provider mappings validated against
   live-shaped fixtures; confirming each source against its **real** endpoint (Claude/Codex live; Copilot/
   Antigravity gated→degrade) is environment-bound. Per-provider recipes:
@@ -279,6 +267,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     fallback — confirm the quota reads are non-empty and move as the run consumes budget. Codex + Claude are
     reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
     real endpoint is reachable.
+
+- **Possibly bundle `headroom` and/or `rtk` into the shipped `audit-tools` install (owner, 2026-07-04).**
+  Idea: make installing `audit-tools` also provide the headroom token-proxy and/or the rtk token-optimizer,
+  so the token-efficiency tooling ships with the package instead of being set up separately per machine.
+  Scope/shape undecided (bundled bin? optional postinstall? peer tool?) — revisit when it firms up. (This
+  replaced the retired stale "Headroom over opentoken" CLAUDE.md bullet, whose orchestrator-internal
+  `headroom-ai`/`wrapForOpenToken` swap already happened or never materialized.)
+
+- **Low-pri UX: surface `intent_checkpoint` reuse to the host.** When a run reuses an existing
+  `intent_checkpoint.json`, the host gets no visible notice. Reuse is by design (`conceptualDispatch.ts`:
+  `intent_checkpoint.design_review` = source of truth); the only gain is transparency — surface
+  "reusing intent from <ts>: <lenses/depth>" so the host knows intake was intentionally skipped. Not a bug.
+  [[guidance-discovery-contextualizes]]
 
 ## Deferred / waiting
 
@@ -293,6 +294,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   hosts (Antigravity/OpenCode).
 - **Manual real-OpenCode validation** that agent-scoped permission allowances propagate to spawned
   subtasks. Folds into the A7 checklist.
+- **`/remediate-code` GUI-host manual checklist (parity with `/audit-code`).** `spec/host-validation.md` is
+  a manual GUI-host live-dispatch checklist for `/audit-code` only; `/remediate-code` has the automated
+  no-drift gate (`verify:remediate-hosts`) but no equivalent manual GUI-host checklist, which the
+  "keep orchestrators in parity" convention says it should have. Add a sibling `/remediate-code` checklist
+  (or extend `host-validation.md`). Folds into the A7 release-time GUI checklist work.
 - **Gated live e2es** skip without creds: `RUN_PROVIDER_MATRIX_E2E=1`, `RUN_NIM_E2E=1`,
   `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_AUTONOMY_E2E=1`.
 - **Provider `queryLimits`** deferred — revisit if a provider gains a real proactive rate-limit endpoint.
@@ -387,3 +393,13 @@ Standing gotchas worth keeping for any agent (strong or weak):
   OWN `isolation: "worktree"` spawns a second, unrelated git worktree and the subagent edits source files there
   instead of the tool-designated one — `accept-node`'s cherry-pick then sees no diff.
   [[no-agent-isolation-worktree-for-dispatch-nodes]]
+- **No host-side unblock for a wedged audit run — use `audit-code force-synthesis`.** Host-side attempts to
+  unblock a stuck audit (pending tasks that won't clear) do NOT work and actively corrupt gitignored
+  run-state: marking `status:complete` in `audit_tasks.json` is ignored; writing
+  `partial_completion_terminal.stranded_ids` is overwritten; appending results with unique idempotency keys
+  clears the obligation but cascades stale `planning_artifacts`. The only clean recovery is the tool-owned
+  affordance — `audit-code force-synthesis` stamps an `operator_forced` partial-completion terminal over the
+  pending task ids (durable direct write to `active-dispatch.json`, the special-loaded artifact
+  `writeCoreArtifacts` doesn't own) and drives the synthesis executor from the intact ledger on partial
+  coverage, with no hand-editing of gitignored run-state. (`src/audit/cli/forceSynthesisCommand.ts`;
+  `buildOperatorForcedTerminal` in shared; e2e in `tests/audit/audit-code-completion.test.mjs`.)

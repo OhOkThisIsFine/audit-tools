@@ -11,14 +11,21 @@ This state machine follows [audit-goals.md](audit-goals.md).
 
 ## Obligations
 
-The orchestrator advances through deterministic obligations in this order:
+The orchestrator advances through obligations in priority order, at the same
+abstraction level as [orchestration-policy.md](orchestration-policy.md):
 
-1. intake
-2. structure
-3. planning
-4. audit result ingestion
-5. runtime validation when planned
-6. final report rendering
+1. repair invalid or contradictory state
+2. create missing upstream artifacts (intake, structure, design assessment,
+   the user gates, and design review)
+3. generate missing planning artifacts
+4. ingest newly available evidence
+5. refresh coverage and requeue
+6. refresh runtime validation artifacts
+7. refresh synthesis
+8. check completion
+
+This is the abstract policy-category list; for the literal ordered chain of named
+obligations, see the `PRIORITY` chain in `src/audit/orchestrator/nextStep.ts`.
 
 ## Rules
 

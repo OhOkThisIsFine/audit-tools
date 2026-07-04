@@ -49,7 +49,13 @@ this doc is the architecture those track against.
 Foundations (O1, O2, O3 + the shared content-key seam) are the shared seams every consumer imports, so
 they land first. **O2 is the data-loss fix** — its absence lets a re-plan destroy the gitignored,
 no-backup run tree (see the concurrent-next-step staleness-cascade trap) — so it leads within foundations.
-Consumers (F1/F3/F4/F5/F6) each build on a landed, dogfooded foundation; F2 (review pass) and D run last.
+Consumers (F1/F3/F4/F5/F6) each build on a landed, dogfooded foundation; D runs last.
+
+> **F2 (`codebase-churn-context-enforce-review`) — dropped by design.** A whole-repo non-mutating review
+> pass belongs to the *audit* half of the pipeline, not remediate — building it into remediate duplicates
+> audit-code and blurs the "one pipeline, two halves" separation. The legitimate need (review the churn a
+> remediation introduced) is met by re-running audit-code on the post-remediation tree, so F2 is not
+> pursued as a remediate feature.
 Green-at-every-commit + atomic-replace across ~10 interdependent tracks on the no-backup tree is why this
 is phased rather than one monolithic run (the project's own *no monolithic change* / failure-isolation
 principles). Phasing also creates a dogfood loop — land O2/F1/F4, run the tool in anger, prove the

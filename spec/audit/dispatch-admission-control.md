@@ -1,28 +1,21 @@
 # Dispatch: admission control over a shared quota ledger
 
-**Status: proposed (not yet implemented).** This is the design of record for the
-dispatch/quota rework. It describes the intended contract, not current behaviour.
-Until it ships, `src/audit/cli/dispatch/quotaPool.ts` still computes a
-precomputed `max_concurrent_agents` scalar — see *Migration*.
+This is the design of record for the dispatch/quota model. It describes the
+contract for how dispatch admits work against a shared quota ledger.
 
 ## Why this exists
 
-Two defects surfaced the rework:
+The design answers one core defect:
 
-1. **Staleness churn (FIXED 2026-07-03).** `repo_manifest.files[]` was emitted in
-   raw `readdir` order, churning its content hash on every re-extraction and
-   cascading phantom staleness down the DAG → redundant LLM design re-reviews.
-   Fixed by path-sorting at source. Not part of this design; noted because it was
-   the first symptom.
-2. **Capability inherited from the run, not the current driver.** A run started in
-   Codex (host concurrency 6) was resumed by a different auditor (Claude Code
-   fanning out subagents). A `next-step` that omitted the capability flags
-   resolved the dispatch pool from the *stored* `sessionConfig.provider` (codex)
-   and sized against codex's `provider_default` quota → 2 slots — wrong for both
-   auditors, and it would have charged the fan-out against codex's quota.
+**Capability inherited from the run, not the current driver.** A run started in
+Codex (host concurrency 6) was resumed by a different auditor (Claude Code
+fanning out subagents). A `next-step` that omitted the capability flags
+resolved the dispatch pool from the *stored* `sessionConfig.provider` (codex)
+and sized against codex's `provider_default` quota → 2 slots — wrong for both
+auditors, and it would have charged the fan-out against codex's quota.
 
-Chasing (2) exposed that **`concurrency` is the wrong primitive.** We backed into
-it because it was the number that came out wrong. But it is not a real, fixed
+Chasing that defect exposed that **`concurrency` is the wrong primitive.** We
+backed into it because it was the number that came out wrong. But it is not a real, fixed
 quantity: pools appear and vanish, estimates drift from actuals, and a hard
 "max in flight" only exists for the subset of hosts that genuinely have one.
 Precomputing `max_concurrent_agents = N` bakes a snapshot of a continuously moving

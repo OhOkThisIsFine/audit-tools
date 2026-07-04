@@ -76,14 +76,19 @@ don't exist at the routing point — a routing signal cannot be a pipeline outpu
 
 ## Implementation slices (lowest-risk first)
 
-1. **Degenerate-phase collapse** — pure architecture, no risk signal needed (1 module ⇒ skip
+Ordered as sequenced. Per-slice status reflects what is wired in code today.
+
+1. **Degenerate-phase collapse — ✅ SHIPPED** — pure architecture, no risk signal needed (1 module ⇒ skip
    seam/finalize round-trips). Safest first slice.
-2. **The shared intake risk/complexity signal** — affected_files + configurable path-risk patterns +
+2. **The shared intake risk/complexity signal — ✅ SHIPPED** — affected_files + configurable path-risk patterns +
    intent; fail-closed (uncertain ⇒ treat as higher-risk ⇒ deeper/finer). Re-assess hook for evidence.
-3. **Dial A — adversarial depth** — light inline self-check vs full independent sub-agents, selected
-   by the signal; floor = light. Soften the existing audit skip-path to light review.
-4. **Dial B — granularity** — collapse coherent phases into fewer round-trips for low-complexity work;
-   keep fine-grained for high; wire escalate-on-evidence.
+   Shipped as `src/remediate/riskSignal.ts` (this doc is its cited design of record).
+3. **Dial A — adversarial depth — ✅ SHIPPED** — light inline self-check vs full independent sub-agents, selected
+   by the signal; floor = light. Soften the existing audit skip-path to light review. Wired via
+   `adversarialDepthForTier`, consumed in `src/remediate/steps/contractPipeline.ts`.
+4. **Dial B — granularity — ✅ SHIPPED** — collapse coherent phases into fewer round-trips for low-complexity work;
+   keep fine-grained for high; wire escalate-on-evidence. (Referenced in `contractPipeline.ts` as the
+   "T1 slice 4b" path.)
 
 ## Invariants this must preserve
 

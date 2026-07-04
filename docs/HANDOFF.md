@@ -15,10 +15,8 @@
   open-work roadmap only. Tree is clean on `main`, nothing unpublished.
 - **Immediate next:** (1) the owner is running the paused audit-tools self-audit to completion in a fresh
   conversation — note it will dispatch at the codex-pinned concurrency until the dispatch rework lands.
-  (2) **Dispatch admission-control rework** — design of record captured at
-  [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (status: proposed).
-  Resolve its *Open tensions* (esp. output-token unknowability; ledger-is-a-proxy / possibly over-built vs
-  reactive-only) **before** building. See T5.3 below.
+  (2) **Dispatch admission-control rework** — see T5.3 below (design of record + *Open tensions* to resolve
+  before building).
 - **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (quarantine
   re-verify affordance, finalization re-dispatch cost); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
   a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);
@@ -60,39 +58,27 @@ on all downstream work, and is the "redesign before scheduled autonomy" the nort
 ([[autonomous-pipeline-capstone-spec]]). Loop-infra (T1–T3) is COMPLETE end-to-end — nothing open on
 those tracks. Remaining sequencing: cheap ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
 
-### T1 — Self-scaling pipeline — ✅ COMPLETE
-Design of record: [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md)
-([[self-scaling-pipeline-not-forked-paths]]). Nothing open on this track.
-
-### T2 — Make the loop converge & safe — ✅ COMPLETE
-Repair-cap/convergence-termination, friction detection wiring, and the quarantine-on-fail-loud data-loss
-fix are all shipped. Nothing open on this track.
-
-### T3 — Headline product capability — ✅ COMPLETE
-Remediator auto-phasing (derivation + persistence + ordinal threading + scheduler barrier + per-phase
-boundary gate) is fully shipped end-to-end. Nothing open on this track.
+### T1–T3 — Loop infra — ✅ COMPLETE
+Self-scaling pipeline ([`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md),
+[[self-scaling-pipeline-not-forked-paths]]), loop convergence & safety (repair-cap / convergence
+termination, friction-detection wiring, quarantine-on-fail-loud data-loss fix), and remediator auto-phasing
+(derivation + persistence + ordinal threading + scheduler barrier + per-phase boundary gate) are all
+shipped end-to-end. Nothing open.
 
 ### T4 — Remaining host-friction inventory
-Nothing open. All A/B/C/D items shipped (contract-pipeline host-friction inventory, phase-cut, boundary
-gates, merge-to-base). Selective-deepening convergence (both known loops) has a shipped code fix; live
-validation on a real deepening-capable run remains env-bound (T6-class).
+Selective-deepening convergence has a shipped code fix; live validation on a real deepening-capable run
+remains env-bound (T6-class). Detail in `docs/backlog.md`.
 
 ### T5 — Product / analysis forward tracks
-1. **Deterministic analyzers — own-vs-acquire acquisition engine.** Git-history mining, gitleaks, jscpd,
-   osv-scanner, clippy (cargo), rubocop (bundle), hadolint + actionlint (binary), type-coverage (npx),
-   and knip (whole-file + unused-dependency + unused-export dead-code leads) are all registered.
-   **Open:** clippy/rubocop landed fixture-only (no Rust/Ruby repo here → live spawn unvalidated).
-   *([[deterministic-analyzers-own-vs-acquire]])*
-2. **Schema-enforced generation — CE-004 residual (env-bound only).** Sole residual: the always-on
-   conversation host advertises no API-level constraint mechanism (provider-blocked).
+Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) — pointers only here:
+1. **Deterministic analyzers — own-vs-acquire acquisition engine.** Open: clippy/rubocop live spawn
+   unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
+2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint
+   endpoint); the openai-compatible/NIM guided-decoding path is the build lever.
 3. **Dispatch admission-control rework — 🟡 DESIGN PROPOSED, not built.** Design of record:
    [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)
-   ([[dispatch-admission-control-design]], [[capability-is-per-auditor-not-per-audit]]). Root: dispatch
-   capability/quota is inherited from the run's original auditor, and `concurrency` is the wrong primitive.
-   Target: admit one task at a time on a live per-pool token budget (concurrency emergent); per-invocation
-   self-describing pool descriptors; shared account-keyed reservation ledger. **Loop-core change → full
-   pipeline.** Blocked on resolving the spec's *Open tensions* first (output-token unknowability;
-   proxy-vs-meter / over-built vs reactive-only). Staleness-churn precursor fix already shipped to `main`.
+   ([[dispatch-admission-control-design]], [[capability-is-per-auditor-not-per-audit]]). Loop-core change →
+   full pipeline; blocked on resolving the spec's *Open tensions* first.
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist

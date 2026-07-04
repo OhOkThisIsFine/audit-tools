@@ -123,6 +123,7 @@ is low priority. No partial-success status should be introduced.
 - The report must be deterministic and work-block-first.
 - Root-cause clustering is not part of the product.
 - Cleanup of audit artifacts is available via the `cleanup` CLI command / pre-run cleanup path
-  (`cleanupStaleArtifactsDir`), but is not currently auto-triggered by the completion transition
-  itself; it also explicitly skips deletion while a run is `active`/`blocked`, so artifacts persist
-  through incomplete or blocked runs rather than staying minimal.
+  (`cleanupStaleArtifactsDir`), but is decoupled from the completion transition by design — the
+  transition itself never triggers it; it also explicitly skips deletion while a run is
+  `active`/`blocked`, so artifacts persist through incomplete or blocked runs rather than staying
+  minimal.

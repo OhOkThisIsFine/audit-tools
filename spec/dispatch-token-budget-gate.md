@@ -82,13 +82,14 @@ A detected session/rate-limit worker death is a pause-until-`reset_at` + preserv
 early return before `removeWorktree` in `acceptNodeWorktree`) + re-dispatch — never a node failure.
 Distinguishes quota-killed from real failure so partial worktrees are not lost.
 
-## Build order (green at every commit)
-- **A.** Strip the invented caps (`first_contact`, `fallback`, cliffs). Governed by token budget +
-  real RPM/TPM + host allowance only. Independently correct.
-- **B.** Learned-slope token-budget gate + cold-start calibration, per pool key.
-- **C.** Surface the per-target budget view into the dispatch step contract.
-- **D.** Quota-death retryable pause + worktree preservation.
+## The four mechanisms this design comprises
+The gate is built from four independently-correct pieces, each described above:
+- **A — no invented caps.** No `first_contact`, `fallback`, or cliff ceilings; concurrency is
+  governed by token budget + real RPM/TPM + host allowance only.
+- **B — learned-slope token-budget gate + cold-start calibration**, per pool key.
+- **C — per-target budget view** surfaced into the dispatch step contract.
+- **D — quota-death retryable pause** + worktree preservation.
 
-Both orchestrators consume the shared `scheduleWave`/`computeDispatchCapacity`, so the change lands
+Both orchestrators consume the shared `scheduleWave`/`computeDispatchCapacity`, so this logic lives
 once in `src/shared/quota` and applies to audit + remediate identically.
 </content>

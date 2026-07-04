@@ -63,6 +63,8 @@ Every finding in the report is adversarially verified against current source by 
 independent reviewer before it's kept. The report opens with a triaged summary and 
 drills down by severity:
 
+*(Illustrative sample — the counts and the `file:line` citation below are fabricated for the example, not a real finding.)*
+
 ```text
 # Audit findings — verified & pruned
 

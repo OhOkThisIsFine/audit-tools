@@ -113,7 +113,7 @@ Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is i
 
 ## remediate-code architecture
 
-Accepts auditor reports or free-form feedback. Advances via bounded step prompts. Single runtime dep: `commander`.
+Accepts auditor reports or free-form feedback. Advances via bounded step prompts. Runtime deps: `commander` (CLI) and `zod` (schema validation, e.g. `src/remediate/state/types.ts`).
 
 **State machine** (`src/remediate/steps/nextStep.ts` → `decideNextStep()`):
 ```
@@ -169,6 +169,7 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 - **Windows-aware** (the most-exercised instance of *OS-agnostic* above, not the boundary of it). Package-manager shims run through the command shell; `.cmd` / `.ps1` wrappers resolve reliably (`resolveWindowsShimSpawnCommand`).
 - **Host prompts are cwd-explicit.** Commands must be cwd-independent or state exact workdir. Prefer `workdir` on the tool over asking workers to `cd`.
 - **PowerShell JSON generation is statement-safe.** Assign `foreach` output to a var first, then pipe to `ConvertTo-Json`.
+- **Extractors emit stable, content-derived array order.** Any artifact array field must be ordered by a stable key derived from content (e.g. path-sort), never filesystem / `readdir` / iteration order. `stableStringify` preserves array order, so an incidentally-ordered array silently churns the artifact's content hash on every re-extraction → cascades phantom staleness down the dependency DAG → redundant (expensive) downstream LLM re-runs. Any new extractor emitting an incidentally-ordered array is a latent churn source.
 - **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, phase, scheduler, cap, or monolithic pass — ships as single atomic replace: new mechanism + deletion in one commit. Never add-then-delete across commits.
 - **Green-at-every-commit.** Before any push: `npm run build && npm run check` → zero errors. Hook-enforced since 2026-06-11: PreToolUse blocks `git commit` until check is green; async PostToolUse typechecks edited package after TS edits (`.claude/hooks/`).
 - **End-of-sprint cleanup — run it every sprint, unprompted.** A *sprint* = any coherent stretch of work that ends at a pause, handoff, or milestone (a shipped item, "wrap up here", switching windows). Before handing off, ALWAYS run the cleanup pass (don't wait to be asked): (1) **verify green** — `npm run build && npm run check` + the touched package's test suite, on a **clean, fully-pushed tree**; (2) **scan the sprint's diff** for dead code / orphaned helpers / stray `console`/`TODO`/debug and remove them; (3) **ensure no half-done broken state** — and call out any *deliberate* intermediate state in the handoff so it isn't mistaken for a bug; (4) **trim `docs/HANDOFF.md`** to lean + accurate (correct HEAD/commits, immediate-next-only, never a changelog); (5) **update `docs/backlog.md`** program-of-record status; (6) **sync memory + its index**; (7) **state remaining next steps explicitly, and name the document each lives in** — the closeout (and the chat hand-back) must say either "nothing pending" or list each remaining item with its home: immediate next step → `docs/HANDOFF.md`; open bugs / forward tracks → `docs/backlog.md`; durable design/decisions/status → project memory + `MEMORY.md` index; durable how-to → `CLAUDE.md`. Never leave a remaining step implied or living only in chat. Render the hand-back to the markdown scheme in [`docs/end-of-sprint-report-template.md`](docs/end-of-sprint-report-template.md) (timeless template — never commit a filled dated copy). (the owner, 2026-06-16; next-steps-and-doc-homes element + report template added 2026-06-25.)
@@ -185,11 +186,11 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 - **Caveman mode (full) active globally.** Ultra-compressed telegraphic prose across all responses and agents. the owner toggles off when clarity needed.
 - **Redesign before scheduled autonomy.** Architecture stabilizes first; then build scheduled audit→remediate→PR loop once on new architecture.
 - **Token/context policy lives in `~/.claude/CLAUDE.md`.** Don't duplicate here.
-- **Headroom over opentoken (2026-06-11).** Host MCP swapped in at user scope; orchestrator swap rides redesign as library-mode npm `headroom-ai` step (deletes `wrapForOpenToken` et al.).
 - **Token estimates stay local and deterministic (2026-06-11).** Never API-call token counting in planning/dispatch. No tokenizer dep — shared `estimateTokensFromBytes` primitive is the standard. Learned RPM/TPM limits authoritative; headroom proxy stats supply measured usage.
 - **Two-tier dependency policy — import vetted libs for correctness-sensitive parsing/schema/lock; own only tiny domain bits (2026-06-17, A5).** A format whose grammar we don't fully own (TOML, YAML, lockfiles, schema validation) is *correctness-sensitive*: a hand-rolled scanner silently drops what it doesn't understand (e.g. the TOML line scanner missed inline-table / dotted-key / quoted forms → dropped dependency-graph edges). Import a vetted, pure-JS, well-maintained parser there (`smol-toml`, `yaml`) — pure-JS so OS-agnostic, no native build. Keep hand-rolled only for *tiny, fully-owned* domain bits (e.g. our `.audit-tools` path tokens, the work-block id grammar). When importing: wrap the parser so malformed input degrades to empty (the graph/extractors never throw on a bad manifest), and single-source the parse + safe accessors in one module.
 - **Dead-code release gate — default-mode knip, not `--production` (2026-06-27).** `npm run check:deadcode`
-  (`knip --include exports,types,nsExports,nsTypes`, wired into `verify:release`) fails the build on any
+  (runs `knip --no-config-hints`, with `include: ["exports","types","nsExports","nsTypes"]` set in
+  `knip.json`; wired into `verify:release`) fails the build on any
   exported symbol with zero consumers anywhere, including tests. This gates our own source tree at release
   time — distinct from knip's separate use as an *acquired product analyzer* audit-code runs against
   repos it audits (`src/audit/extractors/analyzers/candidates.ts`). Default-mode, not the literal
@@ -200,6 +201,12 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
   periodic **manual audit**: `knip --production` → filter to symbols with zero *grep-detectable*
   production callers (grep finds the dispatch/alias cases knip misses, so a grep-zero is a reliable dead
   signal) → delete symbol + orphaned tests. Re-run when worthwhile, not on a schedule.
+- **Dead-code stays leads-not-verdicts — no "sound" signal (audit-code side).** Deliberately not pursuing a
+  sound dead-code detector (entrypoint provenance + dynamic-import tracing) inside the *acquired-product*
+  analyzer: true soundness is undecidable in a language-neutral static auditor (dynamic / dispatch /
+  reflection wiring), and it fights the leads-not-verdicts architecture the per-file lens implements. knip's
+  `files` / `dependencies` / unused-export output are LEADS the lens confirms or refutes against source,
+  never direct findings. (Distinct from the release-gate bullet above, which gates *our own* tree.)
 
 ## Known friction & deferred fixes
 
