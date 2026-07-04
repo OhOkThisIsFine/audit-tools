@@ -39,10 +39,11 @@ the roster.
 ## The three gaps to close
 
 ### G1 — Audit holds the coarse lock across execution → serializes peers
-`runAuditStepLocked` (`src/audit/cli/auditStep.ts:75-88`) wraps the WHOLE step — load → `advanceAudit`
-(**including the executor / LLM work**) → persist — in `artifactTreeLockPath`. A second IDE's `next-step`
-therefore **blocks** on the lock and runs strictly after the first. Split the step into three phases;
-only the first and third take the short lock:
+`runAuditStepLocked` used to wrap the WHOLE step — load → `advanceAudit` (**including the executor / LLM
+work**) → persist — in `artifactTreeLockPath`. A second IDE's `next-step` therefore **blocked** on the
+lock and ran strictly after the first. Fixed by splitting the step into three phases (see "Implementation
+slices" below; `runAuditStepLocked` is now only the fallback path for host-delegation/complete/no-runner
+steps, in `src/audit/cli/auditStep.ts`); only the first and third phases take the short lock:
 
 1. **Claim phase (short lock):** load state, `reclaimStale()`, compute the obligation frontier,
    enumerate claimable units, `claim()` the highest-priority unclaimed one, write THIS agent's
@@ -61,10 +62,12 @@ Add a shared audit `ClaimRegistry` at `.audit-tools/audit/node-claims.json`. Cla
 - **Pooled obligation `audit_tasks`** — each pending task is a claimable node (`nodeId = task_id`). N
   peers claim N distinct tasks → real parallel contribution. Results already append-safe + dedup-by-id.
 - **Serial obligations** (`repo_manifest`, `file_disposition`, structure/graph/design, `synthesis`, …)
-  — the obligation itself is ONE claimable node (`nodeId = obligation:<name>`). One peer wins and does
-  it; a peer whose only frontier work is a serial obligation already held returns a **cooperative-wait**
-  step ("peer is working `<unit>`; nothing else claimable — retry shortly") rather than blocking. When
-  the serial step lands and opens a pool, waiting peers pick up tasks.
+  — rather than one claimable node per obligation, the shipped design (see "Implementation slices" below)
+  claims a single shared `bundle-mutation` mutex node for any bundle-mutating step, with the obligation
+  name carried only as `poolId` metadata for the "peer is working `<unit>`" cooperative-wait message —
+  a single node avoids the "obligation advanced while I waited" mismatch. One peer wins and does it; a
+  peer whose only frontier work is a serial obligation already held returns a **cooperative-wait** step
+  rather than blocking. When the serial step lands and opens a pool, waiting peers pick up tasks.
 
 ### G3 — Single shared step slot → peers clobber each other's prompt
 `current-step.json` / `current-prompt.md` is one slot per orchestrator (`stepContractWriter.ts`). Each
