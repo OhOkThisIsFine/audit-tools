@@ -59,18 +59,18 @@ actual friction triage fires from the `present_report` terminal step
 
 | Executor | Kind | Obligation | Produces |
 |---|---|---|---|
-| `planning_executor` | deterministic | `planning_artifacts` | `scope.json`, `coverage_matrix.json`, `audit_tasks.json`, `audit_plan_metrics.json`, `task_affinity_graph.json` — all in one call |
+| `planning_executor` | deterministic | `planning_artifacts` | `scope.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_tasks.json` (+ `runtime_validation_report.json` when tasks exist), `audit_tasks.json`, `audit_plan_metrics.json`, `task_affinity_graph.json`, `requeue_tasks.json` — all in one call |
 | `rolling_dispatch_executor` | host_delegation | `audit_tasks_completed` | consumes `audit_tasks.json`; drives host-subagent or in-process dispatch until results are produced |
 | `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | `external_analyzer_results.json` |
-| `result_ingestion_executor` | deterministic | `audit_results_ingested` | refreshed `coverage_matrix.json`, `flow_coverage.json`, `requeue_tasks.json` from `audit_results.jsonl` |
-| `runtime_validation_executor` | deterministic | `runtime_validation_current` | `runtime_validation_tasks.json`, initial `runtime_validation_report.json` |
+| `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests into `audit_results.jsonl`; refreshes `coverage_matrix.json`, `flow_coverage.json`, `audit_tasks.json`, `audit_plan_metrics.json`, `requeue_tasks.json` (+ `runtime_validation_tasks.json`/`runtime_validation_report.json` when planned) |
+| `runtime_validation_executor` | deterministic | `runtime_validation_current` | initial `runtime_validation_report.json` only — `runtime_validation_tasks.json` is produced by `planning_executor` and refreshed by `result_ingestion_executor` |
 | `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | refreshed `runtime_validation_report.json` from imported evidence |
 
 ### Reporting
 
 | Executor | Kind | Obligation | Produces |
 |---|---|---|---|
-| `synthesis_executor` | deterministic | `synthesis_current` | `audit-report.md` + `audit-findings.json` (co-produced) + `audit_plan_metrics.json` |
+| `synthesis_executor` | deterministic | `synthesis_current` | `audit-report.md` + `audit-findings.json` (co-produced) |
 | `synthesis_narrative_executor` | host_delegation | `synthesis_narrative_current` | `synthesis-narrative.json` (+ re-renders `audit-findings.json`/`audit-report.md` with the enriched narrative) |
 
 ### Legacy / unreachable
