@@ -27,8 +27,8 @@
   `verify:checks` + vitest; `ci.yml`/`publish-package.yml` run the cheap chain + a 4-way sharded vitest
   matrix as parallel jobs; the monster e2e test files converted to `test.concurrent` — vitest was ~93% of
   the gate and 4 files were 65% of test-work; full-suite wall ~365s→~160s, see [[audit-tools-release-publish-flow]]).
-- **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (CE-006 keyword FP,
-  quarantine re-verify affordance, finalization re-dispatch cost, producer/consumer edge derivation); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
+- **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (quarantine
+  re-verify affordance, finalization re-dispatch cost, producer/consumer edge derivation); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
   a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);
   remediate-side `opencode.json` drift/`INV-RCI-16` reconciliation; env-bound live validations (quota pre-wall
   pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn); provider-blocked

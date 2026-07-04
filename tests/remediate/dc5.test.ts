@@ -207,6 +207,35 @@ describe("negativeAssertionIsScoped (anti-rot scope predicate, CE-006)", () => {
   it("inv-5: a scoped negative with no recognizable anchor is rejected (fail-closed)", () => {
     expect(negativeAssertionIsScoped("throws on bad input", anchors)).toBe(false);
   });
+
+  it("inv-5: a DESCRIPTIVE (negated) mention of a repo-wide scan does not disqualify a scoped negative (CE-006 FP)", () => {
+    // The gate must read the assertion's ACTION, not the literal words: a negative
+    // that names the anchor and merely says it is *not* a repo-wide check is scoped.
+    // Flagging the words "repo-wide" here forced hosts to euphemise legitimate specs.
+    expect(
+      negativeAssertionIsScoped(
+        "writeRecord rejects an empty id, scoped to writeRecord and not an unscoped repo-wide check",
+        anchors,
+      ),
+    ).toBe(true);
+    expect(
+      negativeAssertionIsScoped(
+        "src/store.ts throws on a duplicate append rather than scanning the whole repo",
+        anchors,
+      ),
+    ).toBe(true);
+  });
+
+  it("inv-5: an affirmative scan in a LATER clause still disqualifies (negation in an earlier clause does not launder it)", () => {
+    // A negation cue in a prior clause must not suppress an unrelated affirmative
+    // scan later in the assertion; clause-scoping keeps the two independent.
+    expect(
+      negativeAssertionIsScoped(
+        "writeRecord does not accept null; grep the repo to prove it appears nowhere",
+        anchors,
+      ),
+    ).toBe(false);
+  });
 });
 
 // ── inv-4 + inv-7: test-plan derivation gate ───────────────────────────────────

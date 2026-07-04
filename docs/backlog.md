@@ -60,14 +60,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   parallel agents to stage doc edits independently (per-agent worktree, doc-fragment files merged later, or
   an advisory doc lock). Until there is, cross-agent doc updates serialize through hand-back prose.
 
-- **CE-006 negative-scoping gate false-positives on the literal words "repo-wide"/"unscoped" in the
-  assertion prose (observed 2026-07-04).** The `test_validator_plan` structural gate rejected every
-  invariant spec's negative assertion as "unscoped, repo-wide" because the *text* contained the phrase
-  "not an unscoped repo-wide check" — i.e. it substring-matched the words used to DESCRIBE what to avoid,
-  even though each negative named a real `scope_anchor`. Fix: detect an unscoped negative structurally
-  (does it reference one of the spec's `scope_anchors`? is it a whole-suite/grep-all target?), not by
-  keyword-matching the prose. A gate that flags the words "repo-wide" forces the host to euphemise.
-
 - **No tool affordance to re-verify/re-accept a QUARANTINED implement node after fixing the cause
   (observed 2026-07-04).** When a node's accept-verify fails, its commit is preserved at
   `refs/remediation-quarantine/<run>/<block>` but there is no `remediate-code reverify-node --id … --run-id …`
@@ -372,6 +364,11 @@ Standing gotchas worth keeping for any agent (strong or weak):
   (use `Where-Object -match`); single-element arrays unwrap in `ConvertTo-Json` (bracket-wrap the payload).
 - **When you delete a *shipped* file, grep the smoke/verify scripts** for a `requiredPackagedPaths`-style list
   (the packaged-smoke gate asserts specific tarball files).
+- **A production runtime `import` declared as a `devDependency` ships a broken packaged/global install** —
+  local dev + the vitest suite still pass (devDeps are present there), so ONLY `smoke:packaged-*`
+  (`verify:release`) catches the `ERR_MODULE_NOT_FOUND`. When you add an `import` to any `src/` module that
+  lands in `dist/` on a production path, confirm the package is under `dependencies`, not `devDependencies`.
+  (Bit once 2026-07-04: `zod-to-json-schema`, used by `src/audit/contracts/workerSchemas.ts`.)
 - **Async typecheck hook = stale-dist false alarm** after a shared-source edit (it runs `tsc` before the
   central rebuild); the authoritative gate is `npm run check` after `npm run build`.
 - **Prefer a dependency-injection seam over module mocking** in tests. Under vitest, `vi.spyOn`/`vi.mock`

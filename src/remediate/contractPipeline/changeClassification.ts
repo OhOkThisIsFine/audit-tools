@@ -143,6 +143,36 @@ export function classifyObligationChange(
 const UNSCOPED_GLOBAL_SCAN_PATTERN =
   /\b(?:repo[\s-]?wide|whole\s+repo|entire\s+(?:repo|codebase|tree)|across\s+the\s+(?:repo|codebase|tree)|any\s+file|no\s+file\s+(?:anywhere|in\s+the\s+repo)|anywhere\s+in\s+the\s+(?:repo|codebase|tree)|grep\s+(?:the\s+)?(?:repo|codebase|tree))\b/i;
 
+/**
+ * Negation cues that, in the SAME clause immediately before a global-scan phrase,
+ * mark it as DESCRIPTIVE contrast ("scoped to X, *not* an unscoped repo-wide
+ * check") rather than the assertion's actual action. Flagging the literal words
+ * "repo-wide" regardless of negation is exactly what forced hosts to euphemise a
+ * legitimately-scoped negative — the CE-006 false-positive. Only an AFFIRMATIVE
+ * scan (the scan is the check) disqualifies scoping.
+ */
+const SCAN_NEGATION_CUE =
+  /\b(?:not|never|no\s+longer|rather\s+than|instead\s+of|without|avoids?|avoiding|isn'?t|aren'?t|doesn'?t|don'?t|won'?t)\b/i;
+
+/**
+ * True when the assertion uses a global-scan phrase AFFIRMATIVELY — the scan is
+ * the check it performs, not a contrast clause describing what it deliberately
+ * avoids. Each scan match is judged by its own clause (text back to the nearest
+ * `. ; , — --` boundary): a negation cue in that clause makes the mention
+ * descriptive and non-disqualifying; an unqualified scan disqualifies. This is a
+ * structural read of the assertion's action, not a bare keyword veto on the words.
+ */
+function usesAffirmativeGlobalScan(assertion: string): boolean {
+  const re = new RegExp(UNSCOPED_GLOBAL_SCAN_PATTERN.source, "gi");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(assertion)) !== null) {
+    const clause = assertion.slice(0, match.index).split(/[.;,]|—|--/).pop() ?? "";
+    if (!SCAN_NEGATION_CUE.test(clause)) return true;
+    if (match.index === re.lastIndex) re.lastIndex++; // zero-width guard
+  }
+  return false;
+}
+
 /** Match a scope anchor as a whole word/path fragment inside an assertion. */
 function assertionNamesAnchor(assertion: string, anchor: string): boolean {
   if (anchor.length < 3) return false;
@@ -153,10 +183,13 @@ function assertionNamesAnchor(assertion: string, anchor: string): boolean {
 
 /**
  * A negative assertion for a behavior-CHANGE obligation is SCOPED when it names
- * at least one of the change's anchors (the touched symbol/file) AND is not an
- * unscoped repo-wide scan. Naming an anchor is necessary but not sufficient: an
- * assertion that both names the symbol and says "grep the whole repo" is still
- * rejected, because the scan, not the symbol, is what it actually checks.
+ * at least one of the change's anchors (the touched symbol/file) AND does not
+ * perform an affirmative unscoped repo-wide scan. Naming an anchor is necessary
+ * but not sufficient: an assertion that both names the symbol and says "grep the
+ * whole repo" is still rejected, because the scan, not the symbol, is what it
+ * actually checks. A merely DESCRIPTIVE mention of a global scan ("scoped to X,
+ * not an unscoped repo-wide check") does NOT disqualify — the veto reads the
+ * assertion's action, not the literal words, so a host need not euphemise (CE-006).
  *
  * Returns true when the assertion is acceptably scoped to the change.
  */
@@ -165,7 +198,7 @@ export function negativeAssertionIsScoped(
   anchors: readonly string[],
 ): boolean {
   if (typeof assertion !== "string" || assertion.length === 0) return false;
-  if (UNSCOPED_GLOBAL_SCAN_PATTERN.test(assertion)) return false;
+  if (usesAffirmativeGlobalScan(assertion)) return false;
   return anchors.some((a) => assertionNamesAnchor(assertion, a));
 }
 
