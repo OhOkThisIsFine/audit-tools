@@ -32,9 +32,6 @@ handshake**: report what you can dispatch to *right now* on every `next-step`
 call, so the backend sizes review packets to your real model instead of a
 conservative 32k floor. Report:
 
-- `--host-max-active-subagents` — how many review subagents you can run in
-  parallel (via the `Agent`/`task` tool). Without it the backend assumes serial
-  dispatch and sizes waves to one packet at a time.
 - `--host-models` — an ordered JSON array (lowest rank first) of the models you
   can dispatch subagents to *right now*, one entry per relative rank:
   `{"rank": "small"|"standard"|"deep", "context_tokens": N, "output_tokens": N}`.
@@ -51,25 +48,31 @@ conservative 32k floor. Report:
   model. When `--host-models` is also given, the roster wins. Omit both and
   dispatch falls back to the conservative 32k default (many tiny packets).
 
+Do **not** report a parallel-subagent count. The backend owns concurrency: it
+sizes how many subagents run at once from its own token-budget gate and from any
+hard host cap it can detect (e.g. Codex's `~/.codex/config.toml`
+`[agents].max_threads`). When it detects no hard cap it runs without one — you
+never supply or guess a number. (An operator with a genuine fixed parallel limit
+for this machine may pass `--host-max-active-subagents N` as an optional
+override; it is not part of the handshake and is never something to invent.)
+
 ```bash
-audit-code next-step --host-max-active-subagents 4 --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+audit-code next-step --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
 ```
 
 Or with a single dispatch model:
 
 ```bash
-audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
+audit-code next-step --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
-`4` is a safe concurrency default for this host; raise it for more parallelism or
-lower it under rate-limit pressure. The backend's learned quota adapts from
-there. The token values should match the window of the model(s) dispatching the
-packets (e.g. 200000 / 32000 for a 200k-context model).
+The token values should match the window of the model(s) dispatching the packets
+(e.g. 200000 / 32000 for a 200k-context model).
 
 When developing `audit-tools` itself, from the repo root use:
 
 ```bash
-node audit-code.mjs next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
+node audit-code.mjs next-step --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
 Read the returned JSON only far enough to find `prompt_path`, then read and
@@ -107,8 +110,7 @@ Use MCP tools only as a compatibility adapter when direct shell access to
 separate orchestration path.
 
 When a step prompt tells you to continue, run `audit-code next-step` again with
-the same capability flags (`--host-max-active-subagents`, `--host-models`,
-`--host-context-tokens`, `--host-output-tokens`) and follow only the newly
-returned `prompt_path`.
+the same capability flags (`--host-models`, `--host-context-tokens`,
+`--host-output-tokens`) and follow only the newly returned `prompt_path`.
 
 Stop when the current step prompt tells you to stop.

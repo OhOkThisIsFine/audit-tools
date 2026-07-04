@@ -66,19 +66,17 @@ can dispatch to *right now* on every `next-step` call so the backend sizes revie
 packets to your real model instead of a conservative 32k floor.
 
 ```bash
-audit-code next-step --host-max-active-subagents 4 --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+audit-code next-step --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
 ```
 
 Or with a single dispatch model:
 
 ```bash
-audit-code next-step --host-max-active-subagents 4 --host-context-tokens 200000 --host-output-tokens 32000
+audit-code next-step --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
 Key flags:
 
-- `--host-max-active-subagents` — parallel subagent capacity (via the `Agent`/`task`
-  tool). Without it the backend assumes serial dispatch.
 - `--host-models` — ordered JSON array (lowest rank first) of models you can dispatch
   subagents to *right now*, one entry per relative rank
   (`"small"`, `"standard"`, `"deep"`). Ranks are relative capability labels — never
@@ -86,6 +84,12 @@ Key flags:
   `model_id` used only to key per-model quota learning.
 - `--host-context-tokens` / `--host-output-tokens` — single-model shorthand. When
   `--host-models` is also given, the roster wins.
+
+Do **not** report a parallel-subagent count — the backend owns concurrency (its
+token-budget gate plus any hard host cap it can detect, e.g. Codex
+`[agents].max_threads`), and runs uncapped when it detects none. An operator with
+a genuine fixed machine limit may pass `--host-max-active-subagents N` as an
+optional override; it is never a value to guess.
 
 When a step prompt tells you to continue, repeat `audit-code next-step` with the
 same capability flags and follow only the newly returned `prompt_path`. Stop when
