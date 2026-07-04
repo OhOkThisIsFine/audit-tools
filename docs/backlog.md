@@ -61,11 +61,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   preserves array order, so any new extractor emitting an incidentally-ordered array is a latent
   churn source — emit stable-keyed order.
 
-- **Quota-aware dispatch — SHIPPED; live validation env-bound.** The token-budget dispatch gate is
-  code-complete (per-`(pool,window-label)` learned tokens-per-percent slope, budget = MIN across a
-  pool's windows, quota-death = retryable pause preserving worktrees). **Still open:** live validation
-  on a real rate-limited multi-worker run — cold-start calibration slope + the resume path especially
-  want a live check. Relates to [[claude-usage-endpoint-body-shape]] / [[claude-quota-credential-resolution]] /
+- **Quota-aware dispatch — live validation env-bound.** Still open: live validation of the token-budget
+  dispatch gate (per-`(pool,window-label)` learned tokens-per-percent slope, budget = MIN across a
+  pool's windows, quota-death = retryable pause preserving worktrees) on a real rate-limited
+  multi-worker run — cold-start calibration slope + the resume path especially want a live check.
+  Relates to [[claude-usage-endpoint-body-shape]] / [[claude-quota-credential-resolution]] /
   [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
   - **⬇ Live-run watch** (metered provider + large target; `AUDIT_TOOLS_LIVE_QUOTA=1` to force it): at the
     rate wall the run must **pause gracefully, not crash**, and leave every in-flight worktree intact; on
@@ -74,25 +74,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     cold-start default. FAIL = crash/stall at the wall, discarded worktrees, or a resume that re-does or
     drops packets.
 
-- **Friction detection — M-QUOTA escalation chain WIRED on BOTH orchestrators; only live validation env-bound.** The
-  `recordLimit → escalate → strand → quota_escalation friction` chain is end-to-end on the remediate
-  driver path AND now the audit driver (`rollingAuditDispatch.ts` retains the `HostSessionQuotaSource`
-  from `buildDispatchPool`, threads it through pool sizing + the `recordRateLimit`/`isPacketEscalated`
-  hooks, and routes `onEscalation` to `captureStepBoundaryFriction("quota_escalation")`). Shared
-  primitive unit-tested in `tests/shared/rollingDispatch.test.mjs`; audit glue unit-tested in
-  `tests/audit/rolling-audit-dispatch.test.mjs` (§5, 4-pool same-packet escalation → friction capture).
-  **Still open (env-bound only):** live validation on a real rate-limited run.
-  [[meta-audit-friction-must-be-tool-enforced]]
+- **Friction detection — M-QUOTA escalation chain: live validation env-bound.** The
+  `recordLimit → escalate → strand → quota_escalation friction` chain is unit-tested end-to-end on both
+  drivers (`tests/shared/rollingDispatch.test.mjs`; `tests/audit/rolling-audit-dispatch.test.mjs` §5).
+  **Still open:** live validation on a real rate-limited run. [[meta-audit-friction-must-be-tool-enforced]]
   - **⬇ Live-run watch** (same wall run as quota-aware dispatch): when a packet escalates across pools at
     the wall, a **`quota_escalation` friction event** must be captured at the step boundary — check the
     run's friction log / meta-audit surface after the run and confirm the event is present with the
     escalated packet id. FAIL = wall hit but no friction event recorded (the chain didn't fire live).
 
-- **Selective-deepening convergence — both known loops FIXED; live validation env-bound.** Loop #1
-  (packet-result `task_id` ≠ assigned `deepening:*` id): prompt-side fix in `buildTaskSections`. Loop #2
-  (idempotency_key collision across rounds): fixed by folding `task_id` into
-  `buildResultContentDiscriminator`'s `deepening`/`steward` branch (`src/shared/contentKey.ts`). Both need
-  a real deepening-capable run. Recovery until validated: quarantine orphan pending `deepening:*` tasks.
+- **Selective-deepening convergence — live validation env-bound.** Both known convergence loops
+  (packet-result `task_id` mismatch; idempotency_key collision across rounds) have shipped fixes and need
+  a real deepening-capable run to confirm. Recovery until validated: quarantine orphan pending
+  `deepening:*` tasks.
   - **TRAP (still relevant if this class regresses):** host-side unblock attempts do NOT work and actively
     corrupt gitignored run-state. Marking `status:complete` in `audit_tasks.json` is ignored; writing
     `partial_completion_terminal.stranded_ids` is overwritten; appending results with unique idempotency
@@ -129,11 +123,9 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
-- **Schema-enforced generation — CE-004 residual (env-bound only).** Emit-time constraint seam +
-  `total_lines` gate (CE-009) + validator duplicate finding-id hard-reject + fabricated-path +
-  out-of-range-span checks are all shipped. The only residual is env-bound: the always-on conversation
-  host (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to
-  the repair floor (no emit-time prevention). Unblocks only on a provider gaining a constraint endpoint.
+- **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
+  (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the
+  repair floor (no emit-time prevention). Unblocks only on a provider gaining a constraint endpoint.
   - **⬇ Build lever (openai-compatible / NIM path):** NIM/vLLM/OpenAI-compatible endpoints *do* support
     guided decoding (`guided_json` / `response_format: json_schema`). Plumbing the AuditResult schema into
     that provider's request is a real, contained build that gives emit-time constraint on that path (the
@@ -153,10 +145,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     rather than only reacting after a 429. FAIL = slot-pull chosen on a nesting-capable host, or pacing that
     only ever reacts post-wall.
 
-- **Deterministic analyzers: own-vs-acquire engine.** The acquisition engine, registry
-  (`EXTERNAL_ANALYZER_CANDIDATES`), adapters (eslint, semgrep, gitleaks, jscpd, osv-scanner, clippy,
-  rubocop, hadolint, actionlint, type-coverage), and consent gate (`admitSpawn`) are shipped. **Open:**
-  clippy/rubocop landed fixture-only (no Rust/Ruby repo → live spawn unvalidated). *(Mutation testing was
+- **Deterministic analyzers: own-vs-acquire engine.** **Open:** clippy/rubocop landed fixture-only (no
+  Rust/Ruby repo → live spawn unvalidated). *(Mutation testing was
   considered and dropped 2026-07-03: it doesn't fit the acquire+scan model — Stryker must run the full
   test suite per mutant and needs a per-repo test-runner config we don't own, so it either no-ops or is
   its own subsystem. Not an analyzer-registry add. Re-file as a scoped forward track only if a lightweight
