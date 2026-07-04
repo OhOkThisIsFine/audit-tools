@@ -433,7 +433,17 @@ test("buildRepoManifest infers languages from normalized extensions and leaves e
     { path: "README", size_bytes: 13 },
   ]);
 
-  expect(manifest.files.map((file) => file.language)).toEqual(["tsx", "javascript", "typescript", "unknown"]);
+  // Keyed by path so the assertion is independent of the manifest's (now
+  // deterministic path-sorted) file order.
+  const languageByPath = Object.fromEntries(
+    manifest.files.map((file) => [file.path, file.language]),
+  );
+  expect(languageByPath).toEqual({
+    "SRC\\App.TSX": "tsx",
+    "scripts\\build.MJS": "javascript",
+    "types\\shared.MTS": "typescript",
+    README: "unknown",
+  });
 });
 
 test("buildFileDisposition stays stable for Windows-style absolute paths and overlapping matches", () => {

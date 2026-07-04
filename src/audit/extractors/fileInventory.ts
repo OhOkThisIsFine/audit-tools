@@ -42,11 +42,21 @@ export function buildRepoManifest(
       name: repositoryName,
     },
     generated_at: new Date().toISOString(),
-    files: files.map((file) => ({
-      path: file.path,
-      language: inferLanguage(file.path),
-      size_bytes: file.size_bytes,
-      hash: file.hash,
-    })),
+    // Emit files in a deterministic path-sorted order. The intake walk pushes in
+    // raw readdir (filesystem) order, which varies across OS and on unrelated
+    // file adds/renames; preserving it churns repo_manifest's content_hash on
+    // every re-extraction and cascades phantom staleness down the whole DAG
+    // (repo_manifest → unit_manifest → risk_register → design_assessment →
+    // design review), forcing redundant LLM re-review. Path is the unique key,
+    // so sorting is semantically neutral and makes re-extraction byte-identical
+    // when nothing changed.
+    files: files
+      .map((file) => ({
+        path: file.path,
+        language: inferLanguage(file.path),
+        size_bytes: file.size_bytes,
+        hash: file.hash,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path)),
   };
 }
