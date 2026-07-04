@@ -104,7 +104,7 @@ function toRepoRelativePath(root, targetPath) {
   return value.length > 0 ? value : '.';
 }
 
-function buildInstallDirective(relativePromptPath) {
+export function buildInstallDirective(relativePromptPath) {
   return [
     INSTALL_MARKER_START,
     '## /audit-code',
