@@ -449,6 +449,46 @@ describe("contract pipeline validators", () => {
       });
       expect(issues.some((i) => i.path.includes("status"))).toBe(true);
     });
+
+    const dagNode = (id: string, deps: string[]) => ({
+      ...validNode,
+      id,
+      depends_on: deps,
+    });
+
+    it("accepts an acyclic depends_on chain", () => {
+      const issues = validateImplementationDAG({
+        ...valid,
+        nodes: [dagNode("A", []), dagNode("B", ["A"]), dagNode("C", ["B", "A"])],
+      });
+      expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+    });
+
+    it("rejects a depends_on cycle", () => {
+      const issues = validateImplementationDAG({
+        ...valid,
+        nodes: [dagNode("A", ["B"]), dagNode("B", ["A"])],
+      });
+      expect(
+        issues.some((i) => i.message.includes("dependency cycle") && i.severity === "error"),
+      ).toBe(true);
+    });
+
+    it("rejects a longer depends_on cycle (A->B->C->A)", () => {
+      const issues = validateImplementationDAG({
+        ...valid,
+        nodes: [dagNode("A", ["C"]), dagNode("B", ["A"]), dagNode("C", ["B"])],
+      });
+      expect(issues.some((i) => i.message.includes("dependency cycle"))).toBe(true);
+    });
+
+    it("ignores a dangling depends_on id when checking for cycles (as promotion drops it)", () => {
+      const issues = validateImplementationDAG({
+        ...valid,
+        nodes: [dagNode("A", ["GHOST"])],
+      });
+      expect(issues.some((i) => i.message.includes("dependency cycle"))).toBe(false);
+    });
   });
 
   describe("validateCounterexample", () => {

@@ -32,7 +32,8 @@
   v0.32.6 predates the import so npm `latest` was unaffected); the **CE-006 scope-gate FP** (descriptive
   "repo-wide" prose no longer trips the negative-scoping veto); and **producer/consumer DAG-edge derivation**
   — implementation ordering is now tool-derived from `artifact:<name>` tokens in finalized `inputs`/`outputs`
-  (feeds both `phase_cut` and node `depends_on`), instead of relying on the host to hand-add edges.
+  (feeds both `phase_cut` and node `depends_on`), instead of relying on the host to hand-add edges, plus a
+  `validateImplementationDAG` **acyclicity check** so a host-authored cyclic `depends_on` is rejected.
 - **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (quarantine
   re-verify affordance, finalization re-dispatch cost); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
   a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);

@@ -622,8 +622,75 @@ export function validateImplementationDAG(
       }
     }
   }
+  // Acyclicity: an implementation DAG must be a DAG. Node `depends_on` is the
+  // ordering the block promotion reads, so a dependency cycle would stall the
+  // phase scheduler — no node in the cycle can ever become dispatchable. The
+  // tool-derived scaffold is acyclic by construction, but a host-authored cyclic
+  // `depends_on` must be rejected too (referential integrity alone let it pass).
+  // Traverse declared nodes only (a dangling dep is ignored, as promotion drops it).
+  if (Array.isArray(v.nodes)) {
+    const adjacency = new Map<string, string[]>();
+    for (const node of v.nodes) {
+      if (!isRecord(node) || typeof node.id !== "string") continue;
+      const deps = Array.isArray(node.depends_on)
+        ? node.depends_on.filter(
+            (d): d is string =>
+              typeof d === "string" && d !== node.id && declaredNodeIds.has(d),
+          )
+        : [];
+      adjacency.set(node.id, deps);
+    }
+    const cycle = findFirstDependencyCycle(adjacency);
+    if (cycle) {
+      pushValidationIssue(
+        issues,
+        `${path}.nodes`,
+        `${path} has a dependency cycle among nodes: ${cycle.join(" -> ")}. The implementation DAG must be acyclic.`,
+      );
+    }
+  }
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
+}
+
+/**
+ * Return the node ids forming the first `depends_on` cycle (as `a -> b -> a`), or
+ * null when the graph is acyclic. Standard white/gray/black DFS; iteration follows
+ * node insertion order so the reported cycle is deterministic.
+ */
+function findFirstDependencyCycle(adjacency: Map<string, string[]>): string[] | null {
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map<string, number>();
+  for (const id of adjacency.keys()) color.set(id, WHITE);
+  const stack: string[] = [];
+
+  const visit = (id: string): string[] | null => {
+    color.set(id, GRAY);
+    stack.push(id);
+    for (const next of adjacency.get(id) ?? []) {
+      if (!adjacency.has(next)) continue;
+      if (color.get(next) === GRAY) {
+        return [...stack.slice(stack.indexOf(next)), next];
+      }
+      if (color.get(next) === WHITE) {
+        const found = visit(next);
+        if (found) return found;
+      }
+    }
+    stack.pop();
+    color.set(id, BLACK);
+    return null;
+  };
+
+  for (const id of adjacency.keys()) {
+    if (color.get(id) === WHITE) {
+      const found = visit(id);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 // ── VerificationReport ────────────────────────────────────────────────────────

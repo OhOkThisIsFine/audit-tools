@@ -68,14 +68,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   gitignored run-state stays permanently marked "failed" (branch becomes the only source of truth). Add a
   re-verify/re-accept path so a fixed verify environment can cleanly re-drive quarantined nodes.
 
-- **`implementation_dag` acyclicity is unvalidated — a host-authored `depends_on`/`edges` cycle is not
-  rejected (observed 2026-07-04).** `validateImplementationDAG` (`src/remediate/validation/contractPipeline.ts`)
-  checks referential integrity (every edge/`depends_on` id points at a real node) but never checks the graph
-  is acyclic, despite being called a DAG. The tool-DERIVED scaffold is now acyclic by construction
-  (phase-ordinal-oriented producer/consumer edges), but a host that hand-adds a cyclic `depends_on` would
-  pass validation and could stall the phase scheduler. Add a DFS cycle check to the validator so a cyclic
-  implementation_dag is rejected regardless of who authored it. Low-risk, independent of the derivation work.
-
 - **Contract-pipeline `contract_finalization` re-dispatches 12 heavyweight per-module agents for what is
   mostly a deterministic transform (inefficient-feeding, observed 2026-07-04).** Finalization = the draft
   module contract + the seam-reconciliation decisions attached as `seam_adjustments`; it needs no fresh
