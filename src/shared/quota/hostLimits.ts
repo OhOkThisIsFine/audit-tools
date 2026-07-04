@@ -1,12 +1,12 @@
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { HostConcurrencyLimit } from "./types.js";
+import {
+  CODEX_DEFAULT_MAX_THREADS,
+  readCodexConfiguredMaxThreads,
+} from "./codexHostConfig.js";
 
-/**
- * Codex Desktop does not report its concurrency via env, so we apply this known
- * fixed active-subagent ceiling when the Codex Desktop originator override is
- * present. Exported so tests assert against the constant rather than a literal.
- */
-export const CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT = 6;
+/** Reads Codex's configured `[agents].max_threads`, or null when unset. Injectable for tests. */
+export type ReadCodexMaxThreads = () => number | null;
 
 function parsePositiveInteger(value: unknown): number | null {
   if (typeof value === "number") {
@@ -22,6 +22,7 @@ function parsePositiveInteger(value: unknown): number | null {
 export function detectHostActiveSubagentLimit(
   envPrefix: string,
   env: NodeJS.ProcessEnv = process.env,
+  readCodexMaxThreads: ReadCodexMaxThreads = () => readCodexConfiguredMaxThreads(),
 ): HostConcurrencyLimit | null {
   const explicitEnvLimit = parsePositiveInteger(
     env[`${envPrefix}_HOST_MAX_ACTIVE_SUBAGENTS`] ??
@@ -36,10 +37,22 @@ export function detectHostActiveSubagentLimit(
   }
 
   if (env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE === "Codex Desktop") {
+    // Codex exposes no env var for its concurrency, but `[agents].max_threads`
+    // in `~/.codex/config.toml` IS its real user-configurable ceiling — discover
+    // it there. Only when that config is silent do we fall back to Codex's
+    // documented default, labelled `known_default` (not a fake env reading).
+    const discovered = readCodexMaxThreads();
+    if (discovered !== null) {
+      return {
+        active_subagents: discovered,
+        source: "discovered_config",
+        description: "Codex agents.max_threads from ~/.codex/config.toml.",
+      };
+    }
     return {
-      active_subagents: CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT,
-      source: "environment",
-      description: "Codex Desktop active subagent limit.",
+      active_subagents: CODEX_DEFAULT_MAX_THREADS,
+      source: "known_default",
+      description: "Codex documented default agents.max_threads (config file silent).",
     };
   }
 
@@ -51,6 +64,7 @@ export function resolveHostActiveSubagentLimit(options: {
   explicitLimit?: number | null;
   sessionConfig: SessionConfig;
   env?: NodeJS.ProcessEnv;
+  readCodexMaxThreads?: ReadCodexMaxThreads;
 }): HostConcurrencyLimit | null {
   if (options.explicitLimit !== undefined && options.explicitLimit !== null) {
     return {
@@ -72,5 +86,9 @@ export function resolveHostActiveSubagentLimit(options: {
     };
   }
 
-  return detectHostActiveSubagentLimit(options.envPrefix, options.env);
+  return detectHostActiveSubagentLimit(
+    options.envPrefix,
+    options.env,
+    options.readCodexMaxThreads ?? (() => readCodexConfiguredMaxThreads()),
+  );
 }

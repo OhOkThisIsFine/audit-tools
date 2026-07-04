@@ -12,7 +12,7 @@ import {
   computeBackoffFailureWeight,
 } from "../../src/remediate/quota/index.js";
 import {
-  CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT,
+  CODEX_DEFAULT_MAX_THREADS,
   createBrokeredRepairDispatch,
   classifyCapableHost,
   classifyProvider,
@@ -43,12 +43,24 @@ describe("detectHostConcurrencyFromEnv", () => {
     expect(result!.active_subagents).toBe(4);
   });
 
-  it("detects Codex Desktop with hardcoded limit", () => {
-    const result = detectHostConcurrencyFromEnv({
-      CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop",
-    } as any);
+  it("falls back to Codex documented default when config is silent", () => {
+    const result = detectHostConcurrencyFromEnv(
+      { CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop" } as any,
+      () => null, // config file silent / absent
+    );
     expect(result).not.toBeNull();
-    expect(result!.active_subagents).toBe(CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT);
+    expect(result!.active_subagents).toBe(CODEX_DEFAULT_MAX_THREADS);
+    expect(result!.source).toBe("known_default");
+  });
+
+  it("discovers Codex agents.max_threads from config when present", () => {
+    const result = detectHostConcurrencyFromEnv(
+      { CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop" } as any,
+      () => 10, // ~/.codex/config.toml [agents].max_threads = 10
+    );
+    expect(result).not.toBeNull();
+    expect(result!.active_subagents).toBe(10);
+    expect(result!.source).toBe("discovered_config");
   });
 
   it("returns null when no env vars set", () => {

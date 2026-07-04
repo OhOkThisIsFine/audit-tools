@@ -779,8 +779,12 @@ export { collectClaudeCodeJsonLines } from "./quota/claudeCodeJsonLines.js";
 export {
   detectHostActiveSubagentLimit,
   resolveHostActiveSubagentLimit,
-  CODEX_DESKTOP_ACTIVE_SUBAGENT_LIMIT,
 } from "./quota/hostLimits.js";
+export type { ReadCodexMaxThreads } from "./quota/hostLimits.js";
+export {
+  CODEX_DEFAULT_MAX_THREADS,
+  readCodexConfiguredMaxThreads,
+} from "./quota/codexHostConfig.js";
 export type { RateLimitDetectionResult } from "./quota/errorParsing.js";
 export {
   acquireLock,
