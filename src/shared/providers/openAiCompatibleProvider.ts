@@ -126,37 +126,85 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs);
-    // response_format defaults ON (nullish: on unless explicitly false); not all
-    // endpoints accept it, so a 400/422 rejection degrades to one retry without it.
-    const wantJsonFormat = this.config.response_format_json !== false;
+    // Emit-time constraint ladder (strongest → weakest), each degrading to the next
+    // on an endpoint rejection (HTTP 400/422) so leaving the levers on is safe for
+    // ANY endpoint:
+    //   "json_schema" — CE-004 build lever: per-field constraint from the worker's
+    //     canonical JSON Schema (read ONCE from input.outputSchema, single-sourced
+    //     from zod by the dispatch site) via response_format json_schema + NIM/vLLM
+    //     guided_json. Only offered when a schema is supplied AND guided_json is not
+    //     disabled in config.
+    //   "json_object" — structured output, no per-field enforcement
+    //     (response_format_json, the prior default).
+    //   "none" — no response_format at all.
+    const wantJsonObject = this.config.response_format_json !== false;
+    const outputSchema =
+      this.config.guided_json !== false &&
+      input.outputSchema != null &&
+      typeof input.outputSchema === "object"
+        ? input.outputSchema
+        : null;
+    type ConstraintMode = "json_schema" | "json_object" | "none";
+    const initialMode: ConstraintMode = outputSchema
+      ? "json_schema"
+      : wantJsonObject
+        ? "json_object"
+        : "none";
+    // The degrade target when the current mode is rejected: json_schema falls to
+    // json_object only if json_object is itself wanted, else straight to none.
+    const nextMode = (mode: ConstraintMode): ConstraintMode | null => {
+      if (mode === "json_schema") return wantJsonObject ? "json_object" : "none";
+      if (mode === "json_object") return "none";
+      return null;
+    };
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
       ...(this.config.headers ?? {}),
     };
-    const buildBody = (withJsonFormat: boolean): string =>
-      JSON.stringify({
+    const buildBody = (mode: ConstraintMode): string => {
+      const body: Record<string, unknown> = {
         model,
         messages,
         temperature: this.config.temperature ?? 0,
         max_tokens: this.config.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         stream: false,
-        ...(withJsonFormat ? { response_format: { type: "json_object" } } : {}),
-      });
-    const post = (withJsonFormat: boolean): ReturnType<FetchFn> =>
+      };
+      if (mode === "json_schema" && outputSchema) {
+        // OpenAI / vLLM structured outputs. `name` is required by the OpenAI shape.
+        body.response_format = {
+          type: "json_schema",
+          json_schema: { name: "worker_result", schema: outputSchema, strict: true },
+        };
+        // NIM / vLLM guided decoding: accept the schema both at top level and under
+        // `nvext` so a single request covers vLLM's `guided_json` and NIM's
+        // `nvext.guided_json` — an endpoint ignores the key it doesn't recognize.
+        body.guided_json = outputSchema;
+        body.nvext = { guided_json: outputSchema };
+      } else if (mode === "json_object") {
+        body.response_format = { type: "json_object" };
+      }
+      return JSON.stringify(body);
+    };
+    const post = (mode: ConstraintMode): ReturnType<FetchFn> =>
       this.fetchFn(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers,
-        body: buildBody(withJsonFormat),
+        body: buildBody(mode),
         signal: controller.signal,
       });
 
     let content: string;
     try {
-      let res = await post(wantJsonFormat);
-      // A response_format rejection (400/422) is non-fatal: retry once without it.
-      if (!res.ok && wantJsonFormat && (res.status === 400 || res.status === 422)) {
-        res = await post(false);
+      let mode = initialMode;
+      let res = await post(mode);
+      // A constraint rejection (400/422) is non-fatal: step down the ladder until
+      // the endpoint accepts the request or there is no weaker mode left to try.
+      while (!res.ok && (res.status === 400 || res.status === 422)) {
+        const downgraded = nextMode(mode);
+        if (downgraded === null) break;
+        mode = downgraded;
+        res = await post(mode);
       }
       if (!res.ok) {
         const body = await safeText(res);

@@ -17,6 +17,12 @@ const { CodexProvider } = await import(
 const { SubprocessTemplateProvider } = await import(
   "audit-tools/shared/providers/subprocessTemplateProvider"
 );
+const { OpenAiCompatibleProvider } = await import(
+  "audit-tools/shared/providers/openAiCompatibleProvider"
+);
+const { discoverOutputConstraintCapability } = await import(
+  "audit-tools/shared/providers/providerFactory"
+);
 
 // Minimal deps for the factory. Codex/antigravity never touch the claude-code /
 // opencode options; a dummy activeSessionMessage satisfies the type.
@@ -491,4 +497,149 @@ test("chooseAutoProvider: Codex Desktop session markers resolve codex", () => {
     },
   );
   expect(resolved).toBe("codex");
+});
+
+// ── CE-004 schema-constraint lever (openai-compatible / NIM guided_json) ───────
+// The AuditResult JSON schema is plumbed into the openai-compatible request as an
+// ADDITIVE emit-time constraint: response_format json_schema (OpenAI/vLLM) plus
+// guided_json / nvext.guided_json (NIM/vLLM). It is read ONCE from
+// input.outputSchema (single-sourced from zod by the dispatch site — never forked
+// here), degrades on a 400/422 down json_schema → json_object → none, and behaves
+// exactly as before when no schema is supplied.
+
+const oaiConfig = {
+  base_url: "https://nim.test/v1",
+  model: "openai/gpt-oss-120b",
+  api_key: "k",
+};
+
+function launchOai(config, inputOverrides = {}, fetchImpl) {
+  const dir = mkdtempSync(join(tmpdir(), "oai-schema-prov-"));
+  const promptPath = join(dir, "prompt.txt");
+  writeFileSync(promptPath, "Do the task.");
+  const input = {
+    repoRoot: join(dir, "repo"),
+    runId: "RID",
+    obligationId: null,
+    promptPath,
+    taskPath: join(dir, "task.json"),
+    resultPath: join(dir, "result.json"),
+    stdoutPath: join(dir, "out.log"),
+    stderrPath: join(dir, "err.log"),
+    uiMode: "headless",
+    timeoutMs: 5000,
+    ...inputOverrides,
+  };
+  const provider = new OpenAiCompatibleProvider(config, { fetchFn: fetchImpl });
+  return provider.launch(input);
+}
+
+const OK_COMPLETION = (init) => ({
+  ok: true,
+  status: 200,
+  json: async () => ({
+    choices: [{ message: { content: JSON.stringify({ files: [], result: {} }) } }],
+  }),
+  text: async () => "",
+});
+
+const AUDIT_RESULT_SCHEMA = {
+  type: "object",
+  properties: { task_id: { type: "string" } },
+  required: ["task_id"],
+  additionalProperties: false,
+};
+
+test("CE-004: an outputSchema is plumbed into the request as json_schema + guided_json", async () => {
+  let body;
+  const fetchFn = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return OK_COMPLETION(init);
+  };
+  const res = await launchOai(oaiConfig, { outputSchema: AUDIT_RESULT_SCHEMA }, fetchFn);
+  expect(res.accepted, res.error).toBe(true);
+  // OpenAI / vLLM structured-output shape.
+  expect(body.response_format?.type).toBe("json_schema");
+  expect(body.response_format?.json_schema?.schema).toEqual(AUDIT_RESULT_SCHEMA);
+  expect(body.response_format?.json_schema?.name, "json_schema requires a name").toBeTruthy();
+  expect(body.response_format?.json_schema?.strict).toBe(true);
+  // NIM / vLLM guided decoding — both top-level and nvext-nested.
+  expect(body.guided_json).toEqual(AUDIT_RESULT_SCHEMA);
+  expect(body.nvext?.guided_json).toEqual(AUDIT_RESULT_SCHEMA);
+});
+
+test("CE-004: with NO schema supplied the request is unchanged (json_object, no guided_json)", async () => {
+  let body;
+  const fetchFn = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return OK_COMPLETION(init);
+  };
+  const res = await launchOai(oaiConfig, {}, fetchFn);
+  expect(res.accepted, res.error).toBe(true);
+  expect(body.response_format).toEqual({ type: "json_object" });
+  expect(body.guided_json, "no guided_json without a schema").toBe(undefined);
+  expect(body.nvext, "no nvext without a schema").toBe(undefined);
+});
+
+test("CE-004: guided_json:false forces the weaker json_object even when a schema is supplied", async () => {
+  let body;
+  const fetchFn = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return OK_COMPLETION(init);
+  };
+  const res = await launchOai(
+    { ...oaiConfig, guided_json: false },
+    { outputSchema: AUDIT_RESULT_SCHEMA },
+    fetchFn,
+  );
+  expect(res.accepted, res.error).toBe(true);
+  expect(body.response_format).toEqual({ type: "json_object" });
+  expect(body.guided_json).toBe(undefined);
+});
+
+test("CE-004: a 400 on json_schema degrades to json_object, then succeeds", async () => {
+  const bodies = [];
+  let call = 0;
+  const fetchFn = async (_url, init) => {
+    call += 1;
+    bodies.push(JSON.parse(init.body));
+    if (call === 1) {
+      return { ok: false, status: 400, json: async () => ({}), text: async () => "no json_schema mode" };
+    }
+    return OK_COMPLETION(init);
+  };
+  const res = await launchOai(oaiConfig, { outputSchema: AUDIT_RESULT_SCHEMA }, fetchFn);
+  expect(res.accepted, res.error).toBe(true);
+  expect(call, "one retry after the json_schema rejection").toBe(2);
+  expect(bodies[0].response_format?.type).toBe("json_schema");
+  expect(bodies[1].response_format).toEqual({ type: "json_object" });
+  expect(bodies[1].guided_json, "the degraded retry drops guided_json").toBe(undefined);
+});
+
+test("CE-004: a 422 that persists through the whole ladder degrades to no response_format", async () => {
+  const bodies = [];
+  let call = 0;
+  const fetchFn = async (_url, init) => {
+    call += 1;
+    bodies.push(JSON.parse(init.body));
+    if (call < 3) {
+      return { ok: false, status: 422, json: async () => ({}), text: async () => "reject" };
+    }
+    return OK_COMPLETION(init);
+  };
+  const res = await launchOai(oaiConfig, { outputSchema: AUDIT_RESULT_SCHEMA }, fetchFn);
+  expect(res.accepted, res.error).toBe(true);
+  expect(call, "json_schema → json_object → none").toBe(3);
+  expect(bodies[0].response_format?.type).toBe("json_schema");
+  expect(bodies[1].response_format).toEqual({ type: "json_object" });
+  expect(bodies[2].response_format, "final rung carries no response_format").toBe(undefined);
+});
+
+test("CE-004: discoverOutputConstraintCapability advertises json_schema_constrained by default", () => {
+  const cap = discoverOutputConstraintCapability("openai-compatible", {});
+  expect(cap.mode).toBe("json_schema_constrained");
+  const structured = discoverOutputConstraintCapability("openai-compatible", {
+    openai_compatible: { guided_json: false },
+  });
+  expect(structured.mode).toBe("structured_output");
 });
