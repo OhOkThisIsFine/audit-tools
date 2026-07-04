@@ -86,6 +86,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   `staleness` records surfaced to host during artifact regen. Consider collapsing to a single summary line.
   Codex run 2026-07-03.
 
+- **Committed host assets drift from the renderer without a gate.** Running
+  `audit-code install` / `remediate-code install` to regenerate committed host assets also
+  rewrote `AGENTS.md`, `opencode.json`, and `.github/copilot-instructions.md` with structural
+  template changes unrelated to the prompt-body edit — i.e. those files had silently drifted from
+  current renderer output. Only `.gemini/commands/audit-code.toml` + `.github/agents/auditor.agent.md`
+  are drift-guarded (`host-asset-renderer-drift.test.mjs`); AGENTS/opencode/copilot are not, so they
+  rot undetected. Fix: extend the no-drift guard to every committed install artifact (or regen them in
+  `verify:release`). Found 2026-07-03 while reworking the concurrency handshake.
+
 ## Forward tracks
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** Emit-time constraint seam +
