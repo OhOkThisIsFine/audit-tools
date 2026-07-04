@@ -197,27 +197,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   ownership of `opencode.json` (or the INV-RCI-16 parity rule) before the remediate-side assets can be
   regen-guarded like the audit side.
 
-- **`planning_executor` omits `task_affinity_graph.json` from `artifacts_written` → staleness never bumped
-  (found 2026-07-04, doc-review).** `src/audit/orchestrator/planningExecutors.ts` writes fresh
-  `task_affinity_graph.json` content on every planning run, but its `artifacts_written` array doesn't list
-  it. `computeArtifactMetadata` only rehashes artifacts named in `artifacts_written`, so
-  `task_affinity_graph.json`'s staleness metadata is never bumped on a 2nd-or-later planning run despite the
-  content changing — a real staleness-detection gap. Fix: add `task_affinity_graph.json` to the executor's
-  `artifacts_written`.
-
-- **`id-glossary` guard test gives zero protection for `INV-o3-*` and can't separate O1/O2 (found
-  2026-07-04, doc-review).** `tests/shared/id-glossary.test.mjs` `TOKEN_RE` = `\bINV-[A-Z]\d+\b`:
-  (1) the case-sensitive `[A-Z]` never matches the lowercase `INV-o3-*` tokens actually used in
-  `src/shared/repair/emitValidateRepair.ts` → the `INV-o3` glossary row is entirely unguarded; (2) it
-  collapses `INV-O1` / `INV-O2` into one family bucket so the guard can't distinguish them. Fix `TOKEN_RE`
-  to match the real token grammar (allow lowercase family letters + per-id, not per-family, matching).
-
-- **`riskSignal.ts` header comment is stale — says slices 3/4 unwired when they are (found 2026-07-04,
-  doc-review).** `src/remediate/riskSignal.ts` states "Slices 3 and 4 are not wired yet, so computing the
-  signal changes no pipeline behavior today", but `src/remediate/steps/contractPipeline.ts` already imports
-  and uses `adversarialDepthForTier` and wires "T1 slice 4b". Correct the comment. (The
-  `spec/self-scaling-pipeline-design.md` doc side of this was already fixed in the doc-review pass.)
-
 ## Forward tracks
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
