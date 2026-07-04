@@ -1,4 +1,4 @@
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 /**
  * Single source of truth for the on-disk `.audit-tools/` layout shared by both
@@ -25,14 +25,37 @@ import { dirname, join, resolve } from "node:path";
  * and the remediation close writer cannot drift to different spellings — a
  * drift that previously surfaced as a promote-time ENOENT.
  */
+/**
+ * The single literal directory name for the runtime artifact tree. Single-sourced
+ * here so the path builders, the repo-root resolver (`resolveRepoRoot`), and the
+ * nested-tree guard all agree on the one spelling.
+ */
+export const AUDIT_TOOLS_DIRNAME = ".audit-tools";
+
 export const AUDIT_REPORT_FILENAME = "audit-report.md";
 export const AUDIT_FINDINGS_FILENAME = "audit-findings.json";
 export const REMEDIATION_REPORT_FILENAME = "remediation-report.md";
 export const REMEDIATION_OUTCOMES_FILENAME = "remediation-outcomes.json";
 
-/** `<root>/.audit-tools` (absolute). */
+/**
+ * `<root>/.audit-tools` (absolute). Refuses to build the tree under a `root`
+ * that is itself already inside a `.audit-tools/` directory — that only happens
+ * when the caller trusted a drifted cwd, and silently proceeding mints a phantom
+ * nested `.audit-tools/.audit-tools/` run forked away from the real one. Callers
+ * must anchor the repo root via `resolveRepoRoot()` first; this guard makes the
+ * failure mode loud and impossible rather than silent (auditor-agnostic
+ * robustness — the phantom tree can't be created by any code path).
+ */
 export function auditToolsDir(root: string): string {
-  return resolve(root, ".audit-tools");
+  const resolved = resolve(root);
+  if (resolved.split(sep).includes(AUDIT_TOOLS_DIRNAME)) {
+    throw new Error(
+      `refusing to build ${AUDIT_TOOLS_DIRNAME} under a path already inside ` +
+        `${AUDIT_TOOLS_DIRNAME} (root=${resolved}). Resolve the repository root ` +
+        `via resolveRepoRoot() before constructing artifact paths.`,
+    );
+  }
+  return join(resolved, AUDIT_TOOLS_DIRNAME);
 }
 
 /** `<root>/.audit-tools/audit` — audit-code's default artifacts dir (absolute). */

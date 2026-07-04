@@ -32,7 +32,8 @@ import { ownershipSubWaves } from "../dispatch/ownershipScheduler.js";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
 import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { claimWithBackoff, withClaimHeartbeat } from "../../shared/quota/claimLease.js";
-import { nodeClaimsPath } from "../../shared/io/auditToolsPaths.js";
+import { nodeClaimsPath, remediationArtifactsDir } from "../../shared/io/auditToolsPaths.js";
+import { resolveRepoRoot } from "../../shared/io/repoRoot.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep, RemediationDispatchPlan } from "./types.js";
 import { dependencyVerifiedComplete } from "./stepUtils.js";
@@ -338,11 +339,17 @@ build against the realized upstream output. Do not run a per-node \`npm run buil
 the central rebuild is single-flight (one build, never one-per-node racing \`dist/\`).`;
 
 function resolveRoot(root?: string): string {
-  return resolve(root ?? ".");
+  // Anchor away from a drifted cwd — never trust bare `resolve(".")`. A run whose
+  // cwd wandered into `.audit-tools/` would otherwise recompute repo_root as that
+  // dir and fork a phantom nested tree. See src/shared/io/repoRoot.ts.
+  return resolveRepoRoot(root ?? ".");
 }
 
 function resolveArtifactsDir(root: string, artifactsDir?: string): string {
-  return resolve(artifactsDir ?? join(root, ".audit-tools", "remediation"));
+  // The default rebases onto the anchored root via the shared helper (the sole
+  // owner of the `.audit-tools/remediation` join literal); an explicit dir is
+  // honored verbatim.
+  return artifactsDir ? resolve(artifactsDir) : remediationArtifactsDir(root);
 }
 
 function stateRunId(state: RemediationState | null): string {

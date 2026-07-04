@@ -412,6 +412,9 @@ export {
   REMEDIATION_OUTCOMES_FILENAME,
 } from "./io/auditToolsPaths.js";
 
+// IO: repo-root anchoring (untrust the process cwd; never nest .audit-tools)
+export { resolveRepoRoot, climbOutOfAuditTools } from "./io/repoRoot.js";
+
 // IO: tool-emitted end-of-run friction capture (single-sourced shape + persist
 // helper for BOTH orchestrators — cannot drift, never couples to any one repo's
 // backlog doc).

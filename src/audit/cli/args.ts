@@ -9,6 +9,7 @@ import {
   quotePromptCommandArg,
   parseHostModelRoster,
   auditArtifactsDir,
+  resolveRepoRoot,
   type SessionConfig,
   type HostModelRosterEntry,
 } from "audit-tools/shared";
@@ -156,14 +157,6 @@ export async function readStdinText(): Promise<string> {
   });
 }
 
-function resolveFlagPath(
-  argv: string[],
-  name: string,
-  fallback: string,
-): string {
-  return resolve(getFlag(argv, name, fallback) as string);
-}
-
 export function normalizePositiveInteger(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return undefined;
@@ -183,7 +176,10 @@ export function parsePositiveIntegerFlag(
 }
 
 export function getRootDir(argv: string[]): string {
-  return resolveFlagPath(argv, "--root", DIRECT_CLI_DEFAULTS.rootDir);
+  // Anchor the repo root away from a drifted cwd (never trust bare `--root .`):
+  // resolveRepoRoot climbs out of any `.audit-tools/` and re-anchors to the
+  // existing run's root / git toplevel. See src/shared/io/repoRoot.ts.
+  return resolveRepoRoot(getFlag(argv, "--root", DIRECT_CLI_DEFAULTS.rootDir) as string);
 }
 
 /**

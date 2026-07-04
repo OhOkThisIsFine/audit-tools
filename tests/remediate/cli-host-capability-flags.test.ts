@@ -288,6 +288,21 @@ describe("resolveArtifactsDirOption — default rebases onto --root", () => {
     const explicit = resolve("/var", "artifacts", "elsewhere");
     expect(resolveArtifactsDirOption(rootX, explicit)).toBe(explicit);
   });
+
+  it("a drifted --root inside .audit-tools cannot mint a phantom nested tree", () => {
+    const repo = mkdtempSync(join(tmpdir(), "remediate-drift-"));
+    try {
+      mkdirSync(join(repo, ".audit-tools", "remediation"), { recursive: true });
+      // The cwd drifted into the artifact tree, so a bare `--root .` resolves to
+      // this path. resolveRepoRoot must climb back out — no `.audit-tools/.audit-tools`.
+      const drifted = join(repo, ".audit-tools", "remediation");
+      const resolved = resolveArtifactsDirOption(drifted, ".audit-tools/remediation");
+      expect(resolved).toBe(join(repo, ".audit-tools", "remediation"));
+      expect(resolved).not.toContain(join(".audit-tools", ".audit-tools"));
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 });
 
 // --- doc ↔ CLI parity (INV-CC-05) ------------------------------------------

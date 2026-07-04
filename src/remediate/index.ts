@@ -23,6 +23,7 @@ import {
   setQuotaStateDir,
   parseHostModelRoster,
   remediationArtifactsDir,
+  resolveRepoRoot,
   mergeOpenCodeAgentPermissionRule,
   mergeOpenCodeGlobalPermissionRule,
   migrateOpenCodeGlobalExternalDirectory,
@@ -437,16 +438,18 @@ async function withBackendLogsOnStderr<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * Resolve the remediation artifacts dir. An explicit `--artifacts-dir` is
  * honored verbatim; the unchanged commander default (`.audit-tools/remediation`)
- * rebases onto `--root` via the shared `remediationArtifactsDir()` helper, so
- * `--root <X>` lands the default under `<X>/.audit-tools/remediation`. The
- * `.audit-tools/...` join literal lives only in the shared path module.
+ * rebases onto the anchored `--root` via the shared `remediationArtifactsDir()`
+ * helper, so `--root <X>` lands the default under `<X>/.audit-tools/remediation`.
+ * The `.audit-tools/...` join literal lives only in the shared path module, and
+ * `resolveRepoRoot()` climbs the root out of a drifted cwd so a bare `--root .`
+ * run from inside `.audit-tools/` cannot mint a phantom nested tree.
  */
 export function resolveArtifactsDirOption(
   root: string,
   artifactsDir: string,
 ): string {
   return artifactsDir === ".audit-tools/remediation"
-    ? remediationArtifactsDir(root)
+    ? remediationArtifactsDir(resolveRepoRoot(root))
     : resolve(artifactsDir);
 }
 
