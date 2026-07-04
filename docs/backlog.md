@@ -52,6 +52,33 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     [[dispatch-admission-control-design]]. **Owner not yet fully convinced** — the spec's *Open tensions*
     section holds the unresolved objections (output-token unknowability; ledger-is-a-proxy / possibly
     over-built vs reactive-only). Resolve those before building.
+  - **Audit dispatch can't fan out across host + codex + NIM concurrently — parity gap with remediate
+    (observed 2026-07-04).** On a Claude-driven host-subagent dispatch step, dispatch-quota established a
+    *single* `codex` pool (slots:2, `binding_cap: token_budget` off codex's 45% quota) even though
+    `provider_confirmation.json` lists `claude-code` (frontier) + `codex`. Two concrete defects beyond the
+    capability-inheritance bug above: (1) **host pool excluded from the audit dispatch plan** — when a
+    provider resolves to in-process (`resolvesToInProcessDispatchProvider`,
+    `src/audit/cli/rollingAuditDispatch.ts:75-91`), pools are built only from configured backend sources
+    (`buildAuditSourcePools`, `src/audit/cli/hybridDispatch.ts:57`); the `claude-code` host-subagent pool
+    is never added. Remediate already builds host + source pools together (`buildConfirmedPools`,
+    `src/remediate/steps/dispatch.ts:429`) — **bring audit to parity.** (2) `selectProvider`
+    (`src/shared/dispatch/rollingDispatch.ts:345`) is sequential-per-packet + spill-on-degrade, not
+    deliberate multi-pool fan-out; multi-pool capacity math already exists (`computeDispatchCapacity`,
+    `src/shared/quota/capacity.ts:378`). (3) **NIM/openai-compatible can't take read-heavy audit packets
+    single-shot** — packets require the worker to *open* granted repo files; a single-shot chat call has no
+    file access, so NIM can only participate via the in-process wrapper that serves file bodies (or by
+    inlining files into the prompt). Any deeper fix that adds NIM to the audit pool must route file
+    contents to it, not just the prompt. **Workaround used this run:** drove the fan-out manually across
+    Claude subagents + codex CLI (file-capable) + NIM (small inlined packets). **Observed executor
+    fitness this run:** Claude subagents = reliable, ~90-210s/packet, valid JSON every time. NIM
+    (deepseek-v4-pro, inlined) = worked for 2/3 small packets; 1 failed by emitting the packet's
+    "reply one-line confirmation" instead of the JSON array (single-shot can't write result_path, so the
+    reply convention leaked into output) → needs an output-contract override in the wrapper. Codex CLI
+    (`codex exec --dangerously-bypass-approvals-and-sandbox`) = **too slow to be useful here**: 2
+    concurrent ran 5+ min on the first 2 read-heavy packets with **zero** result files written, 8k+ lines
+    of echoed reasoning → abandoned, its 10 packets reassigned to Claude subagents. Lesson for the real
+    multi-pool fix: codex is not a good fit for large read-heavy audit packets under a wall-clock budget;
+    route only small/low-line packets to it, or drop it from the audit pool.
 
 - **Staleness churn from incidental array order — FIXED 2026-07-03.** `repo_manifest.files[]` was emitted
   in raw `readdir` order → churned content_hash on every re-extraction → cascaded phantom staleness down
@@ -115,9 +142,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   intake was skipped intentionally. NOT a bug; low priority. [[guidance-discovery-contextualizes]]. Codex 2026-07-03.
 
 - **`next-step` emits repeated `staleness` chatter while regenerating artifacts.** Harmless but noisy — many
-  `staleness` records surfaced to host during artifact regen. Fix (collapse to a single summary line via
-  `nextStepCommand` aggregation) is owned by CP-NODE-7; remove this bullet once that node lands. Codex run
-  2026-07-03.
+  `staleness` records surfaced to host during artifact regen. **Retargeted 2026-07-04:** this is NOT a
+  `nextStepCommand`-layer aggregation — the CLI layer surfaces no staleness-record list; the "chatter" is a
+  cross-invocation phenomenon (each `next-step` during regen emits its own step). A real fix eagerly drains
+  regen inside one `advanceAudit` pass — an **orchestrator-level** change (`advance.ts`/`nextStep.ts`), not a
+  bounded CLI fix. Codex run 2026-07-03.
 
 - **Committed host assets drift from the renderer without a gate — BEING REMEDIATED (CP-NODE-10).** Running
   `audit-code install` / `remediate-code install` to regenerate committed host assets also
