@@ -76,6 +76,14 @@ implementation must hold.
 - **Triage predicate covers reflections (CE-004):** zero auto-captured events + ≥1 agent-feedback
   reflection must NOT auto-satisfy. The satisfaction predicate covers BOTH events AND surfaced reflections
   — triage blocks until every surfaced item is dispositioned.
+- **Per-category friction walk (mandatory):** disposition of captured subjects is necessary but not
+  sufficient — the close-out ALSO blocks until EVERY friction category in `FRICTION_CATEGORIES`
+  (`ambiguous_direction` / `tool_should_decide` / `inefficient_feeding`) is covered by ≥1
+  category-tagged `open_observations[]` entry OR an explicit `category_attestations[]` "nothing to
+  report". A category can never be skipped by silence — the exact omission that let end-of-run friction
+  go unlogged. An optional `free_form_notes` string carries anything that fits no category. Single-sourced
+  in `src/shared/friction/triage.ts`; both orchestrators inherit it (they already render
+  `buildFrictionTriageBlock`).
 - **Cross-call read-judge-write (CE-005):** `withFileLock` is per-call and the judge runs outside it, so a
   concurrent ingest can append between read and commit. The post-judge re-check compares a ledger/version
   token captured at read vs. re-acquire; any interleaved append forces re-derive. Bound retries (N then

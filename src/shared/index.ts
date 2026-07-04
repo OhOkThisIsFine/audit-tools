@@ -464,11 +464,16 @@ export type {
   TriageSubject,
   FrictionTriageDecision,
   FrictionOpenObservation,
+  FrictionCategoryAttestation,
+  FrictionCategory,
   TriagedFrictionArtifact,
 } from "./friction/triage.js";
 export {
   FRICTION_DISPOSITIONS,
   FRICTION_NAMED_DIMENSIONS,
+  FRICTION_CATEGORIES,
+  FRICTION_CATEGORY_LABELS,
+  isFrictionCategory,
   isFrictionDisposition,
   reflectionKey,
   frictionLockPath,

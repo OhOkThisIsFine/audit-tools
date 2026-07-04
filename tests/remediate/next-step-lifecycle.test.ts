@@ -39,9 +39,13 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     const pendingPrompt = await readFile(pending.prompt_path, "utf8");
     expect(pendingPrompt).toMatch(/[Ff]riction triage/);
 
-    // Host writes an open_observation → friction satisfied.
+    // Host covers all friction categories → friction satisfied.
     const record = JSON.parse(await readFile(pending.artifact_paths.friction_record, "utf8"));
-    record.open_observations = [{ dimension: "other", note: "no friction this run" }];
+    record.category_attestations = [
+      { category: "ambiguous_direction", note: "none this run" },
+      { category: "tool_should_decide", note: "none this run" },
+      { category: "inefficient_feeding", note: "none this run" },
+    ];
     await writeFile(pending.artifact_paths.friction_record, JSON.stringify(record) + "\n", "utf8");
 
     // Second call: friction satisfied → status:"complete", prompt includes report.

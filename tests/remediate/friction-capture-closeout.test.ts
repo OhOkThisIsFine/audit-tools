@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import {
   FRICTION_CAPTURE_SCHEMA_VERSION,
+  FRICTION_CATEGORIES,
   frictionCapturePath,
   captureFrictionEvent,
   recordFrictionDisposition,
@@ -18,6 +19,14 @@ import {
   type TriagedFrictionArtifact,
   type StepBoundaryEventType,
 } from "audit-tools/shared";
+
+/** Cover all required friction categories on a record (attest each clean). */
+function coverAllCategories(record: TriagedFrictionArtifact): void {
+  record.category_attestations = FRICTION_CATEGORIES.map((category) => ({
+    category,
+    note: "none this run",
+  }));
+}
 import { decideAuditFrictionCloseout } from "../../src/audit/orchestrator/nextStep.js";
 import { decideRemediateFrictionCloseout } from "../../src/remediate/steps/nextStep.js";
 
@@ -38,16 +47,17 @@ afterEach(async () => {
 });
 
 describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
-  it("empty set (zero events AND zero reflections) blocks at AUDIT terminal until host writes ≥1 observation", async () => {
+  it("empty set (zero events AND zero reflections) blocks at AUDIT terminal until host covers all friction categories", async () => {
     const artifactsDir = join(TEST_DIR, "audit");
     await mkdir(artifactsDir, { recursive: true });
     const runId = "AUDIT-RUN-1";
 
-    // First call: materializes the record, no subjects, but needs_open_observations.
+    // First call: materializes the record, no subjects, but all categories missing.
     const pending = await decideAuditFrictionCloseout(artifactsDir, runId);
     expect(pending.action).toBe("dispose");
     expect(pending.pending).toEqual([]);
     expect(pending.needs_open_observations).toBe(true);
+    expect(pending.missing_categories).toEqual([...FRICTION_CATEGORIES]);
 
     const path = frictionCapturePath(artifactsDir, runId);
     expect(pending.recordPath).toBe(path);
@@ -59,17 +69,18 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(artifact.tool).toBe("audit-code");
     expect(artifact.run_id).toBe(runId);
 
-    // Host adds an observation ("no friction this run" is the valid empty-run entry).
+    // Host walks all three categories (attest each clean for an empty run).
     const record = await readArtifact(path);
-    record.open_observations = [{ dimension: "other", note: "no friction this run" }];
+    coverAllCategories(record);
     await writeFile(path, JSON.stringify(record) + "\n", "utf8");
 
     const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
     expect(disposed.action).toBe("disposed");
     expect(disposed.needs_open_observations).toBe(false);
+    expect(disposed.missing_categories).toEqual([]);
   });
 
-  it("empty set blocks at REMEDIATE terminal until host writes ≥1 observation", async () => {
+  it("empty set blocks at REMEDIATE terminal until host covers all friction categories", async () => {
     const artifactsDir = join(TEST_DIR, "remediation");
     await mkdir(artifactsDir, { recursive: true });
     const state = { status: "complete" as const, plan: { plan_id: "REM-RUN-1", findings: [], blocks: [] } } as never;
@@ -79,13 +90,50 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     expect(pending.needs_open_observations).toBe(true);
     expect(pending.recordPath).toMatch(/REM-RUN-1\.json$/);
 
-    // Seed an observation.
+    // Cover all three categories.
     const record = await readArtifact(pending.recordPath);
-    record.open_observations = [{ dimension: "other", note: "no friction this run" }];
+    coverAllCategories(record);
     await writeFile(pending.recordPath, JSON.stringify(record) + "\n", "utf8");
 
     const disposed = await decideRemediateFrictionCloseout(artifactsDir, state);
     expect(disposed.action).toBe("disposed");
+  });
+
+  it("PER-CATEGORY: one covered category still blocks (the other two are owed); a free_form_note round-trips", async () => {
+    const artifactsDir = join(TEST_DIR, "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    const runId = "A-CAT";
+
+    const first = await decideAuditFrictionCloseout(artifactsDir, runId);
+    expect(first.missing_categories).toEqual([...FRICTION_CATEGORIES]);
+
+    // Cover ONLY one category via a real observation; add a free-form note.
+    const record = await readArtifact(first.recordPath);
+    record.open_observations = [
+      { category: "tool_should_decide", note: "verify ran node:test not vitest" },
+    ];
+    record.free_form_notes = "cwd drift produced a nested artifact tree";
+    await writeFile(first.recordPath, JSON.stringify(record) + "\n", "utf8");
+
+    const stillPending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    expect(stillPending.action).toBe("dispose");
+    expect(stillPending.missing_categories).toEqual([
+      "ambiguous_direction",
+      "inefficient_feeding",
+    ]);
+    expect(stillPending.free_form_notes).toBe("cwd drift produced a nested artifact tree");
+
+    // Attest the remaining two clean → satisfied.
+    const record2 = await readArtifact(first.recordPath);
+    record2.category_attestations = [
+      { category: "ambiguous_direction", note: "none" },
+      { category: "inefficient_feeding", note: "none" },
+    ];
+    await writeFile(first.recordPath, JSON.stringify(record2) + "\n", "utf8");
+
+    const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
+    expect(disposed.action).toBe("disposed");
+    expect(disposed.free_form_notes).toBe("cwd drift produced a nested artifact tree");
   });
 
   it("DROPS FALSE-GREEN: a captured mechanical event BLOCKS the close-out until disposed AND ≥1 observation written", async () => {
@@ -112,15 +160,15 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
       "audit-code",
     );
 
-    // Subjects disposed but still needs an open observation.
+    // Subjects disposed but still needs the per-category walk.
     const stillPending = await decideAuditFrictionCloseout(artifactsDir, runId);
     expect(stillPending.action).toBe("dispose");
     expect(stillPending.pending).toEqual([]);
     expect(stillPending.needs_open_observations).toBe(true);
 
-    // Write the observation → fully disposed.
+    // Cover all categories → fully disposed.
     const record = await readArtifact(stillPending.recordPath);
-    record.open_observations = [{ dimension: "other", note: "minor validator coercion, known ok" }];
+    coverAllCategories(record);
     await writeFile(stillPending.recordPath, JSON.stringify(record) + "\n", "utf8");
 
     const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
@@ -155,14 +203,14 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
       "remediate-code",
     );
 
-    // Subjects disposed but still needs open observation.
+    // Subjects disposed but still needs the per-category walk.
     const stillPending = await decideRemediateFrictionCloseout(artifactsDir, state);
     expect(stillPending.action).toBe("dispose");
     expect(stillPending.needs_open_observations).toBe(true);
 
-    // Write the observation → fully disposed.
+    // Cover all categories → fully disposed.
     const record = await readArtifact(stillPending.recordPath);
-    record.open_observations = [{ dimension: "other", note: "flaky lock tracked" }];
+    coverAllCategories(record);
     await writeFile(stillPending.recordPath, JSON.stringify(record) + "\n", "utf8");
 
     const disposed = await decideRemediateFrictionCloseout(artifactsDir, state);

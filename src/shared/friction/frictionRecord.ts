@@ -48,26 +48,52 @@ export interface FrictionDispositionRecord {
   annotation?: string;
 }
 
-/** One mandatory end-of-run open observation along a named friction dimension. */
+/** One end-of-run open observation, tagged with the friction CATEGORY it covers. */
 export interface FrictionOpenObservation {
-  /** The named friction dimension (or a free-form string). */
-  dimension: string;
+  /**
+   * The friction category this observation covers (the required-coverage axis;
+   * one of `FRICTION_CATEGORIES`). Optional only for back-compat with older
+   * records — an untagged observation covers no category and does not satisfy
+   * the per-category close-out.
+   */
+  category?: string;
+  /** Optional finer "what happened" hint (one of `FRICTION_NAMED_DIMENSIONS`). */
+  dimension?: string;
   /** The host's observation note. */
   note: string;
 }
 
 /**
+ * An explicit affirmation that a friction CATEGORY had nothing to report this
+ * run. Distinct from silence: the host must actively attest "none" per category,
+ * so a category can never be skipped by omission (the failure this gate exists to
+ * prevent). Only valid when that category has no `open_observations[]` entry.
+ */
+export interface FrictionCategoryAttestation {
+  /** The friction category being attested clean (one of `FRICTION_CATEGORIES`). */
+  category: string;
+  /** Optional context for why nothing was recorded in this category. */
+  note?: string;
+}
+
+/**
  * The full per-run friction record on disk — the base capture artifact, the
  * accreted mechanical events, plus the host-owned triage overlay
- * (`dispositions[]` / `open_observations[]`). The base `frictions` field is
- * narrowed to `CapturedFrictionItem[]` (each carries an `id`).
+ * (`dispositions[]` / `open_observations[]` / `category_attestations[]` /
+ * `free_form_notes`). The base `frictions` field is narrowed to
+ * `CapturedFrictionItem[]` (each carries an `id`).
  */
 export interface TriagedFrictionArtifact extends FrictionCaptureArtifact {
   frictions: CapturedFrictionItem[];
   /** Host dispositions, keyed by `target_id` (latest verdict wins). */
   dispositions?: FrictionDispositionRecord[];
-  /** Host open observations (≥1 required to satisfy the blocking close-out). */
+  /** Host open observations; every friction category must be covered by one of
+   *  these OR an explicit `category_attestations[]` entry to satisfy the close-out. */
   open_observations?: FrictionOpenObservation[];
+  /** Explicit per-category "nothing to report" affirmations (see the interface). */
+  category_attestations?: FrictionCategoryAttestation[];
+  /** Optional catch-all free-form notes for friction that fits no category. */
+  free_form_notes?: string;
 }
 
 /**

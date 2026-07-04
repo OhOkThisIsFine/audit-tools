@@ -71,7 +71,11 @@ test("next-step emits present_report for a complete audit", async () => {
         captured_at: new Date().toISOString(),
         frictions: [],
         dispositions: [],
-        open_observations: [{ dimension: "other", note: "no friction this run" }],
+        category_attestations: [
+          { category: "ambiguous_direction", note: "none this run" },
+          { category: "tool_should_decide", note: "none this run" },
+          { category: "inefficient_feeding", note: "none this run" },
+        ],
       }) + "\n",
     );
 

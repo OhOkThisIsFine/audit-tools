@@ -247,9 +247,10 @@ async function nextStepUntilPresentReport(root, extraArgs = []) {
         try {
           record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8"));
         } catch { /* new record, start empty */ }
-        record.open_observations = [
-          ...(record.open_observations ?? []),
-          { dimension: "other", note: "no friction this run" },
+        record.category_attestations = [
+          { category: "ambiguous_direction", note: "none this run" },
+          { category: "tool_should_decide", note: "none this run" },
+          { category: "inefficient_feeding", note: "none this run" },
         ];
         // promoteFinalAuditReport deletes artifactsDir; recreate the friction
         // subdir so the write and the subsequent next-step call both succeed.
@@ -375,7 +376,7 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
         if (step.status === "ready" && step.artifact_paths?.friction_record) {
           let record = {};
           try { record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8")); } catch { /* new */ }
-          record.open_observations = [...(record.open_observations ?? []), { dimension: "other", note: "no friction this run" }];
+          record.category_attestations = [{ category: "ambiguous_direction" }, { category: "tool_should_decide" }, { category: "inefficient_feeding" }];
           await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
           await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");
           continue;
