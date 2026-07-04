@@ -54,7 +54,15 @@ function collectTsFiles(dir) {
  */
 function familyKey(token) {
   if (token.startsWith("INV-")) {
-    // INV-<AREA>-<NN>  →  INV-<AREA>
+    // Two-letter+ area invariant: INV-<AREA>-<NN>  →  INV-<AREA> (INV-RS-01 → INV-RS).
+    const area = /^INV-([A-Za-z]{2,})-\d+$/.exec(token);
+    if (area) return `INV-${area[1]}`;
+    // Redesign single-letter module: the <letter><digits> node id IS the family, so
+    // O1/O2/o3/S03/S04/S05/X06 stay DISTINCT (INV-O1-1 → INV-O1, INV-o3-3 → INV-o3,
+    // INV-S05 → INV-S05). Case-preserving so lowercase `INV-o3` resolves.
+    const node = /^INV-([A-Za-z]\d+)(?:-\d+)?$/.exec(token);
+    if (node) return `INV-${node[1]}`;
+    // Fallback: leading letters.
     const m = /^INV-([A-Za-z]+)/.exec(token);
     return `INV-${m[1]}`;
   }
@@ -71,8 +79,8 @@ function familyKey(token) {
 // excludes prose words: requires the digit/hash tail.
 const TOKEN_RE = new RegExp(
   [
-    "\\bINV-[A-Za-z]+-\\d+\\b", // INV-RS-01
-    "\\bINV-[A-Z]\\d+\\b", // INV-S05 (historical area-as-node spelling)
+    "\\bINV-[A-Za-z]{2,}-\\d+\\b", // INV-RS-01 (two-letter+ area invariant)
+    "\\bINV-[A-Za-z]\\d+(?:-\\d+)?\\b", // INV-O1-1, INV-o3-3, INV-S05, INV-X06 (single-letter redesign module; case-preserving)
     "\\bCE-\\d{3}\\b", // CE-003
     "\\bSEAM-[A-Za-z][A-Za-z-]*\\b", // SEAM-rolling-stranding
     "\\bN-[A-Z]+\\d+\\b", // N-R13, N-CE301
@@ -131,19 +139,9 @@ test("id-glossary: every id-family prefix referenced in src is defined in the gl
       }
       continue;
     }
-    // Historical single-letter INV spelling (INV-S05, INV-X06): familyKey
-    // collapses these to `INV-S` / `INV-X`. The glossary documents them by their
-    // full historical id under a dedicated section, so accept the family if the
-    // glossary references any id of that single-letter shape.
-    if (/^INV-[A-Z]$/.test(fam)) {
-      const idShape = new RegExp(`\\b${fam}\\d`);
-      if (!idShape.test(glossary)) {
-        missing.push(
-          `${fam} (historical single-letter invariant) — referenced in ${[...files].slice(0, 3).join(", ")}`,
-        );
-      }
-      continue;
-    }
+    // Every other family key (two-letter areas AND the per-id single-letter
+    // redesign modules INV-O1/INV-O2/INV-o3/INV-S03/INV-S04/INV-S05/INV-X06)
+    // appears verbatim in the glossary — a plain substring check suffices.
     if (!glossary.includes(fam)) {
       missing.push(`${fam} — referenced in ${[...files].slice(0, 3).join(", ")}`);
     }

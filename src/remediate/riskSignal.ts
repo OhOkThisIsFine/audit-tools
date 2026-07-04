@@ -3,9 +3,12 @@
  * `spec/self-scaling-pipeline-design.md`): the ONE shared risk/complexity signal
  * that BOTH self-scaling dials (adversarial depth, phase granularity) will read.
  *
- * This module only *produces and carries* the signal. The dials that consume it
- * (Slices 3 and 4) are not wired yet, so computing the signal changes no pipeline
- * behavior today — it establishes the single source the dials will key on.
+ * This module *produces and carries* the signal; the two dials that consume it
+ * are now wired in `src/remediate/steps/contractPipeline.ts` — the adversarial-depth
+ * dial (`adversarialDepthForTier`, T1 slice 4a) and the round-trip granularity-collapse
+ * dial (`roundTripGranularityForTier`, T1 slice 4b) both key off the (possibly escalated)
+ * tier, so the signal actively shapes pipeline behavior. This module remains the single
+ * source both dials read.
  *
  * Hard constraints (from the spec):
  *   - Computed CHEAPLY at intake from data available at the routing point only:

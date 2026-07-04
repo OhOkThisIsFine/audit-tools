@@ -304,6 +304,7 @@ export async function runPlanningExecutor(
       ...(runtimeValidationReport ? ["runtime_validation_report.json"] : []),
       "audit_tasks.json",
       "audit_plan_metrics.json",
+      "task_affinity_graph.json",
       "requeue_tasks.json",
     ],
     progress_summary:

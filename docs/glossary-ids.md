@@ -52,6 +52,8 @@ A handful of invariants predate the two-letter area scheme and are still cited u
 
 | Id | Meaning | Site |
 |---|---|---|
+| `INV-S03` | Settled dispatch-pool exclusions — a spilled-then-exhausted pool (Gate-0/Gate-1 exclusion) is never re-offered on re-discovery; the `SettledExclusionSet` only grows within a run and is never mutated. | `src/shared/rolling/pausedState.ts`, `src/shared/dispatch/settledPools.ts` |
+| `INV-S04` | Free-form intent is a derived signal only — the verbatim `free_form_intent` string is never threaded into worker/dispatch prompts or output fields. | `src/shared/intent/freeFormIntentInterpreter.ts` |
 | `INV-S05` | Quota headroom is the sole dispatch throttle (the modern `INV-QD-11` restates it). | `src/shared/dispatch/rollingDispatch.ts` |
 | `INV-X06` | Partial-completion terminal hook — undispatchable/blocked work routes the run to close instead of looping forever. | `src/remediate/state/store.ts`, `src/remediate/steps/nextStep.ts` |
 | `INV-O1` | Foundations module O1 (friction-capture) — best-effort no-op-safe `captureFrictionEvent` sink + mandatory blocking triage whose satisfaction set is auto-captured events UNION surfaced reflections. | `src/shared/friction/captureFrictionEvent.ts` (literal `INV-O1-*` tokens; `triage.ts` implements the O1 triage module but carries no `INV-O1-*` token) |
