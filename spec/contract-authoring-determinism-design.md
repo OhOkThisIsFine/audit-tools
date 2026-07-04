@@ -113,7 +113,7 @@ the `implementation_dag` skeleton **deterministically**, not authored. The mappi
 > **CORRECTION (2026-06-15, verified in code via the S2/S4 dogfood — do NOT implement S2 as
 > originally written below).** The dogfood's independent conceptual critique caught, and a code
 > re-read confirmed, that S2's headline mechanism is **redundant and the wrong direction**:
-> - `repairDownstreamPhases` (`validation/contractPipelineGates.ts:976`) is a **linear slice** —
+> - `repairDownstreamPhases` (formerly in `validation/contractPipelineGates.ts`) was a **linear slice** —
 >   `CONTRACT_PHASE_SEQUENCE.slice(index+1)`, i.e. "every phase after this one." It does not know the
 >   real dependency structure.
 > - The pipeline **already** re-derives only genuinely-affected downstream artifacts via the
@@ -131,9 +131,10 @@ the `implementation_dag` skeleton **deterministically**, not authored. The mappi
 >   It is an easy lever to revisit if repair-token cost ever bites; if so, scope it to the repair
 >   *shape* only and keep the staleness DAG as the downstream authority.
 >
-> **Decision: S2 dropped.** `repairDownstreamPhases` is dead code that should simply be **deleted**
-> (it has no correct caller — the staleness DAG supersedes it), not wired. S4 (below) is unaffected
-> and shipped. Original (flawed) S2 text retained below for the record:
+> **Decision: S2 dropped, and `repairDownstreamPhases` has since been deleted** (it had no correct
+> caller — the staleness DAG supersedes it; see the removal comment at
+> `validation/contractPipelineGates.ts:1225-1234`). S4 (below) is unaffected and shipped. Original
+> (flawed) S2 text retained below for the record:
 
 On `needs_repair`, the LLM emits a **targeted patch** ("add INV-X to module Y", "refine INV-Z
 text") — not a full rewrite. The tool applies the patch, re-derives downstream artifacts with the
