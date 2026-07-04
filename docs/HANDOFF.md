@@ -16,11 +16,19 @@
   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (status: proposed).
   Resolve its *Open tensions* (esp. output-token unknowability; ledger-is-a-proxy / possibly over-built vs
   reactive-only) **before** building. See T5.3 below.
-- Staleness-churn fix (path-sort `repo_manifest.files`) committed + pushed to `main` 2026-07-03, **not yet
-  published** (batch with the dispatch rework rather than cut a release for one `sort()`).
-- **Open items** (all in `docs/backlog.md`): env-bound live validations (quota pre-wall pacing, friction
-  escalation, selective-deepening convergence, multi-IDE cooperative runs, clippy/rubocop live spawn);
-  provider-blocked schema CE-004.
+- Several fixes on `main` since v0.32.6, **not yet published** (batch with the dispatch rework rather than
+  cut a release): staleness-churn path-sort (2026-07-03); the `audit-findings-186` remediation (session-config
+  swallow-catch security fix, CE-004 guided_json lever, host-asset drift-guard extension); a **remediate
+  verify-runner fix** (per-node verify ran `.mjs` tests via retired `node:test` → false-quarantined every
+  real-change node; now vitest — `741432c4`, [[remediate-verify-runner-mjs-vitest-bug]]); and the **friction
+  per-category walk** (`054c9ef9`, see below).
+- **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (cwd-drift nested tree,
+  CE-006 keyword FP, quarantine re-verify affordance, finalization re-dispatch cost, producer/consumer edge
+  derivation); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
+  a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);
+  remediate-side `opencode.json` drift/`INV-RCI-16` reconciliation; env-bound live validations (quota pre-wall
+  pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn); provider-blocked
+  schema CE-004.
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.

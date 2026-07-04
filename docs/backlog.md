@@ -72,6 +72,21 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   fan-out) silently degrades to prose. Fix: derive dependency edges from matching producer/consumer artifact
   names in the finalized contracts, so the ordering is tool-enforced, not host-remembered.
 
+- **Friction close-out — per-category WALK shipped; auto-seeding + bypass-backstop still open (2026-07-04).**
+  The end-of-run friction triage now blocks until EVERY category in `FRICTION_CATEGORIES`
+  (`ambiguous_direction` / `tool_should_decide` / `inefficient_feeding`) is covered by a category-tagged
+  `open_observations[]` entry OR an explicit `category_attestations[]` "none", plus a `free_form_notes`
+  channel (`src/shared/friction/triage.ts`, both orchestrators; shipped `054c9ef9`). **Still open, two
+  parts:** (a) **step-boundary auto-seeding** — the walk still starts from a near-empty subject set because
+  only ~2 sites feed `captureFrictionEvent`; instrument the `next-step`/`accept-node`/`validate-artifact`
+  boundaries so re-emits, judge repair rounds, artifact rejects, obligation-renumbers, `resolved_no_change`
+  merges, and node quarantines auto-seed the per-category walk (turns "recall" into "account for these N
+  counted events"). (b) **session-level `Stop`-hook backstop** — the close gate only fires when a run cleanly
+  CLOSES; a run that bypasses close (e.g. the 2026-07-04 verify-runner recovery that assembled the branch by
+  hand) never hits it, so friction goes unlogged. A `Stop` hook that detects a remediate/audit run in the
+  session with no friction entry and blocks stop with the walk closes that. See
+  [[meta-audit-friction-must-be-tool-enforced]].
+
 - **Capability handshake is inherited from the run/original auditor, not the current one.** When a
   different auditor resumes an audit (run started in Codex, resumed by Claude Code), a `next-step` that
   omits the capability flags resolves the dispatch pool from the **stored session config**
@@ -185,15 +200,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   regen inside one `advanceAudit` pass — an **orchestrator-level** change (`advance.ts`/`nextStep.ts`), not a
   bounded CLI fix. Codex run 2026-07-03.
 
-- **Committed host assets drift from the renderer without a gate — BEING REMEDIATED (CP-NODE-10).** Running
-  `audit-code install` / `remediate-code install` to regenerate committed host assets also
-  rewrote `AGENTS.md`, `opencode.json`, and `.github/copilot-instructions.md` with structural
-  template changes unrelated to the prompt-body edit — i.e. those files had silently drifted from
-  current renderer output. Only `.gemini/commands/audit-code.toml` + `.github/agents/auditor.agent.md`
-  were drift-guarded (`host-asset-renderer-drift.test.mjs`); AGENTS/opencode/copilot were not, so they
-  rotted undetected. Fix: extend the no-drift guard to every committed install artifact. Found 2026-07-03
-  while reworking the concurrency handshake; the guard extension + drifted-asset regen is landing via
-  CP-NODE-10 in this remediation run — remove this bullet once that node merges.
+- **Committed host assets drift from the renderer without a gate — AUDIT SIDE guarded (CP-NODE-10 merged);
+  REMEDIATE-side opencode.json still unresolved (2026-07-04).** CP-NODE-10 (merged to `main`) extended
+  `host-asset-renderer-drift.test.mjs` to assert the tool-owned block of `AGENTS.md` / `opencode.json` /
+  `.github/copilot-instructions.md` (only `.gemini/*.toml` + `auditor.agent.md` were guarded before) —
+  correctly guarding only the tool-owned portion, since those files are managed merge targets carrying
+  intentional non-renderer content, so a byte-identity guard would be wrong. **Still open:** the
+  **remediate-code** side of the shared root `opencode.json` still drifts ungated. Regenerating it via
+  `remediate-code ensure` (attempted + reverted this run, `bdba4f02`→`b66731f7`) adds `remediate-code`
+  commands to top-level `permission.bash` that are NOT mirrored into `agent.auditor.permission.bash`,
+  breaking `INV-RCI-16` (audit-cli-invariants) — the two installers write one shared `opencode.json` and
+  the auditor-agent parity invariant doesn't expect the remediate commands. Reconcile the two installers'
+  ownership of `opencode.json` (or the INV-RCI-16 parity rule) before the remediate-side assets can be
+  regen-guarded like the audit side.
 
 ## Forward tracks
 
