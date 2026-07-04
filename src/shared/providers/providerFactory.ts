@@ -267,16 +267,32 @@ export function resolveFreshSessionProviderName(
  * prompt; we have no API-level forced-tool-call or schema-constrained decoding
  * over them, so their structural guarantee is `none` and the emit path degrades to
  * the O3 emit-validate-repair seam. The `openai-compatible` backend is the only one
- * that exposes a structural signal: when `response_format_json` is on (the nullish
- * default), it constrains decoding to a JSON object → `structured_output`.
+ * that exposes a structural signal, in two strengths:
+ *   - when `guided_json` is on (the nullish default) it can constrain decoding to
+ *     the worker's per-field JSON Schema (`response_format: json_schema` /
+ *     `guided_json`) whenever the dispatch site supplies one → `json_schema_constrained`;
+ *   - when `guided_json` is explicitly off but `response_format_json` is on it can
+ *     still constrain to a bare JSON object → `structured_output`.
+ * The strongest form the endpoint refuses degrades at request time (the provider
+ * steps down the response_format ladder on a 400/422), so this descriptor names the
+ * strongest form the operator has ENABLED, not a per-request outcome.
  */
 export function discoverOutputConstraintCapability(
   providerName: ResolvedProviderName,
   sessionConfig: SessionConfig = {},
 ): OutputConstraintCapability {
   if (providerName === "openai-compatible") {
-    const jsonObject = sessionConfig.openai_compatible?.response_format_json;
+    const cfg = sessionConfig.openai_compatible;
+    const jsonObject = cfg?.response_format_json;
+    const guidedJson = cfg?.guided_json;
     // Nullish ⟹ on by default (mirrors the provider's own request behavior).
+    if (guidedJson !== false) {
+      return {
+        mode: "json_schema_constrained",
+        reason:
+          "openai-compatible endpoint accepts a per-field JSON Schema (response_format json_schema / guided_json) constraining decoding to the worker's schema when supplied.",
+      };
+    }
     if (jsonObject !== false) {
       return {
         mode: "structured_output",
@@ -287,7 +303,7 @@ export function discoverOutputConstraintCapability(
     return {
       mode: "none",
       reason:
-        "openai-compatible endpoint has response_format_json disabled; no structural output constraint — degrade to emit-validate-repair.",
+        "openai-compatible endpoint has guided_json and response_format_json disabled; no structural output constraint — degrade to emit-validate-repair.",
     };
   }
   return {

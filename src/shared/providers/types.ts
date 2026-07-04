@@ -19,6 +19,19 @@ export interface LaunchFreshSessionInput {
   timeoutMs: number;
   stdinText?: string;
   onProgress?: (update: WorkerProgress) => void;
+  /**
+   * Optional JSON Schema (draft-07 / 2020-12) describing the shape the worker's
+   * `result` payload must take. Populated by the dispatch site from the canonical
+   * zod worker schema (single-sourced — the caller passes the derived JSON Schema,
+   * never a forked hand-authored copy). Providers that can constrain decoding to a
+   * schema (the OpenAI-compatible / NIM / vLLM backends via `response_format`
+   * `json_schema` / `guided_json`) read this ONCE and attach it to the request as
+   * an ADDITIVE emit-time constraint (CE-004 build lever); providers with no
+   * schema-constrained decoding (the agentic CLIs) ignore it and degrade to the
+   * emit-validate-repair seam. A `null`/absent schema means "no constraint" — the
+   * request behaves exactly as before.
+   */
+  outputSchema?: Record<string, unknown> | null;
 }
 
 export interface LaunchFreshSessionResult {

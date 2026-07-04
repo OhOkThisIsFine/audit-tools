@@ -73,11 +73,19 @@ test("F3: discovery is provider-agnostic — agentic CLIs degrade to 'none'", ()
   }
 });
 
-test("F3: openai-compatible discovers structured_output by default, none when disabled", () => {
+test("F3: openai-compatible discovers json_schema_constrained by default, degrades as levers are disabled", () => {
+  // CE-004 build lever: guided_json is ON by default → the strongest enabled form
+  // is a per-field JSON-schema constraint (response_format json_schema / guided_json).
   const on = discoverOutputConstraintCapability("openai-compatible", {});
-  expect(on.mode).toBe("structured_output");
+  expect(on.mode).toBe("json_schema_constrained");
+  // guided_json off but json_object still on → structured_output (no per-field).
+  const structured = discoverOutputConstraintCapability("openai-compatible", {
+    openai_compatible: { guided_json: false },
+  });
+  expect(structured.mode).toBe("structured_output");
+  // both levers off → no structural constraint.
   const off = discoverOutputConstraintCapability("openai-compatible", {
-    openai_compatible: { response_format_json: false },
+    openai_compatible: { guided_json: false, response_format_json: false },
   });
   expect(off.mode).toBe("none");
 });
@@ -92,7 +100,7 @@ test("F3: descriptor is discovered ONCE and stamped on the constructed provider"
     { openai_compatible: { base_url: "https://x/v1", model: "m" } },
     noopDeps,
   );
-  expect(oai.outputConstraint.mode).toBe("structured_output");
+  expect(oai.outputConstraint.mode).toBe("json_schema_constrained");
 });
 
 test("F3 inv-2: descriptor is output-constraint-scoped only — no concurrency/agent-nesting field (CP-NODE-23)", () => {

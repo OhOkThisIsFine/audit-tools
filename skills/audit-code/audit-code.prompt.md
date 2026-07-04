@@ -101,11 +101,6 @@ directory. It contains `repo_root`, `auditable_file_count`, `git_available`, and
 - If `mis_scope_smells` is empty, the echo is informational only — continue
   automatically without interrupting the workflow.
 
-Use MCP tools only as a compatibility adapter when direct shell access to
-`audit-code next-step` is unavailable. The MCP `start_audit` and
-`continue_audit` tools return the same one-step contract; they are not a
-separate orchestration path.
-
 When a step prompt tells you to continue, run `audit-code next-step` again with
 the same capability flags (`--host-models`, `--host-context-tokens`,
 `--host-output-tokens`) and follow only the newly returned `prompt_path`.

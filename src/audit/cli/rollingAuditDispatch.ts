@@ -55,6 +55,29 @@ import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js"
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 import { artifactNameForId } from "./args.js";
+import { renderWorkerJsonSchema } from "../contracts/workerSchemas.js";
+
+/**
+ * The worker's result contract as a JSON Schema, derived ONCE from the canonical
+ * zod source (`renderWorkerJsonSchema`, single-sourced — never a forked hand copy).
+ * Plumbed into each launch as `input.outputSchema` so a schema-constrained backend
+ * (openai-compatible / NIM guided_json) constrains decoding to the AuditResult[]
+ * shape at emit time (CE-004 build lever). Providers with no schema-constrained
+ * decoding ignore it. Memoized so the schema is rendered at most once per process.
+ */
+let cachedWorkerResultSchema: Record<string, unknown> | null | undefined;
+function workerResultOutputSchema(): Record<string, unknown> | null {
+  if (cachedWorkerResultSchema === undefined) {
+    try {
+      cachedWorkerResultSchema = renderWorkerJsonSchema("audit_results.schema.json");
+    } catch {
+      // A schema-derivation failure must never break dispatch — degrade to no
+      // constraint (the emit-validate-repair seam still guards result shape).
+      cachedWorkerResultSchema = null;
+    }
+  }
+  return cachedWorkerResultSchema;
+}
 
 /**
  * Backends the orchestrator can drive IN-PROCESS as the per-packet review worker
@@ -261,6 +284,9 @@ export function makeAuditProviderPacketDispatcher(params: {
         stderrPath,
         uiMode: "headless",
         timeoutMs: params.sessionConfig.timeout_ms ?? params.timeoutMs,
+        // CE-004: additively constrain a schema-capable backend to the AuditResult[]
+        // shape; backends without schema-constrained decoding ignore this.
+        outputSchema: workerResultOutputSchema(),
       });
       if (!launch.accepted) {
         return {

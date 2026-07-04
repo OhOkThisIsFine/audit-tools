@@ -89,6 +89,18 @@ export interface OpenAiCompatibleConfig {
    * provider retries once without it, so leaving it on is safe for any endpoint.
    */
   response_format_json?: boolean;
+  /**
+   * Plumb the worker's canonical JSON Schema into the request as a per-field
+   * emit-time constraint (`response_format: {type:"json_schema"}` for OpenAI /
+   * vLLM structured outputs, plus `guided_json` / `nvext.guided_json` for NIM /
+   * vLLM guided decoding) whenever the dispatch site supplies a schema (CE-004
+   * build lever). ON by default (nullish: enabled unless explicitly `false`) — it
+   * is ADDITIVE and degrades cleanly: if the endpoint rejects the schema form
+   * (HTTP 400/422) the provider retries with a plain `json_object`, then without
+   * any `response_format`, so leaving it on is safe for any endpoint. Set `false`
+   * to force the weaker `json_object`-only behavior.
+   */
+  guided_json?: boolean;
   /** Inline current contents of prompt-referenced files so edits are grounded. Default true. */
   include_referenced_files?: boolean;
 }

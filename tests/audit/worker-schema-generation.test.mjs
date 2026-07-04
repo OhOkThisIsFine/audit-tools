@@ -106,3 +106,41 @@ test("worker schemas accept a valid worker submission and reject invalid lens", 
 
   expect(LensSchema.options.length).toEqual(11);
 });
+
+// INV-SCHEMA-COMMIT-ATOMIC (C-002): a worker line_range must be ordered — end >= start.
+// The refinement lives on WorkerAuditTaskSchema.line_ranges[] in workerSchemas.ts;
+// this guards it so an inverted span (end < start) can never slip through validation.
+test("WorkerAuditTaskSchema line_ranges enforces end >= start", () => {
+  const baseTask = {
+    task_id: "t",
+    unit_id: "u",
+    pass_id: "p",
+    lens: "security",
+    file_paths: ["src/a.ts"],
+    rationale: "r",
+  };
+
+  // Ordered range (end >= start) accepted, including the degenerate equal case.
+  assert.doesNotThrow(() =>
+    WorkerAuditTaskSchema.parse({
+      ...baseTask,
+      line_ranges: [{ path: "src/a.ts", start: 3, end: 7 }],
+    }),
+  );
+  assert.doesNotThrow(() =>
+    WorkerAuditTaskSchema.parse({
+      ...baseTask,
+      line_ranges: [{ path: "src/a.ts", start: 5, end: 5 }],
+    }),
+  );
+
+  // Inverted range (end < start) rejected by the refinement.
+  assert.throws(
+    () =>
+      WorkerAuditTaskSchema.parse({
+        ...baseTask,
+        line_ranges: [{ path: "src/a.ts", start: 9, end: 2 }],
+      }),
+    /line range end must be >= start/,
+  );
+});

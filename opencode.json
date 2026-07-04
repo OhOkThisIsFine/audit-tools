@@ -1,13 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "command": {
-    "remediate-code": {
-      "template": "Run `remediate-code ensure --quiet`, then `remediate-code next-step`, read only the returned prompt_path, and follow that prompt.",
-      "description": "Conversation-first code remediation",
-      "agent": "remediator",
-      "subtask": false
-    }
-  },
+  "command": {},
   "mcp": {},
   "permission": {
     "read": "allow",
@@ -18,13 +11,33 @@
     },
     "edit": {
       "*": "ask",
-      ".audit-code/**": "allow",
+      ".remediate-code/**": "allow",
       ".audit-tools/**": "allow",
+      ".audit-code/**": "allow",
       ".audit-artifacts/**": "allow",
       "audit-report.md": "allow"
     },
     "bash": {
       "*": "allow",
+      "remediate-code": "allow",
+      "remediate-code ensure*": "allow",
+      "*remediate-code.mjs* ensure*": "allow",
+      "remediate-code next-step*": "allow",
+      "*remediate-code.mjs* next-step*": "allow",
+      "remediate-code prepare-implement-dispatch*": "allow",
+      "*remediate-code.mjs* prepare-implement-dispatch*": "allow",
+      "remediate-code merge-implement-results*": "allow",
+      "*remediate-code.mjs* merge-implement-results*": "allow",
+      "remediate-code accept-node*": "allow",
+      "*remediate-code.mjs* accept-node*": "allow",
+      "remediate-code validate*": "allow",
+      "*remediate-code.mjs* validate*": "allow",
+      "*remediate-code.mjs": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "grep *": "allow",
+      "Select-String *": "allow",
+      "rm *": "deny",
       "audit-code synthesize*": "deny",
       "*dist*index.js* synthesize*": "deny",
       "*audit-code.mjs* synthesize*": "deny",
@@ -51,12 +64,7 @@
       "audit-code validate*": "allow",
       "*audit-code.mjs* validate*": "allow",
       "*audit-code.mjs": "allow",
-      "*audit-code.mjs* worker-run*": "allow",
-      "git status*": "allow",
-      "git diff*": "allow",
-      "grep *": "allow",
-      "Select-String *": "allow",
-      "rm *": "deny"
+      "*audit-code.mjs* worker-run*": "allow"
     }
   },
   "agent": {
@@ -117,10 +125,18 @@
       }
     },
     "remediator": {
-      "description": "Bounded remediation orchestration agent for the /remediate-code workflow.",
+      "description": "Remediation orchestration agent for the /remediate-code workflow.",
       "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "external_directory": {
+          "*": "allow"
+        },
         "edit": {
           "*": "ask",
+          ".remediate-code/**": "allow",
+          ".audit-tools/**": "allow",
           ".remediation-artifacts/**": "allow",
           "remediation-report.md": "allow",
           "remediation-report.json": "allow",
@@ -130,27 +146,33 @@
           "*": "ask",
           "remediate-code": "allow",
           "remediate-code ensure*": "allow",
-          "remediate-code next-step*": "allow",
-          "remediate-code prepare-document-dispatch*": "allow",
-          "remediate-code merge-document-results*": "allow",
-          "remediate-code prepare-implement-dispatch*": "allow",
-          "remediate-code merge-implement-results*": "allow",
-          "remediate-code validate-artifacts*": "allow",
-          "*remediate-code.mjs": "allow",
           "*remediate-code.mjs* ensure*": "allow",
+          "remediate-code next-step*": "allow",
           "*remediate-code.mjs* next-step*": "allow",
-          "*remediate-code.mjs* prepare-document-dispatch*": "allow",
-          "*remediate-code.mjs* merge-document-results*": "allow",
+          "remediate-code prepare-implement-dispatch*": "allow",
           "*remediate-code.mjs* prepare-implement-dispatch*": "allow",
+          "remediate-code merge-implement-results*": "allow",
           "*remediate-code.mjs* merge-implement-results*": "allow",
-          "*remediate-code.mjs* validate-artifacts*": "allow",
+          "remediate-code accept-node*": "allow",
+          "*remediate-code.mjs* accept-node*": "allow",
+          "remediate-code validate*": "allow",
+          "*remediate-code.mjs* validate*": "allow",
+          "*remediate-code.mjs": "allow",
           "git status*": "allow",
           "git diff*": "allow",
           "grep *": "allow",
           "Select-String *": "allow",
-          "rm *": "deny"
+          "rm *": "deny",
+          "remediate-code prepare-document-dispatch*": "allow",
+          "remediate-code merge-document-results*": "allow",
+          "remediate-code validate-artifacts*": "allow",
+          "*remediate-code.mjs* prepare-document-dispatch*": "allow",
+          "*remediate-code.mjs* merge-document-results*": "allow",
+          "*remediate-code.mjs* validate-artifacts*": "allow"
         },
-        "question": "allow"
+        "remediator_*": "allow",
+        "question": "allow",
+        "task": "allow"
       }
     }
   }

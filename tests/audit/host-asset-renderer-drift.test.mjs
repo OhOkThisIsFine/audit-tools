@@ -8,6 +8,8 @@ import {
   renderAntigravityPlanningGuide,
   renderGeminiCommandToml,
 } from "../../wrapper/audit-code-wrapper-install-renderers.mjs";
+import { buildInstallDirective } from "../../wrapper/audit-code-wrapper-install-hosts.mjs";
+import { assertOpenCodeAuditPermissionConfig } from "../../wrapper/audit-code-wrapper-opencode.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -113,4 +115,72 @@ test("no-drift: committed .github/agents/auditor.agent.md equals a fresh render 
     ),
   );
   expect(committed, "Committed VS Code agent file drifted from the canonical body. Re-run `audit-code install` (or regenerate the asset).").toBe(lf(RENDERED_ASSETS["vscode-agent"]));
+});
+
+// ── no-drift guard: managed-block + merge-target host assets ──────────────────
+//
+// AGENTS.md, .github/copilot-instructions.md, and opencode.json are NOT
+// full-file renderHostAsset outputs (those are the two above). They are
+// managed-block / merge targets by design: the two instruction files embed a
+// tool-owned `<!-- audit-code:begin -->…<!-- audit-code:end -->` directive
+// inside a hand-authored file, and opencode.json is a merged multi-orchestrator
+// permission config. The correct no-drift invariant for them is that the
+// TOOL-OWNED portion is renderer-identical — the audit-code directive block must
+// equal buildInstallDirective(...), and the audit permission blocks must satisfy
+// assertOpenCodeAuditPermissionConfig — even though the surrounding hand-authored
+// content (the CLAUDE.md preamble, the remediate-code block, repo-specific
+// permission paths) legitimately differs from a bare render.
+
+const AUDIT_BLOCK_START = "<!-- audit-code:begin -->";
+const AUDIT_BLOCK_END = "<!-- audit-code:end -->";
+
+/** Extract the tool-owned audit-code managed block (markers included), LF-normalized. */
+function auditManagedBlock(markdown) {
+  const normalized = lf(markdown);
+  const start = normalized.indexOf(AUDIT_BLOCK_START);
+  const end = normalized.indexOf(AUDIT_BLOCK_END);
+  if (start < 0 || end < 0) {
+    return null;
+  }
+  return normalized.slice(start, end + AUDIT_BLOCK_END.length);
+}
+
+test("no-drift: committed AGENTS.md audit-code directive block equals buildInstallDirective output", () => {
+  const committed = readFileSync(join(repoRoot, "AGENTS.md"), "utf8");
+  const block = auditManagedBlock(committed);
+  expect(block, "AGENTS.md is missing the audit-code managed directive block. Run `audit-code install`.").not.toBeNull();
+  // AGENTS.md lives at the repo root, so the directive points at the install
+  // prompt via a repo-root-relative path.
+  const expected = lf(
+    buildInstallDirective(".audit-code/install/audit-code.import.md"),
+  );
+  expect(block, "AGENTS.md audit-code directive block drifted from the installer output. Run `audit-code install`.").toBe(expected);
+});
+
+test("no-drift: committed .github/copilot-instructions.md audit-code directive block equals buildInstallDirective output", () => {
+  const committed = readFileSync(
+    join(repoRoot, ".github", "copilot-instructions.md"),
+    "utf8",
+  );
+  const block = auditManagedBlock(committed);
+  expect(block, ".github/copilot-instructions.md is missing the audit-code managed directive block. Run `audit-code install`.").not.toBeNull();
+  // copilot-instructions.md lives under .github/, so the directive points at the
+  // install prompt one directory up.
+  const expected = lf(
+    buildInstallDirective("../.audit-code/install/audit-code.import.md"),
+  );
+  expect(block, ".github/copilot-instructions.md audit-code directive block drifted from the installer output. Run `audit-code install`.").toBe(expected);
+});
+
+test("no-drift: committed opencode.json audit permission blocks satisfy the installer permission contract", () => {
+  const config = JSON.parse(
+    readFileSync(join(repoRoot, "opencode.json"), "utf8"),
+  );
+  // The tool never writes a project-level /audit-code command or mcp.auditor —
+  // those are global npm-installed state.
+  expect(config?.command?.["audit-code"], "opencode.json must not define command['audit-code'] (global npm state). Run `audit-code install --host opencode`.").toBeUndefined();
+  expect(config?.mcp?.auditor, "opencode.json must not define mcp.auditor (global npm state). Run `audit-code install --host opencode`.").toBeUndefined();
+  // The audit permission blocks must match the installer's permission contract.
+  expect(() => assertOpenCodeAuditPermissionConfig(config?.permission, "permission")).not.toThrow();
+  expect(() => assertOpenCodeAuditPermissionConfig(config?.agent?.auditor?.permission, "agent.auditor.permission")).not.toThrow();
 });

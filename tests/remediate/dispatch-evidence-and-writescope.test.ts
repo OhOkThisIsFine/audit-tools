@@ -552,22 +552,22 @@ describe("verifyCommandsForEdits — derive per-node verify from touched tests (
     expect(isBuildFreeVerifyCommand(cmds[0])).toBe(true);
   });
 
-  it("runs a touched node:test file via the tsx loader (no build), not the whole suite", () => {
+  it("runs a touched .mjs vitest file via `vitest run <file>` (no build), not the whole suite", () => {
     const cmds = verifyCommandsForEdits(["src/audit/cli/x.ts", "tests/audit/x.test.mjs"]);
     expect(cmds).toEqual([
       "npm run check",
-      "node --import tsx/esm --test tests/audit/x.test.mjs",
+      "npx vitest run tests/audit/x.test.mjs",
     ]);
     cmds.forEach((c) => expect(isBuildFreeVerifyCommand(c)).toBe(true));
   });
 
-  it("runs a touched vitest file via `vitest run <file>`", () => {
+  it("runs a touched .ts vitest file via `vitest run <file>`", () => {
     const cmds = verifyCommandsForEdits(["tests/remediate/y.test.ts"]);
     expect(cmds).toEqual(["npm run check", "npx vitest run tests/remediate/y.test.ts"]);
     cmds.forEach((c) => expect(isBuildFreeVerifyCommand(c)).toBe(true));
   });
 
-  it("groups multiple node:test and vitest files; ignores non-test edits; normalises separators", () => {
+  it("groups ALL touched test files (.mjs + .ts) into one vitest run; ignores non-test edits; normalises separators", () => {
     const cmds = verifyCommandsForEdits([
       "tests\\audit\\b.test.mjs",
       "tests/audit/a.test.mjs",
@@ -577,8 +577,7 @@ describe("verifyCommandsForEdits — derive per-node verify from touched tests (
     ]);
     expect(cmds).toEqual([
       "npm run check",
-      "node --import tsx/esm --test tests/audit/a.test.mjs tests/audit/b.test.mjs",
-      "npx vitest run tests/remediate/c.test.ts",
+      "npx vitest run tests/audit/a.test.mjs tests/audit/b.test.mjs tests/remediate/c.test.ts",
     ]);
   });
 });

@@ -6,3 +6,10 @@ When the user enters `/audit-code`, treat it as this repository's autonomous aud
 If your host does not automatically register the installed slash command file, load and follow [the repo-local audit directive](../.audit-code/install/audit-code.import.md).
 Normal usage should stay conversation-first and avoid manual `--root`, provider flags, or model-selection arguments.
 <!-- audit-code:end -->
+
+<!-- remediate-code:begin -->
+## /remediate-code
+When the user enters `/remediate-code`, treat it as this repository's autonomous remediation workflow.
+If your host does not automatically register the installed slash command file, load and follow [the repo-local remediate directive](../.remediate-code/install/remediate-code.import.md).
+Normal usage should stay conversation-first and avoid manual `--root`, provider flags, or model-selection arguments.
+<!-- remediate-code:end -->

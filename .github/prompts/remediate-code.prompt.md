@@ -55,13 +55,9 @@ Every `next-step` call is also the **capability handshake**: report what you can
 dispatch to *right now* so the backend sizes remediation waves and per-worker
 context to your real model instead of a conservative 32k floor. Report:
 
-- `--host-can-dispatch-subagents` — whether you can run callable subagents at all
-  (via the `Agent`/`task` tool). Without it the backend runs remediation serially.
-  Do **not** report a parallel-worker count: the backend owns concurrency (its
-  token-budget gate plus any hard host cap it can detect, e.g. Codex
-  `[agents].max_threads`) and runs uncapped when it detects none. An operator with
-  a genuine fixed machine limit may pass `--host-max-concurrent N` as an optional
-  override; it is never a value to guess.
+- `--host-can-dispatch-subagents` / `--host-max-concurrent` — whether you can run
+  callable subagents and how many in parallel. Without them the backend assumes
+  serial dispatch.
 - `--host-models` — an ordered JSON array (lowest rank first) of the models you
   can dispatch workers to *right now*, one entry per relative rank:
   `{"rank": "small"|"standard"|"deep", "context_tokens": N, "output_tokens": N}`.
@@ -78,13 +74,13 @@ context to your real model instead of a conservative 32k floor. Report:
   value.
 
 ```bash
-remediate-code next-step --input <path> --host-can-dispatch-subagents --host-models '[{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+remediate-code next-step --input <path> --host-max-concurrent 4 --host-models '[{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
 ```
 
 Or with a single dispatch model:
 
 ```bash
-remediate-code next-step --input <path> --host-can-dispatch-subagents --host-context-tokens 200000 --host-output-tokens 32000
+remediate-code next-step --input <path> --host-max-concurrent 4 --host-context-tokens 200000 --host-output-tokens 32000
 ```
 
 Read the returned JSON only far enough to find `prompt_path`, then read and

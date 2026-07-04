@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { HostModelRosterEntry, SessionConfig, ResolvedProviderName } from "audit-tools/shared";
+import type { HostModelRosterEntry, ResolvedProviderName } from "audit-tools/shared";
 import { classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
@@ -81,9 +81,14 @@ export async function renderSemanticReviewStep(params: {
     });
   }
 
-  const sessionConfig = await loadSessionConfig(artifactsDir).catch(
-    () => ({} as SessionConfig),
-  );
+  // Fail closed: an invalid/tampered session-config must abort the step, never
+  // silently degrade to an empty (permissive) default. `loadSessionConfig`
+  // throws on a config that fails validation (e.g. a spoofed provider or a
+  // command-injection-shaped provider command); swallowing that here would let
+  // the dispatch path run against an attacker-influenced config. Matches every
+  // sibling caller (advanceAuditCommand/nextStepCommand/prepareDispatchCommand/
+  // quotaCommand), which all let the error propagate.
+  const sessionConfig = await loadSessionConfig(artifactsDir);
   const providerName = resolveFreshSessionProviderName(
     sessionConfig.provider === undefined ? "auto" : undefined,
     sessionConfig,

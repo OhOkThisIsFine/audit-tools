@@ -197,8 +197,14 @@ export async function prepareDispatchArtifacts(params: {
       }
       throw error;
     }));
+  // Fail closed: an invalid/tampered session-config must abort dispatch, never
+  // silently degrade to an empty (permissive) default. `loadSessionConfig` throws
+  // on a config that fails validation (spoofed provider, command-injection-shaped
+  // provider command, non-boolean dangerously_skip_permissions, …); swallowing it
+  // here would build the dispatch against an attacker-influenced config. Matches
+  // the sibling callers, which all let the error propagate.
   const sessionConfig: SessionConfig =
-    params.sessionConfig ?? (await loadSessionConfig(artifactsDir).catch(() => ({} as SessionConfig)));
+    params.sessionConfig ?? (await loadSessionConfig(artifactsDir));
   const lensDefsPath = join(params.packageRoot, "dispatch", "lens-definitions.json");
   const lensDefs = await readJsonFile<Record<string, { description: string; do_not_report: string }>>(lensDefsPath);
 
