@@ -3,7 +3,9 @@
  *
  * The foundations→consumers phase cut derived by {@link derivePhaseCut} is a
  * DERIVED, deterministic artifact (a pure function of the finalized module
- * contracts' `neighbor_needs` DAG). It is persisted as a first-class sidecar —
+ * contracts' module-dependency DAG — producer/consumer `artifact:<name>` tokens
+ * in `inputs`/`outputs`, unioned with any `neighbor_needs`). It is persisted as a
+ * first-class sidecar —
  * `intake/contract/phase_cut.json` — so the cut the conceptual critique sees and
  * the cut the implementation-DAG promotion enforces are ONE source, inspectable
  * on disk, not two inline recomputations that could drift.

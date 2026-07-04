@@ -282,6 +282,87 @@ describe("artifact scaffolds (S3 skeletons for the partially-derivable phases)",
     expect(scaffold.edges).toEqual([]);
   });
 
+  it("derives node depends_on from producer/consumer artifact tokens in the finalized contracts", () => {
+    // auth-module PRODUCES artifact:session; logging-module CONSUMES it → the
+    // logging node must depend on the auth node, with no host-authored edge.
+    const contracts = {
+      goal_id: "G1",
+      module_contracts: [
+        {
+          name: "auth-module",
+          inputs: ["credentials"],
+          outputs: ["artifact:session (an authenticated session)"],
+          invariants: ["a session is returned for valid credentials"],
+          failure_modes: ["malformed credentials are rejected"],
+          validation_boundary: "",
+        },
+        {
+          name: "logging-module",
+          inputs: ["artifact:session to attribute the log line"],
+          outputs: ["log line"],
+          invariants: [],
+          failure_modes: [],
+          validation_boundary: "",
+        },
+      ],
+    };
+    const ledger = deriveObligationLedger(contracts, { created_at: CREATED_AT });
+    const scaffold = buildImplementationDagScaffold(ledger, [], contracts);
+
+    const authNode = scaffold.nodes.find((n) =>
+      n.satisfies_obligations.some((id) => id.includes("auth-module")),
+    )!;
+    const loggingNode = scaffold.nodes.find((n) =>
+      n.satisfies_obligations.some((id) => id.includes("logging-module")),
+    )!;
+    expect(authNode.depends_on).toEqual([]);
+    expect(loggingNode.depends_on).toEqual([authNode.id]);
+    // The scaffold's `edges` array stays empty; node depends_on carries ordering.
+    expect(scaffold.edges).toEqual([]);
+  });
+
+  it("omits node depends_on when no finalized contracts are supplied (unchanged behaviour)", () => {
+    const ledger = deriveObligationLedger(finalizedContracts(), { created_at: CREATED_AT });
+    const scaffold = buildImplementationDagScaffold(ledger, []);
+    expect(scaffold.nodes.every((n) => n.depends_on.length === 0)).toBe(true);
+  });
+
+  it("breaks a producer/consumer dependency cycle rather than emitting a cyclic scaffold", () => {
+    // a consumes artifact:y (produced by b) and produces artifact:x (consumed by b):
+    // a genuine cycle. Phase-oriented derivation keeps at most one direction, so
+    // the resulting node depends_on graph is acyclic (fail-toward-later).
+    const contracts = {
+      goal_id: "G1",
+      module_contracts: [
+        {
+          name: "mod-a",
+          inputs: ["artifact:y"],
+          outputs: ["artifact:x"],
+          invariants: ["a holds"],
+          failure_modes: [],
+          validation_boundary: "",
+        },
+        {
+          name: "mod-b",
+          inputs: ["artifact:x"],
+          outputs: ["artifact:y"],
+          invariants: ["b holds"],
+          failure_modes: [],
+          validation_boundary: "",
+        },
+      ],
+    };
+    const ledger = deriveObligationLedger(contracts, { created_at: CREATED_AT });
+    const scaffold = buildImplementationDagScaffold(ledger, [], contracts);
+    // No pair of nodes mutually depends on each other (acyclic by construction).
+    const dep = new Map(scaffold.nodes.map((n) => [n.id, n.depends_on]));
+    for (const n of scaffold.nodes) {
+      for (const d of n.depends_on) {
+        expect(dep.get(d)?.includes(n.id)).not.toBe(true);
+      }
+    }
+  });
+
   it("B2: a single-module change with many obligations derives exactly ONE node", () => {
     const ledger = deriveObligationLedger(
       {

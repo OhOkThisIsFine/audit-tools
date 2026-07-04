@@ -122,8 +122,8 @@ const ROLES: Record<string, ContractPipelineRole> = {
   "goal_id": "<from module_contracts>",
   "module_contracts": [{
     "name": "<module-name>",
-    "inputs": ["<final — incorporating reconciliation decisions>"],
-    "outputs": ["<final — incorporating reconciliation decisions>"],
+    "inputs": ["<final — incorporating reconciliation decisions; tag a shared artifact this module CONSUMES with an 'artifact:<name>' token>"],
+    "outputs": ["<final — incorporating reconciliation decisions; tag a shared artifact this module PRODUCES with an 'artifact:<name>' token>"],
     "invariants": ["<invariant id + description>"],
     "side_effects": ["<side-effect with owner>"],
     "validation_boundary": "<finalized validation boundary>",
@@ -132,7 +132,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   }]
 }`,
     description:
-      "For every module contract in module_contracts, incorporate any reconciliation decisions from seam_reconciliation_report and produce the finalized module contract. Record which seam adjustments were applied.",
+      "For every module contract in module_contracts, incorporate any reconciliation decisions from seam_reconciliation_report and produce the finalized module contract. Record which seam adjustments were applied. When one module produces something another consumes, tag that shared artifact identically in the producer's outputs and the consumer's inputs with an 'artifact:<name>' token (e.g. 'artifact:validated-roster') — the tool matches these tokens to derive implementation ordering (producer before consumer) mechanically, so you never have to hand-add depends_on edges.",
   },
   cyclic_seam_resolution: {
     title: "Cyclic Seam Resolution",

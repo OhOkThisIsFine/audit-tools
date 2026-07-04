@@ -68,6 +68,14 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   gitignored run-state stays permanently marked "failed" (branch becomes the only source of truth). Add a
   re-verify/re-accept path so a fixed verify environment can cleanly re-drive quarantined nodes.
 
+- **`implementation_dag` acyclicity is unvalidated — a host-authored `depends_on`/`edges` cycle is not
+  rejected (observed 2026-07-04).** `validateImplementationDAG` (`src/remediate/validation/contractPipeline.ts`)
+  checks referential integrity (every edge/`depends_on` id points at a real node) but never checks the graph
+  is acyclic, despite being called a DAG. The tool-DERIVED scaffold is now acyclic by construction
+  (phase-ordinal-oriented producer/consumer edges), but a host that hand-adds a cyclic `depends_on` would
+  pass validation and could stall the phase scheduler. Add a DFS cycle check to the validator so a cyclic
+  implementation_dag is rejected regardless of who authored it. Low-risk, independent of the derivation work.
+
 - **Contract-pipeline `contract_finalization` re-dispatches 12 heavyweight per-module agents for what is
   mostly a deterministic transform (inefficient-feeding, observed 2026-07-04).** Finalization = the draft
   module contract + the seam-reconciliation decisions attached as `seam_adjustments`; it needs no fresh
@@ -77,15 +85,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   seam decision genuinely needs judgment). Related shape bug: draft shards may emit `inputs`/`outputs` as
   arrays of objects, but the finalized schema requires `string[]` — single-source the field type across the
   draft and finalized contracts so no coercion is needed.
-
-- **Contract producer/consumer artifact tokens do NOT derive implementation-DAG ordering edges
-  (`derive.ts` sets `depends_on:[]`; observed 2026-07-04).** A finalized contract can declare
-  `outputs: ["PRODUCES artifact:X …"]` on one module and `inputs: ["CONSUMES artifact:X …"]` on another, but
-  the pipeline never matches those tokens — `phase_cut` puts all modules in one parallel phase and cross-node
-  ordering holds ONLY because the host hand-adds `depends_on` edges in `implementation_dag`. That is an
-  auditor-agnostic-robustness gap: a weaker host omits the edge and a hard ordering (e.g. roster-fix before
-  fan-out) silently degrades to prose. Fix: derive dependency edges from matching producer/consumer artifact
-  names in the finalized contracts, so the ordering is tool-enforced, not host-remembered.
 
 - **Friction close-out — per-category WALK shipped; auto-seeding + bypass-backstop still open (2026-07-04).**
   The end-of-run friction triage now blocks until EVERY category in `FRICTION_CATEGORIES`

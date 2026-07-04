@@ -33,6 +33,7 @@ import {
   obligationScopeAnchors,
   readObligationChangeClassification,
 } from "./changeClassification.js";
+import { derivePhaseCut, phaseCutModulesFromContracts } from "./phaseCut.js";
 
 /** The finalized-module-contract fields the obligation deriver reads. */
 interface DerivableModuleContract {
@@ -346,13 +347,24 @@ export function acceptedCounterexampleIds(judgeReport: unknown): string[] {
  * coverage holds by construction. Grouping by module means a 1-module change
  * derives 1 node instead of N obligation-nodes the host then has to merge (B2);
  * obligations with no module home (counterexample/critique-sourced) fall back
- * to one node each. Empty edges (the derived ledger declares no inter-module
- * ordering). Advisory: the model fills the blanks and may further merge/split
- * nodes as long as coverage is preserved.
+ * to one node each. Advisory: the model fills the blanks and may further
+ * merge/split nodes as long as coverage is preserved.
+ *
+ * `depends_on` is DERIVED, not left for the host: when `finalizedContracts` is
+ * supplied, each module node depends on the nodes of the modules it needs first
+ * (producer/consumer `artifact:<name>` matching over `inputs`/`outputs`, unioned
+ * with `neighbor_needs` — the same module-dependency DAG `phase_cut` uses). This
+ * makes cross-node ordering tool-enforced instead of a thing the host must
+ * remember to hand-add. Edges are oriented by phase ordinal so the result is
+ * acyclic by construction: only an edge to a strictly-earlier-phase module is
+ * kept, which drops the back-edge of any dependency cycle (fail-toward-later,
+ * mirroring `derivePhaseCut`). The `edges` array stays empty — node `depends_on`
+ * is the ordering the block promotion reads.
  */
 export function buildImplementationDagScaffold(
   ledger: ObligationLedger | undefined,
   acceptedCeIds: string[],
+  finalizedContracts?: unknown,
 ): ImplementationDagScaffold {
   const obligations = (ledger?.obligations ?? []).filter((o) =>
     isDagPhaseObligation(o.kind),
@@ -387,6 +399,8 @@ export function buildImplementationDagScaffold(
     };
   });
 
+  applyModuleDependencyEdges(nodes, groups, finalizedContracts);
+
   if (acceptedCeIds.length > 0) {
     if (nodes.length === 0) {
       nodes.push({
@@ -407,6 +421,49 @@ export function buildImplementationDagScaffold(
   }
 
   return { nodes, edges: [] };
+}
+
+/**
+ * Fill each module node's `depends_on` from the finalized contracts'
+ * module-dependency DAG (producer/consumer artifact tokens ∪ neighbor_needs), the
+ * SAME source `phase_cut` uses so the node ordering and the phase barrier agree.
+ * Only a group keyed on a real module can be a dependency target (obligation- and
+ * counterexample-only nodes have no module home). Edges are oriented by phase
+ * ordinal — kept only when the dependency module sits in a strictly-earlier phase
+ * — so a dependency cycle contributes no back-edge and the result is acyclic by
+ * construction. No-op when contracts are absent (existing behaviour: no edges).
+ */
+function applyModuleDependencyEdges(
+  nodes: ImplementationDagScaffoldNode[],
+  groups: Array<{ key: string; obligations: ObligationEntry[] }>,
+  finalizedContracts: unknown,
+): void {
+  if (finalizedContracts === undefined || finalizedContracts === null) return;
+  // module name → node id (1 node per module by construction).
+  const moduleToNodeId = new Map<string, string>();
+  groups.forEach((g, i) => {
+    if (g.key.startsWith("module:")) {
+      moduleToNodeId.set(g.key.slice("module:".length), nodes[i].id);
+    }
+  });
+  if (moduleToNodeId.size === 0) return;
+
+  const phaseModules = phaseCutModulesFromContracts(finalizedContracts);
+  const depsByModule = new Map(phaseModules.map((m) => [m.name, m.depends_on]));
+  const phaseOf = derivePhaseCut(phaseModules).module_phase;
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  for (const [moduleName, nodeId] of moduleToNodeId) {
+    const node = nodeById.get(nodeId);
+    if (!node) continue;
+    const deps = new Set<string>();
+    for (const depModule of depsByModule.get(moduleName) ?? []) {
+      const depNodeId = moduleToNodeId.get(depModule);
+      if (!depNodeId || depNodeId === nodeId) continue;
+      if ((phaseOf[depModule] ?? 0) < (phaseOf[moduleName] ?? 0)) deps.add(depNodeId);
+    }
+    node.depends_on = [...deps].sort();
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

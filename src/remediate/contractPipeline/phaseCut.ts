@@ -171,29 +171,103 @@ export function phaseOrdinalForObligations(
 }
 
 /**
- * Build {@link PhaseCutModule}s from drafted/finalized module contracts whose
- * modules carry directional `neighbor_needs` (`{ neighbor, needs }` — this module
- * needs `neighbor`). A module that needs another is one tier ABOVE it, so the
- * derived `depends_on` for module M is the set of neighbours M needs. Tolerant of
+ * A structured artifact reference embedded anywhere inside a module's free-prose
+ * `inputs`/`outputs` string: the token `artifact:<name>`, where `<name>` is a
+ * stable identifier (letters, digits, `_`, `-`, `.`, `/`). The rest of the string
+ * stays human prose. A module PRODUCES every artifact token in its `outputs` and
+ * CONSUMES every token in its `inputs`; the tool matches producer→consumer to
+ * derive data-flow ordering, so the ordering is tool-enforced from the finalized
+ * contracts rather than relying on the host to hand-add `depends_on` edges.
+ * Matching is case-insensitive so `artifact:Roster` (produced) and `artifact:roster`
+ * (consumed) still pair.
+ */
+const ARTIFACT_TOKEN_PATTERN = /\bartifact:([A-Za-z0-9_./-]+)/gi;
+
+/** The normalized artifact names referenced by a module's inputs/outputs list. */
+function extractArtifactNames(entries: unknown): Set<string> {
+  const names = new Set<string>();
+  if (!Array.isArray(entries)) return names;
+  for (const entry of entries) {
+    if (typeof entry !== "string") continue;
+    for (const match of entry.matchAll(ARTIFACT_TOKEN_PATTERN)) {
+      // Trim trailing separator/punctuation the greedy class may have swallowed
+      // (e.g. a token ending a sentence: "artifact:roster.").
+      const name = match[1].replace(/[._/-]+$/, "").toLowerCase();
+      if (name.length > 0) names.add(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Derive directional module-dependency edges from producer/consumer artifact
+ * tokens in the finalized contracts' `inputs`/`outputs`. For each module M and
+ * each artifact M consumes (an `artifact:<name>` token in M's `inputs`), M depends
+ * on every OTHER module that produces that artifact (the token in its `outputs`).
+ * Returns module name → set of module names it depends on (must run first).
+ * Tolerant of malformed payloads: anything unparseable contributes no edge.
+ */
+function deriveModuleArtifactDependencies(
+  contractsPayload: unknown,
+): Map<string, Set<string>> {
+  const root = contractsPayload as { module_contracts?: unknown } | undefined;
+  const list = Array.isArray(root?.module_contracts) ? root!.module_contracts : [];
+  const producers = new Map<string, Set<string>>(); // artifact name → producing modules
+  const consumes = new Map<string, Set<string>>(); // module name → consumed artifact names
+  const moduleNames: string[] = [];
+  for (const mod of list) {
+    if (typeof mod !== "object" || mod === null) continue;
+    const m = mod as { name?: unknown; inputs?: unknown; outputs?: unknown };
+    if (typeof m.name !== "string" || m.name.length === 0) continue;
+    moduleNames.push(m.name);
+    for (const artifact of extractArtifactNames(m.outputs)) {
+      const set = producers.get(artifact) ?? new Set<string>();
+      set.add(m.name);
+      producers.set(artifact, set);
+    }
+    consumes.set(m.name, extractArtifactNames(m.inputs));
+  }
+  const deps = new Map<string, Set<string>>();
+  for (const name of moduleNames) {
+    const set = new Set<string>();
+    for (const artifact of consumes.get(name) ?? []) {
+      for (const producer of producers.get(artifact) ?? []) {
+        if (producer !== name) set.add(producer);
+      }
+    }
+    deps.set(name, set);
+  }
+  return deps;
+}
+
+/**
+ * Build {@link PhaseCutModule}s from drafted/finalized module contracts. A module's
+ * `depends_on` is the UNION of two tool-derived signals: (1) any directional
+ * `neighbor_needs` (`{ neighbor, needs }` — this module needs `neighbor`, present
+ * on DRAFT contracts) and (2) producer/consumer artifact-token matching over
+ * `inputs`/`outputs` (present on FINALIZED contracts, which drop `neighbor_needs`).
+ * A module that needs/consumes from another is one tier ABOVE it. Tolerant of
  * malformed payloads: anything unparseable contributes no module/edge.
  */
 export function phaseCutModulesFromContracts(contractsPayload: unknown): PhaseCutModule[] {
   const root = contractsPayload as { module_contracts?: unknown } | undefined;
   const list = Array.isArray(root?.module_contracts) ? root!.module_contracts : [];
+  const artifactDeps = deriveModuleArtifactDependencies(contractsPayload);
   const out: PhaseCutModule[] = [];
   for (const mod of list) {
     if (typeof mod !== "object" || mod === null) continue;
     const m = mod as { name?: unknown; neighbor_needs?: unknown };
     if (typeof m.name !== "string" || m.name.length === 0) continue;
     const needs = Array.isArray(m.neighbor_needs) ? m.neighbor_needs : [];
-    const depends_on: string[] = [];
+    const depends_on = new Set<string>();
     for (const need of needs) {
       if (typeof need === "object" && need !== null) {
         const neighbor = (need as { neighbor?: unknown }).neighbor;
-        if (typeof neighbor === "string" && neighbor.length > 0) depends_on.push(neighbor);
+        if (typeof neighbor === "string" && neighbor.length > 0) depends_on.add(neighbor);
       }
     }
-    out.push({ name: m.name, depends_on });
+    for (const dep of artifactDeps.get(m.name) ?? []) depends_on.add(dep);
+    out.push({ name: m.name, depends_on: [...depends_on] });
   }
   return out;
 }

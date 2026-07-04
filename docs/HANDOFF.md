@@ -27,8 +27,14 @@
   `verify:checks` + vitest; `ci.yml`/`publish-package.yml` run the cheap chain + a 4-way sharded vitest
   matrix as parallel jobs; the monster e2e test files converted to `test.concurrent` — vitest was ~93% of
   the gate and 4 files were 65% of test-work; full-suite wall ~365s→~160s, see [[audit-tools-release-publish-flow]]).
+  Also (2026-07-04): a **P0 packaging fix** — `zod-to-json-schema` was a production runtime import declared
+  as a devDep → packaged/global installs crashed at `next-step` (only `smoke:packaged` caught it; published
+  v0.32.6 predates the import so npm `latest` was unaffected); the **CE-006 scope-gate FP** (descriptive
+  "repo-wide" prose no longer trips the negative-scoping veto); and **producer/consumer DAG-edge derivation**
+  — implementation ordering is now tool-derived from `artifact:<name>` tokens in finalized `inputs`/`outputs`
+  (feeds both `phase_cut` and node `depends_on`), instead of relying on the host to hand-add edges.
 - **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (quarantine
-  re-verify affordance, finalization re-dispatch cost, producer/consumer edge derivation); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
+  re-verify affordance, finalization re-dispatch cost); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
   a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);
   remediate-side `opencode.json` drift/`INV-RCI-16` reconciliation; env-bound live validations (quota pre-wall
   pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn); provider-blocked

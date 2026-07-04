@@ -126,6 +126,46 @@ describe("phaseCutModulesFromContracts", () => {
     expect(phaseCutModulesFromContracts({})).toEqual([]);
     expect(phaseCutModulesFromContracts({ module_contracts: "nope" })).toEqual([]);
   });
+
+  it("derives depends_on from producer/consumer artifact tokens in inputs/outputs (finalized contracts drop neighbor_needs)", () => {
+    // Finalized contracts carry no neighbor_needs — the ordering must come from
+    // the data-flow: 'roster' produces artifact:validated-roster; 'fanout' consumes it.
+    const modules = phaseCutModulesFromContracts({
+      module_contracts: [
+        { name: "roster", inputs: ["the raw list"], outputs: ["artifact:validated-roster (a checked roster)"] },
+        { name: "fanout", inputs: ["artifact:validated-roster to fan out"], outputs: ["dispatched work"] },
+      ],
+    });
+    expect(modules).toEqual([
+      { name: "roster", depends_on: [] },
+      { name: "fanout", depends_on: ["roster"] },
+    ]);
+  });
+
+  it("unions neighbor_needs with artifact-token edges and matches artifact names case-insensitively", () => {
+    const modules = phaseCutModulesFromContracts({
+      module_contracts: [
+        { name: "core", outputs: ["artifact:Store"] },
+        { name: "seed", neighbor_needs: [], outputs: [] },
+        {
+          name: "api",
+          neighbor_needs: [{ neighbor: "seed", needs: "seed data" }],
+          inputs: ["artifact:store for reads"],
+        },
+      ],
+    });
+    const api = modules.find((m) => m.name === "api")!;
+    expect([...api.depends_on].sort()).toEqual(["core", "seed"]);
+  });
+
+  it("ignores an artifact token consumed and produced by the same module (no self-edge)", () => {
+    const modules = phaseCutModulesFromContracts({
+      module_contracts: [
+        { name: "rewriter", inputs: ["artifact:doc"], outputs: ["artifact:doc (rewritten)"] },
+      ],
+    });
+    expect(modules).toEqual([{ name: "rewriter", depends_on: [] }]);
+  });
 });
 
 describe("module_phase map + phaseOrdinalForObligations (node→phase key)", () => {

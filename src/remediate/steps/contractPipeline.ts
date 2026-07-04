@@ -320,9 +320,13 @@ Self-check before next-step: \`${loaderCommand(`validate-artifact --name test_va
     const judge = envelopePayload(
       await readContractArtifact(artifactsDir, "judge_report"),
     );
+    const finalized = envelopePayload(
+      await readContractArtifact(artifactsDir, "finalized_module_contracts"),
+    );
     const scaffold = buildImplementationDagScaffold(
       ledger,
       acceptedCounterexampleIds(judge),
+      finalized,
     );
     if (scaffold.nodes.length === 0) return undefined;
     const advisory = advisoryCritiqueItems(
@@ -339,7 +343,7 @@ Self-check before next-step: \`${loaderCommand(`validate-artifact --name test_va
     const path = contractInputFilePath(artifactsDir, "implementation_dag");
     return `## Pre-filled Skeleton — fill only the blank slots
 
-Below is the implementation-DAG skeleton: ONE node per module (its obligations already grouped), covering every obligation and accepted counterexample. Fill ONLY each node's \`title\`, \`description\`, and \`targeted_commands\`. You MAY further merge or split nodes and add real \`depends_on\`/\`edges\` ordering, as long as every obligation stays covered (in \`satisfies_obligations\` or \`verification_obligation_ids\`) and every accepted counterexample stays in some node's \`addresses_counterexamples\`.${advisoryBlock}
+Below is the implementation-DAG skeleton: ONE node per module (its obligations already grouped), covering every obligation and accepted counterexample. Each node's \`depends_on\` is already DERIVED from the finalized contracts' data-flow (a node depends on the modules whose \`artifact:<name>\` outputs it consumes) — keep it unless you know an ordering is wrong. Fill ONLY each node's \`title\`, \`description\`, and \`targeted_commands\`. You MAY further merge or split nodes and refine \`depends_on\`/\`edges\` ordering, as long as every obligation stays covered (in \`satisfies_obligations\` or \`verification_obligation_ids\`) and every accepted counterexample stays in some node's \`addresses_counterexamples\`.${advisoryBlock}
 
 \`\`\`json
 ${JSON.stringify(scaffold, null, 2)}
