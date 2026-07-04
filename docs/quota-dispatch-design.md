@@ -153,7 +153,7 @@ subagents out to a second account's CLI — so the design must keep the two read
 rather than letting one credential's snapshot masquerade as both.
 
 **Implemented** (the key + resolution + stamping; see `scheduler.ts buildProviderModelKey`,
-`httpQuotaSource.ts parseProviderModelKey`, `quotaSource.ts resolveAccountId`,
+`httpQuotaSource.ts parseProviderModelKey`, `quotaSource.ts resolveAccountIdSafe`,
 `apiPool.ts buildHostModelPools`/`buildSourcePool`, `compositeQuotaSource.ts
 buildAccountScopedQuotaSource`):
 - The quota key carries an **account discriminator**, not just provider/model. A bare

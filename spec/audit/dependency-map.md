@@ -106,8 +106,8 @@ so a re-synthesized contract re-stales the narrative pass and it regenerates.
 
 ### `agent-feedback.jsonl` (not a registry entry)
 
-Opt-in worker-appended meta-audit reflections (NDJSON; schema
-`agent_reflection.schema.json`). Workers own this file — the orchestrator only
+Opt-in worker-appended meta-audit reflections (NDJSON; schema `AgentReflectionSchema` in
+`src/shared/agentReflections.ts`). Workers own this file — the orchestrator only
 reads it (parsed leniently into `bundle.agent_reflections`; it is not a writable
 registry entry, so it is never rewritten or pruned). Synthesis renders the
 parsed reflections as the report's "Process Feedback" section. Only the human

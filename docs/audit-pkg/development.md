@@ -7,8 +7,9 @@
 - `examples/`: validated artifact examples
 - `skills/audit-code/`: canonical prompt and skill-facing instructions
 - `dispatch/`: packet-dispatch support data
-- `tests/`: Node test suite and regression coverage
-- `dist/`: checked-in compiled runtime used by packaged installs
+- `tests/`: vitest-based test suite and regression coverage
+- `dist/`: build output (gitignored, not checked in) produced by `npm run build` / the `prepack` script;
+  shipped only in the packed npm tarball
 
 ## Agent handoff
 
@@ -106,6 +107,7 @@ real host (`prepare-dispatch` → worker reviews each packet → `submit-packet`
 checkout. On Windows, runtime validation runs package-manager shims (`npm`,
 `npx`, `pnpm`, `yarn`) through the command shell so `.cmd` wrappers execute
 reliably — keep that covered when changing runtime command execution. If the
-final `audit-report.md` cannot be copied into the target repo due to local
-permissions, completion still succeeds and the artifact copy is authoritative.
+final `audit-report.md` cannot be promoted from `.audit-tools/audit/` to
+`.audit-tools/audit-report.md` due to local permissions, completion still succeeds and the
+pre-promotion copy under `.audit-tools/audit/` is authoritative.
 </content>

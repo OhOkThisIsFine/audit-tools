@@ -199,9 +199,9 @@ and `yarn` through the Windows command shell automatically. A runtime
 `not_confirmed` result can still be environmental when the target repo command
 starts but cannot write its own build output.
 
-If final report promotion to `<repo-root>/audit-report.md` is blocked by local
-permissions, the audit can still complete. Use the artifact-bundle copy of
-`audit-report.md` and run `audit-code validate`.
+If final report promotion to `.audit-tools/audit-report.md` is blocked by local
+permissions, the audit can still complete. Use the copy at `.audit-tools/audit/audit-report.md`
+and run `audit-code validate`.
 
 Run `audit-code validate` after editing session config so command-template
 issues fail before a long audit run.

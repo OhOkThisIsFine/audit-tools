@@ -8,21 +8,19 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.5** (both global bins reinstalled + verified live). Per-lap shipped detail
-  is NOT narrated here (changelog creep — see `git log` and project memory [[live-status]]); this section is
-  the current-state + open-work roadmap only.
+- On npm as `latest` at **v0.32.6**. Per-lap shipped detail is NOT narrated here (changelog creep — see
+  `git log` and project memory [[live-status]]); this section is the current-state + open-work roadmap only.
 - **Immediate next:** (1) the owner is running the paused audit-tools self-audit to completion in a fresh
   conversation — note it will dispatch at the codex-pinned concurrency until the dispatch rework lands.
   (2) **Dispatch admission-control rework** — design of record captured at
   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (status: proposed).
   Resolve its *Open tensions* (esp. output-token unknowability; ledger-is-a-proxy / possibly over-built vs
-  reactive-only) **before** building. See T5.6 below.
+  reactive-only) **before** building. See T5.3 below.
 - Staleness-churn fix (path-sort `repo_manifest.files`) committed + pushed to `main` 2026-07-03, **not yet
   published** (batch with the dispatch rework rather than cut a release for one `sort()`).
 - **Open items** (all in `docs/backlog.md`): env-bound live validations (quota pre-wall pacing, friction
   escalation, selective-deepening convergence, multi-IDE cooperative runs, clippy/rubocop live spawn);
-  provider-blocked schema CE-004. *(Resolved 2026-07-03 v0.32.5: knip dead-code widen shipped; mutation
-  testing + sound-dead-code bar dropped; LWW forward-track dropped; churn C3/C5/C6/E4/E5 dispositioned.)*
+  provider-blocked schema CE-004.
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
@@ -72,25 +70,14 @@ gates, merge-to-base). Selective-deepening convergence (both known loops) has a 
 validation on a real deepening-capable run remains env-bound (T6-class).
 
 ### T5 — Product / analysis forward tracks
-1. **Dead-code analyzer (knip) — slice 3, graph cross-check — ✅ SHIPPED v0.31.0** as a pure render-time
-   join (normalized in-degree index + per-file/per-language fidelity gate + entrypoints from
-   surface_manifest/critical_flows), sidestepping the obligation-ordering blocker. Nothing open.
-2. **Deterministic analyzers — own-vs-acquire acquisition engine.** Git-history mining, gitleaks, jscpd,
-   osv-scanner, and now (v0.31.0) clippy (cargo), rubocop (bundle), hadolint + actionlint (binary),
-   type-coverage (npx) are all registered — the cargo/bundle runner families are now exercised. knip
-   widened v0.32.5 to also emit whole-file + unused-dependency dead-code leads. **Open:** clippy/rubocop
-   landed fixture-only (no Rust/Ruby repo here → live spawn unvalidated). *Mutation testing was evaluated
-   and dropped (doesn't fit acquire+scan — its own subsystem if ever wanted).* *([[deterministic-analyzers-own-vs-acquire]])*
-3. **Schema-enforced generation — CE-004 residual (env-bound only).** Emit-time constraint seam +
-   `total_lines` gate (CE-009) + duplicate finding-id hard-reject + fabricated-path/out-of-range-span checks
-   all shipped. Sole residual: the always-on conversation host advertises no API-level constraint mechanism
-   (provider-blocked). The "further semantic checks" framing is retired — the named candidates are built.
-4. **Codebase-wide churn/context/enforce pass — ✅ CLOSED.** The 2026-07-02 pass ran (v0.31.0); N1/N4
-   follow-ons shipped. C3/C5/C6/E4/E5 dispositioned 2026-07-03: C3/C5/C6 dropped (premature-opt on
-   already-cheap paths), E5 dropped (tolerant-by-design), E4 confirmed intentional + wired to the
-   cyclic-seam resolver (`contractPipelineGates.ts` + `cyclicSeamResolution.ts`). Nothing open.
-5. **remediate-code multi-host installer/generator parity — ✅ SHIPPED (v0.32.0).** Nothing open.
-6. **Dispatch admission-control rework — 🟡 DESIGN PROPOSED, not built.** Design of record:
+1. **Deterministic analyzers — own-vs-acquire acquisition engine.** Git-history mining, gitleaks, jscpd,
+   osv-scanner, clippy (cargo), rubocop (bundle), hadolint + actionlint (binary), type-coverage (npx),
+   and knip (whole-file + unused-dependency + unused-export dead-code leads) are all registered.
+   **Open:** clippy/rubocop landed fixture-only (no Rust/Ruby repo here → live spawn unvalidated).
+   *([[deterministic-analyzers-own-vs-acquire]])*
+2. **Schema-enforced generation — CE-004 residual (env-bound only).** Sole residual: the always-on
+   conversation host advertises no API-level constraint mechanism (provider-blocked).
+3. **Dispatch admission-control rework — 🟡 DESIGN PROPOSED, not built.** Design of record:
    [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)
    ([[dispatch-admission-control-design]], [[capability-is-per-auditor-not-per-audit]]). Root: dispatch
    capability/quota is inherited from the run's original auditor, and `concurrency` is the wrong primitive.

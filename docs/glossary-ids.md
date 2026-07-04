@@ -54,8 +54,8 @@ A handful of invariants predate the two-letter area scheme and are still cited u
 |---|---|---|
 | `INV-S05` | Quota headroom is the sole dispatch throttle (the modern `INV-QD-11` restates it). | `src/shared/dispatch/rollingDispatch.ts` |
 | `INV-X06` | Partial-completion terminal hook — undispatchable/blocked work routes the run to close instead of looping forever. | `src/remediate/state/store.ts`, `src/remediate/steps/nextStep.ts` |
-| `INV-O1` | Foundations module O1 (friction-capture) — best-effort no-op-safe `captureFrictionEvent` sink + mandatory blocking triage whose satisfaction set is auto-captured events UNION surfaced reflections. | `src/shared/friction/captureFrictionEvent.ts`, `src/shared/friction/triage.ts` |
-| `INV-O2` | Foundations module O2 (append-only ledger + lock) — instance-keyed idempotent append, identityKey-grouping re-association, `withFileLock` critical section, version-keyed bounded intent-checkpoint gate. | `src/audit/orchestrator/ledger.ts`, `src/audit/orchestrator/intentCheckpointGate.ts`, `src/audit/orchestrator/resultBaseline.ts` |
+| `INV-O1` | Foundations module O1 (friction-capture) — best-effort no-op-safe `captureFrictionEvent` sink + mandatory blocking triage whose satisfaction set is auto-captured events UNION surfaced reflections. | `src/shared/friction/captureFrictionEvent.ts` (literal `INV-O1-*` tokens; `triage.ts` implements the O1 triage module but carries no `INV-O1-*` token) |
+| `INV-O2` | Foundations module O2 (append-only ledger + lock) — instance-keyed idempotent append, identityKey-grouping re-association, `withFileLock` critical section, version-keyed bounded intent-checkpoint gate. | `src/audit/orchestrator/intentCheckpointGate.ts`, `src/audit/orchestrator/resultBaseline.ts` (literal `INV-O2-*` tokens; `ledger.ts` implements the O2 module but carries no `INV-O2-*` token) |
 | `INV-o3` | Foundations module O3 (emit-validate-repair seam) — cheapest-first monotonic coercion→bounded-patch→re-dispatch, one canonical validator, lock-short. | `src/shared/repair/emitValidateRepair.ts` |
 
 Treat the single-letter `INV-<letter><NN>` spelling as the redesign-node form of an invariant; new

@@ -11,12 +11,15 @@ npm run verify:release
 
 `verify:release` covers:
 
-- TypeScript typecheck
-- full automated test suite
-- linked-install `audit-code` smoke coverage
-- packaged-install `audit-code` smoke coverage
-- tarball contract verification for shipped assets and runtime entrypoints
-- packaged and linked verification of bootstrap install behavior
+- TypeScript typecheck (`check`)
+- dead-code export gate (`check:deadcode`)
+- doc-manifest reconciliation gate (`check:doc-manifest`)
+- full automated test suite (`test`)
+- host-install verification for both bins (`verify:hosts`, `verify:remediate-hosts`)
+- packaged-install smoke coverage for both bins (`smoke:packaged-audit-code`, `smoke:packaged-remediate-code`)
+
+Linked-install smoke coverage (`smoke:linked-audit-code`, `smoke:linked-remediate-code`) is available as a
+standalone command but is not part of the `verify:release` chain.
 
 For live child-process output while debugging smoke tests:
 
@@ -75,9 +78,10 @@ Full maintainer flow:
 npm run release:patch:publish
 ```
 
-That command checks the worktree, runs the release gate, bumps the version,
-commits, tags, pushes `main` and the tag, creates the GitHub Release, waits for
-`publish-package.yml`, and confirms the new npm version resolves.
+That command checks the worktree, runs a fast local typecheck gate (`npm run check` — not the full
+`verify:release` suite, which already ran via CI/the `/ship` preflight), bumps the version, commits,
+tags, pushes `main` and the tag, creates the GitHub Release, waits for `publish-package.yml`, and
+confirms the new npm version resolves.
 
 Minor and major publish variants:
 

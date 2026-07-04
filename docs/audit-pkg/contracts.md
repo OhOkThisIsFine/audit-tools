@@ -116,7 +116,7 @@ artifacts are shaped by:
 Normal packet flow:
 
 ```text
-audit-code next-step --host-can-dispatch-subagents true
+audit-code next-step --host-can-dispatch-subagents
 backend prepares dispatch-plan.json
 conversation launches one worker per dispatch-plan entry
 worker reads entry.prompt_path

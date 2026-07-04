@@ -76,7 +76,8 @@ input is Markdown, free-form, or conversational.
 - Compute parallel-safety per block (default true unless dependencies are found).
 - Detect project type and candidate closing actions (git remote, package
   metadata, release scripts) for confirmation in Phase 2.
-- Emit `remediation_plan.json` conforming to `remediation_plan.schema.json`.
+- Emit `remediation_plan.json` conforming to the `RemediationPlan` contract (validated by the
+  hand-written TypeScript validators in `src/remediate/validation/`, per the Schemas section below).
 
 ### Phase 2: Document (LLM + user, batched)
 
@@ -232,9 +233,10 @@ refined once the first runs produce real clarification batches.
 
 Only `finding.schema.json` is mirrored in `schemas/` as a JSON Schema. The rest of the remediation
 contract (`RemediationPlan`, `RemediationBlock`, `ItemSpec`, `ClarificationRequest`, `ClosingPlan`,
-`TestSpec`, `VerificationResult`, `TriageBatch`, the remediation report) is validated by hand-written
-TypeScript validator functions in `src/remediate/validation/` (`remediationState.ts`,
-`contractPipeline.ts`, `contractPipelineGates.ts`, `artifacts.ts`), not JSON Schema files.
+`TestSpec`, the remediation report) is validated by hand-written TypeScript validator functions in
+`src/remediate/validation/` (`remediationState.ts`, `contractPipeline.ts`, `contractPipelineGates.ts`,
+`artifacts.ts`), not JSON Schema files. `TriageBatch` is an internal wire type local to
+`src/remediate/phases/triage.ts`, not a `state/types.ts` contract type.
 
 Every phase transition validates its output against the relevant validator before the next phase may
 read it.
