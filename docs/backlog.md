@@ -29,10 +29,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`scheduleWave` quota-disabled fast path DRIFTS between the two orchestrators (found 2026-07-05, multi-provider routing rethink).** With quota off (the DEFAULT conversation-first host path), remediate (`src/remediate/steps/dispatch.ts:376-394`) computes the wave with `confidence:"low"` + a flat average, while shared (`src/shared/quota/scheduler.ts:605-615`) uses `confidence:"high"` + `sumTopN` — two throttles that can disagree. Parity / single-source violation (the project's own invariant). Fix: remediate DELEGATES to the shared quota-off path (single-source it), not its own copy. Verify no pinned test expectation shifts first. Flagged independently by two adversarial passes. [[provider-routing-offload-b-to-ai-sdk]]
-
-- **`src/shared/quota/rollingEngine.ts` is a dead module (~268 LOC, found 2026-07-05).** Exports `reroutePackets` / `dropProvider` / `RollingEnginePool` / … with ZERO live non-test consumers — the sole external hit (`hostSessionQuotaSource.ts:36`) is a `{@link dropProvider}` doc-comment, not a call. Referee-confirmed remnant of the OLD wave/reroute model that `admitBatch` / `rollingDispatch` superseded (the actual stalled-migration leftover an adversarial pass mistook `capacity.ts`/`scheduler.ts` for — those are LIVE, `admitBatch` consumes their budget downstream; leave them). Delete via the `knip --production` manual-audit protocol ([[knip-deadcode-gate-default-mode]]) since it's re-exported from `shared/index.ts` (default-mode knip won't flag it): confirm grep-zero prod callers → delete symbols + their tests. [[provider-routing-offload-b-to-ai-sdk]]
-
 - **Shipping from a linked worktree forces a manual FF + rebuild dance (observed 2026-07-05).** The release
   script (`scripts/release-and-publish.mjs`) hard-guards on being ON the default branch (`git branch
   --show-current` must equal `main`), but laps run on a `claude/<name>` feature-branch worktree while `main`
