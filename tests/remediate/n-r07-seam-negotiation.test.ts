@@ -25,6 +25,7 @@ import {
   detectStaleArtifacts,
   writeContractArtifact,
   readContractArtifact,
+  contractArtifactExists,
   contractInputFilePath,
   contractPipelineDir,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
@@ -491,7 +492,7 @@ describe("buildNextContractPipelineStep emits a step for each seam phase", () =>
     expect(prompt).toMatch(/Seam Reconciliation/);
   });
 
-  it("emits contract_finalization step when multi-module seam_reconciliation_report is present", async () => {
+  it("derives finalized_module_contracts deterministically when multi-module seam_reconciliation_report is present (no wave)", async () => {
     await writeRaw("goal_spec", makeGoalSpec());
     await writeRaw("context_bundle", makeContextBundle());
     await writeRaw("module_decomposition", makeMultiModuleDecomposition());
@@ -500,7 +501,10 @@ describe("buildNextContractPipelineStep emits a step for each seam phase", () =>
 
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
     const prompt = await promptOf(step!);
-    expect(prompt).toMatch(/Per-Module Contract Finalization/);
+    // Finalization is DERIVED by the tool, not dispatched as a per-module wave.
+    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(true);
+    expect(prompt).not.toMatch(/ONE sub-agent PER MODULE/);
+    expect(nextMissingContractPhase(ARTIFACTS_DIR)).not.toBe("contract_finalization");
   });
 
   it("emits implementation_planning step after all seam phases and pre-planning phases complete", async () => {

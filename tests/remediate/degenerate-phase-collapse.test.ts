@@ -64,7 +64,8 @@ function moduleContract(name: string) {
     side_effects: [],
     validation_boundary: "none",
     failure_modes: [],
-    // neighbor_needs is a drafting-only field; the passthrough must drop it.
+    // neighbor_needs is preserved into the finalized contract — it is one of the
+    // two module-dependency signals the phase-cut / DAG ordering derivation reads.
     neighbor_needs: [],
   };
 }
@@ -128,9 +129,10 @@ describe("degenerate-phase collapse — single-module decomposition", () => {
     };
     expect(finalized.module_contracts).toHaveLength(1);
     expect(finalized.module_contracts[0].name).toBe("A");
-    // Passthrough records empty seam_adjustments and drops the drafting-only field.
+    // Deterministic derive records empty seam_adjustments (no seams for one
+    // module) and PRESERVES neighbor_needs verbatim (the ordering signal).
     expect(finalized.module_contracts[0].seam_adjustments).toEqual([]);
-    expect(finalized.module_contracts[0].neighbor_needs).toBeUndefined();
+    expect(finalized.module_contracts[0].neighbor_needs).toEqual([]);
 
     // ...so the next host phase is critique, NOT seam/finalization.
     expect(step).not.toBeNull();

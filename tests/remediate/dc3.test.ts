@@ -1,17 +1,22 @@
 /**
- * DC-3: parallel per-module contract phases.
+ * DC-3: parallel per-module contract drafting + deterministic finalization.
  *
- * `module_contract_drafting` (→ module_contracts) and `contract_finalization`
- * (→ finalized_module_contracts) fan out to ONE agent per module through the
- * shared wave scheduler (`scheduleWave`), replacing the former single sequential
- * agent. The orchestrator merges the per-module shards into the aggregated
- * artifact — byte-identical in shape to the single-agent output — and guarantees
- * the merge is COMPLETE (every decomposed module present) before any downstream
- * derivation runs. A missing shard re-emits the wave; the seam_reconciliation /
- * critique pass downstream stays the consistency gate.
+ * `module_contract_drafting` (→ module_contracts) fans out to ONE agent per
+ * module through the shared wave scheduler (`scheduleWave`), replacing the former
+ * single sequential agent. The orchestrator merges the per-module shards into the
+ * aggregated artifact — byte-identical in shape to the single-agent output — and
+ * guarantees the merge is COMPLETE (every decomposed module present) before any
+ * downstream derivation runs. A missing shard re-emits the wave; the
+ * seam_reconciliation / contract_finalization / critique pass downstream stays the
+ * consistency gate.
+ *
+ * `contract_finalization` (→ finalized_module_contracts) is NOT a wave: it is
+ * DERIVED deterministically from the drafts + seam report (carry each draft
+ * verbatim, attach the agreed_interface of every touching seam as a
+ * seam_adjustment), so no per-module LLM fan-out is dispatched.
  *
  * Verifies:
- *   inv-1/inv-2  per-module wave: one shard path per module, capped by the host
+ *   inv-1/inv-2  drafting wave: one shard path per module, capped by the host
  *                concurrency the shared scheduler derives.
  *   inv-3        merge waits for completeness, then advances downstream.
  *   inv-4        merged aggregate passes the validator and is byte-identical in
@@ -21,6 +26,8 @@
  *   inv-6        the merged module_contracts route to seam_reconciliation (the gate).
  *   fail-1..4    a missing shard never promotes a partial aggregate; the wave is
  *                re-emitted instead.
+ *   finalization deterministic derive (no wave), seam-adjustment attach, and the
+ *                module_contracts write-through revert-prevention.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
@@ -49,6 +56,7 @@ import {
   CP_SEAM_RECONCILIATION_REPORT_VERSION,
   CP_FINALIZED_MODULE_CONTRACTS_VERSION,
   CONTRACT_PIPELINE_VALIDATORS,
+  validateReconciliationDerivation,
 } from "../../src/remediate/validation/contractPipeline.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
@@ -202,9 +210,10 @@ afterEach(async () => {
 });
 
 describe("isParallelModulePhase", () => {
-  it("recognizes exactly the two parallel module phases", () => {
+  it("recognizes exactly the one parallel module phase (drafting)", () => {
     expect(isParallelModulePhase("module_contract_drafting")).toBe(true);
-    expect(isParallelModulePhase("contract_finalization")).toBe(true);
+    // contract_finalization is deterministically derived, NOT a per-module wave.
+    expect(isParallelModulePhase("contract_finalization")).toBe(false);
     expect(isParallelModulePhase("seam_reconciliation")).toBe(false);
     expect(isParallelModulePhase("implementation_planning")).toBe(false);
   });
@@ -329,12 +338,14 @@ describe("DC-3 module_contract_drafting — per-module wave fan-out", () => {
   });
 });
 
-describe("DC-3 contract_finalization — per-module wave fan-out", () => {
+describe("contract_finalization — deterministic derivation (no wave)", () => {
   beforeEach(async () => {
     await writeRaw("goal_spec", makeGoalSpec());
     await writeRaw("context_bundle", makeContextBundle());
     await writeRaw("module_decomposition", makeThreeModuleDecomposition());
-    // module_contracts (aggregate) + seam report present → finalization is next.
+  });
+
+  it("derives finalized_module_contracts deterministically and advances past finalization (no per-module wave)", async () => {
     await writeRaw("module_contracts", {
       contract_version: CP_MODULE_CONTRACTS_VERSION,
       goal_id: "G1",
@@ -347,58 +358,104 @@ describe("DC-3 contract_finalization — per-module wave fan-out", () => {
       mismatches: [],
       created_at: CREATED_AT,
     });
-  });
-
-  it("inv-1: emits one finalized-shard assignment per module", async () => {
     expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("contract_finalization");
-    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
-    const prompt = await promptOf(step!);
-    expect(prompt).toMatch(/Per-Module Contract Finalization/);
-    for (const name of THREE_MODULE_NAMES) {
-      expect(() => shardPathFromPrompt(prompt, name)).not.toThrow();
-    }
-  });
 
-  it("inv-3/inv-4: complete finalized shards merge into a validator-clean finalized_module_contracts", async () => {
     const step = await buildNextContractPipelineStep(STEP_OPTIONS);
-    const prompt = await promptOf(step!);
-    for (const name of THREE_MODULE_NAMES) {
-      await writeShardFromPrompt(prompt, name, finalizedShard(name));
-    }
-    await buildNextContractPipelineStep(STEP_OPTIONS);
-
+    // The tool derived the artifact itself — no per-module finalization wave.
     expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(true);
+    expect(nextMissingContractPhase(ARTIFACTS_DIR)).not.toBe("contract_finalization");
+    const prompt = await promptOf(step!);
+    expect(prompt).not.toMatch(/Per-Module Contract Finalization/);
+    // No finalization wave directory is ever created.
+    expect(
+      existsSync(
+        join(contractPipelineDir(ARTIFACTS_DIR), "module-waves", "contract_finalization"),
+      ),
+    ).toBe(false);
+
+    // The derived aggregate passes the real validator, in decomposition order.
     const env = await readContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts");
-    const merged = (env as any).payload;
-    expect(merged.contract_version).toBe(CP_FINALIZED_MODULE_CONTRACTS_VERSION);
-    expect(merged.module_contracts.map((m: any) => m.name)).toEqual([
+    const finalized = (env as any).payload;
+    expect(finalized.contract_version).toBe(CP_FINALIZED_MODULE_CONTRACTS_VERSION);
+    expect(finalized.module_contracts.map((m: any) => m.name)).toEqual([
       ...THREE_MODULE_NAMES,
     ]);
     const issues = CONTRACT_PIPELINE_VALIDATORS.finalized_module_contracts(
-      merged,
+      finalized,
       "finalized_module_contracts",
     ).filter((i) => i.severity === "error");
     expect(issues).toEqual([]);
   });
 
-  it("fail-3: a missing finalized shard re-emits the finalization wave (no partial promote)", async () => {
-    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
-    const prompt = await promptOf(step!);
-    await writeShardFromPrompt(prompt, "mod-alpha", finalizedShard("mod-alpha"));
+  it("carries the draft interface verbatim, preserves neighbor_needs, and attaches touching-seam adjustments", async () => {
+    // A drafting contract with a neighbor edge, to prove neighbor_needs survives.
+    await writeRaw("module_contracts", {
+      contract_version: CP_MODULE_CONTRACTS_VERSION,
+      goal_id: "G1",
+      module_contracts: THREE_MODULE_NAMES.map((name) =>
+        name === "mod-alpha"
+          ? { ...draftingShard(name), neighbor_needs: [{ neighbor: "mod-beta", needs: "y" }] }
+          : draftingShard(name),
+      ),
+      created_at: CREATED_AT,
+    });
+    const AGREED = "mod-beta emits a validated roster payload";
+    await writeRaw("seam_reconciliation_report", {
+      contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
+      goal_id: "G1",
+      mismatches: [
+        {
+          seam_id: "S1",
+          module_a: "mod-alpha",
+          module_b: "mod-beta",
+          description: "alpha input vs beta output",
+          resolution: { decision: "both", agreed_interface: AGREED },
+        },
+      ],
+      created_at: CREATED_AT,
+    });
+
     await buildNextContractPipelineStep(STEP_OPTIONS);
-    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(false);
-    expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("contract_finalization");
+    const env = await readContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts");
+    const finalized = (env as any).payload;
+    const byName = (n: string) =>
+      finalized.module_contracts.find((m: any) => m.name === n);
+
+    // Interface fields copied verbatim from the draft.
+    expect(byName("mod-alpha").inputs).toEqual(["x"]);
+    expect(byName("mod-alpha").outputs).toEqual(["y"]);
+    // neighbor_needs preserved for the phase-cut / DAG ordering derivation.
+    expect(byName("mod-alpha").neighbor_needs).toEqual([
+      { neighbor: "mod-beta", needs: "y" },
+    ]);
+    // The seam's agreed interface is attached to BOTH touched modules...
+    expect(byName("mod-alpha").seam_adjustments.some((s: string) => s.includes(AGREED))).toBe(
+      true,
+    );
+    expect(byName("mod-beta").seam_adjustments.some((s: string) => s.includes(AGREED))).toBe(
+      true,
+    );
+    // ...and to no others.
+    expect(byName("mod gamma/extra").seam_adjustments).toEqual([]);
+
+    // The attach satisfies the reconciliation-derivation gate (INV-CO-12).
+    const seamEnv = await readContractArtifact(ARTIFACTS_DIR, "seam_reconciliation_report");
+    const derivationIssues = validateReconciliationDerivation(
+      (seamEnv as any).payload,
+      finalized,
+    ).filter((i) => i.severity === "error");
+    expect(derivationIssues).toEqual([]);
   });
 });
 
-describe("DC-3 repair write-through (revert-prevention)", () => {
+describe("module_contracts write-through (revert-prevention)", () => {
   beforeEach(async () => {
     await writeRaw("goal_spec", makeGoalSpec());
     await writeRaw("context_bundle", makeContextBundle());
     await writeRaw("module_decomposition", makeThreeModuleDecomposition());
   });
 
-  it("a repaired finalized aggregate writes through to the per-module shards, so a re-merge reproduces the repair (not the pre-repair design)", async () => {
+  it("a directly-ingested module_contracts aggregate writes through to the per-module shards, so a re-merge reproduces the edit (not the stale shards)", async () => {
     // 1. Drive drafting → merged module_contracts.
     const draftStep = await buildNextContractPipelineStep(STEP_OPTIONS);
     const draftPrompt = await promptOf(draftStep!);
@@ -406,57 +463,38 @@ describe("DC-3 repair write-through (revert-prevention)", () => {
       await writeShardFromPrompt(draftPrompt, name, draftingShard(name));
     }
     await buildNextContractPipelineStep(STEP_OPTIONS); // merge module_contracts
+    expect(contractArtifactExists(ARTIFACTS_DIR, "module_contracts")).toBe(true);
 
-    // 2. seam report present → drive finalization → merged finalized aggregate.
-    await writeRaw("seam_reconciliation_report", {
-      contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
-      goal_id: "G1",
-      mismatches: [],
-      created_at: CREATED_AT,
-    });
-    const finalStep = await buildNextContractPipelineStep(STEP_OPTIONS);
-    const finalPrompt = await promptOf(finalStep!);
-    for (const name of THREE_MODULE_NAMES) {
-      await writeShardFromPrompt(finalPrompt, name, finalizedShard(name));
-    }
-    await buildNextContractPipelineStep(STEP_OPTIONS); // merge finalized_module_contracts
-    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(true);
-
-    // 3. Simulate a judge-driven repair: regenerate the AGGREGATED
-    //    finalized_module_contracts.input.json with one module contract corrected
-    //    (validation_boundary rewritten). writeRaw runs ingest, which must write
-    //    the repair THROUGH to the per-module shard.
-    const repaired = finalizedShard("mod-alpha");
-    repaired.validation_boundary = "REPAIRED boundary for mod-alpha";
-    await writeRaw("finalized_module_contracts", {
-      contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+    // 2. A direct aggregate edit (one module's validation_boundary rewritten).
+    //    writeRaw runs ingest, which must write the edit THROUGH to the shard.
+    const edited = draftingShard("mod-alpha");
+    edited.validation_boundary = "EDITED boundary for mod-alpha";
+    await writeRaw("module_contracts", {
+      contract_version: CP_MODULE_CONTRACTS_VERSION,
       goal_id: "G1",
       module_contracts: [
-        repaired,
-        finalizedShard("mod-beta"),
-        finalizedShard("mod gamma/extra"),
+        edited,
+        draftingShard("mod-beta"),
+        draftingShard("mod gamma/extra"),
       ],
       created_at: CREATED_AT,
     });
-
-    // The mod-alpha finalization shard on disk now carries the repair.
-    const alphaShardPath = shardPathFromPrompt(finalPrompt, "mod-alpha");
+    const alphaShardPath = shardPathFromPrompt(draftPrompt, "mod-alpha");
     const alphaShard = JSON.parse(await readFile(alphaShardPath, "utf8"));
-    expect(alphaShard.validation_boundary).toBe("REPAIRED boundary for mod-alpha");
+    expect(alphaShard.validation_boundary).toBe("EDITED boundary for mod-alpha");
 
-    // 4. Simulate the cascade that used to revert the repair: archive the merged
-    //    finalized aggregate, then re-run next-step — it re-merges from shards.
-    //    Because the shards hold the repair, the re-merge reproduces it.
-    await archiveContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", "stale");
-    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(false);
-    expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("contract_finalization");
+    // 3. Archive the aggregate (input + canonical) and re-run: the re-merge from
+    //    shards reproduces the edit because the shard carries it.
+    await archiveContractArtifact(ARTIFACTS_DIR, "module_contracts", "stale");
+    expect(contractArtifactExists(ARTIFACTS_DIR, "module_contracts")).toBe(false);
+    expect(nextMissingContractPhase(ARTIFACTS_DIR)).toBe("module_contract_drafting");
 
     await buildNextContractPipelineStep(STEP_OPTIONS); // re-merge from shards
-    expect(contractArtifactExists(ARTIFACTS_DIR, "finalized_module_contracts")).toBe(true);
-    const env = await readContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts");
+    expect(contractArtifactExists(ARTIFACTS_DIR, "module_contracts")).toBe(true);
+    const env = await readContractArtifact(ARTIFACTS_DIR, "module_contracts");
     const remerged = (env as any).payload;
     const alpha = remerged.module_contracts.find((m: any) => m.name === "mod-alpha");
-    expect(alpha.validation_boundary).toBe("REPAIRED boundary for mod-alpha");
+    expect(alpha.validation_boundary).toBe("EDITED boundary for mod-alpha");
   });
 });
 

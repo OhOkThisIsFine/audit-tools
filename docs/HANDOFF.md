@@ -11,18 +11,21 @@
 - On npm as `latest` at **v0.32.7**. Per-lap shipped detail is NOT narrated here (changelog creep — see
   `git log` and project memory [[live-status]]); this section is current-state + open-work roadmap only.
 - **Committed to `main` but NOT yet republished:** the doc-review pass (status-noise trims, HANDOFF
-  condensation, fact fixes), the first `license` field + `LICENSE` file (ISC), **and three doc-review bug
-  fixes (`f719549f`): the `planning_executor` `task_affinity_graph.json` staleness gap, the `id-glossary`
-  guard's per-id `INV-*` matching (+ `INV-S03`/`INV-S04` glossary rows), and the stale `riskSignal.ts`
-  comment.** The license + code fixes are real package deltas that should ride the **next** publish.
-  Republish + global-bin reinstall was deliberately deferred to avoid swapping the installed bin mid-run
-  while the owner's self-audit is live — fold it into the next release rather than cutting a version now.
+  condensation, fact fixes), the first `license` field + `LICENSE` file (ISC), three doc-review bug
+  fixes (`f719549f`), **and the deterministic `contract_finalization` rework** — `contract_finalization`
+  is now a tool derive (carry drafts verbatim + attach seam `agreed_interface`s as `seam_adjustments`,
+  preserve `neighbor_needs`), NOT a per-module LLM wave; killed the ~1.4M-token 12-agent re-dispatch. LLM
+  only on the gate-failure / judge-repair fallback. Code-complete + green (build/check/deadcode + full
+  remediate suite). These are real package deltas that should ride the **next** publish. Republish +
+  global-bin reinstall was deliberately deferred to avoid swapping the installed bin mid-run while the
+  owner's self-audit is live — fold it into the next release rather than cutting a version now.
+  See [[deterministic-contract-finalization]].
 - **Immediate next:** (1) the owner is running the paused audit-tools self-audit to completion in a fresh
   conversation — note it will dispatch at the codex-pinned concurrency until the dispatch rework lands.
   (2) **Dispatch admission-control rework** — see T5.3 below (design of record + *Open tensions* to resolve
   before building).
-- **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run frictions (quarantine
-  re-verify affordance, finalization re-dispatch cost); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
+- **Open items** (all in `docs/backlog.md`): the 2026-07-04 remediation-run friction (quarantine
+  re-verify affordance); **friction close-out followup** — per-category walk shipped, but step-boundary auto-seeding +
   a session-`Stop`-hook backstop for close-bypassing runs are open ([[meta-audit-friction-must-be-tool-enforced]]);
   remediate-side `opencode.json` drift/`INV-RCI-16` reconciliation; env-bound live validations (quota pre-wall
   pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn); provider-blocked

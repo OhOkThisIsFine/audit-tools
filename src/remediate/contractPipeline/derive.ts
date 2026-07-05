@@ -34,6 +34,7 @@ import {
   readObligationChangeClassification,
 } from "./changeClassification.js";
 import { derivePhaseCut, phaseCutModulesFromContracts } from "./phaseCut.js";
+import { CP_FINALIZED_MODULE_CONTRACTS_VERSION } from "../validation/contractPipeline.js";
 
 /** The finalized-module-contract fields the obligation deriver reads. */
 interface DerivableModuleContract {
@@ -139,6 +140,110 @@ export function deriveObligationLedger(
     obligations,
     created_at: options.created_at,
   });
+}
+
+// ── Finalized module contracts (deterministic attach) ─────────────────────────
+//
+// `contract_finalization` is a mechanical merge, not fresh authoring: it takes
+// the drafted module contracts and the seam-reconciliation decisions and, per
+// module, carries the draft interface verbatim while attaching the
+// `agreed_interface` of every seam that touches the module as a `seam_adjustment`.
+// No source is re-read and no judgment is spent — the judgment already happened
+// upstream (the seam_reconciliation phase decided each mismatch's resolution).
+// Attaching each agreed interface verbatim guarantees the reconciliation-derivation
+// gate (INV-CO-12) passes, since its corpus is the union of every module's
+// inputs/outputs/invariants/side_effects/seam_adjustments/validation_boundary.
+//
+// `neighbor_needs` is PRESERVED from the draft (the finalized schema tolerates the
+// extra field): it is one of the two module-dependency signals `phaseCutModules
+// FromContracts` / `applyModuleDependencyEdges` read (unioned with `artifact:<name>`
+// producer/consumer tokens), so preserving it keeps the phase cut and node
+// ordering intact without the tool having to synthesize artifact tokens. A weaker
+// draft that leaves inputs/outputs empty, or a seam report referencing a module
+// not in scope, surfaces at the downstream design/reconciliation gate and routes
+// to an LLM re-author of `contract_finalization` — the only path that still needs
+// judgment.
+
+/** The seam-reconciliation `agreed_interface`s that touch a given module name. */
+function seamAdjustmentsForModule(
+  moduleName: string,
+  seamReconciliationReport: unknown,
+): string[] {
+  const mismatches =
+    isRecord(seamReconciliationReport) && Array.isArray(seamReconciliationReport.mismatches)
+      ? seamReconciliationReport.mismatches
+      : [];
+  const adjustments: string[] = [];
+  for (const mismatch of mismatches) {
+    if (!isRecord(mismatch)) continue;
+    if (mismatch.module_a !== moduleName && mismatch.module_b !== moduleName) continue;
+    const resolution = isRecord(mismatch.resolution) ? mismatch.resolution : undefined;
+    const agreed =
+      resolution && typeof resolution.agreed_interface === "string"
+        ? resolution.agreed_interface
+        : "";
+    if (agreed.length === 0) continue;
+    const seamId = typeof mismatch.seam_id === "string" ? mismatch.seam_id : "";
+    adjustments.push(seamId ? `${seamId}: ${agreed}` : agreed);
+  }
+  return adjustments;
+}
+
+/**
+ * Derive `finalized_module_contracts` deterministically from the drafted
+ * `module_contracts` and the `seam_reconciliation_report`. Pure function of its
+ * inputs (modulo the `created_at` stamp): the same drafts + seam report always
+ * yield the same finalized contracts in draft order, so the artifact hash /
+ * staleness DAG stays well-behaved.
+ *
+ * Each finalized entry copies the draft's interface fields verbatim (already
+ * validated `string[]` / string shapes, so no coercion is needed) and PRESERVES
+ * `neighbor_needs` for the ordering derivation, then sets `seam_adjustments` to
+ * the `agreed_interface`(s) of the seams that touch the module. A draft entry
+ * that is not an object is passed through unchanged (the downstream validator
+ * reports it).
+ */
+export function deriveFinalizedModuleContracts(
+  draftedModuleContracts: unknown,
+  seamReconciliationReport: unknown,
+  options: DeriveOptions = {},
+): {
+  contract_version: string;
+  goal_id: string;
+  module_contracts: unknown[];
+  created_at: string;
+} {
+  const goalId =
+    isRecord(draftedModuleContracts) && typeof draftedModuleContracts.goal_id === "string"
+      ? draftedModuleContracts.goal_id
+      : "";
+  const drafts =
+    isRecord(draftedModuleContracts) && Array.isArray(draftedModuleContracts.module_contracts)
+      ? draftedModuleContracts.module_contracts
+      : [];
+  const module_contracts = drafts.map((mod) => {
+    if (!isRecord(mod) || typeof mod.name !== "string") return mod;
+    const finalized: Record<string, unknown> = {
+      name: mod.name,
+      inputs: mod.inputs,
+      outputs: mod.outputs,
+      invariants: mod.invariants,
+      side_effects: mod.side_effects,
+      validation_boundary: mod.validation_boundary,
+      failure_modes: mod.failure_modes,
+      seam_adjustments: seamAdjustmentsForModule(mod.name, seamReconciliationReport),
+    };
+    // Preserve the draft's directional neighbor edges when present — one of the
+    // two module-dependency signals the phase-cut / DAG ordering derivation reads.
+    if (Array.isArray(mod.neighbor_needs)) finalized.neighbor_needs = mod.neighbor_needs;
+    return finalized;
+  });
+  return {
+    contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
+    goal_id: goalId,
+    module_contracts,
+    created_at: options.created_at ?? new Date().toISOString(),
+  };
 }
 
 // ── Scaffolds (S3): skeletons for the partially-derivable artifacts ────────────

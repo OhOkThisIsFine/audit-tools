@@ -76,6 +76,7 @@ import {
 } from "../contractPipeline/cyclicSeamResolution.js";
 import {
   deriveObligationLedger,
+  deriveFinalizedModuleContracts,
   buildTestValidatorPlanScaffold,
   buildImplementationDagScaffold,
   acceptedCounterexampleIds,
@@ -103,7 +104,6 @@ import {
 import {
   CONTRACT_PIPELINE_VALIDATORS,
   CP_MODULE_CONTRACTS_VERSION,
-  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
   validateDesignSpecGates,
   validateGoalIdConsistency,
   validateImplementationDAGIntegrity,
@@ -509,13 +509,12 @@ export async function ingestContractArtifacts(
     }
     await writeContractArtifact(artifactsDir, name, payload);
     ingested.push(name);
-    // Repair-revert fix: a judge-driven repair regenerates the AGGREGATED
-    // module-phase artifact (`finalized_module_contracts` / `module_contracts`)
-    // directly, never the per-module shards it was merged from. Write the
-    // repaired aggregate back through to the shards so shards ≡ aggregate stays
-    // an invariant — otherwise a later upstream cascade (e.g. a
-    // module_decomposition edit) re-merges the STALE shards and silently reverts
-    // the approved repair. No-op for every non-module-phase artifact.
+    // Repair-revert fix: an ingested aggregated `module_contracts` payload (a
+    // degenerate single-agent draft, or a direct edit) is written back through to
+    // the per-module shards so shards ≡ aggregate stays an invariant — otherwise a
+    // later upstream cascade (e.g. a module_decomposition edit) re-merges the STALE
+    // shards and silently reverts the change. No-op for every non-sharded artifact
+    // (`finalized_module_contracts` is deterministically derived, never sharded).
     await propagateAggregateToShards(artifactsDir, name, payload);
     // Snapshot a freshly-produced review verdict + the upstreams it reviewed, so
     // a later staleness re-emit can be diff-based (B2). No-op for non-review
@@ -1187,28 +1186,30 @@ export async function evaluatePromotedPlanCitationGrounding(
   return { violations: errors.map((issue) => `[${issue.path}] ${issue.message}`) };
 }
 
-// ── DC-3: parallel per-module contract phases ─────────────────────────────────
+// ── DC-3: parallel per-module contract drafting ───────────────────────────────
 //
-// `module_contract_drafting` (→ module_contracts) and `contract_finalization`
-// (→ finalized_module_contracts) both aggregate a `module_contracts[]` array
-// keyed by module name. DC-3 fans these out to ONE agent per module through the
+// `module_contract_drafting` (→ module_contracts) aggregates a `module_contracts[]`
+// array keyed by module name. DC-3 fans it out to ONE agent per module through the
 // shared wave scheduler (`scheduleWave`, the SAME quota/host machinery implement
-// dispatch uses), replacing the former single sequential agent. Each agent writes
-// a per-module SHARD; the orchestrator merges all shards into the aggregated
-// artifact — byte-identical in shape to the single-agent output — and guarantees
-// the merge is COMPLETE (every decomposed module present) before downstream
-// derivation runs. A missing shard re-emits the wave (never a partial aggregate).
+// dispatch uses), replacing the former single sequential agent — each agent reads
+// its own module's file scope, so no single agent owns both sides of a seam. Each
+// agent writes a per-module SHARD; the orchestrator merges all shards into the
+// aggregated artifact — byte-identical in shape to the single-agent output — and
+// guarantees the merge is COMPLETE (every decomposed module present) before
+// downstream derivation runs. A missing shard re-emits the wave (never a partial
+// aggregate). `contract_finalization` is NOT a parallel wave: it is derived
+// deterministically from the drafts + seam report (see the deterministic
+// contract_finalization fast path), no fresh source read.
 
-/** The two phases that fan out per module, and the artifact each produces. */
+/** The phase(s) that fan out per module, and the artifact each produces. */
 const PARALLEL_MODULE_PHASES = {
   module_contract_drafting: "module_contracts",
-  contract_finalization: "finalized_module_contracts",
 } as const;
 
 type ParallelModulePhase = keyof typeof PARALLEL_MODULE_PHASES;
 
 export function isParallelModulePhase(phase: string): phase is ParallelModulePhase {
-  return phase === "module_contract_drafting" || phase === "contract_finalization";
+  return phase === "module_contract_drafting";
 }
 
 interface DecomposedModule {
@@ -1331,14 +1332,13 @@ function extractShardContract(
 }
 
 /**
- * Merge complete per-module shards into the aggregated artifact for `phase`,
- * byte-identical in shape to the former single-agent output: the same envelope
+ * Merge complete per-module shards into the aggregated `module_contracts`
+ * artifact, byte-identical in shape to the former single-agent output: the same envelope
  * (`contract_version`, `goal_id`, `module_contracts[]`, `created_at`) with one
  * entry per module in DECOMPOSITION order (deterministic, not directory order).
  * Caller guarantees completeness first.
  */
 function mergeModuleShards(
-  phase: ParallelModulePhase,
   modules: DecomposedModule[],
   present: Map<string, Record<string, unknown>>,
   goalId: string,
@@ -1348,10 +1348,7 @@ function mergeModuleShards(
   module_contracts: Record<string, unknown>[];
   created_at: string;
 } {
-  const contractVersion =
-    phase === "module_contract_drafting"
-      ? CP_MODULE_CONTRACTS_VERSION
-      : CP_FINALIZED_MODULE_CONTRACTS_VERSION;
+  const contractVersion = CP_MODULE_CONTRACTS_VERSION;
   const moduleContracts = modules.map((mod) => present.get(mod.name)!);
   return {
     contract_version: contractVersion,
@@ -1363,14 +1360,14 @@ function mergeModuleShards(
 
 /**
  * Write-through invariant (repair-revert fix): the per-module shards under
- * `module-waves/<phase>/` are the single source of truth for the aggregated
- * module-phase artifacts — the aggregate is a pure re-merge of them. A
- * judge-driven repair, however, regenerates the AGGREGATED `.input.json`
- * (`finalized_module_contracts` / `module_contracts`) directly, never the
- * shards. Decompose an ingested aggregate back into its shards (matched by
- * module `name`, in decomposition order) so a later cascade that re-merges the
- * shards reproduces the repair instead of reverting to the pre-repair design.
- * No-op for any artifact that is not an aggregated module-phase artifact, or a
+ * `module-waves/module_contract_drafting/` are the single source of truth for the
+ * aggregated `module_contracts` artifact — the aggregate is a pure re-merge of
+ * them. When that aggregate is instead ingested directly (a degenerate
+ * single-agent draft, or a direct edit), decompose it back into its shards
+ * (matched by module `name`, in decomposition order) so a later cascade that
+ * re-merges the shards reproduces the change instead of reverting to the stale
+ * shards. No-op for any artifact that is not a sharded module-phase artifact
+ * (`finalized_module_contracts` is deterministically derived, never sharded), or a
  * payload lacking a `module_contracts[]` array.
  */
 async function propagateAggregateToShards(
@@ -1601,12 +1598,9 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
     });
     const maxConcurrent = schedule.max_concurrent;
 
-    const inputArtifact =
-      phase === "module_contract_drafting" ? "module_decomposition" : "module_contracts";
+    const inputArtifact = "module_decomposition";
     const inputPaths = (
-      phase === "module_contract_drafting"
-        ? (["goal_spec", "context_bundle", "module_decomposition"] as const)
-        : (["module_contracts", "seam_reconciliation_report"] as const)
+      ["goal_spec", "context_bundle", "module_decomposition"] as const
     ).map((key) => `- \`${artifactPaths[key]}\` (${key})`);
 
     const moduleLines = modules
@@ -1620,9 +1614,7 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
       })
       .join("\n");
 
-    const perModuleSchema =
-      phase === "module_contract_drafting"
-        ? `{
+    const perModuleSchema = `{
   "name": "<module-name — must equal the assigned module>",
   "inputs": ["<what this module receives>"],
   "outputs": ["<what this module produces>"],
@@ -1631,26 +1623,13 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
   "validation_boundary": "<what this module validates vs. what callers must guarantee>",
   "failure_modes": ["<ways this module can fail and how callers should handle them>"],
   "neighbor_needs": [{ "neighbor": "<module-name>", "needs": "<what this module needs>" }]
-}`
-        : `{
-  "name": "<module-name — must equal the assigned module>",
-  "inputs": ["<final — incorporating reconciliation decisions>"],
-  "outputs": ["<final — incorporating reconciliation decisions>"],
-  "invariants": ["<invariant id + description>"],
-  "side_effects": ["<side-effect with owner>"],
-  "validation_boundary": "<finalized validation boundary>",
-  "failure_modes": ["<failure mode + caller handling>"],
-  "seam_adjustments": ["<adjustments made per seam_reconciliation_report, if any>"]
 }`;
 
-    const taskVerb =
-      phase === "module_contract_drafting"
-        ? "draft its module contract"
-        : "incorporate the reconciliation decisions from seam_reconciliation_report and produce its finalized module contract";
+    const taskVerb = "draft its module contract";
 
     const cwdNote = `\n> Set the shell/tool working directory to \`${root}\` before running any commands.\n`;
     const nextCommand = loaderCommand("next-step");
-    const prompt = `# ${PHASE_TO_ARTIFACT[phase] === "module_contracts" ? "Per-Module Contract Drafting" : "Per-Module Contract Finalization"} — Parallel Wave (${modules.length} modules)
+    const prompt = `# Per-Module Contract Drafting — Parallel Wave (${modules.length} modules)
 
 This phase fans out to ONE sub-agent PER MODULE. Dispatch the ${modules.length} modules below as parallel sub-agents in waves of at most **${maxConcurrent}** concurrent agents (the quota/host concurrency cap). Each sub-agent reads only its module's file scope, then writes ONLY that module's contract shard — no agent owns both sides of a seam, and no agent writes the aggregated artifact.
 ${cwdNote}
@@ -1737,7 +1716,7 @@ The orchestrator verifies every module shard is present, merges them into \`${PH
         .find((g): g is string => Boolean(g)) ||
       "";
 
-    const merged = mergeModuleShards(phase, modules, scan.present, goalId);
+    const merged = mergeModuleShards(modules, scan.present, goalId);
     await writeContractArtifact(artifactsDir, PARALLEL_MODULE_PHASES[phase], merged);
     return "merged";
   };
@@ -1924,18 +1903,14 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
     return buildNextContractPipelineStep(options);
   }
 
-  // 2.8. Degenerate-phase collapse (self-scaling pipeline, slice 1). A
-  //      single-module decomposition has NO inter-module seams, so
-  //      seam_reconciliation is a structural no-op and contract_finalization is a
-  //      verbatim passthrough of the drafted contracts (no adjustments to apply).
-  //      Auto-satisfy both deterministically — no host round-trip — mirroring the
-  //      obligation_ledger / cyclic_seam no-op fast paths. This is a purely
-  //      structural collapse (module count, available post-decomposition), NOT a
-  //      risk/complexity call, so it needs no signal. The empty seam report makes
-  //      validateReconciliationDerivation pass vacuously; the finalized contracts
-  //      copy the drafted ones, so validateFinalizedModuleContracts (same entry
-  //      validator as drafting) and the obligation-ledger derivation are satisfied.
-  if (nextPhase === "seam_reconciliation" || nextPhase === "contract_finalization") {
+  // 2.8. Degenerate seam_reconciliation collapse. A single-module decomposition
+  //      has NO inter-module seams, so seam_reconciliation is a structural no-op:
+  //      write an empty seam report deterministically (no host round-trip),
+  //      mirroring the obligation_ledger / cyclic_seam no-op fast paths. The empty
+  //      report makes validateReconciliationDerivation pass vacuously. A
+  //      multi-module decomposition falls through to the LLM seam_reconciliation
+  //      step (which mismatches exist is a judgment call).
+  if (nextPhase === "seam_reconciliation") {
     const modules = await readDecomposedModules(artifactsDir);
     if (modules.length <= 1) {
       const drafted = envelopePayload(
@@ -1943,42 +1918,38 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
       );
       const goalId =
         isRecord(drafted) && typeof drafted.goal_id === "string" ? drafted.goal_id : "";
-      if (nextPhase === "seam_reconciliation") {
-        await writeContractArtifact(artifactsDir, "seam_reconciliation_report", {
-          contract_version:
-            "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
-          goal_id: goalId,
-          mismatches: [],
-          created_at: new Date().toISOString(),
-        });
-      } else {
-        const draftedContracts =
-          isRecord(drafted) && Array.isArray(drafted.module_contracts)
-            ? drafted.module_contracts
-            : [];
-        await writeContractArtifact(artifactsDir, "finalized_module_contracts", {
-          contract_version:
-            "remediate-code-contract-pipeline/finalized-module-contracts/v1alpha1",
-          goal_id: goalId,
-          module_contracts: draftedContracts.map((mod) =>
-            isRecord(mod)
-              ? {
-                  name: mod.name,
-                  inputs: mod.inputs,
-                  outputs: mod.outputs,
-                  invariants: mod.invariants,
-                  side_effects: mod.side_effects,
-                  validation_boundary: mod.validation_boundary,
-                  failure_modes: mod.failure_modes,
-                  seam_adjustments: [],
-                }
-              : mod,
-          ),
-          created_at: new Date().toISOString(),
-        });
-      }
+      await writeContractArtifact(artifactsDir, "seam_reconciliation_report", {
+        contract_version:
+          "remediate-code-contract-pipeline/seam-reconciliation-report/v1alpha1",
+        goal_id: goalId,
+        mismatches: [],
+        created_at: new Date().toISOString(),
+      });
       return buildNextContractPipelineStep(options);
     }
+  }
+
+  // 2.9. Deterministic contract_finalization (all module counts). Finalization is
+  //      a mechanical merge, not fresh authoring: carry each drafted module
+  //      contract verbatim (preserving neighbor_needs for the ordering derivation)
+  //      and attach the agreed_interface of every seam that touches the module as a
+  //      seam_adjustment. The tool derives it instead of dispatching a per-module
+  //      LLM wave — the judgment already happened at seam_reconciliation. Attaching
+  //      each agreed interface verbatim guarantees the INV-CO-12 reconciliation-
+  //      derivation gate passes. A downstream gate that still finds the merge
+  //      inadequate (e.g. a draft with empty inputs/outputs, or a seam naming a
+  //      module out of scope) re-emits contract_finalization as an LLM step via
+  //      buildPhaseStep — the only path that still needs judgment.
+  if (nextPhase === "contract_finalization") {
+    const drafted = envelopePayload(
+      await readContractArtifact(artifactsDir, "module_contracts"),
+    );
+    const seamReport = envelopePayload(
+      await readContractArtifact(artifactsDir, "seam_reconciliation_report"),
+    );
+    const finalized = deriveFinalizedModuleContracts(drafted, seamReport);
+    await writeContractArtifact(artifactsDir, "finalized_module_contracts", finalized);
+    return buildNextContractPipelineStep(options);
   }
 
   // 3. Judge gate: implementation planning is reachable only through an approved
@@ -2679,14 +2650,14 @@ ${preCriticCitationGate.errorLines.join("\n")}
     }
   }
 
-  // Parallel-capable phases (DC-3): module_contract_drafting and
-  // contract_finalization fan out to one agent per module. The aggregated
-  // artifact is missing here, so first try to merge per-module shards (the
-  // worker may have just written them) — a COMPLETE shard set merges into the
-  // aggregated artifact and the pipeline re-derives; an incomplete set re-emits
-  // the wave; a degenerate (≤1 module) decomposition falls through to a single
-  // aggregated step. The seam_reconciliation / critique pass downstream remains
-  // the consistency gate over the merged contracts.
+  // Parallel-capable phase (DC-3): module_contract_drafting fans out to one agent
+  // per module. The aggregated `module_contracts` artifact is missing here, so
+  // first try to merge per-module shards (the worker may have just written them) —
+  // a COMPLETE shard set merges into the aggregated artifact and the pipeline
+  // re-derives; an incomplete set re-emits the wave; a degenerate (≤1 module)
+  // decomposition falls through to a single aggregated step. The seam_reconciliation
+  // / contract_finalization / critique pass downstream remains the consistency gate
+  // over the merged contracts.
   if (isParallelModulePhase(nextPhase)) {
     const mergeOutcome = await tryMergeModuleShards(nextPhase);
     if (mergeOutcome === "merged") {
