@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -773,8 +773,20 @@ export async function driveRollingDispatch(
   const estimateTokens = options.estimateTokens ?? (() => 2000);
   const scopeForBlock =
     options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files ?? []);
-  const blockById = new Map(levels.flat().map((b) => [b.block_id, b]));
+  const allBlocks = levels.flat();
+  const blockById = new Map(allBlocks.map((b) => [b.block_id, b]));
   const hostSession = options.hostSession;
+
+  // Admission control: when a metered pool reports a finite absolute budget, the shared
+  // reservation ledger leases each node's cost before dispatch, so co-located dispatch
+  // loops on one account (a second IDE, the host + its subagents) never collectively
+  // over-admit. On the claude-code host (percent-only quota, no finite ceiling) the ledger
+  // is omitted and the reactive 429 floor is the safety — no per-dispatch lock overhead.
+  const ledgerCfg = resolveLedgerBudgets({
+    pools: options.confirmedPools,
+    sessionConfig: options.sessionConfig,
+    pendingItemTokens: allBlocks.map((b) => estimateTokens(b)),
+  });
 
   // The remediate terminal adapter over the unified shared driver. What stays here is
   // remediate's projection: a block → its ownership node (declared write-scope, so the
@@ -786,6 +798,14 @@ export async function driveRollingDispatch(
     levels,
     confirmedPools: options.confirmedPools,
     sessionConfig: options.sessionConfig,
+    ...(ledgerCfg.reservationLedger
+      ? {
+          reservationLedger: ledgerCfg.reservationLedger,
+          resolvePoolBudget: ledgerCfg.resolvePoolBudget,
+          resolveOutputReservation: (_packet, poolId) =>
+            ledgerCfg.resolveOutputReservation(poolId),
+        }
+      : {}),
     toNode: (b) => ({
       block_id: b.block_id,
       write_paths: scopeForBlock(b),

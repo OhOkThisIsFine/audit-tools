@@ -20,7 +20,9 @@
 
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { CapacityPool, PartialCompletionTerminal } from "../quota/capacity.js";
+import { computeDispatchCapacity } from "../quota/capacity.js";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
+import { createReservationLedger } from "../quota/reservationLedger.js";
 import {
   createRollingDispatcher,
   type RollingDispatchPacket,
@@ -55,6 +57,57 @@ function mergePartialTerminals(
     };
   }
   return { reason: prior.reason, stranded_ids: strandedIds };
+}
+
+/**
+ * Resolve the reservation-ledger admission config for an in-process rolling run.
+ * Mirrors the audit host path's admission-pool derivation (`finalizeDispatchQuota`):
+ * `computeDispatchCapacity` turns each pool's live quota snapshot + learned slope into a
+ * `remaining_token_budget` (a real number where a metered provider reports usage; null
+ * where there is no absolute ceiling) and the pool's output window for the envelope.
+ *
+ * The ledger is wired ONLY when at least one pool has a FINITE absolute budget. On the
+ * claude-code host the quota is percent-only and the tokens-per-percent slope never
+ * converges, so every budget is null (no absolute ceiling to protect) and the reactive
+ * 429 floor is the safety (per spec) — there the ledger stays UNWIRED, adding no
+ * per-dispatch lock overhead and no co-located coordination that couldn't gate on
+ * anything anyway. A metered provider that reports usage gets the full ledger:
+ * reserve-before-dispatch under lock (co-located double-count prevention) + budget
+ * gating. See spec/audit/dispatch-admission-control.md.
+ */
+export function resolveLedgerBudgets(input: {
+  pools: CapacityPool[];
+  sessionConfig: SessionConfig;
+  /** Estimated input tokens per pending packet (sizes the capacity computation). */
+  pendingItemTokens: number[];
+}): {
+  reservationLedger?: ReservationLedger;
+  resolvePoolBudget: (poolId: string) => number;
+  resolveOutputReservation: (poolId: string) => number;
+} {
+  const capacity = computeDispatchCapacity({
+    pools: input.pools,
+    sessionConfig: input.sessionConfig,
+    pendingItemTokens: input.pendingItemTokens,
+  });
+  const budgetByPool = new Map<string, number | null | undefined>();
+  const outputByPool = new Map<string, number>();
+  let hasFiniteBudget = false;
+  for (const alloc of capacity.pools) {
+    const budget = alloc.schedule.remaining_token_budget;
+    if (typeof budget === "number" && Number.isFinite(budget)) hasFiniteBudget = true;
+    budgetByPool.set(alloc.pool_id, budget);
+    outputByPool.set(alloc.pool_id, alloc.schedule.resolved_limits.output_tokens);
+  }
+  return {
+    // Only lease when an absolute budget exists to protect (metered provider). No finite
+    // budget (claude-code percent-only) ⇒ ledger omitted; the reactive 429 floor is the
+    // safety and dispatch stays lock-overhead-free / fully parallel.
+    ...(hasFiniteBudget ? { reservationLedger: createReservationLedger() } : {}),
+    // null/undefined ⇒ +Inf (no absolute ceiling); a real 0 stays 0 (exhausted).
+    resolvePoolBudget: (poolId) => budgetByPool.get(poolId) ?? Number.POSITIVE_INFINITY,
+    resolveOutputReservation: (poolId) => outputByPool.get(poolId) ?? 0,
+  };
 }
 
 /** Configuration for {@link driveRolling}. */

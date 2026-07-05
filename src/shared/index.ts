@@ -1105,7 +1105,7 @@ export type { OwnershipSchedulerNode } from "./dispatch/ownershipScheduler.js";
 // The unified in-process rolling driver — the ONE level/sub-wave loop both
 // orchestrators drive above `createRollingDispatcher`; each keeps only its own
 // terminal/result-routing adapter (audit livelock+DC-4, remediate quota_paused merge).
-export { driveRolling } from "./dispatch/unifiedRolling.js";
+export { driveRolling, resolveLedgerBudgets } from "./dispatch/unifiedRolling.js";
 export type {
   UnifiedRollingConfig,
   UnifiedRollingLevelResult,

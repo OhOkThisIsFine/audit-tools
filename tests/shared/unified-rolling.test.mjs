@@ -5,7 +5,12 @@
 // against), and the rebuild-between-levels boundary.
 
 import { describe, it, expect } from "vitest";
-import { driveRolling } from "../../src/shared/dispatch/unifiedRolling.ts";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { driveRolling, resolveLedgerBudgets } from "../../src/shared/dispatch/unifiedRolling.ts";
+import { ReservationLedger } from "../../src/shared/quota/reservationLedger.ts";
+import { setQuotaStateDir } from "../../src/shared/quota/state.ts";
 
 const POOL = {
   id: "stub/*",
@@ -87,6 +92,58 @@ describe("driveRolling — unified in-process rolling driver", () => {
     // {b1,b2} disjoint → parallel (peak 2); b3 shares src/a.ts with b1 → next sub-wave.
     expect(track.peak).toBe(2);
     expect(run.allResults).toHaveLength(3);
+  });
+
+  it("forwards the reservation ledger: two co-located runs over one ledger never exceed the shared budget", async () => {
+    // The C4 wiring: driveRolling forwards reservationLedger + resolvePoolBudget to the
+    // engine, so two co-located in-process loops on ONE account (same ledger file) reserve
+    // before dispatch and never collectively over-admit — the spec's central overshoot
+    // criterion, exercised through the unified driver rather than the raw engine.
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-ledger-")));
+    const ledgerPath = join(await mkdtemp(join(tmpdir(), "unified-ledger-")), "ledger.json");
+    const BUDGET = 100;
+    const COST = 60; // COST <= BUDGET < 2*COST → at most one in flight across BOTH loops
+
+    const m = { inFlight: 0, peak: 0 };
+    const dispatchPacket = async (packet) => {
+      m.inFlight += COST;
+      m.peak = Math.max(m.peak, m.inFlight);
+      await new Promise((r) => setTimeout(r, 15));
+      m.inFlight -= COST;
+      return { packet, outcome: "success", actualTokens: COST };
+    };
+
+    const mkRun = (prefix, ledger) =>
+      driveRolling({
+        levels: [[{ id: `${prefix}-1` }, { id: `${prefix}-2` }, { id: `${prefix}-3` }]],
+        confirmedPools: [POOL],
+        sessionConfig: SESSION,
+        toNode: (it) => ({ block_id: it.id, write_paths: [], read_only: true }),
+        toPacket: (it) => ({ id: it.id, payload: { id: it.id }, estimatedTokens: COST, complexity: 0.5 }),
+        dispatchPacket,
+        reservationLedger: ledger,
+        resolvePoolBudget: () => BUDGET,
+      });
+
+    // Two SEPARATE ledger instances → SAME file (two co-located loops coordinating only
+    // through the locked file).
+    const [a, b] = await Promise.all([
+      mkRun("a", new ReservationLedger(ledgerPath)),
+      mkRun("b", new ReservationLedger(ledgerPath)),
+    ]);
+    expect(a.allResults).toHaveLength(3);
+    expect(b.allResults).toHaveLength(3);
+    // The combined in-flight reservation never breached the shared budget.
+    expect(m.peak).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("resolveLedgerBudgets omits the ledger when no pool has a finite budget (claude-code path)", () => {
+    // Quota-disabled + no snapshot ⇒ remaining_token_budget is null for every pool ⇒ no
+    // absolute ceiling to protect ⇒ the ledger is NOT wired (the reactive 429 floor is the
+    // safety), so in-process dispatch stays lock-overhead-free and fully parallel.
+    const cfg = resolveLedgerBudgets({ pools: [POOL], sessionConfig: SESSION, pendingItemTokens: [100, 100] });
+    expect(cfg.reservationLedger).toBeUndefined();
+    expect(cfg.resolvePoolBudget("stub/*")).toBe(Number.POSITIVE_INFINITY);
   });
 
   it("rebuilds once between dependency levels (single-flight)", async () => {

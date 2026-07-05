@@ -14,6 +14,7 @@ import type { SessionConfig, PartialCompletionReason } from "audit-tools/shared"
 import {
   detectLivelock,
   driveRolling,
+  resolveLedgerBudgets,
   ROLLING_DISPATCH_ENGINE_VERSION,
 } from "audit-tools/shared";
 import type {
@@ -100,6 +101,16 @@ export async function runRollingDispatch<TPacket>(
   }
 
   let dispatchedCount = 0;
+  // Admission control: when a metered pool reports a finite absolute budget, the shared
+  // reservation ledger leases each packet's cost before dispatch, so two co-located audit
+  // runs on one account never collectively over-admit. On the claude-code host (percent-
+  // only quota, no finite ceiling) the ledger is omitted and the reactive 429 floor is the
+  // safety — no per-dispatch lock overhead, full parallelism.
+  const ledgerCfg = resolveLedgerBudgets({
+    pools: activePools,
+    sessionConfig,
+    pendingItemTokens: packets.map((p) => p.estimatedTokens),
+  });
   // ONE level of READ-ONLY nodes (audit writes nothing to the target tree), which
   // `ownershipSubWaves` collapses into a single maximal parallel sub-wave — one
   // dispatcher over every packet, identical to the old flat pass. The items ARE the
@@ -111,6 +122,14 @@ export async function runRollingDispatch<TPacket>(
     toNode: (packet) => ({ block_id: packet.id, write_paths: [], read_only: true }),
     toPacket: (packet) => packet,
     dispatchPacket,
+    ...(ledgerCfg.reservationLedger
+      ? {
+          reservationLedger: ledgerCfg.reservationLedger,
+          resolvePoolBudget: ledgerCfg.resolvePoolBudget,
+          resolveOutputReservation: (_packet, poolId) =>
+            ledgerCfg.resolveOutputReservation(poolId),
+        }
+      : {}),
     ...(contract.recordRateLimit ? { recordRateLimit: contract.recordRateLimit } : {}),
     ...(contract.isPacketEscalated ? { isPacketEscalated: contract.isPacketEscalated } : {}),
     onResult: (result) => {
