@@ -29,6 +29,25 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Shipping from a linked worktree forces a manual FF + rebuild dance (observed 2026-07-05).** The release
+  script (`scripts/release-and-publish.mjs`) hard-guards on being ON the default branch (`git branch
+  --show-current` must equal `main`), but laps run on a `claude/<name>` feature-branch worktree while `main`
+  is checked out in the PRIMARY worktree. So a ship = push the feature branch to `main` (FF), then manually:
+  update the primary worktree's `main` (`git -C <primary> merge --ff-only`), **rebuild its stale `dist/`**
+  (else `npm run check`'s pre-tag gate fake-fails on "missing export" — the worktree trap), then run the
+  release from the primary worktree. `/ship` doesn't automate this. Follow-up: teach `/ship` (or the release
+  script) to accept a linked-worktree/feature-branch state — e.g. release straight from the current worktree
+  when its HEAD already equals `origin/main`, or auto-FF+rebuild the primary worktree — so a ship from a lap
+  worktree is one command, not a five-step hand dance.
+
+- **Backlog mechanism sub-items can drift from code reality — verify before implementing (2026-07-05).** The
+  defect-1 "mechanism sub-defects" were partly over-stated vs the code: sub-2 claimed `selectProvider` does
+  "no multi-pool fan-out" but the rolling engine already spills off SATURATED pools (the real gap was only
+  UNBOUNDED-pool front-loading → a least-loaded tiebreak, not a rewrite); sub-3's "route file contents to
+  NIM" already existed (`gatherReferencedFiles`) — the real bug was the single-shot output-contract leak.
+  Reinforces [[backlog-item-states-invariant-not-fix-mechanism]]: read the named mechanism against source
+  before building it, and prefer the narrowest correct fix over the backlog's prescribed rewrite.
+
 - **CI test redundancy: the vitest suite runs ~3× per push across workflows (observed 2026-07-04).** After
   sharding `ci.yml` + `publish-package.yml` (vitest = ~93% of the release gate; now sharded 4 ways → ~2×
   faster gate), `audit-code-test-suite.yml` still runs the *full* `npm test` on Node 20 **and** 22 (its
