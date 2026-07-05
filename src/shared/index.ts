@@ -754,6 +754,9 @@ export {
   clearBucketFailureEvidence,
   foldTokensPerPctObservation,
   recordTokensPerPctObservation,
+  foldOutputRatioObservation,
+  recordOutputRatioObservation,
+  OUTPUT_RATIO_EWMA_ALPHA,
   decayWeight,
   applyDecayToEntry,
   computeBackoffCooldownMs,
@@ -803,6 +806,20 @@ export {
 } from "./quota/fileLock.js";
 export type { ClaimRecord, ClaimResult } from "./quota/claimRegistry.js";
 export { ClaimRegistry } from "./quota/claimRegistry.js";
+export type {
+  ReservationLease,
+  AdmitDecision,
+  AdmitInput,
+} from "./quota/reservationLedger.js";
+export { ReservationLedger } from "./quota/reservationLedger.js";
+export type {
+  OutputReservationInput,
+  PacketCost,
+} from "./quota/packetCost.js";
+export {
+  resolveOutputReservation,
+  estimatePacketCost,
+} from "./quota/packetCost.js";
 export type {
   ClaimBackoffOptions,
   ClaimHeartbeatOptions,

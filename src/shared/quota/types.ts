@@ -70,6 +70,17 @@ export interface QuotaStateEntry {
    * a pool's own windows. Absent until observed (cold start).
    */
   tokens_per_pct?: Record<string, number>;
+  /**
+   * Learned output/input token RATIO (EWMA), keyed PER LENS (e.g. "security",
+   * "correctness"). Dispatch reserves an output ENVELOPE before a packet runs —
+   * output (the findings) is unknown until generated yet is frequently the binding
+   * rate-limit constraint, so reserving on input alone systematically
+   * under-reserves. `ratio = actual_output_tokens / actual_input_tokens`, folded on
+   * completion. When absent for a (key,lens) the caller falls back to the packet's
+   * declared output cap (cold start); once learned, `output_reservation =
+   * input_estimate * ratio`. Absent until observed.
+   */
+  output_per_input?: Record<string, number>;
 }
 
 export interface QuotaState {
