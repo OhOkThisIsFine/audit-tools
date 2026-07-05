@@ -10,10 +10,13 @@
 
 - On npm as `latest` at **v0.32.8**. Per-lap shipped detail is NOT narrated here (changelog creep — see
   `git log` and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **Immediate next: Dispatch admission-control rework — IN PROGRESS.** Owner resolved the spec's Open
-  tensions (2026-07-04): build the full proactive reservation ledger now. See T5.3 below + the spec's
-  *Resolved decisions* section. The prior "owner running the paused self-audit" note is void — that audit
-  errored out and its partial results were manually finalized (stale `.audit-tools/` run-state was cleaned).
+- **Immediate next: Dispatch admission-control rework — commit 1/3 shipped, commit 2 next.** Owner resolved
+  the spec's Open tensions + sharpened framing (2026-07-04): full proactive reservation ledger; concurrency
+  is not a computed quantity (budget-gated admission; only a declared env hard-cap like Codex 6 is explicit).
+  Substrate shipped (`5e0a4479`); **commit 2 = the atomic replace** (wire ledger into the rolling engine as
+  shared in-flight accounting + remove the `max_concurrent_agents` scalar from the host-dispatch path + grant
+  the admitted set). Full three-commit plan + line-refs in T5.3 below. The prior "owner running the paused
+  self-audit" note is void — that audit errored out and its partial results were manually finalized.
 - **Open items** (all in `docs/backlog.md`): remediate-side `opencode.json` drift/`INV-RCI-16`
   reconciliation; env-bound live validations (quota pre-wall pacing, friction escalation,
   selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004.
@@ -69,13 +72,34 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
 2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint
    endpoint); the openai-compatible/NIM guided-decoding path is the build lever.
-3. **Dispatch admission-control rework — 🔨 ACCEPTED, building.** Design of record:
-   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)
-   ([[dispatch-admission-control-design]], [[capability-is-per-auditor-not-per-audit]]). Owner resolved the
-   Open tensions (2026-07-04 — see spec's *Resolved decisions*): full proactive reservation ledger on a
-   reactive-backoff floor; output-envelope reservation; probe-then-widen only when the resourceKey has no
-   learned slope; FIFO on the ledger lock; per-admission explain-artifact. Loop-core → full pipeline; ships
-   as one atomic-replace (new admission loop + ledger + `max_concurrent_agents` scalar deletion together).
+3. **Dispatch admission-control rework — 🔨 ACCEPTED, building (commit 1/3 shipped).** Design of record:
+   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (owner-resolved
+   *Resolved decisions* + sharpened framing: **concurrency is not a computed quantity** — admit on budget
+   headroom; the only explicit cap is a declared env hard-limit e.g. Codex 6). [[dispatch-admission-control-design]].
+   Three-commit atomic sequence:
+   - **Commit 1 — DONE (`5e0a4479`):** additive substrate — `ReservationLedger`
+     (`src/shared/quota/reservationLedger.ts`, ClaimRegistry pattern generalized to token leases),
+     output-envelope `estimatePacketCost` (`src/shared/quota/packetCost.ts`), `output_per_input` ratio EWMA
+     (`state.ts`/`types.ts`). 34 tests. No dispatch wiring.
+   - **Commit 2 — NEXT (the atomic replace):** the in-process rolling engine is *already* emergent
+     (`src/shared/dispatch/rollingDispatch.ts` header: "No max_concurrent in the public API") — wire the
+     `ReservationLedger` in as **shared cross-process/account in-flight accounting** (lease at
+     `dispatchOnePacket`, reconcile at `handleResult`; augment `selectProvider` in-flight to include ledger
+     outstanding). The `max_concurrent_agents` scalar lives in the **host-dispatch prompt path** — remove it
+     (schema `audit/quota/index.ts` v1alpha2→v1alpha3; producers `quotaPool.ts:278`/`tierRouting.ts:159`/
+     `dispatch.ts:574`; consumers `semanticReviewStep.ts:125`/remediate `nextStep.ts:279`/`prompts.ts:81-83`)
+     and instead have the tool **grant the admitted set** (leases at grant, reconcile at result-ingest); the
+     granted set is the admission width. Add per-admission explain records. Packet `estimatedTokens` becomes
+     the output-envelope cost at packetization. **Note:** ratio-learning is dormant on the claude-code host
+     path (no actual-usage return); declared-cap envelope is the operative behavior there — active only where
+     a provider reports usage (NIM/openai-compatible). Update `capacity`/`rollingDispatch`/`quota-scheduler`/
+     `seam-host-only-next-step`/`rolling-audit-dispatch`/`quota-command` tests + NEW co-located double-run
+     overshoot test. Ships atomically (scalar deletion + replacement together).
+   - **Commit 3 — founding bug:** driver descriptor rides the continue-command; audit→`resolveHostProviderName`
+     parity (`semanticReviewStep.ts`); include host pool in audit plan (`buildAuditSourcePools` parity with
+     remediate `buildConfirmedPools`); demote `sessionConfig.provider` to headless in-process only. NEW
+     different-auditor-resume-no-inherit test. (Detailed line-refs/scratch design captured mid-build; the spec
+     is the durable source.)
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist
