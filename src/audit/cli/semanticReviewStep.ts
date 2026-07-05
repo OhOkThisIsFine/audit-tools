@@ -13,6 +13,7 @@ import {
   renderDispatchReviewPrompt,
   renderRollingDispatchPrompt,
   renderSingleTaskFallbackStepPrompt,
+  type HostDispatchDescriptor,
 } from "./prompts.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
 import { packageRoot } from "./paths.js";
@@ -110,7 +111,20 @@ export async function renderSemanticReviewStep(params: {
     hostModelId: params.hostModelId,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
-  const continueCommand = nextStepCommand(root, artifactsDir);
+  // The current driver's handshake rides the continue-command so a bare re-invocation
+  // preserves this invocation's capability instead of falling back to the stored
+  // session config (auditor-agnostic robustness — the founding-bug robustness fix).
+  const hostDescriptor: HostDispatchDescriptor = {
+    canDispatchSubagents: params.hostCanDispatch,
+    canRestrictSubagentTools: params.hostCanRestrictSubagentTools,
+    canSelectSubagentModel: params.hostCanSelectSubagentModel,
+    maxActiveSubagents: params.hostMaxActiveSubagents,
+    contextTokens: params.hostContextTokens ?? null,
+    outputTokens: params.hostOutputTokens ?? null,
+    modelRoster: params.hostModelRoster ?? null,
+    modelId: params.hostModelId ?? null,
+  };
+  const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
 
   // S-BROKER-WIRING: choose the dispatch DRIVER off the single classification +
   // the live packet frontier / concurrency cap, and render the matching host
@@ -173,6 +187,7 @@ export async function renderSemanticReviewStep(params: {
           hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
           hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
           driverInstruction,
+          hostDescriptor,
         })
       : renderDispatchReviewPrompt({
           root,
@@ -183,6 +198,7 @@ export async function renderSemanticReviewStep(params: {
           hostCanRestrictSubagentTools: params.hostCanRestrictSubagentTools,
           hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
           driverInstruction,
+          hostDescriptor,
         }),
     access: {
       read_paths: [

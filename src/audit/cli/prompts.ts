@@ -4,6 +4,7 @@ import {
   renderTokenBudgetView,
   buildFrictionTriageBlock,
   type FrictionTriageDecision,
+  type HostModelRosterEntry,
 } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
@@ -36,7 +37,71 @@ function cliInvocationTokens(): string[] {
   return ["audit-code"];
 }
 
-export function nextStepCommand(root: string, artifactsDir: string): string {
+/**
+ * The current driver's dispatch capability handshake, as parsed from this
+ * invocation's `--host-*` flags. Re-emitted onto every continue-command so the
+ * descriptor RIDES the command the driver runs to advance — surviving that
+ * driver's own steps without the host re-appending the flags each time
+ * (auditor-agnostic robustness; the founding capability-inheritance bug was that
+ * a bare continue-command dropped the handshake, so a resume fell back to the
+ * stored session config). A *different* driver entering through its own loader
+ * supplies its own `--host-*` flags, overriding this descriptor.
+ * [[capability-is-per-auditor-not-per-audit]]
+ */
+export interface HostDispatchDescriptor {
+  canDispatchSubagents?: boolean;
+  canRestrictSubagentTools?: boolean;
+  canSelectSubagentModel?: boolean;
+  maxActiveSubagents?: number | null;
+  contextTokens?: number | null;
+  outputTokens?: number | null;
+  modelRoster?: HostModelRosterEntry[] | null;
+  modelId?: string | null;
+}
+
+/**
+ * Render a {@link HostDispatchDescriptor} back to re-parseable `--host-*` flag
+ * tokens — only fields that were actually declared this invocation. The numeric /
+ * string / roster flags round-trip through their `getHost*` parsers; the boolean
+ * capability is pinned explicitly (`--host-can-dispatch-subagents` /
+ * `--no-...`); the two prompt-wording booleans (restrict / select) default false,
+ * so they are re-emitted only when true (absence resolves to false).
+ */
+export function renderHostDescriptorFlags(
+  descriptor: HostDispatchDescriptor | undefined,
+): string[] {
+  if (!descriptor) return [];
+  const out: string[] = [];
+  if (descriptor.contextTokens != null)
+    out.push("--host-context-tokens", String(descriptor.contextTokens));
+  if (descriptor.outputTokens != null)
+    out.push("--host-output-tokens", String(descriptor.outputTokens));
+  if (descriptor.maxActiveSubagents != null)
+    out.push("--host-max-active-subagents", String(descriptor.maxActiveSubagents));
+  if (descriptor.modelId != null && descriptor.modelId.length > 0)
+    out.push("--host-model-id", descriptor.modelId);
+  if (descriptor.modelRoster != null && descriptor.modelRoster.length > 0)
+    out.push("--host-models", JSON.stringify(descriptor.modelRoster));
+  if (descriptor.canDispatchSubagents !== undefined)
+    out.push(
+      descriptor.canDispatchSubagents
+        ? "--host-can-dispatch-subagents"
+        : "--no-host-can-dispatch-subagents",
+    );
+  // restrict/select parse via `getOptionalBooleanFlag` (the space-separated
+  // `--flag true|false` form that `getFlag` reads), unlike the bare / `--no-`
+  // `--host-can-dispatch-subagents`. Both default false, so re-emit only when true
+  // (absence resolves to false).
+  if (descriptor.canRestrictSubagentTools) out.push("--host-can-restrict-subagent-tools", "true");
+  if (descriptor.canSelectSubagentModel) out.push("--host-can-select-subagent-model", "true");
+  return out;
+}
+
+export function nextStepCommand(
+  root: string,
+  artifactsDir: string,
+  hostDescriptor?: HostDispatchDescriptor,
+): string {
   return renderCommand([
     ...cliInvocationTokens(),
     "next-step",
@@ -44,6 +109,7 @@ export function nextStepCommand(root: string, artifactsDir: string): string {
     root,
     "--artifacts-dir",
     artifactsDir,
+    ...renderHostDescriptorFlags(hostDescriptor),
   ]);
 }
 
@@ -108,12 +174,14 @@ export function renderDispatchReviewPrompt(params: {
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
   driverInstruction?: string;
+  /** The current driver's handshake, re-emitted onto the continue-command. */
+  hostDescriptor?: HostDispatchDescriptor;
 }): string {
   const mergeCommand = mergeAndIngestCommand(
     params.artifactsDir,
     params.activeReviewRun.run_id,
   );
-  const continueCommand = nextStepCommand(params.root, params.artifactsDir);
+  const continueCommand = nextStepCommand(params.root, params.artifactsDir, params.hostDescriptor);
   // Only mention model_hint when the host can actually act on it. When it
   // cannot, the field is left as inert plan metadata rather than surfacing a
   // contradictory "here is model_hint, now ignore it" instruction.
@@ -284,9 +352,11 @@ export function renderRollingDispatchPrompt(params: {
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
   driverInstruction?: string;
+  /** The current driver's handshake, re-emitted onto the continue-command. */
+  hostDescriptor?: HostDispatchDescriptor;
 }): string {
   const mergeCommand = mergeAndIngestCommand(params.artifactsDir, params.runId);
-  const continueCommand = nextStepCommand(params.root, params.artifactsDir);
+  const continueCommand = nextStepCommand(params.root, params.artifactsDir, params.hostDescriptor);
 
   const modelLine = params.hostCanSelectSubagentModel
     ? "When launching each subagent, map `entry.model_hint.tier` (`small`, `standard`, `deep`) to an available host model without asking the user for model names."

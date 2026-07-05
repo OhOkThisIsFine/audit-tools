@@ -42,6 +42,7 @@ import {
   renderEdgeReasoningDispatchPrompt,
   renderEdgeReasoningStepPrompt,
   renderPresentReportPrompt,
+  type HostDispatchDescriptor,
 } from "./prompts.js";
 import {
   getArtifactsDir,
@@ -134,6 +135,22 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     sessionConfig,
   });
 
+  // The current driver's capability handshake, built once from this invocation's
+  // parsed `--host-*` flags. It RIDES every continue-command this step emits so a
+  // bare re-invocation preserves the handshake instead of falling back to the
+  // stored session config — the founding-bug robustness fix (a *different* driver
+  // entering through its own loader overrides with its own flags).
+  const hostDescriptor: HostDispatchDescriptor = {
+    canDispatchSubagents: hostCanDispatch,
+    canRestrictSubagentTools: hostCanRestrictSubagentTools,
+    canSelectSubagentModel: hostCanSelectSubagentModel,
+    maxActiveSubagents: hostMaxActiveSubagents,
+    contextTokens: hostContextTokens,
+    outputTokens: hostOutputTokens,
+    modelRoster: hostModelRoster,
+    modelId: hostModelId,
+  };
+
   const result = await runDeterministicForNextStep({
     root,
     artifactsDir,
@@ -205,7 +222,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "design-review-findings.json",
     );
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const prompt = renderDesignReviewPrompt(result.bundle, {
       max_units: sessionConfig.design_review?.max_units,
     });
@@ -244,7 +261,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     // or deep (N independent perspective subagents + an independent judge),
     // resolved JIT from the user-confirmed checkpoint / session config.
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
 
     const conceptualSettings = resolveConceptualReviewSettings(
@@ -328,7 +345,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   if (result.kind === "design_review_contract") {
     // Only the contract pass remains.
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const contractResultsPath = join(artifactsDir, "incoming", "design-review-contract-findings.json");
     const contractReReview = await buildDesignReReviewSection(
       artifactsDir,
@@ -370,7 +387,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     // independent perspective subagents + an independent judge), resolved JIT
     // from the user-confirmed checkpoint / session config.
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const conceptualSettings = resolveConceptualReviewSettings(
       result.bundle,
       sessionConfig,
@@ -425,7 +442,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
 
   if (result.kind === "confirm_intent") {
     const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const preDigest = computeScopePreDigest(
       result.bundle,
       root,
@@ -462,7 +479,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "analyzer-decisions.json",
     );
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "analyzer_install",
@@ -492,7 +509,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "incoming",
       "edge-reasoning.json",
     );
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const basePrompt = buildEdgeReasoningPrompt(result.candidates);
     const contentHash = edgeReasoningContentHash(result.candidates);
 
@@ -571,7 +588,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "synthesis-narrative.json",
     );
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
-    const continueCommand = nextStepCommand(root, artifactsDir);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const basePrompt = result.bundle.audit_findings
       ? renderSynthesisNarrativePrompt(result.bundle.audit_findings)
       : "# Synthesis narrative\n\nNo findings report is available; write an empty themes array.";
