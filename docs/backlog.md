@@ -60,38 +60,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   parallel agents to stage doc edits independently (per-agent worktree, doc-fragment files merged later, or
   an advisory doc lock). Until there is, cross-agent doc updates serialize through hand-back prose.
 
-- **No tool affordance to re-verify/re-accept a QUARANTINED implement node after fixing the cause
-  (observed 2026-07-04).** When a node's accept-verify fails, its commit is preserved at
-  `refs/remediation-quarantine/<run>/<block>` but there is no `remediate-code reverify-node --id … --run-id …`
-  (or `accept-node --retry`) to re-run verify against that preserved commit once the failure cause is fixed.
-  Recovery is manual `git cherry-pick -x` of the quarantine refs + a hand-run whole-suite verify, and the
-  gitignored run-state stays permanently marked "failed" (branch becomes the only source of truth). Add a
-  re-verify/re-accept path so a fixed verify environment can cleanly re-drive quarantined nodes.
-
-- **Friction (tool-should-decide): the commit-gate hook typechecks but never runs tests, so a prose/doc
-  reword can land a RED doc-contract test on main (observed 2026-07-05).** `tests/audit/release-contract.test.mjs`
-  asserts EXACT strings in `docs/audit-pkg/release.md` (e.g. ``Node `20` and Node `22```); the `68b2d974`
-  doc-review pass reworded that line to "Node 20 and 22" and committed it — the PreToolUse commit-gate hook
-  passed (typecheck green) and the red only surfaced at the next `verify:release`. Two prior main pushes
-  (`f719549f`, `68b2d974`) sat CI-red. Fix candidates: have the commit-gate hook also run the fast
-  doc-contract test subset when a tracked `docs/**.md` is staged, and/or have the doc-review routine run
-  `release-contract.test.mjs` before committing a `release.md` edit. (Restored the phrasing in `e3bbf162`.)
-
-- **Friction close-out — per-category WALK shipped; auto-seeding + bypass-backstop still open (2026-07-04).**
-  The end-of-run friction triage now blocks until EVERY category in `FRICTION_CATEGORIES`
-  (`ambiguous_direction` / `tool_should_decide` / `inefficient_feeding`) is covered by a category-tagged
-  `open_observations[]` entry OR an explicit `category_attestations[]` "none", plus a `free_form_notes`
-  channel (`src/shared/friction/triage.ts`, both orchestrators; shipped `054c9ef9`). **Still open, two
-  parts:** (a) **step-boundary auto-seeding** — the walk still starts from a near-empty subject set because
-  only ~2 sites feed `captureFrictionEvent`; instrument the `next-step`/`accept-node`/`validate-artifact`
-  boundaries so re-emits, judge repair rounds, artifact rejects, obligation-renumbers, `resolved_no_change`
-  merges, and node quarantines auto-seed the per-category walk (turns "recall" into "account for these N
-  counted events"). (b) **session-level `Stop`-hook backstop** — the close gate only fires when a run cleanly
-  CLOSES; a run that bypasses close (e.g. the 2026-07-04 verify-runner recovery that assembled the branch by
-  hand) never hits it, so friction goes unlogged. A `Stop` hook that detects a remediate/audit run in the
-  session with no friction entry and blocks stop with the walk closes that. See
-  [[meta-audit-friction-must-be-tool-enforced]].
-
 - **Capability handshake is inherited from the run/original auditor, not the current one.** When a
   different auditor resumes an audit (run started in Codex, resumed by Claude Code), a `next-step` that
   omits the capability flags resolves the dispatch pool from the **stored session config**
