@@ -33,6 +33,7 @@ import type {
   AdmissionPool,
 } from "audit-tools/shared";
 import { computeDispatchAdmission, createReservationLedger, tierRank } from "audit-tools/shared";
+import { scheduleWave as computePoolWaveSchedule } from "audit-tools/shared";
 import { probeQuotaSource } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
 import { captureStepBoundaryFriction } from "audit-tools/shared";
@@ -145,12 +146,6 @@ export function normalizeSlotTokens(tokens: number[] | undefined, count: number)
   if (tokens.length > count) return tokens.slice(0, count);
   if (tokens.length < count) return [...tokens, ...new Array(count - tokens.length).fill(0)];
   return tokens;
-}
-
-function averageSlotTokens(estimatedSlotTokens?: number[]): number {
-  if (!estimatedSlotTokens || estimatedSlotTokens.length === 0) return 0;
-  const total = estimatedSlotTokens.reduce((a, b) => a + b, 0);
-  return Math.floor(total / estimatedSlotTokens.length);
 }
 
 export interface WaveScheduleResult extends WaveSchedule {
@@ -372,24 +367,35 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
   if (!quota || quota.enabled === false) {
     const cap = hostLimit?.active_subagents ?? DEFAULT_WAVE_SIZE;
     const waveSize = Math.max(1, Math.min(cap, input.itemCount));
-    const avgTokens = averageSlotTokens(input.estimatedSlotTokens);
+    // Single-source the quota-off schedule math (wave-token formula + confidence +
+    // source) through the shared scheduler so the two orchestrators can't drift —
+    // remediate previously re-implemented it with a flat average + confidence:"low",
+    // disagreeing with shared's sumTopN + "high". The wave is already capped to
+    // `waveSize`, so shared (`requestedConcurrency: waveSize`, no quota) returns it
+    // verbatim. Only the roster-honoring window and the DEFAULT_WAVE_SIZE-aware
+    // binding_cap are remediate-specific and layered back on top.
+    const base = computePoolWaveSchedule({
+      providerName,
+      sessionConfig,
+      hostModel,
+      requestedConcurrency: waveSize,
+      estimatedSlotTokens: input.estimatedSlotTokens,
+      hostConcurrencyLimit: hostLimit,
+    });
     const schedule: WaveScheduleResult = {
-      max_concurrent: waveSize,
-      estimated_wave_tokens: waveSize * avgTokens,
-      cooldown_until: null,
-      confidence: "low",
-      source: "default",
+      ...base,
       resolved_limits: {
         // Honor a host-reported window even with quota disabled; fall back to the
-        // conservative floor only when nothing was discovered.
-        context_tokens: hostContextTokens ?? 32_000,
-        output_tokens: hostOutputTokens ?? 4_096,
+        // shared scheduler's default only when nothing was discovered.
+        context_tokens: hostContextTokens ?? base.resolved_limits.context_tokens,
+        output_tokens: hostOutputTokens ?? base.resolved_limits.output_tokens,
         requests_per_minute: null,
         input_tokens_per_minute: null,
         output_tokens_per_minute: null,
       },
       host_concurrency_limit: hostLimit,
-      model: hostModel,
+      // hostLimit-gated: a DEFAULT_WAVE_SIZE cap below itemCount is NOT a host
+      // concurrency bind (there is no host limit), so it stays "none".
       binding_cap: hostLimit && waveSize < input.itemCount ? "host_concurrency" : "none",
     };
     return {
