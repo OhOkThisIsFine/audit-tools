@@ -166,6 +166,13 @@ export async function prepareDispatchArtifacts(params: {
    * only the default stderr line. Omit to keep the prior silent-stderr behavior.
    */
   onEscalation?: (escalation: HostSessionEscalation) => void;
+  /**
+   * Whether the admission loop LEASES the granted set against the shared ledger
+   * (host-subagent path). The in-process rolling driver passes `false` — it admits
+   * + leases per packet through the rolling engine itself, so the host grant must
+   * not double-lease. Defaults to true. See `finalizeDispatchQuota`.
+   */
+  grantLeases?: boolean;
 }): Promise<PrepareDispatchResult> {
   const runId = params.runId;
   const artifactsDir = params.artifactsDir;
@@ -495,22 +502,31 @@ export async function prepareDispatchArtifacts(params: {
     entries: resultMapEntries,
   } satisfies DispatchResultMap);
 
-  const perPacketTokens = plan.map((p) => p.complexity.estimated_tokens);
-  // Size the dispatch just-in-time against the partitioned packet layout (one
-  // token estimate per emitted packet) and the host pool resolved above, rather
-  // than a preset wave size. `parallel_workers` is no longer the ambition — it
-  // is folded into hostConcurrencyLimit as a ceiling. Today there is a single
-  // pool (the conversation host's subagents); a heterogeneous provider pool
-  // slots in here without changing the call.
-  const { dispatchQuotaPath, waveSchedule, dispatchCapacity } = await finalizeDispatchQuota({
+  // Admission control replaces the preset wave size: the loop GRANTS the affordable
+  // admitted set (cost-first-capable, ledger-leased) from the priority-ordered plan
+  // — highest-priority packets first, so a budget-limited grant admits the most
+  // important work; the host dispatches exactly the granted set and re-invokes
+  // next-step for the remainder. Today there is a single host pool; a heterogeneous
+  // provider pool slots in through the same admission loop without changing the call.
+  const packetPriorityScore = (entry: DispatchPlanEntry): number =>
+    entry.complexity.priority === "high" ? 1 : entry.complexity.priority === "low" ? 0 : 0.5;
+  const admissionPackets = plan
+    .map((entry) => ({
+      id: entry.packet_id,
+      inputTokens: entry.complexity.estimated_tokens,
+      complexity: packetPriorityScore(entry),
+    }))
+    .sort((a, b) => b.complexity - a.complexity);
+  const { dispatchQuotaPath, waveSchedule, dispatchCapacity, admission } = await finalizeDispatchQuota({
     runId,
     runDir,
     sessionConfig,
     pools: dispatchPool.pools,
     hostModel: dispatchPool.hostModel,
-    perPacketTokens,
+    packets: admissionPackets,
     hostModelRoster: params.hostModelRoster,
     tierBudgets: dispatchPool.tierBudgets,
+    grantLeases: params.grantLeases,
   });
 
   warnings.push(
@@ -557,10 +573,13 @@ export async function prepareDispatchArtifacts(params: {
   };
   await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
 
-  // FINDING-012: pure-arithmetic fan-out summary the loader can gate on.
+  // FINDING-012: pure-arithmetic fan-out summary the loader can gate on. The width
+  // is the GRANTED set size (emergent from budget + any declared cap), not a
+  // computed concurrency number.
   const fanout = computeDispatchFanout({
     agentCount: plan.length,
-    maxConcurrent: dispatchCapacity.total_slots,
+    grantedCount: admission.granted_packet_ids.length,
+    declaredCap: admission.declared_cap,
     confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
   });
 
@@ -571,7 +590,8 @@ export async function prepareDispatchArtifacts(params: {
     packet_count: plan.length,
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
-    max_concurrent_agents: dispatchCapacity.total_slots,
+    granted_count: admission.granted_packet_ids.length,
+    declared_cap: admission.declared_cap,
     agent_count: fanout.agent_count,
     confirmation_recommended: fanout.confirmation_recommended,
     dispatch_summary: fanout.dispatch_summary,

@@ -122,9 +122,11 @@ export async function renderSemanticReviewStep(params: {
         selectDispatchDriver({
           classification: classifyProvider(hostProvider),
           eligibleItemCount: dispatch.packet_count,
-          slots: dispatch.max_concurrent_agents,
+          // The admission width is the granted set size (emergent), not a computed
+          // concurrency number; the driver is chosen off how many are granted now.
+          slots: dispatch.granted_count,
         }),
-        "`max_concurrent_agents`",
+        "the granted set (`admission.granted_packet_ids`)",
       )
     : undefined;
   return writeCurrentStep({
@@ -136,21 +138,23 @@ export async function renderSemanticReviewStep(params: {
     allowedMcpTools: ["auditor_merge_and_ingest", "auditor_continue_audit"],
     progress: {
       summary:
-        `Dispatching ${dispatch.packet_count} review packet(s) covering ` +
-        `${dispatch.task_count} task(s), max ${dispatch.max_concurrent_agents} concurrent (rolling)` +
+        `Granting ${dispatch.granted_count} of ${dispatch.packet_count} review packet(s) covering ` +
+        `${dispatch.task_count} task(s) this pass` +
+        (dispatch.declared_cap != null ? ` (≤${dispatch.declared_cap} in flight)` : "") +
         (dispatch.skipped_task_count > 0
           ? `; ${dispatch.skipped_task_count} task(s) already completed.`
           : "."),
       pending_packets: dispatch.packet_count,
       pending_tasks: dispatch.task_count,
       completed_tasks: dispatch.skipped_task_count,
-      max_concurrent_agents: dispatch.max_concurrent_agents,
+      granted_count: dispatch.granted_count,
+      declared_cap: dispatch.declared_cap,
       agent_count: dispatch.agent_count,
       confirmation_recommended: dispatch.confirmation_recommended,
       dispatch_summary: dispatch.dispatch_summary,
     },
     stopCondition:
-      "Dispatch every packet, run merge-and-ingest once, then run next-step.",
+      "Dispatch exactly the granted packets, run merge-and-ingest once, then run next-step for the next grant.",
     repoRoot: root,
     artifactPaths: {
       dispatch_plan: dispatch.dispatch_plan_path,

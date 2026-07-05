@@ -387,7 +387,7 @@ test("G2: progress is included when supplied and survives JSON round-trip", asyn
     const progress = {
       summary: "4 tasks remaining",
       pending_tasks: 4,
-      max_concurrent_agents: 2,
+      granted_count: 2,
     };
     const step = await writeCurrentStep({ ...baseParams(artifactsDir), progress });
     expect(step.progress).toEqual(progress);

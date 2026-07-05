@@ -262,7 +262,7 @@ test("dispatch quota accepts a single-pool schedule", () => {
   accepts(
     DispatchQuotaSchema,
     {
-      contract_version: "audit-code-dispatch-quota/v1alpha1",
+      contract_version: "audit-code-dispatch-quota/v1alpha3",
       run_id: "PLAN-1",
       model: "test-model",
       resolved_limits: {
@@ -275,7 +275,7 @@ test("dispatch quota accepts a single-pool schedule", () => {
       confidence: "medium",
       source: "default",
       host_concurrency_limit: null,
-      max_concurrent_agents: 2,
+      admission: { granted_packet_ids: ["p1", "p2"], declared_cap: null, leases: [], explains: [] },
       cooldown_until: "2026-05-20T16:45:30Z",
     },
     "single-pool dispatch quota",
@@ -284,7 +284,7 @@ test("dispatch quota accepts a single-pool schedule", () => {
 
 test("dispatch quota accepts a null cooldown and rejects a bad enum", () => {
   const base = {
-    contract_version: "audit-code-dispatch-quota/v1alpha1",
+    contract_version: "audit-code-dispatch-quota/v1alpha3",
     run_id: "PLAN-1",
     model: "test-model",
     resolved_limits: {
@@ -297,19 +297,30 @@ test("dispatch quota accepts a null cooldown and rejects a bad enum", () => {
     confidence: "medium",
     source: "default",
     host_concurrency_limit: null,
-    max_concurrent_agents: 2,
+    admission: { granted_packet_ids: ["p1", "p2"], declared_cap: null, leases: [], explains: [] },
     cooldown_until: null,
   };
   accepts(DispatchQuotaSchema, base, "null cooldown");
   rejects(DispatchQuotaSchema, { ...base, confidence: "very-high" }, "bad confidence enum");
-  rejects(DispatchQuotaSchema, { ...base, max_concurrent_agents: 0 }, "zero concurrency");
+  // A declared cap, when present, is a positive in-flight count — 0 is invalid.
+  rejects(
+    DispatchQuotaSchema,
+    { ...base, admission: { granted_packet_ids: [], declared_cap: 0, leases: [], explains: [] } },
+    "zero declared cap",
+  );
+  // The admission block is required (it replaced the max_concurrent_agents scalar).
+  rejects(
+    DispatchQuotaSchema,
+    { contract_version: base.contract_version, run_id: base.run_id, model: base.model, resolved_limits: base.resolved_limits, confidence: base.confidence, source: base.source, host_concurrency_limit: null, cooldown_until: null },
+    "missing admission block",
+  );
 });
 
 test("dispatch quota accepts multi-pool capacity summaries", () => {
   accepts(
     DispatchQuotaSchema,
     {
-      contract_version: "audit-code-dispatch-quota/v1alpha2",
+      contract_version: "audit-code-dispatch-quota/v1alpha3",
       run_id: "PLAN-1",
       model: "primary-model",
       resolved_limits: {
@@ -322,7 +333,16 @@ test("dispatch quota accepts multi-pool capacity summaries", () => {
       confidence: "medium",
       source: "provider_default",
       host_concurrency_limit: null,
-      max_concurrent_agents: 5,
+      admission: {
+        granted_packet_ids: ["p1", "p2"],
+        declared_cap: 2,
+        leases: [
+          { packet_id: "p1", pool_id: "claude-code/*", resource_key: "claude-code/*", lease_id: "L1", cost: 1000 },
+        ],
+        explains: [
+          { packet_id: "p1", pool_id: "claude-code/*", resource_key: "claude-code/*", admitted: true, reason: "admitted", headroom_before: 100000, outstanding_before: 0, cost: 1000 },
+        ],
+      },
       cooldown_until: null,
       binding_cap: "host_concurrency",
       capacity_pools: [
@@ -673,9 +693,10 @@ test("step_contract validates progress with all StepProgress fields (ARC-ebbd542
       progress: {
         summary: "Dispatch in progress",
         agent_count: 8,
-        max_concurrent_agents: 4,
+        granted_count: 4,
+        declared_cap: null,
         confirmation_recommended: false,
-        dispatch_summary: "8 agents, max 4 concurrent (rolling)",
+        dispatch_summary: "4 of 8 packets granted this pass",
       },
     },
     "step with all fan-out progress fields",

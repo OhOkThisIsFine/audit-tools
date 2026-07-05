@@ -811,7 +811,11 @@ export type {
   AdmitDecision,
   AdmitInput,
 } from "./quota/reservationLedger.js";
-export { ReservationLedger } from "./quota/reservationLedger.js";
+export {
+  ReservationLedger,
+  getReservationLedgerPath,
+  createReservationLedger,
+} from "./quota/reservationLedger.js";
 export type {
   OutputReservationInput,
   PacketCost,
@@ -1065,6 +1069,27 @@ export {
   selectProvider,
   createRollingDispatcher,
 } from "./dispatch/rollingDispatch.js";
+export type { AdmissionRecord } from "./dispatch/rollingDispatch.js";
+
+// Host-path admission loop — the tool-side "grant the admitted set" primitive
+// (per-grant batches, cost-first-capable routing) that REPLACES the removed
+// `max_concurrent_agents` scalar. Both orchestrators embed DispatchAdmissionSchema
+// in their dispatch-quota contract.
+export {
+  admitBatch,
+  AdmissionGrantSchema,
+  AdmissionExplainSchema,
+  DispatchAdmissionSchema,
+} from "./dispatch/admissionLoop.js";
+export type {
+  AdmissionCandidate,
+  AdmissionPool,
+  AdmissionGrant,
+  AdmissionExplain,
+  DispatchAdmission,
+  AdmitBatchResult,
+  AdmitBatchInput,
+} from "./dispatch/admissionLoop.js";
 
 // Hybrid spill coordinator (A-8) — the ONE assignment layer both dispatch drivers
 // drive identically: claim-before-assign (CE-001), co-owned SettledExclusionSet,

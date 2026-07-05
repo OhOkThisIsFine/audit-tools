@@ -51,7 +51,10 @@ export interface DispatchComplexity {
 
 export interface DispatchFanout {
   agent_count: number;
-  max_concurrent_agents: number;
+  /** Packets granted this pass (the emergent admission width). */
+  granted_count: number;
+  /** Verbatim host in-flight cap (declared env limit), or null. */
+  declared_cap: number | null;
   confirmation_recommended: boolean;
   dispatch_summary: string;
 }
@@ -63,13 +66,15 @@ export interface PrepareDispatchResult {
   packet_count: number;
   task_count: number;
   skipped_task_count: number;
-  /** Max subagents running simultaneously (rolling dispatch). */
-  max_concurrent_agents: number;
+  /** Packets GRANTED for dispatch this pass by the admission loop (emergent width). */
+  granted_count: number;
+  /** Verbatim host in-flight cap (declared env limit, e.g. Codex 6), or null. */
+  declared_cap: number | null;
   /** Total agents that will be launched this run (packet_count after budget filtering). */
   agent_count: number;
   /** True when agent_count exceeds sessionConfig.dispatch?.confirm_threshold (default 10). */
   confirmation_recommended: boolean;
-  /** Human-readable summary, e.g. "12 agents, max 4 concurrent (rolling)". */
+  /** Human-readable summary, e.g. "4 of 12 packets granted this pass". */
   dispatch_summary: string;
   /** True when a max_packets budget capped the emitted packets this run. */
   budget_capped: boolean;

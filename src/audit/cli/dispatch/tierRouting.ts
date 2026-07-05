@@ -143,20 +143,26 @@ export function resolveTierBudgets(
 
 export function computeDispatchFanout(params: {
   agentCount: number;
-  maxConcurrent: number;
+  /** Packets GRANTED this pass by the admission loop (the emergent width). */
+  grantedCount: number;
+  /** Verbatim host in-flight cap (declared env limit), or null when none. */
+  declaredCap: number | null;
   confirmThreshold?: number;
 }): DispatchFanout {
   const agentCount = params.agentCount;
-  const maxConcurrent = params.maxConcurrent;
+  const grantedCount = params.grantedCount;
   const confirmThreshold =
     params.confirmThreshold ?? DEFAULT_DISPATCH_CONFIRM_THRESHOLD;
   const confirmationRecommended = agentCount > confirmThreshold;
+  // No computed concurrency number: the summary reports the granted set (the
+  // admission width this pass) and, when present, the verbatim in-flight cap.
+  const capNote = params.declaredCap != null ? `, ≤${params.declaredCap} in flight` : "";
   const dispatchSummary =
-    `${agentCount} agent${agentCount !== 1 ? "s" : ""}, ` +
-    `max ${maxConcurrent} concurrent (rolling)`;
+    `${grantedCount} of ${agentCount} packet${agentCount !== 1 ? "s" : ""} granted this pass${capNote}`;
   return {
     agent_count: agentCount,
-    max_concurrent_agents: maxConcurrent,
+    granted_count: grantedCount,
+    declared_cap: params.declaredCap,
     confirmation_recommended: confirmationRecommended,
     dispatch_summary: dispatchSummary,
   };

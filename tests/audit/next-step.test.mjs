@@ -309,7 +309,7 @@ test.concurrent("next-step true emits dispatch_review and prepares dispatch arti
     expect(Array.isArray(plan)).toBe(true);
     expect(plan.length > 0).toBeTruthy();
     expect(prompt).toMatch(/dispatch-quota\.json/);
-    expect(prompt).toMatch(/max_concurrent_agents/);
+    expect(prompt).toMatch(/admission\.granted_packet_ids/);
     expect(prompt).toMatch(/merge-and-ingest/);
     expect(prompt).not.toMatch(/single-task fallback/i);
   });

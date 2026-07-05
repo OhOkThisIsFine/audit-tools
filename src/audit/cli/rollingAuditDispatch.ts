@@ -420,6 +420,9 @@ export async function driveRollingAuditDispatch(params: {
     hostModelId: params.hostModelId,
     tasksOverride: params.tasksOverride,
     poolsOverride: params.poolsOverride,
+    // In-process path: the rolling engine admits + leases per packet itself, so the
+    // host grant must NOT lease (no double-count of the same work).
+    grantLeases: false,
     // Retained host-session source (audit-side parity with remediate's
     // driveRollingImplementDispatch): feeds the bounded re-limit escalation
     // chain a reviewable friction record instead of only a stderr line.

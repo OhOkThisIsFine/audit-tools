@@ -59,7 +59,7 @@ test("dispatchQuotaPath non-null — quota lines are included", () => {
     makeParams({ dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json" }),
   );
   expect(result.includes("Dispatch quota:"), "expected 'Dispatch quota:' to be present").toBeTruthy();
-  expect(result.includes("max_concurrent_agents"), "expected 'max_concurrent_agents' to be present").toBeTruthy();
+  expect(result.includes("admission.granted_packet_ids"), "expected granted-set instruction to be present").toBeTruthy();
   expect(result.includes("cooldown_until"), "expected 'cooldown_until' to be present").toBeTruthy();
 });
 
@@ -110,7 +110,7 @@ test("FRIC-006: renderRollingDispatchPrompt uses 'After all packets complete:' n
 
 // ── MNT-7cef02e2 regression: both prompts share the same dispatch-data-lines shape ───────────
 
-test("MNT-7cef02e2: both prompts emit 'max_concurrent_agents' when quota path provided", () => {
+test("MNT-7cef02e2: both prompts emit the granted-set instruction when quota path provided", () => {
   const params = makeParams({ dispatchQuotaPath: "/repo/.audit-tools/audit/dispatch-quota.json" });
   const review = renderDispatchReviewPrompt(params);
   const rolling = renderRollingDispatchPrompt({
@@ -123,7 +123,7 @@ test("MNT-7cef02e2: both prompts emit 'max_concurrent_agents' when quota path pr
     hostCanSelectSubagentModel: params.hostCanSelectSubagentModel,
   });
   for (const prompt of [review, rolling]) {
-    expect(prompt.includes("max_concurrent_agents"), "quota prompt must include max_concurrent_agents").toBeTruthy();
+    expect(prompt.includes("admission.granted_packet_ids"), "quota prompt must include the granted-set instruction").toBeTruthy();
     expect(prompt.includes("cooldown_until"), "quota prompt must include cooldown_until").toBeTruthy();
     expect(prompt.includes("Dispatch quota:"), "quota prompt must include 'Dispatch quota:' line").toBeTruthy();
   }

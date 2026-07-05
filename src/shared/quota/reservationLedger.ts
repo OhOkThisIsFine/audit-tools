@@ -1,6 +1,8 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
+import { getQuotaStatePath } from "./state.js";
 
 // Shared, lock-guarded token-reservation ledger — the proactive layer of the
 // dispatch admission-control model (spec/audit/dispatch-admission-control.md).
@@ -267,4 +269,28 @@ export class ReservationLedger {
       return ledger;
     });
   }
+}
+
+/**
+ * Canonical reservation-ledger path — SINGLE-SOURCED so every co-located consumer
+ * (audit host grant, remediate host grant, the in-process rolling engine, a second
+ * IDE's run) leases against the SAME file and therefore shares one account budget.
+ * Sits beside the learned quota-state file (the same user-scoped quota dir), so it
+ * inherits `setQuotaStateDir` redirection in tests and per-user isolation in prod.
+ */
+export function getReservationLedgerPath(): string {
+  // Degrade-safe: when the quota-state dir is not configured (never throws into
+  // dispatch), fall back to a per-process temp path. Co-located coordination needs
+  // the shared quota dir; without it (a misconfigured/unit context) the ledger still
+  // functions locally — the reactive 429 floor remains the always-correct backstop.
+  try {
+    return join(dirname(getQuotaStatePath()), "reservations.json");
+  } catch {
+    return join(tmpdir(), `audit-tools-reservations-${process.pid}.json`);
+  }
+}
+
+/** Construct a ReservationLedger at the canonical shared path. */
+export function createReservationLedger(): ReservationLedger {
+  return new ReservationLedger(getReservationLedgerPath());
 }

@@ -78,9 +78,11 @@ function buildDispatchDataLines(
         `  Dispatch plan:  ${dispatchPlanPath}`,
         `  Dispatch quota: ${dispatchQuotaPath}`,
         "",
-        "Use `max_concurrent_agents` from the quota data. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
+        "The tool has already ADMITTED the set of packets that fit the live budget this pass: dispatch EXACTLY the entries whose `packet_id` is in `admission.granted_packet_ids` (in the quota data) — no more, no fewer. That granted set IS the amount of work to run now; there is no separate concurrency number to read or guess. If `cooldown_until` is non-null, wait until that timestamp before dispatching.",
         "",
-        "Maintain up to `max_concurrent_agents` subagents running simultaneously. As each completes and its result is captured, immediately dispatch the next pending entry. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
+        "If `admission.declared_cap` is non-null, it is a hard environment in-flight limit (e.g. a nested-agent host's cap): keep at most that many granted subagents running at once, refilling from the granted set as each completes. Otherwise run the granted set as your host allows. If you hit a rate limit (429/TPM/RPM), pause until the reset time clears, then continue.",
+        "",
+        "When every granted packet's result is captured, run merge-and-ingest, then run next-step: the tool reconciles the grant and admits the next affordable set (any packets not granted this pass are deferred, not dropped).",
         // S-BROKER-WIRING: the tool-chosen driver (delegate the rolling loop to a
         // dispatcher subagent vs. drive it from the top host). Single-sourced via
         // renderDispatchDriverInstruction so audit + remediate can't drift.

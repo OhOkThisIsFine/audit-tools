@@ -341,28 +341,29 @@ test("D4: pools without rank fall back to standard (neutral) — unknown provide
 // E. computeDispatchFanout produces correct serializable summary shape
 // ---------------------------------------------------------------------------
 
-test("E1: 5 agents, max 2 concurrent → correct summary fields", () => {
-  const fanout = computeDispatchFanout({ agentCount: 5, maxConcurrent: 2 });
+test("E1: 5 packets, 2 granted this pass → correct summary fields", () => {
+  const fanout = computeDispatchFanout({ agentCount: 5, grantedCount: 2, declaredCap: null });
   expect(fanout.agent_count).toBe(5);
-  expect(fanout.max_concurrent_agents).toBe(2);
+  expect(fanout.granted_count).toBe(2);
+  expect(fanout.declared_cap).toBe(null);
   expect(fanout.confirmation_recommended).toBe(false); // 5 <= default threshold (10)
-  expect(fanout.dispatch_summary).toMatch(/5 agents/);
-  expect(fanout.dispatch_summary).toMatch(/max 2 concurrent/);
+  expect(fanout.dispatch_summary).toMatch(/2 of 5 packets granted/);
 });
 
 test("E2: agent_count > confirm_threshold triggers confirmation_recommended", () => {
   const fanout = computeDispatchFanout({
     agentCount: 15,
-    maxConcurrent: 4,
+    grantedCount: 4,
+    declaredCap: null,
     confirmThreshold: 10,
   });
   expect(fanout.confirmation_recommended).toBe(true);
 });
 
-test("E3: 1 agent produces singular 'agent' label in dispatch_summary", () => {
-  const fanout = computeDispatchFanout({ agentCount: 1, maxConcurrent: 1 });
-  expect(fanout.dispatch_summary).toMatch(/1 agent,/);
-  expect(fanout.dispatch_summary).not.toMatch(/1 agents/);
+test("E3: a declared in-flight cap is echoed verbatim on the fanout summary", () => {
+  const fanout = computeDispatchFanout({ agentCount: 1, grantedCount: 1, declaredCap: 6 });
+  expect(fanout.declared_cap).toBe(6);
+  expect(fanout.dispatch_summary).toMatch(/1 of 1 packet granted this pass, ≤6 in flight/);
 });
 
 // ---------------------------------------------------------------------------

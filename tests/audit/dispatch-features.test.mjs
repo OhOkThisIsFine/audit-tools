@@ -258,8 +258,8 @@ await test("FINDING-012: confirmation_recommended and dispatch_summary on the re
   // Below the default threshold of 10 → not recommended.
   expect(result.confirmation_recommended).toBe(false);
   expect(typeof result.dispatch_summary).toBe("string");
-  expect(result.dispatch_summary).toMatch(/agent.* max .* concurrent/);
-  expect(typeof result.max_concurrent_agents).toBe("number");
+  expect(result.dispatch_summary).toMatch(/packet.* granted this pass/);
+  expect(typeof result.granted_count).toBe("number");
 });
 
 await test("FINDING-012: confirmation_recommended flips when agent_count exceeds confirm_threshold", async (t) => {

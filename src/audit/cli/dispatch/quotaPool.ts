@@ -1,11 +1,21 @@
-import { join } from "node:path";
-import { writeJsonFile, buildHostModelPools } from "audit-tools/shared";
+import { dirname, join } from "node:path";
+import {
+  writeJsonFile,
+  buildHostModelPools,
+  admitBatch,
+  estimatePacketCost,
+  createReservationLedger,
+  tierRank,
+} from "audit-tools/shared";
 import type {
   ProviderRateLimits,
   ResolvedProviderName,
   SessionConfig,
   DispatchModelTier,
   HostModelRosterEntry,
+  AdmissionPool,
+  AdmissionCandidate,
+  DispatchAdmission,
 } from "audit-tools/shared";
 import { DEFAULT_EMPIRICAL_HALF_LIFE_HOURS } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
@@ -23,6 +33,7 @@ import {
   lookupDiscoveredLimits,
   mergeDiscoveredLimits,
   summarizeDispatchCapacityPools,
+  DISPATCH_QUOTA_V1ALPHA3,
 } from "../../quota/index.js";
 import type {
   CapacityPool,
@@ -238,18 +249,32 @@ export async function finalizeDispatchQuota(params: {
   sessionConfig: SessionConfig;
   pools: CapacityPool[];
   hostModel: string | null;
-  perPacketTokens: number[];
+  /**
+   * The pending packets, in priority order (highest first): the admission loop
+   * grants the affordable prefix and defers the rest to a later next-step grant.
+   */
+  packets: { id: string; inputTokens: number; complexity: number }[];
   /** Echo of the host's reported roster, when one was given. */
   hostModelRoster?: HostModelRosterEntry[] | null;
   /** Per-tier packet input budgets derived from the roster, when given. */
   tierBudgets?: Record<DispatchModelTier, number> | null;
+  /**
+   * Whether to actually LEASE the granted set against the shared reservation ledger
+   * (host-subagent path — the host dispatches the grant across processes, so the
+   * tool must reserve-before-dispatch and reconcile at ingest). The IN-PROCESS
+   * rolling driver passes `false`: it dispatches every packet through the rolling
+   * engine, which admits + leases per-packet itself, so a second host-grant lease
+   * here would double-count the same work. Defaults to true (host path).
+   */
+  grantLeases?: boolean;
 }): Promise<{
   dispatchQuota: DispatchQuota;
   dispatchQuotaPath: string;
   waveSchedule: ReturnType<typeof computeDispatchCapacity>["primary"]["schedule"];
   dispatchCapacity: ReturnType<typeof computeDispatchCapacity>;
+  admission: DispatchAdmission;
 }> {
-  const { runId, runDir, sessionConfig, hostModel, perPacketTokens } = params;
+  const { runId, runDir, sessionConfig, hostModel } = params;
   // Most-capable rank first: computeDispatchCapacity hands the largest pending
   // items to the first pool, and the biggest packets belong on the rank with
   // the largest window. Unranked pools are the LEAST capable (conservative
@@ -264,18 +289,74 @@ export async function finalizeDispatchQuota(params: {
   const dispatchCapacity = computeDispatchCapacity({
     pools,
     sessionConfig,
-    pendingItemTokens: perPacketTokens,
+    pendingItemTokens: params.packets.map((p) => p.inputTokens),
   });
   const waveSchedule = dispatchCapacity.primary.schedule;
+
+  // Admission control: instead of reporting a computed `max_concurrent_agents`, GRANT
+  // the affordable admitted set (cost-first-capable, ledger-leased). Each capacity
+  // allocation becomes an admission pool — budget = its live remaining token budget
+  // (null → optimistic +Inf); declared cap = its host in-flight cap passed verbatim;
+  // cost/capability rank from its tier; capacity = its context window (a packet's
+  // input+output envelope must fit). The cheapest capable pool with headroom wins.
+  const admissionPools: AdmissionPool[] = dispatchCapacity.pools.map((alloc) => {
+    const rankNum = tierRank(alloc.rank);
+    return {
+      poolId: alloc.pool_id,
+      resourceKey: alloc.pool_id,
+      budget: alloc.schedule.remaining_token_budget ?? Number.POSITIVE_INFINITY,
+      declaredCap: alloc.schedule.host_concurrency_limit?.active_subagents ?? null,
+      costRank: rankNum,
+      capabilityRank: rankNum,
+      capacityTokens: alloc.schedule.resolved_limits.context_tokens,
+    };
+  });
+  // Per-packet reservation = input estimate + output envelope (declared output cap at
+  // cold start; the learned (resourceKey,lens) ratio refines it once a provider
+  // reports usage — dormant on the always-on claude-code host per design).
+  const outputCap = waveSchedule.resolved_limits.output_tokens;
+  const candidates: AdmissionCandidate[] = params.packets.map((p) => ({
+    id: p.id,
+    cost: estimatePacketCost({ inputEstimate: p.inputTokens, declaredOutputCap: outputCap }).cost,
+    complexity: p.complexity,
+  }));
+  // The declared cap surfaced on the contract is the MOST-constraining pool cap (the
+  // host's own in-flight ceiling); null when no pool declares one.
+  const declaredCap = admissionPools.reduce<number | null>(
+    (min, p) => (p.declaredCap == null ? min : min == null ? p.declaredCap : Math.min(min, p.declaredCap)),
+    null,
+  );
+  let admission: DispatchAdmission;
+  if (params.grantLeases === false) {
+    // In-process rolling path: the engine admits + leases per packet itself, so the
+    // host grant takes NO ledger leases. The granted set is every candidate (the
+    // engine drives them all); the contract's admission block is informational here.
+    admission = {
+      granted_packet_ids: candidates.map((c) => c.id),
+      declared_cap: declaredCap,
+      leases: [],
+      explains: [],
+    };
+  } else {
+    const ledger = createReservationLedger();
+    const admitResult = await admitBatch({ packets: candidates, pools: admissionPools, ledger });
+    admission = {
+      granted_packet_ids: admitResult.granted.map((g) => g.packet_id),
+      declared_cap: declaredCap,
+      leases: admitResult.granted,
+      explains: admitResult.explains,
+    };
+  }
+
   const dispatchQuota: DispatchQuota = {
-    contract_version: "audit-code-dispatch-quota/v1alpha2",
+    contract_version: DISPATCH_QUOTA_V1ALPHA3,
     run_id: runId,
     model: hostModel,
     resolved_limits: waveSchedule.resolved_limits,
     confidence: waveSchedule.confidence,
     source: waveSchedule.source,
     host_concurrency_limit: waveSchedule.host_concurrency_limit,
-    max_concurrent_agents: dispatchCapacity.total_slots,
+    admission,
     cooldown_until: dispatchCapacity.cooldown_until,
     binding_cap: dispatchCapacity.binding_cap,
     capacity_pools: summarizeDispatchCapacityPools(dispatchCapacity),
@@ -288,5 +369,5 @@ export async function finalizeDispatchQuota(params: {
   };
   const dispatchQuotaPath = join(runDir, "dispatch-quota.json");
   await writeJsonFile(dispatchQuotaPath, dispatchQuota);
-  return { dispatchQuota, dispatchQuotaPath, waveSchedule, dispatchCapacity };
+  return { dispatchQuota, dispatchQuotaPath, waveSchedule, dispatchCapacity, admission };
 }

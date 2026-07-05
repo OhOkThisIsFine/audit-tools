@@ -1,6 +1,7 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { isFileMissingError, mapWithConcurrency, readJsonFile, writeJsonFile, ClaimRegistry, taskClaimsPath } from "audit-tools/shared";
+import { isFileMissingError, mapWithConcurrency, readJsonFile, readOptionalJsonFile, writeJsonFile, ClaimRegistry, taskClaimsPath, createReservationLedger } from "audit-tools/shared";
+import type { DispatchAdmission } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { validateAuditResults, defaultFindingLensFromResult, emitCoverageLineCountFriction } from "../validation/auditResults.js";
@@ -511,6 +512,32 @@ export interface MergeAndIngestResult {
  * callable `mergeImplementResults`. Resolves with the summary payload + a failure
  * flag; never writes stdout or mutates `process.exitCode` itself.
  */
+/**
+ * Reconcile (free) the reservation-ledger leases the dispatch grant took for this
+ * run's granted set — the "reconcile at result-ingest" half of admission control
+ * (spec/audit/dispatch-admission-control.md). The host has now reported the granted
+ * set's results, so those reservations are no longer in flight and their budget
+ * returns to the shared account for the NEXT grant. Best-effort + token-checked (a
+ * missing/already-freed lease is a no-op), so a lost reconcile self-heals via the
+ * lease TTL and never blocks ingestion. Only the host-subagent grant persists leases
+ * (the in-process path leases per-packet in the engine and reconciles there).
+ */
+async function reconcileAdmissionLeases(runDir: string): Promise<void> {
+  const quota = await readOptionalJsonFile<{ admission?: DispatchAdmission }>(
+    join(runDir, "dispatch-quota.json"),
+  );
+  const leases = quota?.admission?.leases;
+  if (!leases || leases.length === 0) return;
+  const ledger = createReservationLedger();
+  for (const lease of leases) {
+    try {
+      await ledger.reconcile(lease.resource_key, lease.lease_id);
+    } catch {
+      // Best-effort: the lease TTL reclaims budget if a reconcile is lost.
+    }
+  }
+}
+
 export async function mergeAndIngest(params: {
   runId: string;
   artifactsDir: string;
@@ -523,6 +550,10 @@ export async function mergeAndIngest(params: {
   const taskPath = join(runDir, "task.json");
   const tasksPath = join(runDir, "pending-audit-tasks.json");
   const mergeCompletePath = join(runDir, "merge-complete.json");
+
+  // Reconcile the grant's reservation-ledger leases now that the host has reported
+  // the granted set's results — frees the reserved budget for the next grant.
+  await reconcileAdmissionLeases(runDir);
 
   // Phase 1: idempotency — replay a completed run or discard a stale marker.
   const priorSummary = await checkIdempotencyReplay(runId, mergeCompletePath, tasksPath, taskResultsDir);

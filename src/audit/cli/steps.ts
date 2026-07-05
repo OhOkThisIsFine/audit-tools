@@ -40,8 +40,10 @@ export const StepProgressSchema = z
     pending_tasks: z.number().int().optional(),
     /** Audit tasks already completed before this run (skipped as done). */
     completed_tasks: z.number().int().optional(),
-    /** Max subagents running simultaneously (rolling dispatch). */
-    max_concurrent_agents: z.number().int().optional(),
+    /** Packets GRANTED for dispatch this pass (the emergent admission width). */
+    granted_count: z.number().int().optional(),
+    /** Verbatim host in-flight cap (declared env limit), or null. */
+    declared_cap: z.number().int().nullable().optional(),
     /** Total agents (packets) that will be launched this run. */
     agent_count: z.number().int().optional(),
     /**

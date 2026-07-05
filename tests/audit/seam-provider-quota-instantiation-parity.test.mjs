@@ -227,8 +227,7 @@ test("remediate-code quota/index does not export auditor-only symbols", () => {
     "GenericHeaderExtractor",
     "ClaudeCodeHeaderExtractor",
     "getHeaderExtractorForProvider",
-    "DISPATCH_QUOTA_V1ALPHA1",
-    "DISPATCH_QUOTA_V1ALPHA2",
+    "DISPATCH_QUOTA_V1ALPHA3",
     "resolveHostModel",
   ];
   for (const sym of auditorOnly) {
@@ -241,8 +240,7 @@ test("audit-code quota/index exports auditor-specific symbols absent from shared
     "lookupDiscoveredLimits",
     "updateDiscoveredLimits",
     "extractRateLimitHeaders",
-    "DISPATCH_QUOTA_V1ALPHA1",
-    "DISPATCH_QUOTA_V1ALPHA2",
+    "DISPATCH_QUOTA_V1ALPHA3",
   ];
   for (const sym of auditorOnly) {
     expect(sym in auditQuota, `audit-code quota/index should export auditor-specific symbol: ${sym}`).toBeTruthy();
