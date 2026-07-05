@@ -3,6 +3,7 @@ import { z } from "zod";
 export const LimitSourceSchema = z.enum([
   "explicit_config",
   "discovered_capability",
+  "static_metadata",
   "cli_flags",
   "provider_default",
   "learned",

@@ -16,6 +16,7 @@ import {
   type ProviderType,
 } from "./limits.js";
 import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../tokens.js";
 
 /**
  * Minimal structural shape of capabilities discovered at runtime — RPM/TPM (e.g.
@@ -596,8 +597,8 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       applyHostConcurrencyLimit(requestedConcurrency),
     );
     const limits: ResolvedLimits = {
-      context_tokens: quota.default_context_tokens ?? 32_000,
-      output_tokens: quota.reserved_output_tokens ?? 4_096,
+      context_tokens: quota.default_context_tokens ?? DEFAULT_CONTEXT_TOKENS,
+      output_tokens: quota.reserved_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
       requests_per_minute: null,
       input_tokens_per_minute: null,
       output_tokens_per_minute: null,

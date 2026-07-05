@@ -37,7 +37,7 @@
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/shared/copy-data-assets.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "test:doc-contract": "vitest run tests/audit/release-contract.test.mjs tests/audit/priority-chain-doc-sync.test.mjs tests/audit/file-lock-doc-sync.test.mjs tests/audit/host-asset-renderer-drift.test.mjs",
     "test": "npm run build && vitest run",
@@ -53,6 +53,7 @@
     "smoke:linked-remediate-code": "node scripts/remediate/smoke-linked-remediate-code.mjs",
     "smoke:packaged-remediate-code": "node scripts/remediate/smoke-packaged-remediate-code.mjs",
     "update-languages": "node scripts/audit/update-languages.mjs",
+    "update-models": "node scripts/shared/update-models.mjs",
     "generate-schemas": "node scripts/audit/generate-schemas.mjs",
     "fixtures:auditor-contract": "node scripts/remediate/generate-auditor-contract-fixture.mjs",
     "release:patch:publish": "node scripts/release-and-publish.mjs patch",

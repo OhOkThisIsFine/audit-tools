@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, isDemotableInProcessProvider, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, isDemotableInProcessProvider, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -231,8 +231,8 @@ export interface ExplicitHostCapabilities {
   models?: unknown;
 }
 
-/** 32k context-window floor, applied ONLY at true first contact (nothing persisted). */
-const HOST_CONTEXT_TOKENS_FLOOR = 32_000;
+/** Conservative context-window floor, applied ONLY at true first contact (nothing persisted). */
+const HOST_CONTEXT_TOKENS_FLOOR = DEFAULT_CONTEXT_TOKENS;
 
 function finiteOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;

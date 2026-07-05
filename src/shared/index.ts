@@ -746,6 +746,8 @@ export type {
   ResolveLimitsOptions,
   ResolveHostModelOptions,
 } from "./quota/limits.js";
+export { resolveModelStatics, resetModelStaticsCache } from "./quota/modelStatics.js";
+export type { ModelStatics } from "./quota/modelStatics.js";
 export {
   setQuotaStateDir,
   getQuotaStatePath,

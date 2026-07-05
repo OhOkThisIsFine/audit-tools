@@ -1,6 +1,8 @@
 import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import type { LimitConfidence, LimitSource, ResolvedLimits } from "./types.js";
 import type { DiscoveredRateLimitsInput } from "./scheduler.js";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../tokens.js";
+import { resolveModelStatics } from "./modelStatics.js";
 
 export type ProviderType = "hosted" | "local" | "unknown";
 
@@ -88,8 +90,8 @@ export interface ResolveLimitsOptions {
 function defaultLimits(sessionConfig: SessionConfig): ResolvedLimits {
   const quota = sessionConfig.quota ?? {};
   return {
-    context_tokens: quota.default_context_tokens ?? 32_000,
-    output_tokens: quota.reserved_output_tokens ?? 4_096,
+    context_tokens: quota.default_context_tokens ?? DEFAULT_CONTEXT_TOKENS,
+    output_tokens: quota.reserved_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
     requests_per_minute: null,
     input_tokens_per_minute: null,
     output_tokens_per_minute: null,
@@ -104,9 +106,11 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
   // Resolution order:
   // 1. Explicit per-model config overrides
   // 2. Discovered capability from the dispatch-time handshake
-  // 3. Conservative provider-typed default
-  // 4. Generic default fallback
-  // (No static known-model table — model windows are discovered, never guessed.)
+  // 3. Static metadata from the vendored models.dev snapshot (dataset fallback)
+  // 4. Conservative provider-typed default
+  // 5. Generic default fallback
+  // (No hardcoded model table — the static rung is a community dataset consumed
+  // with degrade-to-empty semantics, and it ALWAYS ranks below real discovery.)
   if (hostModel && quota.models?.[hostModel]) {
     const override = quota.models[hostModel];
     return {
@@ -137,6 +141,25 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
       },
       source: "discovered_capability",
       confidence: "high",
+    };
+  }
+
+  // 2.5 Static metadata: no real window was discovered, so consult the vendored
+  // models.dev snapshot for this model's real context window instead of falling
+  // straight to the flat conservative default. Degrades to empty (falls through)
+  // on an unknown model id or an unavailable dataset.
+  const staticStatics = hostModel ? resolveModelStatics(hostModel) : undefined;
+  if (staticStatics && typeof staticStatics.context_tokens === "number" && staticStatics.context_tokens > 0) {
+    return {
+      limits: {
+        context_tokens: staticStatics.context_tokens,
+        output_tokens: staticStatics.output_tokens ?? defaults.output_tokens,
+        requests_per_minute: null,
+        input_tokens_per_minute: null,
+        output_tokens_per_minute: null,
+      },
+      source: "static_metadata",
+      confidence: "medium",
     };
   }
 

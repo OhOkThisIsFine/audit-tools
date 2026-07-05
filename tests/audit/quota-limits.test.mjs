@@ -58,20 +58,21 @@ test("resolveLimits uses discovered_capability when the handshake reports a wind
   expect(result.limits.output_tokens).toBe(32_000);
 });
 
-test("resolveLimits falls back to provider_default for a named model with no discovered window", () => {
-  // No static known-model table: a recognized model name carries no special
-  // limits — only a discovered window or explicit config does.
+test("resolveLimits uses static_metadata for a named model in the models.dev snapshot", () => {
+  // No discovered window and no explicit config, but the model is in the vendored
+  // models.dev dataset — the static rung supplies its real window instead of the
+  // conservative default. (Route prefix `anthropic/` is stripped on lookup.)
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {},
     hostModel: "anthropic/claude-opus-4-7",
   });
-  expect(result.source).toBe("provider_default");
-  expect(result.confidence).toBe("low");
-  expect(result.limits.context_tokens).toBe(32_000);
+  expect(result.source).toBe("static_metadata");
+  expect(result.confidence).toBe("medium");
+  expect(result.limits.context_tokens).toBeGreaterThan(32_000);
 });
 
-test("resolveLimits falls back to provider_default when model is unknown", () => {
+test("resolveLimits falls back to provider_default when model is unknown to the snapshot", () => {
   const result = resolveLimits({
     providerName: "claude-code",
     sessionConfig: {},

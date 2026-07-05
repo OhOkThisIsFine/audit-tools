@@ -172,12 +172,23 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   genuine forward value: the STATIC half of quota metadata is near-empty (there is NO hardcoded model table —
   invariant holds). `context_tokens` = discover-at-handshake else a flat `32_000`; per-token **price is entirely
   absent** — `costRank` (`src/shared/dispatch/admissionLoop.ts:43`) is a TIER ORDINAL, not money. Two workstreams:
-  - **W1 context window.** Add a models.dev-backed `resolveModelStatics(modelId) → {context_tokens?, price?}`
-    module; insert `context_tokens` as a rung in `resolveLimits`/`defaultLimits` (`src/shared/quota/limits.ts:88-99`)
-    — real per-model window instead of the flat-32k default. Prereq: collapse the 4× re-spelled `32_000`/`4_096`
-    (`limits.ts:91`, `scheduler.ts:599`, `remediate/steps/dispatch.ts:385`, `remediate/steps/nextStep.ts:235`) to
-    `DEFAULT_CONTEXT_TOKENS`/`DEFAULT_OUTPUT_TOKENS` (`src/shared/tokens.ts:18-19`) so there's one default path to hook.
-  - **W2 real price → `costRank` (higher value).** Feed models.dev per-token price into `costRank` at the two build
+  - **W1 context window — ✅ SHIPPED (2026-07-05).** `resolveModelStatics(modelId) → {context_tokens?, output_tokens?, price?}`
+    (`src/shared/quota/modelStatics.ts`) reads a vendored models.dev snapshot (`src/shared/data/model-statics.generated.json`,
+    2630 models, refreshed by `npm run update-models` → `scripts/shared/update-models.mjs`); wired as a new
+    `static_metadata` rung in `resolveLimits` (`src/shared/quota/limits.ts`) that ranks *below* discovered capability +
+    explicit config, *above* the conservative default. Build copies the JSON to `dist/shared/data/` via
+    `scripts/shared/copy-data-assets.mjs` (chained after `tsc`); runtime loads via `fs.readFileSync` + cache,
+    degrade-to-empty (no JSON *import*, no TS literal). Prereq done: the re-spelled `32_000`/`4_096` collapsed to
+    `DEFAULT_CONTEXT_TOKENS`/`DEFAULT_OUTPUT_TOKENS` (`limits.ts`, `scheduler.ts`, `nextStep.ts`; the backlog's 4th
+    site `remediate/dispatch.ts:385` was already stale — no literal there). **Two caveats surfaced, both W2-relevant:**
+    (a) **collision resolution = first-sorted-provider-wins** — 2633 duplicate model ids (same id served by multiple
+    providers) are dropped deterministically; context windows agree across providers so W1 is unaffected, but W2 *price*
+    must revisit this (a reseller's marked-up price could win over the native provider's — prefer native/cheapest on
+    collision). (b) **static window can over-state a specific deployment** — e.g. the snapshot lists `claude-opus-4-7`
+    at 1M context; if a real headless run serves a 200k variant with discovery absent, the static rung would over-size
+    work blocks. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding, but worth watching
+    on a real headless metered run.
+  - **W2 real price → `costRank` (higher value) — NEXT-READY.** Feed models.dev per-token price into `costRank` at the two build
     sites (`src/audit/cli/dispatch/quotaPool.ts:307`, `src/remediate/steps/dispatch.ts:515`) so "cheapest capable
     pool" means actual dollars — the routing key the design of record
     ([`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)) already assumes.
