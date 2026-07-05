@@ -29,6 +29,10 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **`scheduleWave` quota-disabled fast path DRIFTS between the two orchestrators (found 2026-07-05, multi-provider routing rethink).** With quota off (the DEFAULT conversation-first host path), remediate (`src/remediate/steps/dispatch.ts:376-394`) computes the wave with `confidence:"low"` + a flat average, while shared (`src/shared/quota/scheduler.ts:605-615`) uses `confidence:"high"` + `sumTopN` — two throttles that can disagree. Parity / single-source violation (the project's own invariant). Fix: remediate DELEGATES to the shared quota-off path (single-source it), not its own copy. Verify no pinned test expectation shifts first. Flagged independently by two adversarial passes. [[provider-routing-offload-b-to-ai-sdk]]
+
+- **`src/shared/quota/rollingEngine.ts` is a dead module (~268 LOC, found 2026-07-05).** Exports `reroutePackets` / `dropProvider` / `RollingEnginePool` / … with ZERO live non-test consumers — the sole external hit (`hostSessionQuotaSource.ts:36`) is a `{@link dropProvider}` doc-comment, not a call. Referee-confirmed remnant of the OLD wave/reroute model that `admitBatch` / `rollingDispatch` superseded (the actual stalled-migration leftover an adversarial pass mistook `capacity.ts`/`scheduler.ts` for — those are LIVE, `admitBatch` consumes their budget downstream; leave them). Delete via the `knip --production` manual-audit protocol ([[knip-deadcode-gate-default-mode]]) since it's re-exported from `shared/index.ts` (default-mode knip won't flag it): confirm grep-zero prod callers → delete symbols + their tests. [[provider-routing-offload-b-to-ai-sdk]]
+
 - **Shipping from a linked worktree forces a manual FF + rebuild dance (observed 2026-07-05).** The release
   script (`scripts/release-and-publish.mjs`) hard-guards on being ON the default branch (`git branch
   --show-current` must equal `main`), but laps run on a `claude/<name>` feature-branch worktree while `main`
@@ -150,6 +154,37 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   cleanly on one agent, not so it entrenches two.
 
 ## Forward tracks
+
+- **Model static-metadata resolver (models.dev) → real cost-first routing (owner-approved direction, 2026-07-05).**
+  The multi-provider routing rethink (full audit trail — architect-from-scratch + red-team + external-scout +
+  referee — in project memory [[provider-routing-offload-b-to-ai-sdk]]) established the core dispatch/quota
+  architecture is **sound and ahead of the field** (no LLM gateway models subscription percent-window quota; our
+  cooperating quota-aware dispatch is unmatched — every multi-agent coding orchestrator punts quota + isolates by
+  worktrees). NO large simplification exists; the AI-SDK transport swap is net-negative and was **dropped**. The
+  genuine forward value: the STATIC half of quota metadata is near-empty (there is NO hardcoded model table —
+  invariant holds). `context_tokens` = discover-at-handshake else a flat `32_000`; per-token **price is entirely
+  absent** — `costRank` (`src/shared/dispatch/admissionLoop.ts:43`) is a TIER ORDINAL, not money. Two workstreams:
+  - **W1 context window.** Add a models.dev-backed `resolveModelStatics(modelId) → {context_tokens?, price?}`
+    module; insert `context_tokens` as a rung in `resolveLimits`/`defaultLimits` (`src/shared/quota/limits.ts:88-99`)
+    — real per-model window instead of the flat-32k default. Prereq: collapse the 4× re-spelled `32_000`/`4_096`
+    (`limits.ts:91`, `scheduler.ts:599`, `remediate/steps/dispatch.ts:385`, `remediate/steps/nextStep.ts:235`) to
+    `DEFAULT_CONTEXT_TOKENS`/`DEFAULT_OUTPUT_TOKENS` (`src/shared/tokens.ts:18-19`) so there's one default path to hook.
+  - **W2 real price → `costRank` (higher value).** Feed models.dev per-token price into `costRank` at the two build
+    sites (`src/audit/cli/dispatch/quotaPool.ts:307`, `src/remediate/steps/dispatch.ts:515`) so "cheapest capable
+    pool" means actual dollars — the routing key the design of record
+    ([`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)) already assumes.
+    Unlocks economically-correct backend choice for the autonomous loop ([[autonomous-pipeline-capstone-spec]]).
+  - **Invariant-safe** = external community dataset consumed like `smol-toml`/`yaml` (two-tier dep policy): fetched
+    or bundled-updatable, degrade-to-empty on an unknown model id, **never inlined as a TS literal**. Owner will own
+    none of the dataset; dynamic-discovery-first, dataset-as-fallback.
+  - **Not deletion — the live-probe generalization the owner wanted is ALREADY built + clean:** `BaseHttpQuotaSource`
+    + one-array register; adding a provider's proactive quota = implement 2 methods. Proactive coverage is already good
+    for the dispatchable set (claude-code/codex/opencode/antigravity proactive; openai-compatible/local-subprocess
+    reactive-by-nature). Do NOT delete working sources; `copilot` is correctly broker-only (no headless dispatch surface).
+  - **Minor cleanups surfaced same pass (low-pri, bundle opportunistically):** providerFactory Rule 6
+    (`hasClaudeCodeConfig && claudeAvailable`) is a provable strict subset of Rule 9 (`claudeAvailable`) — delete the
+    redundant rung; split remediate `dispatch.ts` (4,570 LOC; ~60-85% is git-worktree/write-scope/merge machinery,
+    misfiled not duplicated — audit's dispatch is 613 LOC, zero git); inline `makeProviderKeyedFactory` (19 LOC, 2 sites).
 
 - **Systemic reviewers must be pushed adversarially for improvement, not just correctness (owner,
   2026-07-05).** Two audit tiers exist and both are wanted: unit auditors that structurally can't see the

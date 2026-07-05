@@ -22,8 +22,15 @@
   Sub-2: `selectProvider` least-loaded tiebreak balances equal-rank pools. Sub-3: single-shot NIM
   output-contract override + read-neutral file framing + operator-tunable inline caps.
   [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]].
-- **Immediate next: none forced — dispatch rework is done.** Pick the next T5 item (deterministic-analyzer
-  live spawn, or CE-004 NIM guided-decoding). **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**
+- **Immediate next: none forced — dispatch rework is done.** Pick the next T5 item. **Fresh & ready from the
+  multi-provider routing rethink (2026-07-05, [[provider-routing-offload-b-to-ai-sdk]]):** two low-risk cleanups —
+  the `scheduleWave` quota-off **drift bug** (remediate vs shared, real parity violation) and the `rollingEngine.ts`
+  **dead module** (~268 LOC) — plus the forward **models.dev static-metadata resolver** track (W1 real context
+  window; W2 real price → `costRank` = true $ cost-first routing). Rethink verdict: core dispatch/quota is sound +
+  ahead of the field, NO big simplification exists, AI-SDK transport swap dropped as net-negative. All in
+  `docs/backlog.md` (drift bug + dead module under *Open bugs*; models.dev track under *Forward tracks*). Other
+  standing T5 options unchanged: deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
+  **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
   within one — a detached background driver is architectural, pursue only if a real run shows the alternation
@@ -83,6 +90,12 @@ remains env-bound (T6-class). Detail in `docs/backlog.md`.
 
 ### T5 — Product / analysis forward tracks
 Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) — pointers only here:
+0. **Multi-provider routing rethink outcome (2026-07-05) — ready to execute.** Verdict: core is sound + ahead of
+   field, no big simplification, AI-SDK swap dropped. Ready: (a) `scheduleWave` quota-off **drift bug** fix, (b)
+   delete `rollingEngine.ts` **dead module** (~268 LOC), (c) **models.dev static-metadata resolver** — W1 real
+   context window (`resolveModelStatics` → rung in `resolveLimits`), W2 real price → `costRank` (true $ cost-first
+   routing, aligns with autonomy capstone). Full detail + line refs in `docs/backlog.md`.
+   *([[provider-routing-offload-b-to-ai-sdk]])*
 1. **Deterministic analyzers — own-vs-acquire acquisition engine.** Open: clippy/rubocop live spawn
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
 2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint
