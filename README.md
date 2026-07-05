@@ -38,8 +38,10 @@ human-readable render (markdown):
 npm install -g audit-tools
 ```
 
-This puts both `audit-code` and `remediate-code` on your `PATH` and deploys slash-command
-assets for supported hosts (Claude, Codex, OpenCode, VS Code, Antigravity, etc.).
+This puts both `audit-code` and `remediate-code` on your `PATH` and deploys global
+slash-command assets for supported hosts (Claude, Codex, OpenCode, Antigravity, etc.).
+Running `/audit-code` inside a repo then bootstraps any remaining per-repo host files
+(e.g. VS Code's prompt/agent/instructions).
 
 ## Usage
 
