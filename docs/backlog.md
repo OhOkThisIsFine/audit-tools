@@ -44,60 +44,32 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   and spawn subprocesses → isolation-off risks cross-test bleed. Only pursue with per-file verification.
   Lower priority than the sharding already shipped.
 
-- **Founding capability-inheritance bug (wrong-quota keying + lost handshake) — ✅ SHIPPED commit 3
-  (2026-07-05).** Was: a different auditor resuming an audit (run started in Codex, resumed by Claude
-  Code fanning out subagents on the host-review path) sized/charged the fan-out against the *stored*
-  `sessionConfig.provider` (codex), and bare continue-commands dropped the `--host-*` handshake so it was
-  silently lost on every step after the first. Fixed by: (a) shared `resolveHostProviderName` +
-  audit-local `resolveHostDispatchProviderName` — a headless in-process backend (codex/opencode/
-  openai-compatible) or unset/`auto` `sessionConfig.provider` resolves to the conversation host, so the
-  host-review dispatch pool is keyed to the driver, never the inherited backend (`sessionConfig.provider`
-  demoted to the headless in-process pool only); (b) `HostDispatchDescriptor` + `renderHostDescriptorFlags`
-  — the current driver's handshake RIDES every audit continue-command so a bare resume preserves it (a
-  different driver's own loader overrides). Regression guard: `tests/audit/different-auditor-resume-no-inherit.test.mjs`
-  + `host-descriptor-roundtrip.test.mjs`. See [[capability-is-per-auditor-not-per-audit]] / design of
-  record [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md). **This
-  closes the admission rework's founding correctness bug** (commits 1 + 2a + 2b-AUDIT + 2b-REMEDIATE +
-  rolling-driver unification already shipped). The remaining piece — host+backend *concurrent* fan-out
-  (defect 1) — is a separable throughput enhancement, next bullet.
-
-- **Audit dispatch can't fan out across host + codex + NIM concurrently — driver-identity contract
-  (defect 1; the last dispatch-rework track; observed 2026-07-04, re-scoped 2026-07-05).** THROUGHPUT, not
-  correctness (the wrong-quota bug is fixed above). When `sessionConfig.provider` is a headless in-process
-  backend (codex), the in-process-only branch (`runHostDelegationObligation`,
-  `src/audit/cli/nextStepHelpers.ts:1048` → `resolvesToInProcessDispatchProvider`) drives that backend for
-  the WHOLE frontier — so a Claude host resuming a codex-configured run can't ALSO fan out its own subagents;
-  the backend monopolizes. Desired: demote the configured backend to a **source pool** that fans out
-  alongside the host (host + codex + NIM concurrent) — parity with remediate's `buildConfirmedPools`
-  (`src/remediate/steps/dispatch.ts:431` builds host + source pools together). **BLOCKER (found 2026-07-05):
-  no per-invocation driver-identity/attendance signal exists** to distinguish "codex resumed by codex →
-  drive in-process (headless autonomy)" from "codex resumed by an attended Claude host → host drives, codex
-  demoted to source." `hostCanDispatch` defaults `true` AND the audit skill (`skills/audit-code/SKILL.md`)
-  never sends `--host-can-dispatch-subagents`, so it can't distinguish attended vs headless; the fold picks
-  the in-process path purely on `provider ∈ {codex,opencode,openai-compatible}` (a8/a9/dc4 tests confirm
-  headless relies on that). So the fix is a **contract-level change**, not a pool-assembly tweak: a
-  per-invocation driver-identity/attendance declaration threaded into `next-step` (default `claude-code`) +
-  demote a configured backend to a source when an attended host drives (fold it into `buildAuditSourcePools`,
-  `src/audit/cli/hybridDispatch.ts:57`; route through the existing hybrid split at `nextStepHelpers.ts:1117`) +
-  update the audit skill loader to declare attendance + migrate the a8/a9/dc4 headless tests to declare
-  headless. Further concrete sub-defects, still valid: (2) `selectProvider`
-    (`src/shared/dispatch/rollingDispatch.ts:345`) is sequential-per-packet + spill-on-degrade, not
-    deliberate multi-pool fan-out; multi-pool capacity math already exists (`computeDispatchCapacity`,
-    `src/shared/quota/capacity.ts:378`). (3) **NIM/openai-compatible can't take read-heavy audit packets
-    single-shot** — packets require the worker to *open* granted repo files; a single-shot chat call has no
-    file access, so NIM can only participate via the in-process wrapper that serves file bodies (or by
-    inlining files into the prompt). Any deeper fix that adds NIM to the audit pool must route file
-    contents to it, not just the prompt. **Workaround used this run:** drove the fan-out manually across
-    Claude subagents + codex CLI (file-capable) + NIM (small inlined packets). **Observed executor
-    fitness this run:** Claude subagents = reliable, ~90-210s/packet, valid JSON every time. NIM
-    (deepseek-v4-pro, inlined) = worked for 2/3 small packets; 1 failed by emitting the packet's
-    "reply one-line confirmation" instead of the JSON array (single-shot can't write result_path, so the
-    reply convention leaked into output) → needs an output-contract override in the wrapper. Codex CLI
-    (`codex exec --dangerously-bypass-approvals-and-sandbox`) = **too slow to be useful here**: 2
-    concurrent ran 5+ min on the first 2 read-heavy packets with **zero** result files written, 8k+ lines
-    of echoed reasoning → abandoned, its 10 packets reassigned to Claude subagents. Lesson for the real
-    multi-pool fix: codex is not a good fit for large read-heavy audit packets under a wall-clock budget;
-    route only small/low-line packets to it, or drop it from the audit pool.
+- **Dispatch admission-control rework — ✅ COMPLETE (founding bug commit 3 + defect-1, 2026-07-05).** The
+  whole rework shipped: commits 1 + 2a + 2b-AUDIT + 2b-REMEDIATE + rolling-driver unification + the founding
+  capability-inheritance bug (host-review pool keyed to the driver via `resolveHostDispatchProviderName`;
+  `HostDispatchDescriptor` rides every continue-command) + **defect-1 (host + codex + NIM CONCURRENT
+  fan-out)**. Defect-1: an attended host (`host_can_dispatch_subagents` default true) resuming a
+  backend-configured run now DEMOTES the configured in-process backend (codex/opencode/openai-compatible) to
+  a *source* pool so host + backend + NIM fan out concurrently; the in-process whole-frontier driver fires
+  only when headless (`host_can_dispatch_subagents:false`). Discriminator reuses the existing boolean (no new
+  field — driver identity already ships on `HostDispatchDescriptor`); both orchestrators gated in parity;
+  `buildConfirmedPools` decouples host-pool identity (claude-code when demoting) from the source provider
+  (the actual backend). Sub-2: `selectProvider` breaks equal-rank ties by least in-flight load so
+  same-complexity packets balance across equal pools instead of front-loading one. Sub-3: the single-shot
+  openai-compatible (NIM) worker gets an output-contract override (no "reply valid: …" leak into `result`),
+  read-neutral referenced-files framing, and operator-tunable inline caps for read-heavy packets. See
+  [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]] / design of record
+  [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md).
+  - **Residual (env-bound / deeper, not blocking):** (a) **live validation** of the real host+codex+NIM
+    concurrent run — a metered multi-pool run confirming the demoted backend actually fans out alongside the
+    host (folds into the quota-aware-dispatch live-run watch below). (b) **Deeper simultaneity:** the audit
+    hybrid path drives the in-process (codex/NIM) partition to completion within a `next-step` turn, THEN
+    hands the complement to the host — so host and backend alternate ACROSS turns, not simultaneously WITHIN
+    one. True within-turn simultaneity would need a detached background driver spanning host turns
+    (architectural; only pursue if wall-clock on a real run shows the alternation is the bottleneck).
+    (c) **Executor routing lesson (durable):** codex CLI is a poor fit for large read-heavy audit packets
+    under a wall-clock budget (observed 2026-07-04: 2 concurrent ran 5+ min with zero results, 8k+ lines of
+    echoed reasoning) — route only small/low-line packets to it, or drop it from the audit pool.
 
 - **Quota-aware dispatch — live validation env-bound.** Still open: live validation of the token-budget
   dispatch gate (per-`(pool,window-label)` learned tokens-per-percent slope, budget = MIN across a
