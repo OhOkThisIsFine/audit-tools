@@ -8,8 +8,8 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.11** (defect-1 dispatch admission-control + the batched D-33/D-45 doc-review
-  cleanups). Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
+- On npm as `latest` at **v0.32.13** (models.dev W1 static-metadata resolver → real per-model context window).
+  Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
   [[live-status]]); this section is current-state + open-work roadmap only.
 - **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
   rework shipped end-to-end. Founding capability-inheritance bug (commit 3): host-review pool keyed to the
