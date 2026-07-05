@@ -3,7 +3,6 @@ import { test, expect } from "vitest";
 const { HostSessionQuotaSource } = await import(
   "../../src/shared/quota/hostSessionQuotaSource.ts"
 );
-const { dropProvider } = await import("../../src/shared/quota/rollingEngine.ts");
 
 const KEY = "claude-code/standard";
 const LIMIT_TEXT = "You've hit your session limit · resets 3:30pm";
@@ -96,30 +95,6 @@ test("reset form 'Resets in 2h' (duration) → ~2h pause, auto-resume", async ()
   const resumed = await src.probeUsage(KEY);
   expect(resumed.status, "auto-resumed after reset").toBe("ok");
   expect(resumed.snapshot.remaining_pct > 0 && resumed.snapshot.remaining_pct < 0.1, "near-wall band after a recorded limit").toBeTruthy();
-});
-
-test("non-consuming re-queue: dropProvider returns the packet to pending, never consumed", async () => {
-  // The host-session source pauses the pool; the rolling engine performs the
-  // actual non-consuming re-queue — the packet moves to pending_tokens and is
-  // never recorded as a completed/consumed result.
-  const now = fakeClock(Date.UTC(2026, 0, 1, 10, 0, 0));
-  const src = new HostSessionQuotaSource({ providerModelKey: KEY, now });
-  const event = src.recordLimit("error", LIMIT_TEXT, "pkt-c");
-  expect(event.recorded).toBe(true);
-
-  const state = {
-    active_pools: [{ pool: { id: "host" }, provider: {} }],
-    exhausted_pools: [],
-    in_flight_tokens: [{ id: "pkt-c", assigned_pool_id: "host", estimated_tokens: 100 }],
-    pending_tokens: [],
-    event_log: [],
-  };
-
-  const next = dropProvider(state, "host", "exhausted");
-  // The packet is re-queued (pending), not lost and not consumed.
-  expect(next.pending_tokens.map((t) => t.id), "limit-message packet returned to pending (non-consuming re-queue)").toEqual(["pkt-c"]);
-  expect(next.in_flight_tokens.length, "no longer in-flight").toBe(0);
-  expect(next.event_log[0].requeued_count, "re-queue is recorded, not a consume").toBe(1);
 });
 
 test("bounded escalation: same packet re-limiting past the bound escalates to a terminal operator surface", async () => {

@@ -801,7 +801,7 @@ describe("F4 inv-5 — critical snapshot throttles to 1 and persists cooldown (C
 //
 // EVERY dispatch path sizes concurrency through the SAME shared scheduler:
 //  - the wave/repair path: createBrokeredRepairDispatch().broker() -> scheduleWave
-//  - the rolling engine path: computeDispatchCapacity (what reroutePackets calls)
+//  - the rolling engine path: computeDispatchCapacity
 //    -> schedulePool -> scheduleWave
 // Both must clamp a request of N slots to the host concurrency cap (< N) and
 // attribute the SAME binding_cap, so no path can over-dispatch past

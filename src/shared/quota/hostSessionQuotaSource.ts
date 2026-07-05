@@ -32,9 +32,8 @@
  *    never overwrites learned (sliding-window) limits.
  *
  * This module owns only the host-session window + escalation bookkeeping; the
- * non-consuming re-queue itself is performed by the rolling engine
- * ({@link dropProvider}), which moves in-flight packets back to `pending_tokens`
- * without ever marking them consumed.
+ * non-consuming re-queue itself is performed by the dispatch layer, which moves
+ * in-flight packets back to pending without ever marking them consumed.
  */
 
 import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";

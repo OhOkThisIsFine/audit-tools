@@ -1017,21 +1017,6 @@ export {
   getErrorParserForProvider,
 } from "./quota/errorParsers/index.js";
 
-// Rolling engine — provider-pool-change semantics (drop + re-route)
-export type {
-  ProviderPoolEventKind,
-  ProviderPoolEvent,
-  RollingEnginePoolEntry,
-  RollingEnginePool,
-  EnginePacketToken,
-  RollingEnginePoolState,
-  ReroutePacketsResult,
-} from "./quota/rollingEngine.js";
-export {
-  dropProvider,
-  reroutePackets,
-} from "./quota/rollingEngine.js";
-
 // Rolling engine paused-state + livelock guard (N-S09)
 export type {
   RollingEngineLifecycleState,
