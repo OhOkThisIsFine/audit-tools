@@ -257,14 +257,6 @@ program
   });
 
 program
-  .command("install")
-  .description("Deprecated compatibility alias for global install repair")
-  .option("--root <path>", "Repository root", ".")
-  .action(async (options) => {
-    installRepoAssets(options.root, false);
-  });
-
-program
   .command("ensure")
   .description("Repair/check global /remediate-code host assets")
   .option("--root <path>", "Repository root", ".")
@@ -502,21 +494,6 @@ export function runValidateCommand(
   }
   log("validate: TypeScript types OK");
   return 0;
-}
-
-export function installRepoAssets(
-  root: string,
-  quiet: boolean,
-  log: (msg: string) => void = console.log,
-  homeDir = homedir(),
-): void {
-  if (!quiet) {
-    log(
-      "remediate-code: repo-local install is deprecated; repairing global assets instead.",
-    );
-    log(`remediate-code: no repo-local files were written under ${resolve(root)}.`);
-  }
-  ensureGlobalAssets(quiet, log, homeDir, resolve(root));
 }
 
 // Remediator agent scope: managed rules win for specific patterns; an

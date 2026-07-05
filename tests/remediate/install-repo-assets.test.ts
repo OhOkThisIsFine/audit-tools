@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ensureGlobalAssets, installRepoAssets, runValidateCommand } from "../../src/remediate/index.js";
+import { ensureGlobalAssets, runValidateCommand } from "../../src/remediate/index.js";
 import { rm, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -34,15 +34,6 @@ describe("global-first install helpers", () => {
     expect(existsSync(join(TEST_HOME, ".codex", "skills", "remediate-code", "agents", "openai.yaml"))).toBe(true);
     expect(existsSync(join(TEST_HOME, ".config", "opencode", "opencode.json"))).toBe(true);
     expect(logs.some((line) => line.includes("global OpenCode command"))).toBe(true);
-  });
-
-  it("installRepoAssets does not create repo-local host files", () => {
-    const logs: string[] = [];
-    installRepoAssets(TEST_ROOT, false, (m) => logs.push(m), TEST_HOME);
-
-    expect(existsSync(join(TEST_ROOT, "AGENTS.md"))).toBe(false);
-    expect(existsSync(join(TEST_ROOT, ".audit-tools/remediation", ".gitkeep"))).toBe(false);
-    expect(logs.some((line) => line.includes("repo-local install is deprecated"))).toBe(true);
   });
 
   it("quiet mode suppresses all log output", () => {

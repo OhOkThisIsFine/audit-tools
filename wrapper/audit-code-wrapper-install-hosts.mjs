@@ -565,18 +565,26 @@ export async function writeOpenCodeAssets(assetPaths, root) {
   ];
 }
 
+// Full-file content of the VS Code / GitHub prompt asset
+// (`.github/prompts/audit-code.prompt.md`). Single-sourced here so the committed
+// asset's no-drift guard renders through the exact same generator the installer
+// uses (host-specific `{name, description, agent}` frontmatter + canonical body).
+export function renderVSCodePromptFile(promptBody) {
+  return renderPromptFile(
+    {
+      name: 'audit-code',
+      description: 'Autonomous local loop code auditing',
+      agent: 'auditor',
+    },
+    promptBody,
+  );
+}
+
 export async function writeVSCodeAssets(assetPaths, promptBody) {
   return [
     await writeGeneratedMarkdown(
       assetPaths.vscodePromptPath,
-      renderPromptFile(
-        {
-          name: 'audit-code',
-          description: 'Autonomous local loop code auditing',
-          agent: 'auditor',
-        },
-        promptBody,
-      ),
+      renderVSCodePromptFile(promptBody),
     ),
     await writeGeneratedMarkdown(assetPaths.vscodeAgentPath, renderVSCodeAgentFile(promptBody)),
   ];

@@ -29,23 +29,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`remediate-code.mjs` dead `install`/`ensure`/`verify-install`/`install-host` command (doc-review D-33,
-  2026-07-05).** The `remediate-code.mjs` CLI entrypoint intercepts those verbs and always routes to
-  `wrapper/remediate-code-wrapper-install-hosts.mjs`, so `src/remediate/index.ts`'s own `.command("install")`
-  (itself labelled "Deprecated compatibility alias") is unreachable through the real CLI → dead code. Delete
-  the unreachable command (and confirm the wrapper covers every verb it claimed) per the ideal-code /
-  delete-legacy-paths preference. Fold into the next remediate cleanup pass.
-
-- **Audit-code host-asset drift is un-guarded on two files (doc-review D-45, 2026-07-05).** Remediate-code's
-  generated host assets have drift tests; audit-code's `.agent/skills/audit-code/SKILL.md` and
-  `.github/prompts/audit-code.prompt.md` have **none** — and `.github/prompts/audit-code.prompt.md` currently
-  differs from its canonical source *undetected* (frontmatter `name`/`description`/`agent` vs canonical
-  `description`/`argument-hint`/`allowed-tools`, plus a stray leading blank line). Add an audit-code-side
-  renderer drift test mirroring remediate's (`tests/audit/host-asset-renderer-drift.test.mjs` covers the
-  skill assets but not these two) and re-render the drifted prompt from canonical. (The broader
-  doc-manifest-scope question — should these + the other 15 un-manifested `*.md` be formally in/out of
-  `doc-review-guidelines.md`'s table — is doc-review D-45(a), still an owner judgment call.)
-
 - **CI test redundancy: the vitest suite runs ~3× per push across workflows (observed 2026-07-04).** After
   sharding `ci.yml` + `publish-package.yml` (vitest = ~93% of the release gate; now sharded 4 ways → ~2×
   faster gate), `audit-code-test-suite.yml` still runs the *full* `npm test` on Node 20 **and** 22 (its
@@ -278,6 +261,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 - **Gated live e2es** skip without creds: `RUN_PROVIDER_MATRIX_E2E=1`, `RUN_NIM_E2E=1`,
   `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_AUTONOMY_E2E=1`.
 - **Provider `queryLimits`** deferred — revisit if a provider gains a real proactive rate-limit endpoint.
+- **Doc-manifest scope for non-`docs/` host assets (doc-review D-45(a), owner call).** `.github/prompts/audit-code.prompt.md`, `.agent/skills/audit-code/SKILL.md`, and ~15 other un-manifested `*.md` outside `docs/` are not covered by `check-doc-manifest.mjs` (it scopes to `docs/**`). Now that a renderer drift guard pins the two audit host assets, the only residual is whether these should be *formally* listed in `doc-review-guidelines.md`'s routing table — a low-value owner judgment call, not code work.
 - **Narrow staleness on prose-heavy artifacts via bounded semantic judgment.** Prose-heavy fields feed
   downstream LLM prompts; a cosmetic edit forces wasteful re-emit. The narrowing = bounded judgment on
   meaning change, fail-safe to re-derive. Efficiency-only; defer until re-emit churn is measured.

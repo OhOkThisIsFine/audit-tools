@@ -8,7 +8,10 @@ import {
   renderAntigravityPlanningGuide,
   renderGeminiCommandToml,
 } from "../../wrapper/audit-code-wrapper-install-renderers.mjs";
-import { buildInstallDirective } from "../../wrapper/audit-code-wrapper-install-hosts.mjs";
+import {
+  buildInstallDirective,
+  renderVSCodePromptFile,
+} from "../../wrapper/audit-code-wrapper-install-hosts.mjs";
 import { assertOpenCodeAuditPermissionConfig } from "../../wrapper/audit-code-wrapper-opencode.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -115,6 +118,41 @@ test("no-drift: committed .github/agents/auditor.agent.md equals a fresh render 
     ),
   );
   expect(committed, "Committed VS Code agent file drifted from the canonical body. Re-run `audit-code install` (or regenerate the asset).").toBe(lf(RENDERED_ASSETS["vscode-agent"]));
+});
+
+// The VS Code / GitHub prompt asset carries HOST-SPECIFIC frontmatter
+// ({name, description, agent}) that the installer generates via
+// renderVSCodePromptFile — it is deliberately NOT the canonical skill-prompt
+// frontmatter ({description, argument-hint, allowed-tools}). The correct
+// no-drift baseline is therefore the generator, not the canonical file's own
+// frontmatter. This guard renders through that exact generator so a genuine
+// drift (stale body or hand-edited frontmatter) is caught, while the by-design
+// frontmatter difference is not mistaken for one.
+test("no-drift: committed .github/prompts/audit-code.prompt.md equals a fresh render of the canonical body", () => {
+  const committed = lf(
+    readFileSync(
+      join(repoRoot, ".github", "prompts", "audit-code.prompt.md"),
+      "utf8",
+    ),
+  );
+  expect(committed, "Committed .github/prompts/audit-code.prompt.md drifted from renderVSCodePromptFile(canonicalBody). Re-run `audit-code install` (or regenerate the asset).").toBe(lf(renderVSCodePromptFile(canonicalBody)));
+});
+
+// The Antigravity skill asset is a verbatim copy of the canonical skill source
+// (writeAntigravityAssets writes skillSource unrendered), so its no-drift
+// invariant is byte-equality with skills/audit-code/SKILL.md — mirroring the
+// remediate-code committed-host-asset guard.
+test("no-drift: committed .agent/skills/audit-code/SKILL.md equals the canonical skills/audit-code/SKILL.md", () => {
+  const committed = lf(
+    readFileSync(
+      join(repoRoot, ".agent", "skills", "audit-code", "SKILL.md"),
+      "utf8",
+    ),
+  );
+  const canonical = lf(
+    readFileSync(join(repoRoot, "skills", "audit-code", "SKILL.md"), "utf8"),
+  );
+  expect(committed, "Committed .agent/skills/audit-code/SKILL.md drifted from the canonical skills/audit-code/SKILL.md. Re-run `audit-code install` (or regenerate the asset).").toBe(canonical);
 });
 
 // ── no-drift guard: managed-block + merge-target host assets ──────────────────
