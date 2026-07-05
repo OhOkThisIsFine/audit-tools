@@ -69,8 +69,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     ledger layers on top); reserve an output ENVELOPE (declared cap → learned output/input ratio) not just
     input; probe-then-widen cold-start ONLY when the resourceKey has no learned slope; FIFO on the ledger
     lock (no per-consumer shares until starvation observed); explain-artifact records every admission. See
-    the spec's *Resolved decisions* section. Ships under one atomic-replace change (new admission loop +
-    ledger + `max_concurrent_agents` scalar deletion together).
+    the spec's *Resolved decisions* section. **Build status (2026-07-05):** commit 1 (substrate `5e0a4479`) +
+    commit 2a (in-process rolling-engine ledger wiring — `admitAgainstLedger` leases before `dispatchOnePacket`,
+    reconciles at `handleResult`, liveness backstop off ledger `outstandingBefore`; additive/default-off; tests in
+    `tests/shared/reservation-dispatch-overshoot.test.mjs`) shipped. **Next = commit 2b:** the atomic scalar
+    replace on the host-dispatch prompt path (schema v1alpha3, grant-the-admitted-set, both orchestrators) — see
+    HANDOFF T5.3 for the line-ref map. Ships under one atomic-replace change (scalar deletion + replacement
+    together).
   - **Audit dispatch can't fan out across host + codex + NIM concurrently — parity gap with remediate
     (observed 2026-07-04).** On a Claude-driven host-subagent dispatch step, dispatch-quota established a
     *single* `codex` pool (slots:2, `binding_cap: token_budget` off codex's 45% quota) even though

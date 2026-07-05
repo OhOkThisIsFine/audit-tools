@@ -48,6 +48,7 @@ import {
 import { buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "../quota/capacity.js";
 import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { detectRateLimitError, computeCooldownUntil } from "../quota/errorParsing.js";
+import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { tierRank } from "./tierRank.js";
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,14 @@ export interface InFlightEntry<TPacket> {
   startedAt: number;
   estimatedTokens: number;
   promise: Promise<RollingDispatchResult<TPacket>>;
+  /**
+   * Reservation-ledger lease held for this in-flight packet (spec admission model).
+   * Set only when a `reservationLedger` was configured; reconciled (freed) in
+   * `handleResult` when the packet completes. `resourceKey` is the pool id the lease
+   * was taken against, needed to reconcile. Null/undefined when no ledger is wired.
+   */
+  leaseId?: string | null;
+  resourceKey?: string;
 }
 
 /** Mutable state of the rolling dispatcher. */
@@ -199,6 +208,37 @@ export interface RollingDispatchConfig<TPacket> {
     packet: RollingDispatchPacket<TPacket>,
     result: RollingDispatchResult<TPacket>,
   ) => void;
+  /**
+   * Shared token-reservation ledger (spec/audit/dispatch-admission-control.md, the
+   * proactive admission layer). When supplied, every dispatched packet LEASES its
+   * output-envelope cost against the account-keyed ledger BEFORE dispatch and
+   * reconciles the lease on completion — so two co-located dispatch loops pointed at
+   * the SAME ledger file (same `provider#account/model` meter) each see the other's
+   * outstanding reservations and cannot both optimistically assume the full budget.
+   * The resourceKey is the pool id (`pool.id` is already `provider#account/model`).
+   * Omit to leave the in-process `InFlightTokenTracker` as the sole accounting
+   * (behaviour identical to before this field existed). The reactive 429/backoff
+   * floor still catches any residual under-reservation regardless.
+   */
+  reservationLedger?: ReservationLedger;
+  /**
+   * Live remaining token budget for a pool's resourceKey (its `pool.id`). Consulted
+   * only when `reservationLedger` is set — it is the budget the ledger admits
+   * against (`budget - Σ outstanding_leases >= cost`). Return a non-finite value
+   * (the default) for an optimistic/unbounded budget, in which case the ledger only
+   * prevents co-located double-counting and never gates on an absolute token ceiling.
+   */
+  resolvePoolBudget?: (poolId: string) => number;
+  /**
+   * Output-token envelope (spec Resolved decision 1) added to a packet's INPUT
+   * `estimatedTokens` to form the reservation cost. Consulted only when
+   * `reservationLedger` is set. Default 0 → the lease reserves the input estimate
+   * alone; the reactive floor still catches output under-reservation.
+   */
+  resolveOutputReservation?: (
+    packet: RollingDispatchPacket<TPacket>,
+    poolId: string,
+  ) => number;
 }
 
 /** Options for tuning the dispatcher (intentionally minimal per INV-S05). */
@@ -445,6 +485,9 @@ export function createRollingDispatcher<TPacket>(
     halfLifeHours = DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
     isPacketEscalated,
     recordRateLimit,
+    reservationLedger,
+    resolvePoolBudget,
+    resolveOutputReservation: resolveOutputReservationFn,
   } = config;
 
   const state: RollingDispatchState<TPacket> = {
@@ -560,6 +603,7 @@ export function createRollingDispatcher<TPacket>(
   function dispatchOnePacket(
     packet: RollingDispatchPacket<TPacket>,
     slot: ProviderSlot,
+    lease?: { leaseId: string; resourceKey: string } | null,
   ): void {
     // Remove from pending queue.
     state.pendingQueue = state.pendingQueue.filter((p) => p.id !== packet.id);
@@ -584,9 +628,61 @@ export function createRollingDispatcher<TPacket>(
       startedAt,
       estimatedTokens: packet.estimatedTokens,
       promise,
+      leaseId: lease?.leaseId ?? null,
+      resourceKey: lease?.resourceKey,
     };
 
     state.inFlight.set(packet.id, entry);
+  }
+
+  /**
+   * Admission gate over the shared reservation ledger (proactive admission layer,
+   * spec/audit/dispatch-admission-control.md). Reserves the packet's output-envelope
+   * cost against `slot.poolId`'s live budget BEFORE dispatch, atomically under the
+   * ledger lock so a co-located peer's in-flight leases are visible and optimism is
+   * bounded by ONE budget.
+   *
+   * Returns a discriminated result:
+   *  - `no_ledger` — no ledger configured; dispatch unconditionally (behaviour
+   *    identical to before the ledger existed).
+   *  - `admitted` — carry the lease on the in-flight entry; reconciled on completion.
+   *  - `blocked` — budget minus everyone's outstanding leases cannot cover this
+   *    packet. `outstandingBefore` is the sum of OTHERS' (and this loop's own)
+   *    live leases the ledger saw: `0` means nothing anywhere holds budget, so the
+   *    single packet's cost exceeds the WHOLE budget and no completion will ever
+   *    free room — the caller's liveness backstop force-admits it (the reactive 429
+   *    floor still catches the overshoot). A non-zero value means a lease is
+   *    outstanding and will free budget, so the caller waits instead of forcing.
+   *
+   * `forceUnbounded` overrides the pool budget with +Infinity so the backstop admit
+   * always succeeds.
+   */
+  async function admitAgainstLedger(
+    packet: RollingDispatchPacket<TPacket>,
+    slot: ProviderSlot,
+    forceUnbounded: boolean,
+  ): Promise<
+    | { status: "no_ledger" }
+    | { status: "admitted"; lease: { leaseId: string; resourceKey: string } }
+    | { status: "blocked"; outstandingBefore: number }
+  > {
+    if (!reservationLedger) return { status: "no_ledger" };
+    const resourceKey = slot.poolId;
+    const outputReservation = resolveOutputReservationFn?.(packet, slot.poolId) ?? 0;
+    const cost = Math.max(0, packet.estimatedTokens) + Math.max(0, outputReservation);
+    const budget = forceUnbounded
+      ? Number.POSITIVE_INFINITY
+      : resolvePoolBudget?.(slot.poolId) ?? Number.POSITIVE_INFINITY;
+    const decision = await reservationLedger.admit({
+      resourceKey,
+      cost,
+      budget,
+      poolId: slot.poolId,
+    });
+    if (decision.admitted && decision.leaseId !== null) {
+      return { status: "admitted", lease: { leaseId: decision.leaseId, resourceKey } };
+    }
+    return { status: "blocked", outstandingBefore: decision.outstandingBefore };
   }
 
   async function handleResult(
@@ -605,6 +701,20 @@ export function createRollingDispatcher<TPacket>(
       providerSlot.poolId,
       Math.max(0, (inFlightPerPool.get(providerSlot.poolId) ?? 1) - 1),
     );
+
+    // Reconcile the reservation lease (success OR failure — the request is no
+    // longer in flight either way), returning its reserved budget to the shared
+    // ledger so a co-located peer (or the next pass) can admit against it. The
+    // real token cost surfaces in the provider's next quota snapshot; the ledger's
+    // job is only to stop reserving it. Best-effort: a ledger failure must never
+    // abort dispatch.
+    if (reservationLedger && entry.leaseId && entry.resourceKey) {
+      try {
+        await reservationLedger.reconcile(entry.resourceKey, entry.leaseId);
+      } catch {
+        // Non-fatal: the lease's TTL expiry reclaims it if reconcile ever fails.
+      }
+    }
 
     state.inFlight.delete(packetId);
 
@@ -787,41 +897,80 @@ export function createRollingDispatcher<TPacket>(
     state.pendingQueue = [];
   }
 
+  /**
+   * One dispatch pass: select a pool for each dispatchable packet, gate it through
+   * the reservation ledger (when configured), and dispatch the admitted ones.
+   * Returns how many were dispatched.
+   *
+   * Liveness backstop: a packet the ledger BLOCKS with `outstandingBefore === 0`
+   * has a cost exceeding the WHOLE pool budget while nothing anywhere holds a lease
+   * to ever free room — the FIRST such packet per pass is admitted unbounded so the
+   * run can never deadlock on a single over-budget packet (the reactive 429 floor
+   * still catches the overshoot). A block with outstanding leases (`> 0`) means a
+   * co-located peer or an in-flight packet will free budget, so it waits instead —
+   * this is what stops two co-located loops from both force-admitting into overshoot.
+   */
+  async function dispatchPass(): Promise<number> {
+    let dispatched = 0;
+    let forcedUsed = false;
+    for (const packet of getDispatchablePackets()) {
+      // selectProvider skips pools in exhaustedPoolIds, so a re-queued packet
+      // re-routes to a surviving pool (INV-QD-07).
+      const slot = selectProvider(
+        packet,
+        confirmedPools,
+        inFlightTracker,
+        quotaStateCache.entries,
+        sessionConfig,
+        state.exhaustedPoolIds,
+        state.pausedPoolResetAt,
+        Date.now(),
+      );
+
+      if (slot === null) continue;
+
+      // Apply optional maxConcurrentPerPool cap.
+      if (
+        options.maxConcurrentPerPool !== undefined &&
+        (inFlightPerPool.get(slot.poolId) ?? 0) >= options.maxConcurrentPerPool
+      ) {
+        continue;
+      }
+
+      // Reservation-ledger admission (proactive layer).
+      const admission = await admitAgainstLedger(packet, slot, false);
+      let lease: { leaseId: string; resourceKey: string } | null = null;
+      if (admission.status === "admitted") {
+        lease = admission.lease;
+      } else if (admission.status === "blocked") {
+        if (admission.outstandingBefore === 0 && !forcedUsed && dispatched === 0) {
+          // Single packet exceeds the whole budget with nothing holding a lease →
+          // force it unbounded so the run can't deadlock. Only the first per pass.
+          const forced = await admitAgainstLedger(packet, slot, true);
+          if (forced.status === "admitted") {
+            lease = forced.lease;
+            forcedUsed = true;
+          } else {
+            continue;
+          }
+        } else {
+          continue; // leave pending; a later pass admits once a lease frees.
+        }
+      }
+      // status === "no_ledger" falls through with lease === null (dispatch as before).
+
+      dispatchOnePacket(packet, slot, lease);
+      dispatched++;
+    }
+    return dispatched;
+  }
+
   async function run(): Promise<RollingDispatchResult<TPacket>[]> {
     while (state.pendingQueue.length > 0 || state.inFlight.size > 0) {
       // Dispatch pass: fill quota headroom with pending packets.
       await refreshQuotaStateIfNeeded();
 
-      let dispatched = 0;
-      const dispatchable = getDispatchablePackets();
-
-      for (const packet of dispatchable) {
-        // selectProvider skips pools in exhaustedPoolIds, so a re-queued packet
-        // re-routes to a surviving pool (INV-QD-07).
-        const slot = selectProvider(
-          packet,
-          confirmedPools,
-          inFlightTracker,
-          quotaStateCache.entries,
-          sessionConfig,
-          state.exhaustedPoolIds,
-          state.pausedPoolResetAt,
-          Date.now(),
-        );
-
-        if (slot === null) continue;
-
-        // Apply optional maxConcurrentPerPool cap.
-        if (
-          options.maxConcurrentPerPool !== undefined &&
-          (inFlightPerPool.get(slot.poolId) ?? 0) >= options.maxConcurrentPerPool
-        ) {
-          continue;
-        }
-
-        dispatchOnePacket(packet, slot);
-        dispatched++;
-      }
+      const dispatched = await dispatchPass();
 
       // If nothing is in flight and nothing was dispatched but pending work
       // remains, decide whether to wait or strand:
