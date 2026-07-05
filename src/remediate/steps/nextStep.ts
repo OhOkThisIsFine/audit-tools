@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, createRollingDispatcher, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchPacket, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -28,7 +28,6 @@ import {
   type WorktreeNodeWorker,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
-import { ownershipSubWaves } from "audit-tools/shared";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
 import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { claimWithBackoff, withClaimHeartbeat } from "../../shared/quota/claimLease.js";
@@ -772,125 +771,60 @@ export async function driveRollingDispatch(
     setQuotaStateDir(options.quotaStateDir);
   }
   const estimateTokens = options.estimateTokens ?? (() => 2000);
-  const out: DriveRollingDispatchResult = { levels: [], rebuilds: 0 };
+  const scopeForBlock =
+    options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files ?? []);
+  const blockById = new Map(levels.flat().map((b) => [b.block_id, b]));
+  const hostSession = options.hostSession;
 
-  let rebuildInFlight = false; // single-flight guard (CE-001)
-  for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
-    const level = levels[levelIndex]!;
+  // The remediate terminal adapter over the unified shared driver. What stays here is
+  // remediate's projection: a block → its ownership node (declared write-scope, so the
+  // shared `ownershipSubWaves` serializes same-file nodes / parallelizes disjoint ones)
+  // and → its dispatch packet; the shared rebuild between dependency levels; and the
+  // host-session escalation wiring. The loop, sub-wave split, and quota_paused/empty_pool
+  // terminal merge are the unified driver's.
+  const run = await driveRolling<RemediationBlock, { block_id: string }>({
+    levels,
+    confirmedPools: options.confirmedPools,
+    sessionConfig: options.sessionConfig,
+    toNode: (b) => ({
+      block_id: b.block_id,
+      write_paths: scopeForBlock(b),
+      ...(b.cofile_parallel_safe !== undefined
+        ? { cofile_parallel_safe: b.cofile_parallel_safe }
+        : {}),
+    }),
+    toPacket: (b) => ({
+      id: b.block_id,
+      payload: { block_id: b.block_id },
+      estimatedTokens: estimateTokens(b),
+      complexity: 0.5,
+    }),
+    dispatchPacket: async (packet, slot) =>
+      options.dispatchNode(blockById.get(packet.payload.block_id)!, slot),
+    ...(options.root !== undefined ? { root: options.root } : {}),
+    // Single-flight (CE-001) is enforced by the unified driver.
+    rebuildBetweenLevels: options.rebuildSharedBetweenLevels,
+    // Host-session escalation: feed recordLimit (write) at the rate_limited observation
+    // point and read isEscalated (strand-not-requeue). The SAME instance sized the pools,
+    // so the bounded re-limit count is account-wide.
+    ...(hostSession
+      ? {
+          recordRateLimit: (packet, result) =>
+            hostSession.recordLimit(
+              result.rateLimit?.channel ?? "error",
+              result.rateLimit?.text ?? "",
+              packet.id,
+            ),
+          isPacketEscalated: (packetId) => hostSession.isEscalated(packetId),
+        }
+      : {}),
+  });
 
-    // Interpose the shared rebuild BEFORE every level after the first. Guarded so
-    // it can never run twice or concurrently for the same boundary.
-    if (levelIndex > 0) {
-      if (rebuildInFlight) {
-        throw new Error(
-          "driveRollingDispatch: shared rebuild already in flight — single-flight invariant violated (CE-001).",
-        );
-      }
-      rebuildInFlight = true;
-      try {
-        await options.rebuildSharedBetweenLevels();
-        out.rebuilds += 1;
-      } finally {
-        rebuildInFlight = false;
-      }
-    }
-
-    const blockByPacketId = new Map(level.map((b) => [b.block_id, b]));
-    const scopeForBlock =
-      options.scopeForBlock ?? ((b: RemediationBlock) => b.touched_files ?? []);
-
-    // File-ownership-disjoint admission (INV-SOO): split the level into ordered
-    // sub-waves, each a maximal file-disjoint subset (deterministic block_id
-    // tie-break AFTER the disjointness filter, INV-SOO-08). Same-file nodes land
-    // in successive sub-waves (serialize, INV-SOO-01/02) and a freed file becomes
-    // schedulable for the next sub-wave; different-file nodes share a sub-wave and
-    // parallelize up to the quota cap the dispatcher enforces (INV-SOO-03/05).
-    const subWaves = ownershipSubWaves(
-      level.map((b) => ({
-        block_id: b.block_id,
-        write_paths: scopeForBlock(b),
-        ...(b.cofile_parallel_safe !== undefined
-          ? { cofile_parallel_safe: b.cofile_parallel_safe }
-          : {}),
-      })),
-      options.root,
-    );
-
-    const levelResults: RollingDispatchResult<{ block_id: string }>[] = [];
-    for (const wave of subWaves) {
-      const packets: RollingDispatchPacket<{ block_id: string }>[] = wave.map(
-        (node) => ({
-          id: node.block_id,
-          payload: { block_id: node.block_id },
-          estimatedTokens: estimateTokens(blockByPacketId.get(node.block_id)!),
-          complexity: 0.5,
-        }),
-      );
-      const hostSession = options.hostSession;
-      const dispatcher = createRollingDispatcher<{ block_id: string }>({
-        confirmedPools: options.confirmedPools,
-        sessionConfig: options.sessionConfig,
-        dispatchPacket: async (packet, slot) => {
-          const block = blockByPacketId.get(packet.payload.block_id)!;
-          return options.dispatchNode(block, slot);
-        },
-        // Host-session escalation: feed recordLimit (write) at the rate_limited
-        // observation point and read isEscalated (strand-not-requeue). The SAME
-        // instance sized the pools, so the bounded re-limit count is account-wide.
-        ...(hostSession
-          ? {
-              recordRateLimit: (packet, result) =>
-                hostSession.recordLimit(
-                  result.rateLimit?.channel ?? "error",
-                  result.rateLimit?.text ?? "",
-                  packet.id,
-                ),
-              isPacketEscalated: (packetId) => hostSession.isEscalated(packetId),
-            }
-          : {}),
-      });
-      dispatcher.enqueue(packets);
-      levelResults.push(...(await dispatcher.run()));
-      // Piece D: surface the wave's partial-completion terminal (quota_paused /
-      // empty_pool). Aggregate across waves keeping the EARLIEST-reset quota_paused
-      // terminal (a paused wave is retryable and should resume soonest); union the
-      // stranded ids so a later step re-dispatches all of them. An empty_pool
-      // terminal only stands when no quota_paused terminal was seen.
-      out.terminal = mergePartialTerminals(out.terminal, dispatcher.getTerminal());
-    }
-    out.levels.push({ blockIds: level.map((b) => b.block_id), results: levelResults });
-  }
-
-  return out;
-}
-
-/**
- * Fold a newly-observed partial-completion terminal into the run's aggregate
- * (piece D). Prefers `quota_paused` (retryable) over `empty_pool`; among
- * quota_paused terminals keeps the EARLIEST `earliest_reset_at`; always unions the
- * stranded ids so no stranded node is lost across waves.
- */
-function mergePartialTerminals(
-  prior: PartialCompletionTerminal | undefined,
-  next: PartialCompletionTerminal | null,
-): PartialCompletionTerminal | undefined {
-  if (!next) return prior;
-  if (!prior) return next;
-  const strandedIds = [...new Set([...prior.stranded_ids, ...next.stranded_ids])];
-  const priorPaused = prior.reason === "quota_paused";
-  const nextPaused = next.reason === "quota_paused";
-  if (priorPaused || nextPaused) {
-    const resets = [prior.earliest_reset_at, next.earliest_reset_at].filter(
-      (r): r is string => typeof r === "string",
-    );
-    const earliest = resets.length > 0 ? resets.sort()[0]! : undefined;
-    return {
-      reason: "quota_paused",
-      stranded_ids: strandedIds,
-      ...(earliest ? { earliest_reset_at: earliest } : {}),
-    };
-  }
-  return { reason: prior.reason, stranded_ids: strandedIds };
+  return {
+    levels: run.levels.map((l) => ({ blockIds: l.nodeIds, results: l.results })),
+    rebuilds: run.rebuilds,
+    ...(run.terminal ? { terminal: run.terminal } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,18 +1,19 @@
 /**
  * audit-code rolling dispatch consumer.
  *
- * Wraps the audit-tools/shared createRollingDispatcher with a higher-level
- * runRollingDispatch function that:
- * 1. Accepts the RollingDispatchEngineContract interface (pinned seam, N-X06).
- * 2. Resolves the provider pool to CapacityPool entries.
- * 3. Delegates livelock detection to detectLivelock from audit-tools/shared.
- * 4. Returns a typed RollingRunResult with termination status.
+ * The per-orchestrator TERMINAL adapter over the unified shared driver
+ * (`driveRolling`): audit is the read-only degenerate case — one level of read-only
+ * nodes that collapse into a single maximal parallel sub-wave (one dispatcher over all
+ * packets), so the level/sub-wave machinery no-ops and this reproduces the old flat pass.
+ * This wrapper adds audit's own terminal layer on top: the `RollingDispatchEngineContract`
+ * seam (N-X06), the empty-pool early return, DC-4 livelock detection, and the typed
+ * `RollingRunResult` with `exhausted_pool_ids` the resume path carries.
  */
 
 import type { SessionConfig, PartialCompletionReason } from "audit-tools/shared";
 import {
-  createRollingDispatcher,
   detectLivelock,
+  driveRolling,
   ROLLING_DISPATCH_ENGINE_VERSION,
 } from "audit-tools/shared";
 import type {
@@ -76,8 +77,6 @@ export async function runRollingDispatch<TPacket>(
   ) => Promise<RollingDispatchResult<TPacket>>,
 ): Promise<RollingRunResult<TPacket>> {
   const livelockLimit = contract.livelockGuard ?? 3;
-  const allResults: RollingDispatchResult<TPacket>[] = [];
-  let consecutiveNoProgress = 0;
 
   // Pool filtering happens upstream (providerConfirmation). Trust the caller's
   // pool list — a filter that always returns true is a contract lie (INV-07).
@@ -101,45 +100,44 @@ export async function runRollingDispatch<TPacket>(
   }
 
   let dispatchedCount = 0;
-  const dispatcher = createRollingDispatcher<TPacket>(
-    {
-      confirmedPools: activePools,
-      sessionConfig,
-      dispatchPacket,
-      recordRateLimit: contract.recordRateLimit,
-      isPacketEscalated: contract.isPacketEscalated,
-      onResult: (result) => {
-        allResults.push(result);
-        contract.onResult?.(result);
-        // Reset no-progress counter on any result.
-        consecutiveNoProgress = 0;
-        // FND-OBS-99e3a861: emit a structured progress line on each result so
-        // operators can monitor dispatch execution without waiting for terminal state.
-        dispatchedCount++;
-        process.stderr.write(
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            source: "audit-code:rollingDispatch",
-            event: "packet_result",
-            packet_id: result.packet.id,
-            outcome: result.outcome,
-            completed: dispatchedCount,
-            total: packets.length,
-          }) + "\n",
-        );
-      },
+  // ONE level of READ-ONLY nodes (audit writes nothing to the target tree), which
+  // `ownershipSubWaves` collapses into a single maximal parallel sub-wave — one
+  // dispatcher over every packet, identical to the old flat pass. The items ARE the
+  // packets (`toPacket` is identity).
+  const run = await driveRolling<RollingDispatchPacket<TPacket>, TPacket>({
+    levels: [packets],
+    confirmedPools: activePools,
+    sessionConfig,
+    toNode: (packet) => ({ block_id: packet.id, write_paths: [], read_only: true }),
+    toPacket: (packet) => packet,
+    dispatchPacket,
+    ...(contract.recordRateLimit ? { recordRateLimit: contract.recordRateLimit } : {}),
+    ...(contract.isPacketEscalated ? { isPacketEscalated: contract.isPacketEscalated } : {}),
+    onResult: (result) => {
+      contract.onResult?.(result);
+      // FND-OBS-99e3a861: emit a structured progress line on each result so
+      // operators can monitor dispatch execution without waiting for terminal state.
+      dispatchedCount++;
+      process.stderr.write(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          source: "audit-code:rollingDispatch",
+          event: "packet_result",
+          packet_id: result.packet.id,
+          outcome: result.outcome,
+          completed: dispatchedCount,
+          total: packets.length,
+        }) + "\n",
+      );
     },
-  );
+  });
 
-  dispatcher.enqueue(packets);
-
-  // Run the engine — it drives all packets to completion.
-  const results = await dispatcher.run();
+  const results = run.allResults;
 
   // Pools the engine exhausted this pass (spill + reactive re-route already tried
   // and failed to keep them eligible). These seed the resumable pause's settled
   // exclusion set (DC-4) so re-discovery never re-offers them as net-new.
-  const exhaustedPoolIds = [...dispatcher.getState().exhaustedPoolIds];
+  const exhaustedPoolIds = run.exhaustedPoolIds;
 
   // Check for livelock post-run (packets that never completed).
   const completedIds = new Set(results.map((r) => r.packet.id));

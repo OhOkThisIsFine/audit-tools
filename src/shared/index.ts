@@ -1102,6 +1102,16 @@ export {
 } from "./dispatch/ownershipScheduler.js";
 export type { OwnershipSchedulerNode } from "./dispatch/ownershipScheduler.js";
 
+// The unified in-process rolling driver — the ONE level/sub-wave loop both
+// orchestrators drive above `createRollingDispatcher`; each keeps only its own
+// terminal/result-routing adapter (audit livelock+DC-4, remediate quota_paused merge).
+export { driveRolling } from "./dispatch/unifiedRolling.js";
+export type {
+  UnifiedRollingConfig,
+  UnifiedRollingLevelResult,
+  UnifiedRollingResult,
+} from "./dispatch/unifiedRolling.js";
+
 // Hybrid spill coordinator (A-8) — the ONE assignment layer both dispatch drivers
 // drive identically: claim-before-assign (CE-001), co-owned SettledExclusionSet,
 // proactive capacity split through the single S4 fold, and the sole pause-authorizing
