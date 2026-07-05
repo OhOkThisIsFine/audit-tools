@@ -173,6 +173,7 @@ export {
   PROVIDER_SECTION_KEYS,
   ANALYZER_SETTINGS,
   AnalyzerSettingSchema,
+  resolveHostProviderName,
 } from "./types/sessionConfig.js";
 
 // Contracts

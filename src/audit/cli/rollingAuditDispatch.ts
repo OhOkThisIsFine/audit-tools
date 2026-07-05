@@ -40,6 +40,8 @@ import {
   withSourceConfig,
   sourceByPoolId,
   captureStepBoundaryFriction,
+  resolveHostProviderName,
+  type ResolvedProviderName,
 } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -111,6 +113,29 @@ export function resolvesToInProcessDispatchProvider(
 ): boolean {
   const provider = sessionConfig?.provider;
   return provider !== undefined && IN_PROCESS_DISPATCH_PROVIDERS.has(provider);
+}
+
+/**
+ * The identity of the auditor DRIVING the host-review fan-out this invocation —
+ * what the host-review dispatch pool is keyed to (and charged against). When
+ * `sessionConfig.provider` names a headless in-process backend (codex / opencode /
+ * openai-compatible), that provider is the WORKER, never the driver: the
+ * conversation host that reached the host-review path is `claude-code` (or an
+ * explicit IDE host). So a headless-backend provider — or an unset / `auto`
+ * provider — resolves to the conversation host.
+ *
+ * This is the founding-bug fix ([[capability-is-per-auditor-not-per-audit]]): a run
+ * started with `provider: codex` and later resumed by a Claude host never keys or
+ * charges the host fan-out against codex's meter. `sessionConfig.provider` is thus
+ * demoted to the headless in-process pool only. An explicit conversation-host
+ * provider (vscode-task / antigravity / local-subprocess / claude-code) IS a driver
+ * and passes through unchanged.
+ */
+export function resolveHostDispatchProviderName(
+  sessionConfig: SessionConfig | null | undefined,
+): ResolvedProviderName {
+  if (resolvesToInProcessDispatchProvider(sessionConfig)) return "claude-code";
+  return resolveHostProviderName(sessionConfig);
 }
 
 /**

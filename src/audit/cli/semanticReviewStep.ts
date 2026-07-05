@@ -3,10 +3,8 @@ import type { HostModelRosterEntry, ResolvedProviderName } from "audit-tools/sha
 import { classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
-import {
-  createFreshSessionProvider,
-  resolveFreshSessionProviderName,
-} from "../providers/index.js";
+import { createFreshSessionProvider } from "../providers/index.js";
+import { resolveHostDispatchProviderName } from "./rollingAuditDispatch.js";
 import { renderCommand } from "./args.js";
 import { writeCurrentStep } from "./steps.js";
 import {
@@ -89,10 +87,12 @@ export async function renderSemanticReviewStep(params: {
   // sibling caller (advanceAuditCommand/nextStepCommand/prepareDispatchCommand/
   // quotaCommand), which all let the error propagate.
   const sessionConfig = await loadSessionConfig(artifactsDir);
-  const providerName = resolveFreshSessionProviderName(
-    sessionConfig.provider === undefined ? "auto" : undefined,
-    sessionConfig,
-  );
+  // The host-review dispatch pool is keyed to the CURRENT driver's identity, never
+  // an inherited headless-backend `sessionConfig.provider` (the founding capability-
+  // inheritance bug): a run started under `provider: codex` and resumed by a Claude
+  // host must size/charge the fan-out against the host's meter, not codex's. See
+  // `resolveHostDispatchProviderName` ([[capability-is-per-auditor-not-per-audit]]).
+  const providerName = resolveHostDispatchProviderName(sessionConfig);
   const provider = createFreshSessionProvider(providerName, sessionConfig);
   const dispatch = await prepareDispatchArtifacts({
     packageRoot,

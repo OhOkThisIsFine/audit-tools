@@ -15,6 +15,21 @@ export const PROVIDER_NAMES = [
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export type ResolvedProviderName = Exclude<ProviderName, "auto">;
 
+/**
+ * The host's resolved provider identity for quota-key / driver-classification:
+ * the configured `sessionConfig.provider`, defaulting to the conversation host
+ * (`claude-code`) when unset or `auto`. Single-sourced so the `?? "claude-code"`
+ * default and the `auto`-exclusion live in ONE place rather than being re-spelled
+ * (with an ad-hoc cast) at each dispatch call site across both orchestrators.
+ */
+export function resolveHostProviderName(
+  sessionConfig: { provider?: ProviderName } | null | undefined,
+): ResolvedProviderName {
+  const provider = sessionConfig?.provider;
+  if (provider === undefined || provider === "auto") return "claude-code";
+  return provider;
+}
+
 export const SESSION_UI_MODES = ["visible", "headless"] as const;
 export type SessionUiMode = (typeof SESSION_UI_MODES)[number];
 
