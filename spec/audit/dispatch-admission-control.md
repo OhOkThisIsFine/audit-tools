@@ -223,6 +223,55 @@ allows and hands the host exactly that granted set; the granted set is the
 instantaneous admission width, not a reported concurrency. "Concurrency is not the
 thing to think about" — budget is.
 
+## Host-path admission shape (2b build) — resolved
+
+The model above says the tool "hands the host exactly that granted set." That has
+more than one faithful implementation; these are pinned so any-strength builder lands
+the SAME atomic replace (auditor-agnostic robustness — the build must not depend on the
+agent re-deriving the shape). They apply to the host-dispatch prompt path in BOTH
+orchestrators (audit `dispatch_review`, remediate rolling session).
+
+- **The plan stays whole; a `granted_packet_ids` list carries the admission.** The
+  dispatch plan is NOT re-emitted as a shrinking subset each step. The tool runs ledger
+  admission at the dispatch step and writes the admitted ids plus the per-admission
+  explain records (`{pool_id, resourceKey, headroom_before, estimate, output_reservation,
+  decision, outstanding_leases}`, Resolved decision 3) onto the dispatch-quota artifact;
+  the host dispatches EXACTLY `granted_packet_ids` and nothing else. This keeps the plan
+  a stable content-addressed artifact (one home for the packet set), puts the granted
+  set and its explain records in one place, and makes the host's rule trivial ("dispatch
+  these ids"). Leases are taken at grant; reconciled at result-ingest (merge-and-ingest /
+  accept-node); the next `next-step` re-grants from the still-pending remainder until the
+  plan is exhausted. The granted set's size is the instantaneous admission width —
+  emergent, never a computed/reported number. (Rejected alternative: emitting only the
+  granted subset into the plan/prompt each step — it forks the plan artifact across steps
+  and loses the stable whole-plan identity.)
+
+- **Admission is orthogonal to the top-K coverage budget — two distinct axes, applied in
+  order.** The existing `max_packets` top-K cap (`filterPackets` → `deferred_packet_ids`)
+  is a COVERAGE budget: which packets are in scope for the whole run. Ledger admission is
+  a QUOTA gate: how many of the in-scope packets are granted THIS step. Top-K filters
+  first (bounding the plan); admission then grants a subset of what survives. They never
+  fold into each other: a top-K deferral is permanent for the run (out of scope), an
+  admission deferral is transient (re-granted next step once a lease frees). Both may be
+  present at once; the plan carries the top-K survivors, `granted_packet_ids` carries the
+  admitted subset of those.
+
+- **The per-pool budget the ledger admits against comes from the pool's live quota
+  snapshot, not a new source.** `resolvePoolBudget(pool.id)` returns the live remaining
+  TOKENS for the resourceKey: `remaining_pct × learned tokens_per_pct` for the binding
+  window (MIN across the pool's windows), using the slope `rollingDispatch.ts` already
+  learns (`recordTokensPerPctObservation`) and the snapshot the quota source already
+  supplies. Cold start (no learned slope for the resourceKey) → probe-then-widen
+  (Resolved decision 4): a deliberately narrow first grant, widening as the first
+  completions calibrate the slope. **On the claude-code host path the slope never
+  learns** (the host returns no actual-usage number), so there the operative budget is
+  the declared-cap output envelope only (Resolved decision 1) — the ledger prevents
+  co-located double-counting but never gates on an absolute token ceiling; the reactive
+  429 floor remains the safety. The token-budget path is live only where a provider
+  reports usage (NIM/openai-compatible), and its live validation is the env-bound item
+  tracked in `docs/backlog.md` (quota-aware dispatch). See
+  [[claude-usage-endpoint-body-shape]] / [[cross-provider-quota-matrix]].
+
 ## Validation criteria (how we'd know it works)
 
 - A flagless resume by a *different* auditor never sizes against or charges the
