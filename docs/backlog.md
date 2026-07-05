@@ -308,6 +308,13 @@ Standing gotchas worth keeping for any agent (strong or weak):
   does NOT replace it, and bins run your working-tree dist; invoking a bin *through* the junction path
   can also produce odd artifacts. Fix: `npm rm -g audit-tools` FIRST, then reinstall, and verify
   `(Get-Item <globaldir>).LinkType` is empty before trusting the smoke. (See [[audit-code-global-bin-traps]].)
+- **A NEW `.claude/hooks/*.mjs` needs an explicit `!.claude/hooks/<name>` re-include in `.gitignore`.**
+  `.gitignore` ignores `.claude/hooks/*` then allowlists each tracked hook by name (deliberate — never ship
+  arbitrary `.claude` files). Adding a hook and committing WITHOUT the `!` exception silently drops the file
+  from the commit; if `.claude/settings.json` (committed) references it, main now points at an untracked hook
+  = broken state. Add the `!.claude/hooks/<name>` line in the same commit as the hook + its settings.json
+  registration. (Bit once 2026-07-05: `friction-stop-gate.mjs`.)
+
 - **The Bash tool mangles Windows backslash paths** (`C:\a\b` → `C:ab`) → use forward slashes or the
   PowerShell tool for absolute-path commands.
 - **PowerShell**: assign `foreach` output to a var before piping to `ConvertTo-Json`; `-Filter` is not regex
