@@ -74,8 +74,13 @@ export async function withClaimHeartbeat<T>(
   const setIntervalImpl = options.setIntervalFn ?? setInterval;
   const clearIntervalImpl = options.clearIntervalFn ?? clearInterval;
   let revoked = false;
+  // Track the most recent tick's async heartbeat so it can be settled at teardown —
+  // otherwise a fire-and-forget registry WRITE started by the final tick can land AFTER
+  // this call resolves and the caller has moved on (releasing the claim / removing the
+  // run dir), refreshing a claim the caller is done with (and racing any dir teardown).
+  let pendingHeartbeat: Promise<void> = Promise.resolve();
   const timer = setIntervalImpl(() => {
-    void registry
+    pendingHeartbeat = registry
       .heartbeat(nodeId, ownerToken)
       .then((stillOwned) => {
         if (!stillOwned && !revoked) {
@@ -94,5 +99,7 @@ export async function withClaimHeartbeat<T>(
     return await fn();
   } finally {
     clearIntervalImpl(timer);
+    // Settle any in-flight heartbeat write so none outlives the guarded call.
+    await pendingHeartbeat;
   }
 }
