@@ -101,6 +101,71 @@ describe("INV-SOO-03: pairwise-disjoint nodes share one sub-wave (parallelize)",
 });
 
 // ---------------------------------------------------------------------------
+// 3-case disjointness: read-only nodes are a distinct case from empty-scope
+// ---------------------------------------------------------------------------
+
+describe("read_only nodes admit in full parallel (one maximal sub-wave) — the auditor degenerate case", () => {
+  const roNode = (block_id: string): OwnershipSchedulerNode => ({
+    block_id,
+    write_paths: [],
+    read_only: true,
+  });
+
+  it("an all-read-only level collapses into ONE sub-wave (full parallel)", () => {
+    const level = [roNode("A-3"), roNode("A-1"), roNode("A-2")];
+    const waves = ownershipSubWaves(level);
+    // Read-only ⇒ conflicts with nothing ⇒ every node in the single first sub-wave.
+    expect(waves).toHaveLength(1);
+    expect(waves[0]).toHaveLength(3);
+  });
+
+  it("read_only is DISTINCT from an empty/undeclared scope: empty serializes solo, read_only parallelizes", () => {
+    // Same empty write_paths, opposite meaning: B-* are unresolved (serial); A-* are
+    // provably read-only (parallel). Read-only must NOT inherit the empty-scope gating.
+    const emptyLevel = [node("B-1", []), node("B-2", [])];
+    expect(ownershipSubWaves(emptyLevel)).toHaveLength(2); // unresolved ⇒ solo each
+
+    const roLevel = [
+      { block_id: "A-1", write_paths: [], read_only: true },
+      { block_id: "A-2", write_paths: [], read_only: true },
+    ];
+    expect(ownershipSubWaves(roLevel)).toHaveLength(1); // read-only ⇒ co-admitted
+  });
+
+  it("read-only nodes are inert to the conflict logic: writers still partition normally around them", () => {
+    // A same-file writer pair must still serialize; read-only nodes join the first
+    // sub-wave without displacing that partitioning.
+    const level = [
+      { block_id: "A-1", write_paths: [], read_only: true },
+      node("B-1", ["src/x.ts"]),
+      node("B-2", ["src/x.ts"]), // same file as B-1 → next sub-wave
+      { block_id: "A-2", write_paths: [], read_only: true },
+    ];
+    const waves = ownershipSubWaves(level);
+    // Two sub-waves (the same-file writer pair serializes); both read-only nodes ride
+    // the first sub-wave alongside the first writer.
+    expect(waves).toHaveLength(2);
+    expect(waves[0].map((n) => n.block_id).sort()).toEqual(["A-1", "A-2", "B-1"]);
+    expect(waves[1].map((n) => n.block_id)).toEqual(["B-2"]);
+  });
+
+  it("a read-only node does not displace an empty-scope node's solo admission", () => {
+    // The empty-scope (unresolved) node must still be admitted solo-among-writers even
+    // when a read-only node shares its sub-wave (read-only isn't a writer).
+    const level = [
+      { block_id: "A-1", write_paths: [], read_only: true },
+      node("B-1", []), // unresolved scope
+      node("C-1", ["src/y.ts"]), // a writer → must NOT co-admit with the empty-scope node
+    ];
+    const waves = ownershipSubWaves(level);
+    const emptyWave = waves.find((w) => w.some((n) => n.block_id === "B-1"))!;
+    // B-1 shares its wave with the read-only A-1 but NOT with the writer C-1.
+    expect(emptyWave.map((n) => n.block_id).sort()).toEqual(["A-1", "B-1"]);
+    expect(emptyWave.some((n) => n.block_id === "C-1")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // INV-SOO-03 / 05 (integration): real peak in-flight through driveRollingDispatch
 // ---------------------------------------------------------------------------
 

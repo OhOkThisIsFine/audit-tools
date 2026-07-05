@@ -22,6 +22,17 @@
  * region-disjoint upstream). If either lacks the flag they serialize into
  * successive sub-waves exactly as before — the conservative default is unchanged.
  *
+ * Three disjointness cases, not two (the read-only distinction): (1) a node that is
+ * provably READ-ONLY (`read_only === true`, no writes at all) conflicts with nothing
+ * and admits into any sub-wave — all read-only nodes collapse into the first maximal
+ * sub-wave (this is how an auditor, which writes nothing, runs fully parallel as a
+ * degenerate case of the same scheduler); (2) a node with a DECLARED write-scope
+ * batches file-disjointly (the `cofile_parallel_safe` relaxation above); (3) a node
+ * with an EMPTY/undeclared scope is conservatively non-disjoint and admits solo among
+ * writers. Case (1) is distinct from case (3): an empty `write_paths` means "scope
+ * unresolved, might touch anything" (serialize), whereas `read_only` means "provably
+ * touches nothing" (always parallel).
+ *
  * Pure and deterministic — no I/O, no Set/Map iteration-order leak — so the
  * admission order is reproducible and unit-testable against a precomputed level.
  */
@@ -39,6 +50,15 @@ export interface OwnershipSchedulerNode {
    * Absent/false ⇒ the node serializes vs. any same-file peer exactly as before.
    */
   cofile_parallel_safe?: boolean;
+  /**
+   * The node is provably READ-ONLY — it performs no writes to the target tree, so it
+   * can never conflict with any peer at merge and admits into any sub-wave in full
+   * parallel. This is DISTINCT from an empty/undeclared `write_paths`: empty means the
+   * write-scope is *unresolved* (conservatively serial); `read_only` means the node is
+   * *known* to write nothing (an auditor). Absent/false ⇒ the node is treated as a
+   * writer and goes through the normal file-disjointness gating.
+   */
+  read_only?: boolean;
 }
 
 /**
@@ -64,8 +84,9 @@ export function canonicalScopeKeys(
  *
  * A node with an EMPTY canonical scope (unresolved/undeclared) is treated as
  * conservatively NON-disjoint: it only enters a sub-wave by itself (it blocks and
- * is blocked-by every peer), so it never batches with another writer
- * (INV-SOO-01 / CE-008).
+ * is blocked-by every peer writer), so it never batches with another writer
+ * (INV-SOO-01 / CE-008). A `read_only` node is the opposite — it writes nothing, so
+ * it admits into any sub-wave in full parallel (see the three-case note above).
  */
 export function ownershipSubWaves(
   level: OwnershipSchedulerNode[],
@@ -85,15 +106,32 @@ export function ownershipSubWaves(
     // co-batch on a shared key IFF both are `cofile_parallel_safe`.
     const claimant = new Map<string, OwnershipSchedulerNode>();
     let waveHasEmptyScopeNode = false;
+    // A writer or empty-scope node has been admitted to this sub-wave. Gates the
+    // empty-scope node's solo admission: it may enter only when no writer and no
+    // prior empty-scope node is present. A `read_only` co-resident is NOT a writer,
+    // so it never trips this — read-only nodes stay fully inert to the conflict logic.
+    let waveHasWriter = false;
     const leftover: OwnershipSchedulerNode[] = [];
 
     for (const node of remaining) {
       const scope = scopeOf.get(node.block_id)!;
+
+      // Case 1: provably READ-ONLY (writes nothing) ⇒ conflicts with nothing. Admit to
+      // the current sub-wave unconditionally; never claim a path, never set or consult
+      // the writer/empty-scope flags. All read-only nodes therefore collapse into the
+      // first (maximal) sub-wave — an auditor's full-parallel degenerate case.
+      if (node.read_only === true) {
+        wave.push(node);
+        continue;
+      }
+
       const isEmpty = scope.size === 0;
 
-      // Empty-scope node admits only into an otherwise-empty sub-wave (solo).
+      // Case 3: empty/undeclared scope ⇒ conservatively non-disjoint. Admits only into
+      // a sub-wave with no other writer and no prior empty-scope node (solo among
+      // writers; read-only co-residents don't count).
       if (isEmpty) {
-        if (wave.length === 0) {
+        if (!waveHasWriter && !waveHasEmptyScopeNode) {
           wave.push(node);
           waveHasEmptyScopeNode = true;
         } else {
@@ -102,7 +140,7 @@ export function ownershipSubWaves(
         continue;
       }
 
-      // A real-scope node cannot share a wave with an empty-scope node, nor with
+      // Case 2: a real-scope node cannot share a wave with an empty-scope node, nor with
       // any node it shares a canonical path with — UNLESS both this node and every
       // same-file incumbent it collides with are `cofile_parallel_safe`.
       if (waveHasEmptyScopeNode) {
@@ -128,6 +166,7 @@ export function ownershipSubWaves(
       }
       for (const key of scope) claimant.set(key, node);
       wave.push(node);
+      waveHasWriter = true;
     }
 
     subWaves.push(wave);
