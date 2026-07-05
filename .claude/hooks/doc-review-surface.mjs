@@ -108,12 +108,57 @@ try {
   // After filtering, if no list items remain, there's nothing live to surface.
   if (!filtered || !/^\s*[-*]\s/m.test(filtered)) process.exit(0);
 
+  // Emit a BOUNDED digest, never the full verbatim block. Each open item's prose
+  // can run to a paragraph (design questions especially), so a growing backlog
+  // balloons past the harness's SessionStart inline threshold — it then truncates
+  // to a ~2KB preview + a persisted file, so everything past the first couple of
+  // items silently stops reaching context (the 13.8KB regression this fixes). Parse
+  // the block into (section, id, summary) triples, then render at a verbosity that
+  // stays inline: one-line summaries while the backlog is small, a compact
+  // grouped-ID list once it grows past SUMMARY_BUDGET. Either way the full text is
+  // one `git show` away, named in the header.
+  const SUMMARY_MAX = 150;
+  const SUMMARY_BUDGET = 12; // above this many items, drop to IDs-only so it stays inline
+  const sections = [];
+  let itemCount = 0;
+  for (const raw of filtered.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (/^#{2,}\s/.test(line)) {
+      sections.push({ title: line.replace(/^#+\s*/, ''), items: [] });
+      continue;
+    }
+    const id = parseItemId(line);
+    if (!id) continue; // drop continuation/blank lines — the digest is item-keyed
+    itemCount += 1;
+    let summary = line
+      .replace(/^\s*[-*]\s*\[[^\]]+\]\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (summary.length > SUMMARY_MAX) summary = summary.slice(0, SUMMARY_MAX - 1).trimEnd() + '…';
+    if (sections.length === 0) sections.push({ title: 'Open items', items: [] });
+    sections[sections.length - 1].items.push({ id, summary });
+  }
+
+  const verbose = itemCount <= SUMMARY_BUDGET;
+  const digest = [];
+  for (const section of sections) {
+    if (section.items.length === 0) continue;
+    digest.push('\n### ' + section.title + ` (${section.items.length})`);
+    if (verbose) {
+      for (const it of section.items) digest.push(`- [${it.id}] ${it.summary}`);
+    } else {
+      // Compact: just the IDs on one line — the alert survives inline; details via git show.
+      digest.push(section.items.map((it) => it.id).join(', '));
+    }
+  }
+
   process.stdout.write(
-    '# Open doc-review items (nightly routine)\n\n' +
-      'The doc-review routine left items that need you. Review, then have me run ' +
-      '`node .claude/hooks/doc-review-resolve.mjs <ID>...` once applied/rejected ' +
-      'so they stop re-surfacing.\n\n' +
-      filtered +
+    `# Open doc-review items (nightly routine) — ${itemCount} open\n\n` +
+      'The nightly doc-review routine left items that need you. Full text: ' +
+      `\`git show ${usedRef || BRANCH}:${FILE}\` (between the \`DOC-REVIEW-OPEN\` ` +
+      'markers). Once each is applied/rejected, have me run ' +
+      '`node .claude/hooks/doc-review-resolve.mjs <ID>...` so it stops re-surfacing.\n' +
+      digest.join('\n') +
       '\n',
   );
 } catch {

@@ -7,7 +7,7 @@ Single npm package (`audit-tools`) shipping two autonomous step-driven orchestra
 - **audit-code** — audits codebases, produces findings report
 - **remediate-code** — consumes that report (or free-form), applies fixes
 
-Pipeline: audit → report → remediate. Each published independently to npm.
+Pipeline: audit → report → remediate.
 
 ## Concepts
 
@@ -152,7 +152,7 @@ pending → planning → implementing → closing → complete
 
 ## Release & publish
 
-Per-package via `.github/workflows/publish-package.yml`. Triggered by plain `vX.Y.Z` tags (or manual `workflow_dispatch`). Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: `npm ci` → `verify:release` gate → publish.
+Via `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded `vitest run`) jobs → `publish` (needs both).
 
 Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag) or `:publish` variants (also push + create GitHub Release + wait for CI). Use `/ship` skill — encodes trap list (CLAUDECODE unset for gates, CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at push/publish boundary.
 
@@ -163,7 +163,7 @@ Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + comm
 - **One bounded step per invocation.** Neither orchestrator runs to completion in a single call.
 - **Upstream-valid before downstream-refresh.** Don't refresh a downstream artifact until its upstream dependencies are valid (staleness ordering — see *Right tool, not deterministic dogma* for the deterministic-vs-LLM choice itself).
 - **Language-neutral graph.** Edges: `from`, `to`, `kind`, optional `direction`/`confidence`/`reason`. New analyzers enrich shared artifacts, don't fork planning.
-- **Never hardcode model identities.** No model names, context/output windows, tier→model maps, or "available model" lists in backend code. Discover dynamically from host/provider/IDE. Tiering = relative advertised capability (cheapest/mid/top). `KNOWN_MODEL_LIMITS` is legacy to retire. Hardcoded model table = bug.
+- **Never hardcode model identities.** No model names, context/output windows, tier→model maps, or "available model" lists in backend code. Discover dynamically from host/provider/IDE. Tiering = relative advertised capability (cheapest/mid/top). Hardcoded model table = bug.
 - **Everything-agnostic by default.** Provider/backend, host IDE/agent, **OS/platform**, model, shell, and language/ecosystem are ALL runtime-discovered or contract-abstracted — never baked in. The named rules (provider/model/IDE-agnostic, language-neutral, LLM-always-in-the-loop) are *instances* of ONE principle, not a closed list — any new coupling to a specific environment is a bug to fix at the abstraction, not to document as a flag. **OS/platform-agnostic** specifically: no platform-baked path / shell / command / line-ending assumptions in core logic — route them through the existing abstractions (`resolveWindowsShimSpawnCommand`, `normalizeRepoPath`, the `.audit-tools` path module, `toPromptPathToken`, the env-scrub in `spawnLoggedCommand`) so identical code runs on win32 / darwin / linux. When you add a capability, ask "does this assume a particular provider / IDE / OS / model / shell / language?" — if yes, abstract it.
 - **LLM always in the loop.** Conversation-first = host agent is always the provider. Never gate LLM review behind "if a provider exists."
 - **Windows-aware** (the most-exercised instance of *OS-agnostic* above, not the boundary of it). Package-manager shims run through the command shell; `.cmd` / `.ps1` wrappers resolve reliably (`resolveWindowsShimSpawnCommand`).
