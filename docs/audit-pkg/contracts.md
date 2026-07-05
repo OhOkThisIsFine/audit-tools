@@ -167,7 +167,8 @@ Current deterministic reference edges also include package entrypoints, package
 script links, workspace/project module links, JSON Schema `$ref` links, schema
 contract test links, bounded JSON Schema suite links, bounded GitHub Actions
 workflow suite links, bounded package script suite links, bounded TypeScript
-type contract suite links, and deterministic test/source naming links.
+type contract suite links, bounded Python test-utility suite links, and
+deterministic test/source naming links.
 
 Consumers should treat graph evidence by authority:
 
@@ -181,9 +182,9 @@ Consumers should treat graph evidence by authority:
 
 Bounded suite links are intentionally narrow: they connect small, same-directory
 contract suites such as `*.schema.json` files, `.github/workflows/*.yml`
-files, package-script-seeded `scripts/` files, or TypeScript files under
-`types/` directories without turning broad directory proximity into packet
-evidence.
+files, package-script-seeded `scripts/` files, TypeScript files under
+`types/` directories, or Python test-utility modules, without turning broad
+directory proximity into packet evidence.
 
 Analyzer-supplied ownership roots should use this same graph contract instead
 of requiring packet planners to understand a new language-specific artifact.
