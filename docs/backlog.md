@@ -173,6 +173,24 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
+- **Auditor doesn't self-detect SYSTEMIC / whole-corpus issues — the wide-view design reviewers are
+  missing what the granular lenses structurally can't see (owner, 2026-07-05).** Motivating evidence: a
+  couple sprints back an agent was asked why release/publish was slow and found the **test suite is very
+  inefficient** (whole-suite `collect` ~186s, per-file isolation overhead — see the vitest-collect item
+  above). The question is why the *auditor* doesn't surface this itself. The **`tests` lens missing it is
+  expected** — it takes a granular, per-unit view, so a property that only emerges from the *aggregate* of
+  the whole suite (total wall-clock, cross-file setup duplication, isolation strategy) is below its
+  resolution. But the **wide-view design reviewers are supposed to catch exactly this cross-cutting,
+  systemic class — and they aren't.** So the gap is in the review architecture, not the test lens.
+  Open question (owner to hash out, mechanism NOT decided): the per-lens reviews may all be scoped to a
+  file/unit/packet, with no **whole-corpus pass per lens** that reasons over the system as one artifact.
+  One floated candidate is a *global reviewer per lens* (a system-level pass alongside the granular ones)
+  — but that's a candidate to evaluate, not a settled fix; there may be a better framing (e.g. a dedicated
+  systemic/architecture lens, or feeding aggregate metrics into the existing conceptual design critique).
+  Relates to the two design-review modes ([[contract-authoring-determinism-direction]]: contract vs
+  conceptual critique) and the self-detection theme in [[meta-audit-friction-must-be-tool-enforced]].
+  Needs owner decision before any build.
+
 - **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
   (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the
   repair floor (no emit-time prevention). Unblocks only on a provider gaining a constraint endpoint.
