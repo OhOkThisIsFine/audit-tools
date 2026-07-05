@@ -405,11 +405,18 @@ export function selectProvider<TPacket>(
   };
 
   // Capability ordering: high-complexity → descending rank, low-complexity → ascending.
+  // Within an equal-capability tie, balance by current in-flight load (least-loaded
+  // first) so a run of same-complexity packets fans OUT across equal pools rather than
+  // front-loading the first — deliberate multi-pool fan-out even when the pools are
+  // unbounded (defect-1 sub-defect 2). Each dispatch updates the tracker, so the next
+  // same-rank packet in the pass prefers the peer that is now less loaded.
   const sorted = [...confirmedPools]
     .filter((p) => !exhaustedPoolIds.has(p.id) && !isPausedNow(p.id))
     .sort((a, b) => {
       const diff = poolCapabilityRank(b) - poolCapabilityRank(a);
-      return highComplexity ? diff : -diff;
+      const capOrdered = highComplexity ? diff : -diff;
+      if (capOrdered !== 0) return capOrdered;
+      return inFlightTracker.getInFlightTokens(a.id) - inFlightTracker.getInFlightTokens(b.id);
     });
 
   // Ask scheduleWave whether each pool can accept one more slot, accounting for

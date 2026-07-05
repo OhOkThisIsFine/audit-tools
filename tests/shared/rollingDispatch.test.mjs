@@ -729,6 +729,42 @@ test("selectProvider — among healthy pools, capability still decides; health n
 });
 
 // ---------------------------------------------------------------------------
+// selectProvider — least-loaded balancing within an equal-rank tie
+// (defect-1 sub-defect 2: deliberate multi-pool fan-out, even unbounded)
+// ---------------------------------------------------------------------------
+
+test("selectProvider — same-rank pools balance by in-flight load (least-loaded wins the tie)", async () => {
+  const packet = makePacket("p1", { complexity: 0.5, estimatedTokens: 1000 });
+  const poolA = makePool("pool-a");
+  const poolB = makePool("pool-b");
+  const tracker = new InFlightTokenTracker();
+  // pool-a already carries in-flight load; the equal-rank tiebreak must route the next
+  // packet to the LESS-loaded pool-b instead of front-loading pool-a (fan-out).
+  tracker.recordDispatched("pool-a", 5000);
+  const slot = selectProvider(packet, [poolA, poolB], tracker, {}, unlimitedSession());
+  expect(slot.poolId, "load spreads to the least-loaded equal-rank pool").toBe("pool-b");
+});
+
+test("createRollingDispatcher — fans work across two equal UNBOUNDED pools, not front-loading one", async () => {
+  await setupTmpQuotaDir();
+  const usedPools = new Set();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      usedPools.add(slot.poolId);
+      return { packet, outcome: "success" };
+    },
+  });
+  dispatcher.enqueue(Array.from({ length: 6 }, (_, i) => makePacket(`P${i}`)));
+  const results = await dispatcher.run();
+  expect(results.length).toBe(6);
+  // Both equal pools do real work — the least-loaded tiebreak alternates same-rank
+  // packets across pools rather than piling them all on the first (multi-pool fan-out).
+  expect(usedPools.size, "both equal pools received dispatched work").toBe(2);
+});
+
+// ---------------------------------------------------------------------------
 // scorePacketComplexity
 // ---------------------------------------------------------------------------
 
