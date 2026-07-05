@@ -44,6 +44,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   and spawn subprocesses → isolation-off risks cross-test bleed. Only pursue with per-file verification.
   Lower priority than the sharding already shipped.
 
+- **Test-isolation leak: something writes `.audit-tools/audit/session-config.json` into the REPO ROOT
+  during `npm test` (observed 2026-07-05).** A 3-byte `session-config.json` appeared under the repo's own
+  `.audit-tools/audit/` mid-suite (mtime during the full vitest run) — a test/verify step is using the repo
+  root instead of a temp dir for the session-config write. Harmless (gitignored runtime state) but it
+  pollutes the dogfooded tree and initially tripped the new friction Stop-hook (since fixed to key on a real
+  run marker, not mere dir existence). Find the test/step and point its artifactsDir at a temp dir.
+
 - **Friction (ambiguous-direction): a backlog item that prescribes the *fix mechanism* over-reaches; state
   the invariant/bug, not the implementation (observed 2026-07-04).** The now-fixed cwd-drift bullet
   prescribed "anchor `repo_root` by walking up to the git root (or nearest `.audit-tools` marker)". Taken

@@ -19,7 +19,7 @@
 //  - swallows every fs/parse error → exit 0 (a broken backstop must never trap).
 //
 // Exit 0 = allow stop, exit 2 = block (stderr is fed back to the agent).
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Fail open on the kill-switch or a re-entrant stop (already blocked once).
@@ -49,20 +49,21 @@ const RECENT_MS = 12 * 60 * 60 * 1000;
 // authoritative close gate.
 const FRICTION_CATEGORIES = ["ambiguous_direction", "tool_should_decide", "inefficient_feeding"];
 
-/** Newest mtime (ms) among a directory's immediate entries, or 0 if none/unreadable. */
-function newestMtimeMs(dir) {
+/**
+ * Newest mtime (ms) among an area's genuine run markers, or 0 if none exist. Keying
+ * on a substantive run artifact (not mere dir existence) is what distinguishes a real
+ * run from a trivial stub — a bare `session-config.json` (a 3-byte provider handshake a
+ * test or `ensure` can drop) is NOT a run and must never trip the gate.
+ */
+function newestRunMarkerMs(dir, markers) {
   let newest = 0;
-  try {
-    for (const name of readdirSync(dir)) {
-      try {
-        const m = statSync(join(dir, name)).mtimeMs;
-        if (m > newest) newest = m;
-      } catch {
-        /* skip unreadable entry */
-      }
+  for (const marker of markers) {
+    try {
+      const m = statSync(join(dir, marker)).mtimeMs;
+      if (m > newest) newest = m;
+    } catch {
+      /* marker absent */
     }
-  } catch {
-    /* unreadable dir */
   }
   return newest;
 }
@@ -82,19 +83,31 @@ function recordIsComplete(recordPath) {
 }
 
 // Each orchestrator area writes its friction records under <area>/friction/<run>.json
-// (frictionCapturePath). A run "happened" in the area when state/artifacts exist; it
-// is walked when at least one of its friction records is complete.
+// (frictionCapturePath). A run "happened" in the area when a genuine run MARKER exists
+// (not mere dir existence — the repo dogfoods `.audit-tools/`, so a test/ensure stub
+// must not trip the gate); it is walked when ≥1 of its friction records is complete.
 const AREAS = [
-  { label: "remediate-code", dir: join(root, ".audit-tools", "remediation") },
-  { label: "audit-code", dir: join(root, ".audit-tools", "audit") },
+  {
+    label: "remediate-code",
+    dir: join(root, ".audit-tools", "remediation"),
+    markers: ["state.json"],
+  },
+  {
+    label: "audit-code",
+    dir: join(root, ".audit-tools", "audit"),
+    // A real audit reaches at least a manifest / task ledger / dispatch / findings /
+    // steps dir; a bare session-config.json alone is not a run.
+    markers: ["repo_manifest.json", "audit_tasks.json", "active-dispatch.json", "audit-findings.json", "steps"],
+  },
 ];
 
 const now = Date.now();
 const needsWalk = [];
 for (const area of AREAS) {
-  if (!existsSync(area.dir)) continue;
-  // A run happened here recently if the area's own artifacts were touched in-window.
-  if (now - newestMtimeMs(area.dir) > RECENT_MS) continue;
+  // A run happened here recently only if a genuine run marker exists and was touched
+  // in-window (the session proxy) — a stub or a long-abandoned run never blocks.
+  const markerMs = newestRunMarkerMs(area.dir, area.markers);
+  if (markerMs === 0 || now - markerMs > RECENT_MS) continue;
 
   const frictionDir = join(area.dir, "friction");
   let records = [];
