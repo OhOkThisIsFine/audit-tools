@@ -8,12 +8,9 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.10**. Two doc-review cleanups (D-33 dead `remediate install` alias removed;
-  D-45 audit host-asset drift guards added) landed on main **un-released** — functionally inert (the removed
-  command was unreachable; the extracted renderer is byte-identical), so batched into the next functional
-  release rather than cutting a standalone patch. Per-lap shipped detail is NOT narrated here (changelog
-  creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
-  roadmap only.
+- On npm as `latest` at **v0.32.11** (defect-1 dispatch admission-control + the batched D-33/D-45 doc-review
+  cleanups). Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
+  [[live-status]]); this section is current-state + open-work roadmap only.
 - **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
   rework shipped end-to-end. Founding capability-inheritance bug (commit 3): host-review pool keyed to the
   driver via `resolveHostDispatchProviderName`; `HostDispatchDescriptor` rides every continue-command.
