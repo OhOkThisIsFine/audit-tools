@@ -195,6 +195,39 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     expect(pools.length).toBe(1);
     expect(pools[0].providerName).toBe("openai-compatible");
   });
+
+  it("defect-1: attended demote keys the host pool to claude-code + adds the codex primary as a source", async () => {
+    const pools = await buildConfirmedPools({
+      sessionConfig: {
+        provider: "codex",
+        quota: { enabled: true },
+        codex: { command: "codex", model: "gpt-5" },
+      },
+      demotePrimaryInProcess: true,
+    });
+    // The conversation-host pool keys to claude-code (NOT codex — the founding-bug
+    // quota mis-keying), and codex appears as a SEPARATE demoted source pool so the
+    // host fans out onto it concurrently instead of the backend monopolizing.
+    const hostPool = pools.find((p) => p.providerName === "claude-code");
+    const codexSource = pools.find((p) => p.providerName === "codex");
+    expect(hostPool).toBeTruthy();
+    expect(codexSource).toBeTruthy();
+    expect(codexSource!.hostConcurrencyLimit).toBeNull(); // independent source pool
+    expect(hostPool!.id).not.toBe(codexSource!.id);
+  });
+
+  it("defect-1: headless (no demote) keeps codex the single driver pool, no claude-code host pool", async () => {
+    const pools = await buildConfirmedPools({
+      sessionConfig: {
+        provider: "codex",
+        quota: { enabled: true },
+        codex: { command: "codex", model: "gpt-5" },
+      },
+    });
+    // Headless: codex IS the driver pool; no conversation-host pool, no demoted source.
+    expect(pools.some((p) => p.providerName === "claude-code")).toBeFalsy();
+    expect(pools.filter((p) => p.providerName === "codex").length).toBe(1);
+  });
 });
 
 // ===========================================================================

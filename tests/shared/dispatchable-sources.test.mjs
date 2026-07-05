@@ -16,6 +16,8 @@ const {
   withSourceConfig,
   dispatchableSourceId,
   collectDispatchableSources,
+  primaryInProcessSource,
+  isDemotableInProcessProvider,
   sourceByPoolId,
   buildSourcePool,
   buildHostModelPools,
@@ -142,6 +144,75 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
   );
   expect(two.length).toBe(2);
   expect(dispatchableSourceId(two[0])).not.toBe(dispatchableSourceId(two[1]));
+});
+
+// ── Defect-1: demote the primary in-process backend to a source (attended host) ──
+
+test("isDemotableInProcessProvider: only the API/CLI worker backends demote", () => {
+  expect(isDemotableInProcessProvider("codex")).toBeTruthy();
+  expect(isDemotableInProcessProvider("opencode")).toBeTruthy();
+  expect(isDemotableInProcessProvider("openai-compatible")).toBeTruthy();
+  // Not demotable: the conversation host, IDE backends, host-dispatch defaults.
+  expect(isDemotableInProcessProvider("claude-code")).toBeFalsy();
+  expect(isDemotableInProcessProvider("local-subprocess")).toBeFalsy();
+  expect(isDemotableInProcessProvider("subprocess-template")).toBeFalsy();
+  expect(isDemotableInProcessProvider(undefined)).toBeFalsy();
+});
+
+test("primaryInProcessSource builds a source from the primary backend's own config block", () => {
+  const codex = primaryInProcessSource(
+    { codex: { command: "codex", model: "gpt-5", sandbox_mode: "workspace-write" } },
+    "codex",
+  );
+  expect(codex.provider).toBe("codex");
+  expect(codex.endpoint).toBe("codex");
+  expect(codex.model).toBe("gpt-5");
+  expect(codex.parameters.sandbox_mode).toBe("workspace-write");
+
+  const oc = primaryInProcessSource(
+    { openai_compatible: { base_url: "http://nim/v1", model: "m", api_key_env: "K" } },
+    "openai-compatible",
+  );
+  expect(oc.provider).toBe("openai-compatible");
+  expect(oc.endpoint).toBe("http://nim/v1");
+
+  // Non-demotable primaries → null (nothing to demote).
+  expect(primaryInProcessSource({}, "claude-code")).toBeNull();
+  // openai-compatible named but not configured → null.
+  expect(primaryInProcessSource({}, "openai-compatible")).toBeNull();
+});
+
+test("collectDispatchableSources: demotePrimaryInProcess adds the codex primary as a source", () => {
+  const cfg = { codex: { command: "codex", model: "gpt-5" } };
+  // Default (headless): codex is the in-process worker, NOT a source.
+  expect(collectDispatchableSources(cfg, "codex")).toEqual([]);
+  // Attended: codex is demoted to a source pool so the host fans out onto it.
+  const demoted = collectDispatchableSources(cfg, "codex", { demotePrimaryInProcess: true });
+  expect(demoted.length).toBe(1);
+  expect(demoted[0].provider).toBe("codex");
+});
+
+test("collectDispatchableSources: attended openai-compatible primary demotes alongside a second NIM source", () => {
+  const cfg = {
+    sources: [{ provider: "codex", endpoint: "codex" }],
+    openai_compatible: { base_url: "http://nim/v1", model: "m" },
+  };
+  const demoted = collectDispatchableSources(cfg, "openai-compatible", {
+    demotePrimaryInProcess: true,
+  });
+  // The explicit codex source + the demoted openai-compatible primary, deduped once.
+  expect(demoted.some((s) => s.provider === "codex")).toBeTruthy();
+  expect(
+    demoted.filter((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1").length,
+  ).toBe(1);
+});
+
+test("collectDispatchableSources: demote is a no-op for a non-demotable primary (claude-code)", () => {
+  const cfg = { openai_compatible: { base_url: "http://nim/v1", model: "m" } };
+  // claude-code host + NIM source: demote adds nothing new; the legacy fold already
+  // carries the NIM source (one, not duplicated).
+  const got = collectDispatchableSources(cfg, "claude-code", { demotePrimaryInProcess: true });
+  expect(got.filter((s) => s.provider === "openai-compatible").length).toBe(1);
 });
 
 test("withSourceConfig overlays the source's provider block; no source = passthrough", () => {

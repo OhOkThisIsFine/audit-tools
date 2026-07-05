@@ -174,6 +174,7 @@ export {
   ANALYZER_SETTINGS,
   AnalyzerSettingSchema,
   resolveHostProviderName,
+  resolveHostDispatchCapability,
 } from "./types/sessionConfig.js";
 
 // Contracts
@@ -887,6 +888,8 @@ export {
   sourceProviderConfig,
   dispatchableSourceId,
   collectDispatchableSources,
+  primaryInProcessSource,
+  isDemotableInProcessProvider,
   withSourceConfig,
   sourceByPoolId,
   buildHostModelPool,

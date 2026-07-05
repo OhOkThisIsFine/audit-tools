@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, isDemotableInProcessProvider, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -164,21 +164,17 @@ export function resolveHostDispatchCapability(options: {
   sessionConfig?: SessionConfig | null;
   env?: NodeJS.ProcessEnv;
 }): boolean {
-  if (options.hostCanDispatchSubagents !== undefined) {
-    return options.hostCanDispatchSubagents;
-  }
-  if (options.sessionConfig?.host_can_dispatch_subagents !== undefined) {
-    return options.sessionConfig.host_can_dispatch_subagents;
-  }
-  const envValue = (options.env ?? process.env).REMEDIATE_HOST_CAN_DISPATCH;
-  if (envValue === "true") return true;
-  if (envValue === "false") return false;
-
-  // Conversation-first default: an interactive agent host (e.g. Claude Code) can
-  // dispatch callable subagents, so default to parallel wave dispatch. A host that
-  // genuinely cannot dispatch opts out via host_can_dispatch_subagents:false,
-  // REMEDIATE_HOST_CAN_DISPATCH=false, or --host-can-dispatch-subagents=false.
-  return true;
+  // Conversation-first default (single-sourced in shared): an interactive agent host
+  // (e.g. Claude Code) can dispatch callable subagents, so default to parallel wave
+  // dispatch. A host that genuinely cannot dispatch opts out via
+  // host_can_dispatch_subagents:false, REMEDIATE_HOST_CAN_DISPATCH=false, or
+  // --no-host-can-dispatch-subagents. Remediate supplies its own env var name.
+  return sharedResolveHostDispatchCapability({
+    explicit: options.hostCanDispatchSubagents,
+    sessionConfig: options.sessionConfig,
+    envVarName: "REMEDIATE_HOST_CAN_DISPATCH",
+    env: options.env,
+  });
 }
 
 /**
@@ -1707,15 +1703,28 @@ async function buildImplementDispatchStep(ctx: {
       hostModelId: resolvedHostModelId,
     };
 
-    // A8 in-process provider driver: when the rolling engine is enabled AND the
-    // operator EXPLICITLY configured a programmatic backend provider (openai-compatible
-    // / codex / opencode / …), the orchestrator drives the FULL rolling implement
-    // dispatch ITSELF — the configured provider is the per-node worker, cwd-confined to
-    // each node's worktree, sharing the same `acceptNodeWorktree` core (commit → verify
-    // → merge, verify-fail → triage) as the host-subagent driver. Checked BEFORE the
-    // host-subagent branch so an explicit backend (e.g. a NIM pool for headless
-    // autonomy) drives the work rather than the conversation host's subagents.
-    if (rollingEngineEnabled && resolvesToInProcessDispatchProvider(sessionConfigImpl)) {
+    // A8 in-process provider driver: when the rolling engine is enabled, the run is
+    // HEADLESS (no attended host that can dispatch subagents), AND the operator
+    // EXPLICITLY configured a programmatic backend provider (openai-compatible / codex /
+    // opencode / …), the orchestrator drives the FULL rolling implement dispatch ITSELF —
+    // the configured provider is the per-node worker, cwd-confined to each node's
+    // worktree, sharing the same `acceptNodeWorktree` core (commit → verify → merge,
+    // verify-fail → triage) as the host-subagent driver. Defect-1: gated on `!canDispatchImpl`
+    // so an ATTENDED host demotes the backend to a source pool (the hybrid branch below,
+    // host + backend + NIM concurrent) rather than the backend monopolizing the frontier;
+    // only a truly headless run (e.g. a NIM pool for headless autonomy, host_can_dispatch:false)
+    // lets the backend self-drive.
+    // Defect-1: DEMOTE (attended concurrent fan-out) applies only to the demotable
+    // backends (codex/opencode/openai-compatible). A non-demotable in-process provider
+    // (subprocess-template/local-subprocess — no standalone source pool) keeps
+    // self-driving regardless of attendance, so the monopoly branch still fires for it.
+    const demoteBackendToSource =
+      canDispatchImpl && isDemotableInProcessProvider(sessionConfigImpl?.provider);
+    if (
+      rollingEngineEnabled &&
+      !demoteBackendToSource &&
+      resolvesToInProcessDispatchProvider(sessionConfigImpl)
+    ) {
       const driven = await driveRollingImplementDispatch({
         root,
         artifactsDir,
@@ -1758,7 +1767,12 @@ async function buildImplementDispatchStep(ctx: {
       // bounded rate-limited/settle mechanism below (DC-4) rather than routing
       // through HostSessionQuotaSource.recordLimit/isEscalated, so onEscalation is
       // unused here — the source only feeds buildConfirmedPools' sizing.
-      const hybridProviderName = resolveHostProviderName(sessionConfigImpl);
+      // Defect-1: the host-session quota key must follow the CONVERSATION HOST, not a
+      // demoted backend — key it to claude-code when the configured primary is a
+      // demotable backend that this attended run is fanning out onto as a source.
+      const hybridProviderName = demoteBackendToSource
+        ? "claude-code"
+        : resolveHostProviderName(sessionConfigImpl);
       const hybridHostSessionModelKey = buildProviderModelKey(
         hybridProviderName,
         (sessionConfigImpl as { block_quota?: { host_model?: string | null } } | undefined)
@@ -1777,6 +1791,10 @@ async function buildImplementDispatchStep(ctx: {
         hostModels: resolvedHostModels,
         hostModelId: resolvedHostModelId,
         hostSession: hybridHostSession,
+        // Defect-1: reached here because the headless in-process branch above was
+        // skipped (attended host) — demote the configured primary backend into the
+        // source-pool set so the split fans across host + backend + NIM.
+        demotePrimaryInProcess: demoteBackendToSource,
       });
       const backendPools = confirmedPools.filter(isInProcessPool);
 

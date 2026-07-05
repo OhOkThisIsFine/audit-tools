@@ -232,39 +232,127 @@ export async function buildSourcePool(params: {
 }
 
 /**
+ * The in-process backends that can be DEMOTED to a source pool when an attended host
+ * drives (defect-1): the API/CLI worker backends. Excludes `local-subprocess` /
+ * `subprocess-template` — those are host-dispatch defaults, not standalone source
+ * pools to fan out onto alongside the host.
+ */
+const DEMOTABLE_IN_PROCESS_PROVIDERS: ReadonlySet<string> = new Set([
+  "openai-compatible",
+  "codex",
+  "opencode",
+]);
+
+/**
+ * Whether a provider is an in-process backend that DEMOTES to a source pool when an
+ * attended host drives (defect-1): the API/CLI worker backends only. Callers gate the
+ * in-process-monopoly branch on this so an attended host fans out onto the backend as a
+ * source (host + backend + NIM concurrent) while a non-demotable in-process provider
+ * (`subprocess-template` / `local-subprocess`, which carry no standalone source pool)
+ * keeps self-driving. Also the discriminator for demoting the host-pool identity back
+ * to the conversation host when the configured primary is one of these backends.
+ */
+export function isDemotableInProcessProvider(providerName: string | undefined): boolean {
+  return providerName !== undefined && DEMOTABLE_IN_PROCESS_PROVIDERS.has(providerName);
+}
+
+/** Build a DispatchableSource for a configured `openai_compatible` block (the legacy
+ * NIM source shape), reused by both the back-compat fold and the primary demote. */
+function openAiCompatibleSource(
+  oc: NonNullable<SessionConfig["openai_compatible"]>,
+): DispatchableSource {
+  return {
+    provider: "openai-compatible",
+    endpoint: oc.base_url,
+    model: oc.model,
+    api_key_env: oc.api_key_env,
+    api_key: oc.api_key,
+    parameters: {
+      ...(oc.temperature !== undefined ? { temperature: oc.temperature } : {}),
+      ...(oc.headers !== undefined ? { headers: oc.headers } : {}),
+      ...(oc.max_output_tokens !== undefined ? { max_output_tokens: oc.max_output_tokens } : {}),
+      ...(oc.response_format_json !== undefined ? { response_format_json: oc.response_format_json } : {}),
+      ...(oc.include_referenced_files !== undefined
+        ? { include_referenced_files: oc.include_referenced_files }
+        : {}),
+    },
+  };
+}
+
+/**
+ * The DispatchableSource for the primary in-process backend, built from its own config
+ * block, so an attended host can fan out onto it as a source pool ALONGSIDE its own
+ * subagents (defect-1: host + codex + NIM concurrent, no backend monopoly). Returns
+ * null when the primary provider is not a demotable in-process backend, or its config
+ * block is absent. The dispatch worker rebuilds the concrete provider from this
+ * source's `{endpoint, model, parameters}` via `withSourceConfig`.
+ */
+export function primaryInProcessSource(
+  sessionConfig: SessionConfig,
+  primaryProviderName: string,
+): DispatchableSource | null {
+  if (!DEMOTABLE_IN_PROCESS_PROVIDERS.has(primaryProviderName)) return null;
+  switch (primaryProviderName) {
+    case "openai-compatible":
+      return hasConfiguredOpenAiCompatible(sessionConfig.openai_compatible)
+        ? openAiCompatibleSource(sessionConfig.openai_compatible!)
+        : null;
+    case "codex": {
+      const c = sessionConfig.codex ?? {};
+      return {
+        provider: "codex",
+        ...(c.command !== undefined ? { endpoint: c.command } : {}),
+        ...(c.model !== undefined ? { model: c.model } : {}),
+        parameters: {
+          ...(c.sandbox_mode !== undefined ? { sandbox_mode: c.sandbox_mode } : {}),
+          ...(c.extra_args !== undefined ? { extra_args: c.extra_args } : {}),
+        },
+      };
+    }
+    case "opencode": {
+      const o = sessionConfig.opencode ?? {};
+      return {
+        provider: "opencode",
+        ...(o.command !== undefined ? { endpoint: o.command } : {}),
+        parameters: {
+          ...(o.extra_args !== undefined ? { extra_args: o.extra_args } : {}),
+        },
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Every dispatchable backend source configured for a run, in pool order: the explicit
- * `sessionConfig.sources`, plus — for back-compat — a single implicit source folded in
- * from a legacy `openai_compatible` block when it isn't the primary provider and isn't
- * already covered by an explicit source of the same id.
+ * `sessionConfig.sources`, optionally the DEMOTED primary in-process backend (defect-1,
+ * when an attended host drives — `demotePrimaryInProcess`), plus — for back-compat — a
+ * single implicit source folded in from a legacy `openai_compatible` block when it
+ * isn't the primary provider and isn't already covered by an explicit source of the
+ * same id.
  */
 export function collectDispatchableSources(
   sessionConfig: SessionConfig,
   primaryProviderName: string,
+  options?: { demotePrimaryInProcess?: boolean },
 ): DispatchableSource[] {
   const out: DispatchableSource[] = [...(sessionConfig.sources ?? [])];
+  const pushUnique = (source: DispatchableSource): void => {
+    const id = dispatchableSourceId(source);
+    if (!out.some((s) => dispatchableSourceId(s) === id)) out.push(source);
+  };
+  // Defect-1: an attended host demotes its configured primary in-process backend to a
+  // source pool so it fans out ALONGSIDE the host's subagents rather than monopolizing
+  // the frontier. Inert (null) when the primary is the conversation host / an IDE.
+  if (options?.demotePrimaryInProcess) {
+    const demoted = primaryInProcessSource(sessionConfig, primaryProviderName);
+    if (demoted) pushUnique(demoted);
+  }
   if (
     primaryProviderName !== "openai-compatible" &&
     hasConfiguredOpenAiCompatible(sessionConfig.openai_compatible)
   ) {
-    const oc = sessionConfig.openai_compatible!;
-    const legacy: DispatchableSource = {
-      provider: "openai-compatible",
-      endpoint: oc.base_url,
-      model: oc.model,
-      api_key_env: oc.api_key_env,
-      api_key: oc.api_key,
-      parameters: {
-        ...(oc.temperature !== undefined ? { temperature: oc.temperature } : {}),
-        ...(oc.headers !== undefined ? { headers: oc.headers } : {}),
-        ...(oc.max_output_tokens !== undefined ? { max_output_tokens: oc.max_output_tokens } : {}),
-        ...(oc.response_format_json !== undefined ? { response_format_json: oc.response_format_json } : {}),
-        ...(oc.include_referenced_files !== undefined
-          ? { include_referenced_files: oc.include_referenced_files }
-          : {}),
-      },
-    };
-    const legacyId = dispatchableSourceId(legacy);
-    if (!out.some((s) => dispatchableSourceId(s) === legacyId)) out.push(legacy);
+    pushUnique(openAiCompatibleSource(sessionConfig.openai_compatible!));
   }
   return out;
 }
@@ -281,8 +369,12 @@ export async function buildSourcePools(params: {
   primaryProviderName: string;
   quotaSource: QuotaSource;
   quotaEntries: Record<string, QuotaStateEntry>;
+  /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
+  demotePrimaryInProcess?: boolean;
 }): Promise<CapacityPool[]> {
-  const sources = collectDispatchableSources(params.sessionConfig, params.primaryProviderName);
+  const sources = collectDispatchableSources(params.sessionConfig, params.primaryProviderName, {
+    demotePrimaryInProcess: params.demotePrimaryInProcess,
+  });
   return Promise.all(
     sources.map((source) =>
       buildSourcePool({ source, quotaSource: params.quotaSource, quotaEntries: params.quotaEntries }),

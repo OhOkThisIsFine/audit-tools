@@ -61,6 +61,8 @@ import {
   normalizeRepoPath,
   buildSourcePools,
   buildHostModelPools,
+  resolveHostProviderName,
+  isDemotableInProcessProvider,
   type FindingTheme,
 } from "audit-tools/shared";
 import {
@@ -444,12 +446,27 @@ export async function buildConfirmedPools(input: {
    * Omit on the proactive-sizing-only paths; one is constructed internally.
    */
   hostSession?: HostSessionQuotaSource;
+  /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
+  demotePrimaryInProcess?: boolean;
 }): Promise<CapacityPool[]> {
+  // Defect-1: the ACTUAL configured backend (used to build the demoted source pool) vs
+  // the HOST-pool identity. When an attended host demotes a headless backend to a source
+  // (codex/opencode/openai-compatible), the host pool must key to the CONVERSATION HOST
+  // (claude-code), not the backend — otherwise the host fan-out is charged against the
+  // backend's meter AND collides with the demoted source pool ([[capability-is-per-auditor-not-per-audit]]).
+  const actualProviderName = resolveHostProviderName(input.sessionConfig);
+  const demoteHostIdentity =
+    input.demotePrimaryInProcess === true && isDemotableInProcessProvider(actualProviderName);
+  const hostProviderName: ResolvedProviderName = demoteHostIdentity
+    ? "claude-code"
+    : actualProviderName;
+
   // Resolve identity/limits and build the per-rank host-model pools via the
   // SAME preamble `scheduleWave` uses — the two no longer keep parallel copies.
-  const { sessionConfig, providerName, quotaSource, quotaEntries, primaryPools } =
+  const { sessionConfig, quotaSource, quotaEntries, primaryPools } =
     await buildHostPoolPreamble({
       sessionConfig: input.sessionConfig,
+      providerName: hostProviderName,
       hostMaxConcurrent: input.hostMaxConcurrent,
       hostContextTokens: input.hostContextTokens,
       hostOutputTokens: input.hostOutputTokens,
@@ -463,12 +480,15 @@ export async function buildConfirmedPools(input: {
   // a CLI pool, …) becomes a CapacityPool alongside the primary, so the scheduler's
   // proactive cross-pool spill (INV-QD-14) and the A-8 coordinator can route work to
   // them. Single-sourced in shared (`buildSourcePools`) so audit and remediate surface
-  // the IDENTICAL pool shapes — the spill topology can't drift.
+  // the IDENTICAL pool shapes — the spill topology can't drift. `primaryProviderName`
+  // is the ACTUAL configured backend (not the demoted host identity) so the demoted
+  // source is built for the real provider.
   const sourcePools = await buildSourcePools({
     sessionConfig,
-    primaryProviderName: providerName,
+    primaryProviderName: actualProviderName,
     quotaSource,
     quotaEntries,
+    demotePrimaryInProcess: input.demotePrimaryInProcess,
   });
   primaryPools.push(...sourcePools);
 

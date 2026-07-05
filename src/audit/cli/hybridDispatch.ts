@@ -54,7 +54,10 @@ export function isInProcessAuditPool(pool: { providerName: string }): boolean {
  * `buildSourcePools` remediate's `buildConfirmedPools` does, so the pool shapes are
  * identical across both drivers. Empty when no source is configured (→ no hybrid).
  */
-export async function buildAuditSourcePools(sessionConfig: SessionConfig): Promise<CapacityPool[]> {
+export async function buildAuditSourcePools(
+  sessionConfig: SessionConfig,
+  options?: { demotePrimaryInProcess?: boolean },
+): Promise<CapacityPool[]> {
   const primaryProviderName =
     (sessionConfig as { provider?: string }).provider ?? "claude-code";
   let quotaEntries: Record<string, QuotaStateEntry> = {};
@@ -67,7 +70,16 @@ export async function buildAuditSourcePools(sessionConfig: SessionConfig): Promi
     halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
       ?.empirical_half_life_hours,
   });
-  return buildSourcePools({ sessionConfig, primaryProviderName, quotaSource, quotaEntries });
+  return buildSourcePools({
+    sessionConfig,
+    primaryProviderName,
+    quotaSource,
+    quotaEntries,
+    // Defect-1: when an attended host drives, demote the configured primary in-process
+    // backend (codex/opencode/openai-compatible) to a source pool so the host fans out
+    // onto it alongside its own subagents instead of the backend monopolizing.
+    demotePrimaryInProcess: options?.demotePrimaryInProcess,
+  });
 }
 
 /**

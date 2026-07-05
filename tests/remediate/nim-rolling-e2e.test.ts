@@ -125,11 +125,14 @@ describe.runIf(RUN)("A8 in-process provider rolling dispatch over live NIM", () 
         "utf8",
       );
 
-      // hostCanDispatchSubagents:true on purpose — proves the explicit backend
-      // provider takes precedence over the host-subagent driver (the in-process
-      // branch is checked first). One next-step call drives the whole implement
-      // frontier through the in-process engine, then advances.
-      await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
+      // Defect-1: hostCanDispatchSubagents:false declares this a HEADLESS run (no
+      // attended host to fan out subagents), so the explicit backend provider drives
+      // the WHOLE implement frontier in-process. With the attended default the backend
+      // would instead be DEMOTED to a source pool and the host would review the
+      // complement — the opposite of what this headless in-process capstone asserts.
+      // One next-step call drives the whole implement frontier through the in-process
+      // engine, then advances.
+      await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: false });
 
       // Merged edits are on main; the verify-fail node's file is not.
       expect(git("show", "HEAD:alpha.mjs").status).toBe(0);

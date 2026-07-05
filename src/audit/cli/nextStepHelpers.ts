@@ -85,6 +85,7 @@ import {
   auditHybridSettledPath,
 } from "./hybridDispatch.js";
 import { planHybridDispatch, readSettledPools, addSettledPool } from "audit-tools/shared";
+import { resolveHostDispatchCapability } from "./args.js";
 
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
@@ -131,6 +132,17 @@ export type NextStepParams = {
    * enabled AND an explicit backend provider is configured.
    */
   sessionConfig?: SessionConfig;
+  /**
+   * Defect-1: whether an attended conversation host is driving this invocation and can
+   * fan out subagents (the already-resolved `resolveHostDispatchCapability` value from
+   * the CLI, folding the explicit `--host-can-dispatch-subagents` flag). When TRUE
+   * (default, conversation-first), a configured in-process backend is DEMOTED to a
+   * source pool so the host + backend + any NIM source fan out concurrently instead of
+   * the backend monopolizing the frontier. When FALSE (declared headless), the backend
+   * self-drives the whole frontier. Unset here falls back to the sessionConfig field /
+   * env / true via `resolveHostDispatchCapability` in the fold.
+   */
+  hostCanDispatch?: boolean;
 };
 
 export type TerminalStepResult =
@@ -1036,17 +1048,29 @@ async function runHostDelegationObligation(
     return runDeterministicExecutor(bundle, ctx);
   }
 
-  // A8(a) in-process provider driver: when the rolling engine is enabled AND the
-  // operator EXPLICITLY configured a programmatic backend provider
+  // Defect-1 attended/headless gate: an attended conversation host (host can dispatch
+  // subagents — the conversation-first default) drives the fan-out ITSELF and DEMOTES a
+  // configured in-process backend to a source pool (the hybrid path below), so host +
+  // backend + NIM run concurrently. The in-process whole-frontier driver fires ONLY when
+  // the run is headless (`host_can_dispatch_subagents:false` — no attended dispatcher),
+  // where the backend legitimately self-drives.
+  const sessionConfig = ctx.params.sessionConfig;
+  const hostCanDispatch = resolveHostDispatchCapability({
+    explicit: ctx.params.hostCanDispatch,
+    sessionConfig: sessionConfig ?? ({} as SessionConfig),
+  });
+
+  // A8(a) in-process provider driver: when the rolling engine is enabled, the run is
+  // HEADLESS, AND the operator EXPLICITLY configured a programmatic backend provider
   // (openai-compatible / codex / opencode), the orchestrator drives the WHOLE
   // semantic-review dispatch ITSELF — the provider is the per-packet worker —
   // instead of emitting a host-subagent dispatch step. It `transition`s once the
   // results are ingested so the fold re-derives state (the obligation-engine analog
   // of the hand loop's `continue`), mirroring remediate's decideNextStep transition
   // after driveRollingImplementDispatch.
-  const sessionConfig = ctx.params.sessionConfig;
   if (
     resolveAuditRollingEngineEnabled({ sessionConfig }) &&
+    !hostCanDispatch &&
     resolvesToInProcessDispatchProvider(sessionConfig)
   ) {
     const { activeReviewRun } = await materializeReviewRun({
@@ -1125,7 +1149,12 @@ async function runHostDelegationObligation(
   let reviewBundle = bundle;
   let reviewState = state;
   const hybridCfg = sessionConfig ?? ({} as SessionConfig);
-  const auditSourcePools = await buildAuditSourcePools(hybridCfg);
+  // Defect-1: an attended host (reached here because the headless in-process branch
+  // above was skipped) demotes its configured primary in-process backend into the
+  // source-pool set, so the hybrid split fans the frontier across host + backend + NIM.
+  const auditSourcePools = await buildAuditSourcePools(hybridCfg, {
+    demotePrimaryInProcess: hostCanDispatch,
+  });
   if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditSourcePools.length > 0) {
     const pending = buildPendingAuditTasks(bundle);
     if (pending.length > 0) {

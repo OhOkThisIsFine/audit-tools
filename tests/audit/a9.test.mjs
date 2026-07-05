@@ -78,6 +78,12 @@ const RUN =
 
 const SESSION_CONFIG = {
   provider: 'openai-compatible',
+  // Defect-1: declare HEADLESS so the in-process engine drives the WHOLE frontier
+  // (no attended host to fan out subagents). Without this, the conversation-first
+  // default (attended) would DEMOTE the openai-compatible backend to a source pool
+  // and emit a host-subagent semantic_review over the complement — the opposite of
+  // what this headless-autonomy capstone asserts.
+  host_can_dispatch_subagents: false,
   openai_compatible: {
     base_url: 'https://integrate.api.nvidia.com/v1',
     model: 'openai/gpt-oss-120b',

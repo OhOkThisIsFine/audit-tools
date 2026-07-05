@@ -30,6 +30,34 @@ export function resolveHostProviderName(
   return provider;
 }
 
+/**
+ * The attended-vs-headless discriminator for dispatch (defect-1). TRUE (default,
+ * conversation-first) means an attended conversation host is driving THIS invocation
+ * and can fan out subagents — so a configured in-process backend (codex / opencode /
+ * openai-compatible) is DEMOTED to a source pool and the host + backend + any NIM
+ * source fan out concurrently. FALSE (declared headless) means no attended dispatcher
+ * is present, so a configured in-process backend self-drives the whole frontier.
+ *
+ * Resolution order: explicit per-invocation value → `sessionConfig.host_can_dispatch_subagents`
+ * → the tool-specific env var → TRUE. Single-sourced so audit and remediate cannot
+ * drift; each passes its own `envVarName` (`AUDIT_CODE_HOST_CAN_DISPATCH` /
+ * `REMEDIATE_HOST_CAN_DISPATCH`).
+ */
+export function resolveHostDispatchCapability(options: {
+  explicit?: boolean;
+  sessionConfig?: { host_can_dispatch_subagents?: boolean } | null;
+  envVarName: string;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (options.explicit !== undefined) return options.explicit;
+  const cfg = options.sessionConfig?.host_can_dispatch_subagents;
+  if (cfg !== undefined) return cfg;
+  const envValue = (options.env ?? process.env)[options.envVarName];
+  if (envValue === "true") return true;
+  if (envValue === "false") return false;
+  return true;
+}
+
 export const SESSION_UI_MODES = ["visible", "headless"] as const;
 export type SessionUiMode = (typeof SESSION_UI_MODES)[number];
 

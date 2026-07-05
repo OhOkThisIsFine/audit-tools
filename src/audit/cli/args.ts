@@ -10,6 +10,7 @@ import {
   parseHostModelRoster,
   auditArtifactsDir,
   resolveRepoRoot,
+  resolveHostDispatchCapability as sharedResolveHostDispatchCapability,
   type SessionConfig,
   type HostModelRosterEntry,
 } from "audit-tools/shared";
@@ -73,15 +74,14 @@ export function resolveHostDispatchCapability(options: {
   sessionConfig: SessionConfig;
   env?: NodeJS.ProcessEnv;
 }): boolean {
-  if (options.explicit !== undefined) {
-    return options.explicit;
-  }
-  if (options.sessionConfig.host_can_dispatch_subagents !== undefined) {
-    return options.sessionConfig.host_can_dispatch_subagents;
-  }
-  return optionalBooleanEnv(
-    (options.env ?? process.env).AUDIT_CODE_HOST_CAN_DISPATCH,
-  ) ?? true;
+  // Single-sourced in shared so audit and remediate can't drift; audit supplies its
+  // own env var name.
+  return sharedResolveHostDispatchCapability({
+    explicit: options.explicit,
+    sessionConfig: options.sessionConfig,
+    envVarName: "AUDIT_CODE_HOST_CAN_DISPATCH",
+    env: options.env,
+  });
 }
 
 export function fromBase64Url(value: string): string {

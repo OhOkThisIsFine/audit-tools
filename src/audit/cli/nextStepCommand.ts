@@ -170,6 +170,10 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     },
     since: getFlag(argv, "--since"),
     sessionConfig,
+    // Defect-1: the resolved attended/headless discriminator, so the fold demotes a
+    // configured in-process backend to a source pool (attended) rather than letting it
+    // monopolize the frontier — or self-drives it (headless).
+    hostCanDispatch,
   });
 
   if (result.kind === "complete") {
