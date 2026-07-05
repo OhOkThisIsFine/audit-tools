@@ -219,6 +219,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     test-parallelization finding is `tests`/`performance`, an ops finding is `operability`.
   Relates to the two design-review modes ([[contract-authoring-determinism-direction]]: contract vs
   conceptual critique) and the self-detection theme in [[meta-audit-friction-must-be-tool-enforced]].
+  - **Design of record for the conceptual half:** [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)
+    — the operator (overlay-and-delta at structure + charter layers), node discovery (agreement=nodes /
+    disagreement=findings, multi-resolution stability for emergent depth), the four charters + delta routing
+    (Stated/Inferred/Revealed/True; True gated to human-only provocations), blast-radius ranking, and the
+    three-dial control surface (intensity=compute / ceiling=premise-height at `intent_checkpoint` /
+    attention=the VOI-ranked triangulation loop; attention 0 = the autonomous mode). The "improvement-seeking
+    challenge loop" above is the *intensity* dial + loop-until-dry in that doc's terms.
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
   (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the
