@@ -39,12 +39,15 @@ import type {
  * commit/verify/merge lifecycle, write-scope); the host only spawns a subagent
  * per node and relays `accept-node` on each completion.
  *
- * Scope: one eligible frontier per next-step cycle (every node here has its deps
- * already verified-complete, so they are mutually independent). Cross-level
- * progression rides the existing merge-implement-results -> next-step cadence
- * (the next frontier is planned after this one merges). Within the frontier this
- * is FULL rolling: ~`slots` worktrees live at once, and each completion JIT
- * dispatches the next undispatched node.
+ * Scope: one GRANTED SET per next-step cycle. The dispatch-quota admission block
+ * (`admission.granted_packet_ids`) is the set the tool admitted against the live
+ * budget this step; the host dispatches EXACTLY it (its size is the emergent
+ * admission width — no computed concurrency number). Every node here has its deps
+ * already verified-complete, so they are mutually independent. Worktrees are created
+ * for the WHOLE granted set upfront (worktrees == granted set); when the set is
+ * accepted, `merge-implement-results -> next-step` re-plans and RE-GRANTS the pending
+ * remainder until the plan is exhausted. There is no per-completion JIT refill —
+ * re-admission happens at the next-step boundary, gated by the live budget.
  *
  * Isolation is per-node-worktree (hard between nodes). Binding a host subagent to
  * its worktree is SOFT (the orchestrator cannot cwd-confine the host's subagent),
@@ -61,11 +64,13 @@ export interface RollingFrontierNode {
 
 export interface RollingSession {
   run_id: string;
-  /** Concurrency target N (from the quota scheduler), not a wave cap. */
-  slots: number;
-  /** Every eligible node in this frontier. */
+  /**
+   * The GRANTED SET this step — the nodes the admission loop admitted against the live
+   * budget (`admission.granted_packet_ids` ∩ eligible frontier). Worktrees are created
+   * for the whole set upfront; the pending remainder is re-granted at the next next-step.
+   */
   frontier: RollingFrontierNode[];
-  /** Block ids whose worktree was created + handed to the host. */
+  /** Block ids whose worktree was created + handed to the host (the whole granted set). */
   dispatched: string[];
   /** Block ids whose `acceptNodeWorktree` lifecycle has run. */
   accepted: string[];
@@ -91,14 +96,6 @@ export interface RollingSession {
 }
 
 export type RollingDirective =
-  | {
-      kind: "dispatch";
-      node: RollingFrontierNode;
-      worktree_root: string;
-      in_flight: number;
-      accepted: number;
-      total: number;
-    }
   | { kind: "wait"; in_flight: number; accepted: number; total: number }
   | { kind: "done"; accepted: number; total: number };
 
@@ -268,34 +265,42 @@ export async function prepareHostRollingDispatch(
   const preClaimed = hybrid
     ? new Map(hybrid.partition.map((a) => [a.block_id, a.ownerToken]))
     : null;
-  const frontier: RollingFrontierNode[] = plan.items
-    .filter((i): i is DispatchPlanItem & { block_id: string } => typeof i.block_id === "string")
-    .filter((i) => !partitionIds || partitionIds.has(i.block_id))
-    .map((i) => ({ block_id: i.block_id, prompt_path: i.prompt_path, result_path: i.result_path }));
-
   const dir = implementDir(options.artifactsDir, runId);
   const quotaPath = join(dir, "dispatch-quota.json");
   const quota = await readOptionalJsonFile<RemediationDispatchQuota>(quotaPath);
-  const slots = Math.max(1, quota?.max_concurrent_agents ?? 1);
+  // The admission block is the tool-owned budget gate: dispatch EXACTLY the granted
+  // set this step. A missing/empty admission (older state, or a degrade) grants
+  // nothing — the frontier folds to zero and the run re-grants on the next next-step.
+  const grantedIds = new Set(quota?.admission?.granted_packet_ids ?? []);
 
-  // Pre-create worktrees only for the initial bounded batch (≤ slots); the rest
-  // are JIT-created by `accept-node` as nodes complete — so ~slots worktrees
-  // exist at any time, never the whole frontier at once. Each node is CLAIMED
-  // through the shared registry BEFORE its worktree is created, so a node the
-  // in-process driver (or a second host loop) already holds is skipped here
-  // rather than double-dispatched (A-10 exactly-one-claimant). The slot freed by
-  // a skipped node is filled by walking further into the frontier. In hybrid mode
-  // the coordinator already claimed each partition node, so its token is REUSED
-  // (never re-claimed — that would self-collide and skip the node).
+  const frontier: RollingFrontierNode[] = plan.items
+    .filter((i): i is DispatchPlanItem & { block_id: string } => typeof i.block_id === "string")
+    .filter((i) => !partitionIds || partitionIds.has(i.block_id))
+    // Admission gate: only the granted subset of the eligible frontier runs this step.
+    .filter((i) => grantedIds.has(i.block_id))
+    .map((i) => ({ block_id: i.block_id, prompt_path: i.prompt_path, result_path: i.result_path }));
+
+  // Create a worktree for the WHOLE granted set upfront (worktrees == granted set):
+  // admission already bounded the set to what the live budget + any declared in-flight
+  // cap allow, so there is no per-completion JIT refill — the pending remainder is
+  // re-granted at the next next-step. Each node is CLAIMED through the shared registry
+  // BEFORE its worktree is created, so a node the in-process driver (or a second host
+  // loop) already holds is recorded `contested` (its owner runs + accepts it) rather
+  // than double-dispatched (A-10 exactly-one-claimant). In hybrid mode the coordinator
+  // already claimed each partition node, so its token is REUSED (never re-claimed —
+  // that would self-collide and skip the node).
   const registry = nodeClaimRegistry(options.artifactsDir, runId);
   const initialNodes: RollingFrontierNode[] = [];
   const claims: Record<string, string> = {};
+  const contested: string[] = [];
   for (const node of frontier) {
-    if (initialNodes.length >= slots) break;
     let token = preClaimed?.get(node.block_id);
     if (!token) {
       const claim = await registry.claim(node.block_id, HOST_SUBAGENT_CLAIM_POOL);
-      if (!claim.acquired) continue; // held by another driver — its node to run.
+      if (!claim.acquired) {
+        contested.push(node.block_id); // held by another driver — its node to run + accept.
+        continue;
+      }
       token = claim.ownerToken;
     }
     // `plan` (above) is the single source of each block's declared scope (write ∪
@@ -312,11 +317,11 @@ export async function prepareHostRollingDispatch(
 
   const session: RollingSession = {
     run_id: runId,
-    slots,
     frontier,
     dispatched: initialNodes.map((n) => n.block_id),
     accepted: [],
     claims,
+    contested,
   };
   await writeJsonFile(sessionPath(options.artifactsDir, runId), session);
 
@@ -403,62 +408,23 @@ export async function advanceHostRolling(opts: {
 
     session.contested ??= [];
 
-    // JIT-dispatch the next eligible node. Walk the frontier and CLAIM each
-    // undispatched, non-contested node through the shared registry BEFORE creating
-    // its worktree; a node a peer driver already holds is recorded `contested` (it
-    // is theirs to run + accept) and the walk advances — so the two drivers never
-    // both pick the same node and the freed slot is not wasted on a contested id
-    // (A-10 exactly-one-claimant / coordinator parity).
-    let next: RollingFrontierNode | undefined;
-    let nextToken: string | undefined;
-    for (const candidate of session.frontier) {
-      if (
-        session.dispatched.includes(candidate.block_id) ||
-        session.contested.includes(candidate.block_id)
-      ) {
-        continue;
-      }
-      const claim = await registry.claim(candidate.block_id, HOST_SUBAGENT_CLAIM_POOL);
-      if (!claim.acquired) {
-        session.contested.push(candidate.block_id);
-        continue;
-      }
-      next = candidate;
-      nextToken = claim.ownerToken;
-      break;
-    }
-
-    // This session's completion target is the frontier minus the nodes a peer
+    // No per-completion JIT refill: the whole granted set already has worktrees
+    // (worktrees == granted set — admission bounded it to the live budget at grant
+    // time). The pending remainder is re-granted at the NEXT next-step. So each
+    // `accept-node` only runs the finished node's lifecycle, then reports wait/done.
+    // This session's completion target is the granted set minus the nodes a peer
     // driver owns. Empty `contested` (the common single-driver case) → the full
-    // frontier, so the directive counts are unchanged.
+    // granted set, so the counts are unchanged.
     const ownTotal = session.frontier.length - session.contested.length;
     const inFlight = session.dispatched.length - session.accepted.length;
-
-    if (next && nextToken) {
-      createNodeWorktree(
-        opts.root,
-        next.block_id,
-        opts.runId,
-        await declaredPathsForBlockSafe(opts.artifactsDir, opts.runId, next.block_id),
-      );
-      session.dispatched.push(next.block_id);
-      session.claims[next.block_id] = nextToken;
-      await writeJsonFile(sessionPath(opts.artifactsDir, opts.runId), session);
-      return {
-        kind: "dispatch",
-        node: next,
-        worktree_root: worktreePath(opts.root, next.block_id, opts.runId),
-        in_flight: session.dispatched.length - session.accepted.length,
-        accepted: session.accepted.length,
-        total: ownTotal,
-      };
-    }
 
     await writeJsonFile(sessionPath(opts.artifactsDir, opts.runId), session);
     // Done when every node this session is responsible for has been accepted AND
     // nothing is still in flight — a contested node held by a peer driver does not
     // keep this session waiting forever (the peer accepts it; the run-level
-    // `mergeImplementResults` is the finalizer over both drivers' outcomes).
+    // `mergeImplementResults` is the finalizer over both drivers' outcomes, and it
+    // reconciles the grant's reservation-ledger leases so budget frees for the next
+    // grant).
     if (session.accepted.length >= ownTotal && inFlight <= 0) {
       return { kind: "done", accepted: session.accepted.length, total: ownTotal };
     }

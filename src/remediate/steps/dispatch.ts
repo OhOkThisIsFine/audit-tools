@@ -30,7 +30,9 @@ import type {
   QuotaProbeResult,
   ProviderSlot,
   RollingDispatchResult,
+  AdmissionPool,
 } from "audit-tools/shared";
+import { computeDispatchAdmission, createReservationLedger, tierRank } from "audit-tools/shared";
 import { probeQuotaSource } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
 import { captureStepBoundaryFriction } from "audit-tools/shared";
@@ -473,12 +475,46 @@ export async function buildConfirmedPools(input: {
   return primaryPools;
 }
 
-export function buildDispatchQuota(
+/**
+ * Build the `AdmissionPool[]` the admission loop admits against from a schedule's
+ * per-pool capacity summaries — the remediate analog of audit's `finalizeDispatchQuota`
+ * pool mapping (both feed the single-sourced `computeDispatchAdmission`, so the two
+ * orchestrators can't drift). Budget = the pool's live remaining token budget
+ * (null ⇒ optimistic +Inf); declared cap = its host in-flight cap passed VERBATIM
+ * (null ⇒ none — the only place an explicit agent-count exists); cost/capability rank
+ * from its tier; capacity = its context window (a packet's input+output envelope must fit).
+ */
+function admissionPoolsFromSchedule(schedule: WaveScheduleResult): AdmissionPool[] {
+  return (schedule.capacity_pools ?? []).map((pool) => {
+    const rankNum = tierRank(pool.rank);
+    return {
+      poolId: pool.pool_id,
+      resourceKey: pool.pool_id,
+      budget: pool.remaining_token_budget ?? Number.POSITIVE_INFINITY,
+      declaredCap: pool.host_concurrency_limit?.active_subagents ?? null,
+      costRank: rankNum,
+      capabilityRank: rankNum,
+      capacityTokens: pool.resolved_limits.context_tokens,
+    };
+  });
+}
+
+export async function buildDispatchQuota(
   runId: string,
   phase: DispatchPhase,
   schedule: WaveScheduleResult,
+  admissionPackets: { id: string; inputTokens: number; complexity: number }[],
+  /**
+   * Whether to LEASE the granted set against the shared reservation ledger. The
+   * host-subagent path passes `true` (the host dispatches the grant across processes,
+   * so the tool reserves-before-dispatch and reconciles at accept-node). The
+   * in-process rolling engine passes `false`: it admits + leases per-packet itself, so
+   * a host-grant lease here would double-count the same work. Mirrors audit's
+   * `finalizeDispatchQuota` grantLeases parameterization.
+   */
+  grantLeases: boolean,
   quotaStateEntry?: QuotaStateEntry | null,
-): RemediationDispatchQuota {
+): Promise<RemediationDispatchQuota> {
   let backoffState: BackoffState | null = null;
   const count = quotaStateEntry?.consecutive_429_count ?? 0;
   if (count > 0) {
@@ -489,12 +525,24 @@ export function buildDispatchQuota(
     };
   }
 
+  // Admission control: instead of a computed `max_concurrent_agents`, GRANT the
+  // affordable admitted set (cost-first-capable, ledger-leased). Per-packet reservation
+  // = input estimate + output envelope (declared output cap; the learned ratio refines
+  // it once a provider reports usage — dormant on the always-on claude-code host).
+  const admission = await computeDispatchAdmission({
+    packets: admissionPackets,
+    pools: admissionPoolsFromSchedule(schedule),
+    outputCap: schedule.resolved_limits.output_tokens,
+    grantLeases,
+    ledger: createReservationLedger(),
+  });
+
   return {
     contract_version: REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION,
     run_id: runId,
     phase,
     host_concurrency_limit: schedule.host_concurrency_limit,
-    max_concurrent_agents: schedule.max_concurrent,
+    admission,
     estimated_wave_tokens: schedule.estimated_wave_tokens,
     model: schedule.model,
     confidence: schedule.confidence,
@@ -2879,6 +2927,14 @@ export async function prepareImplementDispatch(
      * repository root is the worktree edits there, not the shared main tree.
      */
     worktreeRootedPrompts?: boolean;
+    /**
+     * Lease the granted admitted set against the shared reservation ledger. The
+     * host-subagent rolling path leaves this unset (defaults true — it dispatches the
+     * grant across processes and reconciles at accept-node); the in-process rolling
+     * engine passes `false` (it admits + leases per-packet itself, so a host grant
+     * here would double-count). Threaded into `buildDispatchQuota`.
+     */
+    grantLeases?: boolean;
   },
 ): Promise<RemediationDispatchPlan> {
   const state = await loadStateOrThrow(options.artifactsDir);
@@ -3005,6 +3061,9 @@ export async function prepareImplementDispatch(
   };
   await writeJsonFile(dispatchPlanPath(options.artifactsDir, runId, "implement"), plan);
 
+  const estimatedSlotTokens = itemReadFileLists.map((files) =>
+    estimateImplementSlotTokens(files, options.root),
+  );
   const schedule = await scheduleWave({
     hostMaxConcurrent: waveOptions?.hostMaxConcurrent,
     sessionConfig: waveOptions?.sessionConfig ?? null,
@@ -3013,15 +3072,30 @@ export async function prepareImplementDispatch(
     hostModels: waveOptions?.hostModels,
     hostModelId: waveOptions?.hostModelId,
     itemCount: items.length,
-    estimatedSlotTokens: itemReadFileLists.map((files) =>
-      estimateImplementSlotTokens(files, options.root),
-    ),
+    estimatedSlotTokens,
   });
+  // Admission packets in plan order: id = the node's block id (what
+  // `admission.granted_packet_ids` references and the host matches to nodes),
+  // inputTokens = its estimated slot cost, complexity = the remediate default 0.5.
+  // Keyed by block_id (same filter the frontier builder uses), so a granted id always
+  // resolves to a frontier node.
+  const admissionPackets = items
+    .map((item, i) => ({ item, inputTokens: estimatedSlotTokens[i] ?? 0 }))
+    .filter((p): p is { item: DispatchPlanItem & { block_id: string }; inputTokens: number } =>
+      typeof p.item.block_id === "string",
+    )
+    .map((p) => ({ id: p.item.block_id, inputTokens: p.inputTokens, complexity: 0.5 }));
   process.stderr.write(
-    `[remediate-code] dispatch: implement max_concurrent=${schedule.max_concurrent} of ${items.length} item(s) ` +
+    `[remediate-code] dispatch: implement ${items.length} item(s) ` +
       `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,
   );
-  const quota = buildDispatchQuota(runId, "implement", schedule);
+  const quota = await buildDispatchQuota(
+    runId,
+    "implement",
+    schedule,
+    admissionPackets,
+    waveOptions?.grantLeases ?? true,
+  );
   await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
 
   return plan;
@@ -3717,10 +3791,40 @@ function obligationIdsForFinding(
   ];
 }
 
+/**
+ * Reconcile (free) the reservation-ledger leases the dispatch grant took for this
+ * run's granted set — the "reconcile at result-ingest" half of admission control
+ * (spec/audit/dispatch-admission-control.md), the remediate analog of audit's
+ * `reconcileAdmissionLeases`. The host has now reported the granted set's results, so
+ * those reservations are no longer in flight and their budget returns to the shared
+ * account for the NEXT grant. Best-effort + token-checked (a missing/already-freed
+ * lease is a no-op), so a lost reconcile self-heals via the lease TTL and never blocks
+ * the merge. Only the host-subagent grant persists leases (`grantLeases: true`); the
+ * in-process path leases per-packet in the engine and reconciles there.
+ */
+async function reconcileAdmissionLeases(artifactsDir: string, runId: string): Promise<void> {
+  const quotaPath = join(runDir(artifactsDir, runId, "implement"), "dispatch-quota.json");
+  const quota = await readOptionalJsonFile<RemediationDispatchQuota>(quotaPath);
+  const leases = quota?.admission?.leases;
+  if (!leases || leases.length === 0) return;
+  const ledger = createReservationLedger();
+  for (const lease of leases) {
+    try {
+      await ledger.reconcile(lease.resource_key, lease.lease_id);
+    } catch {
+      // Best-effort: the lease TTL reclaims budget if a reconcile is lost.
+    }
+  }
+}
+
 export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
 ): Promise<RemediationState> {
+  // Free the grant's reservation-ledger leases now that the host has reported the
+  // granted set's results — returns the reserved budget for the next grant.
+  await reconcileAdmissionLeases(options.artifactsDir, runId);
+
   const plan = await readJsonFile<RemediationDispatchPlan>(
     dispatchPlanPath(options.artifactsDir, runId, "implement"),
   );

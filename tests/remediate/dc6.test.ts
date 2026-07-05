@@ -10,16 +10,22 @@
  * Real git worktrees; no state.json needed (loadState → null → empty verify
  * auto-passes), so these isolate the driver/registry wiring.
  *
+ * Granted-set model (admission control): the whole granted set has its worktree
+ * created + claimed upfront (worktrees == granted set); `advanceHostRolling` only runs
+ * each finished node's accept lifecycle + releases its claim, then reports wait/done.
+ * There is no per-completion JIT refill — the pending remainder is re-granted at the
+ * next next-step. Cross-driver exclusion happens at claim time (`prepareHostRollingDispatch`):
+ * a node a peer driver holds is recorded `contested` and never dispatched here.
+ *
  * Verifies:
- *   rolling next-node     each accept JIT-claims + dispatches the next undispatched
- *                         frontier node through the shared registry, and the node's
- *                         claim is held while in flight and released on accept.
- *   cross-driver accept   a node the SHARED registry already hands to a peer driver
- *                         is recorded `contested` and NOT re-dispatched by the host
- *                         loop — never both pick the same node.
+ *   claim lifecycle       each accept releases the finished node's claim; the granted
+ *                         set completes with no dangling claim.
+ *   cross-driver accept   a node a PEER driver holds (recorded `contested`, not
+ *                         dispatched) does not keep this session waiting — it finishes
+ *                         on its own granted nodes; the peer's claim is untouched.
  *   session-lock race     concurrent accept-node callbacks for distinct nodes are
  *                         serialized by the session lock (no lost acceptance / no
- *                         double-dispatch); a re-run for one node stays idempotent.
+ *                         double-accept); a re-run for one node stays idempotent.
  *   legacy fallback       when the rolling engine is off, the implement step is the
  *                         host-fanned wave (`dispatch_implement`), not a rolling step.
  */
@@ -76,15 +82,21 @@ function initRepo(): { repo: string; ok: boolean } {
   return { repo, ok: true };
 }
 
-/** Seed a rolling session + the per-node result files; pre-create + CLAIM the initial batch. */
+/**
+ * Seed a rolling session in the GRANTED-SET model + the per-node result files. Every
+ * granted node (frontier minus `contested`) has its worktree created + claimed upfront
+ * (worktrees == granted set); a `contested` node is one a PEER driver holds — it is NOT
+ * claimed/dispatched here and is recorded in `session.contested`.
+ */
 async function seedSession(
   repo: string,
   frontierIds: string[],
-  slots: number,
+  opts: { contested?: string[] } = {},
 ): Promise<{ artifactsDir: string; registry: ClaimRegistry }> {
   const artifactsDir = join(repo, ".audit-tools", "remediation");
   const implDir = join(artifactsDir, "runs", RID, "implement");
   mkdirSync(implDir, { recursive: true });
+  const contested = opts.contested ?? [];
   const frontier = frontierIds.map((id) => ({
     block_id: id,
     prompt_path: join(implDir, `${id}.md`),
@@ -102,22 +114,22 @@ async function seedSession(
     );
   }
   const registry = nodeClaimRegistry(artifactsDir, RID);
-  const initial = frontierIds.slice(0, Math.min(slots, frontierIds.length));
+  // Worktrees == granted set: create + claim EVERY non-contested node upfront (parity
+  // with prepareHostRollingDispatch), so the persisted session carries owner tokens.
+  const dispatched = frontierIds.filter((id) => !contested.includes(id));
   const claims: Record<string, string> = {};
-  for (const id of initial) {
+  for (const id of dispatched) {
     createWorktree(repo, worktreePath(repo, id, RID), worktreeBranchForBlock(id, RID));
-    // Claim the initial batch through the shared registry (parity with
-    // prepareHostRollingDispatch), so the persisted session carries owner tokens.
     const claim = await registry.claim(id, "host-subagent");
     if (claim.acquired) claims[id] = claim.ownerToken;
   }
   const session: RollingSession = {
     run_id: RID,
-    slots,
     frontier,
-    dispatched: initial,
+    dispatched,
     accepted: [],
     claims,
+    contested,
   };
   writeFileSync(join(implDir, "rolling-session.json"), JSON.stringify(session));
   return { artifactsDir, registry };
@@ -130,34 +142,28 @@ function readSession(artifactsDir: string): RollingSession {
 }
 
 // ===========================================================================
-// Rolling next-node: each accept JIT-claims + dispatches the next frontier node
-// through the shared registry; the claim is held in flight, released on accept.
+// Claim lifecycle: the whole granted set is claimed upfront; each accept releases
+// the finished node's claim; the set completes with no dangling claim.
 // ===========================================================================
 
-describe("DC-6 rolling next-node through the shared claim registry", () => {
-  it("claims the JIT-dispatched node and releases each node's claim on accept", async () => {
+describe("DC-6 granted-set claim lifecycle through the shared registry", () => {
+  it("releases each node's claim on accept and finishes the granted set with no dangling claim", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    // 3 nodes, slots=2: B1,B2 pre-dispatched+claimed; B3 is JIT-claimed on the first completion.
-    const { artifactsDir, registry } = await seedSession(repo, ["B1", "B2", "B3"], 2);
+    // 3 granted nodes: all worktrees created + claimed upfront (worktrees == granted set).
+    const { artifactsDir, registry } = await seedSession(repo, ["B1", "B2", "B3"]);
 
-    // Before any completion B1 + B2 hold live claims; B3 is unclaimed.
+    // All three hold live claims before any completion.
     expect(await registry.isClaimed("B1")).toBe(true);
     expect(await registry.isClaimed("B2")).toBe(true);
-    expect(await registry.isClaimed("B3")).toBe(false);
+    expect(await registry.isClaimed("B3")).toBe(true);
 
     const d1 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
-    expect(d1.kind).toBe("dispatch");
-    if (d1.kind === "dispatch") expect(d1.node.block_id).toBe("B3");
-    // B1's claim was released on accept; B3 was JIT-claimed before dispatch.
+    expect(d1.kind).toBe("wait"); // no JIT dispatch; B2/B3 still in flight
+    // B1's claim was released on accept; the session dropped its token.
     expect(await registry.isClaimed("B1")).toBe(false);
-    expect(await registry.isClaimed("B3")).toBe(true);
-    // The session persisted B3's owner token and dropped B1's.
-    const s1 = readSession(artifactsDir);
-    expect(s1.claims.B3).toBeTruthy();
-    expect(s1.claims.B1).toBeUndefined();
+    expect(readSession(artifactsDir).claims.B1).toBeUndefined();
 
-    // B2 finishes; B3 still in flight, nothing left to dispatch → wait.
     const d2 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B2" });
     expect(d2.kind).toBe("wait");
     expect(await registry.isClaimed("B2")).toBe(false);
@@ -172,34 +178,34 @@ describe("DC-6 rolling next-node through the shared claim registry", () => {
 });
 
 // ===========================================================================
-// Cross-driver single-accept: a node a PEER driver already holds in the SHARED
-// registry is NOT re-dispatched by the host loop — exactly-one-claimant.
+// Cross-driver single-accept: a node a PEER driver holds (recorded `contested`,
+// never dispatched here) does not keep this session waiting — exactly-one-claimant.
 // ===========================================================================
 
 describe("DC-6 cross-driver single-accept concurrency", () => {
-  it("does not JIT-dispatch a node a peer driver already claimed (no double-dispatch)", async () => {
+  it("finishes on its own granted nodes without waiting on a peer's contested node", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    // 3 nodes, slots=1: only B1 is pre-dispatched. B2, B3 are JIT candidates.
-    const { artifactsDir } = await seedSession(repo, ["B1", "B2", "B3"], 1);
-
-    // A PEER driver (the in-process engine) claims B2 against the SAME registry path
-    // BEFORE the host loop reaches it. The host loop must skip B2 (contested) and
-    // JIT-dispatch B3 instead — the two drivers never both pick B2.
+    // A PEER driver (the in-process engine) holds B2 against the SAME registry path, so
+    // prepareHostRollingDispatch would record it `contested` and never dispatch it. Seed
+    // that state: the host's granted set is {B1, B3}; B2 is the peer's.
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    mkdirSync(join(artifactsDir, "runs", RID, "implement"), { recursive: true });
     const peer = new ClaimRegistry(nodeClaimRegistryPath(artifactsDir, RID));
-    const peerClaim = await peer.claim("B2", "in-process");
-    expect(peerClaim.acquired).toBe(true);
+    expect((await peer.claim("B2", "in-process")).acquired).toBe(true);
 
+    const seeded = await seedSession(repo, ["B1", "B2", "B3"], { contested: ["B2"] });
+    expect(seeded.artifactsDir).toBe(artifactsDir);
+
+    const s0 = readSession(artifactsDir);
+    expect(s0.contested).toContain("B2");
+    expect(s0.dispatched).not.toContain("B2"); // host never dispatched the peer's node
+    expect(s0.dispatched.sort()).toEqual(["B1", "B3"]);
+
+    // This session owns 2 of the 3 nodes (B2 is the peer's).
     const d1 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
-    expect(d1.kind).toBe("dispatch");
-    if (d1.kind === "dispatch") expect(d1.node.block_id).toBe("B3"); // skipped contested B2
-
-    const s = readSession(artifactsDir);
-    expect(s.contested).toContain("B2");
-    expect(s.dispatched).not.toContain("B2"); // host never dispatched the peer's node
-    expect(s.dispatched).toContain("B3");
-    // This session owns 2 of the 3 nodes (B2 is the peer's); B3 still in flight.
-    if (d1.kind === "dispatch") {
+    expect(d1.kind).toBe("wait");
+    if (d1.kind === "wait") {
       expect(d1.total).toBe(2);
       expect(d1.accepted).toBe(1);
     }
@@ -217,39 +223,31 @@ describe("DC-6 cross-driver single-accept concurrency", () => {
 
 // ===========================================================================
 // Session-lock race: concurrent accept-node callbacks for distinct nodes are
-// serialized by the session lock — no lost acceptance, no double-dispatch — and a
+// serialized by the session lock — no lost acceptance, no double-accept — and a
 // re-run for an already-accepted node stays idempotent.
 // ===========================================================================
 
 describe("DC-6 session-lock race", () => {
-  it("serializes concurrent completions: every node accepted once, JIT-claims consistent", async () => {
+  it("serializes concurrent completions: every node accepted once, claims released", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    // 4 nodes, slots=2: B1,B2 in flight; B3,B4 are JIT candidates.
-    const { artifactsDir, registry } = await seedSession(repo, ["B1", "B2", "B3", "B4"], 2);
+    // 4 granted nodes all dispatched upfront; B1,B2 complete CONCURRENTLY.
+    const { artifactsDir, registry } = await seedSession(repo, ["B1", "B2", "B3", "B4"]);
 
-    // B1 and B2 complete CONCURRENTLY. The session lock must serialize the two
-    // read-modify-writes so neither acceptance is lost and B3/B4 are each claimed +
-    // dispatched by exactly one of the two callbacks (no double-claim, no skip).
+    // The session lock must serialize the two read-modify-writes so neither acceptance
+    // is lost and neither node is double-accepted. Both return `wait` (B3/B4 still in
+    // flight) — there is no JIT dispatch in the granted-set model.
     const [r1, r2] = await Promise.all([
       advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" }),
       advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B2" }),
     ]);
-
-    const dispatchedNext = [r1, r2]
-      .filter((d): d is Extract<typeof d, { kind: "dispatch" }> => d.kind === "dispatch")
-      .map((d) => d.node.block_id)
-      .sort();
-    // Both completions had a next node to dispatch → B3 and B4, each exactly once.
-    expect(dispatchedNext).toEqual(["B3", "B4"]);
+    expect(r1.kind).toBe("wait");
+    expect(r2.kind).toBe("wait");
 
     const s = readSession(artifactsDir);
-    // Both B1 and B2 were accepted (neither acceptance lost to the race).
+    // Both B1 and B2 were accepted exactly once (neither acceptance lost to the race).
     expect(s.accepted.sort()).toEqual(["B1", "B2"]);
-    // B3 and B4 are both claimed + dispatched exactly once (no duplicates).
-    expect(s.dispatched.filter((id) => id === "B3")).toHaveLength(1);
-    expect(s.dispatched.filter((id) => id === "B4")).toHaveLength(1);
-    // The two finished nodes' claims were released; the two new ones are held.
+    // The two finished nodes' claims were released; the two still-in-flight ones held.
     expect(await registry.isClaimed("B1")).toBe(false);
     expect(await registry.isClaimed("B2")).toBe(false);
     expect(await registry.isClaimed("B3")).toBe(true);
@@ -259,7 +257,7 @@ describe("DC-6 session-lock race", () => {
   it("is idempotent: a re-run for an already-accepted node does not double-accept or double-release", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const { artifactsDir, registry } = await seedSession(repo, ["B1"], 1);
+    const { artifactsDir, registry } = await seedSession(repo, ["B1"]);
     const first = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
     expect(first.kind).toBe("done");
     expect(await registry.isClaimed("B1")).toBe(false);

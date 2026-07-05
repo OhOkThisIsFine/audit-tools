@@ -541,9 +541,9 @@ function blockedByUnsatisfiedDependency(
 // The rolling scheduler replaced the wave-batch shim: instead of dispatching one
 // fixed-size wave per next-step and folding back through `implementing`, a node
 // becomes eligible the instant every dependency reaches a verified-complete
-// disposition (INV-RS-01). Concurrency is owned entirely by the quota scheduler
-// (the `dispatch-quota.json` max_concurrent_agents from `scheduleWave` /
-// `computeDispatchCapacity` — INV-S05 / INV-QD-11), never a separate wave cap.
+// disposition (INV-RS-01). Concurrency is emergent from admission control (the
+// `dispatch-quota.json` `admission.granted_packet_ids` the tool admits against the
+// live budget — INV-S05 / INV-QD-11), never a computed wave cap.
 // A shared rebuild is interposed between dependency levels so a downstream node
 // typechecks/runs against the freshly-built upstream `audit-tools/shared`
 // surface; the rebuild is single-flight (CE-001) so the same package is never
@@ -1052,6 +1052,10 @@ export async function driveRollingImplementDispatch(
       hostModelId: options.waveOptions?.hostModelId,
       // Each node runs in its own worktree, so its prompt is rooted there.
       worktreeRootedPrompts: true,
+      // The in-process rolling engine admits + leases per-packet itself, so the
+      // dispatch-quota grant here must NOT lease (a host grant lease would
+      // double-count the same work against the shared account budget).
+      grantLeases: false,
     },
   );
   if (plan.items.length === 0) {
@@ -1939,7 +1943,10 @@ async function buildImplementDispatchStep(ctx: {
       const driverSelection = selectDispatchDriver({
         classification: classifyProvider(hostProvider),
         eligibleItemCount: rolling.session.frontier.length,
-        slots: rolling.session.slots,
+        // The granted set's size IS the instantaneous admission width — there is no
+        // separate concurrency number. The whole granted set runs at once, so the
+        // driver-selection "slots" is the granted-set size.
+        slots: rolling.session.frontier.length,
       });
       const rollMerge = loaderCommand(`merge-implement-results --run-id ${runId}`);
       const rollNext = loaderCommand("next-step");
@@ -1959,21 +1966,23 @@ async function buildImplementDispatchStep(ctx: {
         prompt: `
 # Dispatch Implementation Work (host-subagent rolling, worktree-isolated)
 
-Each eligible node runs in its OWN git worktree (hard isolation between nodes). The
+Each granted node runs in its OWN git worktree (hard isolation between nodes). The
 TOOL owns commit -> verify -> merge + write-scope; you only spawn a subagent per
 node and call \`accept-node\` as each finishes.
 
-Concurrency target: **${rolling.session.slots}** subagents at once (the quota
-scheduler's \`max_concurrent_agents\`), NOT a wave cap.
+The tool ADMITTED this set against the live budget (and any declared in-flight cap):
+dispatch EXACTLY the ${rolling.session.frontier.length} node(s) below and no more.
+Their count is the whole grant — there is no separate concurrency cap. When they are
+all accepted, merge and re-invoke next-step; the tool re-grants the pending remainder.
 
-${renderDispatchDriverInstruction(driverSelection, `**${rolling.session.slots}**`)}
+${renderDispatchDriverInstruction(driverSelection, `the ${rolling.session.frontier.length} granted node(s)`)}
 
-Spawn ONE subagent for EACH initial node below. Give the subagent that node's
+Spawn ONE subagent for EACH granted node below. Give the subagent that node's
 \`prompt\`, and set its working directory to the node's **worktree** path. The
 subagent edits source files INSIDE that worktree and writes ONLY its result file.
 Do NOT let any subagent edit the main repository tree.
 
-Initial nodes (worktrees already created):
+Granted nodes (worktrees already created):
 ${nodeLines}
 
 As EACH subagent finishes, run (substituting the finished node's block id):
@@ -1982,11 +1991,8 @@ As EACH subagent finishes, run (substituting the finished node's block id):
 
 It runs the commit -> verify -> merge lifecycle for that node and prints a JSON
 directive on stdout:
-- \`{"directive":"dispatch","node":{...},"worktree_root":"..."}\` — spawn a subagent
-  for that next node (its worktree is already created), keeping up to
-  ${rolling.session.slots} running.
-- \`{"directive":"wait",...}\` — other nodes are still in flight; do not spawn more yet.
-- \`{"directive":"done",...}\` — every node has been accepted. Then run:
+- \`{"directive":"wait",...}\` — other granted nodes are still in flight; do not spawn more.
+- \`{"directive":"done",...}\` — every granted node has been accepted. Then run:
 
 \`${rollMerge}\`
 
@@ -2008,8 +2014,8 @@ ${DISPATCH_PROMPT_HANDOFF_NOTE}
     }
     // Rolling per-node dispatch: prepare EVERY currently-eligible node (deps all
     // verified-complete), never a single artificially-serialized block. There is
-    // no wave-size cap — concurrency is owned by the quota scheduler
-    // (`dispatch-quota.json` max_concurrent_agents). `prepareImplementDispatch`
+    // no wave-size cap — concurrency is emergent from admission control
+    // (`dispatch-quota.json` `admission.granted_packet_ids`). `prepareImplementDispatch`
     // itself only admits verified-complete-eligible blocks
     // (`dependencyVerifiedComplete`), so this is the rolling-eligible frontier.
     const dispatchPlan = await prepareImplementDispatch(
@@ -2089,15 +2095,17 @@ Read the dispatch plan and quota JSONs:
 \`${implQuotaPath}\`
 
 Every item in \`items\` is a node whose dependencies are all VERIFIED-COMPLETE
-(INV-RS-01), so all of them are eligible to run now. Concurrency is owned by the
-quota scheduler — maintain up to \`max_concurrent_agents\` subagents running
-simultaneously (from the quota file), with no separate wave-size cap. Each item's
+(INV-RS-01). The tool admitted a budget-bounded subset: dispatch EXACTLY the block
+ids in the quota file's \`admission.granted_packet_ids\` and no others — that granted
+set is the whole grant (there is no separate concurrency cap). Each item's
 \`model_hint.tier\` suggests which model to use (small/standard/deep). If your
 provider has rate limits, pace launches accordingly.
 
-For each item in \`items\`, dispatch one subagent with that item's
-\`prompt_path\`. Each subagent may edit source files needed for that bounded
-block and must write only its assigned \`result_path\`.
+For each GRANTED item in \`items\` (its \`block_id\` in \`admission.granted_packet_ids\`),
+dispatch one subagent with that item's \`prompt_path\`. Each subagent may edit source
+files needed for that bounded block and must write only its assigned \`result_path\`.
+After the granted set is merged and you run next-step, the tool re-grants the pending
+remainder.
 
 ${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
 

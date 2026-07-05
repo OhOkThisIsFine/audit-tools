@@ -120,7 +120,7 @@ export const REMEDIATION_CLOSING_RESULT_CONTRACT_VERSION =
   "remediate-code-closing-result/v1alpha1" as const;
 
 export const REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION =
-  "remediate-code-dispatch-quota/v1alpha2" as const;
+  "remediate-code-dispatch-quota/v1alpha3" as const;
 
 export type { HostConcurrencyLimitSource, HostConcurrencyLimit } from "audit-tools/shared";
 export type {
@@ -142,16 +142,23 @@ import type {
   QuotaUsageSnapshot,
   WaveBindingCap,
   DispatchCapacityPoolSummary,
+  DispatchAdmission,
 } from "audit-tools/shared";
 
 export interface RemediationDispatchQuota {
-  contract_version:
-    | typeof REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION
-    | "remediate-code-dispatch-quota/v1alpha1";
+  contract_version: typeof REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION;
   run_id: string;
   phase: DispatchPhase;
   host_concurrency_limit: HostConcurrencyLimit | null;
-  max_concurrent_agents: number;
+  /**
+   * Admission control (v1alpha3) — REPLACES the removed `max_concurrent_agents`
+   * scalar. The tool GRANTS the affordable admitted set (`granted_packet_ids`,
+   * cost-first-capable, ledger-leased); the host dispatches exactly that set and
+   * re-invokes next-step for the next grant. The granted set's size is the emergent
+   * admission width — there is no computed concurrency number. Single-sourced with the
+   * audit side via `computeDispatchAdmission`. See spec/audit/dispatch-admission-control.md.
+   */
+  admission: DispatchAdmission;
   estimated_wave_tokens: number;
   model: string | null;
   confidence: LimitConfidence;

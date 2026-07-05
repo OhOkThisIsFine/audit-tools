@@ -396,7 +396,13 @@ describe("acceptNodeWorktree — rebase-onto-HEAD seam handling", () => {
 // ===========================================================================
 
 describe("advanceHostRolling", () => {
-  function seedSession(repo: string, frontierIds: string[], slots: number): string {
+  /**
+   * Seed a rolling session in the GRANTED-SET model: the whole granted set has its
+   * worktree created upfront (worktrees == granted set), `dispatched` is the whole set,
+   * and there is no `slots` / JIT refill. `advanceHostRolling` only accepts + reports
+   * wait/done; the pending remainder is re-granted at the next next-step.
+   */
+  function seedSession(repo: string, frontierIds: string[]): string {
     const artifactsDir = join(repo, ".audit-tools", "remediation");
     const implDir = join(artifactsDir, "runs", RID, "implement");
     mkdirSync(implDir, { recursive: true });
@@ -416,40 +422,39 @@ describe("advanceHostRolling", () => {
         }),
       );
     }
-    const initial = frontierIds.slice(0, Math.min(slots, frontierIds.length));
-    for (const id of initial) {
+    // Worktrees == granted set: create every granted node's worktree upfront.
+    for (const id of frontierIds) {
       createWorktree(repo, worktreePath(repo, id, RID), worktreeBranchForBlock(id, RID));
     }
     const session: RollingSession = {
       run_id: RID,
-      slots,
       frontier,
-      dispatched: initial,
+      dispatched: [...frontierIds],
       accepted: [],
     };
     writeFileSync(join(implDir, "rolling-session.json"), JSON.stringify(session));
     return artifactsDir;
   }
 
-  it("rolls dispatch -> wait -> done across a frontier, JIT-creating the next worktree", async () => {
+  it("accepts the granted set with wait -> wait -> done (no per-completion JIT refill)", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    // 3 nodes, slots=2: B1,B2 pre-dispatched; B3 is JIT-created on the first completion.
-    const artifactsDir = seedSession(repo, ["B1", "B2", "B3"], 2);
+    // 3 granted nodes, all worktrees created upfront. Each accept only accepts + reports.
+    const artifactsDir = seedSession(repo, ["B1", "B2", "B3"]);
 
+    // B1 finishes → 2 still in flight → wait (never a "dispatch" directive: the whole
+    // granted set was already dispatched; the remainder is re-granted next next-step).
     const d1 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
-    expect(d1.kind).toBe("dispatch");
-    if (d1.kind === "dispatch") expect(d1.node.block_id).toBe("B3");
-    // B3's worktree was JIT-created; B1's was removed by its accept lifecycle.
-    expect(existsSync(worktreePath(repo, "B3", RID))).toBe(true);
+    expect(d1.kind).toBe("wait");
+    if (d1.kind === "wait") expect(d1.accepted).toBe(1);
+    // B1's worktree was removed by its accept lifecycle; no new worktree was JIT-created.
     expect(existsSync(worktreePath(repo, "B1", RID))).toBe(false);
 
-    // B2 finishes; B3 is still in flight and nothing left to dispatch → wait.
     const d2 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B2" });
     expect(d2.kind).toBe("wait");
     if (d2.kind === "wait") expect(d2.accepted).toBe(2);
 
-    // B3 finishes; all accepted → done.
+    // B3 finishes; all granted nodes accepted → done.
     const d3 = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B3" });
     expect(d3.kind).toBe("done");
     if (d3.kind === "done") expect(d3.accepted).toBe(3);
@@ -458,7 +463,7 @@ describe("advanceHostRolling", () => {
   it("is idempotent: a re-run for an already-accepted node does not double-accept", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const artifactsDir = seedSession(repo, ["B1"], 1);
+    const artifactsDir = seedSession(repo, ["B1"]);
     const first = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
     expect(first.kind).toBe("done");
     // Re-run: no throw, still done, accepted count unchanged (1, not 2).
@@ -470,7 +475,7 @@ describe("advanceHostRolling", () => {
   it("throws for a block id that is not in the frontier", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const artifactsDir = seedSession(repo, ["B1"], 1);
+    const artifactsDir = seedSession(repo, ["B1"]);
     await expect(
       advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "ZZZ" }),
     ).rejects.toThrow(/not in the rolling frontier/);
@@ -479,7 +484,7 @@ describe("advanceHostRolling", () => {
   it("records each accepted node's verify/merge outcome to the sidecar mergeImplementResults reads", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const artifactsDir = seedSession(repo, ["B1"], 1);
+    const artifactsDir = seedSession(repo, ["B1"]);
     // seedSession created B1's worktree without edits; add a real edit so the accept
     // lifecycle commits → verifies (no targeted cmds → auto-pass) → merges (merged:true).
     const wt = worktreePath(repo, "B1", RID);

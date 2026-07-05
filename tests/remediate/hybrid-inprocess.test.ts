@@ -216,8 +216,20 @@ describe("A-8 prepareHostRollingDispatch (hybrid partition)", () => {
     const artifactsDir = artifactsDirOf(repo);
     const implementDir = join(artifactsDir, "runs", RID, "implement");
     mkdirSync(implementDir, { recursive: true });
-    // slots=2 so both partition nodes dispatch in the initial batch.
-    writeFileSync(join(implementDir, "dispatch-quota.json"), JSON.stringify({ max_concurrent_agents: 2 }) + "\n");
+    // Admission grants all three eligible nodes; the coordinator partition then
+    // restricts the host driver to HOST1/HOST2. The granted set is what the host may
+    // dispatch this step (worktrees == granted set ∩ partition).
+    writeFileSync(
+      join(implementDir, "dispatch-quota.json"),
+      JSON.stringify({
+        admission: {
+          granted_packet_ids: ["HOST1", "HOST2", "HOST3"],
+          declared_cap: null,
+          leases: [],
+          explains: [],
+        },
+      }) + "\n",
+    );
 
     // The plan has THREE host blocks; the coordinator partition covers only two.
     const plan = planFor(repo, ["HOST1", "HOST2", "HOST3"]);

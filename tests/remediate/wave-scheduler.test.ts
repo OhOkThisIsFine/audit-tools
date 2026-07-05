@@ -287,8 +287,13 @@ describe("scheduleWave", () => {
   });
 });
 
+/** Admission packets keyed b-0..b-(n-1), each `tok` input tokens (default 600). */
+function mkPackets(n: number, tok = 600): { id: string; inputTokens: number; complexity: number }[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `b-${i}`, inputTokens: tok, complexity: 0.5 }));
+}
+
 describe("buildDispatchQuota", () => {
-  it("assembles a valid quota object", async () => {
+  it("assembles a valid quota object with an admission block (no scalar)", async () => {
     const schedule = await scheduleWave({
       hostMaxConcurrent: 5,
       sessionConfig: null,
@@ -296,11 +301,17 @@ describe("buildDispatchQuota", () => {
       estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
       env: {} as any,
     });
-    const quota = buildDispatchQuota("RUN-123", "document", schedule);
-    expect(quota.contract_version).toBe("remediate-code-dispatch-quota/v1alpha2");
+    // grantLeases:false → plan-only admission (deterministic, no ledger side-effects):
+    // every candidate is listed and the host in-flight cap is SURFACED (declared_cap),
+    // which replaces the removed `max_concurrent_agents` scalar.
+    const quota = await buildDispatchQuota("RUN-123", "document", schedule, mkPackets(10), false);
+    expect(quota.contract_version).toBe("remediate-code-dispatch-quota/v1alpha3");
     expect(quota.run_id).toBe("RUN-123");
     expect(quota.phase).toBe("document");
-    expect(quota.max_concurrent_agents).toBe(5);
+    // The old scalar is gone; the admission block carries the granted set + declared cap.
+    expect(quota).not.toHaveProperty("max_concurrent_agents");
+    expect(quota.admission.declared_cap).toBe(5);
+    expect(quota.admission.granted_packet_ids).toHaveLength(10);
     expect(quota.estimated_wave_tokens).toBe(3000);
     expect(quota.host_concurrency_limit!.active_subagents).toBe(5);
     expect(quota.confidence).toBeDefined();
@@ -316,16 +327,39 @@ describe("buildDispatchQuota", () => {
     ]);
   });
 
-  it("works for implement phase", async () => {
+  it("works for implement phase (no declared cap ⇒ null)", async () => {
     const schedule = await scheduleWave({
       sessionConfig: null,
       itemCount: 3,
       env: {} as any,
     });
-    const quota = buildDispatchQuota("RUN-456", "implement", schedule);
+    const quota = await buildDispatchQuota("RUN-456", "implement", schedule, mkPackets(3), false);
     expect(quota.phase).toBe("implement");
-    expect(quota.max_concurrent_agents).toBe(3);
+    expect(quota.admission.declared_cap).toBeNull();
+    expect(quota.admission.granted_packet_ids).toHaveLength(3);
     expect(quota.host_concurrency_limit).toBeNull();
+  });
+
+  it("host-path grant (grantLeases:true) honors the declared in-flight cap", async () => {
+    // Isolate the shared reservation ledger to a fresh dir so no other test's leases
+    // seed this grant's cross-process in-flight count (else the cap would under-grant).
+    const { setQuotaStateDir } = await import("../../src/remediate/quota/index.js");
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join: joinPath } = await import("node:path");
+    setQuotaStateDir(await mkdtemp(joinPath(tmpdir(), "wave-sched-ledger-")));
+    // With a real ledger grant, the host in-flight cap bounds the granted set: 5 of 10.
+    const schedule = await scheduleWave({
+      hostMaxConcurrent: 5,
+      sessionConfig: null,
+      itemCount: 10,
+      estimatedSlotTokens: Array.from({ length: 10 }, () => 600),
+      env: {} as any,
+    });
+    const quota = await buildDispatchQuota("RUN-cap", "implement", schedule, mkPackets(10), true);
+    expect(quota.admission.declared_cap).toBe(5);
+    expect(quota.admission.granted_packet_ids).toHaveLength(5);
+    expect(quota.admission.leases).toHaveLength(5);
   });
 });
 
@@ -355,7 +389,7 @@ describe("buildDispatchQuota — backoff state from learned quota entry", () => 
     const schedule = await makeScheduleResult();
     const entry = makeQuotaStateEntry({ consecutive_429_count: 3 });
 
-    const quota = buildDispatchQuota("RUN-429", "document", schedule, entry);
+    const quota = await buildDispatchQuota("RUN-429", "document", schedule, mkPackets(4), false, entry);
 
     expect(quota.backoff_state).not.toBeNull();
     expect(quota.backoff_state!.consecutive_429_count).toBe(3);
@@ -371,7 +405,7 @@ describe("buildDispatchQuota — backoff state from learned quota entry", () => 
     const schedule = await makeScheduleResult();
     const entry = makeQuotaStateEntry({ consecutive_429_count: 0 });
 
-    const quota = buildDispatchQuota("RUN-ok", "document", schedule, entry);
+    const quota = await buildDispatchQuota("RUN-ok", "document", schedule, mkPackets(4), false, entry);
 
     expect(quota.backoff_state).toBeNull();
   });
@@ -379,7 +413,7 @@ describe("buildDispatchQuota — backoff state from learned quota entry", () => 
   it("leaves backoff_state null when no quota entry is supplied", async () => {
     const schedule = await makeScheduleResult();
 
-    const quota = buildDispatchQuota("RUN-none", "document", schedule);
+    const quota = await buildDispatchQuota("RUN-none", "document", schedule, mkPackets(4), false);
 
     expect(quota.backoff_state).toBeNull();
   });
@@ -399,7 +433,7 @@ describe("buildDispatchQuota — backoff state from learned quota entry", () => 
       quota_source_snapshot: snapshot,
     };
 
-    const quota = buildDispatchQuota("RUN-snap", "implement", schedule);
+    const quota = await buildDispatchQuota("RUN-snap", "implement", schedule, mkPackets(4), false);
 
     expect(quota.quota_source_snapshot).toEqual(snapshot);
   });
