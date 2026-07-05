@@ -75,14 +75,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   [[capability-is-per-auditor-not-per-audit]]. **Not yet fixed** — design change touching
   `src/audit/cli/dispatch/quotaPool.ts` + `nextStepCommand.ts` + step-prompt rendering.
   - **Design of record: [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md)** (status:
-    proposed). The fix generalized past "capability" into a full dispatch rework: **concurrency is the
+    **ACCEPTED — building**). The fix generalized past "capability" into a full dispatch rework: **concurrency is the
     wrong primitive** -> admit one task at a time on a live per-pool token budget (concurrency emergent);
     self-describing per-invocation pool descriptors; a shared, `withFileLock`-guarded, account-keyed
     (`provider#account/model`) **reservation ledger** to avoid clobbering the shared provider meter
     (proactive for co-located consumers, reactive shared-key backoff cross-machine). See
-    [[dispatch-admission-control-design]]. **Owner not yet fully convinced** — the spec's *Open tensions*
-    section holds the unresolved objections (output-token unknowability; ledger-is-a-proxy / possibly
-    over-built vs reactive-only). Resolve those before building.
+    [[dispatch-admission-control-design]]. **Owner resolved the Open tensions (2026-07-04)** — build the
+    FULL proactive reservation ledger now (reactive shared-key backoff is the always-correct floor; the
+    ledger layers on top); reserve an output ENVELOPE (declared cap → learned output/input ratio) not just
+    input; probe-then-widen cold-start ONLY when the resourceKey has no learned slope; FIFO on the ledger
+    lock (no per-consumer shares until starvation observed); explain-artifact records every admission. See
+    the spec's *Resolved decisions* section. Ships under one atomic-replace change (new admission loop +
+    ledger + `max_concurrent_agents` scalar deletion together).
   - **Audit dispatch can't fan out across host + codex + NIM concurrently — parity gap with remediate
     (observed 2026-07-04).** On a Claude-driven host-subagent dispatch step, dispatch-quota established a
     *single* `codex` pool (slots:2, `binding_cap: token_budget` off codex's 45% quota) even though

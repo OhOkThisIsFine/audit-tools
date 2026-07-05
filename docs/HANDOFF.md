@@ -10,8 +10,9 @@
 
 - On npm as `latest` at **v0.32.8**. Per-lap shipped detail is NOT narrated here (changelog creep — see
   `git log` and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **Immediate next: Dispatch admission-control rework** — see T5.3 below (design of record + *Open tensions*
-  to resolve before building). The prior "owner running the paused self-audit" note is void — that audit
+- **Immediate next: Dispatch admission-control rework — IN PROGRESS.** Owner resolved the spec's Open
+  tensions (2026-07-04): build the full proactive reservation ledger now. See T5.3 below + the spec's
+  *Resolved decisions* section. The prior "owner running the paused self-audit" note is void — that audit
   errored out and its partial results were manually finalized (stale `.audit-tools/` run-state was cleaned).
 - **Open items** (all in `docs/backlog.md`): remediate-side `opencode.json` drift/`INV-RCI-16`
   reconciliation; env-bound live validations (quota pre-wall pacing, friction escalation,
@@ -68,10 +69,13 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
 2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint
    endpoint); the openai-compatible/NIM guided-decoding path is the build lever.
-3. **Dispatch admission-control rework — 🟡 DESIGN PROPOSED, not built.** Design of record:
+3. **Dispatch admission-control rework — 🔨 ACCEPTED, building.** Design of record:
    [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)
-   ([[dispatch-admission-control-design]], [[capability-is-per-auditor-not-per-audit]]). Loop-core change →
-   full pipeline; blocked on resolving the spec's *Open tensions* first.
+   ([[dispatch-admission-control-design]], [[capability-is-per-auditor-not-per-audit]]). Owner resolved the
+   Open tensions (2026-07-04 — see spec's *Resolved decisions*): full proactive reservation ledger on a
+   reactive-backoff floor; output-envelope reservation; probe-then-widen only when the resourceKey has no
+   learned slope; FIFO on the ledger lock; per-admission explain-artifact. Loop-core → full pipeline; ships
+   as one atomic-replace (new admission loop + ledger + `max_concurrent_agents` scalar deletion together).
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist

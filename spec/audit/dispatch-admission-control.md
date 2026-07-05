@@ -171,42 +171,45 @@ This is the ClaimRegistry / HybridSpillCoordinator lineage generalized: the
 ClaimRegistry already coordinates *task* claiming across agents; this adds *quota*
 claiming (token leases) on the same shared-ledger, account-keyed pattern.
 
-## Open tensions (unresolved — the design must answer these before it ships)
+## Resolved decisions (owner, 2026-07-04 — these were the Open tensions)
 
-These are the places the design is not obviously right. If the design feels off,
-the reason is probably in here.
+The owner resolved the fork: **build the full proactive reservation ledger now**
+(not the deferred reactive-only minimal core), because the full ledger is judged
+the right endpoint — implementation size is not a cost, only the endpoint is.
+Reactive shared-key backoff remains the *always-correct* floor; the proactive
+ledger is layered on top of it, never in place of it.
 
-1. **Output tokens are unknowable before dispatch.** `estimateTokensFromBytes`
-   estimates *input*. A review packet's *output* (the findings) is unknown until
-   generated, and output is frequently the binding rate-limit constraint. Reserving
-   on input-estimate systematically under-reserves. Options: reserve an
-   output *envelope* (the packet's declared output cap) rather than an estimate;
-   learn an empirical output/input ratio per lens; or treat output purely
-   reactively. **Unresolved — likely the biggest hole.**
-2. **The ledger is a proxy, never the meter.** Other clients on the same account
-   that are *not* audit-tools — you chatting with Claude directly, another tool —
-   consume the same meter but never touch the ledger. So the proactive reservation
-   is always optimistic relative to reality regardless of how careful it is. This
-   argues that reactive backoff is the *real* protection and the reservation ledger
-   is a second-order refinement — and that we should not over-invest in
-   reservation precision or let it create a false sense of safety.
-3. **Legibility / predictability loss.** A hard concurrency cap is simple to reason
-   about ("why did it launch N?"). An emergent budget-driven count is more correct
-   but less predictable and harder to audit after the fact. We need the
-   dispatch-quota artifact to *explain* each admission (which pool, what headroom,
-   what estimate) so the emergent behaviour stays inspectable.
-4. **Cold-start overshoot.** With no measured history, optimistic start can admit
-   too much before the first completions calibrate. How optimistic is the initial
-   headroom, and is the first wave deliberately small (probe-then-widen)?
-5. **Fairness across co-located consumers.** Two runs sharing a ledger: a greedy
-   run can starve another. No fairness/priority policy is specified. Is FIFO on the
-   lock enough, or do we need per-consumer shares?
-6. **Is the whole thing over-built?** If (2) is right that reactive backoff is the
-   only true safety, the minimal correct design might be: optimistic one-at-a-time
-   admission + shared-key reactive backoff, with the reservation ledger added
-   *only* if co-located multi-consumer overshoot is measured to be a real problem.
-   The reservation machinery should not be built ahead of evidence that it is
-   needed. **This may be the unarticulated objection.**
+1. **Output tokens — reserve an output envelope, learn the ratio.** A lease
+   reserves `cost(t) = input_estimate + output_reservation`, where
+   `output_reservation` is the packet's declared output cap when the
+   `(resourceKey, lens)` has no learned history, and the learned empirical
+   output/input ratio once completions have measured it. On completion the lease
+   reconciles against **actual (input+output)** tokens, which updates the learned
+   ratio. This makes output — the binding constraint — a first-class part of the
+   reservation instead of an ignored axis. Reactive 429/backoff still catches any
+   residual under-reservation.
+2. **The ledger is a proxy, and that is accepted.** Non-audit-tools clients on the
+   same account never touch the ledger, so proactive reservation is optimistic
+   relative to true meter state — but reactive shared-key backoff is the floor that
+   remains correct regardless. The ledger reduces co-located overshoot; it never
+   claims to be the meter. It must not be presented (in artifact or prompt) as a
+   hard guarantee.
+3. **Legibility — the dispatch-quota artifact explains every admission.** Each
+   admission records `{ pool_id, resourceKey, headroom_before, estimate,
+   output_reservation, decision (admit|block), outstanding_leases }` so the
+   emergent fan-out width is reconstructable after the fact.
+4. **Cold-start — probe-then-widen only when unknown.** When the `resourceKey` has
+   no learned slope, the first admission window is deliberately narrow (probe: admit
+   a small N, then widen as the first completions calibrate the learned
+   tokens-per-percent / output-ratio). When a learned slope *does* exist for the
+   `resourceKey`, size against it directly — no artificial narrow probe.
+5. **Fairness — FIFO on the lock, for now.** Co-located consumers serialize on the
+   ledger lock in arrival order; no per-consumer shares until starvation is
+   *observed* on a real double-run. Revisit only with evidence.
+6. **Not over-built — full ledger is the chosen endpoint.** The owner explicitly
+   chose the full proactive reservation ledger over the reactive-only minimal core.
+   The reactive floor is still built first and independently correct; the ledger is
+   the refinement layered on it, both shipping under one atomic-replace change.
 
 ## Validation criteria (how we'd know it works)
 
