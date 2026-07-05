@@ -68,6 +68,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   gitignored run-state stays permanently marked "failed" (branch becomes the only source of truth). Add a
   re-verify/re-accept path so a fixed verify environment can cleanly re-drive quarantined nodes.
 
+- **Friction (tool-should-decide): the commit-gate hook typechecks but never runs tests, so a prose/doc
+  reword can land a RED doc-contract test on main (observed 2026-07-05).** `tests/audit/release-contract.test.mjs`
+  asserts EXACT strings in `docs/audit-pkg/release.md` (e.g. ``Node `20` and Node `22```); the `68b2d974`
+  doc-review pass reworded that line to "Node 20 and 22" and committed it — the PreToolUse commit-gate hook
+  passed (typecheck green) and the red only surfaced at the next `verify:release`. Two prior main pushes
+  (`f719549f`, `68b2d974`) sat CI-red. Fix candidates: have the commit-gate hook also run the fast
+  doc-contract test subset when a tracked `docs/**.md` is staged, and/or have the doc-review routine run
+  `release-contract.test.mjs` before committing a `release.md` edit. (Restored the phrasing in `e3bbf162`.)
+
 - **Friction close-out — per-category WALK shipped; auto-seeding + bypass-backstop still open (2026-07-04).**
   The end-of-run friction triage now blocks until EVERY category in `FRICTION_CATEGORIES`
   (`ambiguous_direction` / `tool_should_decide` / `inefficient_feeding`) is covered by a category-tagged
