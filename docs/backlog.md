@@ -56,26 +56,24 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   quota-key) must be discovered per-invocation from the **current** auditor and never inherited from the
   run — a host-subagent-driven dispatch must size to the host's own reported capability, not the stored
   provider pool; only per-`(provider,model)` *learned quota* persists (keyed by auditor identity). See
-  [[capability-is-per-auditor-not-per-audit]]. **Not yet fixed** — design change touching
-  `src/audit/cli/dispatch/quotaPool.ts` + `nextStepCommand.ts` + step-prompt rendering.
-  - **Design of record: [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md)** (status:
-    **ACCEPTED — building**). The fix generalized past "capability" into a full dispatch rework: **concurrency is the
-    wrong primitive** -> admit one task at a time on a live per-pool token budget (concurrency emergent);
-    self-describing per-invocation pool descriptors; a shared, `withFileLock`-guarded, account-keyed
-    (`provider#account/model`) **reservation ledger** to avoid clobbering the shared provider meter
-    (proactive for co-located consumers, reactive shared-key backoff cross-machine). See
-    [[dispatch-admission-control-design]]. **Owner resolved the Open tensions (2026-07-04)** — build the
-    FULL proactive reservation ledger now (reactive shared-key backoff is the always-correct floor; the
-    ledger layers on top); reserve an output ENVELOPE (declared cap → learned output/input ratio) not just
-    input; probe-then-widen cold-start ONLY when the resourceKey has no learned slope; FIFO on the ledger
-    lock (no per-consumer shares until starvation observed); explain-artifact records every admission. See
-    the spec's *Resolved decisions* section. **Build status (2026-07-05):** commit 1 (substrate `5e0a4479`) +
-    commit 2a (in-process rolling-engine ledger wiring — `admitAgainstLedger` leases before `dispatchOnePacket`,
-    reconciles at `handleResult`, liveness backstop off ledger `outstandingBefore`; additive/default-off; tests in
-    `tests/shared/reservation-dispatch-overshoot.test.mjs`) shipped. **Next = commit 2b:** the atomic scalar
-    replace on the host-dispatch prompt path (schema v1alpha3, grant-the-admitted-set, both orchestrators) — see
-    HANDOFF T5.3 for the line-ref map. Ships under one atomic-replace change (scalar deletion + replacement
-    together).
+  [[capability-is-per-auditor-not-per-audit]]. **This is commit 3 — the last open piece of the admission
+  rework** (design change touching `src/audit/cli/dispatch/quotaPool.ts` + `nextStepCommand.ts` +
+  step-prompt rendering + `semanticReviewStep.ts`).
+  - **Design of record: [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md)**.
+    The fix generalized past "capability" into a full dispatch rework: **concurrency is the wrong primitive**
+    -> admit one task at a time on a live per-pool token budget (concurrency emergent); self-describing
+    per-invocation pool descriptors; a shared, `withFileLock`-guarded, account-keyed
+    (`provider#account/model`) **reservation ledger**. See [[dispatch-admission-control-design]] +
+    [[dissolve-auditor-remediator-distinction]]. **Build status (2026-07-05):** commit 1 (substrate) + 2a
+    (in-process engine ledger) + 2b-AUDIT + **2b-REMEDIATE** (scalar→admission + host-session reshape to
+    worktrees==granted-set) + the **rolling-driver unification** (one shared `driveRolling`; audit is the
+    read-only degenerate case; ledger wired at both in-process call sites, gated on a finite budget) are all
+    SHIPPED. **Only commit 3 remains** — the founding capability-inheritance bug itself: (a) the driver
+    descriptor must ride the returned continue-command so a different-auditor resume never inherits the run's
+    original provider; (b) audit reaches `resolveHostProviderName` parity (`semanticReviewStep.ts` still uses
+    raw `sessionConfig.provider`); (c) include the host pool in the audit dispatch plan (`buildAuditSourcePools`
+    parity with remediate `buildConfirmedPools` — this is defect (1) below); (d) demote `sessionConfig.provider`
+    to the headless in-process pool only. Lands the NEW **different-auditor-resume-no-inherit** test.
   - **Audit dispatch can't fan out across host + codex + NIM concurrently — parity gap with remediate
     (observed 2026-07-04).** On a Claude-driven host-subagent dispatch step, dispatch-quota established a
     *single* `codex` pool (slots:2, `binding_cap: token_budget` off codex's 45% quota) even though
@@ -164,36 +162,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   cleanly on one agent, not so it entrenches two.
 
 ## Forward tracks
-
-- **Unify the two rolling-dispatch drivers into one system; audit becomes a degenerate case (2026-07-05).**
-  Both orchestrators already share the packet-level engine (`createRollingDispatcher`,
-  `src/shared/dispatch/rollingDispatch.ts` — admission / quota / 429-requeue / spill / reservation ledger).
-  What is still forked is the DRIVER above it: audit `runRollingDispatch`
-  (`src/audit/orchestrator/rollingDispatch.ts`) vs. remediate `driveRollingDispatch`
-  (`src/remediate/steps/nextStep.ts:767`). The ideal endpoint is ONE parameterized driver, per
-  [[dissolve-auditor-remediator-distinction]] — but audit is **not** the free "ordering/writes just don't
-  fire" degenerate case it first appears to be, because of one real modeling conflation:
-  - **The write-ownership layer conflates "read-only" with "unresolved scope".** `ownershipSubWaves`
-    (`src/remediate/dispatch/ownershipScheduler.ts:94-103`) treats an EMPTY write-scope as conservatively
-    NON-disjoint → it admits **solo, one node per sub-wave** (correct for remediate: an *undeclared* scope
-    might touch anything). But an auditor has *no writes at all* = provably conflict-free = should run
-    **fully parallel**. So a naive unification that dispatches auditors as `scopeForBlock = () => []` would
-    silently make **audit go serial**. This regression is invisible today only because audit never reaches
-    this scheduler (it has its own driver).
-  - **The refinement that makes it correct:** the disjointness model needs THREE cases, not two —
-    (1) read-only / provably-no-writes ⇒ **always disjoint** (audit; full parallel); (2) declared disjoint
-    write-scopes ⇒ disjoint (remediate `cofile_parallel_safe`); (3) undeclared/empty ⇒ conservatively serial
-    (remediate today). Split case (1) out as first-class, and audit *does* fall out cleanly: read-only ⇒ one
-    maximal sub-wave ⇒ full parallel, with a single dependency level so the rebuild-between-levels + CE-001
-    single-flight machinery no-ops.
-  - **Keep per-orchestrator: the terminal / result-routing layer.** Audit → coverage/synthesis + DC-4
-    settled-exclusion resume (`exhausted_pool_ids`); remediate → accept-node/triage/close + quota_paused/
-    empty_pool merge. Different artifacts and resume semantics — this difference is **essential, not
-    vestigial**; do not force it into parity. The discipline stays "anything both drivers do the same belongs
-    in the engine/driver, not duplicated" (as commit 2a put the reservation ledger in the shared engine, not
-    each wrapper).
-  - **Sequencing:** this lands on the same call sites as the admission-control rework (2b/3); do the
-    unification as part of / right after that rework so the code is not restructured twice.
 
 - **Systemic reviewers must be pushed adversarially for improvement, not just correctness (owner,
   2026-07-05).** Two audit tiers exist and both are wanted: unit auditors that structurally can't see the
@@ -337,6 +305,14 @@ Standing gotchas worth keeping for any agent (strong or weak):
   bare `**/<name>/` — an unanchored glob (e.g. `**/friction/`) regenerates on every `ensure`/postinstall and
   can shadow a same-named SOURCE dir (`src/shared/friction/`), which a file-level edit can't fix. (`.audit-code/`
   is fine — distinct name, no source collision.)
+- **Wall-clock peak-concurrency tests are latency-fragile.** The rolling-driver integration tests assert
+  `peak == N` by dispatching N nodes with a short `setTimeout` and reading the max simultaneous in-flight
+  count. Any change that adds per-dispatch latency on the dispatch path (e.g. the reservation-ledger's
+  reserve-before-dispatch file-lock) can push admission past the delay window so peak reads `< N` on a slow
+  FS (Windows), a green-on-Linux / red-on-Windows or intermittent failure. When you touch the dispatch path,
+  expect these and either keep the added latency off the hot path (the finite-budget gate that keeps the
+  ledger unwired on the claude-code path) or widen the test's delay well past worst-case admission latency.
+  (`tests/remediate/rolling-dispatch-file-ownership-ordering.test.ts` §INV-SOO-03/05.)
 - **CLAUDECODE** is set in-session → UNSET for true-green gate runs (`env -u CLAUDECODE …`; set = one
   audit-code provider test fails).
 - **Fresh git worktree lacks `node_modules`** → `audit-tools/shared` resolves a stale `dist/` (spurious
