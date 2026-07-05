@@ -39,6 +39,7 @@
     "postinstall": "node scripts/postinstall.mjs",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "test:doc-contract": "vitest run tests/audit/release-contract.test.mjs tests/audit/priority-chain-doc-sync.test.mjs tests/audit/file-lock-doc-sync.test.mjs tests/audit/host-asset-renderer-drift.test.mjs",
     "test": "npm run build && vitest run",
     "test:single": "npm run build && vitest run",
     "verify:checks": "npm run check && npm run check:deadcode && npm run check:doc-manifest && npm run build && npm run verify:hosts && npm run verify:remediate-hosts && npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code",

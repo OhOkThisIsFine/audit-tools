@@ -40,7 +40,6 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 240_000,
   });
-  process.exit(0);
 } catch (err) {
   const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
     .trim()
@@ -49,6 +48,57 @@ try {
     .join('\n');
   console.error(
     `pre-commit gate: \`npm run check\` FAILED — commit blocked (green-at-every-commit invariant). Fix the type errors, then retry the commit.\n${tail}`,
+  );
+  process.exit(2);
+}
+
+// Doc-contract gate: `npm run check` only typechecks — it never runs tests, so a
+// prose reword can land a RED doc-contract test on main (release-contract.test.mjs
+// asserts EXACT strings in docs/audit-pkg/release.md; two main pushes sat CI-red
+// this way). When the staged set touches a doc/asset those tests pin, also run the
+// fast doc-contract subset (pure file reads, no build/subprocess spawns) so the red
+// surfaces here, not at the next verify:release. Skipped entirely when no such file
+// is staged — the common code-only commit pays nothing.
+let staged = [];
+try {
+  staged = execSync('git diff --cached --name-only', {
+    cwd: root,
+    shell: true,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+    .trim()
+    .split('\n')
+    .filter(Boolean);
+} catch {
+  // Can't list staged files (not a repo / git error) — don't wedge the commit.
+  process.exit(0);
+}
+
+// The docs/assets the doc-contract subset pins: any markdown (docs/**.md, CLAUDE.md,
+// AGENTS.md, copilot-instructions.md, auditor.agent.md) plus the rendered host assets
+// (opencode.json, .gemini/*). host-asset-renderer-drift + release/priority/file-lock
+// doc-sync tests guard exactly these.
+const pinsDocContract = (p) =>
+  /\.md$/i.test(p) || p === 'opencode.json' || p.startsWith('.gemini/');
+if (!staged.some(pinsDocContract)) process.exit(0);
+
+try {
+  execSync('npm run test:doc-contract', {
+    cwd: root,
+    shell: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 240_000,
+  });
+  process.exit(0);
+} catch (err) {
+  const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
+    .trim()
+    .split('\n')
+    .slice(-40)
+    .join('\n');
+  console.error(
+    `pre-commit gate: doc-contract tests FAILED — commit blocked. A staged doc/asset broke a test that pins its exact content (release-contract / *-doc-sync / host-asset-renderer-drift). Fix the doc or the test, then retry.\n${tail}`,
   );
   process.exit(2);
 }
