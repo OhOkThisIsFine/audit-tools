@@ -8,23 +8,28 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.8**. Per-lap shipped detail is NOT narrated here (changelog creep — see
-  `git log` and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **Immediate next: Dispatch admission-control — commit 3 (the founding bug).** 2a + 2b-AUDIT +
-  2b-REMEDIATE + the rolling-driver unification are all shipped (see `git log`; the admission model —
-  concurrency is not a computed quantity, budget-gated admission, only a declared env hard-cap like Codex 6
-  is explicit — is fully in place on both orchestrators' in-process paths, and the two forked in-process
-  drivers are now one shared `driveRolling`). **Commit 3 = the founding capability-inheritance bug**
-  ([[capability-is-per-auditor-not-per-audit]], full detail `docs/backlog.md`): a flagless resume by a
-  *different* auditor still sizes/charges against the run's *original* provider. Scope: driver descriptor
-  rides the returned continue-command (survives its own steps without the host re-appending flags); audit
-  reaches `resolveHostProviderName` parity (`semanticReviewStep.ts` still uses raw `sessionConfig.provider`);
-  include the host pool in the audit dispatch plan (`buildAuditSourcePools` parity with remediate
-  `buildConfirmedPools`); demote `sessionConfig.provider` to the headless in-process pool only. Lands the
-  NEW **different-auditor-resume-no-inherit** test (its regression guard, deferred out of C4). **Also then**
-  the audit in-process wrapper `runRollingDispatch` + remediate's real per-pool budget: both now wire the
-  ledger only when a pool reports a *finite* budget (metered provider); the token-budget path is live-
-  validated only on a metered run (`docs/backlog.md` quota-aware dispatch, env-bound).
+- On npm as `latest` at **v0.32.9** (pre-publish; this lap ships the next patch). Per-lap shipped detail
+  is NOT narrated here (changelog creep — see `git log` and project memory [[live-status]]); this section
+  is current-state + open-work roadmap only.
+- **Dispatch admission-control — founding capability-inheritance bug ✅ SHIPPED (commit 3, 2026-07-05).**
+  The whole admission rework (commits 1 + 2a + 2b-AUDIT + 2b-REMEDIATE + rolling-driver unification) is now
+  done through its founding correctness bug: a different-auditor resume no longer sizes/charges the fan-out
+  against the run's *original* provider. Landed: shared `resolveHostProviderName` + audit
+  `resolveHostDispatchProviderName` (a headless backend / unset / `auto` `sessionConfig.provider` resolves
+  to the conversation host; the host-review pool is keyed to the driver, never the inherited backend);
+  `HostDispatchDescriptor` rides every audit continue-command; the `different-auditor-resume-no-inherit` +
+  `host-descriptor-roundtrip` regression tests. [[capability-is-per-auditor-not-per-audit]].
+- **Immediate next: defect-1 — host + codex + NIM *concurrent* fan-out (the driver-identity contract).**
+  THROUGHPUT, not correctness (the wrong-quota bug is fixed). A configured in-process backend still
+  monopolizes the in-process-only branch, so an attended Claude host resuming a codex run can't also fan
+  out. Blocked on a missing per-invocation driver-identity/attendance signal (`hostCanDispatch` defaults
+  true; the audit skill never sends `--host-can-dispatch-subagents`) — so it's a contract-level change
+  (driver-identity declaration threaded into `next-step` + demote backend→source when an attended host
+  drives + audit skill-loader update + a8/a9/dc4 headless-test migration). Full detail + line-refs in
+  `docs/backlog.md`. **Also open:** the audit in-process wrapper `runRollingDispatch` + remediate's real
+  per-pool budget wire the ledger only when a pool reports a *finite* budget (metered provider); the
+  token-budget path is live-validated only on a metered run (`docs/backlog.md` quota-aware dispatch,
+  env-bound).
 - **⚠️ Stale-worktree trap:** ALWAYS `git fetch audit-tools main && git log HEAD..audit-tools/main` before
   starting a lap — this worktree branched behind main and had to fast-forward + re-read HANDOFF/backlog.
 - **Open items** (all in `docs/backlog.md`): remediate-side `opencode.json` drift/`INV-RCI-16`
@@ -82,20 +87,20 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
 2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint
    endpoint); the openai-compatible/NIM guided-decoding path is the build lever.
-3. **Dispatch admission-control rework — 🔨 commit 3 remaining (1 + 2a + 2b-AUDIT + 2b-REMEDIATE +
-   driver-unification all shipped).** Design of record:
+3. **Dispatch admission-control rework — founding bug ✅ SHIPPED; defect-1 (concurrent fan-out) remaining.**
+   Design of record:
    [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (**concurrency is
    not a computed quantity** — admit on budget headroom; the only explicit cap is a declared env hard-limit
-   e.g. Codex 6). [[dispatch-admission-control-design]]. The admission model is fully in place on both
-   orchestrators' host + in-process paths, and the two forked in-process rolling drivers are now one shared
-   `driveRolling` ([[dissolve-auditor-remediator-distinction]]). **Only commit 3 (the founding bug) is open:**
-   - **Commit 3 — founding bug** ([[capability-is-per-auditor-not-per-audit]]): a flagless resume by a
-     *different* auditor still sizes/charges against the run's original provider. Driver descriptor rides the
-     returned continue-command; audit→`resolveHostProviderName` parity (`semanticReviewStep.ts` still uses raw
-     `sessionConfig.provider`); include the host pool in the audit dispatch plan (`buildAuditSourcePools`
-     parity with remediate `buildConfirmedPools`); demote `sessionConfig.provider` to the headless in-process
-     pool only. Lands the NEW **different-auditor-resume-no-inherit** test (deferred out of C4 — it tests
-     commit-3 behaviour). Full per-item detail + line-refs in `docs/backlog.md`; the spec is the durable source.
+   e.g. Codex 6). [[dispatch-admission-control-design]]. Commits 1 + 2a + 2b-AUDIT + 2b-REMEDIATE +
+   driver-unification (one shared `driveRolling`, [[dissolve-auditor-remediator-distinction]]) + **commit 3
+   (the founding capability-inheritance bug: host-review pool keyed to the driver not the inherited backend +
+   descriptor rides the continue-command, [[capability-is-per-auditor-not-per-audit]])** are all shipped.
+   - **Remaining — defect-1: host + codex + NIM *concurrent* fan-out (driver-identity contract).** THROUGHPUT,
+     not correctness. A configured in-process backend monopolizes the in-process-only branch; an attended
+     Claude host resuming a codex run can't also fan out. Blocked on a missing per-invocation
+     driver-identity/attendance signal → contract-level change (declaration threaded into `next-step` +
+     demote backend→source when an attended host drives + audit skill-loader update + a8/a9/dc4 headless-test
+     migration). Full per-item detail + line-refs in `docs/backlog.md`; the spec is the durable source.
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist
