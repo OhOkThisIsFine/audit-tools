@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { readOptionalJsonFile, writeJsonFile, withFileLock } from "audit-tools/shared";
 // Direct module path (not the barrel) per the A-8/A-10 seam: the registry is the
 // SAME mutual-exclusion primitive the in-process driver claims through, so a node
@@ -18,6 +19,8 @@ import {
   recordNodeAcceptOutcome,
   readDispatchPlan,
   blockScopesFromPlan,
+  quarantineRef,
+  mergeImplementResults,
   type DispatchOptions,
 } from "./dispatch.js";
 import type {
@@ -466,4 +469,189 @@ export async function advanceHostRolling(opts: {
       total: ownTotal,
     };
   });
+}
+
+/** Outcome of a {@link reverifyQuarantinedNode} re-drive. */
+export type ReverifyNodeResult =
+  | {
+      /** No quarantine ref for this (run, block) — wrong id, or already cleared by a prior land. */
+      status: "no_quarantine";
+      block_id: string;
+      ref: string;
+    }
+  | {
+      /** The preserved commit no longer applies onto the current remediation HEAD (a sibling
+       *  edited the same lines since quarantine) — nothing landed, ref preserved for retry. */
+      status: "conflict";
+      block_id: string;
+      ref: string;
+      diagnostic: string;
+    }
+  | {
+      /** Replayed cleanly but added nothing on the current HEAD (already landed / empty diff). */
+      status: "nothing_to_land";
+      block_id: string;
+      ref: string;
+    }
+  | {
+      /** Re-ran the accept lifecycle but it still did not land (verify / scope / merged-base
+       *  check RED, or a cherry-pick conflict) — work re-quarantined, retry after fixing. */
+      status: "not_landed";
+      block_id: string;
+      ref: string;
+      outcome: string;
+      verify_passed: boolean;
+      merged: boolean;
+      diagnostic?: string;
+    }
+  | {
+      /** Landed on green, quarantine ref cleared, run re-finalized. */
+      status: "reverified";
+      block_id: string;
+      ref: string;
+      outcome: string;
+      verify_passed: boolean;
+      merged: boolean;
+      /** The block's finding items and their post-finalization status (blocked → resolved). */
+      item_statuses: Array<{ finding_id: string; status: string }>;
+      state_status: string;
+    };
+
+/**
+ * Re-drive a QUARANTINED implement node after its verify-failure cause is fixed.
+ *
+ * When a node's accept-verify fails (a tool-verify false-negative, or an
+ * environmental verify break like the .mjs/vitest-runner bug that false-failed
+ * every real-change node), its committed work is preserved at
+ * `refs/remediation-quarantine/<run>/<block>` but never landed, and the finalized
+ * item stays `blocked`. Recovery until now was a manual `git cherry-pick -x` of the
+ * quarantine ref + a hand-run whole-suite verify — leaving the gitignored run-state
+ * permanently marked failed (auditor-agnostic-robustness gap: the fix only worked if
+ * the host remembered the exact recovery dance).
+ *
+ * This re-runs the REAL accept lifecycle against the preserved commit, no host
+ * bookkeeping: replay it onto the current remediation HEAD as fresh worktree edits
+ * (equivalent to rebasing the single node commit onto the live base), then run the
+ * identical tool-owned verify → write-scope → cherry-pick → merged-base gate the
+ * host-subagent driver uses. On GREEN it lands the node, clears the quarantine ref,
+ * and re-finalizes the run (`mergeImplementResults` is a pure finalizer over result
+ * files + accept-outcome sidecars — it never re-does the cherry-pick), flipping the
+ * node's item(s) blocked → resolved. On a still-RED verify, a scope/cross-package
+ * failure, or a genuine seam conflict with a since-merged sibling, nothing lands and
+ * the quarantine ref is preserved so it can be retried after the next fix.
+ */
+export async function reverifyQuarantinedNode(
+  options: DispatchOptions,
+  runId: string,
+  blockId: string,
+): Promise<ReverifyNodeResult> {
+  const { root, artifactsDir } = options;
+  const wt = worktreePath(root, blockId, runId);
+  const branch = worktreeBranchForBlock(blockId, runId);
+  const ref = quarantineRef(runId, blockId);
+
+  // 1. Resolve the preserved commit. No ref → nothing to re-drive (wrong id, or a
+  //    prior land already cleared it).
+  const rev = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  const commit = (rev.stdout ?? "").trim();
+  if (rev.status !== 0 || !commit) {
+    return { status: "no_quarantine", block_id: blockId, ref };
+  }
+
+  // 2. Fresh worktree/branch at the current HEAD, seeded with the node's declared
+  //    targets (same as a normal dispatch). resetNodeWorktreeAndBranch (folded into
+  //    createNodeWorktree) clears any stale worktree/branch from the failed attempt.
+  createNodeWorktree(
+    root,
+    blockId,
+    runId,
+    await declaredPathsForBlockSafe(artifactsDir, runId, blockId),
+  );
+
+  // 3. Replay the preserved commit's patch as UNCOMMITTED edits on the current HEAD.
+  //    `commitWorktree` (inside acceptNodeWorktree) then commits them and the standard
+  //    lifecycle runs. A conflict = a genuine seam with a sibling merged since the
+  //    quarantine; discard the worktree and keep the ref for a later retry.
+  const replay = spawnSync("git", ["cherry-pick", "--no-commit", commit], {
+    cwd: wt,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (replay.status !== 0) {
+    const detail = [replay.stdout ?? "", replay.stderr ?? ""].filter(Boolean).join("\n").trim();
+    // Clear any partial cherry-pick state, then drop the worktree — the ref is untouched.
+    spawnSync("git", ["cherry-pick", "--quit"], { cwd: wt, shell: false });
+    resetNodeWorktreeAndBranch(root, wt, branch);
+    return {
+      status: "conflict",
+      block_id: blockId,
+      ref,
+      diagnostic:
+        `replaying preserved commit ${commit.slice(0, 8)} onto the current remediation HEAD ` +
+        `conflicted (a sibling likely edited the same lines since quarantine): ${detail}`,
+    };
+  }
+
+  // 4. Run the real accept lifecycle — identical inputs to the host-subagent driver
+  //    (advanceHostRolling), so correctness is the same. On success it clears the
+  //    quarantine ref; on failure it re-quarantines the replayed commit.
+  const state = await new StateStore(artifactsDir).loadState();
+  const scope = await computeAcceptScope(artifactsDir, runId);
+  const accept = await acceptNodeWorktree({
+    root,
+    runId,
+    blockId,
+    worktreeRoot: wt,
+    branch,
+    workerOutcome: "success",
+    // Omitted targetedCommands → derive the verify from the replayed branch's touched
+    // tests, plus the node's own build-free targeted_commands (task_7d35176d parity).
+    additionalVerifyCommands: state ? targetedCommandsForBlock(state, blockId) : [],
+    scope,
+    writePaths: scope.allBlockScopes.find((b) => b.block_id === blockId)?.write_paths ?? [],
+  });
+  await recordNodeAcceptOutcome(artifactsDir, runId, blockId, accept);
+
+  if (accept.outcome === "success" && !accept.merged && accept.diagnostic === undefined) {
+    // acceptNodeWorktree's no-commit branch: the replay added nothing on the current
+    // HEAD (already landed / empty diff). Not a failure, but nothing to finalize.
+    return { status: "nothing_to_land", block_id: blockId, ref };
+  }
+  if (!(accept.outcome === "success" && accept.merged)) {
+    // Still RED (verify / scope / merged-base check) or a cherry-pick conflict — the
+    // replayed work is re-quarantined under the same ref; surface the captured cause.
+    return {
+      status: "not_landed",
+      block_id: blockId,
+      ref,
+      outcome: accept.outcome,
+      verify_passed: accept.verifyPassed,
+      merged: accept.merged,
+      ...(accept.diagnostic !== undefined ? { diagnostic: accept.diagnostic } : {}),
+    };
+  }
+
+  // 5. Landed green → re-finalize the run so the node's item(s) flip blocked → resolved
+  //    from the freshly-written accept-outcome sidecar. Pure finalizer: it never re-runs
+  //    the cherry-pick, so the just-landed commit is not double-applied.
+  const merged = await mergeImplementResults(options, runId);
+  const findingIds = merged.plan?.blocks.find((b) => b.block_id === blockId)?.items ?? [];
+  const itemStatuses = findingIds.map((finding_id) => ({
+    finding_id,
+    status: merged.items?.[finding_id]?.status ?? "unknown",
+  }));
+  return {
+    status: "reverified",
+    block_id: blockId,
+    ref,
+    outcome: accept.outcome,
+    verify_passed: accept.verifyPassed,
+    merged: accept.merged,
+    item_statuses: itemStatuses,
+    state_status: merged.status,
+  };
 }

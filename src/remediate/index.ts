@@ -10,7 +10,7 @@ import {
   mergeImplementResults,
   prepareImplementDispatch,
 } from "./steps/dispatch.js";
-import { advanceHostRolling } from "./steps/rollingSession.js";
+import { advanceHostRolling, reverifyQuarantinedNode } from "./steps/rollingSession.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
 import {
@@ -225,6 +225,35 @@ program
     );
     const { kind, ...rest } = directive;
     console.log(JSON.stringify({ directive: kind, ...rest }, null, 2));
+  });
+
+program
+  .command("reverify-node")
+  .description(
+    "Re-drive a quarantined implement node: replay its preserved commit through the tool's verify/scope/merge gate and land it on green (recovery after a fixed verify cause)",
+  )
+  .requiredOption("--id <blockId>", "Block id of the quarantined node")
+  .requiredOption("--run-id <id>", "Run id")
+  .option("--root <path>", "Repository root", ".")
+  .option(
+    "--artifacts-dir <path>",
+    "Artifacts directory",
+    ".audit-tools/remediation",
+  )
+  .action(async (options) => {
+    const result = await withBackendLogsOnStderr(() =>
+      reverifyQuarantinedNode(
+        {
+          root: resolve(options.root),
+          artifactsDir: resolveArtifactsDirOption(options.root, options.artifactsDir),
+        },
+        options.runId,
+        options.id,
+      ),
+    );
+    console.log(JSON.stringify(result, null, 2));
+    // Non-zero exit when nothing landed, so a scripted retry can branch on it.
+    process.exit(result.status === "reverified" ? 0 : 1);
   });
 
 program

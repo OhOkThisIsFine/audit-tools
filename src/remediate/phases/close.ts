@@ -926,10 +926,11 @@ function buildRemediationReportMarkdown(
   }
 
   if (quarantined.length > 0) {
+    const runId = state.plan?.plan_id ?? "";
     reportContent += `\n## Preserved for Recovery\n\n`;
-    reportContent += `${quarantined.length} node(s) committed real edits but failed the tool's verify/scope/merge and were NOT landed. Their work is preserved under durable git refs (it survives worktree cleanup) — review and recover manually if a fix was correct:\n\n`;
+    reportContent += `${quarantined.length} node(s) committed real edits but failed the tool's verify/scope/merge and were NOT landed. Their work is preserved under durable git refs (it survives worktree cleanup). Once the verify-failure cause is fixed, re-drive each node with \`remediate-code reverify-node\` — it replays the preserved commit through the real verify/scope/merge gate, lands it on green, and re-finalizes the run (flipping the item to resolved); a bare \`git cherry-pick\` is the last-resort fallback that skips the gate and leaves the run-state marked failed:\n\n`;
     for (const q of quarantined) {
-      reportContent += `- **${q.block}**: \`git cherry-pick ${q.commit}\`  (ref: \`${q.ref}\`)\n`;
+      reportContent += `- **${q.block}**: \`remediate-code reverify-node --id ${q.block} --run-id ${runId}\`  (fallback: \`git cherry-pick ${q.commit}\`, ref: \`${q.ref}\`)\n`;
     }
   }
 
