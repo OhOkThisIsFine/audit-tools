@@ -1091,6 +1091,17 @@ export type {
   AdmitBatchInput,
 } from "./dispatch/admissionLoop.js";
 
+// File-ownership-disjoint admission scheduling (INV-SOO) + the single-sourced path
+// identity it keys on — shared so BOTH orchestrators split a dependency level into
+// disjoint sub-waves through ONE scheduler (audit is the read-only degenerate case:
+// all read-only nodes collapse into one maximal parallel sub-wave).
+export { canonicalizeFilePath } from "./dispatch/pathIdentity.js";
+export {
+  ownershipSubWaves,
+  canonicalScopeKeys,
+} from "./dispatch/ownershipScheduler.js";
+export type { OwnershipSchedulerNode } from "./dispatch/ownershipScheduler.js";
+
 // Hybrid spill coordinator (A-8) — the ONE assignment layer both dispatch drivers
 // drive identically: claim-before-assign (CE-001), co-owned SettledExclusionSet,
 // proactive capacity split through the single S4 fold, and the sole pause-authorizing

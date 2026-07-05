@@ -37,7 +37,7 @@
  * admission order is reproducible and unit-testable against a precomputed level.
  */
 
-import { canonicalizeFilePath } from "./ownershipRegistry.js";
+import { canonicalizeFilePath } from "./pathIdentity.js";
 
 /** A node as the ownership scheduler sees it: an id + its declared write-scope. */
 export interface OwnershipSchedulerNode {

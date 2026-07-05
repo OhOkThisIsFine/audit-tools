@@ -28,7 +28,7 @@ import {
   type WorktreeNodeWorker,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
-import { ownershipSubWaves } from "../dispatch/ownershipScheduler.js";
+import { ownershipSubWaves } from "audit-tools/shared";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
 import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { claimWithBackoff, withClaimHeartbeat } from "../../shared/quota/claimLease.js";

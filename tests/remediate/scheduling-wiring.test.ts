@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { CapacityPool, SessionConfig } from "audit-tools/shared";
 import type { RemediationBlock } from "../../src/remediate/state/types.js";
-import * as scheduler from "../../src/remediate/dispatch/ownershipScheduler.js";
+import * as scheduler from "../../src/shared/dispatch/ownershipScheduler.js";
 import { driveRollingDispatch } from "../../src/remediate/steps/nextStep.js";
 
 const pool: CapacityPool = {

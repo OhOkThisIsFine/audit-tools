@@ -15,7 +15,7 @@ import { writeContractArtifact } from "../../src/remediate/contractPipeline/arti
 import {
   ownershipSubWaves,
   type OwnershipSchedulerNode,
-} from "../../src/remediate/dispatch/ownershipScheduler.js";
+} from "audit-tools/shared";
 import {
   OwnershipRegistry,
   isReleasingDisposition,

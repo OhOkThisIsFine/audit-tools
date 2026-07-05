@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   ownershipSubWaves,
   type OwnershipSchedulerNode,
-} from "../../src/remediate/dispatch/ownershipScheduler.js";
+} from "audit-tools/shared";
 
 const ROOT = "/repo";
 

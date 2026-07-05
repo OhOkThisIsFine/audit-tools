@@ -22,7 +22,7 @@ import {
   ownershipSubWaves,
   canonicalScopeKeys,
   type OwnershipSchedulerNode,
-} from "../../src/remediate/dispatch/ownershipScheduler.js";
+} from "audit-tools/shared";
 import {
   OwnershipRegistry,
   canonicalizeFilePath,
