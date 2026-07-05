@@ -46,6 +46,9 @@ import { captureFrictionEvent, type FrictionEvent } from "./captureFrictionEvent
  *                           `file_coverage[].total_lines` disagrees with the
  *                           file's actual line count (discriminator: the result
  *                           index + the mismatching path).
+ *  - `node_quarantine`    — an implement node that committed edits but hard-failed
+ *                           the tool's verify/scope/merge; work preserved under a
+ *                           quarantine ref, NOT landed (discriminator: the node id).
  */
 export type StepBoundaryEventType =
   | "phase_reemit"
@@ -56,6 +59,7 @@ export type StepBoundaryEventType =
   | "intent_gate_fallback"
   | "quota_escalation"
   | "coverage_total_lines_mismatch"
+  | "node_quarantine"
   | (string & {});
 
 /**

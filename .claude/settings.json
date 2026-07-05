@@ -81,6 +81,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/friction-stop-gate.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Friction close-out backstop"
+          }
+        ]
+      }
     ]
   }
 }

@@ -14,6 +14,7 @@ dist/
 !.claude/hooks/session-start.sh
 !.claude/hooks/pre-commit-gate.mjs
 !.claude/hooks/async-typecheck.mjs
+!.claude/hooks/friction-stop-gate.mjs
 !.claude/hooks/doc-review-surface.mjs
 !.claude/hooks/docReviewLedger.mjs
 !.claude/hooks/doc-review-resolve.mjs

@@ -30,6 +30,7 @@ import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../../src/remediate/steps/types.js";
+import { frictionCapturePath, stepBoundaryEventId } from "audit-tools/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-dispatch-tolerance");
@@ -524,5 +525,41 @@ describe("mergeImplementResults — merge-state gate (verify/merge must actually
       { finding_id: "N-x", status: "resolved_no_change", evidence: ["npm run check -> ok (0 errors)"] },
     ]);
     expect(merged.items!["N-x"].status).toBe("resolved_no_change");
+  });
+
+  // M-FRICTION (node_quarantine): a hard-failed accept whose sidecar carries a captured
+  // diagnostic means the node's edits were QUARANTINED — the merge auto-seeds a
+  // node_quarantine step-boundary friction event so the per-category close-out walk
+  // accounts for it (turns "recall" into "account for this counted event").
+  const nodeQuarantineId = () => stepBoundaryEventId("node_quarantine", "PLAN-1", "CP-BLOCK-N-x");
+
+  it("auto-seeds a node_quarantine friction event when a hard-failed accept carries a diagnostic", async () => {
+    await saveState(makeNodeState());
+    await writeAcceptOutcome({
+      outcome: "error",
+      verifyPassed: false,
+      merged: false,
+      diagnostic: "$ npm run check\nsrc/x.ts(3,1): error TS1005",
+    });
+    await mergeWith([{ finding_id: "N-x", status: "resolved", evidence: ["claimed resolved but quarantined"] }]);
+    const artifact = JSON.parse(await readFile(frictionCapturePath(ARTIFACTS_DIR, "PLAN-1"), "utf8")) as {
+      frictions: Array<{ id: string; category?: string }>;
+    };
+    const event = artifact.frictions.find((f) => f.id === nodeQuarantineId());
+    expect(event).toBeDefined();
+    expect(event!.category).toBe("bug");
+  });
+
+  it("does NOT seed node_quarantine for a plain worker error that committed nothing (no diagnostic)", async () => {
+    // The workerOutcome!=success path drops the worktree without quarantining and records
+    // no diagnostic; keying the friction on a present diagnostic excludes it.
+    await saveState(makeNodeState());
+    await writeAcceptOutcome({ outcome: "error", verifyPassed: false, merged: false });
+    await mergeWith([{ finding_id: "N-x", status: "resolved", evidence: ["no diagnostic"] }]);
+    const path = frictionCapturePath(ARTIFACTS_DIR, "PLAN-1");
+    const artifact = existsSync(path)
+      ? (JSON.parse(await readFile(path, "utf8")) as { frictions: Array<{ id: string }> })
+      : { frictions: [] };
+    expect(artifact.frictions.some((f) => f.id === nodeQuarantineId())).toBe(false);
   });
 });

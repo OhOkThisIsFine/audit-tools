@@ -3964,6 +3964,32 @@ async function mergeImplementResultsIntoState(
       !acceptOutcome.merged &&
       (acceptOutcome.outcome === "error" || acceptOutcome.outcome === "timeout");
 
+    // M-FRICTION (node_quarantine): a node that committed real edits but hard-failed
+    // the tool's verify/scope/merge had its work QUARANTINED under a durable ref and
+    // NOT landed — a backend-observed step-boundary fact the per-category friction walk
+    // must account for (recovery is a `reverify-node` re-drive). A hard-fail carries a
+    // captured `diagnostic` ONLY on the quarantine paths; a plain worker error/timeout
+    // that never committed sets none, so guarding on it excludes the non-quarantine
+    // failures. Routed through the single CE-005 chokepoint keyed on the node id (one
+    // event per node, deduped across its findings). Best-effort / non-fatal.
+    if (acceptHardFailed && acceptOutcome.diagnostic) {
+      await captureStepBoundaryFriction(
+        options.artifactsDir,
+        runId,
+        {
+          eventType: "node_quarantine",
+          discriminator: blockId,
+          note:
+            `Node ${blockId} committed edits but hard-failed the tool's verify/scope/merge ` +
+            `(outcome=${acceptOutcome.outcome}); work quarantined and NOT landed — re-drive ` +
+            `with \`remediate-code reverify-node --id ${blockId} --run-id ${runId}\` once the ` +
+            `cause is fixed.`,
+          category: "bug",
+        },
+        "remediate-code",
+      );
+    }
+
     for (const itemResult of unresolved) {
       // OBL-INV-RSD-01: do NOT throw on an unknown finding_id that did not remap
       // to a known node alias. Block the owning block's non-terminal items so the
