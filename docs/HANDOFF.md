@@ -8,9 +8,12 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.9** (pre-publish; this lap ships the next patch). Per-lap shipped detail
-  is NOT narrated here (changelog creep — see `git log` and project memory [[live-status]]); this section
-  is current-state + open-work roadmap only.
+- On npm as `latest` at **v0.32.10**. Two doc-review cleanups (D-33 dead `remediate install` alias removed;
+  D-45 audit host-asset drift guards added) landed on main **un-released** — functionally inert (the removed
+  command was unreachable; the extracted renderer is byte-identical), so batched into the next functional
+  release rather than cutting a standalone patch. Per-lap shipped detail is NOT narrated here (changelog
+  creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
+  roadmap only.
 - **Dispatch admission-control — founding capability-inheritance bug ✅ SHIPPED (commit 3, 2026-07-05).**
   The whole admission rework (commits 1 + 2a + 2b-AUDIT + 2b-REMEDIATE + rolling-driver unification) is now
   done through its founding correctness bug: a different-auditor resume no longer sizes/charges the fan-out
