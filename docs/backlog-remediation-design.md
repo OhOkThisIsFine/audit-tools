@@ -1,9 +1,10 @@
-# Backlog-remediation design (canonical conceptual spec)
+# Backlog-remediation design (architecture-of-record)
 
 Durable design for the backlog-sweep modules and the cross-module seam contracts they
-share. Timeless: the *contracts* and the *verified invariants*, not run status. Live
-shipped-vs-open status lives in [`backlog.md`](backlog.md) and [`HANDOFF.md`](HANDOFF.md);
-this doc is the architecture those track against.
+share. Timeless: the *contracts* and the *verified invariants*, not run status. This doc is
+the **architecture-of-record** — the durable design [`backlog.md`](backlog.md) and
+[`HANDOFF.md`](HANDOFF.md) track their open work against; it does not itself hold
+shipped-vs-open status.
 
 ## Modules
 
@@ -104,6 +105,9 @@ implementation must hold.
   land before O1's full triage wiring without breaking green-at-every-commit), then O1 wires mandatory triage.
 
 ## Still-gated (not landable on tooling alone)
+
+> These are the only genuinely-open items in this doc; they should also be tracked as open work in
+> [`backlog.md`](backlog.md) (this doc is architecture-of-record, not a status tracker).
 
 - **D7/D8** need a manual proxy session / churn measurement this tooling can't produce — record as gated,
   never present as landable now.

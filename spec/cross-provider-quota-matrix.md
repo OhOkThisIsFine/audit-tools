@@ -12,8 +12,9 @@ Each backend gets the best achievable `QuotaSource` feeding the shared contract:
 `queryCurrentUsage(providerModelKey) → QuotaUsageSnapshot { remaining_pct (0–1 fraction),
 reset_at, … }`. Signal preference, always: **proactive endpoint > reactive headers on a
 completion > reactive dated-limit error > local consumption estimate**. How that signal governs
-concurrency is [`dispatch-token-budget-gate.md`](dispatch-token-budget-gate.md)'s concern, not this
-matrix's.
+dispatch is [`audit/dispatch-admission-control.md`](audit/dispatch-admission-control.md)'s concern
+(admission over the shared quota ledger, with the per-pool token-budget substrate folded in), not
+this matrix's.
 
 ## Summary
 

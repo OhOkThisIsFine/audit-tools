@@ -73,6 +73,16 @@ every task passes it; it enforces per-pool budget/attribution/backoff mechanical
 This subsumes the old scalar: a "token-budget cap of N fit at once" is just the
 instantaneous width of the admission window, not a stored number.
 
+### Pool selection — cost-first, capability-tiebreak
+
+When more than one live pool can admit a task, selection is **cost-first, capability
+tiebreak**: candidates are ranked by `costRank` (cheapest capable pool first), and
+`capabilityRank` breaks ties. Multi-provider cost routing is native, not a bolt-on —
+each task goes to the cheapest pool that is *capable* of it (has budget + fits under
+any declared cap), and overflow spills to the next-cheapest. `admissionLoop.ts`
+(`computeDispatchAdmission`, single-sourced across both orchestrators) owns this
+ordering, so the emergent fan-out favours the cheapest capable capacity first.
+
 ## The shared resource, and how we avoid clobbering it
 
 **The shared resource is the provider's rate-limit meter for your credential** —
@@ -272,6 +282,51 @@ orchestrators (audit `dispatch_review`, remediate rolling session).
   reports usage (NIM/openai-compatible), and its live validation is the env-bound item
   tracked in `docs/backlog.md` (quota-aware dispatch). See
   [[claude-usage-endpoint-body-shape]] / [[cross-provider-quota-matrix]].
+
+## Deriving the per-pool token budget (the substrate the ledger admits against)
+
+Admission compares each task's cost against a pool's `remaining_token_budget`. That
+budget is derived from the pool's live quota snapshot — the provider-neutral substrate
+below, single-sourced in `src/shared/quota` and consumed identically by audit +
+remediate (this is `resolvePoolBudget`'s input; see [[claude-usage-endpoint-body-shape]]
+/ [[cross-provider-quota-matrix]]).
+
+- **Provider-neutral snapshot.** Every quota source normalizes to
+  `QuotaUsageSnapshot { remaining_pct (0–1), reset_at, requests_remaining,
+  tokens_remaining, windows[] }`. The budget derivation reads only this shape, so a
+  Claude pool, a Codex pool, and a NIM pool run through identical code.
+- **Per-window slopes — never one collapsed slope.** A provider exposes several
+  concurrent limit windows, each with its own denominator (Claude: 5-hour `session` +
+  7-day `weekly`; Codex: primary-5h + secondary-weekly). The same N tokens is a large
+  percent of the small window but a tiny percent of the big one, so the tokens→percent
+  slope differs per window. The snapshot carries a generic `windows[]` breakdown (each
+  `{label, remaining_pct, reset_at}`, provider-agnostic labels), and the budget learns a
+  slope keyed on `(pool-key, window-label)`. The top-level `remaining_pct` stays the min
+  (binding) window for other consumers, but the budget works per-window.
+- **Budget per window, then the min.** For each active window, in priority order:
+  (1) an **absolute** `tokens_remaining` if the provider gives one; (2) a **learned
+  slope** — most subscription endpoints expose only percent-utilization, so learn
+  `tokens_per_pct[window-label]` per pool key from observed Δutilization vs
+  tokens-dispatched, budget = `remaining_pct × 100 × tokens_per_pct[label]`; (3) **cold
+  start** (no absolute, no learned slope) — calibrate, don't invent a cap: dispatch a
+  small bounded first batch, observe the per-window Δutilization to seed each slope, then
+  widen (a measurement bootstrap, per-(pool, window)). `remaining_token_budget = min over
+  active windows`.
+- **Learning wiring.** The rolling engine samples the pool's snapshot around dispatch and
+  attributes spend: `slope_sample = Δtokens_dispatched / Δutilization_percent`, folded
+  into a per-key EWMA in `quota-state.json` (the same learned-limits machinery as RPM/TPM
+  learning; degrade-to-cold when no history).
+- **Quota-death = retryable pause.** A detected session/rate-limit worker death is a
+  pause-until-`reset_at` + preserve-worktree + re-dispatch — never a node failure (an
+  early return before `removeWorktree` in `acceptNodeWorktree`), distinguishing
+  quota-killed from real failure so partial worktrees are not lost.
+
+`hostConcurrencyLimit` (when a host declares one) and real RPM/TPM still clamp the
+admitted set; `reset_at` bounds how long a fully-spent pool stays parked before it
+refills. On the claude-code host path the slope never learns (percent-only, no
+actual-usage number), so there the operative budget is the declared-cap output envelope
+and the reactive 429 floor — the ledger prevents co-located double-counting but never
+gates on an absolute token ceiling (see *Host-path admission shape*).
 
 ## Validation criteria (how we'd know it works)
 

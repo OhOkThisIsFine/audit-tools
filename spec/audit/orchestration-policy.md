@@ -13,14 +13,13 @@ The orchestrator must choose the **highest-priority valid next obligation** and 
 Default priority order:
 
 1. repair invalid or contradictory state
-2. create missing upstream artifacts
-3. refresh stale upstream artifacts
-4. generate missing planning artifacts
-5. ingest newly available evidence
-6. refresh coverage and requeue
-7. refresh runtime validation artifacts
-8. refresh synthesis
-9. check completion
+2. create or refresh upstream artifacts
+3. generate missing planning artifacts
+4. ingest newly available evidence
+5. refresh coverage and requeue
+6. refresh runtime validation artifacts
+7. refresh synthesis
+8. check completion
 
 ## Selection principles
 

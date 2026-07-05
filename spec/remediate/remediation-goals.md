@@ -46,6 +46,10 @@ Remediator does not re-run the auditor and does not modify its inputs.
   of parallel dispatch, not the unit of outcome reporting. Items within a
   block may have different outcomes.
 
+These are the output-contract vocabulary — the shapes every run reports
+against — and are independent of *how* the plan that produces them is built.
+The plan-building mechanism is named below (Planning mechanisms).
+
 ## Workflow
 
 Every item follows the ordered workflow:
@@ -57,6 +61,34 @@ Document -> Write Tests -> Refactor Code -> Verify Code Against Tests -> Verify 
 Steps may be declared not-applicable per item during the Document phase (for
 example, a comment-only fix has no test step). The declaration is part of
 the item record.
+
+## Planning mechanisms
+
+The normative goals above are realized through the **contract-pipeline** — the
+planning engine that turns confirmed intent into an implementation DAG whose
+nodes each trace to a finding *and* a derived obligation. The pipeline advances
+through a fixed sequence of contract stages: `goal_spec` (normalized goals and
+constraints) → `context_bundle` (affected files and evidence) →
+`module_decomposition` (module list, responsibilities, file scope) →
+per-module contract drafting and seam reconciliation → `obligation_ledger`
+(one verification/test obligation per invariant and seam) → test/validator plan
+and design gates → `implementation_dag` (the metadata-enriched node graph the
+rolling dispatcher executes). The stage detail — multi-agent seam negotiation,
+the adversarial critic→judge→repair loop, DAG promotion metadata — is specified
+in [`spec/remediation-workflow-design.md`](../remediation-workflow-design.md)
+and [`spec/contract-authoring-determinism-design.md`](../contract-authoring-determinism-design.md);
+this document names the mechanism and owns the output contract it produces, not
+the mechanism's internals.
+
+The Finding → Item → Block mechanism described under Phases below (the
+deterministic/LLM plan phase in `src/remediate/phases/plan.ts`) is the
+**alternate/legacy planning source**. Every plan carries a `plan.source` tag
+that records which mechanism built it — `contract_pipeline` (the primary
+engine), `lean_fast_path` (its bounded, grounded Path-A shortcut), or the
+Finding/Item/Block plan phase — so the two coexisting mechanisms are
+distinguished at the artifact level. Whichever source produced the plan, it
+converges on the same output contract (Finding / Item / Block, `ItemSpec`,
+`TestSpec`) and the same downstream implement→close machinery.
 
 ## Phases
 

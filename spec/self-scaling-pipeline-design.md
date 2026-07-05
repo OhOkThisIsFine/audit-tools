@@ -1,4 +1,4 @@
-# Self-scaling remediation pipeline — design of record
+# Self-scaling remediation pipeline — design
 
 > Supersedes the earlier "give document input a separate lean fast path" framing of the
 > *Make the loop cheaper* backlog item. Durable conceptual design; no dated status here.
@@ -74,21 +74,20 @@ don't exist at the routing point — a routing signal cannot be a pipeline outpu
   own finding synthesis.
 - **No reuse-vs-re-derive question** — with one flow there is no second path to reconcile.
 
-## Implementation slices (lowest-risk first)
+## The mechanisms that realize this
 
-Ordered as sequenced. Per-slice status reflects what is wired in code today.
+Four mechanisms implement the two dials and their shared signal:
 
-1. **Degenerate-phase collapse — ✅ SHIPPED** — pure architecture, no risk signal needed (1 module ⇒ skip
-   seam/finalize round-trips). Safest first slice.
-2. **The shared intake risk/complexity signal — ✅ SHIPPED** — affected_files + configurable path-risk patterns +
-   intent; fail-closed (uncertain ⇒ treat as higher-risk ⇒ deeper/finer). Re-assess hook for evidence.
-   Shipped as `src/remediate/riskSignal.ts` (this doc is its cited design of record).
-3. **Dial A — adversarial depth — ✅ SHIPPED** — light inline self-check vs full independent sub-agents, selected
-   by the signal; floor = light. Soften the existing audit skip-path to light review. Wired via
-   `adversarialDepthForTier`, consumed in `src/remediate/steps/contractPipeline.ts`.
-4. **Dial B — granularity — ✅ SHIPPED** — collapse coherent phases into fewer round-trips for low-complexity work;
-   keep fine-grained for high; wire escalate-on-evidence. (Referenced in `contractPipeline.ts` as the
-   "T1 slice 4b" path.)
+- **Degenerate-phase collapse** — pure architecture, no risk signal needed: a 1-module change makes
+  seam-reconciliation a no-op and folds finalize into drafting, so those round-trips skip by structure.
+- **The shared intake risk/complexity signal** (`src/remediate/riskSignal.ts`, whose design of record
+  this doc is) — affected_files + configurable path-risk patterns + intent; fail-closed (uncertain ⇒
+  treat as higher-risk ⇒ deeper/finer), with a re-assess hook so evidence during the run can raise it.
+- **Dial A — adversarial depth** (`adversarialDepthForTier`, consumed in
+  `src/remediate/steps/contractPipeline.ts`) — light inline self-check vs full independent sub-agents,
+  selected by the signal; floor = light, so the pre-vetted audit path gets light review rather than a skip.
+- **Dial B — granularity** (`contractPipeline.ts`) — collapse coherent phases into fewer round-trips for
+  low-complexity work, keep fine-grained for high, and escalate-on-evidence.
 
 ## Invariants this must preserve
 

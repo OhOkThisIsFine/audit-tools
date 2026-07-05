@@ -70,9 +70,10 @@ that conforms to one contract:
 
 Signal preference, always: **proactive endpoint > reactive headers on a completion >
 reactive dated-limit (429) error > local consumption estimate**. How that signal turns
-into a concurrency decision — the token-budget dispatch gate — is a separate mechanism
-documented in [`dispatch-token-budget-gate.md`](../spec/dispatch-token-budget-gate.md);
-this doc stays scoped to *who tracks which quota*, not how concurrency is throttled.
+into a dispatch decision — admission control over the shared quota ledger — is a separate
+mechanism documented in [`dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)
+(which folds in the per-pool token-budget substrate this signal feeds); this doc stays
+scoped to *who tracks which quota*, not how dispatch is admitted.
 
 `buildQuotaSource` registers ALL known proactive sources in one composite, but this is
 NOT "track everything" — it is the opposite. Each source **gates on the provider name**

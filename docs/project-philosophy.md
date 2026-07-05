@@ -106,7 +106,7 @@ INTO judgment.
 - **Delegate adversarial phases to a separate agent** — an author marking own homework misses gaps.
 - **Dispatch = enforcement ⟂ driving ⟂ judgment:** mechanical broker (single chokepoint) → thin non-judging
   driver → bounded judgment at named seams.
-*(home: `spec/contract-authoring-determinism-design.md`; memory: contract-authoring-determinism-direction,
+*(home: "Split design assessment" → `CLAUDE.md` → Preferences; memory:
 delegate-adversarial-phases-to-separate-agent, dispatch-enforcement-driving-judgment-separation)*
 
 ## A8. How the tool decomposes & dispatches work
@@ -133,7 +133,9 @@ peers, no primary/secondary. Needs per-run state namespaces + task-claim locking
   mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist.
 - **Two-tier dependency policy.** Import vetted pure-JS libs for correctness-sensitive parsing/schema/lock
   (`smol-toml`, `yaml`); own only tiny domain bits; wrap parsers so malformed input degrades to empty.
-*(home: `CLAUDE.md` → Preferences; memory: deterministic-analyzers-own-vs-acquire)*
+*(home: Own-vs-acquire → `docs/backlog.md` (open track) + `docs/backlog-remediation-design.md` (F5) — not
+yet promoted into `CLAUDE.md`; Two-tier dependency policy → `CLAUDE.md` → Preferences; memory:
+deterministic-analyzers-own-vs-acquire)*
 
 ## A11. Quota & token policy (product behavior)
 
@@ -141,7 +143,7 @@ peers, no primary/secondary. Needs per-run state namespaces + task-claim locking
   `estimateTokensFromBytes` is the standard; learned RPM/TPM limits authoritative.
 - **Quota awareness must pace, not just observe** — don't burn the window in parallel and all hit the wall
   at once; quota death is a retryable pause, not a failure. Red line: never IDE-GUI automation.
-*(home: `spec/dispatch-token-budget-gate.md`, `docs/quota-dispatch-design.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
+*(home: `spec/audit/dispatch-admission-control.md`, `docs/quota-dispatch-design.md`; memory: quota-dispatch-vision, cross-provider-quota-matrix)*
 
 ---
 
@@ -162,8 +164,9 @@ ship process. They'd change if the developer or workflow changed; they don't des
 - **Caveman mode (full) active globally** — ultra-compressed telegraphic prose; keep technical precision
   (paths/commands/versions/line-refs). Owner toggles off when clarity needed.
 - **Deliverables always land in a file** (repo doc or artifact dir); chat gets path + digest, never
-  chat-only. *(home: `CLAUDE.md` → Preferences; global `~/.claude/CLAUDE.md`; memory:
-  prefer-ideal-code-no-backcompat, ask-on-ambiguity-dont-defer-silently, proportionality-defer-needs-user-signal)*
+  chat-only. *(home: `CLAUDE.md` → Preferences (ideal-code, caveman); global `~/.claude/CLAUDE.md`
+  (Deliverables, caveman); memory: prefer-ideal-code-no-backcompat, ask-on-ambiguity-dont-defer-silently,
+  proportionality-defer-needs-user-signal — the ask/defer pair lives in memory, not repo `CLAUDE.md`)*
 
 ## B2. Ship-pipeline ownership
 
