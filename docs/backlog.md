@@ -44,22 +44,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   and spawn subprocesses → isolation-off risks cross-test bleed. Only pursue with per-file verification.
   Lower priority than the sharding already shipped.
 
-- **Friction (ambiguous-direction): a backlog item that prescribes the *fix mechanism* over-reaches; state
-  the invariant/bug, not the implementation (observed 2026-07-04).** The now-fixed cwd-drift bullet
-  prescribed "anchor `repo_root` by walking up to the git root (or nearest `.audit-tools` marker)". Taken
-  literally that re-homes legitimate sub-project / temp roots to an ancestor repo — the implementer's first
-  cut did exactly that and broke `cli-remediation` tests. The correct fix was narrower: *climb out of
-  `.audit-tools` only*, never trust a cwd inside it. Lesson for backlog hygiene: an item states the
-  invariant to hold ("`repo_root` must never resolve inside `.audit-tools`; never nest the tree") and the
-  bug, and leaves the mechanism to the implementer — over-specifying the fix smuggles in an untested design.
-
-- **Friction (inefficient-feeding): concurrent agents share one working tree with no per-agent doc-staging
-  lane (observed 2026-07-04).** Two agents worked `main` in the same checkout simultaneously; the second
-  couldn't touch shared docs (`docs/backlog.md`, `docs/HANDOFF.md`) held uncommitted by the first without
-  risking a clobber, so it deferred every doc update via a handoff message. There is no mechanism for
-  parallel agents to stage doc edits independently (per-agent worktree, doc-fragment files merged later, or
-  an advisory doc lock). Until there is, cross-agent doc updates serialize through hand-back prose.
-
 - **Capability handshake is inherited from the run/original auditor, not the current one.** When a
   different auditor resumes an audit (run started in Codex, resumed by Claude Code), a `next-step` that
   omits the capability flags resolves the dispatch pool from the **stored session config**
@@ -154,39 +138,53 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   regen inside one `advanceAudit` pass — an **orchestrator-level** change (`advance.ts`/`nextStep.ts`), not a
   bounded CLI fix. Codex run 2026-07-03.
 
-- **Committed host assets drift from the renderer without a gate — AUDIT SIDE guarded (CP-NODE-10 merged);
-  REMEDIATE-side opencode.json still unresolved (2026-07-04).** CP-NODE-10 (merged to `main`) extended
-  `host-asset-renderer-drift.test.mjs` to assert the tool-owned block of `AGENTS.md` / `opencode.json` /
-  `.github/copilot-instructions.md` (only `.gemini/*.toml` + `auditor.agent.md` were guarded before) —
-  correctly guarding only the tool-owned portion, since those files are managed merge targets carrying
-  intentional non-renderer content, so a byte-identity guard would be wrong. **Still open:** the
-  **remediate-code** side of the shared root `opencode.json` still drifts ungated. Regenerating it via
-  `remediate-code ensure` (attempted + reverted this run, `bdba4f02`→`b66731f7`) adds `remediate-code`
-  commands to top-level `permission.bash` that are NOT mirrored into `agent.auditor.permission.bash`,
-  breaking `INV-RCI-16` (audit-cli-invariants) — the two installers write one shared `opencode.json` and
-  the auditor-agent parity invariant doesn't expect the remediate commands. Reconcile the two installers'
-  ownership of `opencode.json` (or the INV-RCI-16 parity rule) before the remediate-side assets can be
-  regen-guarded like the audit side.
+- **Reconcile the shared `opencode.json` via a union permission ceiling; regen-guard the remediate side
+  (2026-07-04).** Both installers (`audit-code ensure`, `remediate-code ensure`) write one shared repo-root
+  `opencode.json` carrying a top-level `permission` default plus per-agent blocks. Today top-level is treated
+  as the *auditor's* private policy and a parity invariant (INV-RCI-16) pins it byte-equal to the auditor
+  block — so when the remediate installer regenerates the file, its commands land at top-level and break that
+  parity, which is why the remediate-side asset can't yet be renderer-gated like the audit side. **Desired
+  end-state:** top-level `permission.bash` becomes the deterministic **union** of every agent's bash rules —
+  a true global privilege *ceiling* — and the parity invariant is reframed from "top-level equals the auditor
+  block" to "each agent's rules are a subset of top-level, and top-level introduces no command no agent
+  needs." Both installers may then regenerate the shared file in any order, idempotently. Two hard
+  requirements: (1) widening the ceiling must **not** silently grant a read-only agent another tool's
+  mutating commands — a wildcard `*: allow` must be matched by explicit per-agent denies so least-privilege
+  still holds; (2) both installers' verifiers must accept each other's keys in the shared blocks (today
+  they're **mutually blind** — one greenlights exactly the state the other rejects), so either side is
+  independently regen-guardable. **Direction this serves:** the auditor/remediator distinction is a vestigial
+  holdover from when they were two separate projects and should be dissolved wherever possible
+  ([[dissolve-auditor-remediator-distinction]]). As it dissolves, the two agent blocks collapse toward a
+  single unified policy and the union degenerates to that one policy — build the union model so it lands
+  cleanly on one agent, not so it entrenches two.
 
 ## Forward tracks
 
-- **Auditor doesn't self-detect SYSTEMIC / whole-corpus issues — the wide-view design reviewers are
-  missing what the granular lenses structurally can't see (owner, 2026-07-05).** Motivating evidence: a
-  couple sprints back an agent was asked why release/publish was slow and found the **test suite is very
-  inefficient** (whole-suite `collect` ~186s, per-file isolation overhead — see the vitest-collect item
-  above). The question is why the *auditor* doesn't surface this itself. The **`tests` lens missing it is
-  expected** — it takes a granular, per-unit view, so a property that only emerges from the *aggregate* of
-  the whole suite (total wall-clock, cross-file setup duplication, isolation strategy) is below its
-  resolution. But the **wide-view design reviewers are supposed to catch exactly this cross-cutting,
-  systemic class — and they aren't.** So the gap is in the review architecture, not the test lens.
-  Open question (owner to hash out, mechanism NOT decided): the per-lens reviews may all be scoped to a
-  file/unit/packet, with no **whole-corpus pass per lens** that reasons over the system as one artifact.
-  One floated candidate is a *global reviewer per lens* (a system-level pass alongside the granular ones)
-  — but that's a candidate to evaluate, not a settled fix; there may be a better framing (e.g. a dedicated
-  systemic/architecture lens, or feeding aggregate metrics into the existing conceptual design critique).
+- **Systemic reviewers must be pushed adversarially for improvement, not just correctness (owner,
+  2026-07-05).** Two audit tiers exist and both are wanted: unit auditors that structurally can't see the
+  whole corpus, and systemic auditors that review the entire corpus as one artifact. The gap is **not
+  scope** — the systemic auditors already have whole-corpus reach — it is that they **under-extract**: they
+  produce a competent first-pass answer and stop, yet cave immediately when a human pushes ("are you sure
+  there isn't a better way to do any of this?"), instantly surfacing numerous improvements they'd first
+  missed. The end-goal makes that pushing intrinsic to the review:
+  - **Improvement-seeking challenge loop.** After the first systemic pass, a second-order adversary
+    re-interrogates the output with human-grade pressure — what's redundant, serial-that-could-be-parallel,
+    duplicated, over-built; what assumption went unquestioned; is there a categorically better approach —
+    and folds newly-surfaced improvements back in. The review is done only when a challenge round yields
+    **nothing new (loop-until-dry)**, not when it first has an answer.
+  - **The mandate is optimization / better-way, not only defect-finding.** The systemic pass must actively
+    seek superior alternatives to things that currently *work* — the class no correctness lens flags because
+    nothing is broken. Motivating evidence: ~a dozen dogfooding runs never surfaced that the release suite
+    re-ran identical tests multiple times per release and ran serially what could have been parallelized;
+    the slow (~186s) suite was the *symptom*, the redundant/serial execution was the catchable finding.
+  - **Feed aggregate metrics into the systemic context** — complexity/duplication/churn rollups plus an
+    operational digest of suite/build/config shape — expressed as a **language-neutral** contract (abstract
+    counts/timeouts/fan-out, never ecosystem-specific like a vitest collect time). Necessary supporting
+    evidence, explicitly **not sufficient** on its own.
+  - **Conceptual/systemic findings carry their true lens**, not a hardcoded `architecture` tag — a
+    test-parallelization finding is `tests`/`performance`, an ops finding is `operability`.
   Relates to the two design-review modes ([[contract-authoring-determinism-direction]]: contract vs
   conceptual critique) and the self-detection theme in [[meta-audit-friction-must-be-tool-enforced]].
-  Needs owner decision before any build.
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
   (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the
@@ -235,13 +233,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     fallback — confirm the quota reads are non-empty and move as the run consumes budget. Codex + Claude are
     reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
     real endpoint is reachable.
-
-- **Possibly bundle `headroom` and/or `rtk` into the shipped `audit-tools` install (owner, 2026-07-04).**
-  Idea: make installing `audit-tools` also provide the headroom token-proxy and/or the rtk token-optimizer,
-  so the token-efficiency tooling ships with the package instead of being set up separately per machine.
-  Scope/shape undecided (bundled bin? optional postinstall? peer tool?) — revisit when it firms up. (This
-  replaced the retired stale "Headroom over opentoken" CLAUDE.md bullet, whose orchestrator-internal
-  `headroom-ai`/`wrapForOpenToken` swap already happened or never materialized.)
 
 - **Low-pri UX: surface `intent_checkpoint` reuse to the host.** When a run reuses an existing
   `intent_checkpoint.json`, the host gets no visible notice. Reuse is by design (`conceptualDispatch.ts`:
