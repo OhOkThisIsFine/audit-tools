@@ -1069,7 +1069,6 @@ export {
   selectProvider,
   createRollingDispatcher,
 } from "./dispatch/rollingDispatch.js";
-export type { AdmissionRecord } from "./dispatch/rollingDispatch.js";
 
 // Host-path admission loop — the tool-side "grant the admitted set" primitive
 // (per-grant batches, cost-first-capable routing) that REPLACES the removed
@@ -1077,6 +1076,7 @@ export type { AdmissionRecord } from "./dispatch/rollingDispatch.js";
 // in their dispatch-quota contract.
 export {
   admitBatch,
+  computeDispatchAdmission,
   AdmissionGrantSchema,
   AdmissionExplainSchema,
   DispatchAdmissionSchema,

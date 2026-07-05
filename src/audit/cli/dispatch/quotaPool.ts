@@ -2,8 +2,7 @@ import { dirname, join } from "node:path";
 import {
   writeJsonFile,
   buildHostModelPools,
-  admitBatch,
-  estimatePacketCost,
+  computeDispatchAdmission,
   createReservationLedger,
   tierRank,
 } from "audit-tools/shared";
@@ -14,7 +13,6 @@ import type {
   DispatchModelTier,
   HostModelRosterEntry,
   AdmissionPool,
-  AdmissionCandidate,
   DispatchAdmission,
 } from "audit-tools/shared";
 import { DEFAULT_EMPIRICAL_HALF_LIFE_HOURS } from "audit-tools/shared";
@@ -313,40 +311,17 @@ export async function finalizeDispatchQuota(params: {
   });
   // Per-packet reservation = input estimate + output envelope (declared output cap at
   // cold start; the learned (resourceKey,lens) ratio refines it once a provider
-  // reports usage — dormant on the always-on claude-code host per design).
-  const outputCap = waveSchedule.resolved_limits.output_tokens;
-  const candidates: AdmissionCandidate[] = params.packets.map((p) => ({
-    id: p.id,
-    cost: estimatePacketCost({ inputEstimate: p.inputTokens, declaredOutputCap: outputCap }).cost,
-    complexity: p.complexity,
-  }));
-  // The declared cap surfaced on the contract is the MOST-constraining pool cap (the
-  // host's own in-flight ceiling); null when no pool declares one.
-  const declaredCap = admissionPools.reduce<number | null>(
-    (min, p) => (p.declaredCap == null ? min : min == null ? p.declaredCap : Math.min(min, p.declaredCap)),
-    null,
-  );
-  let admission: DispatchAdmission;
-  if (params.grantLeases === false) {
-    // In-process rolling path: the engine admits + leases per packet itself, so the
-    // host grant takes NO ledger leases. The granted set is every candidate (the
-    // engine drives them all); the contract's admission block is informational here.
-    admission = {
-      granted_packet_ids: candidates.map((c) => c.id),
-      declared_cap: declaredCap,
-      leases: [],
-      explains: [],
-    };
-  } else {
-    const ledger = createReservationLedger();
-    const admitResult = await admitBatch({ packets: candidates, pools: admissionPools, ledger });
-    admission = {
-      granted_packet_ids: admitResult.granted.map((g) => g.packet_id),
-      declared_cap: declaredCap,
-      leases: admitResult.granted,
-      explains: admitResult.explains,
-    };
-  }
+  // reports usage — dormant on the always-on claude-code host per design). The
+  // admission derivation is single-sourced in `computeDispatchAdmission` so audit and
+  // remediate can't drift; `grantLeases: false` (in-process driver) returns the
+  // plan-only block (the rolling engine leases per-packet itself, no double-count).
+  const admission = await computeDispatchAdmission({
+    packets: params.packets,
+    pools: admissionPools,
+    outputCap: waveSchedule.resolved_limits.output_tokens,
+    grantLeases: params.grantLeases !== false,
+    ledger: createReservationLedger(),
+  });
 
   const dispatchQuota: DispatchQuota = {
     contract_version: DISPATCH_QUOTA_V1ALPHA3,

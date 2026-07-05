@@ -19,6 +19,7 @@
 
 import { z } from "zod";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
+import { estimatePacketCost } from "../quota/packetCost.js";
 
 /** One packet the admission loop may grant this pass. */
 export interface AdmissionCandidate {
@@ -236,4 +237,50 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
   }
 
   return { granted, explains, blocked };
+}
+
+/**
+ * Build the `DispatchAdmission` contract block both orchestrators embed in their
+ * dispatch-quota — the single-sourced host-path admission derivation (no per-tool
+ * copy that could drift). Computes each packet's envelope reservation
+ * (`estimatePacketCost` with the declared output cap), derives the surfaced declared
+ * cap (the most-constraining pool's in-flight cap), and either GRANTS via
+ * {@link admitBatch} (host-subagent path, `grantLeases: true` — leases persist for
+ * reconcile at ingest) or returns a plan-only block listing every candidate
+ * (`grantLeases: false` — the in-process rolling engine leases per-packet itself,
+ * so a host grant here would double-count).
+ */
+export async function computeDispatchAdmission(input: {
+  packets: { id: string; inputTokens: number; complexity: number }[];
+  pools: AdmissionPool[];
+  /** Declared output cap for the packet envelope (cold-start; ratio refines later). */
+  outputCap: number;
+  grantLeases: boolean;
+  ledger: ReservationLedger;
+  capable?: (pool: AdmissionPool, packet: AdmissionCandidate) => boolean;
+}): Promise<DispatchAdmission> {
+  const candidates: AdmissionCandidate[] = input.packets.map((p) => ({
+    id: p.id,
+    cost: estimatePacketCost({ inputEstimate: p.inputTokens, declaredOutputCap: input.outputCap }).cost,
+    complexity: p.complexity,
+  }));
+  const declaredCap = input.pools.reduce<number | null>(
+    (min, p) => (p.declaredCap == null ? min : min == null ? p.declaredCap : Math.min(min, p.declaredCap)),
+    null,
+  );
+  if (!input.grantLeases) {
+    return { granted_packet_ids: candidates.map((c) => c.id), declared_cap: declaredCap, leases: [], explains: [] };
+  }
+  const admit = await admitBatch({
+    packets: candidates,
+    pools: input.pools,
+    ledger: input.ledger,
+    ...(input.capable ? { capable: input.capable } : {}),
+  });
+  return {
+    granted_packet_ids: admit.granted.map((g) => g.packet_id),
+    declared_cap: declaredCap,
+    leases: admit.granted,
+    explains: admit.explains,
+  };
 }
