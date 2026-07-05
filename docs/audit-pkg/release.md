@@ -53,7 +53,7 @@ The workflow:
 - verifies that the published version resolves from the registry
 - uploads `*-npm-logs` artifacts on failure
 
-Routine CI exercises the Node majors matrixed in `.github/workflows/*.yml` (currently Node 20 and 22).
+Routine CI exercises the Node majors matrixed in `.github/workflows/*.yml` (currently Node `20` and Node `22`).
 
 ## Version bump helpers
 
