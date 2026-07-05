@@ -165,6 +165,36 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
+- **Unify the two rolling-dispatch drivers into one system; audit becomes a degenerate case (2026-07-05).**
+  Both orchestrators already share the packet-level engine (`createRollingDispatcher`,
+  `src/shared/dispatch/rollingDispatch.ts` — admission / quota / 429-requeue / spill / reservation ledger).
+  What is still forked is the DRIVER above it: audit `runRollingDispatch`
+  (`src/audit/orchestrator/rollingDispatch.ts`) vs. remediate `driveRollingDispatch`
+  (`src/remediate/steps/nextStep.ts:767`). The ideal endpoint is ONE parameterized driver, per
+  [[dissolve-auditor-remediator-distinction]] — but audit is **not** the free "ordering/writes just don't
+  fire" degenerate case it first appears to be, because of one real modeling conflation:
+  - **The write-ownership layer conflates "read-only" with "unresolved scope".** `ownershipSubWaves`
+    (`src/remediate/dispatch/ownershipScheduler.ts:94-103`) treats an EMPTY write-scope as conservatively
+    NON-disjoint → it admits **solo, one node per sub-wave** (correct for remediate: an *undeclared* scope
+    might touch anything). But an auditor has *no writes at all* = provably conflict-free = should run
+    **fully parallel**. So a naive unification that dispatches auditors as `scopeForBlock = () => []` would
+    silently make **audit go serial**. This regression is invisible today only because audit never reaches
+    this scheduler (it has its own driver).
+  - **The refinement that makes it correct:** the disjointness model needs THREE cases, not two —
+    (1) read-only / provably-no-writes ⇒ **always disjoint** (audit; full parallel); (2) declared disjoint
+    write-scopes ⇒ disjoint (remediate `cofile_parallel_safe`); (3) undeclared/empty ⇒ conservatively serial
+    (remediate today). Split case (1) out as first-class, and audit *does* fall out cleanly: read-only ⇒ one
+    maximal sub-wave ⇒ full parallel, with a single dependency level so the rebuild-between-levels + CE-001
+    single-flight machinery no-ops.
+  - **Keep per-orchestrator: the terminal / result-routing layer.** Audit → coverage/synthesis + DC-4
+    settled-exclusion resume (`exhausted_pool_ids`); remediate → accept-node/triage/close + quota_paused/
+    empty_pool merge. Different artifacts and resume semantics — this difference is **essential, not
+    vestigial**; do not force it into parity. The discipline stays "anything both drivers do the same belongs
+    in the engine/driver, not duplicated" (as commit 2a put the reservation ledger in the shared engine, not
+    each wrapper).
+  - **Sequencing:** this lands on the same call sites as the admission-control rework (2b/3); do the
+    unification as part of / right after that rework so the code is not restructured twice.
+
 - **Systemic reviewers must be pushed adversarially for improvement, not just correctness (owner,
   2026-07-05).** Two audit tiers exist and both are wanted: unit auditors that structurally can't see the
   whole corpus, and systemic auditors that review the entire corpus as one artifact. The gap is **not
