@@ -316,6 +316,14 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 Standing gotchas worth keeping for any agent (strong or weak):
 
+- **Before starting ANY lap in a worktree, sync with remote main — landed work may be missing.** A worktree
+  can be branched from a *stale* local main and miss commits that already landed on `audit-tools/main`. This
+  session branched 4 commits behind and **re-implemented a full commit (admission-control 2a) already on
+  main**, plus built 2b blind to a pinned design section it lacked — then had to `git reset --hard
+  audit-tools/main` + cherry-pick + reconcile. First action of every lap:
+  `rtk git fetch audit-tools main && git log --oneline HEAD..audit-tools/main` — if that lists commits,
+  rebase/reset onto main BEFORE writing code. (Strengthens [[audit-tools-worktree-traps]].)
+
 - **Remediate-code worktree branches strand commits off main.** Remediate runs on isolated git worktree branches; landed work accumulates on `remediation/<runId>` and the host is left checked out there. By DEFAULT those branches are never auto-merged — the base branch is left untouched for review. Any doc or code fix applied inside a remediate run never reaches main unless explicitly merged. Effect: the doc-review nightly routine (which reviews main) keeps re-surfacing the same findings indefinitely. **Opt-in fix (B5, shipped):** select the `merge-to-base` closing action at the confirm step — the tool then `--no-ff` merges `remediation/<runId>` into your launch branch at close (aborts safely on conflict). Otherwise, after a run that touches docs/code you want on main, merge `remediation/<runId>` manually before the next nightly run.
 
 - **`.gitignore` artifact-tree re-include structure (don't flatten it).** The managed block ignores the

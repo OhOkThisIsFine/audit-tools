@@ -10,17 +10,24 @@
 
 - On npm as `latest` at **v0.32.8**. Per-lap shipped detail is NOT narrated here (changelog creep — see
   `git log` and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **Immediate next: Dispatch admission-control rework — commit 2a shipped, commit 2b next.** Owner resolved
-  the spec's Open tensions + sharpened framing (2026-07-04): full proactive reservation ledger; concurrency
-  is not a computed quantity (budget-gated admission; only a declared env hard-cap like Codex 6 is explicit).
-  Commit 2 split into two green atomic units (atomic-replace preserved — 2a deletes no scalar): **2a DONE** —
-  the `ReservationLedger` is now wired into the in-process rolling engine (`src/shared/dispatch/rollingDispatch.ts`:
-  lease at admission before `dispatchOnePacket`, reconcile at `handleResult`, liveness backstop keyed off ledger
-  `outstandingBefore`); co-located-overshoot + liveness + output-envelope tests in
-  `tests/shared/reservation-dispatch-overshoot.test.mjs`. Engine wiring is additive (default off — wrappers pass
-  no ledger yet). **2b = the atomic scalar replace** on the host-dispatch prompt path (schema v1alpha3, grant the
-  admitted set, both orchestrators). Full 2b line-ref map in T5.3 below. The prior "owner running the paused
-  self-audit" note is void — that audit errored out and its partial results were manually finalized.
+- **Immediate next: Dispatch admission-control — 2a + 2b-AUDIT shipped; 2b-REMEDIATE lands WITH the
+  driver-unification (next arc).** Concurrency is not a computed quantity — budget-gated admission; only a
+  declared env hard-cap (Codex 6) is explicit. **2a DONE** (`361f8f7c`): `ReservationLedger` wired into the
+  in-process rolling engine. **2b-AUDIT DONE** (`5f7ef048` + `36623383`): the atomic scalar replace on the
+  audit host-dispatch path — `max_concurrent_agents` deleted; dispatch-quota schema v1alpha3 carries an
+  `admission` block (`granted_packet_ids` + `declared_cap` + `leases` + `explains`); new shared
+  `admitBatch` does **cost-first-capable** routing (cheapest capable pool with budget+cap headroom; owner
+  steer 2026-07-05, native not bolt-on); `computeDispatchAdmission` single-sources the derivation; host
+  prompt says "dispatch exactly the granted set, re-invoke for the next grant"; merge-and-ingest reconciles
+  the grant's leases. Built to the pinned spec §"Host-path admission shape (2b build) — resolved" (whole
+  plan stays, admission ⟂ top-K coverage budget, budget = declared-envelope-only on claude-code). Full audit
+  + shared suites green. **2b-REMEDIATE = next arc, coupled to driver-unification** — see below: remediate's
+  host rolling session is a *continuous-refill* model whose `slots` IS the concurrency width; removing it
+  cleanly (worktrees == granted set, per-grant re-grant, reconcile at accept-node) reshapes the rolling
+  lifecycle, and `docs/backlog.md`'s driver-unification track explicitly says do it WITH the unification so
+  the driver is not restructured twice. **⚠️ Trap logged:** this worktree branched from a STALE main (4
+  commits behind incl. 2a) → a full 2a was re-implemented + had to be reset/reconciled. ALWAYS
+  `git fetch audit-tools main && git log HEAD..audit-tools/main` before starting a lap.
 - **Open items** (all in `docs/backlog.md`): remediate-side `opencode.json` drift/`INV-RCI-16`
   reconciliation; env-bound live validations (quota pre-wall pacing, friction escalation,
   selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004.
@@ -76,7 +83,7 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
 2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint
    endpoint); the openai-compatible/NIM guided-decoding path is the build lever.
-3. **Dispatch admission-control rework — 🔨 ACCEPTED, building (commit 1 + 2a shipped; 2b next).** Design of record:
+3. **Dispatch admission-control rework — 🔨 building (commit 1 + 2a + 2b-AUDIT shipped; 2b-remediate+unification next).** Design of record:
    [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (owner-resolved
    *Resolved decisions* + sharpened framing: **concurrency is not a computed quantity** — admit on budget
    headroom; the only explicit cap is a declared env hard-limit e.g. Codex 6). [[dispatch-admission-control-design]].
@@ -97,27 +104,34 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
      at `nextStep.ts:830`) pass no ledger yet — they get a real budget in 2b. Tests:
      `tests/shared/reservation-dispatch-overshoot.test.mjs` (co-located overshoot / liveness / output-envelope /
      inert-without-ledger).
-   - **Commit 2b — NEXT (the atomic scalar replace):** remove the `max_concurrent_agents` scalar from the
-     **host-dispatch prompt path** (schema `audit/quota/index.ts` v1alpha2→v1alpha3, ADD `DISPATCH_QUOTA_V1ALPHA3`
-     + per-admission explain records; producers `quotaPool.ts:271-288`/`tierRouting.ts:159`+`types.ts:52-56`/
-     `dispatch.ts:574`+`types.ts:66-67`; consumers audit `semanticReviewStep.ts:120-150`/`prompts.ts:81-83`/
-     `steps.ts:44`, remediate `rollingSession.ts:279`(drives worktree pre-create ≤ slots)/`dispatch.ts:497`/
-     `types.ts:154`/`nextStep.ts:1938-2093`) and instead have the tool **grant the admitted set** — run ledger
-     admission at the dispatch-step (lease at grant), hand the host EXACTLY that granted subset, reconcile at
-     result-ingest (merge-and-ingest / accept-node), next-step re-grants the remainder until done; the granted
-     set is the admission width (emergent, not a computed number). The only explicit agent-count is a declared
-     env hard cap (`pool.hostConcurrencyLimit`, passed verbatim). Packet `estimatedTokens` becomes the
-     output-envelope cost at packetization (`estimatePacketCost`). Wire the ledger into the two wrappers with a
-     real per-pool budget (from the quota snapshot / learned slope). **Note:** ratio-learning is dormant on the
-     claude-code host path (no actual-usage return); declared-cap envelope is the operative behavior there —
-     active only where a provider reports usage (NIM/openai-compatible). Update `capacity`/`rollingDispatch`/
-     `quota-scheduler`/`seam-host-only-next-step`/`rolling-audit-dispatch`/`quota-command`/`schema-contracts`/
-     `dispatch-features`/`dispatch-fanout`/`render-dispatch-review-prompt` + remediate `wave-scheduler`/
-     host-only tests + NEW different-auditor-resume-no-inherit test. Ships atomically (scalar deletion +
-     replacement together). **Build shape pinned** in the spec's *Host-path admission shape (2b build) —
-     resolved* section (grant-set artifact = whole-plan + `granted_packet_ids`; admission ⟂ top-K coverage
-     budget; per-pool budget = `remaining_pct × learned tokens_per_pct`, declared-envelope-only on the
-     claude-code host) — build to that, don't re-derive it.
+   - **Commit 2b-AUDIT — DONE (`5f7ef048` + refactor `36623383`):** the atomic scalar replace on the AUDIT
+     host-dispatch path. `max_concurrent_agents` deleted; dispatch-quota schema v1alpha3 (`DISPATCH_QUOTA_V1ALPHA3`)
+     carries an `admission` block (`granted_packet_ids` + `declared_cap` + `leases` + `explains`). New shared
+     `admitBatch` (`src/shared/dispatch/admissionLoop.ts`) does **cost-first-capable** routing — each packet to
+     the cheapest pool capable of it with budget+cap headroom, overflow spills to the next-cheapest (owner steer:
+     multi-provider cost routing is native, not a bolt-on). `computeDispatchAdmission` single-sources the
+     derivation (audit + remediate both call it). Producers `quotaPool.finalizeDispatchQuota` / `dispatch.ts` /
+     `tierRouting.computeDispatchFanout` emit `granted_count`/`declared_cap`; consumers `semanticReviewStep` /
+     `prompts.ts` / `steps.ts` render the granted-set prompt ("dispatch exactly `admission.granted_packet_ids`;
+     re-invoke for the next grant"); `mergeAndIngest` reconciles the grant's leases (`createReservationLedger`,
+     ledger path single-sourced, per-pid temp fallback when the quota dir is unset). In-process path passes
+     `grantLeases:false` (engine leases per-packet — no double-count). Built to the pinned spec §"Host-path
+     admission shape (2b build) — resolved". Tests updated: dispatch-fanout/features, schema-contracts,
+     render-dispatch-review-prompt, seam-host-only-next-step, seam-dispatch-…-routing, next-step, exports-parity
+     + NEW admission-loop test. Full audit+shared suites green.
+   - **Commit 2b-REMEDIATE — NEXT, COUPLED TO DRIVER-UNIFICATION.** Same scalar replace for remediate
+     (`RemediationDispatchQuota.max_concurrent_agents` → `admission`, v1alpha3; `buildDispatchQuota` +
+     `prepareImplementDispatch` call `computeDispatchAdmission`; host prompt granted-set prose; reconcile at
+     accept-node). BUT remediate's host rolling session (`rollingSession.ts` `prepareHostRollingDispatch` /
+     `advanceHostRolling`) is a **continuous-refill** model — `slots` (the removed scalar) IS the concurrency
+     width, and `advanceHostRolling` JIT-dispatches the next frontier node on each completion. Making it
+     worktrees==granted-set (owner-confirmed) means removing the JIT-refill and re-granting per next-step —
+     which reshapes the rolling lifecycle. `docs/backlog.md`'s **"Unify the two rolling-dispatch drivers"**
+     forward track explicitly says do remediate's rework WITH the unification ("not restructured twice"), so
+     land 2b-remediate + the driver-unification together as one arc. Wire the ledger into the unified driver
+     with a real per-pool budget then (audit's in-process wrapper `runRollingDispatch` also still passes no
+     ledger — the 2a capability is dormant at both call sites). NEW different-auditor-resume-no-inherit test
+     belongs here / commit 3.
    - **Commit 3 — founding bug:** driver descriptor rides the continue-command; audit→`resolveHostProviderName`
      parity (`semanticReviewStep.ts`); include host pool in audit plan (`buildAuditSourcePools` parity with
      remediate `buildConfirmedPools`); demote `sessionConfig.provider` to headless in-process only. NEW
