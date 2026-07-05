@@ -26,12 +26,33 @@ const { setQuotaStateDir } = await import(quotaStateUrl);
 // dir. Point that at a fresh temp dir per run so the preview is computed against a
 // pristine cache (no learned entries leaking in) and any accidental writes land
 // in the sandbox rather than the user's ~/.audit-code.
+// Every cmdQuota run must be sandboxed on TWO axes: the quota-state dir (set via
+// setQuotaStateDir) AND the artifacts dir. `loadSessionConfig` materializes a
+// default `session-config.json` on read when the file is missing, so a cmdQuota
+// call with no `--root`/`--artifacts-dir` would write it under the repo's own
+// CWD-relative `.audit-tools/audit` — polluting the tree. Point --artifacts-dir
+// at the per-run temp dir so that write lands in the sandbox and is cleaned up.
+function sandboxArtifactsDir(stateDir) {
+  return join(stateDir, ".audit-tools", "audit");
+}
+
+function quotaArgv(stateDir, argv) {
+  return [
+    process.execPath,
+    "cli.js",
+    "quota",
+    "--artifacts-dir",
+    sandboxArtifactsDir(stateDir),
+    ...argv,
+  ];
+}
+
 async function runQuota(argv) {
   const stateDir = await mkdtemp(join(tmpdir(), "quota-cmd-"));
   setQuotaStateDir(stateDir);
   try {
     const result = await captureConsole(() =>
-      cmdQuota([process.execPath, "cli.js", "quota", ...argv]),
+      cmdQuota(quotaArgv(stateDir, argv)),
     );
     return { ...result, stateDir };
   } finally {
@@ -88,7 +109,7 @@ test("malformed --host-models JSON surfaces the shared parser error (not swallow
   setQuotaStateDir(stateDir);
   try {
     await assert.rejects(
-      () => cmdQuota([process.execPath, "cli.js", "quota", "--host-models", "{not json"]),
+      () => cmdQuota(quotaArgv(stateDir, ["--host-models", "{not json"])),
       /--host-models must be valid JSON/,
       "malformed roster must throw the getHostModelRoster/parseHostModelRoster error",
     );
@@ -105,6 +126,16 @@ test("no handshake flags → cached/learned preview, and nothing is written to d
     expect(preview.tier_budgets, "no tier budgets without a roster").toBe(null);
     // Read-only command: must not invoke finalizeDispatchQuota.
     expect(!existsSync(join(stateDir, "dispatch-quota.json")), "quota command must not write dispatch-quota.json").toBeTruthy();
+    // Regression guard: loadSessionConfig's write-on-read must land in the
+    // sandbox artifacts dir, NOT the repo's own CWD-relative .audit-tools/audit.
+    expect(
+      existsSync(join(sandboxArtifactsDir(stateDir), "session-config.json")),
+      "session-config default must be written under the sandbox artifacts dir",
+    ).toBeTruthy();
+    expect(
+      !existsSync(join(repoRoot, ".audit-tools", "audit", "session-config.json")),
+      "cmdQuota must never write session-config into the repo root",
+    ).toBeTruthy();
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
@@ -116,7 +147,7 @@ async function runQuotaKeepDir(argv) {
   const stateDir = await mkdtemp(join(tmpdir(), "quota-cmd-"));
   setQuotaStateDir(stateDir);
   const result = await captureConsole(() =>
-    cmdQuota([process.execPath, "cli.js", "quota", ...argv]),
+    cmdQuota(quotaArgv(stateDir, argv)),
   );
   return { ...result, stateDir };
 }
