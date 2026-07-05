@@ -29,6 +29,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Commit-gate hook validates the WORKING TREE, not the staged snapshot (hit 2026-07-05).** The
+  green-at-every-commit PreToolUse hook runs `npm run check` against the working tree/dist, so a *partial-stage*
+  commit that is internally broken can still pass: shipping a dead-module deletion as two commits, the first
+  `git add <one file> && git commit` bundled the already-`git rm`-staged deletions but left the compensating
+  barrel edit (`src/shared/index.ts`) unstaged → that commit in isolation deleted `rollingEngine.ts` while still
+  re-exporting it (red), yet the hook greenlit it because the *working tree* (barrel edit present) was green.
+  Caught by eye (file-count in the commit confirmation), not the gate. Real gap in the invariant: a split/partial
+  commit can violate green-at-every-commit undetected. Fix: have the gate check the *staged* tree (e.g. `git
+  stash -k --include-untracked` → build+check → pop, or a temp-index checkout) so the committed snapshot is what's
+  validated, not the working tree. (Note: `git rm` stages deletions immediately — a subsequent scoped `git add`
+  does NOT isolate them.)
+
 - **Shipping from a linked worktree forces a manual FF + rebuild dance (observed 2026-07-05).** The release
   script (`scripts/release-and-publish.mjs`) hard-guards on being ON the default branch (`git branch
   --show-current` must equal `main`), but laps run on a `claude/<name>` feature-branch worktree while `main`
