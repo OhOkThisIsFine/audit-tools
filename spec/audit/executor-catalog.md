@@ -78,7 +78,7 @@ actual friction triage fires from the `present_report` terminal step
 | Executor | Kind | Obligation | Note |
 |---|---|---|---|
 | `agent` | host_delegation | *(none)* | Legacy placeholder for `audit_tasks_completed`, superseded by `rolling_dispatch_executor`. Retained only for persisted-artifact compatibility. |
-| `friction_capture_executor` | deterministic | `friction_capture_current` | Unreachable — obligation not in the priority chain. Friction triage actually fires from the `present_report` terminal step. |
+| `friction_capture_executor` | deterministic | `friction_capture_current` | Unreachable — never produced by `deriveAuditState`'s obligation scan (its id sits in `PRIORITY` only to satisfy the executor-registry-coverage invariant). Friction triage actually fires from the `present_report` terminal step. |
 
 ## Bounded-step expectations
 
