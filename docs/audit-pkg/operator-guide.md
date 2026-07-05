@@ -36,16 +36,15 @@ Shared install files:
 - `.audit-code/install/SKILL.md`
 - `.audit-code/install/GETTING-STARTED.md`
 - `.audit-code/install/manifest.json`
-- `.audit-code/install/run-mcp-server.mjs`
 - `.audit-tools/audit/session-config.json` when no backend fallback config exists
 
 Host-specific files may include:
 
 - Codex: managed `AGENTS.md` fallback guidance
-- Claude Desktop: project template, remote MCP connector, local MCP bundle
+- Claude Desktop: a plugin manifest, command, and skill under `~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/`, written by the global npm install (not a per-repo bundle)
 - OpenCode: `opencode.json` with auditor agent and permission wiring; the `/audit-code` command is global npm-installed state
-- VS Code/Copilot: prompt, custom agent, instructions, and `.vscode/mcp.json`
-- Antigravity: planning-mode guidance
+- VS Code/Copilot: prompt, custom agent, and instructions
+- Antigravity: an auto-discovered skill (`.agent/skills/audit-code/SKILL.md`), a `.gemini/commands/audit-code.toml` slash command, planning-mode guidance, and AGENTS instructions
 
 Use `.audit-code/install/GETTING-STARTED.md` as the repo-local handoff after
 bootstrap.
@@ -61,17 +60,17 @@ repo-local `AGENTS.md` fallback guidance. The installed skill includes
 `agents/openai.yaml` metadata so Codex can keep the slash-list display aligned
 with the canonical `/audit-code` spelling.
 
-Claude Desktop is treated as a bundle-install host. Use the generated project
-template and local bundle artifacts when installing the integration.
+Claude Desktop is provisioned by the global npm install's plugin manifest,
+command, and skill — not a per-repo bundle.
 
 OpenCode uses the global command seeded by `npm install -g audit-tools`.
 The generated project `opencode.json` should not define `command["audit-code"]`;
 it only wires the auditor agent and project permissions. VS Code uses
-repo-local prompt and MCP configuration files.
+repo-local prompt and instructions files.
 
-Antigravity should be treated as a workflow-and-artifacts host until it has a
-stable project-local config surface. Use generated planning-mode guidance
-or the backend fallback from an Antigravity-managed terminal when needed.
+Antigravity has a stable project-local surface: an auto-discovered skill,
+a `.gemini/commands/audit-code.toml` slash command, planning-mode guidance,
+and AGENTS instructions.
 
 Manual prompt-import hosts can use:
 
