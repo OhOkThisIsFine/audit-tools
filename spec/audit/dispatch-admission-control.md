@@ -211,6 +211,18 @@ ledger is layered on top of it, never in place of it.
    The reactive floor is still built first and independently correct; the ledger is
    the refinement layered on it, both shipping under one atomic-replace change.
 
+**Sharpened framing (owner, 2026-07-04): concurrency is not a computed quantity.**
+There is no "how many agents" number to derive, report, or make emergent — the
+count is *entirely* a function of quota/token headroom (admit while the resourceKey's
+budget covers the next task's cost). The ONLY place an explicit agent-count exists is
+when a *specific environment declares a hard in-flight cap* (e.g. Codex's 6, which may
+change) — that is one pool's optional declared constraint, passed through verbatim,
+never a value the tool computes. So the host-dispatch path does not report a live
+"emergent number" either: the tool ADMITS the set that budget (and any declared cap)
+allows and hands the host exactly that granted set; the granted set is the
+instantaneous admission width, not a reported concurrency. "Concurrency is not the
+thing to think about" — budget is.
+
 ## Validation criteria (how we'd know it works)
 
 - A flagless resume by a *different* auditor never sizes against or charges the
