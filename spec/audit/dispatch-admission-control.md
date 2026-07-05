@@ -195,9 +195,10 @@ ledger is layered on top of it, never in place of it.
    claims to be the meter. It must not be presented (in artifact or prompt) as a
    hard guarantee.
 3. **Legibility — the dispatch-quota artifact explains every admission.** Each
-   admission records `{ pool_id, resourceKey, headroom_before, estimate,
-   output_reservation, decision (admit|block), outstanding_leases }` so the
-   emergent fan-out width is reconstructable after the fact.
+   admission records `{ packet_id, pool_id, resource_key, admitted, reason
+   (admitted|no_capable_pool|budget_exhausted|cap_reached), headroom_before,
+   outstanding_before, cost }` so the emergent fan-out width is reconstructable
+   after the fact.
 4. **Cold-start — probe-then-widen only when unknown.** When the `resourceKey` has
    no learned slope, the first admission window is deliberately narrow (probe: admit
    a small N, then widen as the first completions calibrate the learned
@@ -234,8 +235,8 @@ orchestrators (audit `dispatch_review`, remediate rolling session).
 - **The plan stays whole; a `granted_packet_ids` list carries the admission.** The
   dispatch plan is NOT re-emitted as a shrinking subset each step. The tool runs ledger
   admission at the dispatch step and writes the admitted ids plus the per-admission
-  explain records (`{pool_id, resourceKey, headroom_before, estimate, output_reservation,
-  decision, outstanding_leases}`, Resolved decision 3) onto the dispatch-quota artifact;
+  explain records (`{packet_id, pool_id, resource_key, admitted, reason, headroom_before,
+  outstanding_before, cost}`, Resolved decision 3) onto the dispatch-quota artifact;
   the host dispatches EXACTLY `granted_packet_ids` and nothing else. This keeps the plan
   a stable content-addressed artifact (one home for the packet set), puts the granted
   set and its explain records in one place, and makes the host's rule trivial ("dispatch
