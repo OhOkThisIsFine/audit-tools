@@ -227,7 +227,13 @@ function validateOpenAiCompatibleSection(
   if (value.headers !== undefined) {
     validateEnvOverlay(value.headers, `${path}.headers`, issues);
   }
-  for (const key of ["temperature", "max_output_tokens"] as const) {
+  for (const key of [
+    "temperature",
+    "max_output_tokens",
+    "referenced_files_max",
+    "referenced_file_byte_cap",
+    "referenced_files_total_byte_cap",
+  ] as const) {
     const entry = value[key];
     if (entry !== undefined && (typeof entry !== "number" || !Number.isFinite(entry))) {
       pushIssue(

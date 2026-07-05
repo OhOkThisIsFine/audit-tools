@@ -275,6 +275,13 @@ function openAiCompatibleSource(
       ...(oc.include_referenced_files !== undefined
         ? { include_referenced_files: oc.include_referenced_files }
         : {}),
+      ...(oc.referenced_files_max !== undefined ? { referenced_files_max: oc.referenced_files_max } : {}),
+      ...(oc.referenced_file_byte_cap !== undefined
+        ? { referenced_file_byte_cap: oc.referenced_file_byte_cap }
+        : {}),
+      ...(oc.referenced_files_total_byte_cap !== undefined
+        ? { referenced_files_total_byte_cap: oc.referenced_files_total_byte_cap }
+        : {}),
     },
   };
 }

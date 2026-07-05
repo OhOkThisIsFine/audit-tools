@@ -146,6 +146,17 @@ export interface OpenAiCompatibleConfig {
   guided_json?: boolean;
   /** Inline current contents of prompt-referenced files so edits are grounded. Default true. */
   include_referenced_files?: boolean;
+  /**
+   * Max number of prompt-referenced files inlined into a single-shot request
+   * (default 24). Raise for read-heavy AUDIT review packets on a large-context
+   * endpoint so every granted file reaches the worker (it has no Read tool) rather
+   * than being silently truncated to a coverage hole.
+   */
+  referenced_files_max?: number;
+  /** Per-file byte cap when inlining referenced file contents (default 64 KiB). */
+  referenced_file_byte_cap?: number;
+  /** Aggregate byte cap across all inlined referenced files (default 256 KiB). */
+  referenced_files_total_byte_cap?: number;
 }
 
 export interface VSCodeTaskConfig {

@@ -304,9 +304,12 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     repoRoot: string,
   ): Promise<string> {
     if (this.config.include_referenced_files === false) return "";
-    const perFileCap = DEFAULT_REFERENCED_FILE_BYTE_CAP;
-    const totalCap = DEFAULT_REFERENCED_FILES_TOTAL_BYTE_CAP;
-    const maxFiles = DEFAULT_REFERENCED_FILES_MAX;
+    // Operator-tunable caps so a read-heavy AUDIT packet on a large-context endpoint
+    // inlines every granted file (the single-shot worker has no Read tool) instead of
+    // silently truncating to a coverage hole.
+    const perFileCap = positiveOr(this.config.referenced_file_byte_cap, DEFAULT_REFERENCED_FILE_BYTE_CAP);
+    const totalCap = positiveOr(this.config.referenced_files_total_byte_cap, DEFAULT_REFERENCED_FILES_TOTAL_BYTE_CAP);
+    const maxFiles = positiveOr(this.config.referenced_files_max, DEFAULT_REFERENCED_FILES_MAX);
 
     const candidates = new Set<string>();
     // Conservative file-ish tokens: a path segment with an extension. Strips
@@ -338,7 +341,16 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       }
     }
     if (parts.length === 0) return "";
-    return `\n\nCURRENT CONTENTS OF REFERENCED FILES (edit these; return their full new contents in \`files\`):${parts.join("")}`;
+    // Task-neutral framing: this serves BOTH edit tasks (remediate — return the new
+    // contents in `files`) AND read-only review tasks (audit — leave `files` empty,
+    // the finding array goes in `result`). The prior "edit these" wording pushed an
+    // audit review worker toward returning file edits it should never make.
+    return (
+      "\n\nCURRENT CONTENTS OF REFERENCED FILES (provided so you work from real content, " +
+      "not guesses). Only include a file in `files` if the task instructs you to MODIFY " +
+      "it; for a read-only review task, leave `files` empty and put your output in " +
+      `\`result\`:${parts.join("")}`
+    );
   }
 
   private async appendStdout(path: string, content: string): Promise<void> {
@@ -359,22 +371,40 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 }
 
 const SINGLE_SHOT_SYSTEM_PROMPT =
-  "You are a non-interactive, single-shot code-editing worker. You cannot ask " +
-  "questions, open additional files, or run commands — you must complete the " +
-  "task in ONE response. Read the task in the user message and decide the exact " +
-  "file contents required. Then respond with a SINGLE JSON object and NOTHING " +
+  "You are a non-interactive, single-shot worker. You cannot ask " +
+  "questions, open additional files, run commands, use Read/Write/Grep tools, or " +
+  "reply in a second turn — you must complete the task in ONE response. The current " +
+  "contents of the files you need are inlined in the user message. Read the task and " +
+  "decide the exact output required. Then respond with a SINGLE JSON object and NOTHING " +
   "else — no prose, no explanation, no markdown, no code fences. The object has " +
   'exactly two keys: "files" — an array of {"path": string, "content": string} ' +
-  "objects, one per file you create or modify, where `path` is relative to the " +
-  "repository root and `content` is the COMPLETE new contents of that file; and " +
-  '"result" — the exact JSON value the task instructions tell you to write to ' +
-  "the result file (the run's result artifact / item results). Include every " +
-  "file you change in `files`, but do NOT put the result artifact, the result " +
-  "file, or any .audit-tools/ path in `files` — the result belongs ONLY in the " +
-  "`result` key. Output only the JSON object.";
+  "objects, one per file you create or modify (EMPTY for a read-only review task), where " +
+  "`path` is relative to the repository root and `content` is the COMPLETE new contents " +
+  'of that file; and "result" — the exact JSON value the task instructions tell you to ' +
+  "WRITE to the result file / result_path (the run's result artifact / item results / " +
+  "the audit findings array). Include every file you change in `files`, but do NOT put " +
+  "the result artifact, the result file, or any .audit-tools/ path in `files` — the " +
+  "result belongs ONLY in the `result` key. " +
+  // Output-contract override for the single-shot worker (defect-1 sub-defect 3): agentic
+  // prompts tell the worker to WRITE a file then REPLY with a one-line confirmation
+  // ("valid: …" / "done"). A single-shot worker has no file access and no reply channel,
+  // so that convention must NOT leak into `result` — the observed NIM failure.
+  "IMPORTANT: the task instructions were written for an interactive agent and may tell " +
+  "you to WRITE your output to a result file and then REPLY with a one-line confirmation " +
+  "(e.g. 'reply exactly: valid: <id>, findings=<n>'). You have no file access and no " +
+  "separate reply turn: put the EXACT content that instruction says to write to the file " +
+  "into `result` — NEVER the confirmation/acknowledgement string. If the task asks for " +
+  "structured data (e.g. a JSON array of audit results), `result` MUST be that array, not " +
+  "a 'valid: …' summary line. Ignore any instruction to 'reply', 'confirm', or use a " +
+  "Read/Write/Grep tool — those are for interactive agents. Your ONLY output is this JSON object.";
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** A finite positive override, else the default (guards a 0 / negative / NaN config value). */
+function positiveOr(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function truncate(text: string, max: number): string {

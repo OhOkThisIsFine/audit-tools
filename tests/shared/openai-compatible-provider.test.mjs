@@ -232,6 +232,83 @@ test("launch inlines current contents of prompt-referenced files", async () => {
   expect(userMsg).toMatch(/config\.json/);
 });
 
+test("defect-1 sub-3: system prompt overrides the write-then-reply-confirmation convention", async () => {
+  // The audit review packet tells an interactive agent to WRITE a file then reply
+  // "valid: <id>". A single-shot worker must instead put the array in `result`.
+  const { input } = makeCtx("Write the AuditResult[] array to result_path, then reply exactly: valid: p1, findings=0");
+  let captured;
+  const fetchFn = async (_url, init) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ files: [], result: [] }) } }] }),
+      text: async () => "",
+    };
+  };
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(true);
+  const systemMsg = captured.messages.find((m) => m.role === "system").content;
+  // The override must (a) forbid the confirmation string in `result`, (b) direct
+  // structured data into `result`, (c) tell it to ignore reply/confirm/Write-tool steps.
+  expect(systemMsg).toMatch(/NEVER the confirmation/i);
+  expect(systemMsg).toMatch(/result. MUST be that array/i);
+  expect(systemMsg).toMatch(/ignore any instruction to .reply./i);
+});
+
+test("defect-1 sub-3: referenced-files framing is read-neutral (review leaves files empty)", async () => {
+  const { repoRoot, input } = makeCtx("Review reviewme.ts for correctness.");
+  writeFileSync(join(repoRoot, "reviewme.ts"), "export const y = 2;");
+  let captured;
+  const fetchFn = async (_url, init) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ files: [], result: [] }) } }] }),
+      text: async () => "",
+    };
+  };
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  await provider.launch(input);
+  const userMsg = captured.messages.find((m) => m.role === "user").content;
+  // Neutral framing: no "edit these" push; explicit read-only-review guidance.
+  expect(userMsg).not.toMatch(/edit these/i);
+  expect(userMsg).toMatch(/read-only review/i);
+});
+
+test("defect-1 sub-3: referenced-file byte cap is operator-configurable (read-heavy audit tuning)", async () => {
+  const { repoRoot, input } = makeCtx("Review bigfile.ts for correctness.");
+  const body = "x".repeat(2000);
+  writeFileSync(join(repoRoot, "bigfile.ts"), body);
+  const capture = async (_url, init) => ({
+    ok: true,
+    status: 200,
+    _body: init.body,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({ files: [], result: [] }) } }] }),
+    text: async () => "",
+  });
+
+  // A tiny total cap SKIPS the file (coverage-safe: not inlined rather than crashing).
+  let capturedSmall;
+  await new OpenAiCompatibleProvider(
+    { ...minimalConfig, referenced_files_total_byte_cap: 10 },
+    { fetchFn: async (u, i) => { const r = await capture(u, i); capturedSmall = JSON.parse(i.body); return r; } },
+  ).launch(input);
+  const smallUser = capturedSmall.messages.find((m) => m.role === "user").content;
+  expect(smallUser).not.toMatch(/xxxxxxxxxx/);
+
+  // A generous cap INLINES the same file — the operator raised the ceiling.
+  let capturedBig;
+  await new OpenAiCompatibleProvider(
+    { ...minimalConfig, referenced_files_total_byte_cap: 100_000 },
+    { fetchFn: async (u, i) => { const r = await capture(u, i); capturedBig = JSON.parse(i.body); return r; } },
+  ).launch(input);
+  const bigUser = capturedBig.messages.find((m) => m.role === "user").content;
+  expect(bigUser).toMatch(/xxxxxxxxxx/);
+});
+
 test("openai-compatible resolves verbatim and from config", () => {
   expect(resolveFreshSessionProviderName("openai-compatible", {})).toBe("openai-compatible");
   // Inside a CLAUDECODE session (claude can't self-spawn), a configured endpoint
