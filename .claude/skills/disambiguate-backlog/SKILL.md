@@ -45,7 +45,7 @@ actually closes a gap. Doing it live, one item at a time, with concrete
 propositions to react to, is how a vague item becomes a real spec in one sitting.
 
 The reviewer+adversary split exists because **an author marking its own homework
-misses gaps** (`CLAUDE.md` → "delegate adversarial phases to a separate agent").
+misses gaps** (`docs/project-philosophy.md` → A7 "delegate adversarial phases to a separate agent").
 One agent drafts propositions; an independent one tries to refute them and find
 the interpretation the first missed. You see both, then judge.
 
@@ -99,8 +99,8 @@ read-heavy verification, `general-purpose` for drafting):
   interpretation or option the reviewer missed. Agree / refute with evidence from
   code.
 
-Run these against the project's durable principles (`CLAUDE.md` Concepts &
-Conventions — ideal-code-over-compat, language-neutral, everything-agnostic,
+Run these against the project's durable principles (`CLAUDE.md` Concepts, Conventions &
+Preferences — ideal-code-over-compat, language-neutral, everything-agnostic,
 enforce-robustness-in-tooling) so propositions are pre-filtered for fit. A
 proposition that violates a standing decision is a con worth naming, not a silent
 drop.
