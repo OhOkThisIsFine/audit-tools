@@ -29,6 +29,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Adding one PRIORITY-chain obligation ripples through ~10 fixture tests (friction, 2026-07-05, Phase B).**
+  Inserting `structure_decomposition_current` at PRIORITY idx 9 broke ~10 audit test files whose fixtures build
+  a bundle "advanced to `design_assessment`" and then assert the NEXT step / a hardcoded priority index. Each
+  needed the new artifact pre-satisfied (or an extra `advanceAudit` step) — a broad, mechanical, per-file churn
+  every time a phase is added. Fix in tooling: a SHARED "advanced-bundle" fixture builder (one place that seeds a
+  bundle satisfied through phase N) + priority assertions keyed by `PRIORITY.indexOf(id)` relationships, not
+  literal integers, so a new obligation is a one-line fixture edit, not a 10-file sweep. Low-pri (test ergonomics)
+  but recurs on every new phase (C/D/E are coming).
+
 - **`windowsHide` mop-up on dev/CI-script + per-test-file spawns (partial, 2026-07-06).** A windowless parent
   (node under an IDE/agent) spawning a console child pops a console window on win32 unless `windowsHide: true`.
   SHIPPED production spawns are now all covered (`providerPathGuard` where/which, `spawnLoggedCommand` +
@@ -426,6 +435,13 @@ Standing gotchas worth keeping for any agent (strong or weak):
   = broken state. Add the `!.claude/hooks/<name>` line in the same commit as the hook + its settings.json
   registration. (Bit once 2026-07-05: `friction-stop-gate.mjs`.)
 
+- **A `\0` in a Write-tool template literal lands as a RAW NUL byte → binary-flags the source file.** Writing
+  `` `${a}\0${b}` `` (a NUL pair-key separator) via the Write tool put a literal 0x00 in the `.ts` source, so git
+  treated it as **binary** (`git diff` shows `Bin`/`- -`, grep-hostile) even though tsc/vitest read it fine. Same
+  for an in-comment control char. Detect with `python -c "print(open(p,'rb').read().count(0))"`; fix by using a
+  text-safe escape that stays a source escape (`U+001F` unit separator) or a printable delimiter. Never embed a
+  raw control byte in source — prefer a `\uXXXX` escape the compiler resolves at runtime. (Bit once 2026-07-05:
+  `src/shared/decompose/consensus.ts` pairKey.)
 - **The Bash tool mangles Windows backslash paths** (`C:\a\b` → `C:ab`) → use forward slashes or the
   PowerShell tool for absolute-path commands.
 - **PowerShell**: assign `foreach` output to a var before piping to `ConvertTo-Json`; `-Filter` is not regex
