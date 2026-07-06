@@ -120,7 +120,10 @@ test("verify:release runs verify:hosts ahead of the publish smoke steps", () => 
   expect(verifyRelease, "verify:release must compose the verify:checks gate").toMatch(/\bnpm run verify:checks\b/);
   const verifyChecks = pkg.scripts["verify:checks"];
   expect(verifyChecks, "package.json must define a verify:checks script").toBeTruthy();
-  expect(verifyChecks, "verify:checks must invoke verify:hosts").toMatch(/\bnpm run verify:hosts\b/);
+  // verify:checks runs its sub-steps through the profiled runner
+  // (scripts/shared/profile-run.mjs), which invokes each named npm script in order,
+  // so the gate lists `verify:hosts` as a bare step token rather than `npm run …`.
+  expect(verifyChecks, "verify:checks must invoke verify:hosts").toMatch(/\bverify:hosts\b/);
   // verify:hosts must gate BEFORE the publish smoke steps, not after.
   const hostsIdx = verifyChecks.indexOf("verify:hosts");
   const smokeIdx = verifyChecks.indexOf("smoke:packaged-audit-code");

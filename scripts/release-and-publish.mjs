@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import { shouldLogPollAttempt } from "./poll-log-throttle.mjs";
+import { toSeconds, writeProfileLedger } from "./shared/profile.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -301,6 +302,53 @@ async function waitForRunCompletion(repoSlug, runId) {
   throw new Error(`Timed out waiting for publish workflow run ${runId} to complete.`);
 }
 
+// Pull the completed publish run's per-job / per-step wall-clock from the GitHub
+// Actions API and persist it as a `publish-ci` profile. This is the authoritative
+// where-did-CI-time-go view of the release pipeline (gate vs. sharded test vs.
+// publish), emitted on every release so a CI-latency regression is visible.
+function summarizeCiTiming(repoSlug, runId, meta = {}) {
+  let payload;
+  try {
+    payload = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${runId}/jobs?per_page=100`]);
+  } catch (error) {
+    console.log(`[release] CI timing profile skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  const jobs = Array.isArray(payload?.jobs) ? payload.jobs : [];
+  const durationMs = (start, end) => {
+    const a = Date.parse(start ?? "");
+    const b = Date.parse(end ?? "");
+    return Number.isNaN(a) || Number.isNaN(b) ? 0 : Math.max(0, b - a);
+  };
+  const steps = [];
+  const perJob = [];
+  for (const job of jobs) {
+    const jobMs = durationMs(job.started_at, job.completed_at);
+    perJob.push({ name: job.name, ms: jobMs, conclusion: job.conclusion });
+    steps.push({ label: `job:${job.name}`, ms: jobMs });
+    for (const step of Array.isArray(job.steps) ? job.steps : []) {
+      steps.push({ label: `  ${job.name} › ${step.name}`, ms: durationMs(step.started_at, step.completed_at) });
+    }
+  }
+  if (steps.length === 0) return;
+  // Wall-clock of the whole run is the span of the longest job (jobs run in
+  // parallel), not the sum — report both so the parallel speedup is legible.
+  const criticalPathMs = perJob.reduce((max, j) => Math.max(max, j.ms), 0);
+  const summedJobMs = perJob.reduce((sum, j) => sum + j.ms, 0);
+  console.log("[release] CI timing (per job):");
+  for (const j of [...perJob].sort((a, b) => b.ms - a.ms)) {
+    console.log(`[release]   ${toSeconds(j.ms)}s  ${j.name} (${j.conclusion})`);
+  }
+  console.log(`[release]   critical-path ${toSeconds(criticalPathMs)}s · summed ${toSeconds(summedJobMs)}s across ${perJob.length} jobs`);
+  writeProfileLedger("publish-ci", steps, {
+    ...meta,
+    runId,
+    jobCount: perJob.length,
+    criticalPathMs: Math.round(criticalPathMs),
+    summedJobMs: Math.round(summedJobMs),
+  });
+}
+
 async function waitForRegistryVersion(packageName, version) {
   const deadline = Date.now() + registryTimeoutMs;
   const startedAt = Date.now();
@@ -351,6 +399,20 @@ async function main() {
     return;
   }
 
+  // Phase timing for the local orchestration half of the release. The CI half is
+  // profiled separately from the publish run's job/step API (summarizeCiTiming).
+  const phases = [];
+  const runPhase = async (label, fn) => {
+    const start = performance.now();
+    try {
+      return await fn();
+    } finally {
+      const ms = performance.now() - start;
+      phases.push({ label, ms });
+      console.log(`[profile:release] ${label}: ${toSeconds(ms)}s`);
+    }
+  };
+
   ensureCleanWorktree();
   const releaseBranch = bumpOnly ? null : ensureMainBranch();
 
@@ -366,10 +428,10 @@ async function main() {
   // upload, and the /ship preflight already ran it locally. Re-running the whole
   // verify:release here a third time only delayed the tag.
   console.log("[release] running local pre-tag gate (check)");
-  run(npm, ["run", "check"]);
+  await runPhase("pre-tag-gate(check)", () => run(npm, ["run", "check"]));
 
   console.log(`[release] bumping ${bump} version`);
-  const { packageAfter, tag } = bumpVersionAndTag(npm);
+  const { packageAfter, tag } = await runPhase("bump+tag", () => bumpVersionAndTag(npm));
   const remoteName = getRemoteName();
 
   console.log(`[release] pushing ${releaseBranch} (${tag})`);
@@ -392,11 +454,14 @@ async function main() {
   // publish run is created at or after this moment, so it gates out stale
   // same-name runs from an earlier reverted release of the same version.
   const tagPushedAtMs = Date.now();
-  console.log(`[release] pushing tag ${tag}`);
-  run("git", ["push", remoteName, tag]);
+  await runPhase("push+release", () => {
+    console.log(`[release] pushing tag ${tag}`);
+    run("git", ["push", remoteName, tag]);
+    console.log(`[release] creating GitHub Release ${tag}`);
+    run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+  });
 
-  console.log(`[release] creating GitHub Release ${tag}`);
-  run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+  const releaseMeta = { version: packageAfter.version, tag };
 
   if (noWait) {
     console.log(
@@ -404,19 +469,30 @@ async function main() {
         `${packageAfter.name}@${packageAfter.version} asynchronously. ` +
         `Confirm with: npm view ${packageAfter.name} version`,
     );
+    writeProfileLedger("release", phases, { ...releaseMeta, mode: "no-wait" });
     return;
   }
 
   console.log(`[release] waiting for publish-package release run for ${tag}`);
-  const runEntry = await waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha });
+  const runEntry = await runPhase("await-run-detect", () =>
+    waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha }),
+  );
   console.log(`[release] publish run detected: ${runEntry.html_url}`);
 
-  const completedRun = await waitForRunCompletion(repoSlug, runEntry.id);
+  const completedRun = await runPhase("await-ci-complete", () =>
+    waitForRunCompletion(repoSlug, runEntry.id),
+  );
   console.log(`[release] publish run completed: ${completedRun.html_url}`);
 
-  console.log(`[release] waiting for ${packageAfter.name}@${packageAfter.version} on npm`);
-  await waitForRegistryVersion(packageAfter.name, packageAfter.version);
+  // Profile the CI half from the completed run's job/step timings.
+  summarizeCiTiming(repoSlug, runEntry.id, releaseMeta);
 
+  console.log(`[release] waiting for ${packageAfter.name}@${packageAfter.version} on npm`);
+  await runPhase("await-npm-propagation", () =>
+    waitForRegistryVersion(packageAfter.name, packageAfter.version),
+  );
+
+  writeProfileLedger("release", phases, releaseMeta);
   console.log(`[release] published ${packageAfter.name}@${packageAfter.version} successfully.`);
 }
 

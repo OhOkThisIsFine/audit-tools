@@ -146,11 +146,29 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   when its HEAD already equals `origin/main`, or auto-FF+rebuild the primary worktree — so a ship from a lap
   worktree is one command, not a five-step hand dance.
 
-- **Optional: cut vitest `collect` (~186s) / per-file isolation overhead (noted 2026-07-04).** Full-suite
-  `collect` is ~186s of module load/transform for 430 files; default `pool: 'forks'` adds per-file process
-  startup. `pool: 'threads'` and/or `isolate: false` could help, but many audit/remediate tests mutate fs
-  and spawn subprocesses → isolation-off risks cross-test bleed. Only pursue with per-file verification.
-  Lower priority than the sharding already shipped.
+- **Pipeline profiling is now standing (2026-07-06).** Always-on timing across test + release/publish,
+  single-sourced in `scripts/shared/profile.mjs`; ledgers land in `.audit-tools-profile/` (gitignored) +
+  a CI job-summary table. `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs`;
+  `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts`; `release-and-publish.mjs`
+  writes a `release` phase profile + a `publish-ci` per-job/per-step profile from the publish run's API.
+  Use the `*-history.ndjson` trend line to catch time regressions. Durable how-to in `CLAUDE.md` →
+  Release & publish → Pipeline profiling.
+
+- **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
+  numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
+  - **`verify:checks` gate = 95.8s, of which `smoke:packaged-audit-code` alone is 70.2s (73%).**
+    `smoke:packaged-remediate-code` is 13.2s; everything else (check 3.6 / deadcode 2.1 / doc-manifest 0.5 /
+    build 5.0 / hosts 0.5+0.6) is ~12s combined. The `check`→`build` double-`tsc` (~8.6s) is minor next to
+    the packaged smokes. **→ The highest-leverage gate win is the packaged-audit-code smoke** (npm pack +
+    global install + next-step round-trips); investigate trimming the install/round-trip cost or caching the
+    packed tarball rather than chasing the tsc/collect items.
+  - **Full vitest suite = 307s wall (452 files), `collect≈211s`** (confirms the old ~186s estimate), run
+    time dominated by audit integration tests that spawn real subprocesses: `audit-code-completion` 285s,
+    `audit-code-wrapper` 237s, `next-step` 165s, `cli-remediation` 111s. area:audit ≈ 1905s summed across
+    workers vs remediate 451s / shared 62s. `pool: 'threads'` / `isolate: false` won't help the run-time
+    tail (it's subprocess wall, not isolation overhead); the real lever is the sharding already shipped +
+    possibly splitting the few 100s+ integration files across more shards. Only pursue collect/pool changes
+    with per-file verification (many tests mutate fs / spawn subprocesses → isolation-off risks bleed).
 
 - **Dispatch admission-control rework — residual (env-bound / deeper, not blocking).** Shipped in full
   (commits 1/2a/2b-AUDIT/2b-REMEDIATE/driver-unification/commit-3/defect-1 — see `docs/HANDOFF.md` T5-3 /
