@@ -33,6 +33,7 @@ import type {
   RuntimeValidationTaskManifest,
 } from "../types/runtimeValidation.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
+import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
@@ -124,6 +125,7 @@ type ArtifactPayloadMap = {
   risk_register: RiskRegister;
   git_history: GitHistory;
   design_assessment: DesignAssessment;
+  structure_decomposition: StructureDecomposition;
   analyzer_capability: AnalyzerCapabilityRecord;
 
   // --- Phase 3: Audit execution ---
@@ -266,6 +268,10 @@ export const ARTIFACT_DEFINITIONS = {
   risk_register: jsonArtifact("risk_register.json", "analysis"),
   git_history: jsonArtifact("git_history.json", "analysis"),
   design_assessment: jsonArtifact("design_assessment.json", "analysis"),
+  structure_decomposition: jsonArtifact(
+    "structure_decomposition.json",
+    "analysis",
+  ),
   analyzer_capability: jsonArtifact("analyzer_capability.json", "analysis"),
   scope: jsonArtifact("scope.json", "execution"),
   coverage_matrix: jsonArtifact("coverage_matrix.json", "execution"),

@@ -8,6 +8,7 @@ import { runIntentCheckpointAutoComplete } from "./intentCheckpointExecutor.js";
 import {
   runStructureExecutor,
   runDesignAssessmentExecutor,
+  runStructureDecompositionExecutor,
   runDesignReviewAutoComplete,
 } from "./structureExecutors.js";
 import { runPlanningExecutor } from "./planningExecutors.js";
@@ -105,6 +106,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     }),
   design_assessment_executor: async (bundle) =>
     runDesignAssessmentExecutor(bundle),
+  structure_decomposition_executor: async (bundle, { options }) =>
+    runStructureDecompositionExecutor(bundle, options.root),
   design_review_contract: async (bundle) =>
     runDesignReviewAutoComplete(bundle, "contract"),
   design_review_conceptual: async (bundle) =>

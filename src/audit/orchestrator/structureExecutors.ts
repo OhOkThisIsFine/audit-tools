@@ -30,6 +30,7 @@ import type { GitHistoryBaseline } from "../types/artifactMetadata.js";
 import { buildSurfaceManifest } from "../extractors/surfaces.js";
 import { buildUnitManifest } from "./unitBuilder.js";
 import { buildDesignAssessment } from "../extractors/designAssessment.js";
+import { buildStructureDecomposition } from "../decompose/buildStructureDecomposition.js";
 import { deriveGraphSignals } from "../extractors/graphSignals.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 
@@ -221,6 +222,44 @@ export function runDesignAssessmentExecutor(
     },
     artifacts_written: ["design_assessment.json"],
     progress_summary: `Design assessment complete: ${designAssessment.findings.length} structural finding(s).`,
+  };
+}
+
+/**
+ * Phase B conceptual design-review — deterministic structure-layer decomposition.
+ * Runs the overlay-and-delta operator over the graph substrate + the two new
+ * intent extractors and persists `structure_decomposition.json` (node scaffold +
+ * the two non-co-localization findings). Async: the comment/doc intent sources
+ * read source text (skipped without a root).
+ */
+export async function runStructureDecompositionExecutor(
+  bundle: ArtifactBundle,
+  root?: string,
+): Promise<ExecutorRunResult> {
+  if (!bundle.repo_manifest || !bundle.file_disposition || !bundle.graph_bundle) {
+    throw new Error(
+      "Cannot run structure decomposition executor without structure artifacts",
+    );
+  }
+
+  const decomposition = await buildStructureDecomposition({
+    root,
+    repoManifest: bundle.repo_manifest,
+    disposition: bundle.file_disposition,
+    graphBundle: bundle.graph_bundle,
+  });
+
+  return {
+    updated: {
+      ...bundle,
+      structure_decomposition: decomposition,
+    },
+    artifacts_written: ["structure_decomposition.json"],
+    progress_summary:
+      `Structure decomposition complete: ${decomposition.consensus.length} consensus + ` +
+      `${decomposition.contested.length} contested node(s), ` +
+      `${decomposition.findings.length} non-co-localization finding(s) across ` +
+      `${decomposition.node_universe_size} files.`,
   };
 }
 

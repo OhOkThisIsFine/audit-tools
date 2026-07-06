@@ -164,6 +164,20 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
     ),
   );
 
+  // Phase B conceptual design-review — the deterministic structure-layer
+  // decomposition (overlay-and-delta operator). Runs once the enriched graph +
+  // manifest are fresh; its findings + node scaffold feed the Phase C charter pass.
+  obligations.push(
+    obligation(
+      "structure_decomposition_current",
+      staleOrSatisfied(
+        staleArtifacts,
+        ["structure_decomposition.json"],
+        has(bundle.structure_decomposition),
+      ),
+    ),
+  );
+
   // The checkpoint is "current" only when it both exists/fresh AND every
   // unencodable free_form_intent clause has been escalated to a host-answered
   // constraint. An unanswered unencodable clause keeps this obligation unmet so

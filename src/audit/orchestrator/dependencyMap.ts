@@ -81,6 +81,16 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "file_disposition.json",
   ],
   "design_assessment.json": ["unit_manifest.json", "critical_flows.json"],
+  // Phase B conceptual design-review: the deterministic structure-layer
+  // decomposition (overlay-and-delta operator). Depends on the enriched graph
+  // (co-change + analyzer edges land in graph_bundle) plus the manifest +
+  // disposition — repo_manifest carries per-file hashes, so a source-content
+  // change re-stales it transitively (comment/doc extraction reads that source).
+  "structure_decomposition.json": [
+    "repo_manifest.json",
+    "file_disposition.json",
+    "graph_bundle.json",
+  ],
 
   // Phase 3 — planning & execution. scope.json (delta vs. full) gates coverage;
   // it is also a DIRECT input to audit_tasks so a scope change that produces an
@@ -173,6 +183,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "surface_manifest.json",
     "critical_flows.json",
     "design_assessment.json",
+    "structure_decomposition.json",
     "syntax_resolution_status.json",
     "external_analyzer_results.json",
     "coverage_matrix.json",

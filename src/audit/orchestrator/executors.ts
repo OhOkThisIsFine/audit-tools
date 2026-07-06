@@ -51,6 +51,11 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["design_assessment_current"],
   },
   {
+    id: "structure_decomposition_executor",
+    kind: "deterministic",
+    obligation_ids: ["structure_decomposition_current"],
+  },
+  {
     id: "design_review_contract",
     kind: "host_delegation",
     obligation_ids: ["design_review_contract_completed"],

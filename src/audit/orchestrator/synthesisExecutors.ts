@@ -26,6 +26,7 @@ function buildBaseFindingsReport(
       runtimeValidationTaskManifest: bundle.runtime_validation_tasks,
       externalAnalyzerResults: bundle.external_analyzer_results,
       designAssessment: bundle.design_assessment,
+      structureDecomposition: bundle.structure_decomposition,
       activeDispatch: bundle.active_dispatch,
     }),
   );
