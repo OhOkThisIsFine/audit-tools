@@ -31,6 +31,8 @@ import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.j
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { renderCharterExtractionPrompt } from "./charterExtractionPrompt.js";
 import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
+import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
+import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
 import {
   loadSessionConfig,
@@ -518,6 +520,45 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       access: {
         read_paths: [join(artifactsDir, "charter_clarification.json")],
         write_paths: [answersPath],
+      },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "systemic_challenge") {
+    // Phase E second-order adversary (loop-until-dry): the tool has opened the loop
+    // and computed the language-neutral aggregate-metrics digest. The host dispatches
+    // a SEPARATE adversary agent whose mandate is optimization/better-way; it writes
+    // the round's improvement findings (true-lens) back, and the executor folds them
+    // + decides convergence. An empty submission converges the loop.
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const submissionPath = join(artifactsDir, "incoming", "systemic-challenge.json");
+    const metrics =
+      result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "systemic_challenge",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Run a separate second-order-adversary agent (optimization/better-way mandate), write its findings to the submission path, then run next-step. An empty findings array converges the loop.",
+      repoRoot: root,
+      artifactPaths: {
+        systemic_challenge_submission: submissionPath,
+      },
+      prompt: renderSecondOrderAdversaryPrompt({
+        round: (result.bundle.systemic_challenge?.rounds.length ?? 0) + 1,
+        priorFindingCount: result.bundle.systemic_challenge?.findings.length ?? 0,
+        metrics,
+        submissionPath,
+        continueCommand,
+      }),
+      access: {
+        read_paths: [join(artifactsDir, "systemic_challenge.json")],
+        write_paths: [submissionPath],
       },
     });
     console.log(JSON.stringify(step, null, 2));

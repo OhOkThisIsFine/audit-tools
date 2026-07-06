@@ -112,6 +112,18 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "intent_checkpoint.json",
     "repo_manifest.json",
   ],
+  // Phase E systemic improvement-seeking challenge loop. Depends on the Phase-C
+  // charter register (the goal graph its blast-radius ranking reuses), the confirmed
+  // intent checkpoint (the ceiling that gates its depth), and repo_manifest (a
+  // source-content change re-stales the register + re-grounds its findings). The
+  // aggregate-metrics digest is derived from analysis artifacts but is advisory
+  // context — the register's freshness is anchored on the same triad as
+  // charter_clarification so the two conceptual-review outputs stale together.
+  "systemic_challenge.json": [
+    "charter_register.json",
+    "intent_checkpoint.json",
+    "repo_manifest.json",
+  ],
 
   // Phase 3 — planning & execution. scope.json (delta vs. full) gates coverage;
   // it is also a DIRECT input to audit_tasks so a scope change that produces an
@@ -207,6 +219,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "structure_decomposition.json",
     "charter_register.json",
     "charter_clarification.json",
+    "systemic_challenge.json",
     "syntax_resolution_status.json",
     "external_analyzer_results.json",
     "coverage_matrix.json",

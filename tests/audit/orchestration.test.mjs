@@ -130,6 +130,19 @@ function createDecisionBundle(overrides = {}) {
       findings: [],
       validation_issues: [],
     },
+    // Phase E systemic challenge loop: an omitted (shallow-ceiling), converged register
+    // so systemic_challenge_current is satisfied and the decision reaches the planning
+    // / dispatch obligations these decisions target.
+    systemic_challenge: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "systemic_challenge",
+      ceiling: { rung: "shallow" },
+      status: "omitted",
+      rounds: [],
+      converged: true,
+      findings: [],
+      validation_issues: [],
+    },
     intent_checkpoint: {
       schema_version: "intent-checkpoint/v1",
       confirmed_at: "2026-04-22T00:00:00Z",

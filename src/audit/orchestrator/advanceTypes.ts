@@ -3,7 +3,7 @@ import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, ClarificationAnswersSubmission } from "audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission } from "audit-tools/shared";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
 
@@ -37,6 +37,8 @@ export interface AdvanceAuditOptions {
   charterSubmission?: CharterSubmission;
   /** Host-supplied charter-clarification answers (Phase D); applied by charter_clarification_executor. */
   clarificationAnswers?: ClarificationAnswersSubmission;
+  /** Host-supplied second-order-adversary challenge round (Phase E); folded by systemic_challenge_executor. */
+  systemicChallenge?: SystemicChallengeSubmission;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
   /**

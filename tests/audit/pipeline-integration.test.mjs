@@ -112,6 +112,19 @@ function makePostDesignAssessmentBundle(opts = {}) {
       findings: [],
       validation_issues: [],
     },
+    // Phase E systemic challenge loop: an omitted (shallow-ceiling) register so
+    // systemic_challenge_current is satisfied (converged) and the planning obligations
+    // these tests target are reachable. Sits between charter-clarification and planning.
+    systemic_challenge: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "systemic_challenge",
+      ceiling: { rung: "shallow" },
+      status: "omitted",
+      rounds: [],
+      converged: true,
+      findings: [],
+      validation_issues: [],
+    },
   };
 }
 

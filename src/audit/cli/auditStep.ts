@@ -12,6 +12,7 @@ import {
   withClaimHeartbeat,
   CharterSubmissionSchema,
   ClarificationAnswersSubmissionSchema,
+  SystemicChallengeSubmissionSchema,
 } from "audit-tools/shared";
 import {
   loadArtifactBundle,
@@ -73,6 +74,7 @@ export interface RunAuditStepOptions {
   narrativeResultsPath?: string;
   charterSubmissionPath?: string;
   clarificationAnswersPath?: string;
+  systemicChallengePath?: string;
   edgeReasoningResultsPath?: string;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
@@ -365,6 +367,11 @@ async function executeAdvance(
         await readJsonFile<unknown>(options.clarificationAnswersPath),
       )
     : undefined;
+  const systemicChallenge = options.systemicChallengePath
+    ? SystemicChallengeSubmissionSchema.parse(
+        await readJsonFile<unknown>(options.systemicChallengePath),
+      )
+    : undefined;
   const edgeReasoningResults = options.edgeReasoningResultsPath
     ? await readJsonFile<EdgeReasoningResults>(options.edgeReasoningResultsPath)
     : undefined;
@@ -380,6 +387,7 @@ async function executeAdvance(
     narrativeResults,
     charterSubmission,
     clarificationAnswers,
+    systemicChallenge,
     edgeReasoningResults,
     analyzers: options.analyzers,
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,

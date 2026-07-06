@@ -33,6 +33,7 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   const hostDelegationIds = new Set([
     "charter_extraction_executor",
     "charter_clarification_executor",
+    "systemic_challenge_executor",
     "design_review_contract",
     "design_review_conceptual",
     "agent",
@@ -51,7 +52,7 @@ test("all EXECUTOR_REGISTRY entries have a valid kind field", () => {
   }
   // Verify exactly these executors are host_delegation
   const hostEntries = EXECUTOR_REGISTRY.filter((e) => e.kind === "host_delegation");
-  expect(hostEntries.map((e) => e.id).sort(), "Exactly 'agent', 'charter_clarification_executor', 'charter_extraction_executor', 'design_review_contract', 'design_review_conceptual', 'intent_checkpoint_executor', 'provider_confirmation_executor', 'rolling_dispatch_executor', and 'synthesis_narrative_executor' should have kind host_delegation").toEqual(["agent", "charter_clarification_executor", "charter_extraction_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "provider_confirmation_executor", "rolling_dispatch_executor", "synthesis_narrative_executor"]);
+  expect(hostEntries.map((e) => e.id).sort(), "Exactly 'agent', 'charter_clarification_executor', 'charter_extraction_executor', 'design_review_contract', 'design_review_conceptual', 'intent_checkpoint_executor', 'provider_confirmation_executor', 'rolling_dispatch_executor', 'synthesis_narrative_executor', and 'systemic_challenge_executor' should have kind host_delegation").toEqual(["agent", "charter_clarification_executor", "charter_extraction_executor", "design_review_conceptual", "design_review_contract", "intent_checkpoint_executor", "provider_confirmation_executor", "rolling_dispatch_executor", "synthesis_narrative_executor", "systemic_challenge_executor"]);
 });
 
 test("every registry executor with a PRIORITY obligation has a runner in EXECUTOR_RUNNERS (host-delegation dispatch executors excepted)", () => {

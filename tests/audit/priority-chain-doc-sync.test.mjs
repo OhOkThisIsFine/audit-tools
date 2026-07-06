@@ -30,7 +30,7 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // Every backtick-quoted token in that clause is an obligation id.
   const ids = [...chainClause.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
 
-  expect(ids.length, `Expected 22 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`).toBe(22);
+  expect(ids.length, `Expected 23 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`).toBe(23);
 
   // doc == code: same ids, same order.
   expect(ids, "The CLAUDE.md priority chain is out of sync with the exported PRIORITY array").toEqual(PRIORITY);
@@ -38,8 +38,8 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // Spot-check the endpoints and key obligations.
   expect(PRIORITY[0]).toBe("provider_confirmation");
   expect(PRIORITY[1]).toBe("repo_manifest");
-  expect(PRIORITY[20]).toBe("synthesis_narrative_current");
-  expect(PRIORITY[21]).toBe("friction_capture_current");
+  expect(PRIORITY[21]).toBe("synthesis_narrative_current");
+  expect(PRIORITY[22]).toBe("friction_capture_current");
 
   expect(PRIORITY.includes("graph_enrichment_current")).toBeTruthy();
   expect(PRIORITY.includes("design_assessment_current")).toBeTruthy();
@@ -64,7 +64,9 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   expect(PRIORITY.indexOf("design_review_contract_completed")).toBe(12);
   expect(PRIORITY.indexOf("design_review_conceptual_completed")).toBe(13);
   // Phase D charter-clarification triangulation loop sits between the conceptual
-  // design-review pass and planning.
+  // design-review pass and the Phase E systemic challenge loop; Phase E sits one slot
+  // later, immediately before planning.
   expect(PRIORITY.indexOf("charter_clarification_current")).toBe(14);
-  expect(PRIORITY.indexOf("planning_artifacts")).toBe(15);
+  expect(PRIORITY.indexOf("systemic_challenge_current")).toBe(15);
+  expect(PRIORITY.indexOf("planning_artifacts")).toBe(16);
 });

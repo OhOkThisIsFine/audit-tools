@@ -164,6 +164,10 @@ export {
   assembleClarificationRegister,
   ClarificationAnswersSubmissionSchema,
 } from "./decompose/charterClarification.js";
+// Conceptual design-review systemic challenge loop (Phase E) — the second-order
+// adversary submission schema (loop-until-dry improvement findings, true-lens).
+export type { SystemicChallengeSubmission } from "./decompose/systemicChallenge.js";
+export { SystemicChallengeSubmissionSchema } from "./decompose/systemicChallenge.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 

@@ -85,6 +85,16 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["charter_clarification_current"],
   },
   {
+    // Phase E systemic improvement-seeking challenge loop. host_delegation (NON-
+    // DRAINABLE): at a deep+ ceiling it emits a second-order-adversary step
+    // (loop-until-dry, optimization/better-way mandate); at a shallow ceiling
+    // (default) the runner omits deterministically — the branch in nextStepHelpers
+    // gates emit vs run, mirroring charter_clarification.
+    id: "systemic_challenge_executor",
+    kind: "host_delegation",
+    obligation_ids: ["systemic_challenge_current"],
+  },
+  {
     id: "planning_executor",
     kind: "deterministic",
     obligation_ids: ["planning_artifacts"],

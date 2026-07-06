@@ -308,6 +308,34 @@ export function deriveAuditState(
     ),
   );
 
+  // Phase E systemic improvement-seeking challenge — the loop-until-dry second-order
+  // adversary pass. Runs after the charter-clarification loop and before planning. The
+  // base satisfaction is the usual exists+fresh check on systemic_challenge.json (its
+  // deps: charter_register / intent_checkpoint / repo_manifest). At a shallow ceiling
+  // (the default) the executor writes an `omitted` register in one deterministic step,
+  // so this never blocks the conversation-first path — mirrors charter_clarification.
+  //
+  // The interruptible LOOP-UNTIL-DRY: when the register exists+fresh but has NOT yet
+  // `converged` (a deep+ run whose adversary rounds have not returned nothing-new), the
+  // obligation stays unmet so the relay step re-fires for the next challenge round. A
+  // converged (or omitted) register satisfies it.
+  const systemicBase = staleOrSatisfied(
+    staleArtifacts,
+    ["systemic_challenge.json"],
+    has(bundle.systemic_challenge),
+  );
+  const systemicOpen =
+    systemicBase === "satisfied" && bundle.systemic_challenge?.converged !== true;
+  obligations.push(
+    obligation(
+      "systemic_challenge_current",
+      systemicOpen ? "missing" : systemicBase,
+      systemicOpen
+        ? "Systemic challenge loop still open (a challenge round has not yet returned nothing-new) before planning proceeds."
+        : undefined,
+    ),
+  );
+
   const planningReady =
     has(bundle.coverage_matrix) &&
     has(bundle.flow_coverage) &&

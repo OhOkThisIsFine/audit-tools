@@ -4,6 +4,7 @@ import type { IntentCheckpoint } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
+import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import type {
@@ -186,6 +187,7 @@ export function buildAuditReportModel(params: {
   designAssessment?: DesignAssessment;
   structureDecomposition?: StructureDecomposition;
   charterRegister?: CharterRegister;
+  systemicChallenge?: SystemicChallengeRegister;
   /** Active dispatch state; when a partial-completion terminal is set, its stranded count is carried into the summary. */
   activeDispatch?: ActiveDispatchState | null;
 }): AuditReportModel {
@@ -210,6 +212,7 @@ export function buildAuditReportModel(params: {
       params.designAssessment,
       params.structureDecomposition,
       params.charterRegister,
+      params.systemicChallenge,
     ),
   );
   // B4: a tool-executable anchor that REFUTED a claim (status `refuted`, distinct

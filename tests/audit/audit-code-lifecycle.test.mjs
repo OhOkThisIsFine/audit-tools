@@ -191,7 +191,16 @@ test.concurrent("audit-code wrapper supports repeated bounded advance-audit invo
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
     expect(clarification.selected_executor).toBe("charter_clarification_executor");
-    expect(clarification.next_likely_step).toBe("planning_artifacts");
+    expect(clarification.next_likely_step).toBe("systemic_challenge_current");
+
+    // Phase E systemic challenge loop sits between charter-clarification and planning;
+    // under advance-audit at the default shallow ceiling it writes an omitted register
+    // (no host turn) and proceeds.
+    const systemic = JSON.parse(
+      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
+    );
+    expect(systemic.selected_executor).toBe("systemic_challenge_executor");
+    expect(systemic.next_likely_step).toBe("planning_artifacts");
 
     const ninth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,

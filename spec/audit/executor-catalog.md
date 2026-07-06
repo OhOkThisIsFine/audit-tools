@@ -55,6 +55,7 @@ actual friction triage fires from the `present_report` terminal step
 | `design_review_conceptual` | host_delegation | `design_review_conceptual_completed` | updates `design_assessment.json` (conceptual-critique mode — philosophy/alternatives) |
 | `charter_extraction_executor` | host_delegation | `charter_extraction_current` | `charter_register.json` (Phase C charter layer; omits deterministically at a shallow ceiling) |
 | `charter_clarification_executor` | host_delegation | `charter_clarification_current` | `charter_clarification.json` (Phase D triangulation loop; assembles deterministically at a shallow ceiling / zero attention) |
+| `systemic_challenge_executor` | host_delegation | `systemic_challenge_current` | `systemic_challenge.json` (Phase E second-order-adversary loop-until-dry; omits deterministically at a shallow ceiling) |
 | `syntax_resolution_executor` | deterministic | `syntax_resolved` | `syntax_resolution_status.json` |
 
 ### Execution

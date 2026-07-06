@@ -170,6 +170,7 @@ export type NextStepResult =
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_extraction"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "provider_confirmation"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
@@ -664,6 +665,63 @@ export async function handleCharterClarificationBranch(
   return { action: "return", result: { kind: "charter_clarification", state, bundle } };
 }
 
+type SystemicChallengeBranchResult =
+  | { action: "continue" }
+  | { action: "run_omit" }
+  | { action: "return"; result: { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle } };
+
+/**
+ * Handle the `systemic_challenge_executor` obligation (Phase E — the second-order
+ * adversary loop-until-dry pass). Mirrors the charter-clarification branch:
+ *   - a pending `incoming/systemic-challenge.json` (an adversary round's findings) →
+ *     fold it via the deterministic runner, then `continue`;
+ *   - a `shallow` ceiling → `run_omit` (the runner writes an omitted register
+ *     autonomously, no host turn);
+ *   - a `deep`/`deepest` ceiling that has NOT yet produced a register → `run_omit`
+ *     first to compute the metrics digest + open the loop;
+ *   - once the register exists and has NOT converged → `return` the host step that
+ *     dispatches the next adversary round.
+ * A converged register satisfies the obligation, so this branch is never reached for
+ * it (the priority scan skips a satisfied obligation).
+ */
+export async function handleSystemicChallengeBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<SystemicChallengeBranchResult> {
+  const incoming = await tryConsumeIncoming<unknown>(
+    params.artifactsDir,
+    "systemic-challenge.json",
+  );
+  if (incoming) {
+    await runAuditStep({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      preferredExecutor: "systemic_challenge_executor",
+      systemicChallengePath: incoming.path,
+    });
+    await unlink(incoming.path).catch(() => {});
+    return { action: "continue" };
+  }
+  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
+  if (!ceilingRequestsCharters(ceiling)) {
+    // Shallow ceiling (default): omit deterministically, no host turn.
+    return { action: "run_omit" };
+  }
+  // The loop must be OPENED before we can dispatch the adversary: if no register
+  // exists yet, run the deterministic executor this turn (it computes the metrics
+  // digest + writes an open register), then re-scan.
+  if (!bundle.systemic_challenge) {
+    return { action: "run_omit" };
+  }
+  // A converged register is already satisfied (never reaches this branch). An open
+  // register → dispatch the next second-order-adversary round.
+  if (bundle.systemic_challenge.converged) {
+    return { action: "run_omit" };
+  }
+  return { action: "return", result: { kind: "systemic_challenge", state, bundle } };
+}
+
 /**
  * Execute one deterministic audit step and record its progress. Throws (with
  * cause) if the executor fails, preserving the existing throw-with-cause pattern.
@@ -1143,6 +1201,25 @@ function buildAuditObligations(): AuditObligationDef[] {
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleCharterClarificationBranch(ctx.params, bundle, state);
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "run_omit") {
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+      },
+    },
+    {
+      // Systemic challenge (Phase E loop-until-dry): poll the incoming adversary
+      // round (fold it), omit at a shallow ceiling, or emit the second-order-adversary
+      // host step when the loop is open at a deep+ ceiling. Non-drainable
+      // (host_delegation), so the drain stops here.
+      id: "systemic_challenge_current",
+      derive: deriveObligationState("systemic_challenge_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleSystemicChallengeBranch(ctx.params, bundle, state);
         if (branch.action === "return") {
           return { kind: "emit", step: branch.result };
         }

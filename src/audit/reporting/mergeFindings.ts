@@ -2,6 +2,7 @@ import type { AuditResult, Finding } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
+import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import { severityRank, confidenceRank } from "./findingRanks.js";
@@ -322,6 +323,7 @@ export function mergeFindings(
   designAssessment?: DesignAssessment,
   structureDecomposition?: StructureDecomposition,
   charterRegister?: CharterRegister,
+  systemicChallenge?: SystemicChallengeRegister,
 ): Finding[] {
   const merged = new Map<string, Finding>();
 
@@ -338,6 +340,11 @@ export function mergeFindings(
     ...(structureDecomposition?.findings ?? []),
     // Phase C routed charter-delta leads (charter layer).
     ...(charterRegister?.findings ?? []),
+    // Phase E second-order-adversary improvement leads (systemic layer). These carry
+    // their TRUE lens (tests/performance/operability/…), NOT a hardcoded architecture
+    // tag — upsertFinding keys on the finding's own lens, so a systemic improvement is
+    // routed to its real lens rather than collapsed into an architecture bucket.
+    ...(systemicChallenge?.findings ?? []),
   ];
   for (const finding of allDesignFindings) {
     upsertFinding(merged, finding);
