@@ -90,11 +90,11 @@ when there is no operator.
   (host tiers), both read back at dispatch as rung 1 via a single model-keyed positions map.
   Remediate reads the same persisted confirmation (it has no standalone confirmation step; it
   consumes the audit-side pool).
-- **The gate only fires when there is a real decision.** It pauses the operator only when more
-  than one *dispatchable* provider exists (excluding operator-excluded / self-spawn-blocked
-  entries and the always-present `local-subprocess` fallback). A single-provider run has
-  nothing to order, so the gate auto-completes silently — no empty pause (conversation-first).
-  Host-native tiers in that single-provider case are still priced at dispatch.
+- **The gate fires on every interactive run** (audit CLI path), even with one or zero
+  auto-detected providers: the operator may want to reorder, exclude, self-report a host roster,
+  or **add a provider discovery missed** (an OpenAI-compatible endpoint or a CLI backend they've
+  configured but that wasn't surfaced). Only the headless path (`advanceAudit`, no CLI host)
+  auto-completes without pausing.
 
 The suggestion is best-effort at Gate-0 (it prices what is knowable there); the deterministic
 price→`costRank` engine at dispatch — where the per-model roster is always known — is the

@@ -37,13 +37,12 @@
   pool (`renderProviderConfirmationPrompt`), (b) reorders/excludes via a `provider-confirmation.input.json` input the tool
   promotes into both canonical artifacts (per-tool seam + shared confirmation), and (c) self-reports its model roster
   (`host_models`) so host-native tiers are priced + confirmable at the outset and thread to dispatch by `model_id` via
-  `host_model_cost_order`. The gate fires only when ≥2 dispatchable providers exist (no empty gate — conversation-first);
-  headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
+  `host_model_cost_order`. The gate fires on every interactive run (even one/zero detected providers — the operator may
+  want to add one discovery missed); headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md); detail in `docs/backlog.md` → Forward tracks.
 - **Immediate next: cost-first (d) — collision-price preference (low-pri, `docs/backlog.md` → Forward tracks).**
   `resolveModelStatics` dedupes a model id first-sorted-provider-wins, so a reseller markup could win over the
-  native/cheapest price; revisit only if per-provider price matters (needs (provider, model) keying). Also deferred:
-  single-provider host-tier confirmation (the gate skips single-provider runs — an opt-in a flag could add). Rethink
+  native/cheapest price; revisit only if per-provider price matters (needs (provider, model) keying). Rethink
   verdict stands: core dispatch/quota sound + ahead of field, no big simplification, AI-SDK swap dropped. Other standing
   T5 options unchanged: deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
   **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**

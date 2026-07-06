@@ -172,7 +172,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   - **(b) Interactive operator REORDER — ✅ SHIPPED.** The host writes `provider-confirmation.input.json`
     (`provider-confirmation-input/v1`: `cost_order`/`exclude`/`include`/`host_models`); the tool promotes it into both
     canonical artifacts (per-tool seam + shared confirmation). Input/envelope split ([[contract-pipeline-input-vs-envelope-paths]]);
-    presence flips the gate from emit→consume. Fires only when ≥2 dispatchable providers exist (no empty gate).
+    presence flips the gate from emit→consume. Fires on EVERY interactive run (even one/zero detected providers — the
+    operator may want to add a provider discovery missed); headless auto-completes.
   - **(c) Host-roster-at-Gate-0 — ✅ SHIPPED.** `host_models` in the input reports the host's roster; those tiers are
     priced (models.dev) + ordered at Gate-0 and thread to dispatch by `model_id` via `host_model_cost_order` (a separate
     list on the shared confirmation, merged into the model-keyed positions map — zero blast radius to `provider_pool`).
@@ -180,10 +181,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     multiple providers first-sorted-provider-wins, so a reseller markup could win over the native/cheapest price. Prices
     largely agree across providers, so this is an approximation, not a bug — revisit only if per-provider pricing matters
     (would need (provider, model) keying in the snapshot).
-  - **Deferred nuance (single-provider host-tier confirmation).** The gate skips when there is only one dispatchable
-    provider, so a claude-code-only run does NOT get an interactive host-tier confirmation at the outset (its tiers are
-    still priced at dispatch). Confirming host tiers when the host is the *only* provider would need the gate to fire on
-    a single-provider run — an opt-in a future flag could add. Low priority.
 - **models.dev static window can over-state a specific deployment (carried from W1).** The snapshot lists e.g.
   `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
   work blocks off the static rung. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding —

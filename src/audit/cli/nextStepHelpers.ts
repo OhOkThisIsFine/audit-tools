@@ -14,7 +14,6 @@ import {
   readJsonFile,
   writeJsonFile,
   readProviderConfirmationInput,
-  buildSharedProviderConfirmation,
   type ObligationDef,
   type ObligationOutcome,
 } from "audit-tools/shared";
@@ -909,30 +908,6 @@ function deriveObligationState(
  * the executor for the selected id), so the obligation list cannot drift from the
  * priority scan it mirrors.
  */
-/**
- * Whether the interactive provider-confirmation gate has a real decision to
- * present: MORE THAN ONE dispatchable provider. "Dispatchable" excludes both
- * operator-excluded / self-spawn-blocked entries and the always-present
- * `local-subprocess` fallback (it blocks auto-dispatch by design). With one or
- * zero dispatchable providers there is no cost ordering to confirm or reorder, so
- * emitting the gate would be empty friction — the executor auto-completes with the
- * tool's suggestion instead (host-native tiers are still priced at dispatch). This
- * keeps the interactive gate to the case the operator actually chose it for
- * (multiple providers → a real cost decision) without imposing a pause on the
- * common single-provider run. Discovery is deterministic from the same session
- * config the executor uses, so the gate decision cannot drift from the pool it
- * would present.
- */
-function providerPoolHasCostDecision(
-  sessionConfig: SessionConfig | undefined,
-): boolean {
-  const pool = buildSharedProviderConfirmation(sessionConfig ?? {}).provider_pool;
-  const dispatchable = pool.filter(
-    (entry) => !entry.excluded && entry.name !== "local-subprocess",
-  );
-  return dispatchable.length >= 2;
-}
-
 function buildAuditObligations(): AuditObligationDef[] {
   const deterministic = (id: string): AuditObligationDef => ({
     id,
@@ -959,15 +934,10 @@ function buildAuditObligations(): AuditObligationDef[] {
           // Operator has submitted → consume it (writes both canonical artifacts).
           return runDeterministicExecutor(bundle, ctx);
         }
-        // Only pause when there is a real cost ordering to confirm/reorder — i.e.
-        // more than one DISPATCHABLE provider. A single-provider run has nothing to
-        // order, so the gate would be empty friction; auto-complete instead (host
-        // tiers are still priced at dispatch). Honors conversation-first: no gate
-        // with nothing to decide.
-        if (!providerPoolHasCostDecision(ctx.params.sessionConfig)) {
-          return runDeterministicExecutor(bundle, ctx);
-        }
-        // A real ordering choice exists and the operator has not acted → pause.
+        // Otherwise pause for the operator — ALWAYS on the interactive CLI path,
+        // even with one (or zero) auto-detected provider: the operator may want to
+        // ADD a provider discovery missed, exclude one, or reorder. Headless
+        // (`advanceAudit`, no CLI host) never reaches here and auto-completes.
         return {
           kind: "emit",
           step: {
