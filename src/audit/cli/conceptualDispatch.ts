@@ -1,9 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type {
-  DispatchModelHint,
-  DispatchModelTier,
-  SessionConfig,
+import {
+  type DispatchModelHint,
+  type DispatchModelTier,
+  type SessionConfig,
+  charterReviewDisposition,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
@@ -23,6 +24,14 @@ export interface ConceptualReviewSettings {
    * `"standard"`; the judge always routes `"deep"`.
    */
   perspective_tier?: DispatchModelTier;
+  /**
+   * True when any confirmed charter is low-confidence (Phase A conceptual spine):
+   * a review depending on a low-confidence charter must "flag for human intent
+   * input, never opine" (`charterReviewDisposition`). Absent/false when no charters
+   * are present or all are confident. The charter-aware prompt path consumes this
+   * (Phase C); until then it records the disposition on the settings contract.
+   */
+  flag_for_human?: boolean;
 }
 
 /**
@@ -37,12 +46,16 @@ export function resolveConceptualReviewSettings(
 ): ConceptualReviewSettings {
   const checkpoint = bundle.intent_checkpoint?.design_review;
   const cfg = sessionConfig.design_review;
+  const flagForHuman = (checkpoint?.charters ?? []).some(
+    (charter) => charterReviewDisposition(charter) === "flag_for_human",
+  );
   return {
     max_units: cfg?.max_units,
     conceptual_depth:
       checkpoint?.conceptual_depth ?? cfg?.conceptual_depth ?? "shallow",
     perspectives: checkpoint?.perspectives ?? cfg?.perspectives,
     perspective_tier: cfg?.perspective_tier,
+    ...(flagForHuman ? { flag_for_human: true } : {}),
   };
 }
 

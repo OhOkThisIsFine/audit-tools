@@ -88,6 +88,34 @@ export {
 } from "./types/finding.js";
 export type { IntentCheckpoint } from "./types/intentCheckpoint.js";
 export { IntentCheckpointSchema } from "./types/intentCheckpoint.js";
+// Conceptual design-review charter spine (Phase A) — data model + hard gates.
+export type {
+  CharterKind,
+  CharterConfidence,
+  CharterProvenance,
+  Charter,
+  GoalNode,
+  GoalEdge,
+  GoalGraph,
+  Ceiling,
+  CharterDelta,
+} from "./types/charter.js";
+export {
+  CharterKindSchema,
+  CharterConfidenceSchema,
+  CharterProvenanceSchema,
+  CharterSchema,
+  GoalNodeSchema,
+  GoalEdgeSchema,
+  GoalGraphSchema,
+  CeilingSchema,
+  CharterDeltaSchema,
+} from "./types/charter.js";
+export {
+  applyTrueCharterGate,
+  charterReviewDisposition,
+  gateCharterDelta,
+} from "./validation/charterGate.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 

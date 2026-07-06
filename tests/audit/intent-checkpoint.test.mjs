@@ -209,6 +209,52 @@ await test("validateArtifactBundle rejects a checkpoint missing a required key",
   expect(issues.length > 0).toBeTruthy();
 });
 
+// ── Phase A: conceptual charter spine gate ──────────────────────────────────
+
+await test("validateArtifactBundle accepts a checkpoint carrying well-formed charters", () => {
+  const issues = validateArtifactBundle({
+    intent_checkpoint: {
+      ...validCheckpoint(),
+      design_review: {
+        conceptual_depth: "shallow",
+        charters: [
+          {
+            charter_id: "s1",
+            kind: "stated",
+            purpose: "the pipeline exists to extract max value from finite budgets",
+            provenance: [{ kind: "doc", ref: "docs/HANDOFF.md" }],
+            confidence: "high",
+          },
+        ],
+      },
+    },
+  }).filter((i) => JSON.stringify(i).includes("charters"));
+  expect(issues.length).toBe(0);
+});
+
+await test("validateArtifactBundle emits an issue for a gate-dropped (non-falsifiable) `true` charter", () => {
+  const issues = validateArtifactBundle({
+    intent_checkpoint: {
+      ...validCheckpoint(),
+      design_review: {
+        charters: [
+          {
+            charter_id: "t1",
+            kind: "true",
+            purpose: "you want a personal-finance product, not a tax calculator",
+            provenance: [],
+            confidence: "medium",
+            nominated_alternative: "Quicken",
+            // nominated_cost intentionally omitted → non-falsifiable → dropped
+          },
+        ],
+      },
+    },
+  }).filter((i) => JSON.stringify(i).includes("charters"));
+  expect(issues.length).toBe(1);
+  expect(JSON.stringify(issues[0])).toContain("t1");
+});
+
 // ── A2: consume the accepted scope ──────────────────────────────────────────
 
 function coverageFile(path) {

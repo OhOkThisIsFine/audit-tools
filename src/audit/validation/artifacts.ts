@@ -1,6 +1,7 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
   type ValidationIssue,
+  applyTrueCharterGate,
   pushValidationIssue,
   requireKeys,
 } from "audit-tools/shared";
@@ -331,6 +332,27 @@ function validateTaskLineRanges(bundle: ArtifactBundle, idx: BundleIndexes, issu
   }
 }
 
+/**
+ * The intent checkpoint's `design_review.charters` (Phase A conceptual spine) must
+ * clear the True-charter gate: a `true` charter that is not falsifiable (missing a
+ * concrete alternative and/or cost) is dropped, and the drop is surfaced as a
+ * validation issue rather than silently discarded — a confident-but-un-falsifiable
+ * `true` charter is the approach's central failure mode, so the checkpoint should
+ * never carry one unnoticed.
+ */
+function validateIntentCheckpointCharters(bundle: ArtifactBundle, issues: ValidationIssue[]): void {
+  const charters = bundle.intent_checkpoint?.design_review?.charters;
+  if (!charters || charters.length === 0) return;
+  const { dropped } = applyTrueCharterGate(charters);
+  for (const drop of dropped) {
+    pushIssue(
+      issues,
+      `intent_checkpoint:design_review.charters:${drop.charter_id}`,
+      drop.reason,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -359,6 +381,7 @@ export function validateArtifactBundle(
   validateRuntimeValidationReport(bundle, idx, issues);
   validateExternalAnalyzerResults(bundle, idx, issues);
   validateTaskLineRanges(bundle, idx, issues);
+  validateIntentCheckpointCharters(bundle, issues);
 
   if (issues.length > 0) {
     process.stderr.write(

@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { FileDispositionStatusSchema } from "./disposition.js";
+import {
+  CharterSchema,
+  CeilingSchema,
+  GoalGraphSchema,
+} from "./charter.js";
 
 /**
  * The accepted scope and intent for a run, confirmed by the host before
@@ -121,6 +126,21 @@ export const IntentCheckpointSchema = z
       .object({
         conceptual_depth: z.enum(["shallow", "deep"]).optional(),
         perspectives: z.number().int().min(1).optional(),
+        /**
+         * The conceptual-design-review CHARTER SPINE (Phase A), captured at
+         * `confirm_intent`. All optional and additive — a legacy checkpoint carrying
+         * only `conceptual_depth`/`perspectives` stays valid. Populated by the
+         * charter-extraction pass (Phase C); until then these are absent and the
+         * review runs its generic prompt.
+         * - `goal_graph`: the goal DAG (blast-radius substrate).
+         * - `charters`: the four charters with provenance + confidence, mined for
+         *   pairwise deltas; a `true` charter must clear the falsifiable-or-drop gate
+         *   (`applyTrueCharterGate`).
+         * - `ceiling`: the premise-height consent dial (how far up a finding may reach).
+         */
+        goal_graph: GoalGraphSchema.optional(),
+        charters: z.array(CharterSchema).optional(),
+        ceiling: CeilingSchema.optional(),
       })
       .strict()
       .optional(),
