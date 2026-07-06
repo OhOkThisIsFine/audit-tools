@@ -323,6 +323,16 @@ const REPO_ROOT = resolve(__dirname, "../..");
 const TESTS_ROOT = resolve(__dirname, "..");
 const SPAWN_HELPER = resolve(TESTS_ROOT, "helpers/spawn.mjs");
 
+// Files under tests/ that are EXECUTED AS SPAWNED CHILD `node` processes (not run
+// under vitest) cannot import tests/helpers/spawn.mjs — it transitively imports
+// the shared `src/shared/tooling/exec.ts` source, which a plain node child can't
+// load (ERR_UNKNOWN_FILE_EXTENSION ".ts"). They use raw node:child_process with
+// `windowsHide: true` inline instead, verified by the inline-windowsHide check
+// below rather than the no-raw-import walk.
+const CHILD_EXECUTED_SPAWN_FILES = [
+  resolve(TESTS_ROOT, "audit/helpers/provider-assisted-bridge.mjs"),
+];
+
 // The child_process entry points that create a subprocess (and thus a window).
 const SPAWN_CALLEES = ["spawnSync", "spawn", "execSync", "execFileSync", "execFile", "exec"];
 
@@ -367,7 +377,10 @@ test("INV-WH: shared exec.ts exports both spawnSyncHidden and spawnHidden (singl
 
 test("INV-WH: no test file imports a raw spawn/exec entry point from node:child_process", () => {
   const files = walkFiles(TESTS_ROOT).filter(
-    (f) => (f.endsWith(".mjs") || f.endsWith(".ts")) && f !== SPAWN_HELPER,
+    (f) =>
+      (f.endsWith(".mjs") || f.endsWith(".ts")) &&
+      f !== SPAWN_HELPER &&
+      !CHILD_EXECUTED_SPAWN_FILES.includes(f),
   );
 
   const violations = [];
@@ -394,10 +407,11 @@ test("INV-WH: no test file imports a raw spawn/exec entry point from node:child_
   expect(files.length > 20, "INV-WH walker must discover the test tree").toBeTruthy();
 });
 
-test("INV-WH: the two spawn-carrying dev/CI scripts hide the window on every raw call", () => {
+test("INV-WH: spawn-carrying dev/CI scripts + child-executed test helpers hide the window on every raw call", () => {
   const scripts = [
     resolve(REPO_ROOT, "scripts/release-and-publish.mjs"),
     resolve(REPO_ROOT, "scripts/postinstall.mjs"),
+    ...CHILD_EXECUTED_SPAWN_FILES,
   ];
 
   const violations = [];

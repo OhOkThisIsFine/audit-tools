@@ -1,5 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
+// This helper is EXECUTED AS A SPAWNED CHILD `node` process (see
+// provider-assisted-bridge.test.mjs `runBridge`), so it must NOT import the
+// tests/helpers/spawn.mjs wrapper — that transitively imports the shared
+// `src/shared/tooling/exec.ts` source, which a plain node child cannot load
+// (ERR_UNKNOWN_FILE_EXTENSION ".ts", no vitest transform). Use raw child_process
+// with `windowsHide: true` inline instead (INV-WH covers this file via the
+// child-executed-spawn inline check, not the no-raw-import walk).
+import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertNonEmptyString, assertStringArray, describeValue, fail, isRecord, looksLikeCliFlag, assertAccessibleDirectory } from "./validate.mjs";
@@ -11,6 +18,7 @@ function runCommand(command, args, cwd) {
       cwd,
       env: process.env,
       stdio: "inherit",
+      windowsHide: true,
     });
 
     child.on("error", reject);
