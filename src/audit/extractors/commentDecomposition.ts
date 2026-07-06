@@ -194,14 +194,6 @@ function referenceTokens(posixPath: string): string[] {
   return [...tokens].filter((t) => t.includes("/") || t === base);
 }
 
-/**
- * Reference tokens for a file, exported so the docs intent source shares one
- * definition of "how a file is named" with the comment source.
- */
-export function fileReferenceTokens(posixPath: string): string[] {
-  return referenceTokens(posixPath);
-}
-
 export interface CommentDecompositionResult {
   /** Intent-declared coupling edges from comment cross-references (undirected). */
   edges: CouplingEdge[];
