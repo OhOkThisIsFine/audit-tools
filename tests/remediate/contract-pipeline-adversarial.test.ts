@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, readdirSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

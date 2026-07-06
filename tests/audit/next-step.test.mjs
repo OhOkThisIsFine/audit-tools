@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawn } from "node:child_process";
+import { spawnHidden as spawn } from "../helpers/spawn.mjs";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 
 async function withTempRepo(fn) {

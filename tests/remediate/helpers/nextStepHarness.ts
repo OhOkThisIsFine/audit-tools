@@ -13,7 +13,7 @@
 // parallel under vitest never clobber each other's scratch state.
 
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../../helpers/spawn.mjs";
 import { dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateStore } from "../../../src/remediate/state/store.js";

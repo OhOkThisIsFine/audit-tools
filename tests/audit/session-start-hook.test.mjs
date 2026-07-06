@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { spawnSync, execFileSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync, execFileSyncHidden as execFileSync } from "../helpers/spawn.mjs";
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";

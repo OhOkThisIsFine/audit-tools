@@ -1,4 +1,4 @@
-import { spawnSync, type StdioOptions } from "node:child_process";
+import { spawn, spawnSync, type StdioOptions } from "node:child_process";
 
 // Single synchronous command runner shared by both orchestrators. Before
 // Phase 0 the remediator (`utils/commands.ts`) and the auditor
@@ -294,3 +294,21 @@ export const spawnSyncHidden = ((
     ...(options ?? {}),
     windowsHide: true,
   })) as typeof spawnSync;
+
+/**
+ * Async twin of {@link spawnSyncHidden}: `child_process.spawn` with `windowsHide`
+ * forced on. Same rationale — a windowless parent (node under an IDE/agent)
+ * spawning a console child pops a console window on win32 unless suppressed. Thin
+ * passthrough otherwise; callers keep their exact args/options and, via the
+ * `typeof spawn` cast, its full overload set. `windowsHide` is forced last so it
+ * always wins (no caller wants a visible window).
+ */
+export const spawnHidden = ((
+  command: string,
+  args?: readonly string[],
+  options?: Parameters<typeof spawn>[2],
+) =>
+  spawn(command, args as string[], {
+    ...(options ?? {}),
+    windowsHide: true,
+  })) as typeof spawn;

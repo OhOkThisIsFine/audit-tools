@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rm, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { ensureGlobalAssets } from "../../src/remediate/index.js";
 
 const TEMP_HOME = join(__dirname, ".test-home-postinstall-contract");

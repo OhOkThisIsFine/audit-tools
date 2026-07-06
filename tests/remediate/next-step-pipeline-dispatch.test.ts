@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";

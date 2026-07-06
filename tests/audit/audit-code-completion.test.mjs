@@ -4,7 +4,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, access } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawnHidden as spawn } from "../helpers/spawn.mjs";
 import { countLines } from "./helpers/countLines.mjs";
 
 // Step contracts normalize host-facing paths to forward slashes (drift-plan R3).

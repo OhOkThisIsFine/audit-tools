@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSyncHidden as execFileSync, spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

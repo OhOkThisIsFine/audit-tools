@@ -13,7 +13,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFile, rm, mkdtemp } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFile } from "node:child_process";
+import { execFileHidden as execFile } from "../helpers/spawn.mjs";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 

@@ -36,7 +36,16 @@ import {
 const { realSpawnSync } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const actual = require("node:child_process") as typeof import("node:child_process");
-  return { realSpawnSync: actual.spawnSync };
+  // Force windowsHide so the real git calls this test drives don't flash a
+  // console window on win32 (INV-WH). vi.hoisted runs before imports, so we
+  // wrap the raw spawnSync inline rather than importing the shared helper.
+  const rawSpawnSync = actual.spawnSync;
+  const realSpawnSync = ((command: string, args?: readonly string[], options?: object) =>
+    rawSpawnSync(command, args as string[], {
+      ...(options ?? {}),
+      windowsHide: true,
+    })) as typeof actual.spawnSync;
+  return { realSpawnSync };
 });
 
 vi.mock("node:child_process", () => ({

@@ -9,7 +9,7 @@ import { test, expect } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 
 const { headCommit } = await import("../../src/shared/git.ts");
 const { runStructureExecutor } = await import(

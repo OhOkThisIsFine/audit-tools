@@ -6,7 +6,7 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
+import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
 import { RunLogger } from "audit-tools/shared";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
@@ -738,7 +738,6 @@ describe("runClosePhase", () => {
       expect(next.status).toBe("complete");
 
       // Check that the git log shows the generated message, not "Auto-remediation complete".
-      const { execSync } = await import("node:child_process");
       const logMsg = execSync("git log -1 --format=%s", { cwd: REPO_DIR }).toString().trim();
       expect(logMsg).toContain("My specific fix title");
       expect(logMsg).not.toBe("Auto-remediation complete");

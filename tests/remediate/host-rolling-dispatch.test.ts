@@ -14,7 +14,7 @@ import {
   existsSync,
   realpathSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import {
   acceptNodeWorktree,
   createWorktree,

@@ -18,7 +18,7 @@
 // from the repo root (NVIDIA_API_KEY must be in the environment).
 
 import { afterAll, describe, it, expect } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";

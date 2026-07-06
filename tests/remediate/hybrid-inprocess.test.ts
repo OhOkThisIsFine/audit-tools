@@ -22,7 +22,7 @@ import { describe, it, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import {
   ClaimRegistry,
   type CapacityPool,

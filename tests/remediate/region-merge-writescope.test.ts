@@ -7,7 +7,7 @@
 // unavailable. The cherry-pick in mergeWorktree stays the sole merge authority —
 // no hand-rolled hunk apply is introduced (asserted structurally below).
 
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

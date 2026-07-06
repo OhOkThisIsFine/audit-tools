@@ -22,7 +22,7 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSyncHidden as spawnSync } from "../../helpers/spawn.mjs";
 
 /** The relative path of the file carrying the plantable defect. */
 export const DEFECT_FILE = 'src/clamp.mjs';

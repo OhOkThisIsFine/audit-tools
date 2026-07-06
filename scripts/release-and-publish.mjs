@@ -71,6 +71,7 @@ function run(command, args, options = {}) {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    windowsHide: true,
   });
   if (result.error) {
     throw result.error;
@@ -128,6 +129,7 @@ function getDefaultBranch() {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   if (!symref.error && symref.status === 0) {
     return symref.stdout.trim().replace(new RegExp(`^refs/remotes/${remoteName}/`), "");
@@ -136,6 +138,7 @@ function getDefaultBranch() {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   if (!lsRemote.error && lsRemote.status === 0) {
     const match = lsRemote.stdout.match(/^ref: refs\/heads\/(\S+)\s+HEAD/m);
@@ -311,6 +314,7 @@ async function waitForRegistryVersion(packageName, version) {
       cwd: repoRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     if (!result.error && result.status === 0) {
       const elapsedSec = Math.round((Date.now() - startedAt) / 1000);

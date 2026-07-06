@@ -41,7 +41,7 @@ import {
   existsSync,
   realpathSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { ClaimRegistry } from "../../src/shared/quota/claimRegistry.js";
 import {
   createWorktree,

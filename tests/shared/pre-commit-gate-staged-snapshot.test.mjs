@@ -7,7 +7,7 @@
 // By staging vs. leaving-in-the-worktree different sentinel values we prove the
 // gate checks the STAGED content and always restores the worktree afterward.
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";

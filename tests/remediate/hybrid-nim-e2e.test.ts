@@ -16,7 +16,7 @@
 //   RUN_NIM_E2E=1 npx vitest run tests/remediate/hybrid-nim-e2e.test.ts
 
 import { afterAll, describe, it, expect } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";

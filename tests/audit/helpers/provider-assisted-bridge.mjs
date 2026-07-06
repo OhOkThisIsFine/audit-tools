@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertNonEmptyString, assertStringArray, describeValue, fail, isRecord, looksLikeCliFlag, assertAccessibleDirectory } from "./validate.mjs";

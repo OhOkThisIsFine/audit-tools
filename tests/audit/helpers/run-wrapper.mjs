@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 

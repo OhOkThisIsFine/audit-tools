@@ -7,7 +7,7 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 

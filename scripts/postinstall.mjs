@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 let failed = false;
 for (const script of ["./audit/postinstall.mjs", "./remediate/postinstall.mjs"]) {
   const scriptPath = fileURLToPath(new URL(script, import.meta.url));
-  const result = spawnSync(process.execPath, [scriptPath], { stdio: "inherit" });
+  const result = spawnSync(process.execPath, [scriptPath], { stdio: "inherit", windowsHide: true });
   if (result.error) {
     console.warn(`[audit-tools] postinstall: ${script} could not run (${result.error.message}).`);
     failed = true;
@@ -85,6 +85,7 @@ function runGhRepoVisibility(repoRoot) {
       cwd: repoRoot,
       encoding: "utf8",
       shell: process.platform === "win32",
+      windowsHide: true,
     });
     if (result.error || (result.status ?? 0) !== 0) return null;
     return typeof result.stdout === "string" ? result.stdout : null;

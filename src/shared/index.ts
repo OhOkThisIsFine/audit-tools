@@ -387,6 +387,7 @@ export type { RunTrackedOptions, RunTrackedResult } from "./tooling/exec.js";
 export {
   runTracked,
   spawnSyncHidden,
+  spawnHidden,
   resolveExecArgv,
   quoteForCmd,
   shellQuote,

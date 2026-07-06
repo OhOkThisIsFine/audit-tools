@@ -38,19 +38,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   literal integers, so a new obligation is a one-line fixture edit, not a 10-file sweep. Low-pri (test ergonomics)
   but recurs on every new phase (C/D/E are coming).
 
-- **`windowsHide` mop-up on dev/CI-script + per-test-file spawns (partial, 2026-07-06).** A windowless parent
-  (node under an IDE/agent) spawning a console child pops a console window on win32 unless `windowsHide: true`.
-  SHIPPED production spawns are now all covered (`providerPathGuard` where/which, `spawnLoggedCommand` +
-  taskkill reaper, `runtimeCommand`, `antigravityQuotaSource`, `remediate/utils/commands` runShellCommand,
-  `contractPipelineGates`, `sessionConfig` execFile, and the remediate git-swarm via the new
-  `spawnSyncHidden` helper in `src/shared/tooling/exec.ts` — `dispatch.ts` + `rollingSession.ts`). The main
-  packaged/linked **smoke** runners are covered too. **Still uncovered:** the ~dozens of per-test-file
-  `spawn(process.execPath, …)` helpers in `tests/**` and the misc `release-and-publish.mjs` / `postinstall.mjs`
-  git/gh spawns — these pop windows only when a developer runs the raw vitest suite / release locally on
-  Windows (CI is Linux; real users run the shipped bins, which are covered). Mop-up: route test spawns through
-  a shared window-hidden helper (or add `windowsHide: true` to each), same for the release/postinstall scripts.
-  Low priority (dev-only cosmetic).
-
 
 - **Commit-gate hook validates the WORKING TREE, not the staged snapshot (hit 2026-07-05).** The
   green-at-every-commit PreToolUse hook runs `npm run check` against the working tree/dist, so a *partial-stage*

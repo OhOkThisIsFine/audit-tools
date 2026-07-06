@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSyncHidden as execFileSync } from "../../helpers/spawn.mjs";
 import { mkdtempSync, rmSync, symlinkSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";

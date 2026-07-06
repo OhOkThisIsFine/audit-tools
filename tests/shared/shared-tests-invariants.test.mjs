@@ -294,3 +294,134 @@ test("INV-shared-tests-07: observability and IO symbols exported from shared ind
   expect(typeof shared.appendNdjsonFile, "appendNdjsonFile — INV-shared-tests-07").toBe("function");
   expect(typeof shared.estimateTokensFromBytes, "estimateTokensFromBytes — INV-shared-tests-07").toBe("function");
 });
+
+// ── INV-WH: every console-popping test/script spawn hides the window on win32 ──
+// A windowless parent (node under an IDE/agent) spawning a console child pops a
+// console window on win32 unless `windowsHide: true` is passed — and Node's own
+// default for `windowsHide` is `false`. Production spawns already route through
+// the shared `spawnSyncHidden` / `spawnHidden`. This guard extends the same
+// property, mechanically, across the WHOLE test tree plus the two dev/CI scripts
+// that spawn (`scripts/release-and-publish.mjs`, `scripts/postinstall.mjs`), so a
+// newly-added raw spawn can never silently reintroduce a window flash.
+//
+// The guard's assertion surface is exactly the rewrite surface: it enumerates the
+// same files the sweep touched (every test file / target script that reaches into
+// `node:child_process`) and fails the moment one of them spawns without hiding.
+//
+// Two enforcement rules, one per file class:
+//   • Test files must NOT import a spawn/exec entry point from "node:child_process"
+//     directly — they route through tests/helpers/spawn.mjs (whose `*Hidden`
+//     wrappers force `windowsHide: true`), or via an aliased import from it. The
+//     sole exception is a file that fully mocks the module (`vi.mock(
+//     "node:child_process")`): there the imported symbol is a test double, and any
+//     REAL spawn in that file is separately windowsHide-wrapped.
+//   • The two scripts run in the published-package / fresh-install context where
+//     the tests helper is not importable, so each raw child_process call there must
+//     carry `windowsHide` inline.
+
+const REPO_ROOT = resolve(__dirname, "../..");
+const TESTS_ROOT = resolve(__dirname, "..");
+const SPAWN_HELPER = resolve(TESTS_ROOT, "helpers/spawn.mjs");
+
+// The child_process entry points that create a subprocess (and thus a window).
+const SPAWN_CALLEES = ["spawnSync", "spawn", "execSync", "execFileSync", "execFile", "exec"];
+
+function walkFiles(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = resolve(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...walkFiles(full));
+    } else if (entry.isFile()) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+// Does an import statement from "node:child_process" pull in a spawn/exec name?
+function importsRawChildProcessSpawn(source) {
+  // Match `import { … } from "node:child_process"` (single or double quotes).
+  const importRe = /import\s*\{([^}]*)\}\s*from\s*["']node:child_process["']/g;
+  let m;
+  while ((m = importRe.exec(source)) !== null) {
+    const names = m[1].split(",").map((s) => s.trim().split(/\s+as\s+/)[0].trim());
+    if (names.some((n) => SPAWN_CALLEES.includes(n))) return true;
+  }
+  return false;
+}
+
+test("INV-WH: tests/helpers/spawn.mjs exists and exports the window-hidden spawn wrappers", async () => {
+  expect(existsSync(SPAWN_HELPER), "tests/helpers/spawn.mjs must exist — INV-WH (shared window-hidden spawn helper)").toBeTruthy();
+  const helper = await import("../helpers/spawn.mjs");
+  for (const name of ["spawnHidden", "spawnSyncHidden", "execFileSyncHidden", "execSyncHidden", "execFileHidden"]) {
+    expect(typeof helper[name], `tests/helpers/spawn.mjs must export ${name} — INV-WH`).toBe("function");
+  }
+});
+
+test("INV-WH: shared exec.ts exports both spawnSyncHidden and spawnHidden (single source)", async () => {
+  const shared = await import("../../src/shared/index.ts");
+  expect(typeof shared.spawnSyncHidden, "spawnSyncHidden must be exported from shared — INV-WH").toBe("function");
+  expect(typeof shared.spawnHidden, "spawnHidden must be exported from shared — INV-WH").toBe("function");
+});
+
+test("INV-WH: no test file imports a raw spawn/exec entry point from node:child_process", () => {
+  const files = walkFiles(TESTS_ROOT).filter(
+    (f) => (f.endsWith(".mjs") || f.endsWith(".ts")) && f !== SPAWN_HELPER,
+  );
+
+  const violations = [];
+  let scanned = 0;
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    if (!importsRawChildProcessSpawn(source)) continue;
+    // A file that fully mocks node:child_process binds the imported spawn symbol
+    // to a test double; its real spawns are windowsHide-wrapped separately.
+    if (source.includes('vi.mock("node:child_process"') || source.includes("vi.mock('node:child_process'")) {
+      continue;
+    }
+    scanned += 1;
+    violations.push(file.slice(REPO_ROOT.length + 1).replace(/\\/g, "/"));
+  }
+
+  expect(
+    violations,
+    `These test files import a raw spawn/exec entry point from node:child_process — route them through tests/helpers/spawn.mjs (spawnHidden / spawnSyncHidden / execFileSyncHidden / execSyncHidden / execFileHidden) so a windowless parent does not flash a console window on win32: ${violations.join(", ")} — INV-WH`,
+  ).toEqual([]);
+  // Sanity: the guard actually walked the tree (guards against a broken walker
+  // silently passing). `scanned` counts only violations, so we assert the walk
+  // found a representative set of files instead.
+  expect(files.length > 20, "INV-WH walker must discover the test tree").toBeTruthy();
+});
+
+test("INV-WH: the two spawn-carrying dev/CI scripts hide the window on every raw call", () => {
+  const scripts = [
+    resolve(REPO_ROOT, "scripts/release-and-publish.mjs"),
+    resolve(REPO_ROOT, "scripts/postinstall.mjs"),
+  ];
+
+  const violations = [];
+  for (const script of scripts) {
+    expect(existsSync(script), `${script} must exist — INV-WH`).toBeTruthy();
+    const source = readFileSync(script, "utf8");
+    // Find each raw child_process call and require windowsHide within the call's
+    // option object (the ~600 chars following the callee comfortably cover the
+    // multi-line option objects these scripts use).
+    for (const callee of SPAWN_CALLEES) {
+      const callRe = new RegExp(`\\b${callee}\\s*\\(`, "g");
+      let m;
+      while ((m = callRe.exec(source)) !== null) {
+        const window = source.slice(m.index, m.index + 600);
+        if (!/windowsHide\s*:/.test(window)) {
+          const rel = script.slice(REPO_ROOT.length + 1).replace(/\\/g, "/");
+          violations.push(`${rel}: ${callee}() near offset ${m.index} lacks windowsHide`);
+        }
+      }
+    }
+  }
+
+  expect(
+    violations,
+    `These script spawn calls do not pass windowsHide:true, so a windowless parent flashes a console window on win32 — add windowsHide:true to each: ${violations.join("; ")} — INV-WH`,
+  ).toEqual([]);
+});

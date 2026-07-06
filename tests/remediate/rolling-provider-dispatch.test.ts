@@ -19,7 +19,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import {
   createWorktree,
   removeWorktree,
