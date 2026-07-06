@@ -8,8 +8,8 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.14** (cost-first routing W2 → real models.dev price drives `costRank`, decoupled
-  from `capabilityRank`; Gate-0 cost-aware confirmation threads an operator cost ordering to dispatch).
+- On npm as `latest` at **v0.32.15** (interactive cost-first Gate-0 `provider_confirmation` step — the host sees the
+  priced pool, reorders via `provider-confirmation.input.json`, and self-reports its model roster; follow-ups a/b/c).
   Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
   [[live-status]]); this section is current-state + open-work roadmap only.
 - **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
