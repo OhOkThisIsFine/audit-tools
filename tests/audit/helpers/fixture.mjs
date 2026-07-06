@@ -163,10 +163,14 @@ export async function advanceFixtureToPlanning(root) {
 
   const designAssessment = await advanceAudit(enrichment.updated_bundle);
 
-  // The intent checkpoint now sits after design assessment and before design
-  // review. Headless, it auto-completes a default full-scope checkpoint; the
-  // executor requires a root for scope resolution.
-  const intentCheckpoint = await advanceAudit(designAssessment.updated_bundle, {
+  // Structure decomposition is a deterministic step sitting after design
+  // assessment and before the intent checkpoint. It runs fine without a root.
+  const structureDecomposition = await advanceAudit(designAssessment.updated_bundle);
+
+  // The intent checkpoint now sits after structure decomposition and before
+  // design review. Headless, it auto-completes a default full-scope checkpoint;
+  // the executor requires a root for scope resolution.
+  const intentCheckpoint = await advanceAudit(structureDecomposition.updated_bundle, {
     root,
   });
 

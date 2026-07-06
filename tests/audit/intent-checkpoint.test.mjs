@@ -31,6 +31,15 @@ function readyForIntentBundle() {
     risk_register: { items: [] },
     analyzer_capability: {},
     design_assessment: { reviewed: false },
+    structure_decomposition: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "structure",
+      node_universe_size: 0,
+      source_ids: [],
+      consensus: [],
+      contested: [],
+      findings: [],
+    },
   };
 }
 

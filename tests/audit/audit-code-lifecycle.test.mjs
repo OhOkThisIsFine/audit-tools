@@ -145,7 +145,15 @@ test.concurrent("audit-code wrapper supports repeated bounded advance-audit invo
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
     expect(sixth.selected_executor).toBe("design_assessment_executor");
-    expect(sixth.next_likely_step).toBe("intent_checkpoint_current");
+    expect(sixth.next_likely_step).toBe("structure_decomposition_current");
+
+    // Structure decomposition is a deterministic step between design assessment
+    // and the intent checkpoint; under advance-audit it completes and proceeds.
+    const structureDecomposition = JSON.parse(
+      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
+    );
+    expect(structureDecomposition.selected_executor).toBe("structure_decomposition_executor");
+    expect(structureDecomposition.next_likely_step).toBe("intent_checkpoint_current");
 
     // Intent checkpoint auto-completes headlessly under advance-audit.
     const seventh = JSON.parse(

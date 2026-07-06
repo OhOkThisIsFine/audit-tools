@@ -73,6 +73,15 @@ function makePostDesignAssessmentBundle(opts = {}) {
       conceptual_reviewed: opts.conceptual_reviewed ?? false,
       ...opts.designOverrides,
     },
+    structure_decomposition: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "structure",
+      node_universe_size: 0,
+      source_ids: [],
+      consensus: [],
+      contested: [],
+      findings: [],
+    },
   };
 }
 

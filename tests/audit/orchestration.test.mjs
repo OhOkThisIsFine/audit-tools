@@ -99,6 +99,15 @@ function createDecisionBundle(overrides = {}) {
     risk_register: { entries: [] },
     analyzer_capability: { status: "omitted", analyzers: [] },
     design_assessment: { generated_at: "2026-04-22T00:00:00Z", findings: [], review_findings: [], reviewed: true },
+    structure_decomposition: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "structure",
+      node_universe_size: 0,
+      source_ids: [],
+      consensus: [],
+      contested: [],
+      findings: [],
+    },
     intent_checkpoint: {
       schema_version: "intent-checkpoint/v1",
       confirmed_at: "2026-04-22T00:00:00Z",

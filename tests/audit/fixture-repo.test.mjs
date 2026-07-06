@@ -93,6 +93,11 @@ test("committed fixture repo supports external analyzer import and deterministic
       },
     };
 
+    // Structure decomposition is a deterministic step between design assessment
+    // and the intent checkpoint; it runs fine without a root.
+    const structureDecomposition = await advanceAudit(bundle);
+    bundle = structureDecomposition.updated_bundle;
+
     const intentCheckpoint = await advanceAudit(bundle, { root });
     bundle = intentCheckpoint.updated_bundle;
 
