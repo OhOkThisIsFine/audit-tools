@@ -40,6 +40,13 @@
   quota-aware dispatch, env-bound).
 - **⚠️ Stale-worktree trap:** ALWAYS `git fetch audit-tools main && git log HEAD..audit-tools/main` before
   starting a lap — this worktree branched behind main and had to fast-forward + re-read HANDOFF/backlog.
+- **⏸ Paused remediation run (2026-07-06):** a `/remediate-code` run over `docs/backlog.md` + `docs/HANDOFF.md`
+  produced an **operator-approved, adversarially-hardened 10-node plan** (persisted gitignored in
+  `.audit-tools/remediation/intake/contract/`), but the **implement phase never ran** (dispatch bug) — nothing
+  implemented, tree clean, run state left mid-`implementing` with nodes 1-4,7 FALSELY `resolved_no_change`. **Do NOT
+  blindly resume with `next-step` (would false-close); restart/redrive the implement phase with discriminating
+  per-node verify commands.** Branch `remediation/backlog-handoff-max-sweep-2026-07-06` has no commits. Full detail +
+  the 6 pipeline dogfood frictions → `docs/backlog.md` → Open bugs. Its Phase D/E nodes overlap the design-review track.
 - **Open items** (all in `docs/backlog.md`): remediate-side `opencode.json` drift/`INV-RCI-16`
   reconciliation; env-bound live validations (quota pre-wall pacing, friction escalation,
   selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004.

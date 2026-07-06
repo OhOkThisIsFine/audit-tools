@@ -29,6 +29,53 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Paused remediation run — operator-approved 10-node backlog-sweep plan on disk (2026-07-06).** A `/remediate-code`
+  run against `docs/backlog.md` + `docs/HANDOFF.md` drove the FULL contract pipeline to an operator-approved,
+  adversarially-hardened **10-node plan**: commit-gate staged-tree check, CI 3×-suite dedup, windowsHide sweep (all
+  `tests/**`), priority-chain fixture builder, staleness regen-drain, opencode union ceiling, split `dispatch.ts`,
+  Phase C residual (charters→conceptual prompt), Phase D clarification loop, Phase E systemic challenge loop. The
+  adversarial loop caught 3 real defects pre-code (inverted phase cut; opencode scoped to thin shims; windowsHide
+  guard/rewrite-surface mismatch). Artifacts persist **gitignored** in `.audit-tools/remediation/intake/contract/`
+  (`finalized_module_contracts.json`, `implementation_dag.json`, `test_validator_plan.json`) — they survive branch
+  switches. **Implement phase did NOT run** (dispatch bug below); nothing implemented, tree clean. Run state left at
+  `implementing` with nodes 1-4,7 FALSELY `resolved_no_change`. **Next-lap recovery: do NOT blindly `next-step`
+  (would false-close); restart the implement phase — or re-drive host-dispatch re-opening the false-resolved nodes —
+  with discriminating per-node `targeted_commands`.** Branch `remediation/backlog-handoff-max-sweep-2026-07-06` has
+  no commits (safe to delete). Phase D/E in this plan overlap the conceptual-design-review roadmap track.
+
+- **Remediate contract/implement pipeline — dogfood frictions from the 2026-07-06 max-sweep run (fix in tooling).**
+  Six real frictions surfaced driving one large `/remediate-code` run (full walk in the run's friction record,
+  gitignored):
+  - **(biggest) Implement-dispatch false-resolves un-implemented nodes.** Triage's "already satisfied in the working
+    tree" ran each node's `targeted_commands`; when those were the generic `npm run build && npm run check` (pass on
+    ANY green tree) it reconciled un-implemented nodes to `resolved_no_change`. Combined with `provider:
+    local-subprocess` producing no worker results, a run can report success while implementing nothing. Fix: (a)
+    triage must NOT `resolved_no_change` a node whose implement worker produced NO result file — distinguish "verified
+    satisfied" from "no worker ran"; (b) DAG authoring must give each node a *discriminating* verify (a command that
+    FAILS pre-change) — generic build+check is insufficient. Relates [[implement-dispatch-strands-nodes]].
+  - **Verbatim re-emit churn.** Every upstream contract change re-triggers critique→counterexample→judge AND forces
+    the host to fully re-author each downstream artifact even when byte-identical (`test_validator_plan` /
+    `contract_assessment_report` re-emitted 5-6× each). The tool consumes the `.input.json` into an envelope then
+    demands a full re-write on any dependency-hash change. Add a "re-affirm unchanged / copy-envelope-payload-forward"
+    fast path so a host isn't re-materialising a 123-finding verdict verbatim repeatedly.
+  - **Coverage gate not exposed in `validate-artifact`.** The positive+negative pairing + CE-006 negative-scoping gate
+    fires only at `next-step`, so an authoring agent self-validates "ok" then fails the gate → round-trips. Expose it
+    in `validate-artifact`. Also the polarity classifier keyword-heuristic misreads a satisfied-path assertion whose
+    success case is a block/exit-2 action as "no positive" → the gate error should hint the explicit `POSITIVE:`/
+    `NEGATIVE:` label escape hatch.
+  - **Source-grounded citation gate mangles dotfile + bare-filename citations.** M-B3 strips the leading dot from
+    `.claude`/`.github` paths and doesn't resolve bare filenames (`advance.ts` vs the full path), rejecting citations
+    that point at real tracked files; nodes touching only dotfile dirs were un-groundable until a non-dotfile path
+    was added. Handle dotfile dirs + basename resolution.
+  - **`--input` last-wins silently drops earlier inputs.** `next-step --input a --input b` kept only `b`, silently
+    dropping `a` from the source manifest (had to hand-edit `source-manifest.json`). Accept multiple `--input`
+    (union) or error on the extra.
+  - **Module decomposition can scope a module to the wrong files.** opencode-union-ceiling's `file_scope` was assigned
+    to the thin `providers/opencodeProvider.ts` re-export shims (no logic) instead of the real installers
+    (`opencodePermissions.ts` + `scripts/{audit,remediate}/postinstall.mjs` + `src/remediate/index.ts` + the two
+    `wrapper/*-opencode.mjs`); only caught when the drafting agent read source. Decomposition should verify where
+    named logic actually lives before assigning scope. Reinforces [[front-load-broad-search-before-contract-authoring]].
+
 - **Adding one PRIORITY-chain obligation ripples through ~10 fixture tests (friction, 2026-07-05, Phase B).**
   Inserting `structure_decomposition_current` at PRIORITY idx 9 broke ~10 audit test files whose fixtures build
   a bundle "advanced to `design_assessment`" and then assert the NEXT step / a hardcoded priority index. Each
