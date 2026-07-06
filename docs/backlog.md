@@ -273,10 +273,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
       (`decompose/findings.ts`, deterministic leads, confidence low). Persisted `structure_decomposition.json`
       (new obligation `structure_decomposition_current` @ PRIORITY idx 9, deterministic executor, dep-map node,
       findings surfaced through mergeFindings/synthesis). Full `src/shared`+`tests/audit` suite green.
-    - **Phase C (NEXT)** — charter extraction + conceptual prompts (LLM judgment, grounded+gated): Revealed(code) /
-      Stated(docs) / Inferred(LLM) / True-nomination through the gate; emit `CharterDelta`s. Extends
-      `designReviewPrompt.ts` / `conceptualDispatch.ts` (machinery already exists).
-    - **Phase D** — charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest` (port from
+    - **Phase C — ✅ SHIPPED v0.32.19.** Charter extraction + conceptual prompts (LLM judgment, grounded+gated).
+      Deterministic ENFORCEMENT half `src/shared/decompose/charterExtraction.ts` (`assembleCharterRegister`: id
+      assignment, the design's routing table, Phase-A gates, deltas→Finding leads). host_delegation obligation
+      `charter_extraction_current` (PRIORITY idx 11) + `src/audit/orchestrator/charterExtractionExecutor.ts`
+      (ceiling-gated — `shallow` omits deterministically, `deep`/`deepest` emits the LLM charter-extraction prompt
+      `src/audit/cli/charterExtractionPrompt.ts`, grounded in the Phase-B consensus scaffold + /init anti-slop
+      discipline). Persists `charter_register.json` (OUTPUT artifact — off the intent checkpoint it depends on, no
+      cycle); routed charter-delta leads surface via mergeFindings/synthesis. **Phase-C residual (small):** the
+      extracted charters are NOT yet threaded into the `design_review_conceptual` prompt — that pass stays
+      charter-unaware; deltas `routed_to:"clarification"` surface as findings until Phase D's loop. Fold into D or
+      do standalone.
+    - **Phase D (NEXT)** — charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest` (port from
       remediate, charter-keyed not finding-keyed); VOI-ranked question queue; the three dials (ceiling@intent_checkpoint
       defaulted, attention loop, intensity auto); attention-0 = autonomous; blast-radius ranking + risk gate.
     - **Phase E** — systemic improvement-seeking challenge loop: second-order adversary (SEPARATE agent,

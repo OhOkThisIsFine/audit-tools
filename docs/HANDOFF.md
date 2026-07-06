@@ -8,17 +8,17 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.18** — **conceptual design-review Phase B: the overlay-and-delta operator
-  (deterministic)**. The full structure layer in one build ([`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
-  [[conceptual-design-review-design]]): pure primitives `src/shared/decompose/{modularity,consensus}.ts`
-  (resolution-swept Louvain + co-association ensemble with two orthogonal scores agreed-across-source /
-  stable-across-scale); NEW extractors `src/audit/extractors/{dataStateCoupling,commentDecomposition}.ts`;
-  source adapter + the two non-co-localization findings under `src/audit/decompose/`; persisted
-  `structure_decomposition.json` behind the new `structure_decomposition_current` obligation (PRIORITY idx 9,
-  deterministic executor), findings surfaced via mergeFindings/synthesis. The consensus/contested scaffold is
-  the Phase-C input (deliberate: fully consumed once Phase C extracts charters). Still **no LLM content**
-  (extraction/loop are phases C–E). Prior live headline (v0.32.17): Phase A charter spine
-  (`src/shared/types/charter.ts` + `charterGate.ts` + `blast_radius` on Finding).
+- On npm as `latest` at **v0.32.19** — **conceptual design-review Phase C: charter extraction + conceptual
+  prompts (LLM, grounded+gated)**. The charter LAYER end-to-end ([`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
+  [[conceptual-design-review-design]]): the deterministic ENFORCEMENT half `src/shared/decompose/charterExtraction.ts`
+  (`assembleCharterRegister` — id assignment, the routing table, Phase-A gates applyTrueCharterGate/gateCharterDelta,
+  deltas→Finding leads) + the host_delegation obligation `charter_extraction_current` (PRIORITY idx 11) with
+  `src/audit/orchestrator/charterExtractionExecutor.ts` (ceiling-gated: `shallow` omits deterministically —
+  conversation-first opt-in; `deep`/`deepest` emits the LLM charter-extraction prompt) writing
+  `charter_register.json` (an OUTPUT artifact — charters stay off the intent checkpoint it depends on, no cycle);
+  routed charter-delta leads surfaced via mergeFindings/synthesis. This is the FIRST LLM-judgment content in the
+  conceptual pipeline (A/B were deterministic). Prior live headlines: Phase B (v0.32.18) overlay-and-delta
+  structure layer; Phase A (v0.32.17) charter spine.
   Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
   [[live-status]]); this section is current-state + open-work roadmap only.
 - **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
@@ -49,13 +49,16 @@
   `host_model_cost_order`. The gate fires on every interactive run (even one/zero detected providers — the operator may
   want to add one discovery missed); headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md); detail in `docs/backlog.md` → Forward tracks.
-- **Immediate next: conceptual design-review Phase C — charter extraction + conceptual prompts (LLM, grounded+gated).**
-  Extend `designReviewPrompt.ts` / `conceptualDispatch.ts`: Revealed(code)/Stated(docs)/Inferred(LLM)/True-nomination
-  through the Phase-A gate; emit `CharterDelta`s. Consumes the Phase-B `structure_decomposition.json` scaffold
-  (consensus nodes = subsystems to charter-review). Full phasing in `docs/backlog.md` → "Systemic reviewers must be
-  pushed adversarially" + [[conceptual-design-review-design]]. Other standing (lower-pri) options unchanged:
-  cost-first (d) collision-price (`docs/backlog.md` → Forward tracks), deterministic-analyzer live spawn, CE-004
-  NIM guided-decoding.
+- **Immediate next: conceptual design-review Phase D — charter-delta → clarification/triangulation loop.** Port an
+  audit-side `ClarificationRequest` (from remediate, charter-keyed not finding-keyed); VOI-ranked question queue;
+  the three dials (ceiling@intent_checkpoint defaulted, attention loop, intensity auto); attention-0 = autonomous;
+  blast-radius ranking + risk gate. Charter deltas currently `routed_to:"clarification"` just surface as findings —
+  Phase D makes them an interactive loop. Full phasing in `docs/backlog.md` → "Systemic reviewers must be pushed
+  adversarially" + [[conceptual-design-review-design]]. **Phase C residual (small, foldable into D or standalone):**
+  thread the extracted charters INTO the `design_review_conceptual` prompt so the generative pass opines per-charter
+  (today Phase C surfaces deltas as findings but the conceptual pass stays charter-unaware). Other standing
+  (lower-pri) options unchanged: cost-first (d) collision-price (`docs/backlog.md` → Forward tracks),
+  deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
 - **Dispatch admission-control — residual (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -119,10 +122,11 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
 -1. **Conceptual + systemic-adversarial design review (ACTIVE track — owner-selected 2026-07-05).** ONE build,
    five phases ([[conceptual-design-review-design]]; design of record
    [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)). **Phase A (data-model
-   spine) — ✅ SHIPPED v0.32.17.** **Phase B (overlay-and-delta operator, deterministic) — ✅ SHIPPED (unreleased,
-   on branch).** **Phase C (next)** = charter extraction + conceptual prompts (LLM); D = charter-delta
-   clarification/triangulation loop + three dials; E = systemic improvement-seeking challenge loop (loop-until-dry,
-   separate adversary). Detail in `docs/backlog.md` → "Systemic reviewers must be pushed adversarially" forward track.
+   spine) — ✅ SHIPPED v0.32.17.** **Phase B (overlay-and-delta operator, deterministic) — ✅ SHIPPED v0.32.18.**
+   **Phase C (charter extraction + conceptual prompts, LLM) — ✅ SHIPPED v0.32.19.** **Phase D (next)** =
+   charter-delta clarification/triangulation loop + three dials; E = systemic improvement-seeking challenge loop
+   (loop-until-dry, separate adversary). Detail in `docs/backlog.md` → "Systemic reviewers must be pushed
+   adversarially" forward track.
 0. **Multi-provider routing rethink outcome (2026-07-05).** Verdict: core is sound + ahead of field, no big
    simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED. (b) `rollingEngine.ts`
    **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev static-metadata resolver**: W1 real context window — ✅
