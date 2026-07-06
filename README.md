@@ -122,12 +122,18 @@ a summary before anything is committed.
 2. **Understand the repo** — deterministically maps files, public surfaces, the dependency
    graph, critical flows, and a risk register; runs available static analyzers and auto-fixes.
 3. **Confirm intent** — you review the scope and pick the review lenses.
-4. **Review the design** — two parallel passes: a contract pass (invariants, boundaries,
+4. **Map the subsystems** — deterministically clusters the code into real subsystems by
+   overlaying how it actually behaves (call/import, co-change, shared state) against how it's
+   declared to be organized (directories, docs, comments), and flags where the two disagree:
+   a tightly-coupled cluster no declared boundary owns, or a declared purpose smeared across
+   the codebase. On a deeper review it then has an LLM extract and confirm each subsystem's
+   charter — what it's *stated* to do versus what the code *reveals* it does — and surfaces the gaps.
+5. **Review the design** — two parallel passes: a contract pass (invariants, boundaries,
    obligations) and a conceptual pass (philosophy, alternatives, better directions).
-5. **Plan** — turns the risk register into bounded, prioritized review tasks.
-6. **Review in parallel** — dispatches the review tasks to your LLMs, routing riskier work to
+6. **Plan** — turns the risk register into bounded, prioritized review tasks.
+7. **Review in parallel** — dispatches the review tasks to your LLMs, routing riskier work to
    more capable models, and deep-dives selectively.
-7. **Synthesize** — consolidates everything into `audit-findings.json` + `audit-report.md`,
+8. **Synthesize** — consolidates everything into `audit-findings.json` + `audit-report.md`,
    then layers on a narrative (themes, executive summary, top risks).
 
 **remediate-code:**

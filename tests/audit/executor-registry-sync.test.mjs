@@ -4,6 +4,7 @@ import { test, expect } from "vitest";
 import { EXECUTOR_REGISTRY, isHostDelegationExecutor } from "../../src/audit/orchestrator/executors.ts";
 import { EXECUTOR_RUNNERS } from "../../src/audit/orchestrator/executorRunners.ts";
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.ts";
+import { buildAuditObligations } from "../../src/audit/cli/nextStepHelpers.ts";
 
 test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entry", () => {
   for (const obligationId of PRIORITY) {
@@ -11,6 +12,24 @@ test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entr
       entry.obligation_ids.includes(obligationId),
     );
     expect(matches.length, `PRIORITY obligation "${obligationId}" should be claimed by exactly one EXECUTOR_REGISTRY entry, got ${matches.length}: [${matches.map((e) => e.id).join(", ")}]`).toBe(1);
+  }
+});
+
+test("every engine-dispatched PRIORITY obligation has an entry in the CLI fold's buildAuditObligations() array", () => {
+  // The conversation-first `next-step` fold (runDeterministicForNextStep → advance)
+  // scans exactly buildAuditObligations(); an id in PRIORITY but missing here is
+  // silently skipped on the primary path (regression guard for the dropped
+  // structure_decomposition_current obligation — doc-review D-56).
+  //
+  // Exception: friction_capture_current is intentionally NOT engine-dispatched — it
+  // is absent from deriveAuditState and handled out-of-band by the friction close-out
+  // Stop-hook (see executorRunners.ts: "retained for schema compatibility but
+  // unreachable"), so it legitimately has no fold entry.
+  const OUT_OF_BAND = new Set(["friction_capture_current"]);
+  const foldIds = new Set(buildAuditObligations().map((o) => o.id));
+  for (const obligationId of PRIORITY) {
+    if (OUT_OF_BAND.has(obligationId)) continue;
+    expect(foldIds.has(obligationId), `PRIORITY obligation "${obligationId}" is missing from buildAuditObligations() — the CLI next-step fold would skip past it`).toBe(true);
   }
 });
 

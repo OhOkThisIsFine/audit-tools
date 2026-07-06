@@ -1074,7 +1074,7 @@ function deriveObligationState(
  * the executor for the selected id), so the obligation list cannot drift from the
  * priority scan it mirrors.
  */
-function buildAuditObligations(): AuditObligationDef[] {
+export function buildAuditObligations(): AuditObligationDef[] {
   const deterministic = (id: string): AuditObligationDef => ({
     id,
     derive: deriveObligationState(id),
@@ -1147,6 +1147,7 @@ function buildAuditObligations(): AuditObligationDef[] {
       },
     },
     deterministic("design_assessment_current"),
+    deterministic("structure_decomposition_current"),
     {
       // Confirm-intent host step: the host writes intent_checkpoint.json (read by
       // deriveAuditState on re-invocation), so there is no incoming artifact to

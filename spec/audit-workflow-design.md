@@ -114,6 +114,70 @@ verbatim into worker prompts.
 
 ---
 
+## Structure decomposition
+
+The deterministic structure layer of the conceptual design review. It builds
+several **independently-sourced** views of the repo and treats their agreement,
+not any single view, as the boundary signal: where independent sources co-locate
+the same files you have a real subsystem; where they diverge you have a hotspot.
+The views are never reconciled into one answer — the disagreement is itself the
+product. This is the *overlay-and-delta* operator, and the same operator is
+reused at the charter layer (below).
+
+Sources fall into two families: **behavior** (what the system does — call/import
+coupling, git change-coupling, data/state coupling) and **intent** (what humans
+assert the pieces are — directory layout, docs, comments). Each discovered
+subsystem carries two orthogonal robustness scores: how many independent sources
+co-locate its members, and how stable the boundary is across scales (the same
+weighted graph is clustered from coarse to fine, and a boundary that survives
+every resolution is trusted). A node strong on both is a confident subsystem; a
+node weak on either is *contested*, and its contested status is itself a finding
+routed to sharper review.
+
+Where the behavioral and intent views fail to coincide, the mismatch is a
+first-class finding: a behavioral cluster with no coherent purpose points at
+accidental complexity or a dead subsystem, and a stated purpose with no
+behavioral cluster points at a goal smeared across the codebase and never
+modularized — often the highest-value refactor. The phase is fully deterministic
+and language-neutral (it operates on abstract node partitions, so any source of
+coupling feeds it identically) and persists to `structure_decomposition.json`. It
+is the scaffold the charter layer reviews against. The deeper rationale — the two
+families, the two-score model, and the non-co-localization findings — is the
+design of record in
+[`conceptual-design-review-design.md`](conceptual-design-review-design.md).
+
+## Charter extraction
+
+The charter layer of the conceptual design review, and the first phase that
+spends LLM judgment. For each confident subsystem the structure decomposition
+surfaced, the reviewer holds **four charters** — *Stated* (what the user
+expressed), *Inferred* (the model's read of that intent), *Revealed* (what the
+code actually optimizes for), and *True* (the ideal the user may not have
+articulated) — stated in terms of the subsystem's telos, never its mechanism. The
+four are deliberately not reconciled; the value is in their pairwise deltas, each
+routed to whoever can act on it: an unstated assumption to a clarification prompt,
+spec drift to the remediator, and a wrong-goal provocation to the human.
+
+The division of labour is strict: the LLM contributes only judgment (the four
+charters and the deltas it reads between them); the tool owns enforcement. It
+assigns stable charter and delta ids, derives each delta's kind and routing from
+its charter pair against a fixed routing table rather than host discretion, and
+grounds every submitted subsystem against the decomposition scaffold — a subsystem
+the deterministic layer never found is an invented boundary and is dropped. The
+*True* charter carries the hardest gates, because "what you really want is X" is
+the canonical over-confident failure: a True nomination must name a concrete
+alternative and a concrete cost or it is dropped, it is never asserted as a
+verdict, and it routes only to the human. A low-confidence charter likewise
+downgrades any delta that depends on it to a human-intent flag rather than an
+opinion. Its depth is gated by the intent-checkpoint ceiling — the consent dial
+that governs how far up the premise stack the review is allowed to reach.
+
+Surviving deltas are persisted to `charter_register.json` and surfaced as finding
+*leads* under the architecture lens — provocations for the owner to judge, never
+verdicts. The four charters, the routing table, the gates, and the ceiling dial
+are specified in full in
+[`conceptual-design-review-design.md`](conceptual-design-review-design.md).
+
 ## Design review (two parallel passes)
 
 Runs after the intent checkpoint so the reviewer works within confirmed scope.

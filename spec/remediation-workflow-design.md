@@ -22,7 +22,10 @@ provider_confirmation        [user gate — shared with audit; session-level]
                               preliminary intent checkpoint + open questions]
   → intent_checkpoint        [user gate — single consolidated stop: confirm
                               scope, answer questions, set closing action]
-  → contract_pipeline        [BOTH paths; multi-agent seam negotiation]
+  → review_gate              [user gate — Path A: original findings, pre-pipeline;
+                              tiered by review-necessity, approve/disapprove]
+  → contract_pipeline        [BOTH paths; multi-agent seam negotiation;
+                              Path B review_gate fires at the planning point within]
       decomposition
       → per-module contract drafting   [parallel]
       → seam reconciliation            [deterministic detect + LLM resolve]
@@ -32,7 +35,6 @@ provider_confirmation        [user gate — shared with audit; session-level]
       → deterministic design gates
       → critic → judge → repair        [bounded]
       → implementation DAG             [metadata-enriched promotion]
-  → risk_preview             [user gate — classification folded in]
   → rolling_dispatch         [quota-routed, worktree-isolated, per-node
                               verification, ingestion folded in]
   → triage                   [context-carrying retries]
@@ -236,24 +238,41 @@ dispatch/merge commands.
 
 ---
 
-## Risk classification & implementation preview
+## Review-approval gate
 
-The gate is deterministic classify → LLM review → user preview/ack, structured
-for few roundtrips and well-informed review:
+Between the findings and the contract pipeline, every judgment-heavy finding is
+presented to the user for an explicit approve/disapprove **before** the pipeline
+can mark it terminal-without-change. This is the single review surface per run —
+it replaces the classic per-block implementation preview, which fired *after* the
+pipeline had collapsed the original findings into implementation-DAG nodes and so
+let design-review / free-form findings bundled inside a quality-tail node be
+bulk-dispositioned invisibly. The gate operates before that collapse.
 
-- **Classification folds into the pipeline tail.** Deterministic preliminary
-  classification runs as nodes complete planning; the LLM review dispatches in
-  parallel with the final planning work rather than serially after it.
-- **Scoped file access for the reviewer.** The LLM reviewer is metadata-only for
-  `safe` and `substantive` findings, and is granted the relevant source files for
-  `context_dependent` findings only — the cases where project context determines
-  appropriateness.
-- **Ack invalidation.** `impl_preview_acknowledged.json` carries the plan id /
-  content hash it acknowledged; a force-replan or plan mutation invalidates it so
-  a stale ignore-list never applies to a different plan's finding ids.
-- **Preview stability.** The preview shows each node's contract obligations, which
-  are stable across upstream implementation, rather than file-state assumptions,
-  which are not.
+- **Tool owns structure; host owns judgment.** The tool deterministically buckets
+  each finding by *review-necessity* — `strategic` (a design/architecture or
+  cross-cutting call that is the user's to make), `concrete` (a real fix with some
+  latitude, worth a yes/no), or `mechanical` (obvious, low-risk, FYI) — and
+  guarantees each item is shown and tiered. The host fills only the semantic
+  pros/cons when presenting; it can never decide *whether* an item is surfaced.
+- **Fires before the contract pipeline, at the path-appropriate point.** Path A
+  (structured findings) gates the ORIGINAL findings at intake, over the filtered
+  survivors (deduped, evidence-bearing, path-grounded, checkpoint-kept), before the
+  pipeline collapses them into DAG nodes. Path B (document/conversation) has no
+  pre-pipeline finding set — its findings are derived inside the pipeline — so it
+  is gated at the planning point over the deduped/grounded node findings. One
+  review surface either way; the presence of a recorded decision prevents any
+  double review.
+- **Disapproval is a recorded terminal disposition, never a silent close.** A
+  declined finding (by id or by whole tier) is excluded from the pipeline AND
+  recorded as an explicit `ignored` disposition carrying the reason — the exact
+  failure this gate exists to prevent. The default is to act: the gate lets the
+  user REMOVE items, so an absent or empty resolution approves everything.
+- **Idempotent, at most once per run.** The gate halts to collect the decision
+  (`review_request.json` → `review_resolution.json`), then consumes it into a
+  durable record (`review_decision.json`); once recorded it proceeds directly on
+  every subsequent step and never re-halts. Unattended (autonomous) runs never
+  halt — they auto-approve only the lowest-risk findings and re-emit the rest as a
+  re-consumable deliverable, with no durable rejection.
 
 ---
 

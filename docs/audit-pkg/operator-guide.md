@@ -175,6 +175,90 @@ Use `ui_mode: "visible"` when debugging provider stdout/stderr. Use
 `subprocess-template` or `vscode-task` only when you have a reliable launcher
 bridge.
 
+## Gate-0 provider confirmation
+
+The first thing an interactive audit run does — before it reads the repo — is
+pause on a **provider confirmation** step (Gate-0). The tool auto-detects the
+provider pool it can dispatch to, prices each candidate, and proposes a cost
+ordering (cheapest capable first). You confirm, reorder, or amend it. The
+mechanism behind the ordering is documented in
+[`spec/cost-first-routing.md`](../../spec/cost-first-routing.md); this section is
+only how to respond to the step.
+
+### When it fires
+
+- On the conversation/CLI path (`audit-code next-step`) it fires on **every** run,
+  even when only one — or zero — providers were auto-detected, so you can reorder,
+  exclude, self-report your own model roster, or add a provider that discovery missed.
+- Headless (`audit-code advance-audit`, no interactive host) it auto-completes with
+  the tool's price-ascending suggestion and never pauses.
+
+### How to respond
+
+The step prints the suggested pool as a priced table and asks you to write your
+decision to:
+
+```text
+.audit-tools/audit/provider-confirmation.input.json
+```
+
+**Writing that file is what lets the run proceed** — its presence is the "operator
+has acted" signal. To accept the suggestion verbatim, write just the version:
+
+```json
+{ "schema_version": "provider-confirmation-input/v1" }
+```
+
+Every other field is optional:
+
+```json
+{
+  "schema_version": "provider-confirmation-input/v1",
+  "cost_order": ["<provider-or-model-key>", "..."],
+  "exclude": ["<provider-name>"],
+  "include": ["<self-spawn-blocked provider to opt back in>"],
+  "host_models": [{ "model_id": "<your model id>", "tier": "frontier|capable|fast" }]
+}
+```
+
+- `cost_order` — the confirmed ordering, cheapest first, as a list of keys. A key
+  is either a **provider name** (as shown in the table) or a **host `model_id`** you
+  report in `host_models`. Keys you omit keep their suggested relative order,
+  appended after the ones you name; unrecognized keys are ignored. Omit it to accept
+  the suggested order.
+- `exclude` — drops a provider from the dispatchable pool.
+- `include` — opts a self-spawn-blocked provider back in. A CLI provider detected
+  while you are already inside a session of that same agent (`claude-code` under
+  `CLAUDECODE`, `codex` under `CODEX`) is excluded by default so the run can't
+  self-spawn a fresh agent; naming it here overrides that. Advanced — normally leave
+  it excluded.
+- `host_models` — reports your own (the host agent's) model roster so those tiers
+  are priced from the models.dev dataset and orderable here, not just at dispatch.
+
+You supply only ordering intent plus your model roster. The tool owns the prices,
+the capability flags, and the roster snapshot — you never hand-author those. If a
+provider you use isn't listed, it wasn't auto-detected: add its config to
+`session-config.json` (an OpenAI-compatible endpoint via
+`openai_compatible.{base_url,model,api_key_env}`, or a CLI backend via its
+`<name>.command`) and re-run the step.
+
+Once the input is written, re-run the continue command the step printed
+(`audit-code next-step`). The tool consumes the input and promotes it into both
+canonical artifacts: the per-tool `provider_confirmation.json` seam and the shared
+`.audit-tools/provider-confirmation.json`.
+
+### The confirmed pool persists — you aren't re-prompted
+
+The shared `.audit-tools/provider-confirmation.json` is written once and reused for
+the rest of the audit→remediate session. A later step, and a subsequent
+`remediate-code` run against the same repo, read and honor that pool without
+prompting again — `remediate-code` has no confirmation step of its own; it consumes
+the audit-side pool. You are only re-prompted if the discovered provider roster
+changes (a provider appears or disappears since it was confirmed), which forces a
+fresh confirmation so a vanished provider is never pinned. If the file is absent
+(for example a standalone remediate run with no prior audit), the run resolves its
+provider independently — absence is never an error.
+
 ## Model selection
 
 Conversation-level model choice belongs to the host conversation. The backend

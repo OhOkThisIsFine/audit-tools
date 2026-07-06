@@ -83,6 +83,10 @@ any declared cap), and overflow spills to the next-cheapest. `admissionLoop.ts`
 (`computeDispatchAdmission`, single-sourced across both orchestrators) owns this
 ordering, so the emergent fan-out favours the cheapest capable capacity first.
 
+The cost-first routing mechanism itself (the `costRank`/`capabilityRank` model,
+price banding, and collision handling) is owned by [`spec/cost-first-routing.md`](../cost-first-routing.md);
+this section only describes how admission control *consumes* that ordering at dispatch time.
+
 ## The shared resource, and how we avoid clobbering it
 
 **The shared resource is the provider's rate-limit meter for your credential** —
