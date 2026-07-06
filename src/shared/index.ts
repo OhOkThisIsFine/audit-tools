@@ -116,6 +116,22 @@ export {
   charterReviewDisposition,
   gateCharterDelta,
 } from "./validation/charterGate.js";
+// Conceptual design-review overlay-and-delta operator (Phase B) — the
+// deterministic clustering + consensus primitives, reused at the structure layer
+// now and the charter layer in Phase C.
+export type { WeightedGraph, Partition } from "./decompose/modularity.js";
+export {
+  DEFAULT_RESOLUTIONS,
+  louvain,
+  resolutionSweep,
+} from "./decompose/modularity.js";
+export type {
+  DecompositionSource,
+  DecomposedNode,
+  DecomposeResult,
+  DecomposeOptions,
+} from "./decompose/consensus.js";
+export { decompose, clustersFromPartitions } from "./decompose/consensus.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 
