@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 // stay byte-for-byte in step with the `PRIORITY` array in the orchestrator.
 // Importing from source (not dist) ensures the test guards un-rebuilt changes.
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.ts";
+import {
+  expectObligationOrder,
+  expectObligationEndpoint,
+} from "./helpers/advancedBundle.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/ -> audit-code/ -> packages/ -> repo root
@@ -35,33 +39,37 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // doc == code: same ids, same order.
   expect(ids, "The CLAUDE.md priority chain is out of sync with the exported PRIORITY array").toEqual(PRIORITY);
 
-  // Spot-check the endpoints and key obligations.
-  expect(PRIORITY[0]).toBe("provider_confirmation");
-  expect(PRIORITY[1]).toBe("repo_manifest");
-  expect(PRIORITY[19]).toBe("synthesis_narrative_current");
-  expect(PRIORITY[20]).toBe("friction_capture_current");
+  // Endpoints are semantic invariants: provider_confirmation MUST be the session
+  // gate (first), friction_capture_current MUST be the terminal close-out (last).
+  // Asserted by endpoint, not literal index, so they don't churn when a phase is
+  // inserted between them.
+  expectObligationEndpoint(expect, "provider_confirmation", "first");
+  expectObligationEndpoint(expect, "friction_capture_current", "last");
 
-  expect(PRIORITY.includes("graph_enrichment_current")).toBeTruthy();
-  expect(PRIORITY.includes("design_assessment_current")).toBeTruthy();
-  expect(PRIORITY.includes("structure_decomposition_current")).toBeTruthy();
-  expect(PRIORITY.includes("design_review_contract_completed")).toBeTruthy();
-  expect(PRIORITY.includes("design_review_conceptual_completed")).toBeTruthy();
   expect(!PRIORITY.includes("design_review_completed"), "design_review_completed should no longer be in PRIORITY").toBeTruthy();
 
-  // provider_confirmation is the session gate at index 0; intake follows.
-  // external-analyzer acquisition (Slice D) sits at index 5, after syntax_resolved
-  // and before structure_artifacts (index 6); graph/design obligations follow;
-  // the deterministic structure_decomposition sits after design_assessment_current;
-  // intent checkpoint follows it; the Phase-C charter-extraction pass sits between
-  // the checkpoint and the design-review passes.
-  expect(PRIORITY.indexOf("external_analyzers_current")).toBe(5);
-  expect(PRIORITY.indexOf("structure_artifacts")).toBe(6);
-  expect(PRIORITY.indexOf("graph_enrichment_current")).toBe(7);
-  expect(PRIORITY.indexOf("design_assessment_current")).toBe(8);
-  expect(PRIORITY.indexOf("structure_decomposition_current")).toBe(9);
-  expect(PRIORITY.indexOf("intent_checkpoint_current")).toBe(10);
-  expect(PRIORITY.indexOf("charter_extraction_current")).toBe(11);
-  expect(PRIORITY.indexOf("design_review_contract_completed")).toBe(12);
-  expect(PRIORITY.indexOf("design_review_conceptual_completed")).toBe(13);
-  expect(PRIORITY.indexOf("planning_artifacts")).toBe(14);
+  // The full RELATIVE ordering of the chain's key obligations — the actual
+  // sequencing invariant. Keyed by `PRIORITY.indexOf` relationships, never literal
+  // integers: inserting a new obligation shifts every absolute index but leaves
+  // these before/after relationships intact, so a new phase is a one-line PRIORITY
+  // edit rather than a sweep of every pinned number here (the recurring friction
+  // this test was the worst offender for — it re-broke on the Phase-B insert).
+  expectObligationOrder(expect, [
+    "provider_confirmation",
+    "repo_manifest",
+    "file_disposition",
+    "syntax_resolved",
+    "external_analyzers_current",
+    "structure_artifacts",
+    "graph_enrichment_current",
+    "design_assessment_current",
+    "structure_decomposition_current",
+    "intent_checkpoint_current",
+    "charter_extraction_current",
+    "design_review_contract_completed",
+    "design_review_conceptual_completed",
+    "planning_artifacts",
+    "synthesis_narrative_current",
+    "friction_capture_current",
+  ]);
 });
