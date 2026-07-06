@@ -366,6 +366,11 @@ export function mergeFindings(
     const confidenceDelta =
       confidenceRank(b.confidence) - confidenceRank(a.confidence);
     if (confidenceDelta !== 0) return confidenceDelta;
+    // Blast radius is priority (conceptual design-review spine): among equal
+    // severity+confidence, a higher-blast finding (its fix ripples further up the
+    // goal graph) ranks first. Absent blast_radius is treated as 0.
+    const blastDelta = (b.blast_radius ?? 0) - (a.blast_radius ?? 0);
+    if (blastDelta !== 0) return blastDelta;
     return a.title.localeCompare(b.title);
   });
 }

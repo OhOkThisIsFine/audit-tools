@@ -117,6 +117,16 @@ export const FindingSchema = z.object({
   /** Synthesis theme this finding belongs to (Phase 6). */
   theme_id: z.string().optional(),
   /**
+   * How far up the goal graph a fix for this finding ripples (conceptual
+   * design-review spine, Phase A). Simultaneously PRIORITY (high blast = high
+   * value — re-drawing a charter boundary beats a leaf fix) and a RISK gate (a
+   * wrong high-blast finding is catastrophic → it must clear a higher adversarial
+   * bar before it is actionable). An integer height over the goal DAG; absent on
+   * findings with no goal-graph linkage (treated as 0 when ranking). Populated by
+   * the conceptual pass (later phases); deterministic findings omit it.
+   */
+  blast_radius: z.number().int().min(0).optional(),
+  /**
    * Whether at least one evidence entry cites a real repo path (and valid line)
    * that exists on disk. Set by the remediator's deterministic grounding pass on
    * LLM-extracted findings; absent on auditor-produced findings (already grounded).

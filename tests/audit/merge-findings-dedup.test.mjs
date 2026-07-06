@@ -213,6 +213,75 @@ test("mergeFindings keeps same-title same-category findings with different lense
   expect(merged.length, "identical title+category across lenses on disjoint files must stay 2").toBe(2);
 });
 
+// ── blast-radius ordering (conceptual design-review spine, Phase A) ──────────
+
+test("mergeFindings orders equal severity+confidence findings by blast_radius descending", () => {
+  // Two distinct-identity findings, equal severity+confidence, disjoint files so
+  // they never merge. The high-blast one carries an alphabetically-LATER title, so
+  // only the blast tiebreaker (not the title fallback) can explain it ranking first.
+  const merged = mergeFindings([
+    wrapResult([
+      makeFinding({
+        id: "F-LOW",
+        title: "Aaa low-blast leaf fix",
+        category: "General",
+        lens: "correctness",
+        severity: "high",
+        confidence: "high",
+        blast_radius: 1,
+        affected_files: [{ path: "src/leaf.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+    wrapResult([
+      makeFinding({
+        id: "F-HIGH",
+        title: "Zzz high-blast charter break",
+        category: "General",
+        lens: "architecture",
+        severity: "high",
+        confidence: "high",
+        blast_radius: 5,
+        affected_files: [{ path: "src/charter.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+  ]);
+  expect(merged.length).toBe(2);
+  expect(merged[0].blast_radius, "higher blast_radius ranks first").toBe(5);
+  expect(merged[1].blast_radius).toBe(1);
+});
+
+test("mergeFindings treats absent blast_radius as 0 in the tiebreaker", () => {
+  const merged = mergeFindings([
+    wrapResult([
+      makeFinding({
+        id: "F-NONE",
+        title: "Aaa finding without blast",
+        category: "General",
+        lens: "correctness",
+        severity: "medium",
+        confidence: "medium",
+        // blast_radius intentionally absent → treated as 0
+        affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+    wrapResult([
+      makeFinding({
+        id: "F-THREE",
+        title: "Zzz finding with blast 3",
+        category: "General",
+        lens: "architecture",
+        severity: "medium",
+        confidence: "medium",
+        blast_radius: 3,
+        affected_files: [{ path: "src/b.ts", line_start: 1, line_end: 5 }],
+      }),
+    ]),
+  ]);
+  expect(merged[0].id, "blast 3 outranks absent(=0) despite a later title").toBe(
+    "F-THREE",
+  );
+});
+
 // ── same-lens dedup edge cases ────────────────────────────────────────────────
 
 test("deduplicateSameLens merges two same-lens findings with both line_end missing (aEnd===0 && bEnd===0 sentinel forces overlap)", () => {
