@@ -199,10 +199,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
   work blocks off the static rung. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding —
   watch on a real headless metered run.
-- **Minor provider/dispatch cleanups (low-pri, bundle opportunistically).** providerFactory Rule 6
-  (`hasClaudeCodeConfig && claudeAvailable`) is a provable strict subset of Rule 9 (`claudeAvailable`) — delete the
-  redundant rung; split remediate `dispatch.ts` (now ~4,590 LOC; ~60-85% is git-worktree/write-scope/merge machinery,
-  misfiled not duplicated — audit's dispatch is far smaller, zero git); inline `makeProviderKeyedFactory` (19 LOC, 2 sites).
+- **Minor provider/dispatch cleanups (low-pri, bundle opportunistically).**
+  ~~providerFactory Rule 6 (`hasClaudeCodeConfig && claudeAvailable`) is a provable strict subset of Rule 9
+  (`claudeAvailable`) — delete the redundant rung~~ — **FALSIFIED 2026-07-05 (verify-before-implementing).**
+  Not a no-op: the opencode/codex *config-gated* rungs sit BETWEEN Rule 6 (claude config-gated) and Rule 9
+  (claude bare-availability tie-break) and resolve to *different* providers. For a dual-configured operator
+  (`hasClaudeCodeConfig && claudeAvailable && hasOpenCodeConfig && opencodeAvailable`), Rule 6 makes explicit
+  claude config win; deleting it lets the opencode config-gated rung fire first → resolution flips
+  claude-code→opencode. Rule 6 is a predicate-subset of Rule 9 but NOT redundant in the ordered table. Leave it.
+  Remaining (still valid): split remediate `dispatch.ts` (now ~4,590 LOC; ~60-85% is
+  git-worktree/write-scope/merge machinery, misfiled not duplicated — audit's dispatch is far smaller, zero git);
+  inline `makeProviderKeyedFactory` (19 LOC, 2 sites — but it's a cross-area generic with its own dedicated test
+  `tests/shared/provider-keyed-factory.test.mjs`; inlining loses cohesion, marginal — low value).
   Do NOT delete working proactive quota sources (`BaseHttpQuotaSource` + one-array register is already clean);
   `copilot` is correctly broker-only.
 
@@ -238,6 +246,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     three-dial control surface (intensity=compute / ceiling=premise-height at `intent_checkpoint` /
     attention=the VOI-ranked triangulation loop; attention 0 = the autonomous mode). The "improvement-seeking
     challenge loop" above is the *intensity* dial + loop-until-dry in that doc's terms.
+  - **Implementation phasing (owner opted in 2026-07-05 — conceptual + systemic-adversarial = ONE build):**
+    - **Phase A — data-model spine — ✅ SHIPPED v0.32.17.** `src/shared/types/charter.ts` (four charters + goal DAG
+      w/ integer `premise_height`, never a mandated L-enum + `Ceiling` consent dial + symmetric-pair `CharterDelta`);
+      `src/shared/validation/charterGate.ts` (`applyTrueCharterGate` True falsifiable-or-drop; `charterReviewDisposition`
+      low-confidence→flag-for-human; `gateCharterDelta` low-confidence-side→human); `intent_checkpoint.design_review`
+      upgraded additively (goal_graph/charters/ceiling); `blast_radius` optional on shared `Finding` + mergeFindings
+      priority tiebreaker. Deterministic/tool-owned, no LLM. `gateCharterDelta`/`CharterDelta` are test-covered only
+      until Phase C produces deltas (intentional intermediate state, not dead code).
+    - **Phase B (NEXT)** — overlay-and-delta operator `decompose(sources,target)→{consensus,contested}` (deterministic):
+      wire existing coupling signals (`graphSignals.ts` call/import, git co-change) + NEW comment-decomposition
+      (stripped/unstripped) + data/state coupling; multi-resolution stability scoring; the two non-co-localization
+      findings (behavioral-cluster-with-no-purpose / purpose-with-no-cluster).
+    - **Phase C** — charter extraction + conceptual prompts (LLM judgment, grounded+gated): Revealed(code) /
+      Stated(docs) / Inferred(LLM) / True-nomination through the gate; emit `CharterDelta`s. Extends
+      `designReviewPrompt.ts` / `conceptualDispatch.ts` (machinery already exists).
+    - **Phase D** — charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest` (port from
+      remediate, charter-keyed not finding-keyed); VOI-ranked question queue; the three dials (ceiling@intent_checkpoint
+      defaulted, attention loop, intensity auto); attention-0 = autonomous; blast-radius ranking + risk gate.
+    - **Phase E** — systemic improvement-seeking challenge loop: second-order adversary (SEPARATE agent,
+      [[delegate-adversarial-phases-to-separate-agent]]) loop-until-dry; mandate = optimization/better-way; feed
+      language-neutral aggregate metrics; findings carry their true lens (not a hardcoded `architecture` tag).
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
   (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the

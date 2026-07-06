@@ -8,9 +8,15 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.16** (interactive cost-first Gate-0 `provider_confirmation` step — priced pool,
-  operator reorder via `provider-confirmation.input.json`, host-roster self-report; a/b/c. Gate fires on every
-  interactive run. Plus `windowsHide` on all shipped subprocess spawns — no console-window pops on win32).
+- On npm as `latest` at **v0.32.17** — **conceptual design-review charter spine (Phase A)**: the deterministic
+  data-model spine of the conceptual/design-review build ([`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
+  [[conceptual-design-review-design]]). New `src/shared/types/charter.ts` (four charters
+  Stated/Inferred/Revealed/True + goal DAG with integer `premise_height` + `Ceiling` consent dial + symmetric-pair
+  `CharterDelta`) + `src/shared/validation/charterGate.ts` (True falsifiable-or-drop gate; low-confidence →
+  flag-for-human; delta downgrade); `intent_checkpoint.design_review` upgraded additively (goal_graph/charters/ceiling);
+  `blast_radius` optional on shared `Finding` + a mergeFindings priority tiebreaker. Tool-owned/deterministic — **no
+  LLM content yet** (extraction/operator/loop are phases B–E). `gateCharterDelta`/`CharterDelta` are test-covered
+  until Phase C produces deltas. Prior live headline (v0.32.16): interactive cost-first Gate-0 + `windowsHide`.
   Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
   [[live-status]]); this section is current-state + open-work roadmap only.
 - **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
@@ -41,11 +47,14 @@
   `host_model_cost_order`. The gate fires on every interactive run (even one/zero detected providers — the operator may
   want to add one discovery missed); headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md); detail in `docs/backlog.md` → Forward tracks.
-- **Immediate next: cost-first (d) — collision-price preference (low-pri, `docs/backlog.md` → Forward tracks).**
-  `resolveModelStatics` dedupes a model id first-sorted-provider-wins, so a reseller markup could win over the
-  native/cheapest price; revisit only if per-provider price matters (needs (provider, model) keying). Rethink
-  verdict stands: core dispatch/quota sound + ahead of field, no big simplification, AI-SDK swap dropped. Other standing
-  T5 options unchanged: deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
+- **Immediate next: conceptual design-review Phase B — the overlay-and-delta operator (deterministic).**
+  Owner opted into the conceptual + systemic-adversarial review as ONE build (2026-07-05); Phase A (spine) is live.
+  Phase B: `decompose(sources,target)→{consensus,contested}` as a pure primitive; wire the existing coupling
+  signals (`src/audit/extractors/graphSignals.ts`, git co-change) + NEW comment-decomposition (stripped/unstripped)
+  + data/state coupling; multi-resolution stability scoring; the two non-co-localization findings. Full phasing +
+  per-phase detail in `docs/backlog.md` → "Systemic reviewers must be pushed adversarially" forward track and
+  [[conceptual-design-review-design]]. Other standing (lower-pri) options unchanged: cost-first (d) collision-price
+  (`docs/backlog.md` → Forward tracks), deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
   **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -106,6 +115,13 @@ remains env-bound (T6-class). Detail in `docs/backlog.md`.
 
 ### T5 — Product / analysis forward tracks
 Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) — pointers only here:
+-1. **Conceptual + systemic-adversarial design review (ACTIVE track — owner-selected 2026-07-05).** ONE build,
+   five phases ([[conceptual-design-review-design]]; design of record
+   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)). **Phase A (data-model
+   spine) — ✅ SHIPPED v0.32.17.** **Phase B (next)** = overlay-and-delta operator (deterministic). C = charter
+   extraction + prompts (LLM); D = charter-delta clarification/triangulation loop + three dials; E = systemic
+   improvement-seeking challenge loop (loop-until-dry, separate adversary). Detail in `docs/backlog.md` →
+   "Systemic reviewers must be pushed adversarially" forward track.
 0. **Multi-provider routing rethink outcome (2026-07-05).** Verdict: core is sound + ahead of field, no big
    simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED. (b) `rollingEngine.ts`
    **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev static-metadata resolver**: W1 real context window — ✅
