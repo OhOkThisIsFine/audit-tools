@@ -2523,6 +2523,21 @@ function buildImplementDispatchItem(
   };
 }
 
+/**
+ * Absolute path to a block's implement worker result file for a run. Single
+ * source (same convention as {@link buildImplementDispatchItem}'s `result_path`)
+ * shared with triage's already-satisfied reconciliation guard: a passing tree
+ * verify only proves a node's work was DONE if a worker actually ran and left a
+ * result — no result file ⇒ "no worker ran", not "verified satisfied".
+ */
+export function implementResultPath(
+  artifactsDir: string,
+  runId: string,
+  blockId: string,
+): string {
+  return join(runDir(artifactsDir, runId, "implement"), `implement-${blockId}.result.json`);
+}
+
 export function buildImplementModelHint(
   block: RemediationBlock,
   state: RemediationState,
