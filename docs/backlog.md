@@ -29,42 +29,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Paused remediation run — operator-approved 10-node backlog-sweep plan on disk (2026-07-06).** A `/remediate-code`
-  run against `docs/backlog.md` + `docs/HANDOFF.md` drove the FULL contract pipeline to an operator-approved,
-  adversarially-hardened **10-node plan**: commit-gate staged-tree check, CI 3×-suite dedup, windowsHide sweep (all
-  `tests/**`), priority-chain fixture builder, staleness regen-drain, opencode union ceiling, split `dispatch.ts`,
-  Phase C residual (charters→conceptual prompt), Phase D clarification loop, Phase E systemic challenge loop. The
-  adversarial loop caught 3 real defects pre-code (inverted phase cut; opencode scoped to thin shims; windowsHide
-  guard/rewrite-surface mismatch). Artifacts persist **gitignored** in `.audit-tools/remediation/intake/contract/`
-  (`finalized_module_contracts.json`, `implementation_dag.json`, `test_validator_plan.json`) — they survive branch
-  switches. **Implement phase did NOT run** (dispatch bug below); nothing implemented, tree clean. Run state left at
-  `implementing` with nodes 1-4,7 FALSELY `resolved_no_change`.
-  **Update 2026-07-06 (this lap):** the false-close *root cause* is FIXED (friction (a) below — triage now refuses
-  `resolved_no_change` without a real worker result), so a re-drive can no longer false-close. **CP-NODE-4 (priority-chain
-  fixture builder) was picked up + SHIPPED separately** (see the priority-chain entry above). The other tractable nodes
-  are deferred to their own laps (each has its own backlog home): **CP-NODE-1** = commit-gate staged-tree (see
-  "Commit-gate hook validates the WORKING TREE" below — delicate every-commit-hook change, own lap); **CP-NODE-2** = CI
-  3×-suite dedup (see "CI test redundancy" below); **CP-NODE-3** = windowsHide tests sweep (see "windowsHide mop-up"
-  below); **CP-NODE-6** = opencode union ceiling (see "Reconcile the shared opencode.json" below); **CP-NODE-7/8/9/10**
-  (dispatch.ts split + Phase C/D/E) are conceptual-design-review roadmap tracks (drive deliberately, not via the
-  implement dispatch). **To resume THIS run's remaining nodes** you must still reopen the 5 falsely-`resolved_no_change`
-  items in gitignored `state.json` (no clean CLI reopen affordance yet) and drive conversation-first (NOT
-  `local-subprocess`); simpler to pick each node up as its own lap from its backlog home. Branch
-  `remediation/backlog-handoff-max-sweep-2026-07-06` has no commits (safe to delete).
+- **Max-sweep remediation run COMPLETE (2026-07-06).** The operator-approved 10-node
+  `backlog-handoff-max-sweep-2026-07-06` plan is fully landed and green — completed via manual node-by-node
+  recovery after a tool worktree-wipe / state-desync incident (see the worktree-wipe bug below). All 10 nodes
+  shipped; durable design/status lives in project memory [[remediate-max-sweep-run-2026-07-06]].
 
-- **Remediate contract/implement pipeline — dogfood frictions from the 2026-07-06 max-sweep run (fix in tooling).**
-  Six real frictions surfaced driving one large `/remediate-code` run (full walk in the run's friction record,
-  gitignored):
-  - **(biggest) Implement-dispatch false-resolves un-implemented nodes.** Triage's "already satisfied in the working
-    tree" ran each node's `targeted_commands`; when those were the generic `npm run build && npm run check` (pass on
-    ANY green tree) it reconciled un-implemented nodes to `resolved_no_change`. Combined with `provider:
-    local-subprocess` producing no worker results, a run can report success while implementing nothing.
-    **(a) SHIPPED** — triage's reverify now requires a real implement worker result file on disk before trusting
-    "satisfied"; no result ⇒ "no worker ran" ⇒ unsatisfied (route to retry), never `resolved_no_change`
-    (`reverifyBlockedItemAgainstTree` + `implementResultPath`, regression test in `tests/remediate/phase-triage.test.ts`).
-    **(b) still open** — DAG authoring should give each node a *discriminating* verify (a command that FAILS pre-change);
-    generic build+check is insufficient (a quality lift, no longer a false-close risk now that (a) blocks it).
-    Relates [[implement-dispatch-strands-nodes]].
+- **Remediate contract/implement pipeline — dogfood frictions (fix in tooling).**
+  Five open frictions surfaced driving one large `/remediate-code` run:
   - **Verbatim re-emit churn.** Every upstream contract change re-triggers critique→counterexample→judge AND forces
     the host to fully re-author each downstream artifact even when byte-identical (`test_validator_plan` /
     `contract_assessment_report` re-emitted 5-6× each). The tool consumes the `.input.json` into an envelope then
@@ -88,24 +59,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `wrapper/*-opencode.mjs`); only caught when the drafting agent read source. Decomposition should verify where
     named logic actually lives before assigning scope. Reinforces [[front-load-broad-search-before-contract-authoring]].
 
-- ~~**Adding one PRIORITY-chain obligation ripples through ~10 fixture tests (friction, 2026-07-05, Phase B).**~~
-  **SHIPPED** — `tests/audit/helpers/advancedBundle.mjs` `buildAdvancedBundle(root, target)` drives the pipeline via a
-  single ORDERED, target-keyed stage list (a new phase = one stage insert), `advanceFixtureToPlanning` delegates to it,
-  and `priority-chain-doc-sync.test.mjs` now asserts `PRIORITY.indexOf`-relative ordering + endpoints via
-  `expectObligationOrder`/`expectObligationEndpoint` instead of literal indices. Was max-sweep node CP-NODE-4.
+- **HIGH — remediate dispatch worktree-wipe + state-desync (concurrent `accept-node` corrupts sibling
+  in-flight nodes; 2026-07-06).** Driving implement waves through `remediate-code accept-node` while sibling
+  nodes are still in flight triggers two coupled failure modes: **(1) worktree-wipe** — a concurrent stale-sweep
+  prunes / `git reset`s sibling per-node worktrees under `.audit-tools/worktrees/`, wiping uncommitted work; a
+  fully-emptied worktree resolves up to MAIN so the build-free per-node verify **false-greens** against unrelated
+  code; **(2) state-desync** — `accept-node` reports nodes `accepted`/`resolved` that never landed on the run
+  branch (their worktree branch refs were clobbered to a sibling's commit), so `state.json` says resolved while
+  git says missing → the run **false-closes** with work absent. Fixes to build: (a) isolate/lock each node's
+  worktree so no node's `accept` can touch a sibling ref; (b) build-free verify must **fail-loud** when the git
+  toplevel ≠ the node's worktree root (never resolve up to MAIN); (c) reconcile accept-disposition vs
+  run-branch ancestry before trusting `resolved` (`git cat-file -e HEAD:<expected-file>`); (d) never let a
+  concurrent stale-sweep prune a worktree with in-flight/uncommitted work. Recovery procedure preserved in
+  [[remediate-max-sweep-run-2026-07-06]]. Relates [[implement-dispatch-strands-nodes]].
 
-
-- **Commit-gate hook validates the WORKING TREE, not the staged snapshot (hit 2026-07-05).** The
-  green-at-every-commit PreToolUse hook runs `npm run check` against the working tree/dist, so a *partial-stage*
-  commit that is internally broken can still pass: shipping a dead-module deletion as two commits, the first
-  `git add <one file> && git commit` bundled the already-`git rm`-staged deletions but left the compensating
-  barrel edit (`src/shared/index.ts`) unstaged → that commit in isolation deleted `rollingEngine.ts` while still
-  re-exporting it (red), yet the hook greenlit it because the *working tree* (barrel edit present) was green.
-  Caught by eye (file-count in the commit confirmation), not the gate. Real gap in the invariant: a split/partial
-  commit can violate green-at-every-commit undetected. Fix: have the gate check the *staged* tree (e.g. `git
-  stash -k --include-untracked` → build+check → pop, or a temp-index checkout) so the committed snapshot is what's
-  validated, not the working tree. (Note: `git rm` stages deletions immediately — a subsequent scoped `git add`
-  does NOT isolate them.)
+- **Staleness regen-drain shipped opt-in — benefit dormant on the conversation-first path (efficiency-only,
+  2026-07-06).** Node-5's `advanceAudit` drain loop (`AdvanceAuditOptions.drain`) defaults false and no
+  production caller opts in, because the drain crosses interactive / host-input FOLD boundaries
+  (`provider_confirmation` / `analyzer_install` / `edge_reasoning` / `confirm_intent`) its executor-registry
+  stop-gate can't see. So the regen-chatter reduction it was meant to deliver is inert on the primary path. A
+  **fold-aware drain** (stops at host-input folds) or an **autonomy driver that opts in** would land it.
+  Efficiency-only, not a correctness bug.
 
 - **Shipping from a linked worktree forces a manual FF + rebuild dance (observed 2026-07-05).** The release
   script (`scripts/release-and-publish.mjs`) hard-guards on being ON the default branch (`git branch
@@ -125,15 +99,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   NIM" already existed (`gatherReferencedFiles`) — the real bug was the single-shot output-contract leak.
   Reinforces [[backlog-item-states-invariant-not-fix-mechanism]]: read the named mechanism against source
   before building it, and prefer the narrowest correct fix over the backlog's prescribed rewrite.
-
-- **CI test redundancy: the vitest suite runs ~3× per push across workflows (observed 2026-07-04).** After
-  sharding `ci.yml` + `publish-package.yml` (vitest = ~93% of the release gate; now sharded 4 ways → ~2×
-  faster gate), `audit-code-test-suite.yml` still runs the *full* `npm test` on Node 20 **and** 22 (its
-  distinct value is Node-20 type-stripping coverage `ci.yml` lacks). Net: a normal `src/` push runs the
-  suite in `ci.yml` (Node 22) + `audit-code-test-suite.yml` (Node 20 + 22) = 3 full runs. Follow-up:
-  shard `audit-code-test-suite.yml` too, and/or fold the Node-20 line into a single sharded matrix so the
-  suite runs once per Node line, sharded — not 3× whole. Deferred (not on the release-blocking path; only
-  `publish-package.yml` gates the `/ship` wait).
 
 - **Optional: cut vitest `collect` (~186s) / per-file isolation overhead (noted 2026-07-04).** Full-suite
   `collect` is ~186s of module load/transform for 430 files; default `pool: 'forks'` adds per-file process
@@ -189,33 +154,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
-- **`next-step` emits repeated `staleness` chatter while regenerating artifacts.** Harmless but noisy — many
-  `staleness` records surfaced to host during artifact regen. **Retargeted 2026-07-04:** this is NOT a
-  `nextStepCommand`-layer aggregation — the CLI layer surfaces no staleness-record list; the "chatter" is a
-  cross-invocation phenomenon (each `next-step` during regen emits its own step). A real fix eagerly drains
-  regen inside one `advanceAudit` pass — an **orchestrator-level** change (`advance.ts`/`nextStep.ts`), not a
-  bounded CLI fix. Codex run 2026-07-03.
-
-- **Reconcile the shared `opencode.json` via a union permission ceiling; regen-guard the remediate side
-  (2026-07-04).** Both installers (`audit-code ensure`, `remediate-code ensure`) write one shared repo-root
-  `opencode.json` carrying a top-level `permission` default plus per-agent blocks. Today top-level is treated
-  as the *auditor's* private policy and a parity invariant (INV-RCI-16) pins it byte-equal to the auditor
-  block — so when the remediate installer regenerates the file, its commands land at top-level and break that
-  parity, which is why the remediate-side asset can't yet be renderer-gated like the audit side. **Desired
-  end-state:** top-level `permission.bash` becomes the deterministic **union** of every agent's bash rules —
-  a true global privilege *ceiling* — and the parity invariant is reframed from "top-level equals the auditor
-  block" to "each agent's rules are a subset of top-level, and top-level introduces no command no agent
-  needs." Both installers may then regenerate the shared file in any order, idempotently. Two hard
-  requirements: (1) widening the ceiling must **not** silently grant a read-only agent another tool's
-  mutating commands — a wildcard `*: allow` must be matched by explicit per-agent denies so least-privilege
-  still holds; (2) both installers' verifiers must accept each other's keys in the shared blocks (today
-  they're **mutually blind** — one greenlights exactly the state the other rejects), so either side is
-  independently regen-guardable. **Direction this serves:** the auditor/remediator distinction is a vestigial
-  holdover from when they were two separate projects and should be dissolved wherever possible
-  ([[dissolve-auditor-remediator-distinction]]). As it dissolves, the two agent blocks collapse toward a
-  single unified policy and the union degenerates to that one policy — build the union model so it lands
-  cleanly on one agent, not so it entrenches two.
-
 ## Forward tracks
 
 - **Cost-first routing — collision-price preference (carried from W1, open).** Design of record
@@ -237,10 +175,9 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (`hasClaudeCodeConfig && claudeAvailable && hasOpenCodeConfig && opencodeAvailable`), Rule 6 makes explicit
   claude config win; deleting it lets the opencode config-gated rung fire first → resolution flips
   claude-code→opencode. Rule 6 is a predicate-subset of Rule 9 but NOT redundant in the ordered table. Leave it.
-  Remaining (still valid): split remediate `dispatch.ts` (now ~4,590 LOC; ~60-85% is
-  git-worktree/write-scope/merge machinery, misfiled not duplicated — audit's dispatch is far smaller, zero git);
-  inline `makeProviderKeyedFactory` (19 LOC, 2 sites — but it's a cross-area generic with its own dedicated test
-  `tests/shared/provider-keyed-factory.test.mjs`; inlining loses cohesion, marginal — low value).
+  Remaining (still valid): inline `makeProviderKeyedFactory` (19 LOC, 2 sites — but it's a cross-area generic
+  with its own dedicated test `tests/shared/provider-keyed-factory.test.mjs`; inlining loses cohesion,
+  marginal — low value).
   Do NOT delete working proactive quota sources (`BaseHttpQuotaSource` + one-array register is already clean);
   `copilot` is correctly broker-only.
 
@@ -283,16 +220,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
       `structure_decomposition_current`) → charter extraction (`src/shared/decompose/charterExtraction.ts`,
       obligation `charter_extraction_current`, `charter_register.json`, ceiling-gated LLM prompt
       `src/audit/cli/charterExtractionPrompt.ts`). Design of record
-      [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md).
-      **Phase-C residual (small):** the extracted charters are NOT yet threaded into the
-      `design_review_conceptual` prompt — that pass stays charter-unaware; deltas `routed_to:"clarification"`
-      surface as findings until Phase D's loop. Fold into D or do standalone.
-    - **Phase D (NEXT)** — charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest` (port from
-      remediate, charter-keyed not finding-keyed); VOI-ranked question queue; the three dials (ceiling@intent_checkpoint
-      defaulted, attention loop, intensity auto); attention-0 = autonomous; blast-radius ranking + risk gate.
-    - **Phase E** — systemic improvement-seeking challenge loop: second-order adversary (SEPARATE agent,
-      [[delegate-adversarial-phases-to-separate-agent]]) loop-until-dry; mandate = optimization/better-way; feed
+      [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md). The extracted
+      charters are threaded into the `design_review_conceptual` prompt so the generative pass opines per-charter.
+    - **Phase D — ✅ SHIPPED.** Charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest`
+      (charter-keyed, ported from remediate), VOI-ranked question queue, the three dials
+      (ceiling@intent_checkpoint defaulted, attention loop, intensity auto), attention-0 = autonomous,
+      blast-radius ranking + risk gate. Obligation `charter_clarification_current`.
+    - **Phase E — ✅ SHIPPED.** Systemic improvement-seeking challenge loop: second-order adversary (SEPARATE agent,
+      [[delegate-adversarial-phases-to-separate-agent]]) loop-until-dry; mandate = optimization/better-way; feeds
       language-neutral aggregate metrics; findings carry their true lens (not a hardcoded `architecture` tag).
+      Obligation `systemic_challenge_current` (true-lens seam).
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
   (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the

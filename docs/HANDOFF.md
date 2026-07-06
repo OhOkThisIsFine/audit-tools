@@ -8,29 +8,27 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.19** — **conceptual design-review Phase C: charter extraction + conceptual
-  prompts (LLM, grounded+gated)**. The charter LAYER end-to-end ([`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
-  [[conceptual-design-review-design]]): the deterministic ENFORCEMENT half `src/shared/decompose/charterExtraction.ts`
-  (`assembleCharterRegister` — id assignment, the routing table, Phase-A gates applyTrueCharterGate/gateCharterDelta,
-  deltas→Finding leads) + the host_delegation obligation `charter_extraction_current` (PRIORITY idx 11) with
-  `src/audit/orchestrator/charterExtractionExecutor.ts` (ceiling-gated: `shallow` omits deterministically —
-  conversation-first opt-in; `deep`/`deepest` emits the LLM charter-extraction prompt) writing
-  `charter_register.json` (an OUTPUT artifact — charters stay off the intent checkpoint it depends on, no cycle);
-  routed charter-delta leads surfaced via mergeFindings/synthesis. This is the FIRST LLM-judgment content in the
-  conceptual pipeline (A/B were deterministic). Prior live headlines: Phase B (v0.32.18) overlay-and-delta
-  structure layer; Phase A (v0.32.17) charter spine.
-  Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
-  [[live-status]]); this section is current-state + open-work roadmap only.
-- **Immediate next: conceptual design-review Phase D — charter-delta → clarification/triangulation loop.** Port an
-  audit-side `ClarificationRequest` (from remediate, charter-keyed not finding-keyed); VOI-ranked question queue;
-  the three dials (ceiling@intent_checkpoint defaulted, attention loop, intensity auto); attention-0 = autonomous;
-  blast-radius ranking + risk gate. Charter deltas currently `routed_to:"clarification"` just surface as findings —
-  Phase D makes them an interactive loop. Full phasing in `docs/backlog.md` → "Systemic reviewers must be pushed
-  adversarially" + [[conceptual-design-review-design]]. **Phase C residual (small, foldable into D or standalone):**
-  thread the extracted charters INTO the `design_review_conceptual` prompt so the generative pass opines per-charter
-  (today Phase C surfaces deltas as findings but the conceptual pass stays charter-unaware). Other standing
-  (lower-pri) options unchanged: cost-first (d) collision-price (`docs/backlog.md` → Forward tracks),
-  deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
+- On npm as `latest` (version bumps on the pending release — the release script sets it; the branch carrying the
+  max-sweep + Phase D/E work is green and ready to ship). **Conceptual design-review Phases A–E all landed:** the
+  charter LAYER, overlay-and-delta structure operator, charter extraction + charter-aware conceptual prompt
+  (LLM), the charter-delta clarification/triangulation loop (obligation `charter_clarification_current`), and the
+  systemic improvement-seeking challenge loop (obligation `systemic_challenge_current`, true-lens seam). Design of
+  record [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
+  [[conceptual-design-review-design]]. Per-lap shipped detail is NOT narrated here (changelog creep — see `git log`
+  and project memory [[live-status]]); this section is current-state + open-work roadmap only.
+- **Immediate next: fix the remediate dispatch worktree-wipe + state-desync tool bug (HIGH).** Concurrent
+  `accept-node` prunes sibling in-flight worktrees (wipes uncommitted work; the emptied worktree false-greens
+  against MAIN) and desyncs `state.json` from git (reports nodes resolved that never landed → false-close). Four
+  fixes: isolate/lock per-node worktrees, fail-loud when git-toplevel ≠ node worktree root, reconcile
+  accept-disposition vs run-branch ancestry before trusting `resolved`, and never let a stale-sweep prune a
+  worktree with in-flight work. Full detail + recovery procedure in `docs/backlog.md` → Open bugs +
+  [[remediate-max-sweep-run-2026-07-06]].
+- **Then:** node-5 staleness regen-drain is shipped opt-in and no production caller opts in (crosses host-input
+  FOLD boundaries) → its regen-chatter benefit is dormant on the conversation-first path; a fold-aware drain or an
+  autonomy-driver opt-in would land it (efficiency-only, `docs/backlog.md`). Then the remaining env-bound live
+  validations (quota pre-wall pacing, friction escalation, selective-deepening convergence, clippy/rubocop live
+  spawn) and the lower-pri standing options: cost-first (d) collision-price, CE-004 NIM guided-decoding
+  (`docs/backlog.md` → Forward tracks).
 - **Dispatch admission-control — residual (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -40,19 +38,13 @@
   quota-aware dispatch, env-bound).
 - **⚠️ Stale-worktree trap:** ALWAYS `git fetch audit-tools main && git log HEAD..audit-tools/main` before
   starting a lap — this worktree branched behind main and had to fast-forward + re-read HANDOFF/backlog.
-- **⏸ Paused remediation run (2026-07-06) — false-close root cause now FIXED; tractable subset partially picked up.**
-  The `/remediate-code` max-sweep produced an operator-approved 10-node plan (gitignored in
-  `.audit-tools/remediation/intake/contract/`); its implement phase never ran (`local-subprocess` produced no worker
-  results) and triage FALSELY reconciled nodes to `resolved_no_change`. **This lap:** the triage false-close bug is
-  FIXED (a no-worker-result guard — see `docs/backlog.md` friction (a)), and **CP-NODE-4 (priority-chain fixture builder)
-  shipped**. The remaining tractable nodes (CP-NODE-1 commit-gate staged-tree, -2 CI dedup, -3 windowsHide sweep, -6
-  opencode union ceiling) are each deferred to their own laps with a backlog home; CP-NODE-7/8/9/10 are the dispatch-split
-  + Phase C/D/E roadmap tracks (drive deliberately). Resuming THIS run's leftover nodes still needs reopening the stale
-  `resolved_no_change` items in gitignored `state.json` — simpler to pick each up from its backlog home. Full detail +
-  the 6 dogfood frictions → `docs/backlog.md` → Open bugs.
-- **Open items** (all in `docs/backlog.md`): remediate-side `opencode.json` drift/`INV-RCI-16`
-  reconciliation; env-bound live validations (quota pre-wall pacing, friction escalation,
-  selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004.
+- **✅ Max-sweep remediation run COMPLETE (2026-07-06).** The 10-node `backlog-handoff-max-sweep-2026-07-06` plan
+  fully landed (manual node-by-node recovery after the worktree-wipe/state-desync incident above). Durable
+  status/recovery in [[remediate-max-sweep-run-2026-07-06]]; the tool bug it exposed is the immediate-next item.
+- **Open items** (all in `docs/backlog.md`): the worktree-wipe/state-desync tool bug (immediate-next above);
+  node-5 dormant drain; five remaining remediate dogfood frictions; env-bound live validations (quota pre-wall
+  pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn); provider-blocked
+  schema CE-004.
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
@@ -101,14 +93,13 @@ remains env-bound (T6-class). Detail in `docs/backlog.md`.
 
 ### T5 — Product / analysis forward tracks
 Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) — pointers only here:
--1. **Conceptual + systemic-adversarial design review (ACTIVE track — owner-selected 2026-07-05).** ONE build,
-   five phases ([[conceptual-design-review-design]]; design of record
-   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)). **Phase A (data-model
-   spine) — ✅ SHIPPED v0.32.17.** **Phase B (overlay-and-delta operator, deterministic) — ✅ SHIPPED v0.32.18.**
-   **Phase C (charter extraction + conceptual prompts, LLM) — ✅ SHIPPED v0.32.19.** **Phase D (next)** =
-   charter-delta clarification/triangulation loop + three dials; E = systemic improvement-seeking challenge loop
-   (loop-until-dry, separate adversary). Detail in `docs/backlog.md` → "Systemic reviewers must be pushed
-   adversarially" forward track.
+-1. **Conceptual + systemic-adversarial design review — ✅ COMPLETE (all five phases).** ONE build
+   ([[conceptual-design-review-design]]; design of record
+   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)): Phase A (data-model
+   spine), B (overlay-and-delta operator), C (charter extraction + charter-aware conceptual prompt, LLM), D
+   (charter-delta clarification/triangulation loop, obligation `charter_clarification_current`), E (systemic
+   improvement-seeking challenge loop, obligation `systemic_challenge_current`, true-lens seam) all landed.
+   Durable design in `docs/backlog.md` → "Systemic reviewers must be pushed adversarially" forward track.
 0. **Multi-provider routing rethink outcome (2026-07-05).** Verdict: core is sound + ahead of field, no big
    simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED. (b) `rollingEngine.ts`
    **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev static-metadata resolver**: W1 real context window — ✅
