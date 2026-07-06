@@ -8,10 +8,14 @@
 import type { SessionConfig } from "audit-tools/shared";
 import {
   discoverProviders,
-  annotateConfirmedPoolCost,
+  annotateConfirmedPool,
   PROVIDER_CONFIRMATION_RESULT_VERSION,
 } from "audit-tools/shared";
-import type { ProviderConfirmationResult, ConfirmedPoolEntry } from "audit-tools/shared";
+import type {
+  ProviderConfirmationResult,
+  ConfirmedPoolEntry,
+  ProviderConfirmationInput,
+} from "audit-tools/shared";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -27,11 +31,16 @@ import type { ProviderConfirmationResult, ConfirmedPoolEntry } from "audit-tools
  * @param sessionConfig - Current session config; may be an empty `{}`.
  * @param env           - Process environment snapshot; defaults to `process.env`.
  * @param exclude       - Provider names to pre-exclude (e.g. user-supplied from a prior gate).
+ * @param input         - Operator's Gate-0 submission (interactive path): its
+ *   `cost_order` overrides the suggested ordering on the per-tool pool so the
+ *   seam artifact reflects the operator's ordering. Dispatch reads the SHARED
+ *   confirmation, so this only keeps the per-tool file consistent. Omit headless.
  */
 export function confirmProviders(
   sessionConfig: SessionConfig,
   env: NodeJS.ProcessEnv = process.env,
   exclude: string[] = [],
+  input?: ProviderConfirmationInput,
 ): ProviderConfirmationResult {
   const discovered = discoverProviders(sessionConfig, env);
   const excludeSet = new Set<string>(exclude);
@@ -66,10 +75,10 @@ export function confirmProviders(
     schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
     confirmed_at: new Date().toISOString(),
     // Cost-first routing: annotate each entry with its representative model price
-    // + a suggested cost_order (spec/cost-first-routing.md). Read at dispatch as
-    // rung 1 of costRank. Uses the real sessionConfig so a configured API/CLI model
-    // is priceable here; host-native tiers are priced deterministically at dispatch.
-    provider_pool: annotateConfirmedPoolCost(pool, sessionConfig),
+    // + cost_order (spec/cost-first-routing.md). Read at dispatch as rung 1 of
+    // costRank. Uses the real sessionConfig so a configured API/CLI model is
+    // priceable here; an operator `input.cost_order` overrides the suggestion.
+    provider_pool: annotateConfirmedPool(pool, sessionConfig, input).provider_pool,
     session_level: true,
   };
 }

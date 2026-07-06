@@ -698,6 +698,7 @@ export {
   applyProviderConfirmationSelections,
   representativeModelId,
   annotateConfirmedPoolCost,
+  annotateConfirmedPool,
 } from "./providers/providerConfirmation.js";
 export {
   commandExists,
@@ -1154,12 +1155,16 @@ export { ROLLING_DISPATCH_ENGINE_VERSION } from "./types/rollingDispatch.js";
 export type {
   ConfirmedPoolEntry,
   ProviderConfirmationResult,
+  ProviderConfirmationInput,
 } from "./types/providerConfirmation.js";
-export { PROVIDER_CONFIRMATION_RESULT_VERSION } from "./types/providerConfirmation.js";
+export {
+  PROVIDER_CONFIRMATION_RESULT_VERSION,
+  PROVIDER_CONFIRMATION_INPUT_VERSION,
+} from "./types/providerConfirmation.js";
 
 // DC-2 — shared session-level provider confirmation (cross-tool Gate-0 artifact)
 export type { SharedProviderConfirmation, SharedProviderConfirmationRead } from "./providers/sharedProviderConfirmation.js";
-export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, currentProviderRoster, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions } from "./providers/sharedProviderConfirmation.js";
+export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, currentProviderRoster, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput } from "./providers/sharedProviderConfirmation.js";
 
 export type {
   EncodedClause,

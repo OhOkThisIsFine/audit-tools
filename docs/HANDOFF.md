@@ -32,16 +32,20 @@
   and `readConfirmedCostPositions` threads that into both dispatch sites — a NET-NEW confirmation→dispatch link (the
   confirmed pool was written but never influenced routing before). Design of record:
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md). W1 (real context window) shipped the prior lap.
-- **Immediate next: cost-first follow-ups (this sprint's deferred pieces — detail in `docs/backlog.md` → Forward tracks).**
-  Gate-0 today only *suggests* the ordering deterministically (no interactive operator REORDER surface exists) and can
-  only price configured `openai_compatible`/`codex` models — the host's own model roster is dispatch-time, so host-native
-  tiers route by real price at dispatch, not operator-confirmed at the outset. Three follow-ups: (a) surface the suggested
-  ordering in the host-facing provider_confirmation prompt (visibility); (b) an interactive reorder/submission path so the
-  operator can override the suggestion; (c) host-roster-at-Gate-0 so host-native tiers are confirmable at the outset too.
-  Also carried: the **collision-price caveat** — `resolveModelStatics` dedupes a model id first-sorted-provider-wins, so a
-  reseller markup could win over the native/cheapest price; revisit if per-provider price matters. Rethink verdict stands:
-  core dispatch/quota sound + ahead of field, no big simplification, AI-SDK swap dropped. Other standing T5 options
-  unchanged: deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
+- **Cost-first Gate-0 is now INTERACTIVE — ✅ SHIPPED this lap (follow-ups a/b/c).** `provider_confirmation` is an
+  interactive host-delegation step on the audit CLI path (parallel to `confirm_intent`): (a) the host sees the priced
+  pool (`renderProviderConfirmationPrompt`), (b) reorders/excludes via a `provider-confirmation.input.json` input the tool
+  promotes into both canonical artifacts (per-tool seam + shared confirmation), and (c) self-reports its model roster
+  (`host_models`) so host-native tiers are priced + confirmable at the outset and thread to dispatch by `model_id` via
+  `host_model_cost_order`. The gate fires only when ≥2 dispatchable providers exist (no empty gate — conversation-first);
+  headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
+  [`spec/cost-first-routing.md`](../spec/cost-first-routing.md); detail in `docs/backlog.md` → Forward tracks.
+- **Immediate next: cost-first (d) — collision-price preference (low-pri, `docs/backlog.md` → Forward tracks).**
+  `resolveModelStatics` dedupes a model id first-sorted-provider-wins, so a reseller markup could win over the
+  native/cheapest price; revisit only if per-provider price matters (needs (provider, model) keying). Also deferred:
+  single-provider host-tier confirmation (the gate skips single-provider runs — an opt-in a flag could add). Rethink
+  verdict stands: core dispatch/quota sound + ahead of field, no big simplification, AI-SDK swap dropped. Other standing
+  T5 options unchanged: deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
   **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -105,10 +109,10 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
 0. **Multi-provider routing rethink outcome (2026-07-05).** Verdict: core is sound + ahead of field, no big
    simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED. (b) `rollingEngine.ts`
    **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev static-metadata resolver**: W1 real context window — ✅
-   SHIPPED; **W2 real price → `costRank`** + Gate-0 cost-aware confirmation (rung 1) — ✅ SHIPPED (design of record
-   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md)). Remaining cost-first follow-ups (interactive reorder
-   UX, roster-at-Gate-0, host-prompt visibility, collision-price preference) in `docs/backlog.md` → *Forward tracks*.
-   *([[provider-routing-offload-b-to-ai-sdk]])*
+   SHIPPED; **W2 real price → `costRank`** + Gate-0 cost-aware confirmation — ✅ SHIPPED, now an **interactive
+   `provider_confirmation` step** (host-prompt visibility + operator reorder + host-roster-at-Gate-0 all shipped; design
+   of record [`spec/cost-first-routing.md`](../spec/cost-first-routing.md)). Only remaining cost-first follow-up:
+   collision-price preference (low-pri) in `docs/backlog.md` → *Forward tracks*. *([[provider-routing-offload-b-to-ai-sdk]])*
 1. **Deterministic analyzers — own-vs-acquire acquisition engine.** Open: clippy/rubocop live spawn
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
 2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint

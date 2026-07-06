@@ -31,6 +31,17 @@ async function withTempRepo(fn) {
         "",
       ].join("\n"),
     );
+    // Pre-satisfy the interactive provider-confirmation gate (accept the suggested
+    // ordering) so tests that assert a specific FIRST next-step reach it directly.
+    // Without this the gate would halt first whenever the host has ≥2 dispatchable
+    // providers on PATH — a PATH-dependent (non-hermetic) stop point orthogonal to
+    // what these tests exercise.
+    const seededArtifactsDir = join(root, ".audit-tools/audit");
+    await mkdir(seededArtifactsDir, { recursive: true });
+    await writeFile(
+      join(seededArtifactsDir, "provider-confirmation.input.json"),
+      JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
+    );
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -174,6 +185,17 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
       await writeFile(
         step.artifact_paths.edge_reasoning_results,
         JSON.stringify([], null, 2) + "\n",
+      );
+      continue;
+    }
+    if (step.step_kind === "provider_confirmation") {
+      await writeFile(
+        step.artifact_paths.provider_confirmation_input,
+        JSON.stringify(
+          { schema_version: "provider-confirmation-input/v1" },
+          null,
+          2,
+        ) + "\n",
       );
       continue;
     }

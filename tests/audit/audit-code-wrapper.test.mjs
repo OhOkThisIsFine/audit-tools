@@ -289,6 +289,17 @@ async function startDispatchRun(root) {
       );
       continue;
     }
+    if (step.step_kind === "provider_confirmation") {
+      await writeFile(
+        step.artifact_paths.provider_confirmation_input,
+        JSON.stringify(
+          { schema_version: "provider-confirmation-input/v1" },
+          null,
+          2,
+        ) + "\n",
+      );
+      continue;
+    }
     if (step.step_kind === "confirm_intent") {
       await writeFile(
         step.artifact_paths.intent_checkpoint,

@@ -5,6 +5,7 @@ import {
   writeJsonFile,
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
+  readProviderConfirmationInput,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { confirmProviders } from "./providerConfirmation.js";
@@ -128,19 +129,39 @@ export async function runProviderConfirmationAutoComplete(
   const sessionConfig = artifactsDir
     ? await loadSessionConfig(artifactsDir).catch(() => ({}))
     : {};
-  const confirmation = confirmProviders(sessionConfig);
+  // Interactive Gate-0: the host may have submitted an operator ordering + host
+  // roster to `provider-confirmation.input.json` (spec/cost-first-routing.md).
+  // Absent ⇒ the tool's price-ascending suggestion (headless / no-operator path).
+  const input = artifactsDir
+    ? await readProviderConfirmationInput(artifactsDir)
+    : null;
+  const confirmation = confirmProviders(
+    sessionConfig,
+    process.env,
+    input?.exclude ?? [],
+    input ?? undefined,
+  );
   const artifactsWritten = ["provider_confirmation.json"];
   if (root) {
     await writeSharedProviderConfirmation(
       root,
-      buildSharedProviderConfirmation(sessionConfig),
+      buildSharedProviderConfirmation(
+        sessionConfig,
+        process.env,
+        input?.exclude ?? [],
+        input?.include ?? [],
+        undefined,
+        input ?? undefined,
+      ),
     );
     artifactsWritten.push("provider-confirmation.json");
   }
   return {
     updated: { ...bundle, provider_confirmation: confirmation },
     artifacts_written: artifactsWritten,
-    progress_summary: "Auto-completed provider confirmation gate (headless).",
+    progress_summary: input
+      ? "Applied operator provider confirmation (cost ordering + host roster)."
+      : "Auto-completed provider confirmation gate (headless).",
   };
 }
 

@@ -27,6 +27,81 @@ import type { CapabilityTier } from "../providers/providerConfirmation.js";
 export const PROVIDER_CONFIRMATION_RESULT_VERSION = "1.1.0" as const;
 
 // ---------------------------------------------------------------------------
+// Interactive Gate-0 operator input (spec/cost-first-routing.md — Gate-0)
+// ---------------------------------------------------------------------------
+
+/**
+ * Schema version for the operator-written Gate-0 input file
+ * (`<root>/.audit-tools/provider-confirmation.input.json`). The HOST writes this
+ * plain input; the tool owns the canonical envelope it is promoted into (the
+ * per-tool `provider_confirmation.json` seam + the shared
+ * `provider-confirmation.json`) — the input/envelope split so the tool stays the
+ * sole writer of the roster snapshot + cost annotation.
+ */
+export const PROVIDER_CONFIRMATION_INPUT_VERSION =
+  "provider-confirmation-input/v1" as const;
+
+/**
+ * One model the host self-reports at the confirmation step so its host-native
+ * tiers are priced + ordered at Gate-0 (follow-up c) rather than only
+ * deterministically at dispatch. `model_id` is both the price-lookup key
+ * (models.dev) and the dispatch cost-position key. Never hardcoded — the host
+ * supplies it.
+ */
+export interface HostRosterModel {
+  /** Model id used to price (models.dev) and to key the dispatch cost position. */
+  model_id: string;
+  /** Optional capability tier for the price-unknown tiebreak in the suggestion. */
+  tier?: CapabilityTier;
+}
+
+/**
+ * The operator's Gate-0 submission. Every field is optional beyond the version:
+ * an empty `{ schema_version }` accepts the tool's suggested ordering verbatim
+ * (the presence of the file is the "operator has acted" signal). The tool applies
+ * it degrade-safe — unknown keys in `cost_order` are ignored, omitted candidates
+ * keep their suggested relative order.
+ */
+export interface ProviderConfirmationInput {
+  /** Must equal PROVIDER_CONFIRMATION_INPUT_VERSION. */
+  schema_version: typeof PROVIDER_CONFIRMATION_INPUT_VERSION;
+  /**
+   * Operator's confirmed ordering as a list of candidate keys (provider names
+   * and/or host `model_id`s), cheapest-first. Array index becomes `cost_order`.
+   * Omit to accept the tool's price-ascending suggestion. A unified space over
+   * both provider pools and host models so one total cost order drives dispatch.
+   */
+  cost_order?: string[];
+  /** Provider names to exclude from the dispatchable pool. */
+  exclude?: ResolvedProviderName[];
+  /** Self-spawn-blocked provider names the operator opts back IN. */
+  include?: ResolvedProviderName[];
+  /**
+   * Host self-reported model roster (follow-up c). Each becomes a priced,
+   * orderable candidate whose confirmed position threads to dispatch by
+   * `model_id` via `host_model_cost_order`.
+   */
+  host_models?: HostRosterModel[];
+}
+
+/**
+ * A host-native model's persisted cost position (follow-up c). Lives on the
+ * shared confirmation alongside `provider_pool`; merged into the model-keyed
+ * dispatch positions map by `resolveConfirmedCostPositions` so a host tier routes
+ * by its operator-confirmed order exactly like a configured pool does. Kept as a
+ * separate list (not extra `provider_pool` entries) so no `provider_pool` consumer
+ * has to tolerate duplicate provider names.
+ */
+export interface HostModelCostEntry {
+  /** Host model id — the dispatch cost-position key. */
+  model_id: string;
+  /** Blended $/Mtok from models.dev, or `null` when unpriceable. Advisory. */
+  blended_price_usd_per_mtok: number | null;
+  /** Operator-confirmed 0-based cost position (rung 1 of costRank). */
+  cost_order: number;
+}
+
+// ---------------------------------------------------------------------------
 // Contract types
 // ---------------------------------------------------------------------------
 

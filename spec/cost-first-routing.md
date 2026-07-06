@@ -61,22 +61,40 @@ rung supersedes all of this whenever the operator has approved an ordering.
 
 ## Where the ordering is confirmed (Gate-0)
 
-`provider_confirmation` is the run's first obligation and already presents the discovered
-provider pool to the operator. It is extended to be cost-aware:
+`provider_confirmation` is the run's first obligation. On the conversation-first audit CLI
+path it is an **interactive host-delegation step** (parallel to `confirm_intent`): the tool
+renders the suggested priced pool and the host confirms or reorders it. Headless
+(`advanceAudit`, no CLI host) auto-completes with the tool's suggestion, so nothing blocks
+when there is no operator.
 
-- **Candidate models are gathered from every knowable source at the step:** the host
-  self-reports its model roster (it *is* the agent — the same data as `--host-models`, just
-  gathered at confirmation), plus any configured source models (`openai_compatible.model`,
-  `sources[].model`). A CLI backend whose roster is not knowable until spawn (e.g. codex)
-  contributes at provider granularity, priced "resolved at dispatch" and placed by
-  capability tier in the suggestion.
+- **Candidate models are gathered from every knowable source at the step:** any configured
+  source models (`openai_compatible.model`, `codex.model`) are priced at the outset; the host
+  **self-reports its own model roster** in the step's input (`host_models` — it *is* the agent,
+  so the roster is knowable at confirmation), and those host-native tiers are then priced +
+  ordered here too rather than only at dispatch. A CLI backend whose roster is not knowable
+  until spawn (e.g. codex) contributes at provider granularity, priced "resolved at dispatch"
+  and placed by capability tier in the suggestion.
 - **The tool prices each candidate** via `resolveModelStatics`, computes the blended $/Mtok,
   and **suggests an ordering** (ascending price, capability tiebreak). Unknown-price
   candidates are flagged and placed last within their tier.
-- **The operator confirms or reorders.** The confirmed ordering is persisted on
-  `ConfirmedPoolEntry.cost_order` (→ `SessionConfig.confirmed_provider_pool`) and read back at
-  dispatch as rung 1. Remediate reads the same persisted confirmation (it has no standalone
-  confirmation step; it consumes the audit-side pool).
+- **The operator confirms or reorders — input/envelope split.** The host writes a plain
+  `provider-confirmation.input.json` (schema `provider-confirmation-input/v1`: an optional
+  `cost_order` list of provider/model keys, `exclude`/`include`, and `host_models`); the tool
+  owns the canonical envelope. Its presence is the "operator has acted" signal that flips the
+  gate from *emit the step* to *consume the input*: the deterministic executor then promotes
+  the submission into BOTH canonical artifacts — the per-tool `provider_confirmation.json`
+  seam and the shared `provider-confirmation.json` — with the tool-owned roster snapshot +
+  cost annotation. The operator supplies only ordering intent + a model roster; the tool never
+  asks it to hand-author prices, capability flags, or the roster snapshot. The confirmed order
+  is persisted on `ConfirmedPoolEntry.cost_order` (provider pools) and `host_model_cost_order`
+  (host tiers), both read back at dispatch as rung 1 via a single model-keyed positions map.
+  Remediate reads the same persisted confirmation (it has no standalone confirmation step; it
+  consumes the audit-side pool).
+- **The gate only fires when there is a real decision.** It pauses the operator only when more
+  than one *dispatchable* provider exists (excluding operator-excluded / self-spawn-blocked
+  entries and the always-present `local-subprocess` fallback). A single-provider run has
+  nothing to order, so the gate auto-completes silently — no empty pause (conversation-first).
+  Host-native tiers in that single-provider case are still priced at dispatch.
 
 The suggestion is best-effort at Gate-0 (it prices what is knowable there); the deterministic
 price→`costRank` engine at dispatch — where the per-model roster is always known — is the

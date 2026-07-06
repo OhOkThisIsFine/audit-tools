@@ -48,6 +48,16 @@ test("runDeterministicForNextStep advances through all deterministic obligations
     await mkdir(artifactsDir, { recursive: true });
     await ensureSupervisorDirs(artifactsDir);
 
+    // Pre-satisfy the interactive provider-confirmation gate (accept the suggested
+    // ordering verbatim) so the run advances through the whole deterministic block
+    // to the intent checkpoint. Without this the gate would halt first whenever the
+    // host has ≥2 dispatchable providers on PATH — a PATH-dependent (non-hermetic)
+    // stop point. The batch-deterministic invariant under test is downstream of it.
+    await writeFile(
+      join(artifactsDir, "provider-confirmation.input.json"),
+      JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
+    );
+
     const result = await runDeterministicForNextStep({
       root,
       artifactsDir,

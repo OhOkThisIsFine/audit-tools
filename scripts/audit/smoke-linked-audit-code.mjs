@@ -72,6 +72,15 @@ async function advanceToDispatchReady(runNextStep, root) {
       );
       continue;
     }
+    if (step.step_kind === "provider_confirmation") {
+      // Accept the tool's suggested cost ordering verbatim (interactive Gate-0;
+      // spec/cost-first-routing.md). Writing the input lets the run proceed.
+      await writeFile(
+        step.artifact_paths.provider_confirmation_input,
+        JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
+      );
+      continue;
+    }
     if (step.step_kind === "confirm_intent") {
       await writeFile(
         step.artifact_paths.intent_checkpoint,

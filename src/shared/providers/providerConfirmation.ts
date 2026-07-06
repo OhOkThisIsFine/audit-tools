@@ -6,8 +6,12 @@ import {
   hasConfiguredOpenCode,
 } from "./providerFactory.js";
 import { commandExists, isSelfSpawnBlocked } from "./providerPathGuard.js";
-import { suggestCostOrdering, resolveModelPrice } from "../dispatch/costRank.js";
-import type { ConfirmedPoolEntry } from "../types/providerConfirmation.js";
+import { suggestCostOrdering, resolveModelPrice, type CostCandidate } from "../dispatch/costRank.js";
+import type {
+  ConfirmedPoolEntry,
+  HostModelCostEntry,
+  ProviderConfirmationInput,
+} from "../types/providerConfirmation.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -290,36 +294,107 @@ export function representativeModelId(
   }
 }
 
+/** A confirmed pool annotated with cost-first fields, plus any host-model tiers. */
+export interface AnnotatedConfirmation {
+  /** Provider-keyed pool, each entry carrying model_id/price/cost_order. */
+  provider_pool: ConfirmedPoolEntry[];
+  /**
+   * Host self-reported model tiers with their confirmed positions (follow-up c),
+   * kept separate from `provider_pool` so no pool consumer sees duplicate names.
+   */
+  host_model_cost_order: HostModelCostEntry[];
+}
+
 /**
- * Annotate a confirmed provider pool with cost-first-routing fields: each entry's
- * representative `model_id`, its `blended_price_usd_per_mtok` (or `null` when the
- * dataset can't price it), and a suggested `cost_order` (price-ascending, unknown
- * last). The `cost_order` is the tool's SUGGESTION — the operator may later reorder
- * it — and is read back at dispatch (`resolveConfirmedCostPositions`) as rung 1 of
- * `costRank`. Single-sourced so both `confirmProviders` and
- * `buildSharedProviderConfirmation` annotate identically.
+ * Resolve the FINAL 0-based cost position for every candidate key. Without an
+ * operator ordering this is the tool's price-ascending suggestion. With one, the
+ * operator's `cost_order` wins for the keys it names (dense from 0, unknown keys
+ * ignored); candidates it omits keep their suggested relative order, appended
+ * after. Single-sourced so provider pools and host models share one total order.
+ */
+function resolveFinalCostOrder(
+  candidates: CostCandidate[],
+  operatorOrder?: string[],
+): Map<string, number> {
+  const suggested = suggestCostOrdering(candidates);
+  if (!operatorOrder || operatorOrder.length === 0) {
+    return new Map(suggested.map((c) => [c.key, c.suggested_order]));
+  }
+  const knownKeys = new Set(candidates.map((c) => c.key));
+  const seen = new Set<string>();
+  const orderedNamed: string[] = [];
+  for (const key of operatorOrder) {
+    if (knownKeys.has(key) && !seen.has(key)) {
+      seen.add(key);
+      orderedNamed.push(key);
+    }
+  }
+  const rest = suggested.map((c) => c.key).filter((k) => !seen.has(k));
+  const finalOrder = [...orderedNamed, ...rest];
+  return new Map(finalOrder.map((key, index) => [key, index]));
+}
+
+/**
+ * Annotate + order a confirmed pool with cost-first-routing fields, optionally
+ * applying an operator Gate-0 input. Each provider entry gets its representative
+ * `model_id`, `blended_price_usd_per_mtok` (or `null` when the dataset can't price
+ * it), and a `cost_order`. When `input` is absent this is the tool's
+ * price-ascending SUGGESTION (headless / no-operator path). When present, the
+ * operator's `cost_order` overrides the suggested positions and each
+ * `host_models` entry becomes a priced, orderable candidate whose confirmed
+ * position threads to dispatch by `model_id` via `host_model_cost_order`. Read
+ * back at dispatch (`resolveConfirmedCostPositions`) as rung 1 of `costRank`.
+ * Single-sourced so every confirmation site annotates identically.
+ */
+export function annotateConfirmedPool(
+  pool: ConfirmedPoolEntry[],
+  sessionConfig: SessionConfig,
+  input?: ProviderConfirmationInput,
+): AnnotatedConfirmation {
+  const hostModels = input?.host_models ?? [];
+  const providerCandidates: CostCandidate[] = pool.map((entry) => ({
+    key: entry.name,
+    model: representativeModelId(entry.name, sessionConfig),
+  }));
+  // tier is omitted: it only tiebreaks UNPRICED candidates, and HostRosterModel's
+  // CapabilityTier is a different vocabulary from CostCandidate's DispatchModelTier
+  // — host models are keyed + priced by model_id, which is what threads to dispatch.
+  const hostCandidates: CostCandidate[] = hostModels.map((m) => ({
+    key: m.model_id,
+    model: m.model_id,
+  }));
+  const positions = resolveFinalCostOrder(
+    [...providerCandidates, ...hostCandidates],
+    input?.cost_order,
+  );
+  const provider_pool = pool.map((entry) => {
+    const model = representativeModelId(entry.name, sessionConfig);
+    const order = positions.get(entry.name);
+    return {
+      ...entry,
+      ...(model ? { model_id: model } : {}),
+      blended_price_usd_per_mtok: model ? resolveModelPrice(model) ?? null : null,
+      ...(order !== undefined ? { cost_order: order } : {}),
+    };
+  });
+  const host_model_cost_order: HostModelCostEntry[] = hostModels.map((m) => ({
+    model_id: m.model_id,
+    blended_price_usd_per_mtok: resolveModelPrice(m.model_id) ?? null,
+    cost_order: positions.get(m.model_id) ?? 0,
+  }));
+  return { provider_pool, host_model_cost_order };
+}
+
+/**
+ * The suggestion-only annotation (no operator input, no host models). Preserved
+ * for the headless / auto-complete callers that just need the provider pool with
+ * the tool's price-ascending `cost_order`. Delegates to `annotateConfirmedPool`.
  */
 export function annotateConfirmedPoolCost(
   pool: ConfirmedPoolEntry[],
   sessionConfig: SessionConfig,
 ): ConfirmedPoolEntry[] {
-  const ordering = suggestCostOrdering(
-    pool.map((entry) => ({
-      key: entry.name,
-      model: representativeModelId(entry.name, sessionConfig),
-    })),
-  );
-  const orderByKey = new Map(ordering.map((o) => [o.key, o]));
-  return pool.map((entry) => {
-    const model = representativeModelId(entry.name, sessionConfig);
-    const suggestion = orderByKey.get(entry.name);
-    return {
-      ...entry,
-      ...(model ? { model_id: model } : {}),
-      blended_price_usd_per_mtok: model ? resolveModelPrice(model) ?? null : null,
-      ...(suggestion ? { cost_order: suggestion.suggested_order } : {}),
-    };
-  });
+  return annotateConfirmedPool(pool, sessionConfig).provider_pool;
 }
 
 export function applyProviderConfirmationSelections(

@@ -13,6 +13,8 @@ import {
   isFileMissingError,
   readJsonFile,
   writeJsonFile,
+  readProviderConfirmationInput,
+  buildSharedProviderConfirmation,
   type ObligationDef,
   type ObligationOutcome,
 } from "audit-tools/shared";
@@ -163,6 +165,7 @@ export type NextStepResult =
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "provider_confirmation"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
@@ -906,6 +909,30 @@ function deriveObligationState(
  * the executor for the selected id), so the obligation list cannot drift from the
  * priority scan it mirrors.
  */
+/**
+ * Whether the interactive provider-confirmation gate has a real decision to
+ * present: MORE THAN ONE dispatchable provider. "Dispatchable" excludes both
+ * operator-excluded / self-spawn-blocked entries and the always-present
+ * `local-subprocess` fallback (it blocks auto-dispatch by design). With one or
+ * zero dispatchable providers there is no cost ordering to confirm or reorder, so
+ * emitting the gate would be empty friction — the executor auto-completes with the
+ * tool's suggestion instead (host-native tiers are still priced at dispatch). This
+ * keeps the interactive gate to the case the operator actually chose it for
+ * (multiple providers → a real cost decision) without imposing a pause on the
+ * common single-provider run. Discovery is deterministic from the same session
+ * config the executor uses, so the gate decision cannot drift from the pool it
+ * would present.
+ */
+function providerPoolHasCostDecision(
+  sessionConfig: SessionConfig | undefined,
+): boolean {
+  const pool = buildSharedProviderConfirmation(sessionConfig ?? {}).provider_pool;
+  const dispatchable = pool.filter(
+    (entry) => !entry.excluded && entry.name !== "local-subprocess",
+  );
+  return dispatchable.length >= 2;
+}
+
 function buildAuditObligations(): AuditObligationDef[] {
   const deterministic = (id: string): AuditObligationDef => ({
     id,
@@ -914,10 +941,43 @@ function buildAuditObligations(): AuditObligationDef[] {
   });
 
   return [
-    // Provider confirmation gate: a session-level deterministic auto-complete
-    // (writes a default provider_confirmation.json) — folds on like any other
-    // deterministic executor.
-    deterministic("provider_confirmation"),
+    // Provider confirmation gate (Gate-0, interactive on the conversation-first
+    // CLI path): pause for the operator to confirm/reorder the priced provider
+    // pool + optionally self-report a host model roster. The operator writes
+    // `provider-confirmation.input.json`; its presence flips this obligation from
+    // "emit the step" to "consume the input" — the deterministic executor then
+    // promotes it into both canonical artifacts (per-tool seam + shared
+    // confirmation). Headless (`advanceAudit`, no CLI) never reaches here and
+    // auto-completes with the tool's price-ascending suggestion. See
+    // spec/cost-first-routing.md.
+    {
+      id: "provider_confirmation",
+      derive: deriveObligationState("provider_confirmation"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const input = await readProviderConfirmationInput(ctx.params.artifactsDir);
+        if (input) {
+          // Operator has submitted → consume it (writes both canonical artifacts).
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        // Only pause when there is a real cost ordering to confirm/reorder — i.e.
+        // more than one DISPATCHABLE provider. A single-provider run has nothing to
+        // order, so the gate would be empty friction; auto-complete instead (host
+        // tiers are still priced at dispatch). Honors conversation-first: no gate
+        // with nothing to decide.
+        if (!providerPoolHasCostDecision(ctx.params.sessionConfig)) {
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        // A real ordering choice exists and the operator has not acted → pause.
+        return {
+          kind: "emit",
+          step: {
+            kind: "provider_confirmation",
+            state: deriveAuditState(bundle),
+            bundle,
+          },
+        };
+      },
+    },
     deterministic("repo_manifest"),
     deterministic("file_disposition"),
     deterministic("auto_fixes_applied"),

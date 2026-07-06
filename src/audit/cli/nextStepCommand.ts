@@ -10,6 +10,10 @@ import type {
   SessionConfig,
 } from "audit-tools/shared";
 import {
+  buildSharedProviderConfirmation,
+  PROVIDER_CONFIRMATION_INPUT_FILENAME,
+} from "audit-tools/shared";
+import {
   buildEdgeReasoningPrompt,
   edgeReasoningContentHash,
 } from "../orchestrator/edgeReasoning.js";
@@ -34,6 +38,7 @@ import {
 } from "./reviewRun.js";
 import { renderSemanticReviewStep } from "./semanticReviewStep.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
+import { renderProviderConfirmationPrompt } from "./providerConfirmationStep.js";
 import { writeCurrentStep } from "./steps.js";
 import {
   nextStepCommand,
@@ -439,6 +444,35 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         read_paths: conceptual.readPaths,
         write_paths: conceptual.writePaths,
       },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "provider_confirmation") {
+    const inputPath = join(artifactsDir, PROVIDER_CONFIRMATION_INPUT_FILENAME);
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    // The tool's suggested pool (price-ascending). Built from the SAME discovery +
+    // annotation the executor will use, so what the operator sees is what routes
+    // if they accept it verbatim.
+    const suggested = buildSharedProviderConfirmation(sessionConfig);
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "provider_confirmation",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Confirm or reorder the provider cost ordering by writing provider-confirmation.input.json, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        provider_confirmation_input: inputPath,
+      },
+      prompt: renderProviderConfirmationPrompt({
+        providerPool: suggested.provider_pool,
+        inputPath,
+        continueCommand,
+      }),
     });
     console.log(JSON.stringify(step, null, 2));
     return;

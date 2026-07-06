@@ -13,12 +13,20 @@ import { join } from "node:path";
 const {
   representativeModelId,
   annotateConfirmedPoolCost,
+  annotateConfirmedPool,
 } = await import("../../src/shared/providers/providerConfirmation.ts");
 const {
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
   readConfirmedCostPositions,
+  parseProviderConfirmationInput,
+  readProviderConfirmationInput,
+  PROVIDER_CONFIRMATION_INPUT_FILENAME,
 } = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
+const { PROVIDER_CONFIRMATION_INPUT_VERSION } = await import(
+  "../../src/shared/types/providerConfirmation.ts"
+);
+const { mkdir, writeFile } = await import("node:fs/promises");
 
 const NIM_CONFIG = {
   openai_compatible: { base_url: "http://nim.local/v1", model: "claude-haiku-4-5" },
@@ -103,6 +111,158 @@ describe("readConfirmedCostPositions — confirmation→dispatch link", () => {
     try {
       const positions = await readConfirmedCostPositions(root, NIM_CONFIG);
       expect(positions.size).toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Interactive Gate-0: operator input (reorder + host roster) — follow-ups a/b/c
+// -----------------------------------------------------------------------------
+
+describe("annotateConfirmedPool — operator ordering override (b)", () => {
+  const basePool = [
+    { name: "claude-code", capability_tier: "frontier", excluded: false },
+    { name: "openai-compatible", capability_tier: "capable", excluded: false },
+    { name: "local-subprocess", capability_tier: "unknown", excluded: false },
+  ];
+
+  test("no input → price-ascending suggestion (openai-compatible first)", () => {
+    const { provider_pool, host_model_cost_order } = annotateConfirmedPool(
+      basePool,
+      NIM_CONFIG,
+    );
+    expect(host_model_cost_order).toEqual([]);
+    expect(provider_pool.find((e) => e.name === "openai-compatible").cost_order).toBe(0);
+  });
+
+  test("operator cost_order wins for named keys; omitted keep suggested order", () => {
+    const input = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      // Operator demotes the priced pool below local-subprocess.
+      cost_order: ["local-subprocess", "claude-code"],
+    };
+    const { provider_pool } = annotateConfirmedPool(basePool, NIM_CONFIG, input);
+    const order = Object.fromEntries(provider_pool.map((e) => [e.name, e.cost_order]));
+    expect(order["local-subprocess"]).toBe(0);
+    expect(order["claude-code"]).toBe(1);
+    // openai-compatible was not named → appended after, still dense.
+    expect(order["openai-compatible"]).toBe(2);
+  });
+
+  test("unknown keys in operator cost_order are ignored (degrade-safe)", () => {
+    const input = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      cost_order: ["does-not-exist", "openai-compatible"],
+    };
+    const { provider_pool } = annotateConfirmedPool(basePool, NIM_CONFIG, input);
+    expect(provider_pool.find((e) => e.name === "openai-compatible").cost_order).toBe(0);
+  });
+});
+
+describe("annotateConfirmedPool — host roster pricing (c)", () => {
+  const basePool = [
+    { name: "claude-code", capability_tier: "frontier", excluded: false },
+    { name: "local-subprocess", capability_tier: "unknown", excluded: false },
+  ];
+
+  test("host models become priced, ordered entries in host_model_cost_order", () => {
+    const input = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      host_models: [{ model_id: "claude-haiku-4-5" }],
+    };
+    const { host_model_cost_order } = annotateConfirmedPool(basePool, NIM_CONFIG, input);
+    expect(host_model_cost_order).toHaveLength(1);
+    const haiku = host_model_cost_order[0];
+    expect(haiku.model_id).toBe("claude-haiku-4-5");
+    expect(haiku.blended_price_usd_per_mtok).toBeCloseTo(2.0);
+    // Priced host model sorts ahead of the unpriceable providers.
+    expect(haiku.cost_order).toBe(0);
+  });
+
+  test("unpriceable host model gets null price but is still ordered", () => {
+    const input = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      host_models: [{ model_id: "no-such-model-000" }],
+    };
+    const { host_model_cost_order } = annotateConfirmedPool(basePool, NIM_CONFIG, input);
+    expect(host_model_cost_order[0].blended_price_usd_per_mtok).toBeNull();
+    expect(typeof host_model_cost_order[0].cost_order).toBe("number");
+  });
+});
+
+describe("parseProviderConfirmationInput — degrade-safe", () => {
+  test("wrong/absent schema_version → null", () => {
+    expect(parseProviderConfirmationInput(null)).toBeNull();
+    expect(parseProviderConfirmationInput({})).toBeNull();
+    expect(parseProviderConfirmationInput({ schema_version: "bogus" })).toBeNull();
+  });
+
+  test("minimal valid input (accept suggestion) → empty-but-versioned", () => {
+    const parsed = parseProviderConfirmationInput({
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+    });
+    expect(parsed).toEqual({ schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION });
+  });
+
+  test("malformed fields are dropped, not fatal", () => {
+    const parsed = parseProviderConfirmationInput({
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      cost_order: "not-an-array",
+      host_models: [{ nope: 1 }, { model_id: "claude-haiku-4-5" }],
+    });
+    expect(parsed.cost_order).toBeUndefined();
+    expect(parsed.host_models).toEqual([{ model_id: "claude-haiku-4-5" }]);
+  });
+});
+
+describe("readProviderConfirmationInput + dispatch merge (c)", () => {
+  test("reads the operator input file from the artifacts dir", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "audit-conf-input-"));
+    try {
+      await writeFile(
+        join(dir, PROVIDER_CONFIRMATION_INPUT_FILENAME),
+        JSON.stringify({
+          schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+          host_models: [{ model_id: "claude-haiku-4-5" }],
+        }),
+      );
+      const input = await readProviderConfirmationInput(dir);
+      expect(input.host_models).toEqual([{ model_id: "claude-haiku-4-5" }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("absent input file → null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "audit-conf-input-"));
+    try {
+      expect(await readProviderConfirmationInput(dir)).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("host roster position round-trips into the dispatch positions map", async () => {
+    const root = await mkdtemp(join(tmpdir(), "audit-cost-conf-"));
+    try {
+      const input = {
+        schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+        host_models: [{ model_id: "claude-haiku-4-5" }],
+      };
+      const confirmation = buildSharedProviderConfirmation(
+        {},
+        process.env,
+        [],
+        [],
+        undefined,
+        input,
+      );
+      await writeSharedProviderConfirmation(root, confirmation);
+      const positions = await readConfirmedCostPositions(root, {});
+      // The host-native tier now threads to dispatch by its model_id.
+      expect(positions.get("claude-haiku-4-5")).toBe(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

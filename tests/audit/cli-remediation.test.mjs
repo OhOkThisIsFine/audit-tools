@@ -108,9 +108,16 @@ test("next-step starts intake for manifestless source repositories", async () =>
     await writeFile(join(root, "src", "app.js"), "export const ok = true;\n");
 
     const artifactsDir = join(root, ".audit-tools/audit");
-    // next-step advances the deterministic spine: provider confirmation
-    // auto-completes headlessly, then intake builds the repo manifest and file
-    // disposition before the run pauses at its first host step.
+    // next-step advances the deterministic spine: the provider-confirmation gate
+    // consumes the pre-seeded operator input (accept the suggestion) below, then
+    // intake builds the repo manifest and file disposition before the run pauses
+    // at its first host step. The seed keeps this hermetic — otherwise the gate
+    // would halt first whenever the host has ≥2 dispatchable providers on PATH.
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "provider-confirmation.input.json"),
+      JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
+    );
     const result = await captureRunCli([
       process.execPath,
       join(repoRoot, "dist", "audit", "cli.js"),
@@ -138,6 +145,17 @@ test("next-step blocks empty or documentation-only repositories after intake val
   const root = await mkdtemp(join(tmpdir(), "audit-code-no-auditable-"));
   try {
     await writeFile(join(root, "README.md"), "# Notes only\n");
+
+    // Pre-satisfy the provider-confirmation gate (accept the suggestion) so the
+    // run reaches intake validation on the first call regardless of how many
+    // providers are on PATH — the gate is orthogonal to the no-auditable-files
+    // behavior under test.
+    const artifactsDir = join(root, ".audit-tools/audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "provider-confirmation.input.json"),
+      JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
+    );
 
     // Intake throws for repositories with no auditable files; next-step
     // surfaces the failure as a non-zero exit with the intake validation

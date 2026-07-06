@@ -163,25 +163,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
-- **Cost-first routing follow-ups (W2 core SHIPPED 2026-07-06).** Real models.dev price now drives `costRank`
-  (decoupled from `capabilityRank`) via the shared 3-rung engine, and Gate-0 confirmation annotates + threads an
-  operator cost ordering to dispatch. Design of record [`spec/cost-first-routing.md`](../spec/cost-first-routing.md),
-  durable design in memory [[cost-first-routing-design]]. Remaining OPEN:
-  - **(a) Host-prompt visibility.** The suggested cost ordering is persisted on `provider-confirmation.json` but not
-    yet surfaced in the host-facing provider_confirmation prompt — the operator can't *see* it. `buildProviderConfirmationDisplay`
-    is the render helper (currently unused in `src`); the real host prompt is a step-contract render. Surface the
-    per-entry price + suggested order there.
-  - **(b) Interactive operator REORDER surface.** Today `cost_order` is only the tool's deterministic price-ascending
-    *suggestion*; there is no path for the operator to override it (the confirmation executor auto-completes). Add a
-    host submission path that accepts a reordered pool and persists the operator's `cost_order`.
-  - **(c) Host-roster-at-Gate-0.** The host's own model roster is dispatch-time (`--host-models`), so host-native tiers
-    can only be priced/ordered deterministically at dispatch, not operator-confirmed at the outset. To confirm them at
-    Gate-0, the host must self-report its roster at the confirmation step (a new input path). Only then does "confirm
-    which models at the outset" cover the common claude-code-only case.
-  - **(d) Collision-price preference (carried from W1).** `resolveModelStatics` dedupes a model id served by multiple
-    providers first-sorted-provider-wins, so a reseller markup could win over the native/cheapest price. Prices largely
-    agree across providers, so this is an approximation, not a bug — revisit only if per-provider pricing matters
+- **Cost-first routing follow-ups (W2 core + interactive Gate-0 SHIPPED).** Real models.dev price drives `costRank`
+  (decoupled from `capabilityRank`) via the shared 3-rung engine, and Gate-0 is now an **interactive
+  `provider_confirmation` step** on the audit CLI path. Design of record
+  [`spec/cost-first-routing.md`](../spec/cost-first-routing.md), durable design in memory [[cost-first-routing-design]].
+  - **(a) Host-prompt visibility — ✅ SHIPPED.** `renderProviderConfirmationPrompt` (`src/audit/cli/providerConfirmationStep.ts`)
+    surfaces the priced pool (model + blended $/Mtok + suggested cost order + status) to the host.
+  - **(b) Interactive operator REORDER — ✅ SHIPPED.** The host writes `provider-confirmation.input.json`
+    (`provider-confirmation-input/v1`: `cost_order`/`exclude`/`include`/`host_models`); the tool promotes it into both
+    canonical artifacts (per-tool seam + shared confirmation). Input/envelope split ([[contract-pipeline-input-vs-envelope-paths]]);
+    presence flips the gate from emit→consume. Fires only when ≥2 dispatchable providers exist (no empty gate).
+  - **(c) Host-roster-at-Gate-0 — ✅ SHIPPED.** `host_models` in the input reports the host's roster; those tiers are
+    priced (models.dev) + ordered at Gate-0 and thread to dispatch by `model_id` via `host_model_cost_order` (a separate
+    list on the shared confirmation, merged into the model-keyed positions map — zero blast radius to `provider_pool`).
+  - **(d) Collision-price preference (carried from W1) — OPEN.** `resolveModelStatics` dedupes a model id served by
+    multiple providers first-sorted-provider-wins, so a reseller markup could win over the native/cheapest price. Prices
+    largely agree across providers, so this is an approximation, not a bug — revisit only if per-provider pricing matters
     (would need (provider, model) keying in the snapshot).
+  - **Deferred nuance (single-provider host-tier confirmation).** The gate skips when there is only one dispatchable
+    provider, so a claude-code-only run does NOT get an interactive host-tier confirmation at the outset (its tiers are
+    still priced at dispatch). Confirming host tiers when the host is the *only* provider would need the gate to fire on
+    a single-provider run — an opt-in a future flag could add. Low priority.
 - **models.dev static window can over-state a specific deployment (carried from W1).** The snapshot lists e.g.
   `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
   work blocks off the static rung. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding —

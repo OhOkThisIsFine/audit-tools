@@ -41,11 +41,16 @@ import { withFileLock } from "../quota/fileLock.js";
 import type { RunLogger } from "../observability/runLog.js";
 import {
   discoverProviders,
-  annotateConfirmedPoolCost,
+  annotateConfirmedPool,
   type CapabilityTier,
 } from "./providerConfirmation.js";
 import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
-import type { ConfirmedPoolEntry } from "../types/providerConfirmation.js";
+import type {
+  ConfirmedPoolEntry,
+  HostModelCostEntry,
+  ProviderConfirmationInput,
+} from "../types/providerConfirmation.js";
+import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "../types/providerConfirmation.js";
 
 // ---------------------------------------------------------------------------
 // Version + on-disk location
@@ -89,6 +94,13 @@ export interface SharedProviderConfirmation {
   confirmed_at: string;
   /** Confirmed provider pool, with exclusion flags. */
   provider_pool: ConfirmedPoolEntry[];
+  /**
+   * Host self-reported model tiers with their operator-confirmed cost positions
+   * (follow-up c). Merged into the model-keyed dispatch positions map by
+   * `readConfirmedCostPositions` so host-native tiers route by their confirmed
+   * order. Absent/empty on the headless path (no host roster is reported).
+   */
+  host_model_cost_order?: HostModelCostEntry[];
   /**
    * Sorted snapshot of the provider NAMES discovered when this was written.
    * Compared against the current discovered roster to detect staleness.
@@ -176,6 +188,13 @@ function rostersEqual(
  *   overriding the default self-spawn-blocked exclusion for those names.
  * @param detectCommand - Injectable PATH-detection hook, forwarded to
  *   `discoverProviders` so tests can drive discovery deterministically.
+ * @param input         - Operator's Gate-0 submission (interactive path): its
+ *   `cost_order` overrides the suggested ordering and its `host_models` become
+ *   priced, orderable host-native tiers (`host_model_cost_order`). Omit for the
+ *   headless / no-operator path — the tool then emits its price-ascending
+ *   suggestion with no host models, exactly as before. `exclude`/`include` are
+ *   passed via the dedicated params above (the executor forwards them from the
+ *   same input), so this arg governs ordering + host roster only.
  */
 export function buildSharedProviderConfirmation(
   sessionConfig: SessionConfig = {},
@@ -183,6 +202,7 @@ export function buildSharedProviderConfirmation(
   exclude: ResolvedProviderName[] = [],
   include: ResolvedProviderName[] = [],
   detectCommand?: (command: string) => boolean,
+  input?: ProviderConfirmationInput,
 ): SharedProviderConfirmation {
   const discovered = discoverProviders(sessionConfig, env, detectCommand);
   const excludeSet = new Set<ResolvedProviderName>(exclude);
@@ -219,13 +239,18 @@ export function buildSharedProviderConfirmation(
     });
   }
 
+  // Cost-first routing: annotate with representative model price + cost_order,
+  // read at dispatch as rung 1 of costRank (spec/cost-first-routing.md). When an
+  // operator input is present its ordering wins and its host roster is priced.
+  const annotated = annotateConfirmedPool(pool, sessionConfig, input);
   return {
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
     confirmed_at: new Date().toISOString(),
-    // Cost-first routing: annotate with representative model price + suggested
-    // cost_order, read at dispatch as rung 1 of costRank (spec/cost-first-routing.md).
-    provider_pool: annotateConfirmedPoolCost(pool, sessionConfig),
+    provider_pool: annotated.provider_pool,
+    ...(annotated.host_model_cost_order.length > 0
+      ? { host_model_cost_order: annotated.host_model_cost_order }
+      : {}),
     roster: sortRoster(discovered.map((p) => p.name)),
   };
 }
@@ -285,6 +310,19 @@ function isConfirmedPoolEntry(value: unknown): value is ConfirmedPoolEntry {
   );
 }
 
+function isHostModelCostEntry(value: unknown): value is HostModelCostEntry {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.model_id === "string" &&
+    (obj.blended_price_usd_per_mtok === null ||
+      typeof obj.blended_price_usd_per_mtok === "number") &&
+    typeof obj.cost_order === "number"
+  );
+}
+
 /**
  * Validate a parsed value as a SharedProviderConfirmation. Returns the typed
  * value or `null` when any required field is missing or malformed — a corrupt
@@ -307,11 +345,21 @@ function parseSharedProviderConfirmation(
     return null;
   }
   if (!isResolvedProviderNameArray(obj.roster)) return null;
+  // host_model_cost_order is optional + additive; a malformed value degrades to
+  // absent (the field never blocks parsing — INV-DC1-6 never-block spirit).
+  const hostModels =
+    Array.isArray(obj.host_model_cost_order) &&
+    obj.host_model_cost_order.every(isHostModelCostEntry)
+      ? (obj.host_model_cost_order as HostModelCostEntry[])
+      : undefined;
   return {
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
     confirmed_at: obj.confirmed_at,
     provider_pool: obj.provider_pool as ConfirmedPoolEntry[],
+    ...(hostModels && hostModels.length > 0
+      ? { host_model_cost_order: hostModels }
+      : {}),
     roster: obj.roster,
   };
 }
@@ -392,5 +440,95 @@ export async function readConfirmedCostPositions(
   if (!root) return new Map();
   const read = await readSharedProviderConfirmation(root, sessionConfig, env);
   if (!read || read.status !== "confirmed") return new Map();
-  return resolveConfirmedCostPositions(read.confirmation.provider_pool);
+  // Provider-pool positions (configured models) PLUS any host-native tiers the
+  // operator confirmed at Gate-0 (follow-up c). Both are model-keyed; a host tier
+  // and a configured pool thread to dispatch identically. Host entries are already
+  // in the single unified cost order, so a plain merge preserves the total order.
+  const positions = resolveConfirmedCostPositions(read.confirmation.provider_pool);
+  for (const entry of read.confirmation.host_model_cost_order ?? []) {
+    if (
+      entry.model_id &&
+      Number.isFinite(entry.cost_order) &&
+      entry.cost_order >= 0
+    ) {
+      positions.set(entry.model_id, entry.cost_order);
+    }
+  }
+  return positions;
+}
+
+// ---------------------------------------------------------------------------
+// Interactive Gate-0 operator input (spec/cost-first-routing.md — Gate-0)
+// ---------------------------------------------------------------------------
+
+/** File name of the host-written Gate-0 input under the audit artifacts dir. */
+export const PROVIDER_CONFIRMATION_INPUT_FILENAME =
+  "provider-confirmation.input.json";
+
+/**
+ * Validate a parsed value as a ProviderConfirmationInput. Degrade-safe: returns
+ * `null` for absent/malformed so a missing or corrupt input is never an error
+ * (the executor then falls back to the tool's suggested ordering). Only the
+ * version is required; every other field is optional and validated to its
+ * expected shape (a malformed field is dropped, not fatal).
+ */
+export function parseProviderConfirmationInput(
+  value: unknown,
+): ProviderConfirmationInput | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const obj = value as Record<string, unknown>;
+  if (obj.schema_version !== PROVIDER_CONFIRMATION_INPUT_VERSION) return null;
+  const stringArray = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((x) => typeof x === "string")
+      ? (v as string[])
+      : undefined;
+  const costOrder = stringArray(obj.cost_order);
+  const exclude = stringArray(obj.exclude) as
+    | ResolvedProviderName[]
+    | undefined;
+  const include = stringArray(obj.include) as
+    | ResolvedProviderName[]
+    | undefined;
+  const hostModels = Array.isArray(obj.host_models)
+    ? obj.host_models
+        .filter(
+          (m): m is { model_id: string; tier?: unknown } =>
+            m !== null &&
+            typeof m === "object" &&
+            typeof (m as { model_id?: unknown }).model_id === "string",
+        )
+        .map((m) => ({
+          model_id: m.model_id,
+          ...(typeof m.tier === "string"
+            ? { tier: m.tier as CapabilityTier }
+            : {}),
+        }))
+    : undefined;
+  return {
+    schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+    ...(costOrder ? { cost_order: costOrder } : {}),
+    ...(exclude ? { exclude } : {}),
+    ...(include ? { include } : {}),
+    ...(hostModels && hostModels.length > 0 ? { host_models: hostModels } : {}),
+  };
+}
+
+/**
+ * Read the operator's Gate-0 input from `<artifactsDir>/provider-confirmation.input.json`.
+ * Returns `null` when the file is absent, unreadable, or malformed — the "operator
+ * has not acted yet" signal the gate uses to decide emit-vs-consume. Never throws.
+ */
+export async function readProviderConfirmationInput(
+  artifactsDir: string,
+): Promise<ProviderConfirmationInput | null> {
+  const path = join(artifactsDir, PROVIDER_CONFIRMATION_INPUT_FILENAME);
+  let raw: unknown;
+  try {
+    raw = await readJsonFile<unknown>(path);
+  } catch {
+    return null;
+  }
+  return parseProviderConfirmationInput(raw);
 }
