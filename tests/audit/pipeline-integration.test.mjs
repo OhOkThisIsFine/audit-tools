@@ -82,6 +82,21 @@ function makePostDesignAssessmentBundle(opts = {}) {
       contested: [],
       findings: [],
     },
+    // Phase C charter layer: an omitted (shallow-ceiling) register so
+    // charter_extraction_current is satisfied and the design-review/planning
+    // obligations these tests target are reachable. Only consulted after the
+    // checkpoint is present (charter extraction sits between them).
+    charter_register: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "charter",
+      ceiling: { rung: "shallow" },
+      status: "omitted",
+      subsystems: [],
+      goal_graph: { nodes: [], edges: [] },
+      deltas: [],
+      findings: [],
+      validation_issues: [],
+    },
   };
 }
 

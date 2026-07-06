@@ -22,6 +22,7 @@ import {
   runSynthesisExecutor,
   runSynthesisNarrativeExecutor,
 } from "./synthesisExecutors.js";
+import { runCharterExtractionExecutor } from "./charterExtractionExecutor.js";
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
 import { runSyntaxResolutionExecutor } from "./syntaxResolutionExecutor.js";
 import { runGraphEnrichmentExecutor } from "./graphEnrichmentExecutor.js";
@@ -108,6 +109,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     runDesignAssessmentExecutor(bundle),
   structure_decomposition_executor: async (bundle, { options }) =>
     runStructureDecompositionExecutor(bundle, options.root),
+  charter_extraction_executor: async (bundle, { options }) =>
+    runCharterExtractionExecutor(bundle, options.charterSubmission),
   design_review_contract: async (bundle) =>
     runDesignReviewAutoComplete(bundle, "contract"),
   design_review_conceptual: async (bundle) =>

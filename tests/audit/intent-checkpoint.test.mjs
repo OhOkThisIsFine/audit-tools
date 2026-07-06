@@ -14,6 +14,22 @@ function obligationState(bundle, id) {
   return deriveAuditState(bundle).obligations.find((o) => o.id === id)?.state;
 }
 
+// An omitted (shallow-ceiling) charter register — satisfies charter_extraction_current
+// so a test can assert the obligation AFTER the Phase-C charter pass.
+function omittedCharterRegister() {
+  return {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    target: "charter",
+    ceiling: { rung: "shallow" },
+    status: "omitted",
+    subsystems: [],
+    goal_graph: { nodes: [], edges: [] },
+    deltas: [],
+    findings: [],
+    validation_issues: [],
+  };
+}
+
 // A bundle where every obligation up to and including design_assessment_current
 // is satisfied, but the intent checkpoint has not yet been written.
 function readyForIntentBundle() {
@@ -72,9 +88,14 @@ await test("decideNextStep selects intent_checkpoint after design assessment, be
   expect(decision.selected_executor).toBe("intent_checkpoint_executor");
 });
 
-await test("decideNextStep advances to design_review_contract_completed once the checkpoint exists", () => {
+await test("decideNextStep advances to charter_extraction once the checkpoint exists", () => {
+  // Phase C: the charter-extraction pass sits between the checkpoint and the
+  // design-review passes (it needs the confirmed ceiling). Once charter extraction
+  // is satisfied (omitted at a shallow ceiling), design_review_contract is next.
   const bundle = { ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() };
-  expect(decideNextStep(bundle).selected_obligation).toBe("design_review_contract_completed");
+  expect(decideNextStep(bundle).selected_obligation).toBe("charter_extraction_current");
+  const withCharters = { ...bundle, charter_register: omittedCharterRegister() };
+  expect(decideNextStep(withCharters).selected_obligation).toBe("design_review_contract_completed");
 });
 
 // ── Deterministic scope pre-digest ──────────────────────────────────────────

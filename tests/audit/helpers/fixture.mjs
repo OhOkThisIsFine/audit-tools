@@ -174,9 +174,14 @@ export async function advanceFixtureToPlanning(root) {
     root,
   });
 
+  // Charter extraction (Phase C) sits between the checkpoint and the design-review
+  // passes. Headless with a default (shallow-ceiling) checkpoint it omits in one
+  // deterministic step, writing an empty charter_register.json.
+  const charterExtraction = await advanceAudit(intentCheckpoint.updated_bundle);
+
   // Design review is now split into two passes: contract (adversarial) and
   // conceptual (generative). Both auto-complete headlessly.
-  const designReviewContract = await advanceAudit(intentCheckpoint.updated_bundle);
+  const designReviewContract = await advanceAudit(charterExtraction.updated_bundle);
   const designReviewConceptual = await advanceAudit(designReviewContract.updated_bundle);
 
   const planning = await advanceAudit(designReviewConceptual.updated_bundle, {

@@ -108,6 +108,17 @@ function createDecisionBundle(overrides = {}) {
       contested: [],
       findings: [],
     },
+    charter_register: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "charter",
+      ceiling: { rung: "shallow" },
+      status: "omitted",
+      subsystems: [],
+      goal_graph: { nodes: [], edges: [] },
+      deltas: [],
+      findings: [],
+      validation_issues: [],
+    },
     intent_checkpoint: {
       schema_version: "intent-checkpoint/v1",
       confirmed_at: "2026-04-22T00:00:00Z",

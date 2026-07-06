@@ -1,6 +1,7 @@
 import type { AuditResult, Finding } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
+import type { CharterRegister } from "../types/charterRegister.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import { severityRank, confidenceRank } from "./findingRanks.js";
@@ -320,6 +321,7 @@ export function mergeFindings(
   externalAnalyzerResults?: ExternalAnalyzerResults[],
   designAssessment?: DesignAssessment,
   structureDecomposition?: StructureDecomposition,
+  charterRegister?: CharterRegister,
 ): Finding[] {
   const merged = new Map<string, Finding>();
 
@@ -334,6 +336,8 @@ export function mergeFindings(
       : []),
     // Phase B deterministic non-co-localization leads (structure layer).
     ...(structureDecomposition?.findings ?? []),
+    // Phase C routed charter-delta leads (charter layer).
+    ...(charterRegister?.findings ?? []),
   ];
   for (const finding of allDesignFindings) {
     upsertFinding(merged, finding);

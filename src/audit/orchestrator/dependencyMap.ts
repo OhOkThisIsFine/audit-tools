@@ -91,6 +91,17 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "file_disposition.json",
     "graph_bundle.json",
   ],
+  // Phase C conceptual design-review: the charter LAYER. Depends on the Phase-B
+  // consensus scaffold (the subsystems it charter-reviews), the confirmed intent
+  // checkpoint (the ceiling/consent dial that gates its depth), and repo_manifest
+  // (Revealed re-extracts on code change — its per-file hashes re-stale this
+  // transitively). Charters live in this OUTPUT artifact, never back on the
+  // checkpoint it depends on, so there is no cycle.
+  "charter_register.json": [
+    "structure_decomposition.json",
+    "intent_checkpoint.json",
+    "repo_manifest.json",
+  ],
 
   // Phase 3 — planning & execution. scope.json (delta vs. full) gates coverage;
   // it is also a DIRECT input to audit_tasks so a scope change that produces an
@@ -184,6 +195,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "critical_flows.json",
     "design_assessment.json",
     "structure_decomposition.json",
+    "charter_register.json",
     "syntax_resolution_status.json",
     "external_analyzer_results.json",
     "coverage_matrix.json",

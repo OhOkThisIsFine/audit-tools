@@ -3,7 +3,7 @@ import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import type { AnalyzerSetting, SynthesisNarrative, RunLogger } from "audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission } from "audit-tools/shared";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
 
@@ -33,6 +33,8 @@ export interface AdvanceAuditOptions {
   externalAnalyzerResults?: ExternalAnalyzerResults;
   /** Host/provider-supplied synthesis narrative; merged by synthesis_narrative_executor. */
   narrativeResults?: SynthesisNarrative;
+  /** Host-supplied charter-extraction submission (Phase C); assembled by charter_extraction_executor. */
+  charterSubmission?: CharterSubmission;
   /** Per-analyzer resolution policy for the optional graph-enrichment pass. */
   analyzers?: Record<string, AnalyzerSetting>;
   /**

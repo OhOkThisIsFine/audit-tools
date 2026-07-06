@@ -47,6 +47,10 @@ import {
 import { computeArtifactStateSignature } from "../orchestrator/artifactMetadata.js";
 import { decideNextStep, PRIORITY, decideAuditFrictionCloseout } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
+import {
+  resolveCharterCeiling,
+  ceilingRequestsCharters,
+} from "../orchestrator/charterExtractionExecutor.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import {
@@ -163,6 +167,7 @@ export type NextStepResult =
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "charter_extraction"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "provider_confirmation"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
@@ -554,6 +559,49 @@ export async function handleSynthesisNarrativeBranch(
   }
   // Narrative disabled: run the deterministic omit executor below.
   return { action: "run_omit" };
+}
+
+type CharterExtractionBranchResult =
+  | { action: "continue" }
+  | { action: "run_omit" }
+  | { action: "return"; result: { kind: "charter_extraction"; state: AuditState; bundle: ArtifactBundle } };
+
+/**
+ * Handle the `charter_extraction_executor` incoming-artifact polling block
+ * (Phase C). Mirrors the synthesis-narrative branch:
+ *   - a pending `incoming/charter-extraction.json` → assemble+gate it via the
+ *     preferred executor (ingest), then `continue`;
+ *   - otherwise a `shallow` ceiling → `run_omit` (the deterministic executor
+ *     writes an empty `status:omitted` register — the conversation-first default,
+ *     no host turn);
+ *   - a `deep`/`deepest` ceiling with no submission yet → `return` the host step
+ *     that renders the charter-extraction prompt.
+ */
+export async function handleCharterExtractionBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<CharterExtractionBranchResult> {
+  const incoming = await tryConsumeIncoming<unknown>(
+    params.artifactsDir,
+    "charter-extraction.json",
+  );
+  if (incoming) {
+    await runAuditStep({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      preferredExecutor: "charter_extraction_executor",
+      charterSubmissionPath: incoming.path,
+    });
+    await unlink(incoming.path).catch(() => {});
+    return { action: "continue" };
+  }
+  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
+  if (!ceilingRequestsCharters(ceiling)) {
+    // Shallow ceiling (default): omit deterministically, no host turn.
+    return { action: "run_omit" };
+  }
+  return { action: "return", result: { kind: "charter_extraction", state, bundle } };
 }
 
 /**
@@ -991,6 +1039,24 @@ function buildAuditObligations(): AuditObligationDef[] {
         kind: "emit",
         step: { kind: "confirm_intent", state: deriveAuditState(bundle), bundle },
       }),
+    },
+    {
+      // Charter extraction (Phase C): poll the incoming submission (ingest+gate),
+      // omit at a shallow ceiling, or emit the host charter-extraction step at a
+      // deep+ ceiling. Mirrors the synthesis-narrative branch.
+      id: "charter_extraction_current",
+      derive: deriveObligationState("charter_extraction_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleCharterExtractionBranch(ctx.params, bundle, state);
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "run_omit") {
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+      },
     },
     {
       // Contract design-review pass: poll incoming contract/conceptual findings;

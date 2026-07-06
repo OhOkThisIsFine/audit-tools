@@ -101,6 +101,10 @@ test("committed fixture repo supports external analyzer import and deterministic
     const intentCheckpoint = await advanceAudit(bundle, { root });
     bundle = intentCheckpoint.updated_bundle;
 
+    // Charter extraction (Phase C) omits at the default shallow ceiling.
+    const charterExtraction = await advanceAudit(bundle);
+    bundle = charterExtraction.updated_bundle;
+
     const planning = await advanceAudit(bundle, {
       root,
       lineIndex: await buildFixtureLineIndex(root),

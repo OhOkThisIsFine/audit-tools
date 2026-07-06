@@ -10,6 +10,7 @@ import {
   ClaimRegistry,
   claimWithBackoff,
   withClaimHeartbeat,
+  CharterSubmissionSchema,
 } from "audit-tools/shared";
 import {
   loadArtifactBundle,
@@ -69,6 +70,7 @@ export interface RunAuditStepOptions {
   externalAnalyzerPath?: string;
   externalAnalyzerData?: ExternalAnalyzerResults;
   narrativeResultsPath?: string;
+  charterSubmissionPath?: string;
   edgeReasoningResultsPath?: string;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
@@ -351,6 +353,11 @@ async function executeAdvance(
   const narrativeResults = options.narrativeResultsPath
     ? await readJsonFile<SynthesisNarrative>(options.narrativeResultsPath)
     : undefined;
+  const charterSubmission = options.charterSubmissionPath
+    ? CharterSubmissionSchema.parse(
+        await readJsonFile<unknown>(options.charterSubmissionPath),
+      )
+    : undefined;
   const edgeReasoningResults = options.edgeReasoningResultsPath
     ? await readJsonFile<EdgeReasoningResults>(options.edgeReasoningResultsPath)
     : undefined;
@@ -364,6 +371,7 @@ async function executeAdvance(
     runtimeValidationUpdates,
     externalAnalyzerResults,
     narrativeResults,
+    charterSubmission,
     edgeReasoningResults,
     analyzers: options.analyzers,
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,

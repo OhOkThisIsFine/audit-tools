@@ -16,6 +16,7 @@ export const StepKindSchema = z.enum([
   "design_review_parallel",
   "design_review_contract",
   "design_review_conceptual",
+  "charter_extraction",
   "confirm_intent",
   "provider_confirmation",
   "analyzer_install",

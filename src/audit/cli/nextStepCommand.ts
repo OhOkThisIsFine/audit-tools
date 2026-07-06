@@ -29,6 +29,8 @@ import { buildDesignReReviewSection } from "../orchestrator/designReviewSnapshot
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
+import { renderCharterExtractionPrompt } from "./charterExtractionPrompt.js";
+import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
 import {
   loadSessionConfig,
 } from "../supervisor/sessionConfig.js";
@@ -443,6 +445,41 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       access: {
         read_paths: conceptual.readPaths,
         write_paths: conceptual.writePaths,
+      },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "charter_extraction") {
+    // Phase C charter layer (conceptual, teleological): the host extracts the four
+    // charter families per confident subsystem + the deltas it sees; the tool gates
+    // + routes them at ingest. Only reached at a deep+ ceiling (shallow omits
+    // deterministically without a host turn).
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const submissionPath = join(artifactsDir, "incoming", "charter-extraction.json");
+    const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "charter_extraction",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write the charter submission (four charters per subsystem + deltas) to the submission path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        charter_extraction_submission: submissionPath,
+      },
+      prompt: renderCharterExtractionPrompt(result.bundle, {
+        submissionPath,
+        continueCommand,
+        ceiling,
+      }),
+      access: {
+        read_paths: [join(artifactsDir, "structure_decomposition.json")],
+        write_paths: [submissionPath],
       },
     });
     console.log(JSON.stringify(step, null, 2));

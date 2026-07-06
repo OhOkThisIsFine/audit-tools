@@ -30,7 +30,7 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // Every backtick-quoted token in that clause is an obligation id.
   const ids = [...chainClause.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
 
-  expect(ids.length, `Expected 20 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`).toBe(20);
+  expect(ids.length, `Expected 21 obligation ids in the CLAUDE.md chain sentence, found ${ids.length}: ${ids.join(", ")}`).toBe(21);
 
   // doc == code: same ids, same order.
   expect(ids, "The CLAUDE.md priority chain is out of sync with the exported PRIORITY array").toEqual(PRIORITY);
@@ -38,8 +38,8 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // Spot-check the endpoints and key obligations.
   expect(PRIORITY[0]).toBe("provider_confirmation");
   expect(PRIORITY[1]).toBe("repo_manifest");
-  expect(PRIORITY[18]).toBe("synthesis_narrative_current");
-  expect(PRIORITY[19]).toBe("friction_capture_current");
+  expect(PRIORITY[19]).toBe("synthesis_narrative_current");
+  expect(PRIORITY[20]).toBe("friction_capture_current");
 
   expect(PRIORITY.includes("graph_enrichment_current")).toBeTruthy();
   expect(PRIORITY.includes("design_assessment_current")).toBeTruthy();
@@ -52,14 +52,16 @@ test("CLAUDE.md priority chain matches the exported PRIORITY array", async () =>
   // external-analyzer acquisition (Slice D) sits at index 5, after syntax_resolved
   // and before structure_artifacts (index 6); graph/design obligations follow;
   // the deterministic structure_decomposition sits after design_assessment_current;
-  // intent checkpoint follows it, before design_review_contract_completed.
+  // intent checkpoint follows it; the Phase-C charter-extraction pass sits between
+  // the checkpoint and the design-review passes.
   expect(PRIORITY.indexOf("external_analyzers_current")).toBe(5);
   expect(PRIORITY.indexOf("structure_artifacts")).toBe(6);
   expect(PRIORITY.indexOf("graph_enrichment_current")).toBe(7);
   expect(PRIORITY.indexOf("design_assessment_current")).toBe(8);
   expect(PRIORITY.indexOf("structure_decomposition_current")).toBe(9);
   expect(PRIORITY.indexOf("intent_checkpoint_current")).toBe(10);
-  expect(PRIORITY.indexOf("design_review_contract_completed")).toBe(11);
-  expect(PRIORITY.indexOf("design_review_conceptual_completed")).toBe(12);
-  expect(PRIORITY.indexOf("planning_artifacts")).toBe(13);
+  expect(PRIORITY.indexOf("charter_extraction_current")).toBe(11);
+  expect(PRIORITY.indexOf("design_review_contract_completed")).toBe(12);
+  expect(PRIORITY.indexOf("design_review_conceptual_completed")).toBe(13);
+  expect(PRIORITY.indexOf("planning_artifacts")).toBe(14);
 });

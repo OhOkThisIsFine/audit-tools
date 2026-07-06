@@ -160,7 +160,16 @@ test.concurrent("audit-code wrapper supports repeated bounded advance-audit invo
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
     expect(seventh.selected_executor).toBe("intent_checkpoint_executor");
-    expect(seventh.next_likely_step).toBe("design_review_contract_completed");
+    expect(seventh.next_likely_step).toBe("charter_extraction_current");
+
+    // Charter extraction (Phase C) sits between the checkpoint and the
+    // design-review passes; under advance-audit at the default shallow ceiling it
+    // omits deterministically (writes an empty charter_register.json) and proceeds.
+    const charter = JSON.parse(
+      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
+    );
+    expect(charter.selected_executor).toBe("charter_extraction_executor");
+    expect(charter.next_likely_step).toBe("design_review_contract_completed");
 
     const eighth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,

@@ -34,6 +34,7 @@ export const PRIORITY: string[] = [
   "design_assessment_current",
   "structure_decomposition_current",
   "intent_checkpoint_current",
+  "charter_extraction_current",
   "design_review_contract_completed",
   "design_review_conceptual_completed",
   "planning_artifacts",

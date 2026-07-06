@@ -3,6 +3,7 @@ import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
+import type { CharterRegister } from "../types/charterRegister.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { ActiveDispatchState } from "../types/activeDispatch.js";
 import type {
@@ -184,6 +185,7 @@ export function buildAuditReportModel(params: {
   externalAnalyzerResults?: ExternalAnalyzerResults[];
   designAssessment?: DesignAssessment;
   structureDecomposition?: StructureDecomposition;
+  charterRegister?: CharterRegister;
   /** Active dispatch state; when a partial-completion terminal is set, its stranded count is carried into the summary. */
   activeDispatch?: ActiveDispatchState | null;
 }): AuditReportModel {
@@ -207,6 +209,7 @@ export function buildAuditReportModel(params: {
       params.externalAnalyzerResults,
       params.designAssessment,
       params.structureDecomposition,
+      params.charterRegister,
     ),
   );
   // B4: a tool-executable anchor that REFUTED a claim (status `refuted`, distinct

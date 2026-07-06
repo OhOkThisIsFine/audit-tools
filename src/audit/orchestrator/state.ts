@@ -203,6 +203,23 @@ export function deriveAuditState(bundle: ArtifactBundle): AuditState {
     ),
   );
 
+  // Phase C conceptual design-review — the charter LAYER. Runs after the intent
+  // checkpoint (it needs the confirmed ceiling) and before the design-review
+  // passes. Satisfied when charter_register.json exists + is fresh w.r.t. its deps
+  // (structure_decomposition / intent_checkpoint / repo_manifest). At a shallow
+  // ceiling the executor writes an omitted register in one step, so this never
+  // blocks the default (conversation-first) path.
+  obligations.push(
+    obligation(
+      "charter_extraction_current",
+      staleOrSatisfied(
+        staleArtifacts,
+        ["charter_register.json"],
+        has(bundle.charter_register),
+      ),
+    ),
+  );
+
   // Backward-compat: old artifacts only have `reviewed`; new artifacts have
   // contract_reviewed and conceptual_reviewed. Treat both as satisfied when
   // the legacy flag is set and neither new flag is present.

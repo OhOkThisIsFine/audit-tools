@@ -27,6 +27,7 @@ function buildBaseFindingsReport(
       externalAnalyzerResults: bundle.external_analyzer_results,
       designAssessment: bundle.design_assessment,
       structureDecomposition: bundle.structure_decomposition,
+      charterRegister: bundle.charter_register,
       activeDispatch: bundle.active_dispatch,
     }),
   );

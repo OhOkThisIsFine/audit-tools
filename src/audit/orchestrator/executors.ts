@@ -56,6 +56,15 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["structure_decomposition_current"],
   },
   {
+    // Phase C charter extraction. host_delegation: at a deep+ ceiling it emits an
+    // LLM charter-extraction step; at a shallow ceiling (default) the runner omits
+    // deterministically (the branch in buildAuditObligations gates emit vs run,
+    // mirroring synthesis_narrative).
+    id: "charter_extraction_executor",
+    kind: "host_delegation",
+    obligation_ids: ["charter_extraction_current"],
+  },
+  {
     id: "design_review_contract",
     kind: "host_delegation",
     obligation_ids: ["design_review_contract_completed"],
