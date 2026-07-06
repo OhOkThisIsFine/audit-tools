@@ -132,6 +132,17 @@ export type {
   DecomposeOptions,
 } from "./decompose/consensus.js";
 export { decompose, clustersFromPartitions } from "./decompose/consensus.js";
+// Conceptual design-review charter layer (Phase C) — assemble a gated charter
+// register from a host LLM submission (deterministic enforcement half).
+export type {
+  CharterSubmission,
+  CharterSubsystem,
+  AssembledCharters,
+} from "./decompose/charterExtraction.js";
+export {
+  CharterSubmissionSchema,
+  assembleCharterRegister,
+} from "./decompose/charterExtraction.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 
