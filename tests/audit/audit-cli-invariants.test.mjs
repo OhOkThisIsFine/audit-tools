@@ -297,42 +297,40 @@ test("INV-audit-cli-13: runAuditStep function signature accepts externalAnalyzer
   expect(true, "externalAnalyzerData option accepted structurally via TypeScript check").toBeTruthy();
 });
 
-// ── INV-RCI-16: opencode.json top-level bash ↔ agent.auditor.permission.bash parity ──
-// Drift between the two blocks is a latent privilege bug: the agent can run
-// commands the global policy denies, or vice-versa. Both sets of keys and their
-// values must be identical. (Agent-only extras like auditor_*, question, task are
-// NOT bash keys and are therefore out of scope for this check.)
+// ── INV-RCI-16 (reframed): opencode.json top-level bash is the UNION CEILING ──
+// of every agent's bash rules ──────────────────────────────────────────────────
+// The top-level permission.bash is NOT one agent's private policy pinned
+// byte-equal to it (the retired parity model made the two installers mutually
+// blind). It is the deterministic union ceiling: each agent's rules are a
+// subset of top-level, top-level introduces no command no agent needs, and
+// shared denies survive (least-privilege). The shared verifier re-derives the
+// union from the agent rule sets and asserts equality, which enforces all three
+// properties mechanically; it is mutually key-aware, so either installer can
+// regenerate the file and it greenlights the same state.
 
-function extractBashBlock(oc) {
-  return oc?.permission?.bash ?? {};
-}
+const { verifyOpenCodeBashCeiling } = await import("../../src/shared/opencodePermissions.ts");
 
-function extractAgentBashBlock(oc) {
-  return oc?.agent?.auditor?.permission?.bash ?? {};
-}
-
-function assertBashParity(label, oc) {
-  const top = extractBashBlock(oc);
-  const agent = extractAgentBashBlock(oc);
-  const topKeys = Object.keys(top).sort();
-  const agentKeys = Object.keys(agent).sort();
-
-  const inTopNotAgent = topKeys.filter((k) => !Object.prototype.hasOwnProperty.call(agent, k));
-  const inAgentNotTop = agentKeys.filter((k) => !Object.prototype.hasOwnProperty.call(top, k));
-  const diffValues = topKeys.filter(
-    (k) => Object.prototype.hasOwnProperty.call(agent, k) && top[k] !== agent[k],
-  );
-
-  expect(inTopNotAgent, `${label}: bash keys present in top-level but absent from agent.auditor: ${JSON.stringify(inTopNotAgent)}`).toEqual([]);
-  expect(inAgentNotTop, `${label}: bash keys present in agent.auditor but absent from top-level: ${JSON.stringify(inAgentNotTop)}`).toEqual([]);
-  expect(diffValues, `${label}: bash keys with differing values between top-level and agent.auditor: ${JSON.stringify(diffValues)}`).toEqual([]);
+function collectAgentBashRuleSets(oc) {
+  const agents = oc?.agent ?? {};
+  return Object.keys(agents)
+    .sort()
+    .map((name) => agents[name]?.permission?.bash)
+    .filter((bash) => bash && typeof bash === "object" && !Array.isArray(bash));
 }
 
 // Single-package repo: the canonical opencode.json lives at the repo root and
-// carries BOTH agent.auditor and agent.remediator scopes. The auditor parity
-// invariant checks top-level permission.bash against agent.auditor.permission.bash.
-test("INV-RCI-16: root opencode.json top-level bash ↔ agent.auditor.permission.bash parity", () => {
+// carries BOTH agent.auditor and agent.remediator scopes. The reframed
+// invariant checks top-level permission.bash is exactly the union ceiling over
+// every agent's bash block.
+test("INV-RCI-16: root opencode.json top-level bash is the union ceiling of every agent's bash rules", () => {
   const rootOpencodeJson = join(repoRoot, "opencode.json");
   const oc = JSON.parse(readFileSync(rootOpencodeJson, "utf8"));
-  assertBashParity("root opencode.json", oc);
+  const violations = verifyOpenCodeBashCeiling(
+    oc?.permission?.bash,
+    collectAgentBashRuleSets(oc),
+  );
+  expect(
+    violations,
+    `root opencode.json top-level bash is not the union ceiling of the agent blocks: ${JSON.stringify(violations, null, 2)}`,
+  ).toEqual([]);
 });

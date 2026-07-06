@@ -3,12 +3,14 @@
 // buildMergedOpenCodeProjectConfig throws a clear error in that case.
 let mergeOpenCodeAgentPermissionRule;
 let withoutOpenCodeWildcard;
+let composeOpenCodeBashCeiling;
 export let sharedOpenCodePermissions = false;
 
 try {
   const shared = await import('audit-tools/shared');
   mergeOpenCodeAgentPermissionRule = shared.mergeOpenCodeAgentPermissionRule;
   withoutOpenCodeWildcard = shared.withoutOpenCodeWildcard;
+  composeOpenCodeBashCeiling = shared.composeOpenCodeBashCeiling;
   sharedOpenCodePermissions = true;
 } catch {
   // shared not yet built — callers that need merge logic will throw below
@@ -170,6 +172,19 @@ function mergePermissionBlock(existingPermission, generatedPermission) {
   };
 }
 
+// Collect every agent's bash rule set from a merged agent map (in stable,
+// key-sorted order) so the top-level ceiling is a deterministic union over all
+// present agents — auditor, remediator, or any future agent — not just the one
+// this installer owns. This is what makes the two installers mutually
+// key-aware: whichever one runs unions the block the other already wrote.
+function collectAgentBashRuleSets(agentMap) {
+  const agents = objectValue(agentMap);
+  return Object.keys(agents)
+    .sort()
+    .map((name) => objectValue(objectValue(agents[name]).permission).bash)
+    .filter((bash) => bash && typeof bash === 'object' && !Array.isArray(bash));
+}
+
 export function buildMergedOpenCodeProjectConfig(existing, root) {
   if (!sharedOpenCodePermissions) {
     throw new Error(
@@ -180,22 +195,33 @@ export function buildMergedOpenCodeProjectConfig(existing, root) {
   const mergedMcp = objectValue(existing.mcp);
   delete mergedMcp.remediator;
   const existingRemediator = objectValue(objectValue(existing.agent).remediator);
+  const mergedAgent = {
+    ...objectValue(existing.agent),
+    remediator: {
+      ...existingRemediator,
+      ...generated.agent.remediator,
+      permission: mergePermissionBlock(
+        existingRemediator.permission,
+        generated.agent.remediator.permission,
+      ),
+    },
+  };
+  // Top-level permission: non-bash rules keep the agent-scope merge. The
+  // top-level bash is the union ceiling of EVERY final agent's bash block — a
+  // true global privilege ceiling, order-stable and idempotent regardless of
+  // which installer regenerates the file. User-authored top-level bash keys the
+  // union does not manage are preserved (non-clobber).
+  const topPermission = mergePermissionBlock(existing.permission, generated.permission);
+  topPermission.bash = composeOpenCodeBashCeiling(
+    objectValue(existing.permission).bash,
+    collectAgentBashRuleSets(mergedAgent),
+  );
   return {
     ...existing,
     $schema: existing.$schema ?? generated.$schema,
     command: removeManagedOpenCodeCommand(existing.command),
     mcp: mergedMcp,
-    permission: mergePermissionBlock(existing.permission, generated.permission),
-    agent: {
-      ...objectValue(existing.agent),
-      remediator: {
-        ...existingRemediator,
-        ...generated.agent.remediator,
-        permission: mergePermissionBlock(
-          existingRemediator.permission,
-          generated.agent.remediator.permission,
-        ),
-      },
-    },
+    permission: topPermission,
+    agent: mergedAgent,
   };
 }

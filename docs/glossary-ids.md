@@ -39,6 +39,7 @@ The grep that backs the guard recognises these family shapes:
 | `INV-GND` | Grounding — a finding with no grounding verdict is treated as ungrounded (verify-before-fix). | `src/shared/validation/findingGrounding.ts` |
 | `INV-ID` | Idempotent intake — content-hash keyed source registration (re-register is a no-op). | `src/remediate/intake.ts` |
 | `INV-QD` | Quota-driven dispatch — quota headroom is the sole throttle; in-flight token accounting is the single authority (no external concurrency cap). | `src/shared/dispatch/rollingDispatch.ts` |
+| `INV-RCI` | Reconciled OpenCode config invariants — the shared repo-root `opencode.json` top-level `permission.bash` is the deterministic **union ceiling** of every agent's bash rules (each agent's rules are a subset, top-level introduces no command no agent needs, shared denies survive). | `src/shared/opencodePermissions.ts` |
 | `INV-RPS` | Remediation plan / cross-lens dedup — distinct structural-anchor identities stay distinct. | `src/remediate/dedup/crossLensDedup.ts` |
 | `INV-RS` | Remediation steps / state machine — ordered-obligation, one-bounded-step, fail-closed final gate. | `src/remediate/steps/nextStep.ts` |
 | `INV-RSD` | Rolling single-tree dispatch — the whole read-modify-write of `state.json` runs under one held lock. | `src/remediate/steps/dispatch.ts` |

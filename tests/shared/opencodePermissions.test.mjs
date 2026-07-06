@@ -12,6 +12,9 @@ const {
   mergeOpenCodeGlobalPermissionRule,
   migrateOpenCodeGlobalExternalDirectory,
   withoutOpenCodeWildcard,
+  unionOpenCodeBashCeiling,
+  composeOpenCodeBashCeiling,
+  verifyOpenCodeBashCeiling,
   OPENCODE_MANAGED_BROAD_VALUE,
 } = await import("../../src/shared/opencodePermissions.ts");
 
@@ -199,4 +202,180 @@ test("migrateOpenCodeGlobalExternalDirectory: entry without wildcard is returned
   const input = { "/home/user": "allow" };
   const result = migrateOpenCodeGlobalExternalDirectory(input);
   expect(result).toEqual(input);
+});
+
+// ── unionOpenCodeBashCeiling ──────────────────────────────────────────────────
+
+test("unionOpenCodeBashCeiling: wildcard is the broadest across agents", () => {
+  // auditor '*': 'allow' is broader than remediator '*': 'ask' → ceiling allow.
+  const ceiling = unionOpenCodeBashCeiling([{ "*": "allow" }, { "*": "ask" }]);
+  expect(ceiling["*"], "broadest wildcard wins the ceiling").toBe("allow");
+});
+
+test("unionOpenCodeBashCeiling: defaults wildcard to 'ask' when no agent sets one", () => {
+  const ceiling = unionOpenCodeBashCeiling([{ "cmd a": "allow" }, { "cmd b": "allow" }]);
+  expect(ceiling["*"]).toBe("ask");
+});
+
+test("unionOpenCodeBashCeiling: a command any agent allows is allowed at the ceiling", () => {
+  // Only the remediator needs 'remediate-code'; the ceiling must permit it so
+  // the remediator's own commands are within the ceiling.
+  const ceiling = unionOpenCodeBashCeiling([
+    { "*": "allow", "audit-code": "allow" },
+    { "*": "ask", "remediate-code": "allow" },
+  ]);
+  expect(ceiling["audit-code"]).toBe("allow");
+  expect(ceiling["remediate-code"]).toBe("allow");
+});
+
+test("unionOpenCodeBashCeiling: a shared deny survives at the ceiling (no allow wins)", () => {
+  // Both agents deny 'rm *'; no agent allows it → ceiling deny (least-privilege).
+  const ceiling = unionOpenCodeBashCeiling([
+    { "*": "allow", "rm *": "deny" },
+    { "*": "ask", "rm *": "deny" },
+  ]);
+  expect(ceiling["rm *"], "a command every mentioning agent denies stays denied").toBe("deny");
+});
+
+test("unionOpenCodeBashCeiling: allow beats deny when agents disagree on a key", () => {
+  // If one agent allows and another denies the same key, the ceiling (max
+  // privilege) allows it; the denying agent keeps its own deny in its block.
+  const ceiling = unionOpenCodeBashCeiling([
+    { "cmd": "allow" },
+    { "cmd": "deny" },
+  ]);
+  expect(ceiling["cmd"]).toBe("allow");
+});
+
+test("unionOpenCodeBashCeiling: a key no agent mentions is omitted (covered by wildcard)", () => {
+  const ceiling = unionOpenCodeBashCeiling([{ "*": "allow" }, { "*": "ask" }]);
+  expect(Object.keys(ceiling)).toEqual(["*"]);
+});
+
+test("unionOpenCodeBashCeiling: order-stable ('*' first, then keys sorted)", () => {
+  const ceiling = unionOpenCodeBashCeiling([
+    { "*": "allow", "z cmd": "allow", "a cmd": "allow" },
+    { "m cmd": "allow" },
+  ]);
+  expect(Object.keys(ceiling), "keys are '*' then lexicographic — deterministic, no churn").toEqual([
+    "*",
+    "a cmd",
+    "m cmd",
+    "z cmd",
+  ]);
+});
+
+test("unionOpenCodeBashCeiling: tolerates null/undefined/non-object agent sets", () => {
+  const ceiling = unionOpenCodeBashCeiling([null, undefined, { "*": "allow", cmd: "allow" }, "nope"]);
+  expect(ceiling["*"]).toBe("allow");
+  expect(ceiling.cmd).toBe("allow");
+});
+
+// ── composeOpenCodeBashCeiling ────────────────────────────────────────────────
+
+test("composeOpenCodeBashCeiling: managed union first (stable order), user extras appended sorted", () => {
+  const auditor = { "*": "allow", "audit-code": "allow" };
+  const existingTop = { "*": "ask", "npm test*": "allow", "aaa user*": "allow" };
+  const composed = composeOpenCodeBashCeiling(existingTop, [auditor]);
+  // Managed union keys come first in their own stable order; the wildcard is
+  // the broadest (allow), NOT the user's stale 'ask'.
+  expect(composed["*"]).toBe("allow");
+  expect(composed["audit-code"]).toBe("allow");
+  // User-only extras survive, appended in sorted order after the union.
+  expect(composed["npm test*"]).toBe("allow");
+  expect(composed["aaa user*"]).toBe("allow");
+  const keys = Object.keys(composed);
+  expect(keys.indexOf("audit-code"), "managed key precedes user extras").toBeLessThan(
+    keys.indexOf("aaa user*"),
+  );
+  expect(keys.indexOf("aaa user*"), "user extras appended in sorted order").toBeLessThan(
+    keys.indexOf("npm test*"),
+  );
+});
+
+test("composeOpenCodeBashCeiling: order-stable regardless of which installer ran last", () => {
+  const auditor = { "*": "allow", "audit-code": "allow", "rm *": "deny" };
+  const remediator = { "*": "ask", "remediate-code": "allow", "rm *": "deny" };
+  // Simulate audit-then-remediate vs remediate-then-audit: the managed portion
+  // is the SAME sorted union either way, so the composed block is byte-equal.
+  const auditFirst = composeOpenCodeBashCeiling(
+    composeOpenCodeBashCeiling(undefined, [auditor]),
+    [auditor, remediator],
+  );
+  const remFirst = composeOpenCodeBashCeiling(
+    composeOpenCodeBashCeiling(undefined, [remediator]),
+    [auditor, remediator],
+  );
+  expect(
+    JSON.stringify(auditFirst),
+    "top-level bash must be byte-identical regardless of installer order (no hash churn)",
+  ).toBe(JSON.stringify(remFirst));
+});
+
+test("composeOpenCodeBashCeiling: idempotent — re-composing over its own output is a no-op", () => {
+  const auditor = { "*": "allow", "audit-code": "allow", "rm *": "deny" };
+  const once = composeOpenCodeBashCeiling(undefined, [auditor]);
+  const twice = composeOpenCodeBashCeiling(once, [auditor]);
+  expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
+});
+
+// ── verifyOpenCodeBashCeiling (reframed INV-RCI-16) ───────────────────────────
+
+test("verifyOpenCodeBashCeiling: a correct union ceiling has zero violations", () => {
+  const auditor = { "*": "allow", "audit-code": "allow", "rm *": "deny" };
+  const remediator = { "*": "ask", "remediate-code": "allow", "rm *": "deny" };
+  const ceiling = unionOpenCodeBashCeiling([auditor, remediator]);
+  expect(verifyOpenCodeBashCeiling(ceiling, [auditor, remediator])).toEqual([]);
+});
+
+test("verifyOpenCodeBashCeiling: flags an agent command missing from the ceiling (not a subset)", () => {
+  const auditor = { "*": "allow", "audit-code": "allow" };
+  const remediator = { "*": "ask", "remediate-code": "allow" };
+  // A ceiling that forgot the remediator's command → subset violation.
+  const badCeiling = { "*": "allow", "audit-code": "allow" };
+  const violations = verifyOpenCodeBashCeiling(badCeiling, [auditor, remediator]);
+  expect(violations.some((v) => v.kind === "agent_not_subset" && v.key === "remediate-code")).toBe(true);
+});
+
+test("verifyOpenCodeBashCeiling: flags a ceiling command no agent needs (unneeded)", () => {
+  const auditor = { "*": "allow", "audit-code": "allow" };
+  const badCeiling = { "*": "allow", "audit-code": "allow", "unneeded cmd": "allow" };
+  const violations = verifyOpenCodeBashCeiling(badCeiling, [auditor]);
+  expect(violations.some((v) => v.kind === "ceiling_unneeded_command" && v.key === "unneeded cmd")).toBe(true);
+});
+
+test("verifyOpenCodeBashCeiling: flags a value mismatch (deny widened to allow at the ceiling)", () => {
+  const auditor = { "*": "allow", "rm *": "deny" };
+  const remediator = { "*": "ask", "rm *": "deny" };
+  // A ceiling that widened the shared deny to allow → least-privilege violation.
+  const badCeiling = { "*": "allow", "rm *": "allow" };
+  const violations = verifyOpenCodeBashCeiling(badCeiling, [auditor, remediator]);
+  expect(violations.some((v) => v.kind === "ceiling_value_mismatch" && v.key === "rm *")).toBe(true);
+});
+
+test("verifyOpenCodeBashCeiling: allowExtraTopLevelKeys lets a preserved user key through", () => {
+  const auditor = { "*": "allow", "audit-code": "allow" };
+  const ceiling = unionOpenCodeBashCeiling([auditor]);
+  // A user added their own top-level bash rule; the installer preserves it.
+  const withUserKey = { ...ceiling, "npm test*": "allow" };
+  // Strict mode flags it as unneeded...
+  expect(
+    verifyOpenCodeBashCeiling(withUserKey, [auditor]).some(
+      (v) => v.kind === "ceiling_unneeded_command" && v.key === "npm test*",
+    ),
+  ).toBe(true);
+  // ...but the relaxed mode accepts the preserved user key.
+  expect(
+    verifyOpenCodeBashCeiling(withUserKey, [auditor], { allowExtraTopLevelKeys: true }),
+  ).toEqual([]);
+});
+
+test("verifyOpenCodeBashCeiling: mutually key-aware — accepts either installer's keys", () => {
+  // Whichever installer regenerated the block, the verifier consumes the full
+  // agent list, so it greenlights the union both would produce.
+  const auditor = { "*": "allow", "audit-code next-step*": "allow", "rm *": "deny" };
+  const remediator = { "*": "ask", "remediate-code next-step*": "allow", "rm *": "deny" };
+  const ceiling = unionOpenCodeBashCeiling([auditor, remediator]);
+  // Same result regardless of the order agents are listed (order-independent union).
+  expect(verifyOpenCodeBashCeiling(ceiling, [remediator, auditor])).toEqual([]);
 });

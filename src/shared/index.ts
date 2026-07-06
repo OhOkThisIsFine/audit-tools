@@ -242,7 +242,11 @@ export {
   mergeOpenCodeAgentPermissionRule,
   mergeOpenCodeGlobalPermissionRule,
   migrateOpenCodeGlobalExternalDirectory,
+  unionOpenCodeBashCeiling,
+  composeOpenCodeBashCeiling,
+  verifyOpenCodeBashCeiling,
 } from "./opencodePermissions.js";
+export type { OpenCodeCeilingViolation } from "./opencodePermissions.js";
 
 // Agent meta-audit reflections (opt-in worker feedback channel, both orchestrators)
 export type {
