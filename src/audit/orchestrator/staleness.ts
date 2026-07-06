@@ -26,7 +26,56 @@ function computeContentHash(
 const ARTIFACT_DEPENDENCIES_MAP: Partial<Record<string, string[]>> =
   ARTIFACT_DEPENDS_ON_MAP;
 
-export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
+/** Options controlling the staleness pass's observability side effect. */
+export interface StalenessOptions {
+  /**
+   * When `true` (the default), a non-empty stale set is reported to stderr as a
+   * single `{ kind: "staleness", … }` JSONL record. `advanceAudit`'s internal
+   * drain loop passes `false` for every intermediate re-derivation so a whole
+   * regen cascade resolved in one host round-trip emits ONE consolidated record
+   * (via `emitStalenessRecord`) at the boundary, not one per drained step.
+   */
+  emit?: boolean;
+}
+
+/**
+ * Emit the single canonical staleness stderr record for a computed stale set.
+ * Kept separate from `computeStaleArtifacts` so the pure staleness computation
+ * has no side effect and callers (notably the `advanceAudit` drain) can emit
+ * exactly once per host round-trip. `reason` distinguishes the metadata-schema
+ * migration degrade from an ordinary dependency-hash staleness.
+ */
+export function emitStalenessRecord(
+  stale: Set<string>,
+  reason?: string,
+): void {
+  if (stale.size === 0) return;
+  process.stderr.write(
+    JSON.stringify({
+      kind: "staleness",
+      stale_artifacts: [...stale].sort(),
+      ...(reason ? { reason } : {}),
+      ts: new Date().toISOString(),
+    }) + "\n",
+  );
+}
+
+/**
+ * True exactly when `computeStaleArtifacts` would take the metadata-schema
+ * migration degrade path (an old-shape manifest that must not be trusted to
+ * skip work). The boundary emit in `advanceAudit` uses this to tag the
+ * consolidated record with the migration `reason`, matching the inline record.
+ */
+export function isMetadataMigrationStaleness(bundle: ArtifactBundle): boolean {
+  const metadata = bundle.artifact_metadata;
+  return Boolean(metadata && !isMetadataManifestCurrent(metadata));
+}
+
+export function computeStaleArtifacts(
+  bundle: ArtifactBundle,
+  options: StalenessOptions = {},
+): Set<string> {
+  const emit = options.emit ?? true;
   const stale = new Set<string>();
   const metadata = bundle.artifact_metadata;
 
@@ -41,16 +90,7 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
       if (artifactName === "artifact_metadata.json") continue;
       if (present(bundle, artifactName)) stale.add(artifactName);
     }
-    if (stale.size > 0) {
-      process.stderr.write(
-        JSON.stringify({
-          kind: "staleness",
-          stale_artifacts: [...stale].sort(),
-          reason: "metadata_schema_version_migration",
-          ts: new Date().toISOString(),
-        }) + "\n",
-      );
-    }
+    if (emit) emitStalenessRecord(stale, "metadata_schema_version_migration");
     return stale;
   }
 
@@ -140,15 +180,7 @@ export function computeStaleArtifacts(bundle: ArtifactBundle): Set<string> {
     }
   }
 
-  if (stale.size > 0) {
-    process.stderr.write(
-      JSON.stringify({
-        kind: "staleness",
-        stale_artifacts: [...stale].sort(),
-        ts: new Date().toISOString(),
-      }) + "\n",
-    );
-  }
+  if (emit) emitStalenessRecord(stale);
 
   return stale;
 }

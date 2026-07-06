@@ -116,78 +116,56 @@ export function buildSyntheticResults(tasks, lineIndex) {
 }
 
 /**
+ * Analyzer policy that forces graph enrichment to stay hermetic (no analyzer
+ * subprocess / dependency acquisition) even when a real `root` is supplied — every
+ * registered analyzer is set to `skip`. `advanceAudit` now drains the whole
+ * deterministic regen frontier (intake → structure → graph_enrichment →
+ * design_assessment → structure_decomposition) within a single call, so
+ * graph_enrichment runs WITH the root that intake/planning require; `skip` keeps
+ * it on the floor graph the old rootless "absent" path produced, so the pipeline
+ * stays offline-hermetic. The five ids are the stable ANALYZER_REGISTRY set.
+ */
+const FIXTURE_SKIP_ANALYZERS = {
+  typescript: "skip",
+  python: "skip",
+  html: "skip",
+  css: "skip",
+  sql: "skip",
+};
+
+/**
  * Drive the deterministic audit pipeline in-process up to (and including) the
  * planning step. Returns `{ planning, lineIndex }` where `lineIndex` is
  * `FIXTURE_LINE_INDEX`.
  *
- * The 8-step sequence (intake → preparedBundle construction → structure →
- * enrichment → designAssessment → designReview → intentCheckpoint → planning)
- * was duplicated verbatim in both orchestration.test.mjs and
- * next-step-narrative.test.mjs.
+ * `advanceAudit` drains the consecutive deterministic regen frontier within one
+ * call, stopping only at host-delegation boundaries (provider_confirmation,
+ * intent_checkpoint, charter, both design-review passes). So the whole
+ * deterministic chain collapses into a handful of host-boundary round-trips — this
+ * helper is chain-length-agnostic: it loops `advanceAudit` until the planning
+ * artifacts are built (planning_executor is the deterministic tail that the
+ * conceptual design-review round-trip drains into), never hard-coding the exact
+ * intermediate step count. Every call passes the same options (root + lineIndex +
+ * a skip-all analyzer policy for hermeticity), mirroring the real CLI path.
  */
 export async function advanceFixtureToPlanning(root) {
-  // Provider confirmation is the first session-level gate; headless, it
-  // auto-completes deterministically and writes provider_confirmation.json.
-  const providerConfirmation = await advanceAudit({}, { root });
-
-  const intake = await advanceAudit(providerConfirmation.updated_bundle, { root });
-  const preparedBundle = {
-    ...intake.updated_bundle,
-    auto_fixes_applied: {
-      executed_tools: [],
-      timestamp: "2026-04-22T00:00:00Z",
-    },
-    external_analyzer_results: [
-      {
-        tool: "syntax_resolution_executor",
-        results: [],
-      },
-    ],
-    syntax_resolution_status: {
-      tool: "syntax_resolution_executor",
-      completed_at: "2026-04-22T00:00:00Z",
-    },
-    // Mark external-analyzer acquisition (Slice D) as already satisfied so the
-    // hand-built step sequence below proceeds straight to structure (acquisition
-    // is a hermetic no-op without an enabled gate; the fixture skips it like the
-    // injected auto-fix / syntax-resolution markers above).
-    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
-  };
-
-  const structure = await advanceAudit(preparedBundle);
-
-  // Graph enrichment runs between structure and design assessment. With no root
-  // the optional analyzers are unavailable, so it writes an "omitted" marker and
-  // leaves the regex-floor graph unchanged.
-  const enrichment = await advanceAudit(structure.updated_bundle);
-
-  const designAssessment = await advanceAudit(enrichment.updated_bundle);
-
-  // Structure decomposition is a deterministic step sitting after design
-  // assessment and before the intent checkpoint. It runs fine without a root.
-  const structureDecomposition = await advanceAudit(designAssessment.updated_bundle);
-
-  // The intent checkpoint now sits after structure decomposition and before
-  // design review. Headless, it auto-completes a default full-scope checkpoint;
-  // the executor requires a root for scope resolution.
-  const intentCheckpoint = await advanceAudit(structureDecomposition.updated_bundle, {
-    root,
-  });
-
-  // Charter extraction (Phase C) sits between the checkpoint and the design-review
-  // passes. Headless with a default (shallow-ceiling) checkpoint it omits in one
-  // deterministic step, writing an empty charter_register.json.
-  const charterExtraction = await advanceAudit(intentCheckpoint.updated_bundle);
-
-  // Design review is now split into two passes: contract (adversarial) and
-  // conceptual (generative). Both auto-complete headlessly.
-  const designReviewContract = await advanceAudit(charterExtraction.updated_bundle);
-  const designReviewConceptual = await advanceAudit(designReviewContract.updated_bundle);
-
-  const planning = await advanceAudit(designReviewConceptual.updated_bundle, {
+  const options = {
     root,
     lineIndex: FIXTURE_LINE_INDEX,
-  });
+    analyzers: FIXTURE_SKIP_ANALYZERS,
+  };
 
-  return { planning, lineIndex: FIXTURE_LINE_INDEX };
+  let result = await advanceAudit({}, options);
+  // Loop across host-delegation boundaries until the planning step has run. Each
+  // iteration crosses one host boundary and drains its trailing deterministic
+  // run; planning_executor is reached once the design-review passes complete.
+  // Bounded well above the real boundary count so a genuine stall still fails
+  // fast rather than hanging.
+  for (let i = 0; i < 32; i += 1) {
+    if (result.selected_executor === "planning_executor") break;
+    if (result.next_likely_step === null) break;
+    result = await advanceAudit(result.updated_bundle, options);
+  }
+
+  return { planning: result, lineIndex: FIXTURE_LINE_INDEX };
 }

@@ -6,6 +6,19 @@ import { fileURLToPath } from "node:url";
 import { countLines } from "./helpers/countLines.mjs";
 
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.ts");
+const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.ts");
+
+// Analyzer policy that keeps graph enrichment hermetic (no analyzer subprocess /
+// dependency acquisition) even with a real root — advanceAudit drains the whole
+// deterministic frontier in one call, so graph_enrichment runs with the root that
+// intake/planning require. The five ids are the stable ANALYZER_REGISTRY set.
+const SKIP_ANALYZERS = {
+  typescript: "skip",
+  python: "skip",
+  html: "skip",
+  css: "skip",
+  sql: "skip",
+};
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = join(here, "fixtures", "simple-app");
@@ -37,16 +50,24 @@ async function buildFixtureLineIndex(root) {
 
 test("committed fixture repo supports external analyzer import and deterministic planning without synthetic runtime placeholders", async () => {
   await withFixtureRepo(async (root) => {
-    let bundle = {};
+    const lineIndex = await buildFixtureLineIndex(root);
+    const options = { root, lineIndex, analyzers: SKIP_ANALYZERS };
 
-    // Provider confirmation gate auto-completes headlessly.
-    const providerConf = await advanceAudit(bundle, { root });
-    bundle = providerConf.updated_bundle;
+    // advanceAudit now DRAINS the consecutive deterministic regen frontier within
+    // one call, stopping only at host-delegation boundaries. So the first call
+    // (provider_confirmation) drains intake → auto_fix → syntax_resolution →
+    // external_analyzer_acquisition → structure → graph_enrichment →
+    // design_assessment → structure_decomposition in one round-trip, halting at
+    // the intent_checkpoint host boundary.
+    let result = await advanceAudit({}, options);
+    let bundle = result.updated_bundle;
 
-    const intake = await advanceAudit(bundle, { root });
-    bundle = intake.updated_bundle;
-
+    // Force the external-analyzer import BEFORE planning consumes
+    // external_analyzer_results. The import is a forced-only executor (no
+    // priority obligation); injecting it here re-stales the planning artifacts so
+    // the drive-to-planning below regenerates them WITH the analyzer signal.
     const imported = await advanceAudit(bundle, {
+      ...options,
       preferredExecutor: "external_analyzer_import_executor",
       externalAnalyzerResults: {
         tool: "semgrep",
@@ -68,48 +89,23 @@ test("committed fixture repo supports external analyzer import and deterministic
     expect(imported.selected_executor).toBe("external_analyzer_import_executor");
     bundle = imported.updated_bundle;
 
-    const autoFix = await advanceAudit(bundle, { root });
-    bundle = autoFix.updated_bundle;
+    // Drive across the remaining host-delegation boundaries (intent_checkpoint,
+    // charter, both design-review passes) until the deterministic planning tail
+    // runs. Chain-length-agnostic: loop until planning_executor is the resolved
+    // step rather than hard-coding the intermediate host-boundary count.
+    let planning = null;
+    for (let i = 0; i < 32; i += 1) {
+      const decision = decideNextStep(bundle);
+      if (decision.state.status === "complete") break;
+      const step = await advanceAudit(bundle, options);
+      bundle = step.updated_bundle;
+      if (step.selected_executor === "planning_executor") {
+        planning = step;
+        break;
+      }
+    }
 
-    const syntaxResolution = await advanceAudit(bundle, { root });
-    bundle = syntaxResolution.updated_bundle;
-
-    // External-analyzer acquisition (Slice D) runs before structure; not enabled
-    // here (no externalAcquisition option), so it writes a hermetic empty marker.
-    const acquisition = await advanceAudit(bundle, { root });
-    bundle = acquisition.updated_bundle;
-    expect(acquisition.selected_executor).toBe("external_analyzer_acquisition_executor");
-
-    const structure = await advanceAudit(bundle);
-    bundle = structure.updated_bundle;
-
-    const designAssessment = await advanceAudit(bundle);
-    bundle = {
-      ...designAssessment.updated_bundle,
-      design_assessment: {
-        ...designAssessment.updated_bundle.design_assessment,
-        reviewed: true,
-        review_findings: [],
-      },
-    };
-
-    // Structure decomposition is a deterministic step between design assessment
-    // and the intent checkpoint; it runs fine without a root.
-    const structureDecomposition = await advanceAudit(bundle);
-    bundle = structureDecomposition.updated_bundle;
-
-    const intentCheckpoint = await advanceAudit(bundle, { root });
-    bundle = intentCheckpoint.updated_bundle;
-
-    // Charter extraction (Phase C) omits at the default shallow ceiling.
-    const charterExtraction = await advanceAudit(bundle);
-    bundle = charterExtraction.updated_bundle;
-
-    const planning = await advanceAudit(bundle, {
-      root,
-      lineIndex: await buildFixtureLineIndex(root),
-    });
-
+    expect(planning, "planning_executor should be reached").toBeTruthy();
     expect(planning.selected_executor).toBe("planning_executor");
     expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
 

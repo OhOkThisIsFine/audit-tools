@@ -76,6 +76,8 @@ test("finalization converges through the real persist/reload loop without oscill
     let completedAt = -1;
     let lastUpdated = null;
     let sawRuntimeTasks = false;
+    let synthesisReachedIter = -1;
+    let planningReRanAfterSynthesis = false;
     const MAX_ITERS = 25;
 
     for (let i = 0; i < MAX_ITERS; i++) {
@@ -83,6 +85,11 @@ test("finalization converges through the real persist/reload loop without oscill
       if ((bundle.runtime_validation_tasks?.tasks ?? []).length > 0) {
         sawRuntimeTasks = true;
       }
+      // Synthesis is detected by the report bundle appearing, NOT by a discrete
+      // `synthesis_current` trail entry: advanceAudit now DRAINS the consecutive
+      // deterministic regen frontier (runtime_validation → synthesis → …) within
+      // one call, so only the FIRST obligation of each call surfaces in `trail`.
+      const reportAlreadyPresent = bundle.audit_report != null;
       const decision = decideNextStep(bundle);
       if (decision.state.status === "complete") {
         completedAt = i;
@@ -90,6 +97,12 @@ test("finalization converges through the real persist/reload loop without oscill
       }
       expect(decision.selected_executor, `iter ${i}: an executor should be selected (trail: ${trail.join(" -> ")})`).toBeTruthy();
       trail.push(decision.selected_obligation);
+      // Oscillation guard (the real A1 bug): once the report exists, a later step
+      // must never re-open planning (a planning re-run rewrites
+      // runtime_validation_report.json and re-stales synthesis).
+      if (reportAlreadyPresent && decision.selected_obligation === "planning_artifacts") {
+        planningReRanAfterSynthesis = true;
+      }
 
       let res;
       if (decision.selected_executor === "agent" || decision.selected_executor === "rolling_dispatch_executor") {
@@ -104,6 +117,11 @@ test("finalization converges through the real persist/reload loop without oscill
       } else {
         res = await advanceAudit(bundle, { root, lineIndex: LINE_INDEX });
       }
+      // A drain that produced the report (synthesis ran) is recorded the first
+      // time audit_report becomes present in the accumulated bundle.
+      if (synthesisReachedIter < 0 && res.updated_bundle.audit_report != null) {
+        synthesisReachedIter = i;
+      }
       lastUpdated = res.updated_bundle;
       await writeCoreArtifacts(artDir, res.updated_bundle, { prune: true });
     }
@@ -111,9 +129,8 @@ test("finalization converges through the real persist/reload loop without oscill
     expect(completedAt >= 0, `finalization must converge to complete within ${MAX_ITERS} iterations; trail: ${trail.join(" -> ")}`).toBeTruthy();
     expect(sawRuntimeTasks, "fixture should exercise runtime validation tasks").toBeTruthy();
 
-    const firstSynthesis = trail.indexOf("synthesis_current");
-    expect(firstSynthesis >= 0, `synthesis should run; trail: ${trail.join(" -> ")}`).toBeTruthy();
-    expect(!trail.slice(firstSynthesis).includes("planning_artifacts"), `planning must not re-run after synthesis; trail: ${trail.join(" -> ")}`).toBeTruthy();
+    expect(synthesisReachedIter >= 0, `synthesis should run (audit_report must be produced); trail: ${trail.join(" -> ")}`).toBeTruthy();
+    expect(!planningReRanAfterSynthesis, `planning must not re-run after synthesis; trail: ${trail.join(" -> ")}`).toBeTruthy();
 
     // Every persisted artifact must survive a reload with an identical content
     // hash — a round-trip-unstable artifact perpetually re-stales its downstream.

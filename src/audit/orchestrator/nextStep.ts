@@ -89,7 +89,21 @@ export function findObligation(
   return findFirstActionableObligation(PRIORITY, obligations);
 }
 
-export function decideNextStep(bundle: ArtifactBundle): NextStepDecision {
+/** Options for `decideNextStep`. */
+export interface DecideNextStepOptions {
+  /**
+   * Forwarded to `deriveAuditState` → `computeStaleArtifacts`. `false` suppresses
+   * the staleness stderr record for this derivation — used inside `advanceAudit`'s
+   * drain loop so the cascade emits a single consolidated record at the boundary.
+   * Defaults to `true`.
+   */
+  emitStaleness?: boolean;
+}
+
+export function decideNextStep(
+  bundle: ArtifactBundle,
+  options: DecideNextStepOptions = {},
+): NextStepDecision {
   // After intermediate artifacts are cleaned up, trust the persisted complete
   // state so re-runs don't attempt to rebuild from an empty bundle.
   if (bundle.audit_state?.status === "complete") {
@@ -100,7 +114,9 @@ export function decideNextStep(bundle: ArtifactBundle): NextStepDecision {
       reason: "All known obligations are currently satisfied.",
     };
   }
-  const state = deriveAuditState(bundle);
+  const state = deriveAuditState(bundle, {
+    emitStaleness: options.emitStaleness ?? true,
+  });
   const next = findObligation(state.obligations);
 
   if (!next) {

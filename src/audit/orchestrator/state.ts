@@ -57,9 +57,26 @@ function designReviewPassState(
   return "satisfied";
 }
 
-export function deriveAuditState(bundle: ArtifactBundle): AuditState {
+/** Options for `deriveAuditState`. */
+export interface DeriveAuditStateOptions {
+  /**
+   * Forwarded to `computeStaleArtifacts`. When `false`, the staleness pass runs
+   * without writing its stderr record — used by `advanceAudit`'s internal drain
+   * loop so a whole regen cascade emits ONE consolidated staleness record at the
+   * boundary rather than one per drained step. Defaults to `true` (every other
+   * caller keeps the current emit-on-stale behavior).
+   */
+  emitStaleness?: boolean;
+}
+
+export function deriveAuditState(
+  bundle: ArtifactBundle,
+  options: DeriveAuditStateOptions = {},
+): AuditState {
   const obligations: AuditObligation[] = [];
-  const staleArtifacts = computeStaleArtifacts(bundle);
+  const staleArtifacts = computeStaleArtifacts(bundle, {
+    emit: options.emitStaleness ?? true,
+  });
 
   obligations.push(
     obligation(
