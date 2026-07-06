@@ -133,10 +133,12 @@ test("grounding-single-source/3b: remediate-code reads finding.grounding via the
   // shared verify-before-fix predicate so a missing grounding verdict is treated
   // as ungrounded (never silently trusted).
   const plan = read(join(REMEDIATE_SRC, "phases", "plan.ts"));
-  const dispatch = read(join(REMEDIATE_SRC, "steps", "dispatch.ts"));
+  // dispatch.ts was split into cohesive modules (CP-NODE-7); the implement-prompt
+  // grounding-read now lives in the dispatch/implementPrompt.ts module.
+  const dispatch = read(join(REMEDIATE_SRC, "steps", "dispatch", "implementPrompt.ts"));
   for (const [label, src] of [
     ["remediate-code/src/phases/plan.ts", plan],
-    ["remediate-code/src/steps/dispatch.ts", dispatch],
+    ["remediate-code/src/steps/dispatch/implementPrompt.ts", dispatch],
   ]) {
     expect(/findingNeedsVerificationBeforeFix[^]*from\s+["']audit-tools\/shared["']/.test(src), `${label} must import findingNeedsVerificationBeforeFix from shared`).toBeTruthy();
     expect(src, `${label} must consult findingNeedsVerificationBeforeFix on the grounding path`).toMatch(/findingNeedsVerificationBeforeFix\(/);
