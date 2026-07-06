@@ -162,3 +162,82 @@ export const CharterDeltaSchema = z
   })
   .strict();
 export type CharterDelta = z.infer<typeof CharterDeltaSchema>;
+
+// ── Phase D — the charter-alignment clarification / triangulation loop ──────────
+//
+// The True charter is inexpressible cold; the review converts it into a decidable
+// question ("your code optimizes X, your docs say Y, which governs?"). Charter
+// alignment is therefore a LOOP interleaved with re-review, not a post-step:
+//   show delta → user picks → charters update → deltas re-derive → next question.
+// (design of record spec/conceptual-design-review-design.md §"The triangulation
+// loop" + §"Control surface — three currencies, three dials".)
+//
+// This is the AUDIT-side, charter-keyed ClarificationRequest — sourced from a
+// routed CharterDelta, NOT the remediate-side finding-keyed ClarificationRequest
+// (src/remediate/state/types.ts). The two are deliberately separate: a charter
+// question moves any of the four charters (including Stated), whereas a remediate
+// question resolves an implementation ambiguity for one finding.
+
+/**
+ * How answerable a charter question is — the axes the VOI ranking scores. A
+ * `blast_radius` is how far up the goal DAG the answer ripples (goals are a DAG,
+ * not a tree, so one answer can force reframes on multiple parents); a
+ * `cascade_count` is how many other still-open deltas the answer is expected to
+ * settle. High on both = highest value-of-information (resolve it first).
+ */
+export const ClarificationValueSchema = z
+  .object({
+    /** How far up the goal DAG the fix ripples (0 = leaf). Priority AND risk. */
+    blast_radius: z.number().int().min(0),
+    /** How many other open deltas this answer is expected to cascade-settle. */
+    cascade_count: z.number().int().min(0),
+  })
+  .strict();
+export type ClarificationValue = z.infer<typeof ClarificationValueSchema>;
+
+/**
+ * A single charter-alignment question — the audit-side ClarificationRequest,
+ * sourced from a routed CharterDelta. `options` are SYMMETRIC (any of the four
+ * charters may move, including Stated; "leave open" is a first-class answer), so a
+ * question never silently anoints Stated as ground truth. `value` carries the
+ * blast-radius + cascade estimate the VOI queue ranks on. `answer` is set once the
+ * user (or the autonomous zero-attention mode) resolves it.
+ */
+export const CharterClarificationAnswerSchema = z.enum([
+  "this_side_wins",
+  "that_side_wins",
+  "rewrite_both",
+  "leave_open",
+]);
+export type CharterClarificationAnswer = z.infer<
+  typeof CharterClarificationAnswerSchema
+>;
+
+export const CharterClarificationRequestSchema = z
+  .object({
+    /** Stable id, derived from the source delta (`${delta_id}:q`). */
+    request_id: z.string(),
+    /** The routed delta this question triangulates. */
+    delta_id: z.string(),
+    /** The subsystem the delta belongs to (for grouping + reporting). */
+    node_id: z.string(),
+    /** The symmetric charter pair in tension. */
+    pair: z.tuple([CharterKindSchema, CharterKindSchema]),
+    /** The decidable question ("code optimizes X, docs say Y — which governs?"). */
+    question: z.string(),
+    /** The VOI axes this question is ranked on. */
+    value: ClarificationValueSchema,
+    /**
+     * Whether this question is CLEARED for the interactive human channel or must
+     * only be written as a finding. A high-blast question that has not cleared the
+     * risk gate's higher adversarial bar (or any question under zero attention) is
+     * `finding_only`. `interactive` questions form the VOI queue the user answers.
+     */
+    disposition: z.enum(["interactive", "finding_only"]),
+    /** Resolved answer (symmetric); absent while the question is still open. */
+    answer: CharterClarificationAnswerSchema.optional(),
+  })
+  .strict();
+export type CharterClarificationRequest = z.infer<
+  typeof CharterClarificationRequestSchema
+>;

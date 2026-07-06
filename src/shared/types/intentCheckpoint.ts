@@ -141,6 +141,17 @@ export const IntentCheckpointSchema = z
         goal_graph: GoalGraphSchema.optional(),
         charters: z.array(CharterSchema).optional(),
         ceiling: CeilingSchema.optional(),
+        /**
+         * The ATTENTION dial (Phase D control surface, currency #3) — how much the
+         * user will converse to align the charters: how many VOI-ranked
+         * charter-clarification questions they answer this round. `0` is the
+         * autonomous mode (every charter-delta becomes a written finding, nothing
+         * interactive); a finite N takes the top-N of the VOI queue; `"all"` takes
+         * every interactive question. Attended and unattended are two settings of
+         * ONE dial, not a forked path. Optional + additive; defaults to `0`
+         * (conversation-first: no human loop unless the user opts in).
+         */
+        attention: z.union([z.number().int().min(0), z.literal("all")]).optional(),
       })
       .strict()
       .optional(),

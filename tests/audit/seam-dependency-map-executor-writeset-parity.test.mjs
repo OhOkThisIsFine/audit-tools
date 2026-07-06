@@ -101,6 +101,7 @@ const EXECUTOR_SOURCE_FILES = [
   join(auditCodeRoot, "src", "audit", "orchestrator", "intakeExecutors.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "structureExecutors.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "charterExtractionExecutor.ts"),
+  join(auditCodeRoot, "src", "audit", "orchestrator", "charterClarificationExecutor.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "planningExecutors.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "ingestionExecutors.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "synthesisExecutors.ts"),

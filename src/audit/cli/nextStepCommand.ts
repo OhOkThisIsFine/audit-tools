@@ -30,6 +30,7 @@ import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { renderCharterExtractionPrompt } from "./charterExtractionPrompt.js";
+import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
 import {
   loadSessionConfig,
@@ -480,6 +481,43 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       access: {
         read_paths: [join(artifactsDir, "structure_decomposition.json")],
         write_paths: [submissionPath],
+      },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "charter_clarification") {
+    // Phase D triangulation loop: the tool has already run the deterministic loop
+    // (partition → VOI-rank → risk-gate → split by attention) and surfaces the
+    // interactive queue here. The host relays each SYMMETRIC question and writes the
+    // answers back; the executor applies them + re-splits (interruptible: unanswered
+    // questions leave-open). Only reached at a deep+ ceiling with attention > 0 and
+    // ≥1 open interactive question.
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const answersPath = join(artifactsDir, "incoming", "charter-clarification.json");
+    const ceiling = resolveCharterCeiling(result.bundle.intent_checkpoint);
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "charter_clarification",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Relay each charter-alignment question to the user, write the answers to the answers path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        charter_clarification_answers: answersPath,
+      },
+      prompt: renderCharterClarificationPrompt(result.bundle, {
+        answersPath,
+        continueCommand,
+        ceiling,
+      }),
+      access: {
+        read_paths: [join(artifactsDir, "charter_clarification.json")],
+        write_paths: [answersPath],
       },
     });
     console.log(JSON.stringify(step, null, 2));

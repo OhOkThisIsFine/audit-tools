@@ -119,6 +119,17 @@ function createDecisionBundle(overrides = {}) {
       findings: [],
       validation_issues: [],
     },
+    charter_clarification: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      target: "charter_clarification",
+      ceiling: { rung: "shallow" },
+      attention: 0,
+      status: "omitted",
+      asked: [],
+      banked: [],
+      findings: [],
+      validation_issues: [],
+    },
     intent_checkpoint: {
       schema_version: "intent-checkpoint/v1",
       confirmed_at: "2026-04-22T00:00:00Z",

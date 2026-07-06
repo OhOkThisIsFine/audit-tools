@@ -273,6 +273,41 @@ export function deriveAuditState(
     ),
   );
 
+  // Phase D conceptual design-review — the charter-alignment TRIANGULATION LOOP.
+  // Runs after the design-review passes and before planning. The base satisfaction
+  // is the usual exists+fresh check on charter_clarification.json (its deps:
+  // charter_register / intent_checkpoint / repo_manifest). At a shallow ceiling (or
+  // zero attention) the executor writes the register in one deterministic step, so
+  // this never blocks the default (conversation-first) path — mirrors
+  // charter_extraction_current.
+  //
+  // The interruptible LOOP: when the register exists+fresh AND still carries
+  // interactive `asked` questions with no recorded answer, the obligation stays
+  // unmet so the relay step re-fires (the host banks each answer, the executor
+  // re-splits, the queue shrinks). An empty/all-answered `asked` set satisfies it.
+  // A user who taps out mid-loop leaves questions open → they bank as findings on
+  // the next deterministic assemble, so the loop always terminates.
+  const clarificationBase = staleOrSatisfied(
+    staleArtifacts,
+    ["charter_clarification.json"],
+    has(bundle.charter_clarification),
+  );
+  const pendingCharterQuestions =
+    clarificationBase === "satisfied"
+      ? (bundle.charter_clarification?.asked ?? []).filter(
+          (q) => q.answer === undefined,
+        ).length
+      : 0;
+  obligations.push(
+    obligation(
+      "charter_clarification_current",
+      pendingCharterQuestions > 0 ? "missing" : clarificationBase,
+      pendingCharterQuestions > 0
+        ? `${pendingCharterQuestions} interactive charter-alignment question(s) awaiting an answer (or leave-open) before planning proceeds.`
+        : undefined,
+    ),
+  );
+
   const planningReady =
     has(bundle.coverage_matrix) &&
     has(bundle.flow_coverage) &&

@@ -99,6 +99,9 @@ export type {
   GoalGraph,
   Ceiling,
   CharterDelta,
+  ClarificationValue,
+  CharterClarificationAnswer,
+  CharterClarificationRequest,
 } from "./types/charter.js";
 export {
   CharterKindSchema,
@@ -110,11 +113,15 @@ export {
   GoalGraphSchema,
   CeilingSchema,
   CharterDeltaSchema,
+  ClarificationValueSchema,
+  CharterClarificationAnswerSchema,
+  CharterClarificationRequestSchema,
 } from "./types/charter.js";
 export {
   applyTrueCharterGate,
   charterReviewDisposition,
   gateCharterDelta,
+  riskGateClarification,
 } from "./validation/charterGate.js";
 // Conceptual design-review overlay-and-delta operator (Phase B) — the
 // deterministic clustering + consensus primitives, reused at the structure layer
@@ -143,6 +150,20 @@ export {
   CharterSubmissionSchema,
   assembleCharterRegister,
 } from "./decompose/charterExtraction.js";
+// Conceptual design-review charter-clarification loop (Phase D) — the pure
+// triangulation-loop assembler (partition → risk-gate → split-by-attention);
+// consumes the audit-side D1/D2 primitives via injected deps.
+export type {
+  ClarificationDeltaInput,
+  ClarificationAttention,
+  ClarificationLoopDeps,
+  AssembledClarifications,
+  ClarificationAnswersSubmission,
+} from "./decompose/charterClarification.js";
+export {
+  assembleClarificationRegister,
+  ClarificationAnswersSubmissionSchema,
+} from "./decompose/charterClarification.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 

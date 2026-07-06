@@ -51,6 +51,7 @@ import {
   resolveCharterCeiling,
   ceilingRequestsCharters,
 } from "../orchestrator/charterExtractionExecutor.js";
+import { resolveClarificationAttention } from "../orchestrator/charterClarificationExecutor.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import {
@@ -168,6 +169,7 @@ export type NextStepResult =
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_extraction"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "provider_confirmation"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
@@ -602,6 +604,64 @@ export async function handleCharterExtractionBranch(
     return { action: "run_omit" };
   }
   return { action: "return", result: { kind: "charter_extraction", state, bundle } };
+}
+
+type CharterClarificationBranchResult =
+  | { action: "continue" }
+  | { action: "run_omit" }
+  | { action: "return"; result: { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle } };
+
+/**
+ * Handle the `charter_clarification_executor` obligation (Phase D triangulation
+ * loop). Mirrors the charter-extraction branch, but the loop is DETERMINISTIC — the
+ * executor assembles asked/banked from the Phase-C `charter_register` deltas, so the
+ * host turn only surfaces the VOI-ranked interactive queue for relay:
+ *   - a pending `incoming/charter-clarification.json` (host answers) → assemble via
+ *     the deterministic runner, then `continue`;
+ *   - a `shallow` ceiling OR zero attention → `run_omit` (the runner writes the
+ *     register autonomously — every question banks as a finding, no host turn);
+ *   - a `deep`/`deepest` ceiling WITH attention > 0 that has NOT yet produced a
+ *     register → `run_omit` first to COMPUTE the loop (partition/rank/gate/split);
+ *   - once the register exists with ≥1 interactive `asked` question and no answers
+ *     yet → `return` the host step that relays the VOI queue.
+ */
+export async function handleCharterClarificationBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<CharterClarificationBranchResult> {
+  const incoming = await tryConsumeIncoming<unknown>(
+    params.artifactsDir,
+    "charter-clarification.json",
+  );
+  if (incoming) {
+    await runAuditStep({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      preferredExecutor: "charter_clarification_executor",
+      clarificationAnswersPath: incoming.path,
+    });
+    await unlink(incoming.path).catch(() => {});
+    return { action: "continue" };
+  }
+  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
+  const attention = resolveClarificationAttention(bundle.intent_checkpoint);
+  if (!ceilingRequestsCharters(ceiling) || attention === 0) {
+    // Shallow ceiling or autonomous (zero-attention) mode: assemble the register
+    // deterministically, no host turn (every question banks as a finding).
+    return { action: "run_omit" };
+  }
+  // The loop must be COMPUTED before we can relay a queue: if no register exists
+  // yet, run the deterministic assembler this turn (it partitions/ranks/gates/
+  // splits from the charter_register), then re-scan.
+  if (!bundle.charter_clarification) {
+    return { action: "run_omit" };
+  }
+  // Register exists: relay the interactive queue only when there is one to ask.
+  if ((bundle.charter_clarification.asked?.length ?? 0) === 0) {
+    return { action: "run_omit" };
+  }
+  return { action: "return", result: { kind: "charter_clarification", state, bundle } };
 }
 
 /**
@@ -1071,6 +1131,26 @@ function buildAuditObligations(): AuditObligationDef[] {
       id: "design_review_conceptual_completed",
       derive: deriveObligationState("design_review_conceptual_completed"),
       execute: (bundle, ctx) => runDesignReviewObligation(bundle, ctx),
+    },
+    {
+      // Charter clarification (Phase D triangulation loop): poll incoming answers
+      // (apply + re-split), assemble the loop deterministically at a shallow ceiling
+      // / zero attention (autonomous), or emit the host step relaying the VOI-ranked
+      // interactive queue at a deep+ ceiling with attention > 0. Non-drainable
+      // (host_delegation), so the drain stops here.
+      id: "charter_clarification_current",
+      derive: deriveObligationState("charter_clarification_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleCharterClarificationBranch(ctx.params, bundle, state);
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "run_omit") {
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+      },
     },
     deterministic("planning_artifacts"),
     {

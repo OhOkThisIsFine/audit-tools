@@ -75,6 +75,16 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["design_review_conceptual_completed"],
   },
   {
+    // Phase D charter-clarification triangulation loop. host_delegation (NON-
+    // DRAINABLE): at a deep+ ceiling WITH attention > 0 and open interactive
+    // questions it emits an LLM step surfacing the VOI-ranked queue; otherwise the
+    // runner assembles the loop deterministically (autonomous mode / omit) — the
+    // branch in nextStepHelpers gates emit vs run, mirroring charter_extraction.
+    id: "charter_clarification_executor",
+    kind: "host_delegation",
+    obligation_ids: ["charter_clarification_current"],
+  },
+  {
     id: "planning_executor",
     kind: "deterministic",
     obligation_ids: ["planning_artifacts"],

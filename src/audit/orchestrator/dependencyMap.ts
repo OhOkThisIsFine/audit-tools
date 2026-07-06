@@ -102,6 +102,16 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "intent_checkpoint.json",
     "repo_manifest.json",
   ],
+  // Phase D conceptual design-review: the charter-alignment TRIANGULATION LOOP.
+  // Depends on the Phase-C charter register (the deltas it questions), the confirmed
+  // intent checkpoint (the ceiling + attention dials that gate its depth/appetite),
+  // and repo_manifest (a source-content change re-stales the register transitively).
+  // Deterministic: the loop assembles from the register, so re-running is idempotent.
+  "charter_clarification.json": [
+    "charter_register.json",
+    "intent_checkpoint.json",
+    "repo_manifest.json",
+  ],
 
   // Phase 3 — planning & execution. scope.json (delta vs. full) gates coverage;
   // it is also a DIRECT input to audit_tasks so a scope change that produces an
@@ -196,6 +206,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "design_assessment.json",
     "structure_decomposition.json",
     "charter_register.json",
+    "charter_clarification.json",
     "syntax_resolution_status.json",
     "external_analyzer_results.json",
     "coverage_matrix.json",

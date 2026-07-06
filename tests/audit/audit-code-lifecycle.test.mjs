@@ -181,7 +181,17 @@ test.concurrent("audit-code wrapper supports repeated bounded advance-audit invo
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,
     );
     expect(eighthB.selected_executor).toBe("design_review_conceptual");
-    expect(eighthB.next_likely_step).toBe("planning_artifacts");
+    expect(eighthB.next_likely_step).toBe("charter_clarification_current");
+
+    // Charter clarification (Phase D triangulation loop) sits between the conceptual
+    // design-review pass and planning; under advance-audit at the default shallow
+    // ceiling / zero attention it assembles the register autonomously (no host turn)
+    // and proceeds.
+    const clarification = JSON.parse(
+      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
+    );
+    expect(clarification.selected_executor).toBe("charter_clarification_executor");
+    expect(clarification.next_likely_step).toBe("planning_artifacts");
 
     const ninth = JSON.parse(
       (await runWrapper(["advance-audit"], { cwd: root })).stdout,

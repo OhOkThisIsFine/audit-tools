@@ -53,6 +53,8 @@ actual friction triage fires from the `present_report` terminal step
 | `design_assessment_executor` | deterministic | `design_assessment_current` | `design_assessment.json` (deterministic pass) |
 | `design_review_contract` | host_delegation | `design_review_contract_completed` | updates `design_assessment.json` (contract-assessment mode — invariants/boundaries/obligations) |
 | `design_review_conceptual` | host_delegation | `design_review_conceptual_completed` | updates `design_assessment.json` (conceptual-critique mode — philosophy/alternatives) |
+| `charter_extraction_executor` | host_delegation | `charter_extraction_current` | `charter_register.json` (Phase C charter layer; omits deterministically at a shallow ceiling) |
+| `charter_clarification_executor` | host_delegation | `charter_clarification_current` | `charter_clarification.json` (Phase D triangulation loop; assembles deterministically at a shallow ceiling / zero attention) |
 | `syntax_resolution_executor` | deterministic | `syntax_resolved` | `syntax_resolution_status.json` |
 
 ### Execution

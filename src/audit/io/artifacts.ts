@@ -35,6 +35,7 @@ import type {
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
+import type { CharterClarificationRegister } from "../types/charterClarification.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { ToolingManifest } from "../types/toolingManifest.js";
@@ -128,6 +129,7 @@ type ArtifactPayloadMap = {
   design_assessment: DesignAssessment;
   structure_decomposition: StructureDecomposition;
   charter_register: CharterRegister;
+  charter_clarification: CharterClarificationRegister;
   analyzer_capability: AnalyzerCapabilityRecord;
 
   // --- Phase 3: Audit execution ---
@@ -275,6 +277,7 @@ export const ARTIFACT_DEFINITIONS = {
     "analysis",
   ),
   charter_register: jsonArtifact("charter_register.json", "analysis"),
+  charter_clarification: jsonArtifact("charter_clarification.json", "analysis"),
   analyzer_capability: jsonArtifact("analyzer_capability.json", "analysis"),
   scope: jsonArtifact("scope.json", "execution"),
   coverage_matrix: jsonArtifact("coverage_matrix.json", "execution"),

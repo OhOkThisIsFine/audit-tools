@@ -4,7 +4,11 @@
 // the approach's central failure mode: a confident-but-wrong finding sourced from a
 // bad charter. They run deterministically over the charter data model — no LLM.
 
-import type { Charter, CharterDelta } from "../types/charter.js";
+import type {
+  Charter,
+  CharterDelta,
+  CharterClarificationRequest,
+} from "../types/charter.js";
 
 /**
  * The True-charter gate: a `true` charter is nominatable-never-assertable and
@@ -84,4 +88,31 @@ export function gateCharterDelta(
     return { ...delta, routed_to: "human" };
   }
   return delta;
+}
+
+/**
+ * The blast-radius RISK GATE (Phase D; design §"Blast radius — the ranking and the
+ * risk gate"). Blast radius is simultaneously priority (high-blast = high-value)
+ * AND risk: acting on a WRONG high-blast finding is catastrophic, so it must clear
+ * a MUCH higher bar of independent adversarial refutation before it is actionable.
+ * This gate is the deterministic side of that bar: a question whose blast radius is
+ * at/above `highBlastThreshold` may only reach the interactive human channel if it
+ * has cleared `requiredRefutations` rounds of independent refutation; otherwise it
+ * is downgraded to `finding_only` (written as a lead, never asked interactively).
+ * Below the threshold, a question is interactive without the extra bar.
+ *
+ * Pure + deterministic: same request + same observed refutation count always
+ * yields the same disposition. `observedRefutations` is supplied by the caller (the
+ * intensity dial's adversarial rounds); the gate never runs the refutation itself.
+ */
+export function riskGateClarification(
+  request: CharterClarificationRequest,
+  observedRefutations: number,
+  opts: { highBlastThreshold: number; requiredRefutations: number },
+): CharterClarificationRequest["disposition"] {
+  const isHighBlast = request.value.blast_radius >= opts.highBlastThreshold;
+  if (!isHighBlast) return "interactive";
+  return observedRefutations >= opts.requiredRefutations
+    ? "interactive"
+    : "finding_only";
 }
