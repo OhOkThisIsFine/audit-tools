@@ -7,18 +7,36 @@ on:
     paths:
       - src/**
       - tests/**
+      - schemas/**
+      - dispatch/**
+      - templates/**
+      - skills/**
+      - scripts/**
+      - "*.mjs"
+      - .github/workflows/**
       - package.json
       - package-lock.json
-      - .github/workflows/audit-code-test-suite.yml
+      - tsconfig.json
+      - tsconfig.base.json
+      - vitest.config.ts
   pull_request:
     branches:
       - main
     paths:
       - src/**
       - tests/**
+      - schemas/**
+      - dispatch/**
+      - templates/**
+      - skills/**
+      - scripts/**
+      - "*.mjs"
+      - .github/workflows/**
       - package.json
       - package-lock.json
-      - .github/workflows/audit-code-test-suite.yml
+      - tsconfig.json
+      - tsconfig.base.json
+      - vitest.config.ts
 
 concurrency:
   group: audit-code-test-suite-${{ github.workflow }}-${{ github.ref }}
@@ -32,15 +50,22 @@ env:
 
 jobs:
   orchestration-tests:
-    name: Orchestration tests (Node ${{ matrix.node-version }})
+    name: Orchestration tests (Node ${{ matrix.node-version }}, shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # Sole suite runner: the vitest suite runs once per Node line, sharded 4
+      # ways (not the full suite whole). ci.yml carries only verify:checks now,
+      # so this workflow owns both Node lines. The Node-20 line is the distinct
+      # type-stripping coverage ci.yml (Node 22 only) lacks.
+      # Keep the denominator in the `vitest run --shard` command below in sync
+      # with the length of this shard list.
       matrix:
         node-version:
           - "20.19.2"
           - "22.14.0"
+        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
@@ -81,19 +106,19 @@ jobs:
           set -euo pipefail
           trap 'echo "::error::npm run build failed. Review the uploaded audit-code-test-suite npm logs artifact and rerun npm run build locally."' ERR
           npm run build
-      - name: Run tests
+      - name: Run tests (shard ${{ matrix.shard }}/4)
         timeout-minutes: 15
         shell: bash
         working-directory: .
         run: |
           set -euo pipefail
-          trap 'echo "::error::npm test failed. Review the uploaded audit-code-test-suite npm logs artifact and compare the failing Node line shown in this job name."' ERR
-          npm test
+          trap 'echo "::error::vitest shard ${{ matrix.shard }}/4 failed on Node ${{ matrix.node-version }}. Review the uploaded audit-code-test-suite npm logs artifact and rerun npx vitest run --shard=${{ matrix.shard }}/4 locally on the same Node line."' ERR
+          npx vitest run --shard=${{ matrix.shard }}/4
       - name: Upload npm debug logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: audit-code-test-suite-npm-logs-node-${{ matrix.node-version }}
+          name: audit-code-test-suite-npm-logs-node-${{ matrix.node-version }}-shard-${{ matrix.shard }}
           path: |
             ~/.npm/_logs
             npm-debug.log*
@@ -103,4 +128,4 @@ jobs:
         shell: bash
         working-directory: .
         run: |
-          echo "::error::audit-code test-suite workflow failed on Node ${{ matrix.node-version }}. Review the uploaded npm logs artifact and rerun npm ci && npm test locally on the same Node line."
+          echo "::error::audit-code test-suite workflow failed on Node ${{ matrix.node-version }} (shard ${{ matrix.shard }}/4). Review the uploaded npm logs artifact and rerun npm ci && npx vitest run --shard=${{ matrix.shard }}/4 locally on the same Node line."
