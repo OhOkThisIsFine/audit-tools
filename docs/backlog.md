@@ -163,47 +163,35 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
-- **Model static-metadata resolver (models.dev) → real cost-first routing (owner-approved direction, 2026-07-05).**
-  The multi-provider routing rethink (full audit trail — architect-from-scratch + red-team + external-scout +
-  referee — in project memory [[provider-routing-offload-b-to-ai-sdk]]) established the core dispatch/quota
-  architecture is **sound and ahead of the field** (no LLM gateway models subscription percent-window quota; our
-  cooperating quota-aware dispatch is unmatched — every multi-agent coding orchestrator punts quota + isolates by
-  worktrees). NO large simplification exists; the AI-SDK transport swap is net-negative and was **dropped**. The
-  genuine forward value: the STATIC half of quota metadata is near-empty (there is NO hardcoded model table —
-  invariant holds). `context_tokens` = discover-at-handshake else a flat `32_000`; per-token **price is entirely
-  absent** — `costRank` (`src/shared/dispatch/admissionLoop.ts:43`) is a TIER ORDINAL, not money. Two workstreams:
-  - **W1 context window — ✅ SHIPPED (2026-07-05).** `resolveModelStatics(modelId) → {context_tokens?, output_tokens?, price?}`
-    (`src/shared/quota/modelStatics.ts`) reads a vendored models.dev snapshot (`src/shared/data/model-statics.generated.json`,
-    2630 models, refreshed by `npm run update-models` → `scripts/shared/update-models.mjs`); wired as a new
-    `static_metadata` rung in `resolveLimits` (`src/shared/quota/limits.ts`) that ranks *below* discovered capability +
-    explicit config, *above* the conservative default. Build copies the JSON to `dist/shared/data/` via
-    `scripts/shared/copy-data-assets.mjs` (chained after `tsc`); runtime loads via `fs.readFileSync` + cache,
-    degrade-to-empty (no JSON *import*, no TS literal). Prereq done: the re-spelled `32_000`/`4_096` collapsed to
-    `DEFAULT_CONTEXT_TOKENS`/`DEFAULT_OUTPUT_TOKENS` (`limits.ts`, `scheduler.ts`, `nextStep.ts`; the backlog's 4th
-    site `remediate/dispatch.ts:385` was already stale — no literal there). **Two caveats surfaced, both W2-relevant:**
-    (a) **collision resolution = first-sorted-provider-wins** — 2633 duplicate model ids (same id served by multiple
-    providers) are dropped deterministically; context windows agree across providers so W1 is unaffected, but W2 *price*
-    must revisit this (a reseller's marked-up price could win over the native provider's — prefer native/cheapest on
-    collision). (b) **static window can over-state a specific deployment** — e.g. the snapshot lists `claude-opus-4-7`
-    at 1M context; if a real headless run serves a 200k variant with discovery absent, the static rung would over-size
-    work blocks. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding, but worth watching
-    on a real headless metered run.
-  - **W2 real price → `costRank` (higher value) — NEXT-READY.** Feed models.dev per-token price into `costRank` at the two build
-    sites (`src/audit/cli/dispatch/quotaPool.ts:307`, `src/remediate/steps/dispatch.ts:515`) so "cheapest capable
-    pool" means actual dollars — the routing key the design of record
-    ([`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md)) already assumes.
-    Unlocks economically-correct backend choice for the autonomous loop ([[autonomous-pipeline-capstone-spec]]).
-  - **Invariant-safe** = external community dataset consumed like `smol-toml`/`yaml` (two-tier dep policy): fetched
-    or bundled-updatable, degrade-to-empty on an unknown model id, **never inlined as a TS literal**. Owner will own
-    none of the dataset; dynamic-discovery-first, dataset-as-fallback.
-  - **Not deletion — the live-probe generalization the owner wanted is ALREADY built + clean:** `BaseHttpQuotaSource`
-    + one-array register; adding a provider's proactive quota = implement 2 methods. Proactive coverage is already good
-    for the dispatchable set (claude-code/codex/opencode/antigravity proactive; openai-compatible/local-subprocess
-    reactive-by-nature). Do NOT delete working sources; `copilot` is correctly broker-only (no headless dispatch surface).
-  - **Minor cleanups surfaced same pass (low-pri, bundle opportunistically):** providerFactory Rule 6
-    (`hasClaudeCodeConfig && claudeAvailable`) is a provable strict subset of Rule 9 (`claudeAvailable`) — delete the
-    redundant rung; split remediate `dispatch.ts` (4,570 LOC; ~60-85% is git-worktree/write-scope/merge machinery,
-    misfiled not duplicated — audit's dispatch is 613 LOC, zero git); inline `makeProviderKeyedFactory` (19 LOC, 2 sites).
+- **Cost-first routing follow-ups (W2 core SHIPPED 2026-07-06).** Real models.dev price now drives `costRank`
+  (decoupled from `capabilityRank`) via the shared 3-rung engine, and Gate-0 confirmation annotates + threads an
+  operator cost ordering to dispatch. Design of record [`spec/cost-first-routing.md`](../spec/cost-first-routing.md),
+  durable design in memory [[cost-first-routing-design]]. Remaining OPEN:
+  - **(a) Host-prompt visibility.** The suggested cost ordering is persisted on `provider-confirmation.json` but not
+    yet surfaced in the host-facing provider_confirmation prompt — the operator can't *see* it. `buildProviderConfirmationDisplay`
+    is the render helper (currently unused in `src`); the real host prompt is a step-contract render. Surface the
+    per-entry price + suggested order there.
+  - **(b) Interactive operator REORDER surface.** Today `cost_order` is only the tool's deterministic price-ascending
+    *suggestion*; there is no path for the operator to override it (the confirmation executor auto-completes). Add a
+    host submission path that accepts a reordered pool and persists the operator's `cost_order`.
+  - **(c) Host-roster-at-Gate-0.** The host's own model roster is dispatch-time (`--host-models`), so host-native tiers
+    can only be priced/ordered deterministically at dispatch, not operator-confirmed at the outset. To confirm them at
+    Gate-0, the host must self-report its roster at the confirmation step (a new input path). Only then does "confirm
+    which models at the outset" cover the common claude-code-only case.
+  - **(d) Collision-price preference (carried from W1).** `resolveModelStatics` dedupes a model id served by multiple
+    providers first-sorted-provider-wins, so a reseller markup could win over the native/cheapest price. Prices largely
+    agree across providers, so this is an approximation, not a bug — revisit only if per-provider pricing matters
+    (would need (provider, model) keying in the snapshot).
+- **models.dev static window can over-state a specific deployment (carried from W1).** The snapshot lists e.g.
+  `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
+  work blocks off the static rung. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding —
+  watch on a real headless metered run.
+- **Minor provider/dispatch cleanups (low-pri, bundle opportunistically).** providerFactory Rule 6
+  (`hasClaudeCodeConfig && claudeAvailable`) is a provable strict subset of Rule 9 (`claudeAvailable`) — delete the
+  redundant rung; split remediate `dispatch.ts` (now ~4,590 LOC; ~60-85% is git-worktree/write-scope/merge machinery,
+  misfiled not duplicated — audit's dispatch is far smaller, zero git); inline `makeProviderKeyedFactory` (19 LOC, 2 sites).
+  Do NOT delete working proactive quota sources (`BaseHttpQuotaSource` + one-array register is already clean);
+  `copilot` is correctly broker-only.
 
 - **Systemic reviewers must be pushed adversarially for improvement, not just correctness (owner,
   2026-07-05).** Two audit tiers exist and both are wanted: unit auditors that structurally can't see the

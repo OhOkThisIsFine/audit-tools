@@ -8,7 +8,8 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.13** (models.dev W1 static-metadata resolver → real per-model context window).
+- On npm as `latest` at **v0.32.14** (cost-first routing W2 → real models.dev price drives `costRank`, decoupled
+  from `capabilityRank`; Gate-0 cost-aware confirmation threads an operator cost ordering to dispatch).
   Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
   [[live-status]]); this section is current-state + open-work roadmap only.
 - **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
@@ -22,17 +23,25 @@
   Sub-2: `selectProvider` least-loaded tiebreak balances equal-rank pools. Sub-3: single-shot NIM
   output-contract override + read-neutral file framing + operator-tunable inline caps.
   [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]].
-- **Immediate next: models.dev resolver W2 (real price → `costRank`).** **W1 (real context window) shipped this lap** —
-  `resolveModelStatics` + vendored models.dev snapshot (`src/shared/quota/modelStatics.ts`, `src/shared/data/…`,
-  `npm run update-models`) wired as a `static_metadata` rung in `resolveLimits` below discovery/config, above the
-  conservative default; the `32_000`/`4_096` default-collapse prereq is done. Next-ready is **W2**: feed models.dev
-  per-token price into `costRank` at the two build sites (`audit/cli/dispatch/quotaPool.ts:307`,
-  `remediate/steps/dispatch.ts:515`) so "cheapest capable pool" = actual dollars. **Two W1 caveats to carry into W2**
-  (detail in `docs/backlog.md` → Forward tracks): collision resolution is first-sorted-provider-wins (fine for context,
-  but W2 price must prefer native/cheapest); and a static window can over-state a specific deployment (mitigated by
-  discovery-override + 0.7 safety margin, watch on a real headless run). Rethink verdict stands: core dispatch/quota is
-  sound + ahead of the field, NO big simplification exists, AI-SDK transport swap dropped as net-negative. Other
-  standing T5 options unchanged: deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
+- **models.dev resolver W2 (real price → `costRank`) — ✅ SHIPPED this lap.** `costRank` was `tierRank(rank)` (a tier
+  ordinal doubling as cost AND capability). Now a real, independent cost axis via the shared engine
+  (`src/shared/dispatch/costRank.ts`): three disjoint rungs — operator-confirmed position < real blended $/Mtok
+  (models.dev) < tier fallback — so a dollar value never sorts against a tier ordinal. Both build sites derive through
+  the one `deriveCostRank`; `capabilityRank` stays the tier ordinal (decoupled). **Rung 1 wired end-to-end:** Gate-0
+  provider confirmation annotates each entry with `model_id`/`blended_price`/`cost_order` (`annotateConfirmedPoolCost`),
+  and `readConfirmedCostPositions` threads that into both dispatch sites — a NET-NEW confirmation→dispatch link (the
+  confirmed pool was written but never influenced routing before). Design of record:
+  [`spec/cost-first-routing.md`](../spec/cost-first-routing.md). W1 (real context window) shipped the prior lap.
+- **Immediate next: cost-first follow-ups (this sprint's deferred pieces — detail in `docs/backlog.md` → Forward tracks).**
+  Gate-0 today only *suggests* the ordering deterministically (no interactive operator REORDER surface exists) and can
+  only price configured `openai_compatible`/`codex` models — the host's own model roster is dispatch-time, so host-native
+  tiers route by real price at dispatch, not operator-confirmed at the outset. Three follow-ups: (a) surface the suggested
+  ordering in the host-facing provider_confirmation prompt (visibility); (b) an interactive reorder/submission path so the
+  operator can override the suggestion; (c) host-roster-at-Gate-0 so host-native tiers are confirmable at the outset too.
+  Also carried: the **collision-price caveat** — `resolveModelStatics` dedupes a model id first-sorted-provider-wins, so a
+  reseller markup could win over the native/cheapest price; revisit if per-provider price matters. Rethink verdict stands:
+  core dispatch/quota sound + ahead of field, no big simplification, AI-SDK swap dropped. Other standing T5 options
+  unchanged: deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
   **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -94,12 +103,12 @@ remains env-bound (T6-class). Detail in `docs/backlog.md`.
 ### T5 — Product / analysis forward tracks
 Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) — pointers only here:
 0. **Multi-provider routing rethink outcome (2026-07-05).** Verdict: core is sound + ahead of field, no big
-   simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED (remediate delegates
-   to shared `scheduleWave`). (b) `rollingEngine.ts` **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev
-   static-metadata resolver**: W1 real context window (`resolveModelStatics` → `static_metadata` rung in
-   `resolveLimits`, vendored snapshot + `npm run update-models`) — ✅ SHIPPED; **W2 real price → `costRank`** (true $
-   cost-first routing, aligns with autonomy capstone) — NEXT-READY. Full detail + line refs in
-   `docs/backlog.md` → *Forward tracks*. *([[provider-routing-offload-b-to-ai-sdk]])*
+   simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED. (b) `rollingEngine.ts`
+   **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev static-metadata resolver**: W1 real context window — ✅
+   SHIPPED; **W2 real price → `costRank`** + Gate-0 cost-aware confirmation (rung 1) — ✅ SHIPPED (design of record
+   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md)). Remaining cost-first follow-ups (interactive reorder
+   UX, roster-at-Gate-0, host-prompt visibility, collision-price preference) in `docs/backlog.md` → *Forward tracks*.
+   *([[provider-routing-offload-b-to-ai-sdk]])*
 1. **Deterministic analyzers — own-vs-acquire acquisition engine.** Open: clippy/rubocop live spawn
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
 2. **Schema-enforced generation — CE-004 residual.** Provider-blocked (always-on host has no constraint
