@@ -77,6 +77,42 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `wrapper/*-opencode.mjs`); only caught when the drafting agent read source. Decomposition should verify where
     named logic actually lives before assigning scope. Reinforces [[front-load-broad-search-before-contract-authoring]].
 
+- **META — the friction-capture mechanism did not capture the run's real friction (2026-07-06).** The close-out
+  walk exists, but *detection* under-delivered: the run's biggest friction (the process inefficiency above) was
+  invisible to the tool's own capture and had to be hand-authored — and even then I under-captured it on the first
+  pass. The capture mechanism is really host-attestation wearing a detection label. Specifics:
+  - **What it DID capture:** the tool auto-wrote ~7 per-contract-step `.audit-tools/remediation/friction/CONTRACT-*.json`
+    records, each a single-line `frictions[]` entry with category `"trap"` (e.g. "implementation_planning re-emitted:
+    a promoted-plan finding cited a component absent from the tree — M-B3 citation grounding"). Narrow, mechanical,
+    per-event.
+  - **What it did NOT capture:** (a) the DOMINANT friction — pervasive process inefficiency (full-cascade re-run on
+    localized fixes, `test_plan`↔`assessment` ping-pong, re-author-not-copy-forward, ~40 round-trips) — never
+    detected; (b) the implement-dispatch false-resolve (surfaced only as terse stdout log lines, never a friction);
+    (c) host-side waste (dispatching agents for copy jobs — outside the tool's view).
+  - **The meta-failure modes:**
+    1. **Gate-invisible shape.** Auto-capture writes `frictions[]`/`"trap"`; the close-out gate counts only
+       `open_observations[]`/`category_attestations[]` over the three categories — so the tool's OWN capture doesn't
+       satisfy the tool's OWN gate, and the host starts from a blank record.
+    2. **Per-event, never aggregated.** N identical re-emit events were logged as N isolated traps; the AGGREGATE
+       ("re-emit churn is the run's biggest cost") is the real friction and is never recognized. The raw signal
+       existed (7 trap files) — the loss was between events-logged and friction-recognized.
+    3. **Blind to cost/inefficiency.** It fires only on discrete failure events (a mis-ground, a re-emit) and has no
+       notion of measuring round-trip count / verbatim re-author count / tokens — so the most important friction
+       class, "a run that is mostly overhead," is exactly what it cannot see.
+    4. **Capture is host-attestation, not detection.** The stop-gate forces the HOST to walk the categories and
+       hand-write observations; the tool detects almost nothing IN those categories, so a rushed host under-captures.
+       This is the enforce-in-tooling gap under [[meta-audit-friction-must-be-tool-enforced]]: detection is near-empty
+       and the substantive capture is left to host discretion (which under-delivered here — twice: an empty first
+       pass, then a too-thin re-emit-churn bullet).
+  - **What SHOULD happen:** (a) auto-capture emits into the SAME `open_observations[]` shape (with a real category)
+    the gate reads, so tool detection SEEDS the walk instead of the host starting from nothing; (b) AGGREGATE repeated
+    events (N re-emits of one artifact → one `inefficient_feeding` observation "re-emit churn, cost N round-trips");
+    (c) measure + surface COST signals (per-phase round-trip count, verbatim re-author count, token spend) so
+    inefficiency is DETECTED, not just discrete failures; (d) pre-populate the host's category walk with the detected
+    observations so the host CONFIRMS/augments rather than authoring from a blank record. Generalizes
+    [[meta-audit-friction-must-be-tool-enforced]] from "enforce the walk happens" to "detect the substance the walk
+    is supposed to surface — especially cost/inefficiency, not just discrete traps."
+
 - **HIGH — remediate dispatch worktree-wipe + state-desync (concurrent `accept-node` corrupts sibling
   in-flight nodes; 2026-07-06).** Driving implement waves through `remediate-code accept-node` while sibling
   nodes are still in flight triggers two coupled failure modes: **(1) worktree-wipe** — a concurrent stale-sweep
