@@ -33,7 +33,7 @@ import type {
   AdmissionPool,
 } from "audit-tools/shared";
 import { computeDispatchAdmission, createReservationLedger, tierRank } from "audit-tools/shared";
-import { deriveCostRank, lookupConfirmedPosition } from "audit-tools/shared";
+import { deriveCostRank, lookupConfirmedPosition, readConfirmedCostPositions } from "audit-tools/shared";
 import { scheduleWave as computePoolWaveSchedule } from "audit-tools/shared";
 import { probeQuotaSource } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
@@ -3131,12 +3131,21 @@ export async function prepareImplementDispatch(
     `[remediate-code] dispatch: implement ${items.length} item(s) ` +
       `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,
   );
+  // Cost-first routing rung 1: honor the operator-confirmed cost ordering from the
+  // shared Gate-0 confirmation (spec/cost-first-routing.md). Best-effort — absent /
+  // unreadable / roster-changed confirmation ⇒ costRank falls to real price then tier.
+  const confirmedCostPositions = await readConfirmedCostPositions(
+    options.root,
+    waveOptions?.sessionConfig ?? {},
+  );
   const quota = await buildDispatchQuota(
     runId,
     "implement",
     schedule,
     admissionPackets,
     waveOptions?.grantLeases ?? true,
+    null,
+    confirmedCostPositions,
   );
   await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
 

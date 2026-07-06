@@ -41,8 +41,10 @@ import { withFileLock } from "../quota/fileLock.js";
 import type { RunLogger } from "../observability/runLog.js";
 import {
   discoverProviders,
+  annotateConfirmedPoolCost,
   type CapabilityTier,
 } from "./providerConfirmation.js";
+import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
 import type { ConfirmedPoolEntry } from "../types/providerConfirmation.js";
 
 // ---------------------------------------------------------------------------
@@ -221,7 +223,9 @@ export function buildSharedProviderConfirmation(
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
     confirmed_at: new Date().toISOString(),
-    provider_pool: pool,
+    // Cost-first routing: annotate with representative model price + suggested
+    // cost_order, read at dispatch as rung 1 of costRank (spec/cost-first-routing.md).
+    provider_pool: annotateConfirmedPoolCost(pool, sessionConfig),
     roster: sortRoster(discovered.map((p) => p.name)),
   };
 }
@@ -369,4 +373,24 @@ export async function readSharedProviderConfirmation(
   }
 
   return { status: "confirmed", confirmation };
+}
+
+/**
+ * Read the operator-confirmed cost ordering (rung 1 of costRank; see
+ * spec/cost-first-routing.md) from the shared Gate-0 confirmation as a model-keyed
+ * `Map<model_id, cost_order>` for the dispatch build sites. Single-sourced so audit
+ * and remediate honor it identically. Best-effort and never throws: an absent
+ * `root`, a missing/malformed confirmation, or a roster that has since changed
+ * (`reconfirm`) all yield an empty map — dispatch then falls to real price then
+ * tier. Only a `confirmed` (roster-fresh) confirmation contributes positions.
+ */
+export async function readConfirmedCostPositions(
+  root: string | undefined,
+  sessionConfig: SessionConfig = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Map<string, number>> {
+  if (!root) return new Map();
+  const read = await readSharedProviderConfirmation(root, sessionConfig, env);
+  if (!read || read.status !== "confirmed") return new Map();
+  return resolveConfirmedCostPositions(read.confirmation.provider_pool);
 }

@@ -696,6 +696,8 @@ export {
   queryProviderQuota,
   buildProviderConfirmationDisplay,
   applyProviderConfirmationSelections,
+  representativeModelId,
+  annotateConfirmedPoolCost,
 } from "./providers/providerConfirmation.js";
 export {
   commandExists,
@@ -1157,7 +1159,7 @@ export { PROVIDER_CONFIRMATION_RESULT_VERSION } from "./types/providerConfirmati
 
 // DC-2 — shared session-level provider confirmation (cross-tool Gate-0 artifact)
 export type { SharedProviderConfirmation, SharedProviderConfirmationRead } from "./providers/sharedProviderConfirmation.js";
-export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, currentProviderRoster, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation } from "./providers/sharedProviderConfirmation.js";
+export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, currentProviderRoster, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions } from "./providers/sharedProviderConfirmation.js";
 
 export type {
   EncodedClause,

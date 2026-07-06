@@ -8,6 +8,7 @@ import {
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { confirmProviders } from "./providerConfirmation.js";
+import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import {
   buildFileDisposition,
   isAuditExcludedStatus,
@@ -118,13 +119,21 @@ function readPackageJson(dir: string): PackageJsonShape | undefined {
 export async function runProviderConfirmationAutoComplete(
   bundle: ArtifactBundle,
   root?: string,
+  artifactsDir?: string,
 ): Promise<ExecutorRunResult> {
-  const confirmation = confirmProviders({});
+  // Load the real session config so a configured API/CLI model is priceable at
+  // Gate-0 (cost-first routing; spec/cost-first-routing.md). Degrade to the empty
+  // permissive default when it is absent/unreadable — pricing is best-effort and
+  // must never block confirmation.
+  const sessionConfig = artifactsDir
+    ? await loadSessionConfig(artifactsDir).catch(() => ({}))
+    : {};
+  const confirmation = confirmProviders(sessionConfig);
   const artifactsWritten = ["provider_confirmation.json"];
   if (root) {
     await writeSharedProviderConfirmation(
       root,
-      buildSharedProviderConfirmation({}),
+      buildSharedProviderConfirmation(sessionConfig),
     );
     artifactsWritten.push("provider-confirmation.json");
   }

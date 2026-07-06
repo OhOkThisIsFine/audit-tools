@@ -8,6 +8,7 @@
 import type { SessionConfig } from "audit-tools/shared";
 import {
   discoverProviders,
+  annotateConfirmedPoolCost,
   PROVIDER_CONFIRMATION_RESULT_VERSION,
 } from "audit-tools/shared";
 import type { ProviderConfirmationResult, ConfirmedPoolEntry } from "audit-tools/shared";
@@ -64,7 +65,11 @@ export function confirmProviders(
   return {
     schema_version: PROVIDER_CONFIRMATION_RESULT_VERSION,
     confirmed_at: new Date().toISOString(),
-    provider_pool: pool,
+    // Cost-first routing: annotate each entry with its representative model price
+    // + a suggested cost_order (spec/cost-first-routing.md). Read at dispatch as
+    // rung 1 of costRank. Uses the real sessionConfig so a configured API/CLI model
+    // is priceable here; host-native tiers are priced deterministically at dispatch.
+    provider_pool: annotateConfirmedPoolCost(pool, sessionConfig),
     session_level: true,
   };
 }

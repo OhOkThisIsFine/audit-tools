@@ -6,6 +6,8 @@ import {
   hasConfiguredOpenCode,
 } from "./providerFactory.js";
 import { commandExists, isSelfSpawnBlocked } from "./providerPathGuard.js";
+import { suggestCostOrdering, resolveModelPrice } from "../dispatch/costRank.js";
+import type { ConfirmedPoolEntry } from "../types/providerConfirmation.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -266,6 +268,60 @@ export function buildProviderConfirmationDisplay(
  * @param exclude         - Provider names to remove from the pool.
  * @param addUndetected   - Manually specified providers not found on PATH.
  */
+/**
+ * The representative model id a provider is priced/ordered by at Gate-0 (cost-first
+ * routing; spec/cost-first-routing.md). Only the providers that carry a configured
+ * model in session config are knowable here — a host-native model roster and a CLI
+ * backend's model arrive only at the dispatch handshake, so those return `undefined`
+ * and are priced deterministically at dispatch instead. Never hardcodes a model
+ * name; reads only operator-supplied config.
+ */
+export function representativeModelId(
+  name: ResolvedProviderName,
+  sessionConfig: SessionConfig,
+): string | undefined {
+  switch (name) {
+    case "openai-compatible":
+      return sessionConfig.openai_compatible?.model?.trim() || undefined;
+    case "codex":
+      return sessionConfig.codex?.model?.trim() || undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Annotate a confirmed provider pool with cost-first-routing fields: each entry's
+ * representative `model_id`, its `blended_price_usd_per_mtok` (or `null` when the
+ * dataset can't price it), and a suggested `cost_order` (price-ascending, unknown
+ * last). The `cost_order` is the tool's SUGGESTION — the operator may later reorder
+ * it — and is read back at dispatch (`resolveConfirmedCostPositions`) as rung 1 of
+ * `costRank`. Single-sourced so both `confirmProviders` and
+ * `buildSharedProviderConfirmation` annotate identically.
+ */
+export function annotateConfirmedPoolCost(
+  pool: ConfirmedPoolEntry[],
+  sessionConfig: SessionConfig,
+): ConfirmedPoolEntry[] {
+  const ordering = suggestCostOrdering(
+    pool.map((entry) => ({
+      key: entry.name,
+      model: representativeModelId(entry.name, sessionConfig),
+    })),
+  );
+  const orderByKey = new Map(ordering.map((o) => [o.key, o]));
+  return pool.map((entry) => {
+    const model = representativeModelId(entry.name, sessionConfig);
+    const suggestion = orderByKey.get(entry.name);
+    return {
+      ...entry,
+      ...(model ? { model_id: model } : {}),
+      blended_price_usd_per_mtok: model ? resolveModelPrice(model) ?? null : null,
+      ...(suggestion ? { cost_order: suggestion.suggested_order } : {}),
+    };
+  });
+}
+
 export function applyProviderConfirmationSelections(
   discovered: DiscoveredProvider[],
   exclude: ResolvedProviderName[],

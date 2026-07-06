@@ -18,7 +18,7 @@ import type {
   ResolvedProviderName,
 } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions } from "audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { writePacketSchemaFiles } from "../io/runArtifacts.js";
@@ -517,6 +517,10 @@ export async function prepareDispatchArtifacts(params: {
       complexity: packetPriorityScore(entry),
     }))
     .sort((a, b) => b.complexity - a.complexity);
+  // Cost-first routing rung 1: honor the operator-confirmed cost ordering from the
+  // shared Gate-0 confirmation (spec/cost-first-routing.md). Best-effort — absent /
+  // unreadable / roster-changed confirmation ⇒ costRank falls to real price then tier.
+  const confirmedCostPositions = await readConfirmedCostPositions(params.root, sessionConfig);
   const { dispatchQuotaPath, waveSchedule, dispatchCapacity, admission } = await finalizeDispatchQuota({
     runId,
     runDir,
@@ -527,6 +531,7 @@ export async function prepareDispatchArtifacts(params: {
     hostModelRoster: params.hostModelRoster,
     tierBudgets: dispatchPool.tierBudgets,
     grantLeases: params.grantLeases,
+    confirmedCostPositions,
   });
 
   warnings.push(

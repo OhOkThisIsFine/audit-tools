@@ -73,7 +73,7 @@ function requireRoot(root: string | undefined, executorName: string): string {
  */
 export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   provider_confirmation_executor: async (bundle, { options }) =>
-    runProviderConfirmationAutoComplete(bundle, options.root),
+    runProviderConfirmationAutoComplete(bundle, options.root, options.artifactsDir),
   intake_executor: async (bundle, { options }) =>
     runIntakeExecutor(
       bundle,

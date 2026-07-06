@@ -19,8 +19,12 @@ import type { CapabilityTier } from "../providers/providerConfirmation.js";
 /**
  * Version string for the ProviderConfirmationResult contract.
  * Increment when any breaking interface change lands.
+ *
+ * 1.1.0 — additive cost-first-routing fields on ConfirmedPoolEntry
+ * (`model_id`, `blended_price_usd_per_mtok`, `cost_order`). See
+ * spec/cost-first-routing.md.
  */
-export const PROVIDER_CONFIRMATION_RESULT_VERSION = "1.0.0" as const;
+export const PROVIDER_CONFIRMATION_RESULT_VERSION = "1.1.0" as const;
 
 // ---------------------------------------------------------------------------
 // Contract types
@@ -48,6 +52,28 @@ export interface ConfirmedPoolEntry {
   self_spawn_blocked?: boolean;
   /** Optional reason for exclusion or detection restriction. */
   reason?: string;
+  /**
+   * Representative model id this entry is priced/ordered by (cost-first routing;
+   * spec/cost-first-routing.md). For a configured API pool it is the configured
+   * model; for a host-reported roster entry it is that roster model. Absent when
+   * the concrete model is not knowable at confirmation time (e.g. a CLI backend
+   * whose roster arrives only at the dispatch handshake).
+   */
+  model_id?: string;
+  /**
+   * Suggested blended price ($/Mtok) the tool computed from the models.dev
+   * snapshot for `model_id`, or `null` when the dataset can't price it (surfaced
+   * to the operator as "price unknown"). Advisory — the authoritative routing key
+   * is `cost_order` once the operator confirms.
+   */
+  blended_price_usd_per_mtok?: number | null;
+  /**
+   * Operator-confirmed 0-based cost position (rung 1 of costRank). Lower routes
+   * first. Defaults to the tool's price-ascending suggestion; the operator may
+   * reorder. Read back at dispatch via `resolveConfirmedCostPositions`. Absent ⇒
+   * the pool falls to real price then tier at dispatch.
+   */
+  cost_order?: number;
 }
 
 /**
