@@ -36,11 +36,29 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 - **Remediate contract/implement pipeline — dogfood frictions (fix in tooling).**
   Five open frictions surfaced driving one large `/remediate-code` run:
-  - **Verbatim re-emit churn.** Every upstream contract change re-triggers critique→counterexample→judge AND forces
-    the host to fully re-author each downstream artifact even when byte-identical (`test_validator_plan` /
-    `contract_assessment_report` re-emitted 5-6× each). The tool consumes the `.input.json` into an envelope then
-    demands a full re-write on any dependency-hash change. Add a "re-affirm unchanged / copy-envelope-payload-forward"
-    fast path so a host isn't re-materialising a 123-finding verdict verbatim repeatedly.
+  - **Contract-pipeline re-validation is grossly inefficient — a localized fix re-runs the WHOLE downstream chain.**
+    This was the dominant cost of the run (a 10-node plan took ~40 `next-step` round-trips + ~20 subagent dispatches,
+    the large majority pure churn). Facets:
+    - **Full cascade re-run on any localized change.** Each of the 3 small contract repairs (widen one module's file
+      scope; pin one PRIORITY slot; fix one disclaimer sentence) invalidated and re-ran the ENTIRE downstream chain:
+      critique → counterexample → judge → **full re-author of `test_validator_plan` (114 specs) + `contract_assessment_report`
+      (123 findings)**. The adversarial *review* is diff-based (the reviewer re-examines only the diff) but the
+      host-authored artifacts are re-materialised in full every time. Re-validation should be scoped to the changed
+      module's obligations, not the whole plan.
+    - **`test_validator_plan` ↔ `contract_assessment_report` ping-pong.** Their mutual dependency + the
+      consume-`.input.json`-into-envelope model caused repeated oscillation — re-emitting one invalidated the other,
+      several round-trips each cycle, re-writing byte-identical content.
+    - **Structural gates surface failures across successive round-trips, not all-at-once.** The positive/negative
+      pairing gate and the CE-006 negative-scoping gate flagged different specs on separate `next-step` calls (fix a
+      batch → re-run → new batch), and the polarity vs scoping issues surfaced in different passes. Batch every gate
+      failure the plan currently has into one report.
+    - **Re-emit is re-author, not copy-forward** — no "re-affirm unchanged / copy-envelope-payload-forward" fast path,
+      so an unchanged 123-finding verdict is re-materialised verbatim repeatedly. (Host lesson also logged: I initially
+      dispatched heavyweight subagents — 80-130k tokens — to do pure verbatim copy-forward before switching to
+      deterministic prior-verdict extraction; a copy job must never be an LLM dispatch.)
+    Net: the full adversarial contract pipeline is far too expensive to run on a large mixed plan without a cheaper
+    re-convergence path — reinforces [[risk-tier-loop-laps-cheap-vs-heavy]] and the self-scaling-pipeline direction
+    [[self-scaling-pipeline-not-forked-paths]].
   - **Coverage gate not exposed in `validate-artifact`.** The positive+negative pairing + CE-006 negative-scoping gate
     fires only at `next-step`, so an authoring agent self-validates "ok" then fails the gate → round-trips. Expose it
     in `validate-artifact`. Also the polarity classifier keyword-heuristic misreads a satisfied-path assertion whose
