@@ -8,15 +8,17 @@
 
 ## Live state
 
-- On npm as `latest` at **v0.32.17** — **conceptual design-review charter spine (Phase A)**: the deterministic
-  data-model spine of the conceptual/design-review build ([`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
-  [[conceptual-design-review-design]]). New `src/shared/types/charter.ts` (four charters
-  Stated/Inferred/Revealed/True + goal DAG with integer `premise_height` + `Ceiling` consent dial + symmetric-pair
-  `CharterDelta`) + `src/shared/validation/charterGate.ts` (True falsifiable-or-drop gate; low-confidence →
-  flag-for-human; delta downgrade); `intent_checkpoint.design_review` upgraded additively (goal_graph/charters/ceiling);
-  `blast_radius` optional on shared `Finding` + a mergeFindings priority tiebreaker. Tool-owned/deterministic — **no
-  LLM content yet** (extraction/operator/loop are phases B–E). `gateCharterDelta`/`CharterDelta` are test-covered
-  until Phase C produces deltas. Prior live headline (v0.32.16): interactive cost-first Gate-0 + `windowsHide`.
+- On npm as `latest` at **v0.32.18** — **conceptual design-review Phase B: the overlay-and-delta operator
+  (deterministic)**. The full structure layer in one build ([`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
+  [[conceptual-design-review-design]]): pure primitives `src/shared/decompose/{modularity,consensus}.ts`
+  (resolution-swept Louvain + co-association ensemble with two orthogonal scores agreed-across-source /
+  stable-across-scale); NEW extractors `src/audit/extractors/{dataStateCoupling,commentDecomposition}.ts`;
+  source adapter + the two non-co-localization findings under `src/audit/decompose/`; persisted
+  `structure_decomposition.json` behind the new `structure_decomposition_current` obligation (PRIORITY idx 9,
+  deterministic executor), findings surfaced via mergeFindings/synthesis. The consensus/contested scaffold is
+  the Phase-C input (deliberate: fully consumed once Phase C extracts charters). Still **no LLM content**
+  (extraction/loop are phases C–E). Prior live headline (v0.32.17): Phase A charter spine
+  (`src/shared/types/charter.ts` + `charterGate.ts` + `blast_radius` on Finding).
   Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
   [[live-status]]); this section is current-state + open-work roadmap only.
 - **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
@@ -47,14 +49,6 @@
   `host_model_cost_order`. The gate fires on every interactive run (even one/zero detected providers — the operator may
   want to add one discovery missed); headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md); detail in `docs/backlog.md` → Forward tracks.
-- **Conceptual design-review Phase B (overlay-and-delta operator, deterministic) — ✅ SHIPPED this lap (unreleased,
-  on branch `claude/agitated-robinson-6061f4`).** The full deterministic structure layer in one build: pure
-  primitives `src/shared/decompose/{modularity,consensus}.ts` (resolution-swept Louvain + co-association ensemble
-  with two orthogonal scores agreed-across-source / stable-across-scale); NEW extractors
-  `src/audit/extractors/{dataStateCoupling,commentDecomposition}.ts`; source adapter + the two non-co-localization
-  findings under `src/audit/decompose/`; persisted `structure_decomposition.json` behind the new
-  `structure_decomposition_current` obligation (PRIORITY idx 9, deterministic executor), findings surfaced via
-  mergeFindings/synthesis. `src/shared`+`tests/audit` suite fully green. [[conceptual-design-review-design]].
 - **Immediate next: conceptual design-review Phase C — charter extraction + conceptual prompts (LLM, grounded+gated).**
   Extend `designReviewPrompt.ts` / `conceptualDispatch.ts`: Revealed(code)/Stated(docs)/Inferred(LLM)/True-nomination
   through the Phase-A gate; emit `CharterDelta`s. Consumes the Phase-B `structure_decomposition.json` scaffold
@@ -62,9 +56,7 @@
   pushed adversarially" + [[conceptual-design-review-design]]. Other standing (lower-pri) options unchanged:
   cost-first (d) collision-price (`docs/backlog.md` → Forward tracks), deterministic-analyzer live spawn, CE-004
   NIM guided-decoding.
-- **⚠️ Unreleased on branch:** Phase B is committed to `claude/agitated-robinson-6061f4` but NOT yet merged to main
-  or published (still v0.32.17 on npm). Ship = merge branch → main + `release:patch:publish` (→ v0.32.18).
-  **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**
+- **Dispatch admission-control — residual (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
   within one — a detached background driver is architectural, pursue only if a real run shows the alternation
