@@ -42,7 +42,7 @@
     "test:doc-contract": "vitest run tests/audit/release-contract.test.mjs tests/audit/priority-chain-doc-sync.test.mjs tests/audit/file-lock-doc-sync.test.mjs tests/audit/host-asset-renderer-drift.test.mjs",
     "test": "npm run build && vitest run",
     "test:single": "npm run build && vitest run",
-    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check check:deadcode check:doc-manifest build verify:hosts verify:remediate-hosts smoke:packaged-audit-code smoke:packaged-remediate-code",
+    "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:deadcode check:doc-manifest build verify:hosts verify:remediate-hosts smoke:packaged-audit-code smoke:packaged-remediate-code",
     "verify:release": "npm run verify:checks && vitest run",
     "check:deadcode": "knip --no-config-hints",
     "check:doc-manifest": "node scripts/check-doc-manifest.mjs",

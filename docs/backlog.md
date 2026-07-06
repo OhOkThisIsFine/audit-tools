@@ -157,11 +157,20 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
   - **`verify:checks` gate = 95.8s, of which `smoke:packaged-audit-code` alone is 70.2s (73%).**
-    `smoke:packaged-remediate-code` is 13.2s; everything else (check 3.6 / deadcode 2.1 / doc-manifest 0.5 /
-    build 5.0 / hosts 0.5+0.6) is ~12s combined. The `check`→`build` double-`tsc` (~8.6s) is minor next to
-    the packaged smokes. **→ The highest-leverage gate win is the packaged-audit-code smoke** (npm pack +
-    global install + next-step round-trips); investigate trimming the install/round-trip cost or caching the
-    packed tarball rather than chasing the tsc/collect items.
+    `smoke:packaged-remediate-code` is 13.2s; everything else is ~12s combined. **→ The highest-leverage gate
+    win is the packaged-audit-code smoke.** Internal breakdown (measured): `next-step ×~7 to dispatch_review`
+    = 35.9s (53% — the real audit-flow round-trips, inherent coverage), `npm install from tarball` 9.3s,
+    `next-step to present_report` 10.1s, `npm pack` 7.2s (incl. a prepack rebuild). The next-step round-trips
+    are fresh-process pipeline runs — cutting them cuts coverage, so this needs a real design (e.g. an
+    in-process multi-step driver for the smoke, or packing once and sharing the tarball across both smokes
+    since they build the identical `audit-tools` package), not a quick trim.
+  - **Easy wins SHIPPED 2026-07-06:** (1) dropped the redundant `check` (`tsc --noEmit`) from `verify:checks`
+    — `build` (tsc emit) type-checks identically, so it was a second full compile; gate 95.8s→90.8s local.
+    (2) dropped the `Type-check` step from `audit-code-test-suite.yml` (its `Build` step covers it) — a `tsc`
+    saved in each of 8 matrix jobs per push. (3) added the `release: vX.Y.Z` skip guard to
+    `audit-code-test-suite.yml` (mirrors `ci.yml`) — the version-bump push no longer re-runs the 8-job suite
+    (publish-package.yml runs the authoritative sharded suite for the release). `check` remains a standalone
+    script (commit hook, local pre-tag gate, dev typecheck).
   - **Full vitest suite = 307s wall (452 files), `collect≈211s`** (confirms the old ~186s estimate), run
     time dominated by audit integration tests that spawn real subprocesses: `audit-code-completion` 285s,
     `audit-code-wrapper` 237s, `next-step` 165s, `cli-remediation` 111s. area:audit ≈ 1905s summed across
