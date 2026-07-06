@@ -254,11 +254,17 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
       upgraded additively (goal_graph/charters/ceiling); `blast_radius` optional on shared `Finding` + mergeFindings
       priority tiebreaker. Deterministic/tool-owned, no LLM. `gateCharterDelta`/`CharterDelta` are test-covered only
       until Phase C produces deltas (intentional intermediate state, not dead code).
-    - **Phase B (NEXT)** — overlay-and-delta operator `decompose(sources,target)→{consensus,contested}` (deterministic):
-      wire existing coupling signals (`graphSignals.ts` call/import, git co-change) + NEW comment-decomposition
-      (stripped/unstripped) + data/state coupling; multi-resolution stability scoring; the two non-co-localization
-      findings (behavioral-cluster-with-no-purpose / purpose-with-no-cluster).
-    - **Phase C** — charter extraction + conceptual prompts (LLM judgment, grounded+gated): Revealed(code) /
+    - **Phase B — ✅ SHIPPED.** Overlay-and-delta operator `decompose(sources,target)→{consensus,contested}`
+      (deterministic), all sources in one build. Pure primitives in `src/shared/decompose/` (resolution-swept
+      Louvain `modularity.ts`; co-association ensemble + two orthogonal scores `consensus.ts`). Sources:
+      call/import (`allGraphEdges`), git co-change, NEW data/state coupling (`extractors/dataStateCoupling.ts`,
+      bibliographic/shared-out-neighbor), NEW comment-decomposition (`extractors/commentDecomposition.ts`,
+      language-neutral extension-keyed lexer → intent cross-refs + `deriveDocGroups`), directory-depth intent.
+      Multi-resolution stability + agreed-across-source scoring; the two non-co-localization findings
+      (`decompose/findings.ts`, deterministic leads, confidence low). Persisted `structure_decomposition.json`
+      (new obligation `structure_decomposition_current` @ PRIORITY idx 9, deterministic executor, dep-map node,
+      findings surfaced through mergeFindings/synthesis). Full `src/shared`+`tests/audit` suite green.
+    - **Phase C (NEXT)** — charter extraction + conceptual prompts (LLM judgment, grounded+gated): Revealed(code) /
       Stated(docs) / Inferred(LLM) / True-nomination through the gate; emit `CharterDelta`s. Extends
       `designReviewPrompt.ts` / `conceptualDispatch.ts` (machinery already exists).
     - **Phase D** — charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest` (port from

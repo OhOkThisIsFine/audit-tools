@@ -47,14 +47,23 @@
   `host_model_cost_order`. The gate fires on every interactive run (even one/zero detected providers — the operator may
   want to add one discovery missed); headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md); detail in `docs/backlog.md` → Forward tracks.
-- **Immediate next: conceptual design-review Phase B — the overlay-and-delta operator (deterministic).**
-  Owner opted into the conceptual + systemic-adversarial review as ONE build (2026-07-05); Phase A (spine) is live.
-  Phase B: `decompose(sources,target)→{consensus,contested}` as a pure primitive; wire the existing coupling
-  signals (`src/audit/extractors/graphSignals.ts`, git co-change) + NEW comment-decomposition (stripped/unstripped)
-  + data/state coupling; multi-resolution stability scoring; the two non-co-localization findings. Full phasing +
-  per-phase detail in `docs/backlog.md` → "Systemic reviewers must be pushed adversarially" forward track and
-  [[conceptual-design-review-design]]. Other standing (lower-pri) options unchanged: cost-first (d) collision-price
-  (`docs/backlog.md` → Forward tracks), deterministic-analyzer live spawn, CE-004 NIM guided-decoding.
+- **Conceptual design-review Phase B (overlay-and-delta operator, deterministic) — ✅ SHIPPED this lap (unreleased,
+  on branch `claude/agitated-robinson-6061f4`).** The full deterministic structure layer in one build: pure
+  primitives `src/shared/decompose/{modularity,consensus}.ts` (resolution-swept Louvain + co-association ensemble
+  with two orthogonal scores agreed-across-source / stable-across-scale); NEW extractors
+  `src/audit/extractors/{dataStateCoupling,commentDecomposition}.ts`; source adapter + the two non-co-localization
+  findings under `src/audit/decompose/`; persisted `structure_decomposition.json` behind the new
+  `structure_decomposition_current` obligation (PRIORITY idx 9, deterministic executor), findings surfaced via
+  mergeFindings/synthesis. `src/shared`+`tests/audit` suite fully green. [[conceptual-design-review-design]].
+- **Immediate next: conceptual design-review Phase C — charter extraction + conceptual prompts (LLM, grounded+gated).**
+  Extend `designReviewPrompt.ts` / `conceptualDispatch.ts`: Revealed(code)/Stated(docs)/Inferred(LLM)/True-nomination
+  through the Phase-A gate; emit `CharterDelta`s. Consumes the Phase-B `structure_decomposition.json` scaffold
+  (consensus nodes = subsystems to charter-review). Full phasing in `docs/backlog.md` → "Systemic reviewers must be
+  pushed adversarially" + [[conceptual-design-review-design]]. Other standing (lower-pri) options unchanged:
+  cost-first (d) collision-price (`docs/backlog.md` → Forward tracks), deterministic-analyzer live spawn, CE-004
+  NIM guided-decoding.
+- **⚠️ Unreleased on branch:** Phase B is committed to `claude/agitated-robinson-6061f4` but NOT yet merged to main
+  or published (still v0.32.17 on npm). Ship = merge branch → main + `release:patch:publish` (→ v0.32.18).
   **Residual on dispatch (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -118,10 +127,10 @@ Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) �
 -1. **Conceptual + systemic-adversarial design review (ACTIVE track — owner-selected 2026-07-05).** ONE build,
    five phases ([[conceptual-design-review-design]]; design of record
    [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)). **Phase A (data-model
-   spine) — ✅ SHIPPED v0.32.17.** **Phase B (next)** = overlay-and-delta operator (deterministic). C = charter
-   extraction + prompts (LLM); D = charter-delta clarification/triangulation loop + three dials; E = systemic
-   improvement-seeking challenge loop (loop-until-dry, separate adversary). Detail in `docs/backlog.md` →
-   "Systemic reviewers must be pushed adversarially" forward track.
+   spine) — ✅ SHIPPED v0.32.17.** **Phase B (overlay-and-delta operator, deterministic) — ✅ SHIPPED (unreleased,
+   on branch).** **Phase C (next)** = charter extraction + conceptual prompts (LLM); D = charter-delta
+   clarification/triangulation loop + three dials; E = systemic improvement-seeking challenge loop (loop-until-dry,
+   separate adversary). Detail in `docs/backlog.md` → "Systemic reviewers must be pushed adversarially" forward track.
 0. **Multi-provider routing rethink outcome (2026-07-05).** Verdict: core is sound + ahead of field, no big
    simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED. (b) `rollingEngine.ts`
    **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev static-metadata resolver**: W1 real context window — ✅
