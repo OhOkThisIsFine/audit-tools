@@ -98,32 +98,21 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   and spawn subprocesses → isolation-off risks cross-test bleed. Only pursue with per-file verification.
   Lower priority than the sharding already shipped.
 
-- **Dispatch admission-control rework — ✅ COMPLETE (founding bug commit 3 + defect-1, 2026-07-05).** The
-  whole rework shipped: commits 1 + 2a + 2b-AUDIT + 2b-REMEDIATE + rolling-driver unification + the founding
-  capability-inheritance bug (host-review pool keyed to the driver via `resolveHostDispatchProviderName`;
-  `HostDispatchDescriptor` rides every continue-command) + **defect-1 (host + codex + NIM CONCURRENT
-  fan-out)**. Defect-1: an attended host (`host_can_dispatch_subagents` default true) resuming a
-  backend-configured run now DEMOTES the configured in-process backend (codex/opencode/openai-compatible) to
-  a *source* pool so host + backend + NIM fan out concurrently; the in-process whole-frontier driver fires
-  only when headless (`host_can_dispatch_subagents:false`). Discriminator reuses the existing boolean (no new
-  field — driver identity already ships on `HostDispatchDescriptor`); both orchestrators gated in parity;
-  `buildConfirmedPools` decouples host-pool identity (claude-code when demoting) from the source provider
-  (the actual backend). Sub-2: `selectProvider` breaks equal-rank ties by least in-flight load so
-  same-complexity packets balance across equal pools instead of front-loading one. Sub-3: the single-shot
-  openai-compatible (NIM) worker gets an output-contract override (no "reply valid: …" leak into `result`),
-  read-neutral referenced-files framing, and operator-tunable inline caps for read-heavy packets. See
-  [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]] / design of record
-  [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md).
-  - **Residual (env-bound / deeper, not blocking):** (a) **live validation** of the real host+codex+NIM
-    concurrent run — a metered multi-pool run confirming the demoted backend actually fans out alongside the
-    host (folds into the quota-aware-dispatch live-run watch below). (b) **Deeper simultaneity:** the audit
-    hybrid path drives the in-process (codex/NIM) partition to completion within a `next-step` turn, THEN
-    hands the complement to the host — so host and backend alternate ACROSS turns, not simultaneously WITHIN
-    one. True within-turn simultaneity would need a detached background driver spanning host turns
-    (architectural; only pursue if wall-clock on a real run shows the alternation is the bottleneck).
-    (c) **Executor routing lesson (durable):** codex CLI is a poor fit for large read-heavy audit packets
-    under a wall-clock budget (observed 2026-07-04: 2 concurrent ran 5+ min with zero results, 8k+ lines of
-    echoed reasoning) — route only small/low-line packets to it, or drop it from the audit pool.
+- **Dispatch admission-control rework — residual (env-bound / deeper, not blocking).** Shipped in full
+  (commits 1/2a/2b-AUDIT/2b-REMEDIATE/driver-unification/commit-3/defect-1 — see `docs/HANDOFF.md` T5-3 /
+  `git log` for what landed). Design of record
+  [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md);
+  [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]].
+  - (a) **live validation** of the real host+codex+NIM concurrent run — a metered multi-pool run confirming
+    the demoted backend actually fans out alongside the host (folds into the quota-aware-dispatch live-run
+    watch below). (b) **Deeper simultaneity:** the audit hybrid path drives the in-process (codex/NIM)
+    partition to completion within a `next-step` turn, THEN hands the complement to the host — so host and
+    backend alternate ACROSS turns, not simultaneously WITHIN one. True within-turn simultaneity would need
+    a detached background driver spanning host turns (architectural; only pursue if wall-clock on a real
+    run shows the alternation is the bottleneck). (c) **Executor routing lesson (durable):** codex CLI is a
+    poor fit for large read-heavy audit packets under a wall-clock budget (observed 2026-07-04: 2 concurrent
+    ran 5+ min with zero results, 8k+ lines of echoed reasoning) — route only small/low-line packets to it,
+    or drop it from the audit pool.
 
 - **Quota-aware dispatch — live validation env-bound.** Still open: live validation of the token-budget
   dispatch gate (per-`(pool,window-label)` learned tokens-per-percent slope, budget = MIN across a
@@ -186,24 +175,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
-- **Cost-first routing follow-ups (W2 core + interactive Gate-0 SHIPPED).** Real models.dev price drives `costRank`
-  (decoupled from `capabilityRank`) via the shared 3-rung engine, and Gate-0 is now an **interactive
-  `provider_confirmation` step** on the audit CLI path. Design of record
+- **Cost-first routing — collision-price preference (carried from W1, open).** Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md), durable design in memory [[cost-first-routing-design]].
-  - **(a) Host-prompt visibility — ✅ SHIPPED.** `renderProviderConfirmationPrompt` (`src/audit/cli/providerConfirmationStep.ts`)
-    surfaces the priced pool (model + blended $/Mtok + suggested cost order + status) to the host.
-  - **(b) Interactive operator REORDER — ✅ SHIPPED.** The host writes `provider-confirmation.input.json`
-    (`provider-confirmation-input/v1`: `cost_order`/`exclude`/`include`/`host_models`); the tool promotes it into both
-    canonical artifacts (per-tool seam + shared confirmation). Input/envelope split ([[contract-pipeline-input-vs-envelope-paths]]);
-    presence flips the gate from emit→consume. Fires on EVERY interactive run (even one/zero detected providers — the
-    operator may want to add a provider discovery missed); headless auto-completes.
-  - **(c) Host-roster-at-Gate-0 — ✅ SHIPPED.** `host_models` in the input reports the host's roster; those tiers are
-    priced (models.dev) + ordered at Gate-0 and thread to dispatch by `model_id` via `host_model_cost_order` (a separate
-    list on the shared confirmation, merged into the model-keyed positions map — zero blast radius to `provider_pool`).
-  - **(d) Collision-price preference (carried from W1) — OPEN.** `resolveModelStatics` dedupes a model id served by
-    multiple providers first-sorted-provider-wins, so a reseller markup could win over the native/cheapest price. Prices
-    largely agree across providers, so this is an approximation, not a bug — revisit only if per-provider pricing matters
-    (would need (provider, model) keying in the snapshot).
+  W2 core + interactive Gate-0 (host-prompt visibility, operator reorder, host-roster-at-Gate-0) are shipped —
+  see `docs/HANDOFF.md` T5-0. `resolveModelStatics` dedupes a model id served by multiple providers
+  first-sorted-provider-wins, so a reseller markup could win over the native/cheapest price. Prices
+  largely agree across providers, so this is an approximation, not a bug — revisit only if per-provider
+  pricing matters (would need (provider, model) keying in the snapshot).
 - **models.dev static window can over-state a specific deployment (carried from W1).** The snapshot lists e.g.
   `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
   work blocks off the static rung. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding —
@@ -256,34 +234,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     attention=the VOI-ranked triangulation loop; attention 0 = the autonomous mode). The "improvement-seeking
     challenge loop" above is the *intensity* dial + loop-until-dry in that doc's terms.
   - **Implementation phasing (owner opted in 2026-07-05 — conceptual + systemic-adversarial = ONE build):**
-    - **Phase A — data-model spine — ✅ SHIPPED v0.32.17.** `src/shared/types/charter.ts` (four charters + goal DAG
-      w/ integer `premise_height`, never a mandated L-enum + `Ceiling` consent dial + symmetric-pair `CharterDelta`);
-      `src/shared/validation/charterGate.ts` (`applyTrueCharterGate` True falsifiable-or-drop; `charterReviewDisposition`
-      low-confidence→flag-for-human; `gateCharterDelta` low-confidence-side→human); `intent_checkpoint.design_review`
-      upgraded additively (goal_graph/charters/ceiling); `blast_radius` optional on shared `Finding` + mergeFindings
-      priority tiebreaker. Deterministic/tool-owned, no LLM. `gateCharterDelta`/`CharterDelta` are test-covered only
-      until Phase C produces deltas (intentional intermediate state, not dead code).
-    - **Phase B — ✅ SHIPPED.** Overlay-and-delta operator `decompose(sources,target)→{consensus,contested}`
-      (deterministic), all sources in one build. Pure primitives in `src/shared/decompose/` (resolution-swept
-      Louvain `modularity.ts`; co-association ensemble + two orthogonal scores `consensus.ts`). Sources:
-      call/import (`allGraphEdges`), git co-change, NEW data/state coupling (`extractors/dataStateCoupling.ts`,
-      bibliographic/shared-out-neighbor), NEW comment-decomposition (`extractors/commentDecomposition.ts`,
-      language-neutral extension-keyed lexer → intent cross-refs + `deriveDocGroups`), directory-depth intent.
-      Multi-resolution stability + agreed-across-source scoring; the two non-co-localization findings
-      (`decompose/findings.ts`, deterministic leads, confidence low). Persisted `structure_decomposition.json`
-      (new obligation `structure_decomposition_current` @ PRIORITY idx 9, deterministic executor, dep-map node,
-      findings surfaced through mergeFindings/synthesis). Full `src/shared`+`tests/audit` suite green.
-    - **Phase C — ✅ SHIPPED v0.32.19.** Charter extraction + conceptual prompts (LLM judgment, grounded+gated).
-      Deterministic ENFORCEMENT half `src/shared/decompose/charterExtraction.ts` (`assembleCharterRegister`: id
-      assignment, the design's routing table, Phase-A gates, deltas→Finding leads). host_delegation obligation
-      `charter_extraction_current` (PRIORITY idx 11) + `src/audit/orchestrator/charterExtractionExecutor.ts`
-      (ceiling-gated — `shallow` omits deterministically, `deep`/`deepest` emits the LLM charter-extraction prompt
-      `src/audit/cli/charterExtractionPrompt.ts`, grounded in the Phase-B consensus scaffold + /init anti-slop
-      discipline). Persists `charter_register.json` (OUTPUT artifact — off the intent checkpoint it depends on, no
-      cycle); routed charter-delta leads surface via mergeFindings/synthesis. **Phase-C residual (small):** the
-      extracted charters are NOT yet threaded into the `design_review_conceptual` prompt — that pass stays
-      charter-unaware; deltas `routed_to:"clarification"` surface as findings until Phase D's loop. Fold into D or
-      do standalone.
+    - **Phases A–C — ✅ SHIPPED (v0.32.17–v0.32.19).** Data-model spine (four charters + goal DAG, `Ceiling`
+      consent dial, `CharterDelta`, `src/shared/validation/charterGate.ts` gates) → overlay-and-delta structure
+      operator (`src/shared/decompose/modularity.ts`/`consensus.ts`, `structure_decomposition.json`, obligation
+      `structure_decomposition_current`) → charter extraction (`src/shared/decompose/charterExtraction.ts`,
+      obligation `charter_extraction_current`, `charter_register.json`, ceiling-gated LLM prompt
+      `src/audit/cli/charterExtractionPrompt.ts`). Design of record
+      [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md).
+      **Phase-C residual (small):** the extracted charters are NOT yet threaded into the
+      `design_review_conceptual` prompt — that pass stays charter-unaware; deltas `routed_to:"clarification"`
+      surface as findings until Phase D's loop. Fold into D or do standalone.
     - **Phase D (NEXT)** — charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest` (port from
       remediate, charter-keyed not finding-keyed); VOI-ranked question queue; the three dials (ceiling@intent_checkpoint
       defaulted, attention loop, intensity auto); attention-0 = autonomous; blast-radius ranking + risk gate.
