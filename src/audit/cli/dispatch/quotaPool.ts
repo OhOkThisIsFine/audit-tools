@@ -5,6 +5,8 @@ import {
   computeDispatchAdmission,
   createReservationLedger,
   tierRank,
+  deriveCostRank,
+  lookupConfirmedPosition,
 } from "audit-tools/shared";
 import type {
   ProviderRateLimits,
@@ -265,6 +267,12 @@ export async function finalizeDispatchQuota(params: {
    * here would double-count the same work. Defaults to true (host path).
    */
   grantLeases?: boolean;
+  /**
+   * Operator-confirmed cost ordering (rung 1 of costRank; spec/cost-first-routing.md),
+   * keyed by model id → 0-based confirmed position. Derived from the Gate-0
+   * confirmed provider pool. Absent/empty ⇒ costRank falls to real price then tier.
+   */
+  confirmedCostPositions?: Map<string, number> | null;
 }): Promise<{
   dispatchQuota: DispatchQuota;
   dispatchQuotaPath: string;
@@ -298,14 +306,21 @@ export async function finalizeDispatchQuota(params: {
   // cost/capability rank from its tier; capacity = its context window (a packet's
   // input+output envelope must fit). The cheapest capable pool with headroom wins.
   const admissionPools: AdmissionPool[] = dispatchCapacity.pools.map((alloc) => {
-    const rankNum = tierRank(alloc.rank);
+    // costRank is a REAL cost axis (blended $/Mtok via the shared cost-first
+    // engine), decoupled from capabilityRank (still the tier ordinal). See
+    // spec/cost-first-routing.md. Confirmed operator ordering (rung 1) threads in
+    // via confirmedPositions keyed by pool_id; absent ⇒ price (rung 2) ⇒ tier (rung 3).
     return {
       poolId: alloc.pool_id,
       resourceKey: alloc.pool_id,
       budget: alloc.schedule.remaining_token_budget ?? Number.POSITIVE_INFINITY,
       declaredCap: alloc.schedule.host_concurrency_limit?.active_subagents ?? null,
-      costRank: rankNum,
-      capabilityRank: rankNum,
+      costRank: deriveCostRank({
+        model: alloc.schedule.model,
+        tier: alloc.rank,
+        confirmedPosition: lookupConfirmedPosition(params.confirmedCostPositions, alloc.schedule.model),
+      }),
+      capabilityRank: tierRank(alloc.rank),
       capacityTokens: alloc.schedule.resolved_limits.context_tokens,
     };
   });

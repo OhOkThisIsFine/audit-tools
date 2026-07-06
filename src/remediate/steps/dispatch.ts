@@ -33,6 +33,7 @@ import type {
   AdmissionPool,
 } from "audit-tools/shared";
 import { computeDispatchAdmission, createReservationLedger, tierRank } from "audit-tools/shared";
+import { deriveCostRank, lookupConfirmedPosition } from "audit-tools/shared";
 import { scheduleWave as computePoolWaveSchedule } from "audit-tools/shared";
 import { probeQuotaSource } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
@@ -510,16 +511,26 @@ export async function buildConfirmedPools(input: {
  * (null ⇒ none — the only place an explicit agent-count exists); cost/capability rank
  * from its tier; capacity = its context window (a packet's input+output envelope must fit).
  */
-function admissionPoolsFromSchedule(schedule: WaveScheduleResult): AdmissionPool[] {
+function admissionPoolsFromSchedule(
+  schedule: WaveScheduleResult,
+  confirmedCostPositions?: Map<string, number> | null,
+): AdmissionPool[] {
   return (schedule.capacity_pools ?? []).map((pool) => {
-    const rankNum = tierRank(pool.rank);
+    // costRank is a REAL cost axis (blended $/Mtok via the shared cost-first
+    // engine), decoupled from capabilityRank (still the tier ordinal). See
+    // spec/cost-first-routing.md. Rung 1 (operator-confirmed) via the model-keyed
+    // map; absent ⇒ price (rung 2) ⇒ tier (rung 3).
     return {
       poolId: pool.pool_id,
       resourceKey: pool.pool_id,
       budget: pool.remaining_token_budget ?? Number.POSITIVE_INFINITY,
       declaredCap: pool.host_concurrency_limit?.active_subagents ?? null,
-      costRank: rankNum,
-      capabilityRank: rankNum,
+      costRank: deriveCostRank({
+        model: pool.model,
+        tier: pool.rank,
+        confirmedPosition: lookupConfirmedPosition(confirmedCostPositions, pool.model),
+      }),
+      capabilityRank: tierRank(pool.rank),
       capacityTokens: pool.resolved_limits.context_tokens,
     };
   });
@@ -540,6 +551,11 @@ export async function buildDispatchQuota(
    */
   grantLeases: boolean,
   quotaStateEntry?: QuotaStateEntry | null,
+  /**
+   * Operator-confirmed cost ordering (rung 1 of costRank; spec/cost-first-routing.md),
+   * keyed by model id → 0-based confirmed position. Absent ⇒ price then tier.
+   */
+  confirmedCostPositions?: Map<string, number> | null,
 ): Promise<RemediationDispatchQuota> {
   let backoffState: BackoffState | null = null;
   const count = quotaStateEntry?.consecutive_429_count ?? 0;
@@ -557,7 +573,7 @@ export async function buildDispatchQuota(
   // it once a provider reports usage — dormant on the always-on claude-code host).
   const admission = await computeDispatchAdmission({
     packets: admissionPackets,
-    pools: admissionPoolsFromSchedule(schedule),
+    pools: admissionPoolsFromSchedule(schedule, confirmedCostPositions),
     outputCap: schedule.resolved_limits.output_tokens,
     grantLeases,
     ledger: createReservationLedger(),

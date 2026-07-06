@@ -1043,6 +1043,26 @@ export {
   mostCapableTier,
 } from "./dispatch/tierRank.js";
 
+// Cost-first routing engine (real price → costRank; spec/cost-first-routing.md).
+export {
+  COST_BLEND_INPUT_WEIGHT,
+  COST_BLEND_OUTPUT_WEIGHT,
+  CONFIRMED_ORDER_BAND_BASE,
+  PRICE_BAND_BASE,
+  UNKNOWN_PRICE_BAND_BASE,
+  blendedPrice,
+  resolveModelPrice,
+  deriveCostRank,
+  suggestCostOrdering,
+  lookupConfirmedPosition,
+  resolveConfirmedCostPositions,
+} from "./dispatch/costRank.js";
+export type {
+  CostRankInput,
+  CostCandidate,
+  OrderedCostCandidate,
+} from "./dispatch/costRank.js";
+
 // Rolling dispatch engine (packet-type-agnostic, quota-only throttle)
 export type {
   RollingDispatchPacket,
