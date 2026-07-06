@@ -197,7 +197,7 @@ test("primary CI workflows validate the lockfile, preserve diagnostics, and make
 
   expect(ci).toMatch(/CI_NODE_VERSION: "22\.14\.0"/);
 
-  expect(testSuite).toMatch(/name: Orchestration tests \(Node \$\{\{ matrix\.node-version \}\}\)/);
+  expect(testSuite).toMatch(/name: Orchestration tests \(Node \$\{\{ matrix\.node-version \}\}(, shard [^)]+)?\)/);
   expect(testSuite).toMatch(/fail-fast: false/);
   expect(testSuite.includes('- "20.19.2"')).toBeTruthy();
   expect(testSuite.includes('- "22.14.0"')).toBeTruthy();
@@ -263,9 +263,11 @@ test("update-languages writes the real extractor map path and the header points 
 test("audit-code test-suite CI triggers on package.json and the workflow file itself", async () => {
   const testSuite = await readWorkflow("audit-code-test-suite.yml");
   // A package.json change (scripts/deps) or a workflow change must re-run CI;
-  // otherwise a broken script/dep edit ships without a gate.
+  // otherwise a broken script/dep edit ships without a gate. The workflow-file
+  // trigger may be pinned explicitly or covered by the `.github/workflows/**`
+  // glob (a superset that also re-runs on any sibling workflow edit).
   expect(testSuite).toMatch(/- package\.json\n/);
-  expect(testSuite).toMatch(/- \.github\/workflows\/audit-code-test-suite\.yml\n/);
+  expect(testSuite).toMatch(/- \.github\/workflows\/(\*\*|audit-code-test-suite\.yml)\n/);
 });
 
 test("audit-code postinstall fails non-zero when an install step fails (parity with remediate)", async () => {
