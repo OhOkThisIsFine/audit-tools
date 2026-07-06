@@ -26,12 +26,14 @@ because it stops re-emitting boilerplate.
 
 ## 1. The one open item
 
-Everything in this design is realized except **S8's "Gate it"** guard.
-`runDesignReviewAutoComplete` (`src/audit/orchestrator/structureExecutors.ts`) can mark a
-design-review pass `reviewed: true` with an empty `findings: []` and no LLM call ever having run —
-there is no guard distinguishing "a real review found nothing" from "auto-completed empty." Closing
-that gap (require a real, non-fallback finding set, or block synthesis when the pass auto-completed
-empty) is the remaining work; see the S8 section for the full statement.
+Two items remain open. **S8's "Gate it" guard**: `runDesignReviewAutoComplete`
+(`src/audit/orchestrator/structureExecutors.ts`) can mark a design-review pass
+`contract_reviewed: true` / `conceptual_reviewed: true` with an empty `contract_findings`/
+`conceptual_findings: []` and no LLM call ever having run — there is no guard distinguishing "a real
+review found nothing" from "auto-completed empty." Closing that gap (require a real, non-fallback
+finding set, or block synthesis when the pass auto-completed empty) is remaining work; see the S8
+section for the full statement. **S4's ID-authority consolidation**: `goal_id` / module / obligation
+ID minting is not yet routed through `idRegistry.ts` — see the S4 section.
 
 ## 2. The judgment vs. mechanical line
 
@@ -108,9 +110,11 @@ only judgment slots blank — and gives the worker a **write-time validator** (t
   tokens on boilerplate. This is the core "both weak and strong" lever.
 
 ### S4 — Single ID authority
-`src/remediate/contractPipeline/idRegistry.ts` is a tool-owned registry that mints `goal_id` /
-module / obligation / node IDs and owns the `CP-BLOCK-` ↔ bare-node-id relationship as one
-registered mapping.
+`src/remediate/contractPipeline/idRegistry.ts` is a tool-owned registry, currently scoped to the
+one relationship that caused the recurring "Unknown finding_id" merge trap: the `CP-BLOCK-`
+block-id ↔ bare-node-id bijection (`ensureNodeId`/`toBlockId`/`fromBlockId`). Consolidating
+`goal_id` / module / obligation ID minting (today minted ad hoc via `mintUniqueId` in
+`contractPipeline/derive.ts`) under the same authority is still open.
 - **Plug-in:** new `contractPipeline/idRegistry.ts`; repoint the mint sites (`goal_normalization`,
   `obligation_ledger` derivation, `promoteImplementationDagToExtractedPlan`'s `CP-BLOCK-` prefix)
   and the consumers (`buildBlockAliasMap`/`collapseItemResults`/`mergeImplementResults`).
@@ -197,10 +201,11 @@ judge — not a reviewer lacking the project's vocabulary. The restorations:
 - **Ground the output (general; = S7 applied to the reviewer).** Conceptual/contract
   findings require component-level evidence, enforced at ingest by `groundDesignFinding`
   (`src/shared/validation/designFindingGrounding.ts`), called from `nextStepHelpers.ts`.
-- **Gate it — the one open item.** The review-completion flag is still a boolean;
+- **Gate it — an open item.** The review-completion flags are still booleans;
   `runDesignReviewAutoComplete` (`src/audit/orchestrator/structureExecutors.ts`) can mark a pass
-  `reviewed: true` with `contract_findings`/`conceptual_findings: []` and no LLM call ever having
-  run — there is no guard distinguishing "a real review found nothing" from "auto-completed empty."
+  `contract_reviewed`/`conceptual_reviewed: true` with `contract_findings`/`conceptual_findings: []`
+  and no LLM call ever having run — there is no guard distinguishing "a real review found nothing"
+  from "auto-completed empty."
   **Fix needed:** require a real (non-fallback) finding set, or block synthesis when the pass
   auto-completed empty — "no systemic review happened" must not pass silently.
 
