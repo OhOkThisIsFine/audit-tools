@@ -86,7 +86,10 @@ describe("N-remediate-phases — single state.json writer (CE-P3-001 / OBL-INV-R
       if (/last_successful_step\s*=/.test(content)) writerFiles.push(file);
     }
     expect(writerFiles).toHaveLength(1);
-    expect(writerFiles[0].replace(/\\/g, "/")).toMatch(/steps\/dispatch\.ts$/);
+    // The dispatch wave path was split into cohesive modules under
+    // steps/dispatch/ (CP-NODE-7); the sole writer now lives in the merge
+    // marshalling module steps/dispatch/marshal.ts.
+    expect(writerFiles[0].replace(/\\/g, "/")).toMatch(/steps\/dispatch\/marshal\.ts$/);
   });
 });
 
@@ -177,7 +180,7 @@ describe("N-remediate-phases — step constant + evidence path agreement (OBL-IN
     // it cannot drift from state/types.ts. A bare inline string with the same
     // text would silently break the seam if the constant ever changes.
     const dispatchSrc = await readFile(
-      join(SRC_DIR, "steps", "dispatch.ts"),
+      join(SRC_DIR, "steps", "dispatch", "marshal.ts"),
       "utf8",
     );
     expect(dispatchSrc).toMatch(

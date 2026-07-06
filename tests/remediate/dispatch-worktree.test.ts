@@ -442,15 +442,21 @@ describe("worktreePath", () => {
 
 describe("claimedWritePaths heuristic absent from prepareImplementDispatch", () => {
   it("dispatch module source does not reference claimedWritePaths", async () => {
-    // Read the dispatch source and verify the heuristic is not present.
-    // Use import.meta.url to get the tests directory, then navigate to the src file.
-    const { readFileSync } = await import("node:fs");
+    // Read the dispatch source (barrel + split modules under steps/dispatch/) and
+    // verify the heuristic is not present anywhere in the dispatch area.
+    const { readFileSync, readdirSync } = await import("node:fs");
     const { join: pathJoin, dirname: pathDirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
 
     const testsDir = pathDirname(fileURLToPath(import.meta.url));
-    const dispatchPath = pathJoin(testsDir, "..", "..", "src", "remediate", "steps", "dispatch.ts");
-    const source = readFileSync(dispatchPath, "utf8");
+    const stepsDir = pathJoin(testsDir, "..", "..", "src", "remediate", "steps");
+    const dispatchDir = pathJoin(stepsDir, "dispatch");
+    const source = [
+      readFileSync(pathJoin(stepsDir, "dispatch.ts"), "utf8"),
+      ...readdirSync(dispatchDir)
+        .filter((f) => f.endsWith(".ts"))
+        .map((f) => readFileSync(pathJoin(dispatchDir, f), "utf8")),
+    ].join("\n");
     expect(source).not.toContain("claimedWritePaths");
   });
 });
@@ -468,7 +474,8 @@ describe("worktree-rooted implement prompt rendering", () => {
     const { fileURLToPath } = await import("node:url");
 
     const testsDir = pathDirname(fileURLToPath(import.meta.url));
-    const dispatchPath = pathJoin(testsDir, "..", "..", "src", "remediate", "steps", "dispatch.ts");
+    // implementPrompt now lives in the split module steps/dispatch/implementPrompt.ts.
+    const dispatchPath = pathJoin(testsDir, "..", "..", "src", "remediate", "steps", "dispatch", "implementPrompt.ts");
     const source = readFileSync(dispatchPath, "utf8");
     // The dispatch source must reference worktreeRoot so isolated workers see
     // their worktree path, not the main repo root.

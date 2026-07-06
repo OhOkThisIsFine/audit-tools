@@ -694,7 +694,9 @@ describe("M5-WIRING convergence — no dispatch path bypasses the broker (inv-1,
   // broker fold) or the broker seam — never by a dispatch path calling a provider
   // directly for a slot count.
   it("the remediate dispatch.ts driver routes through computeDispatchCapacity, never a hand-rolled slot count", () => {
-    const src = readSource("../../src/remediate/steps/dispatch.ts");
+    // Wave scheduling was split into steps/dispatch/waveScheduling.ts (CP-NODE-7);
+    // the broker-routing invariant now lives there.
+    const src = readSource("../../src/remediate/steps/dispatch/waveScheduling.ts");
     expect(src).toContain("computeDispatchCapacity");
     // A capable host's reported active-subagent number feeds the broker as a
     // ceiling input, never a substitute for the broker's own sizing.
