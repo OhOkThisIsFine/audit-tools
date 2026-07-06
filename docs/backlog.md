@@ -29,36 +29,29 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Max-sweep remediation run COMPLETE (2026-07-06).** The operator-approved 10-node
-  `backlog-handoff-max-sweep-2026-07-06` plan is fully landed and green — completed via manual node-by-node
-  recovery after a tool worktree-wipe / state-desync incident (see the worktree-wipe bug below). All 10 nodes
-  shipped; durable design/status lives in project memory [[remediate-max-sweep-run-2026-07-06]].
-
 - **Remediate contract/implement pipeline — dogfood frictions (fix in tooling).**
   Five open frictions surfaced driving one large `/remediate-code` run:
-  - **Contract-pipeline re-validation is grossly inefficient — a localized fix re-runs the WHOLE downstream chain.**
-    This was the dominant cost of the run (a 10-node plan took ~40 `next-step` round-trips + ~20 subagent dispatches,
-    the large majority pure churn). Facets:
-    - **Full cascade re-run on any localized change.** Each of the 3 small contract repairs (widen one module's file
-      scope; pin one PRIORITY slot; fix one disclaimer sentence) invalidated and re-ran the ENTIRE downstream chain:
-      critique → counterexample → judge → **full re-author of `test_validator_plan` (114 specs) + `contract_assessment_report`
-      (123 findings)**. The adversarial *review* is diff-based (the reviewer re-examines only the diff) but the
-      host-authored artifacts are re-materialised in full every time. Re-validation should be scoped to the changed
-      module's obligations, not the whole plan.
-    - **`test_validator_plan` ↔ `contract_assessment_report` ping-pong.** Their mutual dependency + the
-      consume-`.input.json`-into-envelope model caused repeated oscillation — re-emitting one invalidated the other,
-      several round-trips each cycle, re-writing byte-identical content.
-    - **Structural gates surface failures across successive round-trips, not all-at-once.** The positive/negative
-      pairing gate and the CE-006 negative-scoping gate flagged different specs on separate `next-step` calls (fix a
-      batch → re-run → new batch), and the polarity vs scoping issues surfaced in different passes. Batch every gate
-      failure the plan currently has into one report.
-    - **Re-emit is re-author, not copy-forward** — no "re-affirm unchanged / copy-envelope-payload-forward" fast path,
-      so an unchanged 123-finding verdict is re-materialised verbatim repeatedly. (Host lesson also logged: I initially
-      dispatched heavyweight subagents — 80-130k tokens — to do pure verbatim copy-forward before switching to
-      deterministic prior-verdict extraction; a copy job must never be an LLM dispatch.)
-    Net: the full adversarial contract pipeline is far too expensive to run on a large mixed plan without a cheaper
-    re-convergence path — reinforces [[risk-tier-loop-laps-cheap-vs-heavy]] and the self-scaling-pipeline direction
-    [[self-scaling-pipeline-not-forked-paths]].
+  - **Contract-pipeline re-convergence must be incremental — a localized change must not re-author the whole
+    downstream chain.** Today a single small upstream edit re-stales and fully re-materialises every downstream
+    contract/review artifact (a whole test-validator plan + a whole assessment report, etc.); on a large mixed plan
+    this whole-artifact re-author was the dominant cost of a real run (dozens of full rewrites across many
+    round-trips). Staleness is whole-artifact, and re-emit is always a fresh full author — even when the payload is
+    byte-identical. Three invariants the tool must hold:
+    - **Item-scoped re-validation (fail-closed).** A localized upstream change must re-validate and re-emit only the
+      downstream *items* (obligations / specs / findings) that actually derive from the changed upstream item — not
+      the entire artifact. Where per-item provenance can't be established for a given item (e.g. a finding that
+      reasons across modules), that item falls back to full re-validation, so scoping never *under*-invalidates and a
+      real staleness is never silently missed. (The observed "plan ↔ assessment ping-pong" is *not* a dependency
+      cycle — the edge is one-way; the churn was whole-artifact restaling off shared upstreams, which item-scoping
+      dissolves.)
+    - **Empty-delta re-emit is a deterministic copy-forward, never an LLM dispatch.** When an artifact's (or an
+      item's) upstream semantic-projection delta is empty, the tool re-envelopes the prior payload forward
+      deterministically with zero worker dispatch. A verbatim carry-forward must never cost an LLM round-trip (a copy
+      job is never a dispatch).
+    - **Batch all gate failures into one report.** Every structural-gate failure currently present in the plan
+      surfaces in a single report at once, not one-batch-per-round-trip (no fix→re-run→new-failure thrash).
+    Reinforces [[risk-tier-loop-laps-cheap-vs-heavy]] and the self-scaling-pipeline direction
+    [[self-scaling-pipeline-not-forked-paths]]; the copy-forward invariant extends [[deterministic-contract-finalization]].
   - **Coverage gate not exposed in `validate-artifact`.** The positive+negative pairing + CE-006 negative-scoping gate
     fires only at `next-step`, so an authoring agent self-validates "ok" then fails the gate → round-trips. Expose it
     in `validate-artifact`. Also the polarity classifier keyword-heuristic misreads a satisfied-path assertion whose
@@ -127,13 +120,20 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   concurrent stale-sweep prune a worktree with in-flight/uncommitted work. Recovery procedure preserved in
   [[remediate-max-sweep-run-2026-07-06]]. Relates [[implement-dispatch-strands-nodes]].
 
-- **Staleness regen-drain shipped opt-in — benefit dormant on the conversation-first path (efficiency-only,
-  2026-07-06).** Node-5's `advanceAudit` drain loop (`AdvanceAuditOptions.drain`) defaults false and no
-  production caller opts in, because the drain crosses interactive / host-input FOLD boundaries
-  (`provider_confirmation` / `analyzer_install` / `edge_reasoning` / `confirm_intent`) its executor-registry
-  stop-gate can't see. So the regen-chatter reduction it was meant to deliver is inert on the primary path. A
-  **fold-aware drain** (stops at host-input folds) or an **autonomy driver that opts in** would land it.
-  Efficiency-only, not a correctness bug.
+- **Regen-drain must be safe and active on the primary path — not a dormant, unsafe opt-in.** Collapsing a
+  chain of consecutive deterministic regen steps into one host round-trip + one consolidated staleness record
+  (instead of N of each) is a real recurring win on the conversation-first path — every cold start and every
+  migration-triggered staleness cascade. Today it ships as an opt-in (`advanceAudit` drain) that **no production
+  caller enables**, and it is *unsafe* to enable as-is: its stop-gate reads executor-registry granularity, but
+  two host-input pauses — analyzer-install consent and low-confidence edge-reasoning — live *inside* a
+  deterministic executor and are invisible to that gate, so a naive drain silently skips operator consent (a
+  latent correctness footgun, not merely efficiency). Invariants to hold:
+  - **A drain must stop at EVERY host-input pause**, including the sub-executor interactive folds not
+    distinguishable at executor-registry granularity. The fold that owns a pause is the single authority on where
+    a host-stop belongs — surface that signal so the drain (and the primary step loop) always halt there.
+  - **The safe drain is the default behavior of the primary path — no opt-in flag** (a needed manual flag is a
+    bug signal). Any future autonomy driver is merely a *consumer* of the same fold-aware stop signal, never a
+    second code path that re-implements the fold boundaries.
 
 - **Shipping from a linked worktree forces a manual FF + rebuild dance (observed 2026-07-05).** The release
   script (`scripts/release-and-publish.mjs`) hard-guards on being ON the default branch (`git branch
@@ -145,14 +145,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   script) to accept a linked-worktree/feature-branch state — e.g. release straight from the current worktree
   when its HEAD already equals `origin/main`, or auto-FF+rebuild the primary worktree — so a ship from a lap
   worktree is one command, not a five-step hand dance.
-
-- **Backlog mechanism sub-items can drift from code reality — verify before implementing (2026-07-05).** The
-  defect-1 "mechanism sub-defects" were partly over-stated vs the code: sub-2 claimed `selectProvider` does
-  "no multi-pool fan-out" but the rolling engine already spills off SATURATED pools (the real gap was only
-  UNBOUNDED-pool front-loading → a least-loaded tiebreak, not a rewrite); sub-3's "route file contents to
-  NIM" already existed (`gatherReferencedFiles`) — the real bug was the single-shot output-contract leak.
-  Reinforces [[backlog-item-states-invariant-not-fix-mechanism]]: read the named mechanism against source
-  before building it, and prefer the narrowest correct fix over the backlog's prescribed rewrite.
 
 - **Optional: cut vitest `collect` (~186s) / per-file isolation overhead (noted 2026-07-04).** Full-suite
   `collect` is ~186s of module load/transform for 430 files; default `pool: 'forks'` adds per-file process
@@ -171,10 +163,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     partition to completion within a `next-step` turn, THEN hands the complement to the host — so host and
     backend alternate ACROSS turns, not simultaneously WITHIN one. True within-turn simultaneity would need
     a detached background driver spanning host turns (architectural; only pursue if wall-clock on a real
-    run shows the alternation is the bottleneck). (c) **Executor routing lesson (durable):** codex CLI is a
-    poor fit for large read-heavy audit packets under a wall-clock budget (observed 2026-07-04: 2 concurrent
-    ran 5+ min with zero results, 8k+ lines of echoed reasoning) — route only small/low-line packets to it,
-    or drop it from the audit pool.
+    run shows the alternation is the bottleneck).
 
 - **Quota-aware dispatch — live validation env-bound.** Still open: live validation of the token-budget
   dispatch gate (per-`(pool,window-label)` learned tokens-per-percent slope, budget = MIN across a
@@ -234,56 +223,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   marginal — low value).
   Do NOT delete working proactive quota sources (`BaseHttpQuotaSource` + one-array register is already clean);
   `copilot` is correctly broker-only.
-
-- **Systemic reviewers must be pushed adversarially for improvement, not just correctness (owner,
-  2026-07-05).** Two audit tiers exist and both are wanted: unit auditors that structurally can't see the
-  whole corpus, and systemic auditors that review the entire corpus as one artifact. The gap is **not
-  scope** — the systemic auditors already have whole-corpus reach — it is that they **under-extract**: they
-  produce a competent first-pass answer and stop, yet cave immediately when a human pushes ("are you sure
-  there isn't a better way to do any of this?"), instantly surfacing numerous improvements they'd first
-  missed. The end-goal makes that pushing intrinsic to the review:
-  - **Improvement-seeking challenge loop.** After the first systemic pass, a second-order adversary
-    re-interrogates the output with human-grade pressure — what's redundant, serial-that-could-be-parallel,
-    duplicated, over-built; what assumption went unquestioned; is there a categorically better approach —
-    and folds newly-surfaced improvements back in. The review is done only when a challenge round yields
-    **nothing new (loop-until-dry)**, not when it first has an answer.
-  - **The mandate is optimization / better-way, not only defect-finding.** The systemic pass must actively
-    seek superior alternatives to things that currently *work* — the class no correctness lens flags because
-    nothing is broken. Motivating evidence: ~a dozen dogfooding runs never surfaced that the release suite
-    re-ran identical tests multiple times per release and ran serially what could have been parallelized;
-    the slow (~186s) suite was the *symptom*, the redundant/serial execution was the catchable finding.
-  - **Feed aggregate metrics into the systemic context** — complexity/duplication/churn rollups plus an
-    operational digest of suite/build/config shape — expressed as a **language-neutral** contract (abstract
-    counts/timeouts/fan-out, never ecosystem-specific like a vitest collect time). Necessary supporting
-    evidence, explicitly **not sufficient** on its own.
-  - **Conceptual/systemic findings carry their true lens**, not a hardcoded `architecture` tag — a
-    test-parallelization finding is `tests`/`performance`, an ops finding is `operability`.
-  Relates to the two design-review modes ([[contract-authoring-determinism-direction]]: contract vs
-  conceptual critique) and the self-detection theme in [[meta-audit-friction-must-be-tool-enforced]].
-  - **Design of record for the conceptual half:** [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)
-    — the operator (overlay-and-delta at structure + charter layers), node discovery (agreement=nodes /
-    disagreement=findings, multi-resolution stability for emergent depth), the four charters + delta routing
-    (Stated/Inferred/Revealed/True; True gated to human-only provocations), blast-radius ranking, and the
-    three-dial control surface (intensity=compute / ceiling=premise-height at `intent_checkpoint` /
-    attention=the VOI-ranked triangulation loop; attention 0 = the autonomous mode). The "improvement-seeking
-    challenge loop" above is the *intensity* dial + loop-until-dry in that doc's terms.
-  - **Implementation phasing (owner opted in 2026-07-05 — conceptual + systemic-adversarial = ONE build):**
-    - **Phases A–C — ✅ SHIPPED (v0.32.17–v0.32.19).** Data-model spine (four charters + goal DAG, `Ceiling`
-      consent dial, `CharterDelta`, `src/shared/validation/charterGate.ts` gates) → overlay-and-delta structure
-      operator (`src/shared/decompose/modularity.ts`/`consensus.ts`, `structure_decomposition.json`, obligation
-      `structure_decomposition_current`) → charter extraction (`src/shared/decompose/charterExtraction.ts`,
-      obligation `charter_extraction_current`, `charter_register.json`, ceiling-gated LLM prompt
-      `src/audit/cli/charterExtractionPrompt.ts`). Design of record
-      [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md). The extracted
-      charters are threaded into the `design_review_conceptual` prompt so the generative pass opines per-charter.
-    - **Phase D — ✅ SHIPPED.** Charter-delta → clarification/triangulation loop: audit-side `ClarificationRequest`
-      (charter-keyed, ported from remediate), VOI-ranked question queue, the three dials
-      (ceiling@intent_checkpoint defaulted, attention loop, intensity auto), attention-0 = autonomous,
-      blast-radius ranking + risk gate. Obligation `charter_clarification_current`.
-    - **Phase E — ✅ SHIPPED.** Systemic improvement-seeking challenge loop: second-order adversary (SEPARATE agent,
-      [[delegate-adversarial-phases-to-separate-agent]]) loop-until-dry; mandate = optimization/better-way; feeds
-      language-neutral aggregate metrics; findings carry their true lens (not a hardcoded `architecture` tag).
-      Obligation `systemic_challenge_current` (true-lens seam).
 
 - **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
   (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the
@@ -388,6 +327,11 @@ Standing gotchas worth keeping for any agent (strong or weak):
   audit-tools/main` + cherry-pick + reconcile. First action of every lap:
   `rtk git fetch audit-tools main && git log --oneline HEAD..audit-tools/main` — if that lists commits,
   rebase/reset onto main BEFORE writing code. (Strengthens [[audit-tools-worktree-traps]].)
+
+- **Codex CLI is a poor executor for large read-heavy audit packets under a wall-clock budget.** Observed
+  2026-07-04: 2 concurrent codex executors ran 5+ min with zero results and 8k+ lines of echoed reasoning.
+  Route only small / low-line packets to the codex pool, or drop it from the audit executor pool for
+  read-heavy work. (Durable routing lesson from the admission-control rework.)
 
 - **Remediate-code worktree branches strand commits off main.** Remediate runs on isolated git worktree branches; landed work accumulates on `remediation/<runId>` and the host is left checked out there. By DEFAULT those branches are never auto-merged — the base branch is left untouched for review. Any doc or code fix applied inside a remediate run never reaches main unless explicitly merged. Effect: the doc-review nightly routine (which reviews main) keeps re-surfacing the same findings indefinitely. **Opt-in fix (B5, shipped):** select the `merge-to-base` closing action at the confirm step — the tool then `--no-ff` merges `remediation/<runId>` into your launch branch at close (aborts safely on conflict). Otherwise, after a run that touches docs/code you want on main, merge `remediation/<runId>` manually before the next nightly run.
 
