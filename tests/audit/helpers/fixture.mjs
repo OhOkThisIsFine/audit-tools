@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const { advanceAudit } = await import("../../../src/audit/orchestrator/advance.ts");
+const { buildAdvancedBundle } = await import("./advancedBundle.mjs");
 
 /**
  * The canonical line-index for the shared fixture repository.
@@ -149,23 +150,15 @@ const FIXTURE_SKIP_ANALYZERS = {
  * a skip-all analyzer policy for hermeticity), mirroring the real CLI path.
  */
 export async function advanceFixtureToPlanning(root) {
-  const options = {
+  // Drive the deterministic pipeline up to (but not through) planning via the
+  // single target-keyed stage list in advancedBundle.mjs — adding a PRIORITY
+  // phase is a one-line stage insert there, never a re-edit of this sequence.
+  const preplanningBundle = await buildAdvancedBundle(root, "planning_artifacts");
+  const planning = await advanceAudit(preplanningBundle, {
     root,
     lineIndex: FIXTURE_LINE_INDEX,
     analyzers: FIXTURE_SKIP_ANALYZERS,
-  };
+  });
 
-  let result = await advanceAudit({}, options);
-  // Loop across host-delegation boundaries until the planning step has run. Each
-  // iteration crosses one host boundary and drains its trailing deterministic
-  // run; planning_executor is reached once the design-review passes complete.
-  // Bounded well above the real boundary count so a genuine stall still fails
-  // fast rather than hanging.
-  for (let i = 0; i < 32; i += 1) {
-    if (result.selected_executor === "planning_executor") break;
-    if (result.next_likely_step === null) break;
-    result = await advanceAudit(result.updated_bundle, options);
-  }
-
-  return { planning: result, lineIndex: FIXTURE_LINE_INDEX };
+  return { planning, lineIndex: FIXTURE_LINE_INDEX };
 }

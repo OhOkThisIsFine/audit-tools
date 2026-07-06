@@ -592,6 +592,25 @@ describe("runTriagePhase", () => {
   // node is reconciled to resolved_no_change instead of looping through retries
   // and human triage. `exit 0`/`exit 1` are shell builtins on both cmd.exe and
   // /bin/sh; root must exist for the spawn cwd, so use TEST_DIR.
+  // The reverify-before-retry path only trusts a green tree as "already
+  // satisfied" if an implement WORKER actually ran and left a result file (the
+  // no-worker guard — a `local-subprocess` no-op leaves none, and a generic
+  // `build && check` would then false-resolve an un-implemented node). Every
+  // reconcile test below models a node whose worker DID run (and failed), so it
+  // must seed the result file the merge would have written.
+  async function seedImplementResult(
+    blockId: string,
+    planId = "P1",
+  ): Promise<void> {
+    const dir = join(TEST_DIR, "runs", planId, "implement");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, `implement-${blockId}.result.json`),
+      JSON.stringify({ item_results: [] }),
+      "utf8",
+    );
+  }
+
   function planWithBlocks(
     blocks: {
       block_id: string;
@@ -633,6 +652,7 @@ describe("runTriagePhase", () => {
         },
       },
     }) as RemediationState;
+    await seedImplementResult("B1");
 
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("closing");
@@ -657,6 +677,7 @@ describe("runTriagePhase", () => {
         },
       },
     }) as RemediationState;
+    await seedImplementResult("B1");
 
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("implementing");
@@ -688,11 +709,60 @@ describe("runTriagePhase", () => {
         },
       },
     }) as RemediationState;
+    // Seed the worker result so the no-worker guard passes and the test actually
+    // exercises the deliverable-existence guard (the missing touched_file), not
+    // the missing result.
+    await seedImplementResult("B1");
 
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("implementing");
     expect(state.items!.F1.status).toBe("pending");
     expect(state.items!.F1.rework_count).toBe(1);
+  });
+
+  it("does NOT reconcile to resolved_no_change when NO worker result exists, even if a generic targeted_command passes (no-worker guard)", async () => {
+    // No-worker guard (2026-07-06): the 2026-07-06 max-sweep run had a
+    // `local-subprocess` provider produce no worker results; the nodes edited
+    // pre-existing files (backlog.md, dispatch.ts…) so the deliverable-existence
+    // guard couldn't catch them, and their generic `build && check` verify passed
+    // on the green tree → un-implemented nodes false-resolved to
+    // resolved_no_change. A blocked node with NO result file on disk must route to
+    // retry, never reconcile. Note: NO seedImplementResult call here — that is the
+    // whole point.
+    const state = makeBaseState({
+      status: "triage",
+      plan: planWithBlocks([
+        {
+          block_id: "B1",
+          items: ["F1"],
+          // Generic verify that passes on any green tree (the real-run culprit).
+          targeted_commands: ["exit 0"],
+          // Edit-node: touched path pre-exists, so the deliverable guard is inert.
+          touched_files: ["docs/backlog.md"],
+        },
+      ]),
+      items: {
+        F1: {
+          finding_id: "F1",
+          status: "blocked",
+          failure_reason:
+            "Implementation worker did not produce a result file: implement-B1.result.json",
+          block_id: "B1",
+          rework_count: 99,
+          infra_rework_count: 99,
+        },
+      },
+    }) as RemediationState;
+    // Make the touched path EXIST so the deliverable-existence guard passes —
+    // isolating the no-worker guard as the only thing that can catch this node.
+    await mkdir(join(TEST_DIR, "docs"), { recursive: true });
+    await writeFile(join(TEST_DIR, "docs", "backlog.md"), "x", "utf8");
+
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    // Budget exhausted + genuinely un-implemented → human triage, NOT closing.
+    expect(next.status).toBe("waiting_for_triage");
+    expect(state.items!.F1.status).toBe("blocked");
+    expect(state.items!.F1.status).not.toBe("resolved_no_change");
   });
 
   it("reconciles only the satisfied node and routes the rest to human triage (no whole-run abandonment)", async () => {
@@ -721,6 +791,10 @@ describe("runTriagePhase", () => {
         },
       },
     }) as RemediationState;
+    // B1's worker ran (and failed) → its result exists, so it can reconcile.
+    // B2 stays genuinely open (exit 1) and routes to triage.
+    await seedImplementResult("B1");
+    await seedImplementResult("B2");
 
     const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
     expect(next.status).toBe("waiting_for_triage");

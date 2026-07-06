@@ -13,8 +13,10 @@ and this document is never edited to record what has or hasn't shipped.
 provider_confirmation       [user gate]
   → intake
   → batch_deterministic     [auto_fix → syntax_resolved → external_analyzers
-                             → structure_artifacts → graph_enrichment → design_assessment]
+                             → structure_artifacts → graph_enrichment → design_assessment
+                             → structure_decomposition]
   → intent_checkpoint       [user gate]
+  → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling]
   → design_review × 2       [parallel host_delegation: contract + conceptual]
   → planning
   → rolling_dispatch        [quota + capability-routed, ingestion folded in]
@@ -56,8 +58,8 @@ broader coverage).
 
 ## Batch deterministic block
 
-Steps 2–7 (auto_fix → syntax_resolved → external_analyzers → structure_artifacts
-→ graph_enrichment → design_assessment) run in a single next-step call. The orchestrator advances
+Steps 2–8 (auto_fix → syntax_resolved → external_analyzers → structure_artifacts
+→ graph_enrichment → design_assessment → structure_decomposition) run in a single next-step call. The orchestrator advances
 through all pending deterministic obligations before returning. No separate
 roundtrip per step. Execution halts at the first host_delegation obligation or
 when all obligations are satisfied.

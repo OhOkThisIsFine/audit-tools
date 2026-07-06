@@ -186,8 +186,9 @@ agent-owns-ship-pipeline)*
 - **Keep the two orchestrators in parity** — a fix in one usually belongs in both; shared logic →
   `audit-tools/shared`.
 - **Prefer extraction over drift-tests** — single-source two copies instead of guarding them with a drift
-  test; make drift impossible. *(home: `CLAUDE.md` → Conventions/Preferences; memory:
-  knip-deadcode-gate-default-mode, prefer-extraction-over-drift-tests)*
+  test; make drift impossible. *(home: `CLAUDE.md` → Conventions/Preferences for the other B3 bullets;
+  memory: knip-deadcode-gate-default-mode, prefer-extraction-over-drift-tests — the latter not yet in
+  CLAUDE.md)*
 
 ## B4. End-of-sprint cleanup (standing, unprompted)
 

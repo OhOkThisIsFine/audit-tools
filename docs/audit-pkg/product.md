@@ -38,12 +38,15 @@ The intended workflow is:
 
 1. The user invokes `/audit-code`.
 2. The prompt runs `audit-code ensure --quiet`.
-3. Deterministic backend steps build or refresh artifacts.
-4. The active conversation dispatches bounded review packets when semantic
+3. The conversation confirms (or accepts by default) the discovered provider
+   pool and cost ordering (`provider_confirmation`) — the pipeline's first
+   gated step.
+4. Deterministic backend steps build or refresh artifacts.
+5. The active conversation dispatches bounded review packets when semantic
    judgment is required.
-5. Packet workers submit validated `AuditResult` objects through backend-owned
+6. Packet workers submit validated `AuditResult` objects through backend-owned
    commands.
-6. The backend ingests results, performs selective deepening and runtime
+7. The backend ingests results, performs selective deepening and runtime
    validation when needed, and writes the final `audit-report.md`.
 
 Semantic review belongs to the active host conversation by default. Backend

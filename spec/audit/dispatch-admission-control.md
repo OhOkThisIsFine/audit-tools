@@ -183,9 +183,11 @@ ordering matters).
   (`readQuotaState`/`recordWaveOutcome`), same `withFileLock`, keyed by
   `resourceKey`. The dispatch-quota schema already anticipates it
   (`in_flight_tokens`, `remaining_token_budget`).
-- **Audit reaches parity with remediate**: use `resolveHostProviderName` for the
-  driver identity (remediate already does at `src/remediate/steps/nextStep.ts`;
-  audit's `semanticReviewStep.ts` still uses raw `sessionConfig.provider`).
+- **Audit reaches parity with remediate.** Both resolve driver identity through
+  the shared `resolveHostProviderName`: remediate calls it directly
+  (`src/remediate/steps/nextStep.ts`); audit calls it via the thin
+  `resolveHostDispatchProviderName` wrapper (`src/audit/cli/rollingAuditDispatch.ts`),
+  which falls back to it once the in-process-dispatch case is ruled out.
 - **`max_concurrent_agents` becomes emergent** — the dispatch prompt drives the
   admission loop, not a precomputed cap.
 

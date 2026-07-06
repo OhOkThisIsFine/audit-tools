@@ -16,7 +16,7 @@ abstraction level as [orchestration-policy.md](orchestration-policy.md):
 
 1. repair invalid or contradictory state
 2. create missing upstream artifacts (intake, structure, design assessment,
-   the user gates, and design review)
+   structure decomposition, the user gates, charter extraction, and design review)
 3. generate missing planning artifacts
 4. ingest newly available evidence
 5. refresh coverage and requeue

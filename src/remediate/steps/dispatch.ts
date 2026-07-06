@@ -102,6 +102,7 @@ export {
 export type { TestFileEntry } from "./dispatch/implementPrompt.js";
 export {
   buildImplementModelHint,
+  implementResultPath,
   isInfraModifyingBlock,
   buildTestFileIndex,
   collectReferencingTests,

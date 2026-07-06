@@ -21,34 +21,6 @@
   structure layer; Phase A (v0.32.17) charter spine.
   Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and project memory
   [[live-status]]); this section is current-state + open-work roadmap only.
-- **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1, 2026-07-05).** The whole
-  rework shipped end-to-end. Founding capability-inheritance bug (commit 3): host-review pool keyed to the
-  driver via `resolveHostDispatchProviderName`; `HostDispatchDescriptor` rides every continue-command.
-  **Defect-1 (host + codex + NIM CONCURRENT fan-out)** now shipped too: an attended host
-  (`host_can_dispatch_subagents` default true) DEMOTES a configured in-process backend to a *source* pool so
-  host + backend + NIM fan out concurrently; the in-process whole-frontier driver fires only when headless.
-  Discriminator reuses the existing boolean (no new field). Both orchestrators gated in parity;
-  `buildConfirmedPools` decouples host-pool identity (claude-code when demoting) from the source provider.
-  Sub-2: `selectProvider` least-loaded tiebreak balances equal-rank pools. Sub-3: single-shot NIM
-  output-contract override + read-neutral file framing + operator-tunable inline caps.
-  [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]].
-- **models.dev resolver W2 (real price → `costRank`) — ✅ SHIPPED this lap.** `costRank` was `tierRank(rank)` (a tier
-  ordinal doubling as cost AND capability). Now a real, independent cost axis via the shared engine
-  (`src/shared/dispatch/costRank.ts`): three disjoint rungs — operator-confirmed position < real blended $/Mtok
-  (models.dev) < tier fallback — so a dollar value never sorts against a tier ordinal. Both build sites derive through
-  the one `deriveCostRank`; `capabilityRank` stays the tier ordinal (decoupled). **Rung 1 wired end-to-end:** Gate-0
-  provider confirmation annotates each entry with `model_id`/`blended_price`/`cost_order` (`annotateConfirmedPoolCost`),
-  and `readConfirmedCostPositions` threads that into both dispatch sites — a NET-NEW confirmation→dispatch link (the
-  confirmed pool was written but never influenced routing before). Design of record:
-  [`spec/cost-first-routing.md`](../spec/cost-first-routing.md). W1 (real context window) shipped the prior lap.
-- **Cost-first Gate-0 is now INTERACTIVE — ✅ SHIPPED this lap (follow-ups a/b/c).** `provider_confirmation` is an
-  interactive host-delegation step on the audit CLI path (parallel to `confirm_intent`): (a) the host sees the priced
-  pool (`renderProviderConfirmationPrompt`), (b) reorders/excludes via a `provider-confirmation.input.json` input the tool
-  promotes into both canonical artifacts (per-tool seam + shared confirmation), and (c) self-reports its model roster
-  (`host_models`) so host-native tiers are priced + confirmable at the outset and thread to dispatch by `model_id` via
-  `host_model_cost_order`. The gate fires on every interactive run (even one/zero detected providers — the operator may
-  want to add one discovery missed); headless (`advanceAudit`) still auto-completes with the tool's suggestion. Design of record
-  [`spec/cost-first-routing.md`](../spec/cost-first-routing.md); detail in `docs/backlog.md` → Forward tracks.
 - **Immediate next: conceptual design-review Phase D — charter-delta → clarification/triangulation loop.** Port an
   audit-side `ClarificationRequest` (from remediate, charter-keyed not finding-keyed); VOI-ranked question queue;
   the three dials (ceiling@intent_checkpoint defaulted, attention loop, intensity auto); attention-0 = autonomous;
@@ -68,6 +40,16 @@
   quota-aware dispatch, env-bound).
 - **⚠️ Stale-worktree trap:** ALWAYS `git fetch audit-tools main && git log HEAD..audit-tools/main` before
   starting a lap — this worktree branched behind main and had to fast-forward + re-read HANDOFF/backlog.
+- **⏸ Paused remediation run (2026-07-06) — false-close root cause now FIXED; tractable subset partially picked up.**
+  The `/remediate-code` max-sweep produced an operator-approved 10-node plan (gitignored in
+  `.audit-tools/remediation/intake/contract/`); its implement phase never ran (`local-subprocess` produced no worker
+  results) and triage FALSELY reconciled nodes to `resolved_no_change`. **This lap:** the triage false-close bug is
+  FIXED (a no-worker-result guard — see `docs/backlog.md` friction (a)), and **CP-NODE-4 (priority-chain fixture builder)
+  shipped**. The remaining tractable nodes (CP-NODE-1 commit-gate staged-tree, -2 CI dedup, -3 windowsHide sweep, -6
+  opencode union ceiling) are each deferred to their own laps with a backlog home; CP-NODE-7/8/9/10 are the dispatch-split
+  + Phase C/D/E roadmap tracks (drive deliberately). Resuming THIS run's leftover nodes still needs reopening the stale
+  `resolved_no_change` items in gitignored `state.json` — simpler to pick each up from its backlog home. Full detail +
+  the 6 dogfood frictions → `docs/backlog.md` → Open bugs.
 - **Open items** (all in `docs/backlog.md`): remediate-side `opencode.json` drift/`INV-RCI-16`
   reconciliation; env-bound live validations (quota pre-wall pacing, friction escalation,
   selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004.

@@ -1,14 +1,21 @@
 # External analyzer adapters
 
-This directory is for adapters that normalize outputs from external tools into the repository's stable artifact formats.
+Adapters normalize output from acquired external tools into the shared `ExternalAnalyzerResults` /
+`ExternalAnalyzerGraphEdge` contracts, through the common normalization seam in `normalizeExternal.ts`.
 
-Initial targets:
+Implemented:
 
-- semgrep-like SAST results
-- dependency vulnerability scanners
-- secret scanners
-- lint/typecheck diagnostics
-- test coverage summaries
+- `semgrep.ts` — SAST results (plus dataflow-trace graph edges)
+- `astGrep.ts` — ast-grep structural matches (graph edges)
+- `codeql.ts` — CodeQL SARIF dataflow queries (graph edges)
+- `eslint.ts` — JS/TS lint diagnostics
+- `clippy.ts` — Rust (`cargo clippy`) diagnostics
+- `rubocop.ts` — Ruby (rubocop) diagnostics
+- `npmAudit.ts` — npm dependency vulnerabilities
+- `coverageSummary.ts` — test coverage summaries
+
+Secret scanning is a deterministically-owned extractor, not an acquired-tool adapter (own-vs-acquire —
+see `docs/backlog-remediation-design.md` F5↔F6) — by design it has no file here.
 
 Adapter rule:
 

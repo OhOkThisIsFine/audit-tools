@@ -21,7 +21,7 @@ The grep that backs the guard recognises these family shapes:
 | `CE-` | `CE-<NNN>` | **Counterexample** — a judge-accepted adversarial case the contract pipeline must defend against; the paired invariant must make it impossible. **Not globally unique** — this guard only scans `src/**/*.ts`; `docs/backlog-remediation-design.md` runs its own independent `CE-*`/`FC-*` id family for a different design-history purpose, and a bare `CE-NNN` can also appear as an unrelated local counter in source comments (e.g. `stepBoundaryCapture.ts`, `scheduler.ts`, `clauseInterpreter.ts`). Always resolve a `CE-*` id from its own document/file, never assume cross-document uniqueness. |
 | `N-` | `N-<phase><NN>` | **Node id** in a remediation/redesign plan DAG (e.g. the redesign `N-R*`/`N-S*` nodes, the self-audit `N-X*`/`N-CE*` nodes). A node is a bounded unit of planned work. |
 | `SEAM-` | `SEAM-<NAME>` | **Multi-agent seam contract** — a hand-off boundary between independently-run agents (or between dispatch and merge) whose contract both sides must honour. |
-| `OBS-` / `ARC-` / `COR-` / `MNT-` / `TST-` / `REL-` / `CFG-` / `DAT-` | `<LENS>-<hash>` | **Auditor finding id** — a finding emitted by `audit-code`, keyed by lens prefix + a short content hash (see `findingIdentitySignature`). Stable across re-audits of the same defect. |
+| `OBS-` / `ARC-` / `COR-` / `MNT-` / `TST-` / `REL-` / `CFG-` / `DAT-` / `SEC-` / `PRF-` / `OPR-` | `<LENS>-<hash>` | **Auditor finding id** — a finding emitted by `audit-code`, keyed by lens prefix + a short content hash (see `findingIdentitySignature`). Stable across re-audits of the same defect. |
 | `FND-` | `FND-<LENS>-<hash>` | **Obligation-bound finding reference** — the same auditor finding id wrapped as a remediation obligation handle (`FND-OBS-99e3a861`); the `FND-` prefix marks it as the unit a remediation node satisfies. |
 
 ## INV-* areas (invariant namespaces)
@@ -44,7 +44,7 @@ The grep that backs the guard recognises these family shapes:
 | `INV-RS` | Remediation steps / state machine — ordered-obligation, one-bounded-step, fail-closed final gate. | `src/remediate/steps/nextStep.ts` |
 | `INV-RSD` | Rolling single-tree dispatch — the whole read-modify-write of `state.json` runs under one held lock. | `src/remediate/steps/dispatch.ts` |
 | `INV-PHASE` | Auto-phasing barrier (T3) — a block's foundations→consumers phase ordinal (derived at promotion from the persisted phase cut) is a hard scheduler barrier: a higher-phase block never enters a dispatch level until every lower-phase block is verified-complete. | `src/remediate/steps/nextStep.ts` |
-| `INV-SOO` | Scheduler ownership ordering — file-ownership-disjoint admission (one in-flight writer per canonical file) over declared∪claimed scope, enforced at admission and amendment-grant time, with deterministic tie-break, atomic triage-retry hand-off, and disposition-aware claim lifecycle. | `src/remediate/dispatch/ownershipScheduler.ts`, `src/remediate/dispatch/ownershipRegistry.ts` |
+| `INV-SOO` | Scheduler ownership ordering — file-ownership-disjoint admission (one in-flight writer per canonical file) over declared∪claimed scope, enforced at admission and amendment-grant time, with deterministic tie-break, atomic triage-retry hand-off, and disposition-aware claim lifecycle. | `src/shared/dispatch/ownershipScheduler.ts`, `src/remediate/dispatch/ownershipRegistry.ts` |
 
 ### Historical single-letter INV spelling (`INV-S05`, `INV-X06`)
 

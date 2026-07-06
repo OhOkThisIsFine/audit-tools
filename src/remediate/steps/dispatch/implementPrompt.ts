@@ -17,7 +17,7 @@ import {
 } from "../types.js";
 import { classifyFindingRisk } from "../stepUtils.js";
 import { isTerminalStatus } from "../../state/itemStatus.js";
-import { uniquePaths } from "./common.js";
+import { runDir, uniquePaths } from "./common.js";
 import { buildFreeVerifyCommands } from "./verifyCommands.js";
 import { nodeFieldsOf, reconciliationExpectationsOf } from "./dagNodeFields.js";
 
@@ -226,6 +226,21 @@ export function buildImplementDispatchItem(
       write_paths: [...writeFiles, resultPath],
     },
   };
+}
+
+/**
+ * Absolute path to a block's implement worker result file for a run. Single
+ * source (same convention as {@link buildImplementDispatchItem}'s `result_path`)
+ * shared with triage's already-satisfied reconciliation guard: a passing tree
+ * verify only proves a node's work was DONE if a worker actually ran and left a
+ * result — no result file ⇒ "no worker ran", not "verified satisfied".
+ */
+export function implementResultPath(
+  artifactsDir: string,
+  runId: string,
+  blockId: string,
+): string {
+  return join(runDir(artifactsDir, runId, "implement"), `implement-${blockId}.result.json`);
 }
 
 export function buildImplementModelHint(

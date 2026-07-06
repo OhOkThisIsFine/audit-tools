@@ -6,7 +6,7 @@ import { rename } from "node:fs/promises";
 import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry } from "audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
-import { verifyNodeInWorktree } from "../steps/dispatch.js";
+import { verifyNodeInWorktree, implementResultPath } from "../steps/dispatch.js";
 
 interface TriageResolution {
   items: {
@@ -120,6 +120,23 @@ function reverifyBlockedItemAgainstTree(
       ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
       : undefined) ??
     state.plan?.blocks.find((b) => b.items.includes(item.finding_id));
+  // No-worker guard (2026-07-06): a passing tree verify only proves this node's
+  // work was DONE if an implement worker actually RAN and left a result. When the
+  // provider produced nothing (e.g. `local-subprocess` no-op) the merge marks the
+  // node blocked with no result file; a GENERIC `build && check` targeted_command
+  // then passes on ANY green tree and would FALSE-resolve an un-implemented node.
+  // This is distinct from the deliverable-existence guard below — an edit-node's
+  // touched paths PRE-EXIST, so that guard can't catch a never-implemented edit;
+  // only the missing worker result can. No result on disk ⇒ "no worker ran" ⇒
+  // unsatisfied (route to retry / re-dispatch), never `resolved_no_change`.
+  const runId = state.plan?.plan_id;
+  if (
+    runId &&
+    block?.block_id &&
+    !existsSync(implementResultPath(options.artifactsDir, runId, block.block_id))
+  ) {
+    return "unsatisfied";
+  }
   // Deliverable-existence guard (2026-07-03): a node cannot be "already satisfied" if
   // its declared deliverables aren't in the tree. A passing `targeted_command` may be
   // satisfied by a SIBLING's work while THIS node's file was never created — proven

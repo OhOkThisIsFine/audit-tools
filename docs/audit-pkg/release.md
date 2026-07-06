@@ -42,11 +42,13 @@ Workflow:
 .github/workflows/publish-package.yml
 ```
 
-The workflow:
+The release gate is split into two parallel jobs — `gate` (`npm run verify:checks`) and `test` (the
+vitest suite, sharded 4 ways) — so publish latency is bounded by the slowest gate job rather than their
+sum. The `publish` job needs both, then:
 
 - requests `id-token: write` for npm OIDC exchange
 - pins the Node and npm versions declared in `.github/workflows/publish-package.yml`
-- runs `npm run verify:release`
+- rebuilds `dist/` for packing (the `gate`/`test` jobs already ran the full verify chain)
 - previews the packed tarball with `npm pack --dry-run`
 - publishes with public access and provenance
 - defaults semver prerelease versions to the `next` dist-tag unless overridden
