@@ -53,7 +53,7 @@ design spends that data: **cost becomes real dollars, decoupled from capability.
 
 Rungs never mix *within* a pass because a confirmed ordering covers the whole candidate set
 or none of it, and (rung 2 vs 3) an unknown-price pool is offset to sort **after** all
-priced pools (`PRICE_UNKNOWN_BASE + tierRank`), preserving tier order among the unknowns.
+priced pools (`UNKNOWN_PRICE_BAND_BASE + tierRank`), preserving tier order among the unknowns.
 So: all-known ⇒ ordered by real dollars; all-unknown ⇒ ordered by tier (today's behavior,
 no regression); mixed ⇒ priced pools first by dollars, unknown-price pools after by tier —
 a "route to provably-cheapest first, treat unknown-cost as overflow" policy. The confirmed
@@ -110,6 +110,8 @@ replacement for it.
   one rung of one field; capability routing and the capacity-fit gate are untouched.
 - **Parity.** Audit (`finalizeDispatchQuota`) and remediate (`admissionPoolsFromSchedule`)
   both derive `costRank` through the one shared `deriveCostRank` — they cannot drift.
-- **Collision resolution prefers the cheapest/native price** when models.dev lists a model id
-  under multiple providers (W1 carried this caveat forward: context windows agreed across
-  providers, but price must prefer the native/cheapest to avoid a reseller markup winning).
+- **Collision resolution is first-sorted-provider-wins, not price-preferred.**
+  `scripts/shared/update-models.mjs`'s `flatten()` visits providers alphabetically and keeps
+  the first hit for a model id served by multiple providers; prices largely agree across
+  providers so this is an accepted approximation, not a bug. Preferring the native/cheapest
+  price on collision is an open item — see `docs/backlog.md` (cost-first-routing (d)).
