@@ -6,67 +6,130 @@ the process this implements.
 
 <!-- DOC-REVIEW-OPEN:START -->
 ### Proposed instruction-file edits (approve to apply)
-- [I-3] CLAUDE.md — intro says "Single npm package" then two sentences later claims "Each published independently to npm" (monorepo-era leftover; the Layout section correctly states the single-package/two-bins fact). — proposed: delete the sentence "Each published independently to npm."
-- [I-4] CLAUDE.md — "Release & publish" says "Triggered by plain `vX.Y.Z` tags" but `.github/workflows/publish-package.yml`'s only triggers are `workflow_dispatch` and `release: types: [published]` — there is no tag-push trigger. — proposed: "Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or manual `workflow_dispatch`."
-- [I-5] CLAUDE.md — "CI: `npm ci` → `verify:release` gate → publish" no longer matches the workflow, which runs a parallel `gate` job (`verify:checks`) and a `test` job (4-way sharded `vitest run --shard=N/4`), with `publish: needs: [gate, test]`. — proposed: "CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded `vitest run`) jobs → `publish` (needs both)."
-- [I-6] CLAUDE.md — "`KNOWN_MODEL_LIMITS` is legacy to retire" — the symbol has zero hits under `src/`; it's already fully removed and now exists only inside guard-test regexes that assert it must never reappear. — proposed: delete the clause "`KNOWN_MODEL_LIMITS` is legacy to retire."
-- [I-7] CLAUDE.md — "Release & publish" opens with "Per-package via `.github/workflows/publish-package.yml`" — leftover multi-package framing; there is one package.json/one package name, and the workflow's own comment says "Single package `audit-tools`: release tags are plain `vX.Y.Z`". — proposed: "Via `.github/workflows/publish-package.yml`."
+None this run — `CLAUDE.md`/`AGENTS.md` checked out clean against every named file, symbol,
+command, path, and count (verified by both reviewer and adversary independently).
 
 ### Design decisions for you
-- [D-30] CLAUDE.md — the repeated "policy statement + (YYYY-MM-DD[, code])" dated pattern across "Preferences & standing decisions" (e.g. "Hook-enforced since 2026-06-11...", "(2026-06-17, A5)", "(2026-06-27)") is factually accurate but is exactly the pinned-date status-noise `documentation-philosophy.md` forbids in a durable-concept doc. Intentional decision-log genre (acceptable given this doc's own purpose), or should dates be dropped/moved elsewhere? (carried from last run, still open)
-- [D-31] CLAUDE.md — "durable design/decisions/status → project memory + `MEMORY.md` index" — no `MEMORY.md` file exists anywhere on disk (checked the whole filesystem, not just the repo). Missing repo file, or an external/untracked host-memory store this routine can't see? (carried from last run, still open)
-- [D-32] CLAUDE.md — two spots use exactly the changelog-creep phrasing `documentation-philosophy.md` itself quotes verbatim as forbidden examples: "(A12 collapsed the former 3-package monorepo)" and "now in `src/remediate/steps/dispatch.ts` (former `src/phases/document.ts` inlined into the dispatch step)" / similar for `waveScheduler.ts`. Reword to timeless architecture statements, or is this provenance narration an accepted local convention for CLAUDE.md specifically?
-- [D-33] Code bug found incidentally, not a doc issue (flagging so it lands somewhere): `remediate-code.mjs`'s CLI entrypoint intercepts the `install`/`ensure`/`verify-install`/`install-host` verbs and always routes to `wrapper/remediate-code-wrapper-install-hosts.mjs`, so `src/remediate/index.ts`'s own `.command("install")` (itself labeled "Deprecated compatibility alias") is unreachable dead code through the real CLI. Worth a `docs/backlog.md` entry independent of this doc-review pass.
-- [D-34] docs/project-philosophy.md — A10's first bullet ("Own-vs-acquire; agnostic engine over a fixed bundle... curated default set... NOT a maintained allowlist") cites home `CLAUDE.md → Preferences`, but this wording doesn't appear anywhere in CLAUDE.md. The actual current home is `docs/backlog.md` (an **open** item) and `docs/backlog-remediation-design.md` (F5 row) — i.e. the policy isn't yet durable/shipped into CLAUDE.md. Correct the map's citation (to backlog.md + memory), or promote the policy into CLAUDE.md now?
-- [D-35] docs/project-philosophy.md — A7's three bullets ("Split design assessment into two named modes", "Delegate adversarial phases to a separate agent", "Dispatch = enforcement ⟂ driving ⟂ judgment") cite home `spec/contract-authoring-determinism-design.md`, but none of this wording exists in that file (grepped in full — zero hits). "Split design assessment" is actually verbatim in `CLAUDE.md` → Preferences instead; the other two bullets have no verifiable home in any repo file (may be memory-only). Correct the citations, or enrich the spec file so they're true?
-- [D-36] docs/project-philosophy.md — B1's three sub-bullets ("Ask on ambiguity, don't defer silently", "Proportionality-defer needs a user signal", "Deliverables always land in a file") cite home `CLAUDE.md → Preferences`, but none of that wording exists in this repo's `CLAUDE.md`. B1 also names an alternate home, global `~/.claude/CLAUDE.md`, which this routine cannot read from its sandbox to confirm. Please confirm these three sub-bullets actually live in the global CLAUDE.md (or memory) as claimed.
-- [D-37] docs/backlog-remediation-design.md — none of its O1–O3/F1/F3–F6/D7/D8 module ids appear anywhere in `docs/backlog.md` or `docs/HANDOFF.md`, even though this doc's own header says "Live shipped-vs-open status lives in backlog.md and HANDOFF.md; this doc is the architecture those track against." All cited source files for the shipped modules exist and are live-wired (independently verified). Has this doc fully lapsed into pure historical/architecture record with D7/D8 as the only open remainder — and if so, should the "Still-gated" section move directly into backlog.md, retiring the rest?
-- [D-38] spec/audit/state-machine.md (now an 8-item abstract obligation list) vs spec/audit/orchestration-policy.md (still a 9-item list, splitting "create missing upstream artifacts" and "refresh stale upstream artifacts" into two separate priority steps) — the actual code (`src/audit/orchestrator/state.ts`'s `staleOrSatisfied()` + `findFirstActionableObligation`) treats missing-or-stale as one combined check per obligation, with no separate priority slot for "create" vs "refresh." state-machine.md's 8-item collapse is closer to code behavior. Should orchestration-policy.md's list collapse to match (and match code), or is the missing/stale split intentional conceptual scaffolding state-machine.md should instead adopt?
-- [D-39] spec/audit/dispatch-admission-control.md — the admission pseudocode ("find a live pool p with headroom(p) >= cost(t)... admit t to p") never documents the cost-first-capable, capability-tiebreak pool-selection policy that actually shipped (`src/shared/dispatch/admissionLoop.ts` sorts candidates by `costRank` then `capabilityRank`, called out in the shipping commit as "multi-provider cost routing is native, not a bolt-on"). Add a paragraph naming this policy under "The model" or the "Resolved decisions" list?
-- [D-40] spec/self-scaling-pipeline-design.md — now that all 4 "Implementation slices" are shipped, the doc reads as a shipped-status log ("Per-slice status reflects what is wired in code today" + four "✅ SHIPPED" tags) — the changelog/progress-creep smell `documentation-philosophy.md` forbids. Collapse to a timeless statement of the shipped architecture (drop the "Implementation slices"-as-plan framing), or keep as-is?
-- [D-41] spec/dispatch-token-budget-gate.md vs spec/audit/dispatch-admission-control.md — the former's "## The gate" ("max concurrent slots K = the largest K such that...") and "## Surface to the orchestrating agent" (`{remaining_pct, reset_at, in_flight_tokens, remaining_token_budget}`) describe the pre-admission-control model that shipped commits (`5e0a447`/`361f8f7`/`3662338`/`5f7ef04`, now further built on by the just-landed C1–C4 driver-unification) explicitly replaced with a reservation-ledger/admission-grant model. The surviving token/window-slope-learning substrate (`## Deriving the per-pool remaining token budget`, `## Learning wiring`) is still current and is reused by `dispatch-admission-control.md`'s `resolvePoolBudget`. This is a doc-set condensation call, not a narrow fact-swap: retire the two superseded sections and fold the surviving substrate into `dispatch-admission-control.md` as one doc, or keep both with an explicit "superseded by" pointer at the top of `dispatch-token-budget-gate.md`? (see also C-4 below)
-- [D-42] spec/contract-authoring-determinism-design.md — the whole doc now leans changelog: a dated "(2026-07-02, re-grounded)" header plus "✅ SHIPPED"/"⚠️ SUPERSEDED/DROPPED"/"❌ STILL OPEN" tags across S1–S8, with 7 of 8 strategies done. Condense to "the architecture + the one open item (S8)" and drop the shipped-narrative scaffolding, or is the S1–S8 history deliberately retained as durable design-rationale (it does carry real "why we didn't do S2" reasoning)?
-- [D-43] spec/host-validation.md covers only `/audit-code`'s 3 GUI hosts; `/remediate-code` has an automated no-drift gate (`scripts/remediate/verify-hosts.mjs`, wired as `verify:remediate-hosts`) but no manual live-dispatch GUI checklist, which `CLAUDE.md`'s "keep orchestrators in parity" convention would suggest it should have. Add a sibling checklist table for `/remediate-code`, or is there a reason it doesn't need one (e.g. always paired with an audit run that already exercises the host)?
-- [D-44] spec/remediate/remediation-goals.md (self-described as "the normative product definition... other specs and docs should defer to it") never mentions the contract-pipeline architecture (`goal_spec`/`context_bundle`/`module_decomposition`/`obligation_ledger`/`implementation_dag`) that `spec/remediation-workflow-design.md`, `spec/contract-authoring-determinism-design.md`, and the code (`src/remediate/contractPipeline/`) treat as central. Its own described Finding/Item/Block mechanism (`src/remediate/phases/plan.ts`'s Test-Graph/Git-Co-commit/File-Overlap derivation) is still real, live code — so this looks like two coexisting planning mechanisms under one `plan.source` value, not a factual error. Is the split intentional (goals.md = stable output contract regardless of which mechanism produced it; workflow-design.md = the internal planning mechanism, contract-pipeline is an implementation detail), and if so should goals.md gain an explicit cross-pointer? Or does goals.md need a real update pass to name contract-pipeline as a (or the) planning mechanism?
-- [D-45] 17 tracked `*.md` files aren't covered by any row in doc-review-guidelines.md's manifest table, and `scripts/check-doc-manifest.mjs` only gates `docs/**/*.md`, so it structurally can't catch drift in them: `.agent/skills/audit-code/SKILL.md`, `.agent/skills/remediate-code/SKILL.md`, `.claude/skills/disambiguate-backlog/SKILL.md`, `.claude/skills/ship/SKILL.md`, `.github/agents/auditor.agent.md`, `.github/agents/remediator.agent.md`, `.github/copilot-instructions.md`, `.github/prompts/audit-code.prompt.md`, `.github/prompts/remediate-code.prompt.md`, `examples/README.md`, `skills/audit-code/SKILL.md`, `skills/audit-code/audit-code.prompt.md`, `skills/remediate-code/SKILL.md`, `skills/remediate-code/remediate-code.prompt.md`, `src/audit/README.md`, `src/audit/adapters/README.md`, `tests/audit/fixtures/simple-app/README.md`. Most are `CLAUDE.md` B5 "one canonical body rendered per-IDE" generated assets governed by drift tests (`tests/audit/host-asset-renderer-drift.test.mjs`, `tests/remediate/host-bootstrap-descriptors-remediate.test.ts`, `tests/remediate/install-repo-assets.test.ts`) — but a real, currently-live gap was found: audit-code's `.agent/skills/audit-code/SKILL.md` and `.github/prompts/audit-code.prompt.md` have **no** drift-test guard (remediate-code's equivalents do), and `.github/prompts/audit-code.prompt.md`'s frontmatter (`name`/`description`/`agent` vs. canonical's `description`/`argument-hint`/`allowed-tools`) plus a stray leading blank line **currently differ** from their canonical source undetected. Separately, `.claude/skills/disambiguate-backlog/SKILL.md` and `.claude/skills/ship/SKILL.md` are standalone dev-workflow docs with no generated-asset relationship at all, and `tests/audit/fixtures/simple-app/README.md` is test-fixture content, arguably a different category entirely (own content, not a project doc). Please decide: (a) should doc-review-guidelines.md's scope/manifest explicitly cover these (as generated-asset / meta-tooling / test-fixture categories) or formally exclude them; (b) separately, should a backlog item be opened for adding an audit-code-side drift test mirroring remediate-code's, and fixing the currently-drifted `.github/prompts/audit-code.prompt.md`?
-- [D-46] `examples/README.md`'s provider list ("claude-code, opencode, local-subprocess, subprocess-template, vscode-task, plus auto and per-model variants") omits 3 of `CLAUDE.md`'s 8 documented providers (`codex`, `openai-compatible`, `antigravity`), and `examples/session-config/` has no example config file for any of the 3 missing providers either — a factual gap beyond the prose. This is a clean stale-factual-fix once the file is routed into the manifest (see D-45); flagging here rather than auto-applying since the file's scope/auto-apply eligibility is itself unresolved.
+- [D-47] CLAUDE.md — Preferences, the "Two-tier dependency policy" bullet is tagged
+  `(2026-06-17, A5)` — a leftover internal slice-id from the commit that introduced it. Since then
+  `docs/project-philosophy.md` created its own public `A5`/`A10`/etc. section numbering and assigns
+  *this exact policy* to **A10**, while its own **A5** is an unrelated conviction ("Conversation-first").
+  Not a code-contradicted fact, just a naming collision that could mislead a reader cross-referencing
+  the two docs. Drop the stray `A5` tag (keep just the date), or leave it as a historical slice-id with
+  no claimed relationship to `project-philosophy.md`'s lettering?
+- [D-48] `.claude/skills/start-lap/SKILL.md` — new this window, not registered in
+  `doc-review-guidelines.md`'s manifest table (the "meta-tooling / dev-workflow" row lists only
+  `disambiguate-backlog` and `ship`). Content/commands verified factually accurate — this is purely an
+  existence-review gap (`scripts/check-doc-manifest.mjs` doesn't gate `.claude/skills/**` at all, so
+  nothing mechanical would ever catch it). Register it in that row alongside its two siblings (same
+  shape: standalone hand-written dev-workflow how-to), or is a different routing intended?
+- [D-49] `docs/audit-pkg/operator-guide.md` — entirely silent on the new Gate-0 provider-confirmation
+  subsystem (`src/shared/providers/providerConfirmation.ts` — an interactive host-delegation step that
+  now fires on every run before anything else). Unlike the enumerated-list fixes already auto-applied
+  elsewhere, this doc has no exhaustive workflow list to patch narrowly — the gap is a whole new
+  host-visible interactive behavior with no home yet. Should it gain a section (under "Session config"
+  or "Backend fallback") describing the confirmation prompt, how to respond, and how
+  `confirmed_provider_pool` persists?
+- [D-50] `README.md` (root) — the audit-code "step by step" walkthrough (step 4, "Review the design")
+  doesn't mention the structural-decomposition/charter-extraction phase now sitting between design
+  assessment and the two design-review passes — a real, user-visible capability (detects non-co-located
+  modules, extracts/confirms a charter register) with no mention in the top-level product narrative.
+  Expand step 4, or is this deliberately left implicit (staying only in `CLAUDE.md`'s priority chain)?
+- [D-51] `spec/audit-workflow-design.md` — now that the pipeline diagram/prose names
+  `structure_decomposition` and `charter_extraction` (fixed this run), the doc still has no descriptive
+  `##` section for either phase (every other pipeline stage gets one, e.g. "Design review (two parallel
+  passes)"). The rationale exists only as code comments in `dependencyMap.ts`. Should full descriptive
+  sections be authored here, transcribing that rationale into the doc?
+- [D-52] `spec/remediation-workflow-design.md` — the "Risk classification & implementation preview"
+  section (and the `risk_preview` pipeline-diagram step) describes a mechanism that no longer exists:
+  `impl_preview_acknowledged.json` and the `safe`/`substantive`/`context_dependent` classification have
+  zero hits anywhere in `src/` — it was replaced (commit `46179f29`) by the review-approval gate
+  (`src/remediate/review/reviewGate.ts`/`reviewNecessity.ts`), which tiers findings
+  `strategic`/`concrete`/`mechanical`, persists `review_request.json`/`review_resolution.json`/
+  `review_decision.json`, fires **before** the contract pipeline (not after), and currently only on Path
+  A. This is a full mechanism replacement plus a reordering, not a narrow rename — should this section
+  and the pipeline diagram be rewritten to describe the current gate (tiers, artifact names, its
+  pre-pipeline/Path-A-only firing point)?
+- [D-53] `spec/host-validation.md` / `docs/backlog.md` — still open (carried forward, no new evidence
+  changes it): `/audit-code` has a manual GUI-host live-dispatch checklist; `/remediate-code` has the
+  automated no-drift gate (`verify:remediate-hosts`) but no manual GUI-host checklist sibling, which the
+  "keep orchestrators in parity" convention suggests it should have. Add one, or is there a reason
+  `/remediate-code` doesn't need it (e.g. always paired with an audit run that already exercises the
+  host)?
+- [D-54] `docs/backlog.md` — the "Backlog mechanism sub-items can drift from code reality" entry (Open
+  bugs / frictions section) is mis-homed: it's a closed lesson with no further code action (verify a
+  named mechanism against source before building it), which reads like a "Durable trap," not an open
+  bug. Move it to the Durable-traps section, or is it deliberately staged as a recent-lap friction note
+  that ages out on its own?
+- [D-55] `docs/HANDOFF.md` — T5-3 (dispatch-admission-control) still carries a denser
+  commit-level "what shipped" recap than sibling T5 entries (e.g. T5-1/T5-2 are pointer + one-line
+  verdict). Should T5 entries be uniformly terser, with commit-level detail left to `git log` only? Or
+  is the denser style an intentional exception for tracks with multiple sub-parts?
+- [D-56] Code bug found incidentally while verifying `spec/audit-workflow-design.md`'s pipeline claims,
+  not a doc issue — flagging so it lands somewhere: `buildAuditObligations()` in
+  `src/audit/cli/nextStepHelpers.ts` (the CLI conversation-first `next-step` fold) has an obligation-def
+  entry for every `PRIORITY` id **except** `structure_decomposition_current` — it's present in
+  `PRIORITY`, `EXECUTOR_REGISTRY`, and `deriveAuditState`, but missing from this function's returned
+  array (lines ~959–1075). Since `findNextObligation`/`advance()` only scans obligations present in that
+  array, the CLI's `next-step` loop may skip straight past `structure_decomposition_current` to
+  `intent_checkpoint_current` regardless of whether structure-decomposition has actually run. No test
+  currently exercises this CLI fold path for this obligation. Worth a `docs/backlog.md` entry /
+  investigation independent of this doc-review pass.
 
 ### Doc-set condensation
-- [C-4] spec/dispatch-token-budget-gate.md × spec/audit/dispatch-admission-control.md — both now claim to govern "how dispatch concurrency is gated"; the latter explicitly states it supersedes the scalar "token-budget cap of N" model the former still partly describes (see D-41 for the specific stale sections). Per the condensation bias: fold the superseded sections into `dispatch-admission-control.md` (keeping only the still-current token/window-slope-learning substrate in `dispatch-token-budget-gate.md`), or keep both as separate docs with an explicit "superseded by" pointer?
+- [C-5] `spec/audit/dispatch-admission-control.md` ("Pool selection — cost-first, capability-tiebreak")
+  vs `spec/cost-first-routing.md` — the admission-control doc's section restates cost-first-routing's
+  core mechanism (cheapest-capable-first, `costRank`/`capabilityRank`) but carries no cross-reference to
+  `spec/cost-first-routing.md`, even though cost-first-routing.md says it "pairs with" the admission-
+  control doc — the pointer is one-directional. Add a pointer from that section to
+  `spec/cost-first-routing.md` (which should stay the sole owner of the mechanism), or trim the section
+  to a one-line summary + link?
+- [C-6] (minor) `.claude/skills/ship/SKILL.md` and `.claude/skills/start-lap/SKILL.md` both independently
+  state "Remote `audit-tools`, branch `main` (not origin, not master)." Likely necessary
+  self-containment (each skill must stand alone when invoked) rather than harmful duplication — flagging
+  per the one-home-per-concept pass in case a single shared source is preferred.
 <!-- DOC-REVIEW-OPEN:END -->
 
 ## FYI — auto-applied this run (informational, not open items)
 
-Second run of this routine. Reviewed every in-scope doc against the full codebase via 7 parallel
-reviewer agents + 7 independent parallel adversary agents (three-agent gate: every item independently
-re-verified; zero disposition-level contests across all seven groups, so no judge tie-break was
-needed this run). Also re-verified every open item from the first run's findings file — most were
-already resolved by commits landed since (`f719549`, `68b2d97`, and others); the few still open are
-carried forward above with fresh evidence.
+Third run of this routine. All 17 D-30..D-46/I-3..I-7/C-4 items escalated by the second run were
+resolved by the owner in commits `dc5c1718` and `0e6e43b3` before this run started (verified, not just
+trusted — re-checked each against current code). `spec/dispatch-token-budget-gate.md` was retired per
+C-4/D-41 (folded into `dispatch-admission-control.md`); its 17 stale ledger entries were dropped rather
+than carried forward.
 
-8 discrete stale-factual-fix commits landed on `main` (green gate: build + check + full vitest suite,
-432 files / 5660 tests passed — run twice, once before and once after rebasing onto upstream work
-that landed mid-review):
+Reviewed every in-scope doc (33 files, ~743 ledger items + 3 new files) via 9 parallel reviewer agents
+(one per manifest cluster) + 9 independent parallel adversary agents re-checking every file from
+scratch. The adversary pass caught real staleness the reviewer missed in two clusters (the README
+cluster's `src/audit/adapters/README.md` and `examples/README.md`, and `docs/audit-pkg/release.md`'s
+publish-workflow description) — verified directly against source/CI config before accepting the
+adversary's findings over the reviewer's "clean" verdict. No judge tie-break was otherwise needed;
+every other cluster's reviewer and adversary passes converged independently.
 
-- `README.md` — fixed an Install-section overclaim (VS Code assets are deployed by the per-repo
-  `/audit-code` bootstrap, not the global npm postinstall).
-- `docs/audit-pkg/operator-guide.md` — fixed the "Generated files" section (removed MCP-surface/old
-  Claude Desktop bundle claims; VS Code no longer writes `.vscode/mcp.json`) and the Antigravity host
-  guidance (it now has a stable project-local surface, not "until it has one").
-- `docs/audit-pkg/contracts.md` — added the missing `python-test-util-suite-link` graph-edge kind.
-- `spec/audit/dispatch-admission-control.md` — fixed the admission-explain-record field shape (two
-  occurrences) to match the shipped `AdmissionExplainSchema`.
-- `spec/audit/executor-catalog.md` — fixed the `friction_capture_executor` unreachability explanation.
-- `spec/audit-workflow-design.md` — added the missing `external_analyzers_current` step to the pipeline
-  diagram and batch-deterministic-block prose (was undercounting 5 steps instead of 6).
+8 discrete stale-factual-fix commits landed on `main` (green gate: build + check + doc-manifest +
+full vitest suite, 442 files / 5788 tests, run once after all edits, before the first push):
 
-**Mid-review race note:** partway through this run, a separate lap landed 8 commits on `main`
-(admission-control 2b-remediate + driver-unification C1–C4, a v0.32.9 release, and a docs commit that
-independently collapsed the exact same `docs/backlog.md`/`docs/HANDOFF.md` admission-control
-staleness this run had also fixed — in a more complete way, since 2b-remediate had shipped by then).
-This run's `backlog.md`/`HANDOFF.md` fix commits were dropped before push (superseded, not
-re-applied) rather than re-fighting already-resolved staleness; the other 6 file fixes had no overlap
-with the upstream work and were rebased cleanly onto the new `main` before the final green-gated push.
+- `docs/audit-pkg/product.md`, `development.md`, `contracts.md`; `spec/audit-workflow-design.md`;
+  `spec/audit/dependency-map.md`, `artifact-contract.md`, `executor-catalog.md`, `state-machine.md` —
+  reflected the two new pipeline steps (`structure_decomposition_current`, `charter_extraction_current`)
+  and their artifacts across the audit spec/package docs (34 artifacts not 32; 23 executors not 21).
+- `spec/cost-first-routing.md`, `spec/audit/dispatch-admission-control.md` — fixed a stale
+  collision-resolution claim (code is first-sorted-provider-wins, not price-preferred), a stale symbol
+  name, and a parity claim that was actually already resolved.
+- `spec/remediate/remediation-goals.md`, `spec/contract-authoring-determinism-design.md` — fixed a
+  `plan.source` overclaim, a renamed review-completion field (`reviewed` → split
+  `contract_reviewed`/`conceptual_reviewed`), and `idRegistry.ts`'s overstated scope.
+- `src/audit/README.md`, `src/audit/adapters/README.md`, `examples/README.md` — module/adapter/example
+  index gaps (missing `decompose/`, `clippy`/`rubocop`, several example files never listed).
+- `docs/audit-pkg/release.md` — the publish job doesn't run `verify:release` (split into parallel
+  gate/test jobs; publish only rebuilds `dist/`).
+- `docs/glossary-ids.md` — a moved file path (`INV-SOO`) and 3 missing lens prefixes (`SEC-`/`PRF-`/`OPR-`).
+- `.claude/skills/disambiguate-backlog/SKILL.md`, `docs/project-philosophy.md` — two mis-citations
+  pointing at `CLAUDE.md` for wording that doesn't live there.
+- `docs/backlog.md`, `docs/HANDOFF.md` — trimmed three fully/partially-shipped backlog entries
+  (dispatch-admission-control, cost-first-routing, charter-extraction phases A–C) to their open
+  remainders, and removed three HANDOFF "Live state" bullets that duplicated the same shipped detail
+  HANDOFF's own header says it shouldn't narrate.
 
-Full diffs are on `main` (commits `66ab550`..`96c7089`); this section is FYI only, not something to
+Full diffs are on `main` (commits `3e4f9b9d`..`1a5bbe4d`); this section is FYI only, not something to
 act on.
