@@ -1,5 +1,7 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
+import type { CharterRegister } from "../types/charterRegister.js";
+import { charterReviewDisposition } from "audit-tools/shared";
 import {
   deriveUnitScopeDisposition,
   type UnitScopeDisposition,
@@ -357,6 +359,56 @@ function conceptualOutputFormat(resultsPathNote: string): string[] {
 }
 
 /**
+ * Render the charter-layer context block (Phase C) for the conceptual passes:
+ * the per-subsystem charters the deterministic charter-extraction produced, so
+ * the generative reviewer OPINES per-charter — judging the design against the
+ * purpose each subsystem is *for*, not just its structure. Each charter carries
+ * its disposition: a confident charter is opinable; a low-confidence one must be
+ * FLAGGED for human intent input, never opined on (`charterReviewDisposition` —
+ * the tool-enforced guard against confident-but-wrong-charter findings).
+ *
+ * Byte-identical charter-unaware fallback: returns `""` when the register is
+ * absent (old bundle), `status:"omitted"` (shallow ceiling — no charter layer),
+ * or carries no surviving charters. The conceptual renderers append this block
+ * only when it is non-empty, so a charter-free run renders exactly the prompt it
+ * rendered before Phase C threaded the register in. Consumes the register
+ * read-only — no Phase-D (clarification) dependency.
+ */
+export function renderCharterContext(bundle: ArtifactBundle): string {
+  const register: CharterRegister | undefined = bundle.charter_register;
+  if (!register || register.status === "omitted") return "";
+  const subsystems = (register.subsystems ?? []).filter(
+    (s) => (s.charters ?? []).length > 0,
+  );
+  if (subsystems.length === 0) return "";
+
+  const subsystemBlocks = subsystems.map((subsystem) => {
+    const memberList =
+      subsystem.members.length > 0 ? subsystem.members.join(", ") : "(no members recorded)";
+    const charterLines = subsystem.charters.map((charter) => {
+      const disposition =
+        charterReviewDisposition(charter) === "flag_for_human"
+          ? " — LOW-CONFIDENCE charter: FLAG for human intent input, do NOT opine on it"
+          : "";
+      return `  - [${charter.kind}] ${charter.purpose}${disposition}`;
+    });
+    return [
+      `- **${subsystem.node_id}** (members: ${memberList})`,
+      ...charterLines,
+    ].join("\n");
+  });
+
+  return [
+    "### Subsystem charters (what each part is FOR)",
+    "",
+    "The deterministic charter layer recorded each confident subsystem's purpose in *telos* terms (what it exists to achieve), across the four charter families — `stated` (user-expressed), `inferred` (the model's read of that intent), `revealed` (what the code actually optimizes for), `true` (the ideal it should serve). Opine PER CHARTER: judge whether the design actually delivers the purpose each subsystem claims, and surface where a subsystem's structure works against its own charter. Where a charter is marked LOW-CONFIDENCE, flag the gap for human intent confirmation instead of opining.",
+    "",
+    ...subsystemBlocks,
+    "",
+  ].join("\n");
+}
+
+/**
  * Render the shared structural context block that is identical for both the
  * contract-review and conceptual-review passes. Placing it first in both
  * prompts makes it cache-eligible when the same bundle is used for both agents.
@@ -479,6 +531,7 @@ export function renderConceptualReviewPrompt(
   const unitCount = bundle.unit_manifest?.units.length ?? 0;
   const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
   const maxUnits = options.max_units ?? defaultMaxUnits;
+  const charterContext = renderCharterContext(bundle);
 
   return [
     "# Project conceptual design review (generative pass)",
@@ -486,6 +539,7 @@ export function renderConceptualReviewPrompt(
     "You are performing the **conceptual-design-critique** pass on this project. The deterministic audit pipeline has already analyzed the codebase structure. Your job is to provide generative observations about broader architecture ideas that static analysis cannot produce.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
+    ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Write the JSON array to the conceptual review results path provided below. Use finding IDs starting with DR-001.",
@@ -510,6 +564,7 @@ export function renderConceptualPerspectivePrompt(
   const unitCount = bundle.unit_manifest?.units.length ?? 0;
   const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
   const maxUnits = options.max_units ?? defaultMaxUnits;
+  const charterContext = renderCharterContext(bundle);
 
   return [
     `# Conceptual design review — perspective ${index + 1} of ${total}: ${perspective.name}`,
@@ -523,6 +578,7 @@ export function renderConceptualPerspectivePrompt(
     "You may sharpen or extend this lens to fit this codebase's character and domain, but stay in character.",
     "",
     renderSharedStructuralContext(bundle, maxUnits),
+    ...(charterContext ? [charterContext] : []),
     ...conceptualCritiqueInstructions(),
     ...conceptualOutputFormat(
       "Write the JSON array of findings *from your perspective only* to the results path provided below. Use finding IDs starting with DR-001.",
