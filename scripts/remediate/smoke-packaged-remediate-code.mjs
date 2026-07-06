@@ -30,7 +30,7 @@ function resolveSpawn(command, args) {
 
 function spawnNpm(args, options) {
   const resolved = resolveSpawn(npm, args);
-  return spawnSync(resolved.command, resolved.args, options);
+  return spawnSync(resolved.command, resolved.args, { windowsHide: true, ...options });
 }
 
 function defaultSmokeTmpRoot() {
@@ -171,6 +171,7 @@ try {
     check("remediate-code --version exits 0", () => {
       const r = spawnSync(process.execPath, [wrapperPath, "--version"], {
         encoding: "utf8",
+        windowsHide: true,
       });
       if (r.status !== 0) throw new Error(`exit ${r.status}`);
     });
@@ -178,6 +179,7 @@ try {
     check(`remediate-code --version prints ${packageVersion}`, () => {
       const r = spawnSync(process.execPath, [wrapperPath, "--version"], {
         encoding: "utf8",
+        windowsHide: true,
       });
       if (!r.stdout.includes(packageVersion))
         throw new Error(`got: ${r.stdout.trim()}`);

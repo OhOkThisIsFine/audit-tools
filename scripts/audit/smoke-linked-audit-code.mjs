@@ -366,6 +366,7 @@ function runCommand(command, args, options = {}) {
       cwd,
       env: options.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     let stdout = "";

@@ -1,6 +1,5 @@
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { readOptionalJsonFile, writeJsonFile, withFileLock } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, withFileLock, spawnSyncHidden } from "audit-tools/shared";
 // Direct module path (not the barrel) per the A-8/A-10 seam: the registry is the
 // SAME mutual-exclusion primitive the in-process driver claims through, so a node
 // dispatched by one driver can never be re-dispatched by the other.
@@ -518,7 +517,7 @@ export async function reverifyQuarantinedNode(
 
   // 1. Resolve the preserved commit. No ref → nothing to re-drive (wrong id, or a
   //    prior land already cleared it).
-  const rev = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+  const rev = spawnSyncHidden("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -542,7 +541,7 @@ export async function reverifyQuarantinedNode(
   //    `commitWorktree` (inside acceptNodeWorktree) then commits them and the standard
   //    lifecycle runs. A conflict = a genuine seam with a sibling merged since the
   //    quarantine; discard the worktree and keep the ref for a later retry.
-  const replay = spawnSync("git", ["cherry-pick", "--no-commit", commit], {
+  const replay = spawnSyncHidden("git", ["cherry-pick", "--no-commit", commit], {
     cwd: wt,
     encoding: "utf8",
     shell: false,
@@ -550,7 +549,7 @@ export async function reverifyQuarantinedNode(
   if (replay.status !== 0) {
     const detail = [replay.stdout ?? "", replay.stderr ?? ""].filter(Boolean).join("\n").trim();
     // Clear any partial cherry-pick state, then drop the worktree — the ref is untouched.
-    spawnSync("git", ["cherry-pick", "--quit"], { cwd: wt, shell: false });
+    spawnSyncHidden("git", ["cherry-pick", "--quit"], { cwd: wt, shell: false });
     resetNodeWorktreeAndBranch(root, wt, branch);
     return {
       status: "conflict",

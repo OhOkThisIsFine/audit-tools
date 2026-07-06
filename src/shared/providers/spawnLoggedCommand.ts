@@ -121,6 +121,7 @@ class SpawnRunController {
       try {
         const reaper = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
           stdio: "ignore",
+          windowsHide: true,
         });
         reaper.on("error", () => {
           // Best-effort only — taskkill missing/failing must never surface.
@@ -301,6 +302,9 @@ class SpawnRunController {
         windowsVerbatimArguments:
           process.platform === "win32" &&
           /(^|[\\/])cmd\.exe$/i.test(this.command),
+        // Suppress the console window a windowless parent would otherwise pop when
+        // launching a console child on win32 (provider/session spawns).
+        windowsHide: true,
         // ARC-6d068334: scrub the host's interactive-session markers
         // (CLAUDECODE / CLAUDE_CODE_*) from EVERY process the tool launches,
         // including a provider session spawn — otherwise a worker session (and

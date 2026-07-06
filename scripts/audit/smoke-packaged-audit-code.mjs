@@ -415,6 +415,9 @@ function runCommand(command, args, options = {}) {
       cwd,
       env: options.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // Suppress the console window a windowless parent pops when spawning a
+      // console child (npm, the packaged bins) on win32.
+      windowsHide: true,
     });
 
     let stdout = "";

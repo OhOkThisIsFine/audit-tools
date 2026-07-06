@@ -40,6 +40,7 @@ export async function runCommand(
       cwd,
       env: stripClaudeCodeEnv(),
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     let stdout = "";
     let stderr = "";

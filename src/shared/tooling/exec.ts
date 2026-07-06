@@ -274,3 +274,23 @@ export function runTracked(
     error: result.error,
   };
 }
+
+/**
+ * `child_process.spawnSync` with `windowsHide` forced on. A windowless parent
+ * (node launched by an IDE/agent) spawning a console child (git, sqlite3, …) pops
+ * a console window on win32 unless suppressed — the many direct git spawns across
+ * the remediate git-worktree machinery would otherwise each flash one. Thin
+ * passthrough otherwise; callers keep their exact args/options and, via the
+ * `typeof spawnSync` cast, its full encoding-based overloads (so `.stdout` stays
+ * `string` under `{ encoding: "utf8" }`). `windowsHide` is forced last so it
+ * always wins (no caller wants a visible window).
+ */
+export const spawnSyncHidden = ((
+  command: string,
+  args?: readonly string[],
+  options?: Parameters<typeof spawnSync>[2],
+) =>
+  spawnSync(command, args as string[], {
+    ...(options ?? {}),
+    windowsHide: true,
+  })) as typeof spawnSync;

@@ -1015,6 +1015,7 @@ export function enumerateRepoTreePaths(repoRoot: string): Set<string> {
       cwd: repoRoot,
       encoding: "utf8",
       shell: false,
+      windowsHide: true,
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch {
@@ -1046,6 +1047,7 @@ export function isInsideGitWorkTree(repoRoot: string): boolean {
       cwd: repoRoot,
       encoding: "utf8",
       shell: false,
+      windowsHide: true,
     });
   } catch {
     return false;

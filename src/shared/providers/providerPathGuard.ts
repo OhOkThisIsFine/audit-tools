@@ -24,7 +24,13 @@ import type { ResolvedProviderName } from "../types/sessionConfig.js";
 /** The real PATH probe: `where`/`which` exits 0 iff the command resolves. */
 function probeCommandOnPath(command: string): boolean {
   const lookupCommand = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(lookupCommand, [command], { stdio: "ignore" });
+  // windowsHide: a windowless parent (node launched by an IDE/agent) spawning a
+  // console child pops a console window on win32 unless suppressed — this probe
+  // runs on every provider discovery, so it is the most frequent offender.
+  const result = spawnSync(lookupCommand, [command], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
   return result.status === 0;
 }
 

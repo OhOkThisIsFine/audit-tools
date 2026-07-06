@@ -135,7 +135,7 @@ function readAntigravityToken(env: NodeJS.ProcessEnv, stateDbPath: string): stri
     const r = spawnSync(
       "sqlite3",
       [stateDbPath, "SELECT value FROM ItemTable WHERE key='antigravityAuthStatus'"],
-      { encoding: "utf8", shell: false },
+      { encoding: "utf8", shell: false, windowsHide: true },
     );
     if (r.status !== 0 || !r.stdout) return null;
     const apiKey = (JSON.parse(r.stdout.trim()) as { apiKey?: string }).apiKey;

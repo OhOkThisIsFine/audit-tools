@@ -39,5 +39,8 @@ export function runShellCommand(
   return spawnSync(command, {
     ...options,
     shell: true,
+    // Default-hide the console window a windowless parent would pop on win32;
+    // an explicit caller value still wins.
+    windowsHide: options.windowsHide ?? true,
   });
 }

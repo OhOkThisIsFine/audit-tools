@@ -267,6 +267,7 @@ async function commandExists(command: string): Promise<boolean> {
     // executed during environment validation.
     await execFileAsync(lookupCommand, [command], {
       timeout: COMMAND_EXISTS_TIMEOUT_MS,
+      windowsHide: true,
     });
     return true;
   } catch {

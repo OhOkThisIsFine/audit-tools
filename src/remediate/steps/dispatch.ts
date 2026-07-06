@@ -6,7 +6,6 @@ import { routeAmendmentRequest } from "../dispatch/amendmentClaim.js";
 import { toBlockId, fromBlockId } from "../contractPipeline/idRegistry.js";
 import { readContractArtifact } from "../contractPipeline/artifactStore.js";
 import { verifyPairingForFinding } from "../contractPipeline/changeClassification.js";
-import { spawnSync } from "node:child_process";
 import { StateStore, type RemediationState } from "../state/store.js";
 import {
   REMEDIATION_STEP,
@@ -32,7 +31,7 @@ import type {
   RollingDispatchResult,
   AdmissionPool,
 } from "audit-tools/shared";
-import { computeDispatchAdmission, createReservationLedger, tierRank } from "audit-tools/shared";
+import { computeDispatchAdmission, createReservationLedger, tierRank, spawnSyncHidden } from "audit-tools/shared";
 import { deriveCostRank, lookupConfirmedPosition, readConfirmedCostPositions } from "audit-tools/shared";
 import { scheduleWave as computePoolWaveSchedule } from "audit-tools/shared";
 import { probeQuotaSource } from "audit-tools/shared";
@@ -658,7 +657,7 @@ export interface WorktreeVerifyResult {
  * --show-toplevel` emits a forward-slash absolute path on every platform.
  */
 export function gitTopLevel(cwd: string): string | null {
-  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+  const result = spawnSyncHidden("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     encoding: "utf8",
     shell: false,
@@ -706,7 +705,7 @@ export function createWorktree(root: string, worktreePath: string, branchName: s
         `target root before rolling dispatch.`,
     );
   }
-  const result = spawnSync(
+  const result = spawnSyncHidden(
     "git",
     ["worktree", "add", "-b", branchName, worktreePath, "HEAD"],
     { cwd: root, encoding: "utf8", shell: false },
@@ -770,7 +769,7 @@ export function removeWorktree(root: string, worktreePath: string): void {
   // path that still exists but fails git-remove for another reason is surfaced
   // exactly as before. We do NOT match on the 'not a working tree' stderr text.
   if (!existsSync(worktreePath)) return;
-  const result = spawnSync(
+  const result = spawnSyncHidden(
     "git",
     ["worktree", "remove", "--force", worktreePath],
     { cwd: root, encoding: "utf8", shell: false },
@@ -804,9 +803,9 @@ export function resetNodeWorktreeAndBranch(
   removeWorktree(root, worktreePath);
   // Prune stale worktree admin entries (e.g. a dir deleted out from under git),
   // otherwise `git worktree add` can refuse a path it still thinks is registered.
-  spawnSync("git", ["worktree", "prune"], { cwd: root, shell: false });
+  spawnSyncHidden("git", ["worktree", "prune"], { cwd: root, shell: false });
   // Force-delete the leftover branch from a prior attempt so `-b` recreates it.
-  spawnSync("git", ["branch", "-D", branchName], { cwd: root, shell: false });
+  spawnSyncHidden("git", ["branch", "-D", branchName], { cwd: root, shell: false });
   // Force-remove a leftover worktree DIRECTORY: when a prior attempt's worktree
   // became an orphaned dir (registered admin entry gone but files remain),
   // `git worktree remove` no-ops ("is not a working tree") and `git worktree add`
@@ -865,7 +864,7 @@ export function mergeWorktree(
   branchName: string,
 ): { success: true } | { success: false; error: string } {
   // Get the tip commit of the worktree branch
-  const revResult = spawnSync("git", ["rev-parse", branchName], {
+  const revResult = spawnSyncHidden("git", ["rev-parse", branchName], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -877,7 +876,7 @@ export function mergeWorktree(
   }
 
   const worktreeTip = revResult.stdout.trim();
-  const mergeResult = spawnSync("git", ["cherry-pick", worktreeTip], {
+  const mergeResult = spawnSyncHidden("git", ["cherry-pick", worktreeTip], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -885,7 +884,7 @@ export function mergeWorktree(
   if (mergeResult.status !== 0) {
     const stderr = (mergeResult.stderr ?? "").trim();
     // Abort the cherry-pick so the main tree stays clean
-    spawnSync("git", ["cherry-pick", "--abort"], { cwd: root, shell: false });
+    spawnSyncHidden("git", ["cherry-pick", "--abort"], { cwd: root, shell: false });
     removeWorktree(root, worktreePath);
     return { success: false, error: `cherry-pick failed: ${stderr}` };
   }
@@ -909,7 +908,7 @@ export function mergeWorktree(
 export function dirtyMainTreeCollisions(root: string, branch: string): string[] {
   const edited = gitEditedFilesForBranch(root, branch);
   if (!edited.available || edited.files.size === 0) return [];
-  const status = spawnSync(
+  const status = spawnSyncHidden(
     "git",
     ["status", "--porcelain", "--", ...edited.files],
     { cwd: root, encoding: "utf8", shell: false },
@@ -944,13 +943,13 @@ export function rebaseBranchOntoHead(
   worktreePath: string,
   branch: string,
 ): { ok: true } | { ok: false; error: string } {
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
+  const head = spawnSyncHidden("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: false });
   if (head.error || head.status !== 0) {
     const detail = (head.stderr ?? head.error?.message ?? "git rev-parse failed").toString().trim();
     return { ok: false, error: `could not resolve remediation HEAD for rebase: ${detail}` };
   }
   const target = head.stdout.trim();
-  const rebase = spawnSync("git", ["rebase", target], {
+  const rebase = spawnSyncHidden("git", ["rebase", target], {
     cwd: worktreePath,
     encoding: "utf8",
     shell: false,
@@ -961,7 +960,7 @@ export function rebaseBranchOntoHead(
       .join("\n")
       .trim();
     // Leave a clean tree: abort the in-progress rebase before the worktree is dropped.
-    spawnSync("git", ["rebase", "--abort"], { cwd: worktreePath, shell: false });
+    spawnSyncHidden("git", ["rebase", "--abort"], { cwd: worktreePath, shell: false });
     return {
       ok: false,
       error:
@@ -1032,7 +1031,7 @@ export function quarantineFailedNodeCommit(
   runId: string,
   blockId: string,
 ): { ref: string; commit: string } | null {
-  const rev = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${branch}^{commit}`], {
+  const rev = spawnSyncHidden("git", ["rev-parse", "--verify", "--quiet", `${branch}^{commit}`], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -1040,7 +1039,7 @@ export function quarantineFailedNodeCommit(
   if (rev.status !== 0) return null;
   const commit = (rev.stdout ?? "").trim();
   const ref = quarantineRef(runId, blockId);
-  const upd = spawnSync("git", ["update-ref", ref, commit], {
+  const upd = spawnSyncHidden("git", ["update-ref", ref, commit], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -1081,19 +1080,19 @@ export function quarantineUncommittedWorktreeEdits(
   // honours .gitignore, so the incidental ignored churn (node_modules/dist) and
   // the offending generated artifact stay out — what we preserve is the worker's
   // real source work.
-  const add = spawnSync("git", ["add", "-A"], {
+  const add = spawnSyncHidden("git", ["add", "-A"], {
     cwd: worktreeRoot,
     encoding: "utf8",
     shell: false,
   });
   if (add.status !== 0) return null;
   // Nothing staged → no uncommitted edits to preserve.
-  const staged = spawnSync("git", ["diff", "--cached", "--quiet"], {
+  const staged = spawnSyncHidden("git", ["diff", "--cached", "--quiet"], {
     cwd: worktreeRoot,
     shell: false,
   });
   if (staged.status === 0) return null;
-  const commit = spawnSync(
+  const commit = spawnSyncHidden(
     "git",
     ["commit", "-m", `remediate-quarantine ${blockId} (${runId}) — fail-loud preserve`],
     { cwd: worktreeRoot, encoding: "utf8", shell: false },
@@ -1109,7 +1108,7 @@ export function quarantineUncommittedWorktreeEdits(
 
 /** Clear a node's quarantine ref (e.g. once a later re-dispatch landed successfully). Best-effort. */
 export function clearQuarantinedCommit(root: string, runId: string, blockId: string): void {
-  spawnSync("git", ["update-ref", "-d", quarantineRef(runId, blockId)], {
+  spawnSyncHidden("git", ["update-ref", "-d", quarantineRef(runId, blockId)], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -1122,7 +1121,7 @@ export function listQuarantinedCommits(
   runId: string,
 ): Array<{ block: string; ref: string; commit: string }> {
   const prefix = `refs/remediation-quarantine/${refSafeSegment(runId, "run")}/`;
-  const res = spawnSync("git", ["for-each-ref", "--format=%(refname) %(objectname)", prefix], {
+  const res = spawnSyncHidden("git", ["for-each-ref", "--format=%(refname) %(objectname)", prefix], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -1178,7 +1177,7 @@ export function ensureRemediationBranchCheckedOut(
   const top = gitTopLevel(root);
   if (top === null || canonicalPathKey(top) !== canonicalPathKey(root)) return null;
   const branch = remediationBranchName(runId);
-  const current = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+  const current = spawnSyncHidden("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
     cwd: root,
     encoding: "utf8",
     shell: false,
@@ -1186,7 +1185,7 @@ export function ensureRemediationBranchCheckedOut(
   if (current.status === 0 && (current.stdout ?? "").trim() === branch) return branch;
   const branchExisted = gitBranchExists(root, branch);
   const args = branchExisted ? ["checkout", branch] : ["checkout", "-b", branch];
-  const co = spawnSync("git", args, { cwd: root, encoding: "utf8", shell: false });
+  const co = spawnSyncHidden("git", args, { cwd: root, encoding: "utf8", shell: false });
   if (co.status !== 0) {
     process.stderr.write(
       `[remediate-code] could not switch to remediation branch ${branch}: ${(co.stderr ?? "").trim()}\n`,
@@ -1314,7 +1313,7 @@ function forceAddNewSourceFiles(
   declaredWritePaths: string[] | undefined,
 ): { ok: true } | { ok: false; error: string } {
   if (declaredWritePaths === undefined) return { ok: true };
-  const ls = spawnSync(
+  const ls = spawnSyncHidden(
     "git",
     ["ls-files", "--others", "--ignored", "--exclude-standard"],
     { cwd: worktreeRoot, encoding: "utf8", shell: false },
@@ -1358,7 +1357,7 @@ function forceAddNewSourceFiles(
     };
   }
   for (const rel of toForceAdd) {
-    const add = spawnSync("git", ["add", "-f", "--", rel], {
+    const add = spawnSyncHidden("git", ["add", "-f", "--", rel], {
       cwd: worktreeRoot,
       encoding: "utf8",
       shell: false,
@@ -1382,7 +1381,7 @@ export function commitWorktree(
   if (!forced.ok) {
     return { committed: false, error: forced.error };
   }
-  const add = spawnSync("git", ["add", "-A"], {
+  const add = spawnSyncHidden("git", ["add", "-A"], {
     cwd: worktreeRoot,
     encoding: "utf8",
     shell: false,
@@ -1391,14 +1390,14 @@ export function commitWorktree(
     return { committed: false, error: `git add failed: ${(add.stderr ?? "").trim()}` };
   }
   // `git diff --cached --quiet` exits 0 when nothing is staged → no worker edits.
-  const staged = spawnSync("git", ["diff", "--cached", "--quiet"], {
+  const staged = spawnSyncHidden("git", ["diff", "--cached", "--quiet"], {
     cwd: worktreeRoot,
     shell: false,
   });
   if (staged.status === 0) {
     return { committed: false };
   }
-  const commit = spawnSync("git", ["commit", "-m", message], {
+  const commit = spawnSyncHidden("git", ["commit", "-m", message], {
     cwd: worktreeRoot,
     encoding: "utf8",
     shell: false,
@@ -1694,7 +1693,7 @@ export async function acceptNodeWorktree(
 
     // Capture the base HEAD OID BEFORE the cherry-pick so a RED merged-base check can
     // roll the base back to a bit-identical state.
-    const baseHeadBefore = spawnSync("git", ["rev-parse", "HEAD"], {
+    const baseHeadBefore = spawnSyncHidden("git", ["rev-parse", "HEAD"], {
       cwd: root,
       encoding: "utf8",
       shell: false,
@@ -1747,12 +1746,12 @@ export async function acceptNodeWorktree(
           ? check.error.message
           : [check.stdout ?? "", check.stderr ?? ""].filter(Boolean).join("\n");
         // Roll the base back to its pre-pick OID, bit-identical.
-        spawnSync("git", ["reset", "--hard", baseOid], { cwd: root, shell: false });
+        spawnSyncHidden("git", ["reset", "--hard", baseOid], { cwd: root, shell: false });
         // Scoped clean: remove only the cherry-pick / check-emitted untracked files
         // under the paths the pick touched — never a blanket `git clean` that could
         // nuke unrelated untracked state.
         if (pickedFiles.available && pickedFiles.files.size > 0) {
-          spawnSync(
+          spawnSyncHidden(
             "git",
             ["clean", "-fdq", "--", ...[...pickedFiles.files]],
             { cwd: root, shell: false },
@@ -3173,7 +3172,7 @@ export type GitEditedFiles =
 
 /** True when `root` is inside a git work tree (the git tool is present and it's a repo). */
 function isGitWorkTree(root: string): boolean {
-  const probe = spawnSync(
+  const probe = spawnSyncHidden(
     "git",
     ["rev-parse", "--is-inside-work-tree"],
     { cwd: root, encoding: "utf8", shell: false },
@@ -3183,7 +3182,7 @@ function isGitWorkTree(root: string): boolean {
 
 /** True when `branch` resolves to a commit in the repo at `root`. */
 function gitBranchExists(root: string, branch: string): boolean {
-  const probe = spawnSync(
+  const probe = spawnSyncHidden(
     "git",
     ["rev-parse", "--verify", "--quiet", `${branch}^{commit}`],
     { cwd: root, encoding: "utf8", shell: false },
@@ -3239,7 +3238,7 @@ export function gitEditedFilesForBranch(root: string, branch: string): GitEdited
   if (!isGitWorkTree(root)) {
     return { available: false, reason: "not_a_repo", error: "root is not a git work tree" };
   }
-  const diff = spawnSync(
+  const diff = spawnSyncHidden(
     "git",
     ["diff", "--name-only", `HEAD...${branch}`],
     { cwd: root, encoding: "utf8", shell: false },
@@ -3293,7 +3292,7 @@ export function gitHunksForBranch(root: string, branch: string): GitBranchHunks 
   if (!isGitWorkTree(root)) {
     return { available: false, reason: "not_a_repo", error: "root is not a git work tree" };
   }
-  const diff = spawnSync(
+  const diff = spawnSyncHidden(
     "git",
     // No rename detection / context noise beyond what we parse; a plain unified
     // diff carries the `+++ b/<path>` and `@@ … +start,count @@` headers we need.
