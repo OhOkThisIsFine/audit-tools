@@ -38,10 +38,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   guard/rewrite-surface mismatch). Artifacts persist **gitignored** in `.audit-tools/remediation/intake/contract/`
   (`finalized_module_contracts.json`, `implementation_dag.json`, `test_validator_plan.json`) — they survive branch
   switches. **Implement phase did NOT run** (dispatch bug below); nothing implemented, tree clean. Run state left at
-  `implementing` with nodes 1-4,7 FALSELY `resolved_no_change`. **Next-lap recovery: do NOT blindly `next-step`
-  (would false-close); restart the implement phase — or re-drive host-dispatch re-opening the false-resolved nodes —
-  with discriminating per-node `targeted_commands`.** Branch `remediation/backlog-handoff-max-sweep-2026-07-06` has
-  no commits (safe to delete). Phase D/E in this plan overlap the conceptual-design-review roadmap track.
+  `implementing` with nodes 1-4,7 FALSELY `resolved_no_change`.
+  **Update 2026-07-06 (this lap):** the false-close *root cause* is FIXED (friction (a) below — triage now refuses
+  `resolved_no_change` without a real worker result), so a re-drive can no longer false-close. **CP-NODE-4 (priority-chain
+  fixture builder) was picked up + SHIPPED separately** (see the priority-chain entry above). The other tractable nodes
+  are deferred to their own laps (each has its own backlog home): **CP-NODE-1** = commit-gate staged-tree (see
+  "Commit-gate hook validates the WORKING TREE" below — delicate every-commit-hook change, own lap); **CP-NODE-2** = CI
+  3×-suite dedup (see "CI test redundancy" below); **CP-NODE-3** = windowsHide tests sweep (see "windowsHide mop-up"
+  below); **CP-NODE-6** = opencode union ceiling (see "Reconcile the shared opencode.json" below); **CP-NODE-7/8/9/10**
+  (dispatch.ts split + Phase C/D/E) are conceptual-design-review roadmap tracks (drive deliberately, not via the
+  implement dispatch). **To resume THIS run's remaining nodes** you must still reopen the 5 falsely-`resolved_no_change`
+  items in gitignored `state.json` (no clean CLI reopen affordance yet) and drive conversation-first (NOT
+  `local-subprocess`); simpler to pick each node up as its own lap from its backlog home. Branch
+  `remediation/backlog-handoff-max-sweep-2026-07-06` has no commits (safe to delete).
 
 - **Remediate contract/implement pipeline — dogfood frictions from the 2026-07-06 max-sweep run (fix in tooling).**
   Six real frictions surfaced driving one large `/remediate-code` run (full walk in the run's friction record,
@@ -49,10 +58,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   - **(biggest) Implement-dispatch false-resolves un-implemented nodes.** Triage's "already satisfied in the working
     tree" ran each node's `targeted_commands`; when those were the generic `npm run build && npm run check` (pass on
     ANY green tree) it reconciled un-implemented nodes to `resolved_no_change`. Combined with `provider:
-    local-subprocess` producing no worker results, a run can report success while implementing nothing. Fix: (a)
-    triage must NOT `resolved_no_change` a node whose implement worker produced NO result file — distinguish "verified
-    satisfied" from "no worker ran"; (b) DAG authoring must give each node a *discriminating* verify (a command that
-    FAILS pre-change) — generic build+check is insufficient. Relates [[implement-dispatch-strands-nodes]].
+    local-subprocess` producing no worker results, a run can report success while implementing nothing.
+    **(a) SHIPPED** — triage's reverify now requires a real implement worker result file on disk before trusting
+    "satisfied"; no result ⇒ "no worker ran" ⇒ unsatisfied (route to retry), never `resolved_no_change`
+    (`reverifyBlockedItemAgainstTree` + `implementResultPath`, regression test in `tests/remediate/phase-triage.test.ts`).
+    **(b) still open** — DAG authoring should give each node a *discriminating* verify (a command that FAILS pre-change);
+    generic build+check is insufficient (a quality lift, no longer a false-close risk now that (a) blocks it).
+    Relates [[implement-dispatch-strands-nodes]].
   - **Verbatim re-emit churn.** Every upstream contract change re-triggers critique→counterexample→judge AND forces
     the host to fully re-author each downstream artifact even when byte-identical (`test_validator_plan` /
     `contract_assessment_report` re-emitted 5-6× each). The tool consumes the `.input.json` into an envelope then
@@ -76,14 +88,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `wrapper/*-opencode.mjs`); only caught when the drafting agent read source. Decomposition should verify where
     named logic actually lives before assigning scope. Reinforces [[front-load-broad-search-before-contract-authoring]].
 
-- **Adding one PRIORITY-chain obligation ripples through ~10 fixture tests (friction, 2026-07-05, Phase B).**
-  Inserting `structure_decomposition_current` at PRIORITY idx 9 broke ~10 audit test files whose fixtures build
-  a bundle "advanced to `design_assessment`" and then assert the NEXT step / a hardcoded priority index. Each
-  needed the new artifact pre-satisfied (or an extra `advanceAudit` step) — a broad, mechanical, per-file churn
-  every time a phase is added. Fix in tooling: a SHARED "advanced-bundle" fixture builder (one place that seeds a
-  bundle satisfied through phase N) + priority assertions keyed by `PRIORITY.indexOf(id)` relationships, not
-  literal integers, so a new obligation is a one-line fixture edit, not a 10-file sweep. Low-pri (test ergonomics)
-  but recurs on every new phase (C/D/E are coming).
+- ~~**Adding one PRIORITY-chain obligation ripples through ~10 fixture tests (friction, 2026-07-05, Phase B).**~~
+  **SHIPPED** — `tests/audit/helpers/advancedBundle.mjs` `buildAdvancedBundle(root, target)` drives the pipeline via a
+  single ORDERED, target-keyed stage list (a new phase = one stage insert), `advanceFixtureToPlanning` delegates to it,
+  and `priority-chain-doc-sync.test.mjs` now asserts `PRIORITY.indexOf`-relative ordering + endpoints via
+  `expectObligationOrder`/`expectObligationEndpoint` instead of literal indices. Was max-sweep node CP-NODE-4.
 
 - **`windowsHide` mop-up on dev/CI-script + per-test-file spawns (partial, 2026-07-06).** A windowless parent
   (node under an IDE/agent) spawning a console child pops a console window on win32 unless `windowsHide: true`.
