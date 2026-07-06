@@ -40,13 +40,14 @@ workflow semantics.
 
 The system separates deterministic extraction from bounded LLM judgment:
 
-1. intake and file disposition
-2. surface, flow, graph, unit, risk, and coverage artifacts
-3. audit task planning
-4. review packet construction
-5. semantic review through the active conversation or fallback provider bridge
-6. result ingestion, selective deepening, runtime validation, and synthesis
-7. final `audit-report.md`
+1. a one-time provider-confirmation gate (discover, cost-order, and confirm the provider pool)
+2. intake and file disposition
+3. surface, flow, graph, unit, risk, and coverage artifacts
+4. audit task planning
+5. review packet construction
+6. semantic review through the active conversation or fallback provider bridge
+7. result ingestion, selective deepening, runtime validation, and synthesis
+8. final `audit-report.md`
 
 Portability rules:
 
