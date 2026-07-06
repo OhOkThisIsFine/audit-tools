@@ -58,6 +58,23 @@ export interface AdvanceAuditOptions {
    */
   since?: string;
   preferredExecutor?: string;
+  /**
+   * Opt-in to the internal deterministic drain loop: run consecutive
+   * runner-backed non-host-delegation steps in one call, halting at the first
+   * host-delegation boundary. DEFAULT `false` — a bare `advanceAudit` call runs
+   * EXACTLY ONE bounded step.
+   *
+   * Only a direct autonomy driver that owns the whole regen/staleness cascade
+   * (and has no host to hand interactive steps back to) sets this. The CLI paths
+   * MUST leave it off: both the `advance-audit` command (contractually one bounded
+   * executor per invocation) and the `next-step` obligation fold drive their own
+   * one-step-at-a-time loop, and rely on `advanceAudit` NOT draining so the fold
+   * can stop at the CLI-level interactive pauses (provider confirmation,
+   * analyzer-install consent, edge-reasoning, intent checkpoint) that live in the
+   * fold rather than in the executor registry. A drain here would silently skip
+   * those operator-interactive steps.
+   */
+  drain?: boolean;
   runLogger?: RunLogger;
 }
 

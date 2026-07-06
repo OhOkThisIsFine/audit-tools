@@ -248,18 +248,27 @@ function nextStepIsDrainableRegen(bundle: ArtifactBundle): boolean {
 }
 
 /**
- * Advance the audit by draining the dependency-ordered regen cascade within ONE
- * host round-trip. Runs the first bounded step, then — for the normal
- * (non-forced) path — keeps running consecutive deterministic runner-backed steps
- * (re-deriving decideNextStep + computeStaleArtifacts each iteration) until the
- * next step is a host-delegation boundary, a no-runner handoff, or the run is
- * complete. A whole staleness cascade (e.g. a schema-version migration that
- * re-stales every downstream artifact) thus resolves in a single call and emits a
- * single consolidated staleness stderr record at the boundary — instead of one
- * host round-trip (and one record) per regenerated artifact.
+ * Advance the audit by ONE bounded step. When `options.drain` is set, an autonomy
+ * driver that owns the whole cascade can instead drain the dependency-ordered
+ * regen frontier within ONE call: run the first bounded step, then keep running
+ * consecutive deterministic runner-backed steps (re-deriving decideNextStep +
+ * computeStaleArtifacts each iteration) until the next step is a host-delegation
+ * boundary, a no-runner handoff, or the run is complete. A whole staleness cascade
+ * (e.g. a schema-version migration that re-stales every downstream artifact) thus
+ * resolves in a single call and emits a single consolidated staleness stderr
+ * record at the boundary — instead of one host round-trip (and one record) per
+ * regenerated artifact.
  *
- * A forced `preferredExecutor` still runs EXACTLY ONE step: an explicit executor
- * request is a targeted single action, never a drain trigger.
+ * The drain is OPT-IN (`options.drain`), because the CLI paths must NOT drain: the
+ * `advance-audit` command runs exactly one executor per invocation, and the
+ * `next-step` obligation fold drives its own single-step loop so it can halt at the
+ * interactive/host-input pauses (provider confirmation, analyzer-install consent,
+ * edge-reasoning, intent checkpoint) that live in the fold — not in the executor
+ * registry, so the drain's registry-level `isHostDelegationExecutor` gate cannot
+ * see them. Draining there would silently skip an operator-interactive step.
+ *
+ * A forced `preferredExecutor` still runs EXACTLY ONE step even with `drain` set:
+ * an explicit executor request is a targeted single action, never a drain trigger.
  */
 export async function advanceAudit(
   bundle: ArtifactBundle,
@@ -268,7 +277,7 @@ export async function advanceAudit(
   const forced = Boolean(options.preferredExecutor);
   let result = await runSingleAdvanceStep(bundle, options);
 
-  if (!forced) {
+  if (!forced && options.drain === true) {
     // Drain the deterministic regen frontier. Each drained step re-derives the
     // decision + staleness from the accumulated bundle, so the loop is agnostic
     // to how long the chain is or where in the priority order it sits.
