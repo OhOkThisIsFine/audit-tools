@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
 
-const { advanceAudit } = await import("../../src/audit/orchestrator/advance.ts");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.ts");
+const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
 
 // The Phase 4B candidate we inject into the regex-floor graph. Its endpoints are
 // real fixture files; its confidence (0.4) puts it below the 0.65 reasoning floor.
@@ -31,23 +31,14 @@ function edgeIdentity(edge) {
 
 /** Drive the deterministic pipeline in-process through structure, leaving
  * graph_enrichment_current as the next outstanding obligation. Returns the
- * structure-stage bundle so the caller can shape the graph before persisting. */
+ * structure-stage bundle so the caller can shape the graph before persisting.
+ *
+ * Uses the single-source, target-keyed `buildAdvancedBundle` (forced single steps)
+ * rather than a hand-rolled advanceAudit chain: `advanceAudit` now SAFELY DRAINS
+ * the deterministic frontier by default, so a bare chain would overshoot past
+ * graph_enrichment_current to the intent_checkpoint host boundary. */
 async function buildStructureReadyBundle(root) {
-  // Provider confirmation is the session-level gate; auto-completes headlessly.
-  const providerConf = await advanceAudit({}, { root });
-  const intake = await advanceAudit(providerConf.updated_bundle, { root });
-  const prepared = {
-    ...intake.updated_bundle,
-    auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },
-    external_analyzer_results: [{ tool: "syntax_resolution_executor", results: [] }],
-    syntax_resolution_status: {
-      tool: "syntax_resolution_executor",
-      completed_at: "2026-04-22T00:00:00Z",
-    },
-    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
-  };
-  const structure = await advanceAudit(prepared);
-  return structure.updated_bundle;
+  return buildAdvancedBundle(root, "graph_enrichment_current");
 }
 
 function stripLowConfidenceEdges(graphBundle) {

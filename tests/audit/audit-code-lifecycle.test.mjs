@@ -86,129 +86,52 @@ async function withTempRepo(fn) {
   }
 }
 
-test.concurrent("audit-code wrapper supports repeated bounded advance-audit invocations with a stable artifact directory", async () => {
+test.concurrent("audit-code wrapper supports repeated draining advance-audit invocations with a stable artifact directory", async () => {
   await withTempRepo(async (root) => {
-    // Provider confirmation auto-completes headlessly under advance-audit.
-    const first = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(first.selected_executor).toBe("provider_confirmation_executor");
-    expect(first.next_likely_step).toBe("repo_manifest");
+    // advance-audit now SAFELY DRAINS the consecutive deterministic regen frontier
+    // each call (the fold-aware drain is the default), halting at host-input
+    // pauses. The interactive/host-delegation steps between the checkpoint and
+    // planning (provider gate, intent checkpoint, charter extraction, both
+    // design-review passes, charter clarification, systemic challenge) auto-complete
+    // or omit headlessly under advance-audit, each bounding one drained segment; the
+    // deterministic runs between them collapse into a single call. So the whole
+    // deterministic pipeline resolves in a handful of drained round-trips against
+    // ONE stable artifact directory — never one-executor-per-invocation.
+    //
+    // Chain-length-agnostic: loop until the deterministic planning tail runs rather
+    // than pinning each intermediate step (adding a PRIORITY phase must not churn
+    // this test). Every drained invocation makes progress; the first collapses the
+    // intake→structure_decomposition run in one call.
+    let first = null;
+    let planning = null;
+    for (let i = 0; i < 24; i += 1) {
+      const step = JSON.parse(
+        (await runWrapper(["advance-audit"], { cwd: root })).stdout,
+      );
+      first ??= step;
+      expect(step.progress_made).toBe(true);
+      if (step.selected_executor === "planning_executor") {
+        planning = step;
+        break;
+      }
+    }
 
-    const second = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(second.selected_executor).toBe("intake_executor");
-    expect(second.next_likely_step).toBe("auto_fixes_applied");
+    // The very first drained call resolved the whole deterministic pre-checkpoint
+    // frontier in ONE invocation (intake → … → structure decomposition) and handed
+    // back at the first host-input pause, the intent checkpoint.
+    expect(first.selected_executor).toBe("structure_decomposition_executor");
+    expect(first.next_likely_step).toBe("intent_checkpoint_current");
+    expect(first.artifacts_written.includes("repo_manifest.json")).toBe(true);
+    expect(first.artifacts_written.includes("external_analyzer_acquisition.json")).toBe(true);
+    expect(first.artifacts_written.includes("graph_bundle.json")).toBe(true);
+    expect(first.artifacts_written.includes("structure_decomposition.json")).toBe(true);
 
-    const third = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(third.selected_executor).toBe("auto_fix_executor");
-    expect(third.next_likely_step).toBe("syntax_resolved");
-
-    const fourth = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(fourth.selected_executor).toBe("syntax_resolution_executor");
-    expect(fourth.next_likely_step).toBe("external_analyzers_current");
-
-    // External-analyzer acquisition (Slice D) runs between syntax resolution and
-    // structure. Under advance-audit it is NOT enabled (only the CLI next-step
-    // path sets externalAcquisition.enabled), so it writes an empty hermetic
-    // marker and proceeds — nothing is spawned/downloaded.
-    const acquisition = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(acquisition.selected_executor).toBe("external_analyzer_acquisition_executor");
-    expect(acquisition.next_likely_step).toBe("structure_artifacts");
-    expect(acquisition.artifacts_written.includes(
-        "external_analyzer_acquisition.json",
-      )).toBeTruthy();
-
-    const fifth = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(fifth.selected_executor).toBe("structure_executor");
-    expect(fifth.next_likely_step).toBe("graph_enrichment_current");
-
-    // Graph enrichment runs between structure and design assessment. Under
-    // advance-audit it never prompts: optional analyzers resolve or fall
-    // back to the regex floor, then the chain proceeds.
-    const enrichment = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(enrichment.selected_executor).toBe("graph_enrichment_executor");
-    expect(enrichment.next_likely_step).toBe("design_assessment_current");
-
-    const sixth = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(sixth.selected_executor).toBe("design_assessment_executor");
-    expect(sixth.next_likely_step).toBe("structure_decomposition_current");
-
-    // Structure decomposition is a deterministic step between design assessment
-    // and the intent checkpoint; under advance-audit it completes and proceeds.
-    const structureDecomposition = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(structureDecomposition.selected_executor).toBe("structure_decomposition_executor");
-    expect(structureDecomposition.next_likely_step).toBe("intent_checkpoint_current");
-
-    // Intent checkpoint auto-completes headlessly under advance-audit.
-    const seventh = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(seventh.selected_executor).toBe("intent_checkpoint_executor");
-    expect(seventh.next_likely_step).toBe("charter_extraction_current");
-
-    // Charter extraction (Phase C) sits between the checkpoint and the
-    // design-review passes; under advance-audit at the default shallow ceiling it
-    // omits deterministically (writes an empty charter_register.json) and proceeds.
-    const charter = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(charter.selected_executor).toBe("charter_extraction_executor");
-    expect(charter.next_likely_step).toBe("design_review_contract_completed");
-
-    const eighth = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(eighth.selected_executor).toBe("design_review_contract");
-    expect(eighth.next_likely_step).toBe("design_review_conceptual_completed");
-
-    const eighthB = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(eighthB.selected_executor).toBe("design_review_conceptual");
-    expect(eighthB.next_likely_step).toBe("charter_clarification_current");
-
-    // Charter clarification (Phase D triangulation loop) sits between the conceptual
-    // design-review pass and planning; under advance-audit at the default shallow
-    // ceiling / zero attention it assembles the register autonomously (no host turn)
-    // and proceeds.
-    const clarification = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(clarification.selected_executor).toBe("charter_clarification_executor");
-    expect(clarification.next_likely_step).toBe("systemic_challenge_current");
-
-    // Phase E systemic challenge loop sits between charter-clarification and planning;
-    // under advance-audit at the default shallow ceiling it writes an omitted register
-    // (no host turn) and proceeds.
-    const systemic = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(systemic.selected_executor).toBe("systemic_challenge_executor");
-    expect(systemic.next_likely_step).toBe("planning_artifacts");
-
-    const ninth = JSON.parse(
-      (await runWrapper(["advance-audit"], { cwd: root })).stdout,
-    );
-    expect(ninth.selected_executor).toBe("planning_executor");
-    expect(Array.isArray(ninth.artifacts_written)).toBeTruthy();
-    expect(ninth.artifacts_written.includes("audit_tasks.json")).toBeTruthy();
-    expect(ninth.artifacts_written.includes("requeue_tasks.json")).toBeTruthy();
+    // The drained pipeline reached the deterministic planning tail against the same
+    // stable artifact directory.
+    expect(planning, "planning_executor should be reached via drained advances").toBeTruthy();
+    expect(Array.isArray(planning.artifacts_written)).toBeTruthy();
+    expect(planning.artifacts_written.includes("audit_tasks.json")).toBeTruthy();
+    expect(planning.artifacts_written.includes("requeue_tasks.json")).toBeTruthy();
   });
 });
 

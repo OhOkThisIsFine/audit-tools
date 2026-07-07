@@ -78,28 +78,47 @@ function injectPreStructureMarkers(bundle) {
  * source of "how to advance a headless fixture bundle through phase N" — adding a
  * new PRIORITY phase is a one-line insert here, not an edit to every test that
  * seeds an advanced bundle. Each `run(bundle, root)` returns the next bundle.
+ *
+ * Each `advanceAudit` stage FORCES its executor (`preferredExecutor`) so it runs
+ * EXACTLY ONE bounded step and lands the bundle at exactly `upTo`. `advanceAudit`
+ * now SAFELY DRAINS the deterministic regen frontier by default (a bare call runs
+ * the whole runner-backed chain up to the next host-input pause), so a bare
+ * `advanceAudit(b)` here would overshoot the target obligation. The forced path is
+ * the single-step primitive (drain never triggers on a forced executor).
  */
+// Some stages require a real root (intake / provider-confirmation / intent
+// checkpoint); the structure + graph-enrichment + later stages deliberately run
+// ROOTLESS so the fixture stays offline-hermetic (manifest-only floor graph, no
+// analyzer subprocess). `withRoot` mirrors the pre-drain hand-drive exactly.
+const forcedStep = (executor, { withRoot = false } = {}) => async (b, root) =>
+  (
+    await advanceAudit(b, {
+      preferredExecutor: executor,
+      ...(withRoot ? { root } : {}),
+    })
+  ).updated_bundle;
+
 const FIXTURE_STAGES = [
   // Session gate: provider confirmation auto-completes headlessly (ignores input).
-  { upTo: "provider_confirmation", run: async (_b, root) => (await advanceAudit({}, { root })).updated_bundle },
+  { upTo: "provider_confirmation", run: forcedStep("provider_confirmation_executor", { withRoot: true }) },
   // Intake satisfies repo_manifest + file_disposition in one advance.
-  { upTo: "file_disposition", run: async (b, root) => (await advanceAudit(b, { root })).updated_bundle },
+  { upTo: "file_disposition", run: forcedStep("intake_executor", { withRoot: true }) },
   // Host-delegated markers: auto_fixes_applied + syntax_resolved + external_analyzers_current.
   { upTo: "external_analyzers_current", run: async (b) => injectPreStructureMarkers(b) },
-  { upTo: "structure_artifacts", run: async (b) => (await advanceAudit(b)).updated_bundle },
-  { upTo: "graph_enrichment_current", run: async (b) => (await advanceAudit(b)).updated_bundle },
-  { upTo: "design_assessment_current", run: async (b) => (await advanceAudit(b)).updated_bundle },
-  { upTo: "structure_decomposition_current", run: async (b) => (await advanceAudit(b)).updated_bundle },
-  { upTo: "intent_checkpoint_current", run: async (b, root) => (await advanceAudit(b, { root })).updated_bundle },
-  { upTo: "charter_extraction_current", run: async (b) => (await advanceAudit(b)).updated_bundle },
-  { upTo: "design_review_contract_completed", run: async (b) => (await advanceAudit(b)).updated_bundle },
-  { upTo: "design_review_conceptual_completed", run: async (b) => (await advanceAudit(b)).updated_bundle },
+  { upTo: "structure_artifacts", run: forcedStep("structure_executor") },
+  { upTo: "graph_enrichment_current", run: forcedStep("graph_enrichment_executor") },
+  { upTo: "design_assessment_current", run: forcedStep("design_assessment_executor") },
+  { upTo: "structure_decomposition_current", run: forcedStep("structure_decomposition_executor") },
+  { upTo: "intent_checkpoint_current", run: forcedStep("intent_checkpoint_executor", { withRoot: true }) },
+  { upTo: "charter_extraction_current", run: forcedStep("charter_extraction_executor") },
+  { upTo: "design_review_contract_completed", run: forcedStep("design_review_contract") },
+  { upTo: "design_review_conceptual_completed", run: forcedStep("design_review_conceptual") },
   // Phase D charter-clarification triangulation loop + Phase E systemic challenge
   // loop. Both host_delegation (like the design-review passes / charter_extraction):
   // at the default shallow ceiling each runner omits deterministically in one
-  // advance, so a plain advanceAudit satisfies the obligation headlessly.
-  { upTo: "charter_clarification_current", run: async (b) => (await advanceAudit(b)).updated_bundle },
-  { upTo: "systemic_challenge_current", run: async (b) => (await advanceAudit(b)).updated_bundle },
+  // advance, so a forced single step satisfies the obligation headlessly.
+  { upTo: "charter_clarification_current", run: forcedStep("charter_clarification_executor") },
+  { upTo: "systemic_challenge_current", run: forcedStep("systemic_challenge_executor") },
 ];
 
 /**

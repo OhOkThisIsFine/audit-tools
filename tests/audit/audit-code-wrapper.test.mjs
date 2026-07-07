@@ -488,10 +488,14 @@ function assertSharedHostInstallResponse(parsed, root, paths) {
   expect(parsed.unsupported_hosts.length).toBe(0);
 }
 
-test.concurrent("audit-code wrapper advance-audit runs one bounded deterministic advance and prints the execution envelope", async () => {
+test.concurrent("audit-code wrapper advance-audit drains the deterministic regen frontier to the first host-input pause and prints the execution envelope", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
-    // First advance: provider confirmation gate auto-completes headlessly.
+    // advance-audit now SAFELY DRAINS the consecutive deterministic regen frontier
+    // in one call (the fold-aware drain is the default): the provider gate
+    // auto-completes headlessly, then intake → auto-fix → syntax → analyzer
+    // acquisition → structure → graph enrichment → design assessment → structure
+    // decomposition all run, halting at the intent_checkpoint host-input boundary.
     const { stdout: stdout0 } = await runWrapper(["advance-audit"], { cwd: root });
     const step0 = JSON.parse(stdout0);
 
@@ -499,19 +503,27 @@ test.concurrent("audit-code wrapper advance-audit runs one bounded deterministic
     expect(info.isDirectory()).toBe(true);
     assertMatchesResponseSchema(step0, "auditCodeResponse");
     expect(step0.contract_version).toBe("audit-code/v1alpha1");
-    expect(step0.selected_executor).toBe("provider_confirmation_executor");
+    // The drain resolved the whole deterministic frontier and stopped at the first
+    // host-input pause (the intent checkpoint), so the last executor it ran is the
+    // final deterministic step and the next step it hands back is a host boundary.
+    expect(step0.selected_executor).toBe("structure_decomposition_executor");
     expect(step0.progress_made).toBe(true);
-    expect(step0.next_likely_step).toBe("repo_manifest");
+    expect(step0.next_likely_step).toBe("intent_checkpoint_current");
     expect(step0.handoff.status).toBe("active");
+    // Every deterministic artifact across the drained frontier is present + the
+    // artifact directory is reused (stable) — not one-executor-per-invocation.
+    expect(step0.artifacts_written.includes("repo_manifest.json")).toBe(true);
+    expect(step0.artifacts_written.includes("graph_bundle.json")).toBe(true);
+    expect(step0.artifacts_written.includes("structure_decomposition.json")).toBe(true);
 
-    // Second advance: intake executor runs.
+    // A second advance from the same artifact directory continues past the intent
+    // checkpoint (auto-completed headlessly) and drains onward, still making
+    // progress against the same stable artifact dir.
     const { stdout: stdout1 } = await runWrapper(["advance-audit"], { cwd: root });
     const step1 = JSON.parse(stdout1);
 
     assertMatchesResponseSchema(step1, "auditCodeResponse");
-    expect(step1.selected_executor).toBe("intake_executor");
     expect(step1.progress_made).toBe(true);
-    expect(step1.next_likely_step).toBe("auto_fixes_applied");
     expect(step1.handoff.status).toBe("active");
     expect(step1.handoff.suggested_commands.length).toBe(0);
   });

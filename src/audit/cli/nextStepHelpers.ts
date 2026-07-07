@@ -54,16 +54,11 @@ import {
 import { resolveClarificationAttention } from "../orchestrator/charterClarificationExecutor.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
+import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
 import {
-  collectLowConfidenceEdges,
-  type EdgeReasoningResults,
-} from "../orchestrator/edgeReasoning.js";
-import { buildPathLookup } from "../extractors/graph.js";
-import { buildDispositionMap } from "../extractors/disposition.js";
-import {
-  resolveAnalyzerPlan,
-  needsInstallDecision,
-} from "../extractors/analyzers/registry.js";
+  graphEnrichmentUnresolvedAnalyzers,
+  graphEnrichmentLowConfidenceEdges,
+} from "../orchestrator/hostInputPause.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import {
   persistAnalyzerSettings,
@@ -293,18 +288,15 @@ export async function handleGraphEnrichmentBranch(
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
 ): Promise<GraphEnrichmentBranchResult> {
-  const includedFiles = bundle.repo_manifest
-    ? [
-        ...new Set(
-          buildPathLookup(
-            bundle.repo_manifest,
-            buildDispositionMap(bundle.file_disposition),
-          ).values(),
-        ),
-      ]
-    : [];
-  const plan = resolveAnalyzerPlan(params.root, analyzersRef.value, includedFiles);
-  const unresolved = plan.filter(needsInstallDecision);
+  // Fold-level pause detection is single-sourced in `hostInputPause` so the drain
+  // stop predicate (`nextStepPausesForHostInput`) and this fold agree EXACTLY on
+  // when the analyzer-install consent / edge-reasoning turns are owed.
+  const pauseInputs = {
+    root: params.root,
+    analyzers: analyzersRef.value,
+    graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
+  };
+  const unresolved = graphEnrichmentUnresolvedAnalyzers(bundle, pauseInputs);
   if (unresolved.length > 0) {
     const incoming = await tryConsumeIncoming<Record<string, unknown>>(
       params.artifactsDir,
@@ -353,8 +345,8 @@ export async function handleGraphEnrichmentBranch(
   // that merges analyzer edges and writes analyzer_capability, so graph_bundle
   // and its marker stay revision-consistent (no staleness loop). Flag off or
   // no candidates → fall through and run the executor with no rewrites.
-  if (params.graphLlmEdgeReasoning === true && bundle.graph_bundle) {
-    const candidates = collectLowConfidenceEdges(bundle.graph_bundle);
+  {
+    const candidates = graphEnrichmentLowConfidenceEdges(bundle, pauseInputs);
     if (candidates.length > 0) {
       const edgeReasoningIncoming = await tryConsumeIncoming<EdgeReasoningResults>(
         params.artifactsDir,

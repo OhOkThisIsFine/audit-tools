@@ -41,10 +41,11 @@ async function captureStderr(fn) {
   return chunks.join("");
 }
 
-test("advanceAudit drains the consecutive deterministic regen frontier within one call, stopping at the first host-delegation boundary", async () => {
+test("advanceAudit drains the consecutive deterministic regen frontier by default within one call, stopping at the first host-delegation boundary", async () => {
   await withTempDir("advance-drain-", async (root) => {
     await writeFixtureRepo(root);
-    const options = { root, analyzers: SKIP_ANALYZERS, drain: true };
+    // The drain is the DEFAULT now (no opt-in flag); a bare call drains.
+    const options = { root, analyzers: SKIP_ANALYZERS };
 
     // First call starts at provider_confirmation (host-delegation, auto-completes
     // headlessly) and then drains the WHOLE deterministic run — intake, auto-fix,
@@ -131,7 +132,7 @@ test("computeStaleArtifacts is pure when emit:false and emitStalenessRecord writ
 test("a full drain emits at most ONE staleness stderr record for the whole round-trip", async () => {
   await withTempDir("advance-drain-staleness-", async (root) => {
     await writeFixtureRepo(root);
-    const options = { root, analyzers: SKIP_ANALYZERS, drain: true };
+    const options = { root, analyzers: SKIP_ANALYZERS };
 
     // The first call drains the whole deterministic intake→structure frontier.
     // Every intermediate re-derivation runs emit-off; only the boundary emits.
