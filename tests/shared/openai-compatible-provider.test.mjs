@@ -414,6 +414,143 @@ test("a degrade-exhausted request (both attempts fail) is fatal", async () => {
   expect(call, "first attempt + one retry, no loop").toBe(2);
 });
 
+// ---------------------------------------------------------------------------
+// CP-NODE-10 (CE-004 NIM guided-decoding lever): the provider attaches the
+// worker's JSON Schema supplied via `input.outputSchema` through the constraint
+// ladder (json_schema -> json_object -> none), the `guided_json` kill-switch
+// suppresses it, and a 400/422 rejection of the schema form degrades to a plain
+// json_object retry rather than failing. These pin the emit-time build lever.
+// ---------------------------------------------------------------------------
+
+const sampleSchema = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  type: "array",
+  items: { type: "object" },
+};
+
+function captureBodyFetch(onBody, response) {
+  const fn = async (_url, init) => {
+    onBody(JSON.parse(init.body));
+    return (
+      response ?? {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ files: [], result: {} }) } }],
+        }),
+        text: async () => "",
+      }
+    );
+  };
+  return fn;
+}
+
+test("CP-NODE-10: outputSchema is attached via response_format json_schema + guided_json/nvext.guided_json", async () => {
+  const { input } = makeCtx();
+  let captured;
+  const provider = new OpenAiCompatibleProvider(minimalConfig, {
+    fetchFn: captureBodyFetch((b) => { captured = b; }),
+  });
+  const res = await provider.launch({ ...input, outputSchema: sampleSchema });
+  expect(res.accepted, res.error).toBe(true);
+  // Strongest form: response_format json_schema with the schema inlined + strict.
+  expect(captured.response_format.type).toBe("json_schema");
+  expect(captured.response_format.json_schema.schema).toEqual(sampleSchema);
+  expect(captured.response_format.json_schema.strict).toBe(true);
+  // NIM / vLLM guided decoding: schema at top level AND under nvext.
+  expect(captured.guided_json).toEqual(sampleSchema);
+  expect(captured.nvext).toEqual({ guided_json: sampleSchema });
+});
+
+test("CP-NODE-10: no outputSchema => plain json_object, never a guided_json body", async () => {
+  const { input } = makeCtx();
+  let captured;
+  const provider = new OpenAiCompatibleProvider(minimalConfig, {
+    fetchFn: captureBodyFetch((b) => { captured = b; }),
+  });
+  await provider.launch(input); // no outputSchema on the input
+  expect(captured.response_format).toEqual({ type: "json_object" });
+  expect(captured.guided_json, "no schema => no guided_json").toBe(undefined);
+  expect(captured.nvext, "no schema => no nvext").toBe(undefined);
+});
+
+test("CP-NODE-10: guided_json:false kill-switch suppresses the schema form even when a schema is supplied", async () => {
+  const { input } = makeCtx();
+  let captured;
+  const provider = new OpenAiCompatibleProvider(
+    { ...minimalConfig, guided_json: false },
+    { fetchFn: captureBodyFetch((b) => { captured = b; }) },
+  );
+  const res = await provider.launch({ ...input, outputSchema: sampleSchema });
+  expect(res.accepted, res.error).toBe(true);
+  // Kill-switch on: falls back to the weaker json_object, no schema attached.
+  expect(captured.response_format).toEqual({ type: "json_object" });
+  expect(captured.guided_json).toBe(undefined);
+  expect(captured.nvext).toBe(undefined);
+});
+
+for (const status of [400, 422]) {
+  test(`CP-NODE-10: HTTP ${status} on the json_schema request degrades to a json_object retry`, async () => {
+    const { input } = makeCtx();
+    const bodies = [];
+    let call = 0;
+    const fetchFn = async (_url, init) => {
+      call += 1;
+      bodies.push(JSON.parse(init.body));
+      if (call === 1) {
+        return { ok: false, status, json: async () => ({}), text: async () => "no guided decoding" };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ files: [], result: { ok: true } }) } }],
+        }),
+        text: async () => "",
+      };
+    };
+    const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+    const res = await provider.launch({ ...input, outputSchema: sampleSchema });
+    expect(res.accepted, res.error).toBe(true);
+    expect(call, "schema attempt + one json_object retry").toBe(2);
+    // First attempt carried the schema; the retry stepped down to json_object.
+    expect(bodies[0].response_format.type).toBe("json_schema");
+    expect(bodies[1].response_format).toEqual({ type: "json_object" });
+    expect(bodies[1].guided_json, "the degrade drops guided_json").toBe(undefined);
+  });
+}
+
+test("CP-NODE-10: with guided_json wanted but json_object disabled, a schema-form rejection degrades straight to none", async () => {
+  const { input } = makeCtx();
+  const bodies = [];
+  let call = 0;
+  const fetchFn = async (_url, init) => {
+    call += 1;
+    bodies.push(JSON.parse(init.body));
+    if (call === 1) {
+      return { ok: false, status: 400, json: async () => ({}), text: async () => "no schema" };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ files: [], result: {} }) } }],
+      }),
+      text: async () => "",
+    };
+  };
+  // response_format_json:false means json_object is NOT a wanted intermediate step.
+  const provider = new OpenAiCompatibleProvider(
+    { ...minimalConfig, response_format_json: false },
+    { fetchFn },
+  );
+  const res = await provider.launch({ ...input, outputSchema: sampleSchema });
+  expect(res.accepted, res.error).toBe(true);
+  expect(call, "schema attempt + a straight-to-none retry").toBe(2);
+  expect(bodies[0].response_format.type).toBe("json_schema");
+  expect(bodies[1].response_format, "skips json_object, goes to no response_format").toBe(undefined);
+});
+
 test("createFreshSessionProvider constructs the openai-compatible provider", () => {
   const deps = {
     orchestratorName: "test",

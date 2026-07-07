@@ -22,9 +22,8 @@ const { createBrokeredRepairDispatch } = await import(
 );
 const { enforceSchemaAtEmit, buildWorkerRepairContract, resolveEmitConstraint } =
   await import("../../src/audit/contracts/schemaEnforcedEmit.ts");
-const { WorkerAuditResultsSchema, WORKER_SCHEMA_SOURCES } = await import(
-  "../../src/audit/contracts/workerSchemas.ts"
-);
+const { WorkerAuditResultsSchema, WORKER_SCHEMA_SOURCES, renderWorkerJsonSchema } =
+  await import("../../src/audit/contracts/workerSchemas.ts");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
@@ -372,6 +371,46 @@ test("F3 inv-7: enforced schema + registered RepairContract validator both resol
   expect(fromRegistry.validate(bad).errors.length > 0).toBeTruthy();
   expect(WorkerAuditResultsSchema.safeParse(bad).success).toBe(false);
   expect(fromRegistry.validate(bad).errors, "registry-sourced and export-sourced validators report identical errors — one schema").toEqual(fromExport.validate(bad).errors);
+});
+
+test("CP-NODE-10 (CE-004): the audit-result dispatch site plumbs outputSchema from renderWorkerJsonSchema — audit-result nodes only, tool-enforced", async () => {
+  // The lever must be TOOL-enforced, never host-remembered: the audit review
+  // dispatch site (rollingAuditDispatch) sets input.outputSchema from the canonical
+  // worker JSON Schema, while the remediate implement dispatch site (which builds
+  // LaunchFreshSessionInput via createLaunchInputForTask) leaves it undefined.
+
+  // (a) The canonical schema renders to a real, non-empty JSON Schema object.
+  const schema = renderWorkerJsonSchema("audit_results.schema.json");
+  expect(schema && typeof schema === "object", "audit_results schema renders to an object").toBeTruthy();
+  expect(schema.$id).toBe("audit_results.schema.json");
+  expect(schema.type, "the worker submission is an array of AuditResults").toBe("array");
+
+  // (b) The audit dispatch site sets outputSchema from the derived worker schema.
+  const auditSrc = await readFile(
+    join(repoRoot, "src/audit/cli/rollingAuditDispatch.ts"),
+    "utf8",
+  );
+  expect(
+    /outputSchema:\s*workerResultOutputSchema\(\)/.test(auditSrc),
+    "audit dispatch site sets input.outputSchema = workerResultOutputSchema()",
+  ).toBeTruthy();
+  expect(
+    /renderWorkerJsonSchema\(\s*["']audit_results\.schema\.json["']\s*\)/.test(auditSrc),
+    "the schema is single-sourced from renderWorkerJsonSchema, not a forked copy",
+  ).toBeTruthy();
+
+  // (c) The remediate implement dispatch site (createLaunchInputForTask) does NOT
+  //     set outputSchema — it stays undefined for non-audit-result nodes.
+  const remediateSrc = await readFile(
+    join(repoRoot, "src/remediate/phases/workerTasks.ts"),
+    "utf8",
+  );
+  const factoryStart = remediateSrc.indexOf("createLaunchInputForTask");
+  expect(factoryStart, "createLaunchInputForTask exists").toBeGreaterThan(-1);
+  expect(
+    /outputSchema/.test(remediateSrc),
+    "remediate's LaunchFreshSessionInput builder must NOT set outputSchema (audit-result nodes only)",
+  ).toBe(false);
 });
 
 test("F3 STRUCTURAL guard: F3 source files contain no hardcoded model literal", async () => {
