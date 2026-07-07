@@ -17,8 +17,12 @@
  * there is no remediate→audit cross-area import.
  */
 import type { Finding, FindingGrounding } from "../types/finding.js";
-// Repo-relative path normalizer is single-sourced in shared (drift-plan P7).
-import { normalizeRepoPath } from "./findingGrounding.js";
+// Repo-relative path normalizer + bare-basename resolver are single-sourced in
+// shared (drift-plan P7 / INV-B3-2).
+import {
+  normalizeRepoPath,
+  resolveBasenameToTrackedPath,
+} from "./findingGrounding.js";
 
 /**
  * Ground a single design finding against the set of real repository paths. The
@@ -38,7 +42,15 @@ export function groundDesignFinding(
       reason: "cites no component (affected_files is empty)",
     };
   }
-  const real = cited.filter((p) => knownPaths.has(p));
+  // A cited path grounds by exact membership (full repo-relative or dotfile-dir
+  // path — INV-B3-1) OR, for a bare basename, by uniquely resolving to one
+  // tracked full path (INV-B3-2). An ambiguous (>1-match) basename does not
+  // ground — the resolver returns undefined there.
+  const real = cited.filter(
+    (p) =>
+      knownPaths.has(p) ||
+      resolveBasenameToTrackedPath(p, knownPaths) !== undefined,
+  );
   if (real.length === 0) {
     return {
       status: "ungrounded",

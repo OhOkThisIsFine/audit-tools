@@ -19,6 +19,7 @@
  * E3 + P7).
  */
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { isAbsolute, join } from "node:path";
 import type { Finding, FindingGrounding } from "../types/finding.js";
 
@@ -35,9 +36,93 @@ export function normalizeForMatch(text: string): string {
  * grounding and any other consumer that matches a cited `affected_files` path
  * against a repo manifest. (Quote-and-verify resolves a cited path against the
  * filesystem instead, so it does not lowercase — see `verifyFindingGrounding`.)
+ *
+ * INV-B3-1: strips a leading `./` ONLY — it must NEVER strip the leading dot of a
+ * dotfile-directory segment (`.claude/…`, `.github/…`). The regex is anchored to
+ * `./` (dot-SLASH); do not broaden it to `/^\.\/?/` or similar, or every
+ * dotfile-dir citation silently un-grounds (it would no longer match its
+ * `git ls-files` form by exact membership).
  */
 export function normalizeRepoPath(p: string): string {
   return p.trim().replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+}
+
+/**
+ * True when `p` is a bare basename — a single path segment with no separator
+ * (`advance.ts`), as opposed to a nested repo-relative path (`src/x/advance.ts`)
+ * or a dotfile-dir path (`.claude/hooks/x.mjs`). A bare basename is the one shape
+ * that cannot be resolved by a naive `root/<name>` join when the real file is
+ * nested, so it is the shape {@link resolveBasenameToTrackedPath} rescues.
+ */
+export function isBareBasename(p: string): boolean {
+  const t = p.trim();
+  return t.length > 0 && !t.includes("/") && !t.includes("\\");
+}
+
+/**
+ * INV-B3-2: resolve a bare basename (`advance.ts`) to its UNIQUE tracked full
+ * path in the known-path corpus (`src/audit/orchestrator/advance.ts`). Returns
+ * the single matching corpus entry when exactly one tracked path has that
+ * basename; `undefined` when zero OR more-than-one path matches — an ambiguous
+ * basename stays a checkable signal, never a silent false-pass.
+ *
+ * Corpus-agnostic and case-insensitive on the basename: it works whether the
+ * caller's corpus is `normalizeRepoPath`-lowercased (the M-B3 gate) or
+ * case-preserving (the fs-resolving remediate consumers), and returns the corpus
+ * entry as-is so a case-preserving caller gets a real on-disk path back. Single
+ * source (drift-plan convention) — the gate, both orchestrators, and
+ * `groundDesignFinding` all resolve basenames through this one authority.
+ */
+export function resolveBasenameToTrackedPath(
+  basename: string,
+  knownPaths: ReadonlySet<string>,
+): string | undefined {
+  const target = basename.trim().replace(/\\/g, "/");
+  if (target.length === 0 || target.includes("/")) return undefined;
+  const targetLower = target.toLowerCase();
+  let match: string | undefined;
+  for (const path of knownPaths) {
+    const base = path.slice(path.lastIndexOf("/") + 1);
+    if (base.toLowerCase() === targetLower) {
+      if (match !== undefined) return undefined; // >1 match → ambiguous
+      match = path;
+    }
+  }
+  return match;
+}
+
+/**
+ * Case-preserving corpus of the tracked working-tree paths at `root`, via
+ * `git ls-files` (forward-slashed, trimmed). This is the sibling of the M-B3
+ * gate's `enumerateRepoTreePaths` (which `normalizeRepoPath`-lowercases for
+ * membership matching): the remediate consumers that resolve a basename and then
+ * read the file off disk (line counting) need the REAL on-disk case, so this one
+ * does not lowercase. Degrades to an empty set when git is missing / not a repo
+ * (callers then fall back to their existing `existsSync` check — monotonic, never
+ * a regression). OS-agnostic: `shell: false`, forward-slash output.
+ */
+export function enumerateTrackedFilePaths(root: string): Set<string> {
+  const known = new Set<string>();
+  let result;
+  try {
+    result = spawnSync("git", ["ls-files"], {
+      cwd: root,
+      encoding: "utf8",
+      shell: false,
+      windowsHide: true,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return known;
+  }
+  if (!result || result.status !== 0 || typeof result.stdout !== "string") {
+    return known;
+  }
+  for (const line of result.stdout.split("\n")) {
+    const path = line.trim().replace(/\\/g, "/");
+    if (path.length > 0) known.add(path);
+  }
+  return known;
 }
 
 /**

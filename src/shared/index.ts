@@ -673,6 +673,9 @@ export type { SourceReader } from "./validation/findingGrounding.js";
 export {
   normalizeForMatch,
   normalizeRepoPath,
+  isBareBasename,
+  resolveBasenameToTrackedPath,
+  enumerateTrackedFilePaths,
   quoteMatches,
   verifyFindingGrounding,
   findingIsGrounded,

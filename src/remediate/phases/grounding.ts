@@ -11,6 +11,11 @@
  * integrity check's replan concern, not a grounding concern.
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
+import {
+  enumerateTrackedFilePaths,
+  isBareBasename,
+  resolveBasenameToTrackedPath,
+} from "audit-tools/shared";
 import type { Finding } from "../state/types.js";
 import { resolveAffectedPath } from "../utils/fileIntegrity.js";
 
@@ -29,10 +34,33 @@ export interface AffectedFileGrounding {
 }
 
 /**
+ * A cited path is real (grounded) when it resolves on disk relative to `root`
+ * (a full repo-relative or dotfile-dir path — the join resolves it directly), OR
+ * when it is a bare basename that uniquely resolves to one tracked path in
+ * `corpus`. The basename branch (INV-B3-3) fixes the false-negative where a bare
+ * `advance.ts` for a NESTED tracked file (`src/audit/orchestrator/advance.ts`)
+ * failed `existsSync(root/advance.ts)` and was wrongly stripped as phantom. This
+ * only ADDS true-positives; a genuinely absent path / non-unique basename still
+ * fails (INV-B3-6, monotonic widening).
+ */
+function citedPathIsReal(
+  root: string,
+  path: string,
+  corpus: ReadonlySet<string>,
+): boolean {
+  if (existsSync(resolveAffectedPath(root, path))) return true;
+  if (isBareBasename(path)) {
+    return resolveBasenameToTrackedPath(path, corpus) !== undefined;
+  }
+  return false;
+}
+
+/**
  * Strip phantom `affected_files` paths from extracted findings in place.
  * A path is real when it resolves (relative to `root`) to an existing file or
- * directory. Returns what was stripped so the caller can repair, drop, and
- * record — nothing is silently lost.
+ * directory, or when a bare basename uniquely resolves to one tracked path.
+ * Returns what was stripped so the caller can repair, drop, and record — nothing
+ * is silently lost.
  */
 export function groundAffectedFiles(
   root: string,
@@ -40,13 +68,14 @@ export function groundAffectedFiles(
 ): AffectedFileGrounding {
   const phantomPathsByFinding = new Map<string, string[]>();
   const zeroRealPathFindingIds: string[] = [];
+  const corpus = enumerateTrackedFilePaths(root);
 
   for (const finding of findings) {
     const cited = finding.affected_files ?? [];
     if (cited.length === 0) continue;
     const phantoms = cited
       .map((af) => af.path)
-      .filter((path) => !existsSync(resolveAffectedPath(root, path)));
+      .filter((path) => !citedPathIsReal(root, path, corpus));
     if (phantoms.length === 0) continue;
 
     phantomPathsByFinding.set(finding.id, phantoms);
@@ -77,16 +106,45 @@ function fileLineCount(absolutePath: string): number {
 }
 
 /**
+ * Resolve a cited evidence path to an existing absolute path, or `undefined`.
+ * A full/dotfile path resolves by the `root` join; a bare basename that is not a
+ * top-level file resolves against the tracked-path `corpus` (INV-B3-3) so a
+ * nested `advance.ts` is not false-negatived by a naive `root/advance.ts` join.
+ */
+function resolveEvidencePath(
+  root: string,
+  citedPath: string,
+  corpus: ReadonlySet<string>,
+): string | undefined {
+  const direct = resolveAffectedPath(root, citedPath);
+  if (existsSync(direct)) return direct;
+  if (isBareBasename(citedPath)) {
+    const tracked = resolveBasenameToTrackedPath(citedPath, corpus);
+    if (tracked) {
+      const resolved = resolveAffectedPath(root, tracked);
+      if (existsSync(resolved)) return resolved;
+    }
+  }
+  return undefined;
+}
+
+/**
  * True when the evidence string cites at least one real repo path; a cited
  * line number must also exist in the file (a `path:9999` citation into a
- * 40-line file is not grounded).
+ * 40-line file is not grounded). A bare basename resolves against the tracked
+ * corpus (INV-B3-3); `corpus` is supplied by the caller so it is enumerated once
+ * per pass, and defaults to a fresh enumeration for standalone callers.
  */
-export function evidenceCitesRealPath(root: string, evidence: string): boolean {
+export function evidenceCitesRealPath(
+  root: string,
+  evidence: string,
+  corpus: ReadonlySet<string> = enumerateTrackedFilePaths(root),
+): boolean {
   for (const match of evidence.matchAll(EVIDENCE_PATH_TOKEN_RE)) {
     const citedPath = match.groups?.path;
     if (!citedPath) continue;
-    const absolute = resolveAffectedPath(root, citedPath.trim());
-    if (!existsSync(absolute)) continue;
+    const absolute = resolveEvidencePath(root, citedPath.trim(), corpus);
+    if (!absolute) continue;
 
     const line = match.groups?.line;
     if (line === undefined) return true;
@@ -118,9 +176,10 @@ export function groundEvidence(
   findings: Finding[],
 ): EvidenceGrounding {
   const ungroundedFindingIds: string[] = [];
+  const corpus = enumerateTrackedFilePaths(root);
   for (const finding of findings) {
     const grounded = (finding.evidence ?? []).some((entry) =>
-      evidenceCitesRealPath(root, entry),
+      evidenceCitesRealPath(root, entry, corpus),
     );
     finding.evidence_grounded = grounded;
     if (!grounded) {

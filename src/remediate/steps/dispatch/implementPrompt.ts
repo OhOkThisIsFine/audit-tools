@@ -6,6 +6,9 @@ import {
   mostCapableTier,
   findingLead,
   renderFindingBadgeBody,
+  isBareBasename,
+  resolveBasenameToTrackedPath,
+  enumerateTrackedFilePaths,
 } from "audit-tools/shared";
 import { findingNeedsVerificationBeforeFix } from "audit-tools/shared";
 import type { RemediationState } from "../../state/store.js";
@@ -509,6 +512,33 @@ build-free checks pass; otherwise mark the item blocked with the failure in
 `;
 }
 
+/**
+ * INV-B3-5: resolve a cited source path to the token the worker should open.
+ *
+ * A bare basename (`advance.ts`) that uniquely resolves to one tracked path
+ * (`src/audit/orchestrator/advance.ts`) is rewritten to that tracked path FIRST,
+ * so it never surfaces as a broken `<worktreeRoot>/advance.ts` prefix that
+ * misdirects the worker to a non-existent top-level file. Full / dotfile-dir /
+ * already-absolute / drive-letter paths pass through unchanged; when a worktree
+ * root is present, a relative path is prefixed onto it (unchanged behaviour). An
+ * ambiguous or unresolvable basename is left as-is (monotonic — never a
+ * regression on paths that already resolved).
+ */
+export function resolveCitationPathForPrompt(
+  rel: string,
+  worktreeRoot: string | undefined,
+  trackedPaths: ReadonlySet<string>,
+): string {
+  let target = rel;
+  if (isBareBasename(rel)) {
+    const resolved = resolveBasenameToTrackedPath(rel, trackedPaths);
+    if (resolved) target = resolved;
+  }
+  if (!worktreeRoot) return target;
+  if (target.startsWith("/") || /^[A-Za-z]:[/\\]/.test(target)) return target;
+  return toPromptPathToken(join(worktreeRoot, target));
+}
+
 export function implementPrompt(
   block: RemediationBlock,
   state: RemediationState,
@@ -543,11 +573,14 @@ export function implementPrompt(
   const rootDisplay = toPromptPathToken(effectiveRoot);
   const resultDisplay = toPromptPathToken(resultPath);
 
-  // Prefix each source file path with the worktree root when applicable.
+  // Tracked-path corpus for bare-basename → tracked-path resolution (INV-B3-5),
+  // enumerated once per prompt from the effective root (a worktree shares the
+  // repo's tracked set). Empty when git is unavailable → basename pass-through.
+  const trackedPaths = enumerateTrackedFilePaths(effectiveRoot);
+  // Prefix each source file path with the worktree root when applicable, after
+  // resolving a bare basename to its unique tracked path.
   function resolveFilePath(rel: string): string {
-    if (!worktreeRoot) return rel;
-    if (rel.startsWith("/") || /^[A-Za-z]:[/\\]/.test(rel)) return rel;
-    return toPromptPathToken(join(worktreeRoot, rel));
+    return resolveCitationPathForPrompt(rel, worktreeRoot, trackedPaths);
   }
 
   const worktreeNote = worktreeRoot
