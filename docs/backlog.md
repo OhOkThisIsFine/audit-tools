@@ -29,6 +29,29 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
+  recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
+  - **Convergence guard keys on the reviewer-supplied counterexample *id string*, not CE content.** Two independent
+    adversarial rounds each labeled their (genuinely distinct) top CE `CE-001`, so the judge↔repair loop read "same CE
+    re-accepted after a repair" and raised a FALSE non-convergence block that escalated to a user decision — while a
+    real, new, accepted defect was being correctly repaired. Fix: key convergence detection on a CE content /
+    violated-obligation fingerprint, or auto-mint unique CE ids; never trust the reviewer's free-text id.
+  - **Test-plan re-derive doesn't apply the empty-delta copy-forward.** The shipped B1 incremental re-convergence
+    (CP-NODE-2) covers contract artifacts, but a `test_validator_plan` re-derive still presents an ALL-empty skeleton
+    even though `test-plan-carry.json` holds the prior assertions and ~118/128 specs are byte-identical carries — the
+    host had to script the carry every round. Extend the copy-forward (auto-carry unchanged specs by obligation_id;
+    blank only specs whose obligation text changed) to the test plan.
+  - **Drafting-prompt vs finalized-artifact schema disagree on `inputs`/`outputs` shape.** The per-module
+    contract-drafting prompt lets drafters author `inputs`/`outputs` as objects, but the `finalized_module_contracts`
+    validator requires `string[]`; the finalize step carries the objects through → validate-artifact rejects them.
+    Single-source the shape (coerce/normalize at finalize, or constrain the drafting schema).
+  - **Cross-file contract/invariant regressions escape node-local verify and surface only at ship-time CI.** Per-node
+    implement workers verify their OWN targeted tests but don't run the repo-wide guards their refactors break
+    (id-glossary INV-family registry, INV-WH raw-spawn, release-contract source-shape, drain-lifecycle analyzer-cache
+    coupling) — four such breaks were caught one-CI-cycle-at-a-time across 3 failed publishes. The implement/verify
+    (or accept-node) step should run the repo-wide contract/invariant guard suite against the merged tree, not just
+    node-local tests. Extends [[worktree-tests-miss-integration-guards]].
+
 - **NIM/Codex dispatch fix set — from a real run + adversarial review (2026-07-07).** `audit-code` in a Codex
   host against an external repo, NIM (openai-compatible) backend, Claude quota exhausted → a 13-issue cascade.
   Investigated + adversarially reviewed: the "host-proposes/broker-disposes" replan was **refuted** (`admitBatch`
@@ -65,123 +88,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     Sole-consumer, no back-compat shim.
   B2 (host override at Gate-0) + the cost↔speed dial + free-pool max are the forward-track evolution of this —
   see *Forward tracks*. Issue 13 (Codex session usage/approval limit) = env, not ours.
-
-- **Remediate contract/implement pipeline — dogfood frictions (fix in tooling).**
-  Five open frictions surfaced driving one large `/remediate-code` run:
-  - **Contract-pipeline re-convergence must be incremental — a localized change must not re-author the whole
-    downstream chain.** Today a single small upstream edit re-stales and fully re-materialises every downstream
-    contract/review artifact (a whole test-validator plan + a whole assessment report, etc.); on a large mixed plan
-    this whole-artifact re-author was the dominant cost of a real run (dozens of full rewrites across many
-    round-trips). Staleness is whole-artifact, and re-emit is always a fresh full author — even when the payload is
-    byte-identical. Three invariants the tool must hold:
-    - **Item-scoped re-validation (fail-closed).** A localized upstream change must re-validate and re-emit only the
-      downstream *items* (obligations / specs / findings) that actually derive from the changed upstream item — not
-      the entire artifact. Where per-item provenance can't be established for a given item (e.g. a finding that
-      reasons across modules), that item falls back to full re-validation, so scoping never *under*-invalidates and a
-      real staleness is never silently missed. (The observed "plan ↔ assessment ping-pong" is *not* a dependency
-      cycle — the edge is one-way; the churn was whole-artifact restaling off shared upstreams, which item-scoping
-      dissolves.)
-    - **Empty-delta re-emit is a deterministic copy-forward, never an LLM dispatch.** When an artifact's (or an
-      item's) upstream semantic-projection delta is empty, the tool re-envelopes the prior payload forward
-      deterministically with zero worker dispatch. A verbatim carry-forward must never cost an LLM round-trip (a copy
-      job is never a dispatch).
-    - **Batch all gate failures into one report.** Every structural-gate failure currently present in the plan
-      surfaces in a single report at once, not one-batch-per-round-trip (no fix→re-run→new-failure thrash).
-    Reinforces [[risk-tier-loop-laps-cheap-vs-heavy]] and the self-scaling-pipeline direction
-    [[self-scaling-pipeline-not-forked-paths]]; the copy-forward invariant extends [[deterministic-contract-finalization]].
-  - **Coverage gate not exposed in `validate-artifact`.** The positive+negative pairing + CE-006 negative-scoping gate
-    fires only at `next-step`, so an authoring agent self-validates "ok" then fails the gate → round-trips. Expose it
-    in `validate-artifact`. Also the polarity classifier keyword-heuristic misreads a satisfied-path assertion whose
-    success case is a block/exit-2 action as "no positive" → the gate error should hint the explicit `POSITIVE:`/
-    `NEGATIVE:` label escape hatch.
-  - **Source-grounded citation gate mangles dotfile + bare-filename citations.** M-B3 strips the leading dot from
-    `.claude`/`.github` paths and doesn't resolve bare filenames (`advance.ts` vs the full path), rejecting citations
-    that point at real tracked files; nodes touching only dotfile dirs were un-groundable until a non-dotfile path
-    was added. Handle dotfile dirs + basename resolution.
-  - **`--input` last-wins silently drops earlier inputs.** `next-step --input a --input b` kept only `b`, silently
-    dropping `a` from the source manifest (had to hand-edit `source-manifest.json`). Accept multiple `--input`
-    (union) or error on the extra.
-  - **Module decomposition can scope a module to the wrong files.** opencode-union-ceiling's `file_scope` was assigned
-    to the thin `providers/opencodeProvider.ts` re-export shims (no logic) instead of the real installers
-    (`opencodePermissions.ts` + `scripts/{audit,remediate}/postinstall.mjs` + `src/remediate/index.ts` + the two
-    `wrapper/*-opencode.mjs`); only caught when the drafting agent read source. Decomposition should verify where
-    named logic actually lives before assigning scope. Reinforces [[front-load-broad-search-before-contract-authoring]].
-
-- **META — the friction-capture mechanism did not capture the run's real friction (2026-07-06).** The close-out
-  walk exists, but *detection* under-delivered: the run's biggest friction (the process inefficiency above) was
-  invisible to the tool's own capture and had to be hand-authored — and even then I under-captured it on the first
-  pass. The capture mechanism is really host-attestation wearing a detection label. Specifics:
-  - **What it DID capture:** the tool auto-wrote ~7 per-contract-step `.audit-tools/remediation/friction/CONTRACT-*.json`
-    records, each a single-line `frictions[]` entry with category `"trap"` (e.g. "implementation_planning re-emitted:
-    a promoted-plan finding cited a component absent from the tree — M-B3 citation grounding"). Narrow, mechanical,
-    per-event.
-  - **What it did NOT capture:** (a) the DOMINANT friction — pervasive process inefficiency (full-cascade re-run on
-    localized fixes, `test_plan`↔`assessment` ping-pong, re-author-not-copy-forward, ~40 round-trips) — never
-    detected; (b) the implement-dispatch false-resolve (surfaced only as terse stdout log lines, never a friction);
-    (c) host-side waste (dispatching agents for copy jobs — outside the tool's view).
-  - **The meta-failure modes:**
-    1. **Gate-invisible shape.** Auto-capture writes `frictions[]`/`"trap"`; the close-out gate counts only
-       `open_observations[]`/`category_attestations[]` over the three categories — so the tool's OWN capture doesn't
-       satisfy the tool's OWN gate, and the host starts from a blank record.
-    2. **Per-event, never aggregated.** N identical re-emit events were logged as N isolated traps; the AGGREGATE
-       ("re-emit churn is the run's biggest cost") is the real friction and is never recognized. The raw signal
-       existed (7 trap files) — the loss was between events-logged and friction-recognized.
-    3. **Blind to cost/inefficiency.** It fires only on discrete failure events (a mis-ground, a re-emit) and has no
-       notion of measuring round-trip count / verbatim re-author count / tokens — so the most important friction
-       class, "a run that is mostly overhead," is exactly what it cannot see.
-    4. **Capture is host-attestation, not detection.** The stop-gate forces the HOST to walk the categories and
-       hand-write observations; the tool detects almost nothing IN those categories, so a rushed host under-captures.
-       This is the enforce-in-tooling gap under [[meta-audit-friction-must-be-tool-enforced]]: detection is near-empty
-       and the substantive capture is left to host discretion (which under-delivered here — twice: an empty first
-       pass, then a too-thin re-emit-churn bullet).
-  - **What SHOULD happen:** (a) auto-capture emits into the SAME `open_observations[]` shape (with a real category)
-    the gate reads, so tool detection SEEDS the walk instead of the host starting from nothing; (b) AGGREGATE repeated
-    events (N re-emits of one artifact → one `inefficient_feeding` observation "re-emit churn, cost N round-trips");
-    (c) measure + surface COST signals (per-phase round-trip count, verbatim re-author count, token spend) so
-    inefficiency is DETECTED, not just discrete failures; (d) pre-populate the host's category walk with the detected
-    observations so the host CONFIRMS/augments rather than authoring from a blank record. Generalizes
-    [[meta-audit-friction-must-be-tool-enforced]] from "enforce the walk happens" to "detect the substance the walk
-    is supposed to surface — especially cost/inefficiency, not just discrete traps."
-
-- **HIGH — remediate dispatch worktree-wipe + state-desync (concurrent `accept-node` corrupts sibling
-  in-flight nodes; 2026-07-06).** Driving implement waves through `remediate-code accept-node` while sibling
-  nodes are still in flight triggers two coupled failure modes: **(1) worktree-wipe** — a concurrent stale-sweep
-  prunes / `git reset`s sibling per-node worktrees under `.audit-tools/worktrees/`, wiping uncommitted work; a
-  fully-emptied worktree resolves up to MAIN so the build-free per-node verify **false-greens** against unrelated
-  code; **(2) state-desync** — `accept-node` reports nodes `accepted`/`resolved` that never landed on the run
-  branch (their worktree branch refs were clobbered to a sibling's commit), so `state.json` says resolved while
-  git says missing → the run **false-closes** with work absent. Fixes to build: (a) isolate/lock each node's
-  worktree so no node's `accept` can touch a sibling ref; (b) build-free verify must **fail-loud** when the git
-  toplevel ≠ the node's worktree root (never resolve up to MAIN); (c) reconcile accept-disposition vs
-  run-branch ancestry before trusting `resolved` (`git cat-file -e HEAD:<expected-file>`); (d) never let a
-  concurrent stale-sweep prune a worktree with in-flight/uncommitted work. Recovery procedure preserved in
-  [[remediate-max-sweep-run-2026-07-06]]. Relates [[implement-dispatch-strands-nodes]].
-
-- **Regen-drain must be safe and active on the primary path — not a dormant, unsafe opt-in.** Collapsing a
-  chain of consecutive deterministic regen steps into one host round-trip + one consolidated staleness record
-  (instead of N of each) is a real recurring win on the conversation-first path — every cold start and every
-  migration-triggered staleness cascade. Today it ships as an opt-in (`advanceAudit` drain) that **no production
-  caller enables**, and it is *unsafe* to enable as-is: its stop-gate reads executor-registry granularity, but
-  two host-input pauses — analyzer-install consent and low-confidence edge-reasoning — live *inside* a
-  deterministic executor and are invisible to that gate, so a naive drain silently skips operator consent (a
-  latent correctness footgun, not merely efficiency). Invariants to hold:
-  - **A drain must stop at EVERY host-input pause**, including the sub-executor interactive folds not
-    distinguishable at executor-registry granularity. The fold that owns a pause is the single authority on where
-    a host-stop belongs — surface that signal so the drain (and the primary step loop) always halt there.
-  - **The safe drain is the default behavior of the primary path — no opt-in flag** (a needed manual flag is a
-    bug signal). Any future autonomy driver is merely a *consumer* of the same fold-aware stop signal, never a
-    second code path that re-implements the fold boundaries.
-
-- **Shipping from a linked worktree forces a manual FF + rebuild dance (observed 2026-07-05).** The release
-  script (`scripts/release-and-publish.mjs`) hard-guards on being ON the default branch (`git branch
-  --show-current` must equal `main`), but laps run on a `claude/<name>` feature-branch worktree while `main`
-  is checked out in the PRIMARY worktree. So a ship = push the feature branch to `main` (FF), then manually:
-  update the primary worktree's `main` (`git -C <primary> merge --ff-only`), **rebuild its stale `dist/`**
-  (else `npm run check`'s pre-tag gate fake-fails on "missing export" — the worktree trap), then run the
-  release from the primary worktree. `/ship` doesn't automate this. Follow-up: teach `/ship` (or the release
-  script) to accept a linked-worktree/feature-branch state — e.g. release straight from the current worktree
-  when its HEAD already equals `origin/main`, or auto-FF+rebuild the primary worktree — so a ship from a lap
-  worktree is one command, not a five-step hand dance.
 
 - **Pipeline profiling is now standing (2026-07-06).** Always-on timing across test + release/publish,
   single-sourced in `scripts/shared/profile.mjs`; ledgers land in `.audit-tools-profile/` (gitignored) +
@@ -314,13 +220,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     opt-in? Undecided pending a written explainer of what's actually risky (multi-account / aggregator ToS-ban
     exposure, token security) before the owner lands it.
 
-- **Cost-first routing — collision-price preference (carried from W1, open).** Design of record
-  [`spec/cost-first-routing.md`](../spec/cost-first-routing.md), durable design in memory [[cost-first-routing-design]].
-  W2 core + interactive Gate-0 (host-prompt visibility, operator reorder, host-roster-at-Gate-0) are shipped —
-  see `docs/HANDOFF.md` T5-0. `resolveModelStatics` dedupes a model id served by multiple providers
-  first-sorted-provider-wins, so a reseller markup could win over the native/cheapest price. Prices
-  largely agree across providers, so this is an approximation, not a bug — revisit only if per-provider
-  pricing matters (would need (provider, model) keying in the snapshot).
 - **models.dev static window can over-state a specific deployment (carried from W1).** The snapshot lists e.g.
   `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
   work blocks off the static rung. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding —
@@ -339,14 +238,14 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   Do NOT delete working proactive quota sources (`BaseHttpQuotaSource` + one-array register is already clean);
   `copilot` is correctly broker-only.
 
-- **Schema-enforced generation — CE-004 residual (env-bound only).** The always-on conversation host
-  (`claude-code`) advertises no API-level constraint mechanism → on the primary path this reduces to the
-  repair floor (no emit-time prevention). Unblocks only on a provider gaining a constraint endpoint.
-  - **⬇ Build lever (openai-compatible / NIM path):** NIM/vLLM/OpenAI-compatible endpoints *do* support
-    guided decoding (`guided_json` / `response_format: json_schema`). Plumbing the AuditResult schema into
-    that provider's request is a real, contained build that gives emit-time constraint on that path (the
-    claude-code host stays repair-floor — genuinely host-blocked, not a defect). **⬇ Live-run watch** on an
-    openai-compatible run: results conform on first emit (repair rounds for schema-shape errors drop to ~0).
+- **Schema-enforced generation — CE-004 residual (provider-blocked only).** The openai-compatible / NIM
+  guided-decoding path is **SHIPPED** — the AuditResult `outputSchema` is plumbed through and the dispatch site
+  sets it, so those endpoints get emit-time constraint (`guided_json` / `response_format: json_schema`). The
+  sole residual is the always-on conversation host (`claude-code`), which advertises no API-level constraint
+  mechanism → on that path CE-004 reduces to the repair floor (no emit-time prevention). Genuinely
+  host-blocked, not a defect; unblocks only if that host gains a constraint endpoint.
+  - **⬇ Live-run watch** on an openai-compatible run: results conform on first emit (repair rounds for
+    schema-shape errors drop to ~0).
 
 - **Tool-enforced dispatch broker with capability-tiered driver.** Desired end-state: (1) a gated
   primitive set as the single dispatch chokepoint (read quota, estimate tokens locally, dispatch/await);
@@ -386,12 +285,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     fallback — confirm the quota reads are non-empty and move as the run consumes budget. Codex + Claude are
     reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
     real endpoint is reachable.
-
-- **Low-pri UX: surface `intent_checkpoint` reuse to the host.** When a run reuses an existing
-  `intent_checkpoint.json`, the host gets no visible notice. Reuse is by design (`conceptualDispatch.ts`:
-  `intent_checkpoint.design_review` = source of truth); the only gain is transparency — surface
-  "reusing intent from <ts>: <lenses/depth>" so the host knows intake was intentionally skipped. Not a bug.
-  [[guidance-discovery-contextualizes]]
 
 ## Deferred / waiting
 
