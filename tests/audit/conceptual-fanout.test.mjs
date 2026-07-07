@@ -246,3 +246,102 @@ test("resolveConceptualReviewSettings threads perspective_tier from session conf
   });
   expect(s.perspective_tier).toBe("small");
 });
+
+// ── CP-NODE-11: intent-checkpoint reuse notice ────────────────────────────────
+
+test("reuse_notice: surfaced when the checkpoint design_review drives the settings", () => {
+  const bundle = minimalBundle({
+    confirmed_at: "2026-02-03T04:05:06Z",
+    design_review: { conceptual_depth: "deep", perspectives: 3 },
+    lens_selection: { include: ["security"], exclude: ["performance"] },
+  });
+  const s = resolveConceptualReviewSettings(bundle, {});
+  expect(s.reuse_notice).toBeTruthy();
+  expect(s.reuse_notice).toMatch(/Reusing intent from 2026-02-03T04:05:06Z/);
+  expect(s.reuse_notice).toMatch(/conceptual depth deep/);
+  expect(s.reuse_notice).toMatch(/\+security/);
+  expect(s.reuse_notice).toMatch(/-performance/);
+});
+
+test("reuse_notice: absent when the checkpoint carries no design_review", () => {
+  const s = resolveConceptualReviewSettings(minimalBundle(), {
+    design_review: { conceptual_depth: "deep" },
+  });
+  expect(s.reuse_notice).toBe(undefined);
+});
+
+test("reuse_notice: lens list is content-sorted (stable, no text churn)", () => {
+  const a = resolveConceptualReviewSettings(
+    minimalBundle({
+      design_review: { conceptual_depth: "shallow" },
+      lens_selection: { include: ["security", "correctness", "architecture"] },
+    }),
+    {},
+  );
+  const b = resolveConceptualReviewSettings(
+    minimalBundle({
+      design_review: { conceptual_depth: "shallow" },
+      // same set, different source order — must render identically
+      lens_selection: { include: ["architecture", "security", "correctness"] },
+    }),
+    {},
+  );
+  expect(a.reuse_notice).toBe(b.reuse_notice);
+  expect(a.reuse_notice).toMatch(/\+architecture,correctness,security/);
+});
+
+test("reuse_notice: does not alter the reuse decision (byte-identical settings)", () => {
+  const withNotice = resolveConceptualReviewSettings(
+    minimalBundle({
+      design_review: { conceptual_depth: "deep", perspectives: 4 },
+      lens_selection: { include: ["security"] },
+    }),
+    { design_review: { max_units: 5, perspective_tier: "small" } },
+  );
+  const { reuse_notice, ...decision } = withNotice;
+  expect(reuse_notice).toBeTruthy();
+  expect(decision).toEqual({
+    max_units: 5,
+    conceptual_depth: "deep",
+    perspectives: 4,
+    perspective_tier: "small",
+  });
+});
+
+test("reuse_notice: degrades cleanly on a partial checkpoint", () => {
+  // design_review present but empty; no confirmed_at content; no lens_selection.
+  const bundle = minimalBundle({ confirmed_at: "", design_review: {} });
+  const s = resolveConceptualReviewSettings(bundle, {});
+  expect(s.conceptual_depth).toBe("shallow"); // default preserved
+  expect(s.reuse_notice).toMatch(/Reusing intent from unknown/);
+  expect(s.reuse_notice).toMatch(/all lenses/);
+  expect(s.reuse_notice).toMatch(/conceptual depth shallow/);
+});
+
+test("prepareConceptualDispatch: prepends the reuse notice to instructionLines (shallow + deep)", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-conceptual-"));
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+  const notice = "_Reusing intent from 2026-02-03T04:05:06Z: +security; conceptual depth shallow._";
+
+  const shallow = await prepareConceptualDispatch({
+    artifactsDir,
+    bundle: minimalBundle(),
+    settings: { conceptual_depth: "shallow", reuse_notice: notice },
+  });
+  expect(shallow.instructionLines[0]).toBe(notice);
+
+  const deep = await prepareConceptualDispatch({
+    artifactsDir,
+    bundle: minimalBundle(),
+    settings: { conceptual_depth: "deep", perspectives: 3, reuse_notice: notice },
+  });
+  expect(deep.instructionLines[0]).toBe(notice);
+
+  // absent notice → no leading blank / churn line
+  const noNotice = await prepareConceptualDispatch({
+    artifactsDir,
+    bundle: minimalBundle(),
+    settings: { conceptual_depth: "shallow" },
+  });
+  expect(noNotice.instructionLines[0]).toMatch(/\*\*Conceptual review\*\*/);
+});

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   type DispatchModelHint,
   type DispatchModelTier,
+  type IntentCheckpoint,
   type SessionConfig,
   charterReviewDisposition,
 } from "audit-tools/shared";
@@ -32,6 +33,41 @@ export interface ConceptualReviewSettings {
    * (Phase C); until then it records the disposition on the settings contract.
    */
   flag_for_human?: boolean;
+  /**
+   * Host-visible one-liner surfaced when the settings were REUSED from an existing
+   * `intent_checkpoint.design_review` (rather than freshly confirmed this step).
+   * Prepended to `ConceptualDispatch.instructionLines` so the host can see, in
+   * `current-prompt.md`, which prior intent is being re-applied without re-running
+   * `confirm_intent`. Present only on reuse; absent when the checkpoint carries no
+   * `design_review`. Purely informational — it never alters the reuse DECISION
+   * (the resolved depth/perspectives/tier are byte-identical with or without it),
+   * and the lens list it renders is content-sorted so the text never churns.
+   */
+  reuse_notice?: string;
+}
+
+/**
+ * Render the host-visible reuse notice when a prior `intent_checkpoint.design_review`
+ * drives this dispatch. Content-sorted lens list keeps the text stable (no churn),
+ * and every field degrades cleanly on a partial checkpoint: a missing `confirmed_at`
+ * renders `unknown`, an absent/empty lens selection renders `all lenses`, and a
+ * missing depth falls back to the resolved default `shallow`.
+ */
+function renderReuseNotice(
+  checkpoint: NonNullable<IntentCheckpoint["design_review"]>,
+  confirmedAt: string | undefined,
+  lensSelection: IntentCheckpoint["lens_selection"],
+  resolvedDepth: "shallow" | "deep",
+): string {
+  const when = confirmedAt && confirmedAt.length > 0 ? confirmedAt : "unknown";
+  const included = [...(lensSelection?.include ?? [])].sort();
+  const excluded = [...(lensSelection?.exclude ?? [])].sort();
+  const lensParts: string[] = [];
+  if (included.length > 0) lensParts.push(`+${included.join(",")}`);
+  if (excluded.length > 0) lensParts.push(`-${excluded.join(",")}`);
+  const lenses = lensParts.length > 0 ? lensParts.join(" ") : "all lenses";
+  const depth = checkpoint.conceptual_depth ?? resolvedDepth;
+  return `_Reusing intent from ${when}: ${lenses}; conceptual depth ${depth}._`;
 }
 
 /**
@@ -49,13 +85,26 @@ export function resolveConceptualReviewSettings(
   const flagForHuman = (checkpoint?.charters ?? []).some(
     (charter) => charterReviewDisposition(charter) === "flag_for_human",
   );
+  const conceptualDepth =
+    checkpoint?.conceptual_depth ?? cfg?.conceptual_depth ?? "shallow";
+  // Surface a reuse notice only when a prior checkpoint design_review drives the
+  // dispatch. The notice is purely informational — it is derived AFTER the
+  // decision fields above so it can never change them (reuse stays byte-identical).
+  const reuseNotice = checkpoint
+    ? renderReuseNotice(
+        checkpoint,
+        bundle.intent_checkpoint?.confirmed_at,
+        bundle.intent_checkpoint?.lens_selection,
+        conceptualDepth,
+      )
+    : undefined;
   return {
     max_units: cfg?.max_units,
-    conceptual_depth:
-      checkpoint?.conceptual_depth ?? cfg?.conceptual_depth ?? "shallow",
+    conceptual_depth: conceptualDepth,
     perspectives: checkpoint?.perspectives ?? cfg?.perspectives,
     perspective_tier: cfg?.perspective_tier,
     ...(flagForHuman ? { flag_for_human: true } : {}),
+    ...(reuseNotice ? { reuse_notice: reuseNotice } : {}),
   };
 }
 
@@ -137,6 +186,7 @@ export async function prepareConceptualDispatch(opts: {
       deep: false,
       conceptualResultsPath,
       instructionLines: [
+        ...(settings.reuse_notice ? [settings.reuse_notice] : []),
         "**Conceptual review** (generative): dispatch a subagent that reads the prompt at the conceptual prompt path and writes findings to the conceptual results path.",
       ],
       artifactPaths: {
@@ -216,6 +266,7 @@ export async function prepareConceptualDispatch(opts: {
     deep: true,
     conceptualResultsPath,
     instructionLines: [
+      ...(settings.reuse_notice ? [settings.reuse_notice] : []),
       `**Conceptual review** (generative, deep — ${total}-perspective fan-out):`,
       `1. Dispatch these ${total} independent perspective subagents **in parallel**. Each reviews only through its own value system and must NOT see the others' output:`,
       ...perspectiveLines,
