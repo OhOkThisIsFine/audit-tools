@@ -8,7 +8,8 @@
 
 ## Live state
 
-- **v0.32.27 published on npm as `latest`.** The "everything code-fixable" backlog sweep landed (11 nodes) **plus
+- **v0.32.28 published on npm as `latest`.** Latest lap shipped the NIM/Codex dispatch-fix lean tranche (see the
+  dedicated bullet below). Prior (v0.32.27): the "everything code-fixable" backlog sweep landed (11 nodes) **plus
   the HIGH remediate worktree-safety fix** — per-node worktree isolation + total lock order + OID-ancestry
   reconcile + `resolved_no_change` captured-OID grounding, so concurrent `accept-node` can no longer wipe sibling
   in-flight worktrees or desync `state.json` from git. **Conceptual design-review Phases A–E all landed** (charter
@@ -17,12 +18,15 @@
   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
   [[conceptual-design-review-design]]. Per-lap shipped detail is NOT narrated here (changelog creep — see `git log`
   and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **Immediate next: the concurrent NIM/Codex dispatch fix set** (`audit-code` in a Codex host, NIM/openai-compatible
-  backend, Claude quota exhausted → a 13-issue cascade; tool-proposes/host-overrides). Ship order = lean halt fix
-  (tolerant `result` parse, bounded fetch retry+backoff, `declaredCap` source-pool cap, in-loop auto-retry with
-  backoff), then host-identity sourcing (default host provider off `isSelfSpawnBlocked`/`insideCodex`, stop
-  defaulting `claude-code`), then C3 AIMD adaptive ceiling, C1 real source-pool budget, A1 provider rename. Full
-  detail + file:lines in `docs/backlog.md` → Open bugs + [[host-provider-misattribution-nim-codex]].
+- **NIM/Codex dispatch fix set — lean halt fix ✅ SHIPPED (v0.32.28).** C2 tolerant result parse + C4 bounded
+  transient fetch retry + C3 per-pool concurrency cap (`source.quota.max_concurrent` → rolling-engine in-flight
+  ceiling + host `declaredCap`; the real 33/32 overrun fix) + D1 bounded no-progress retry + D2 recovery-path
+  handoff — all green + adversarially reviewed. **Immediate next: B1 host-identity sourcing** — default the host
+  provider off the existing `isSelfSpawnBlocked("codex")`/`insideCodex` signal (reuse, no new env-sniff) with a
+  `--host-provider` override; stop defaulting `claude-code` (fixes the attended-mode host-complement wall). Then
+  C3-AIMD adaptive ceiling (mutable per-pool ceiling + drop-requeue→decrement-retry rework), C1 real source-pool
+  budget (converge onto `sources[].quota`), A1 rename `local-subprocess`→`worker-command`. Full detail + file:lines
+  in `docs/backlog.md` → Open bugs + [[host-provider-misattribution-nim-codex]].
 - **Then:** the cost↔speed dispatch dial + free-pool maximization forward track (lands ON TOP of the kept
   cost-first router; B2 host-reorder seed, capability floor, free-pool saturation gated by C3) + the free/cheap
   multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;

@@ -62,14 +62,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   no-progress guard; attended (`--host-can-dispatch-subagents`) → the complement review routes to the host pool
   mis-keyed `claude-code` (exhausted). Full root-cause + decided direction + file:lines in
   [[host-provider-misattribution-nim-codex]]. Fixes to build, in ship order:
-  - **Lean halt fix first (headless erroring-packets):** (C2) tolerant `openai-compatible` `result` parse —
-    treat top-level content as the result when the wrapper field is absent (schema-gated downstream, can't ingest
-    garbage); (C4) bounded fetch retry+backoff on transient failures (5xx/429/524/timeout/reject); (C3-floor)
-    express a source-pool concurrency cap as `declaredCap` so `admitBatch`'s cap branch fires — NIM source pools
-    are built `hostConcurrencyLimit: null` so the cap is skipped → the 33/32 overrun; (D1) wire the existing
-    bounded auto-retry (`runInProcessAuditDispatch`) into the interactive loop **with backoff** so a transient
-    all-error pass self-heals instead of halting; (D2) name the `ingest-results --results` recovery path in the
-    blocked handoff.
+  - **Lean halt fix — ✅ SHIPPED (v0.32.28, headless erroring-packets):** (C2) tolerant `openai-compatible`
+    `result` parse — relays a bare result array/object at the top level when the `{files,result}` wrapper is
+    absent (schema-gated downstream; bare primitives/null rejected); (C4) bounded fetch retry+backoff on transient
+    failures (5xx/429/524/timeout/reject); (C3-floor) per-pool concurrency cap `source.quota.max_concurrent` →
+    `CapacityPool.concurrencyCap` → rolling-engine in-flight ceiling AND host-path `declaredCap` (NIM source pools
+    were built `hostConcurrencyLimit:null` so the cap was skipped → the 33/32 overrun; a ≤0 cap clamps to
+    null-uncapped, never a 0-admit wedge); (D1) bounded no-progress retry (`driveWithNoProgressRetry`, backoff +
+    `maxTotalMs` budget so an all-timeout pass spawns no extra passes) so a transient all-error pass self-heals
+    instead of halting; (D2) `ingest-results --results` recovery path named in the blocked handoff. Landed through
+    a full adversarial review pass (one clamp blocker + primitive-reject + retry-budget minors folded in).
   - **Host-identity sourcing (attended-mode wall):** default the host provider from the existing
     `isSelfSpawnBlocked("codex", env)` / `insideCodex` signal (reuse, no new env-sniff) with a `--host-provider`
     override; stop defaulting `claude-code`. Property to hold: a run's fan-out is charged to the ACTUAL host's
