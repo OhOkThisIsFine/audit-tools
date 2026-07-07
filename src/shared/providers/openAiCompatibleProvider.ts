@@ -42,7 +42,21 @@ export interface OpenAiCompatibleProviderDeps {
   fetchFn?: FetchFn;
   /** Injectable env for key resolution; defaults to process.env. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Base backoff (ms) between transient-failure retries; the actual wait grows
+   * exponentially per attempt (`base * 2^(attempt-1)`). Test seam — defaults to
+   * {@link DEFAULT_RETRY_BACKOFF_MS}. Not operator-configurable: transient retry is
+   * a reliability floor, not a tuning knob.
+   */
+  retryBackoffMs?: number;
 }
+
+/** HTTP statuses treated as transient (retried with backoff): rate-limit + 5xx/CDN. */
+const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504, 524]);
+/** Total request attempts on a transient failure (1 initial + retries). */
+const MAX_TRANSIENT_ATTEMPTS = 3;
+/** Default base backoff (ms) between transient retries; deps override for tests. */
+const DEFAULT_RETRY_BACKOFF_MS = 500;
 
 /**
  * OpenAI-compatible **chat-completions** backend — a first-class, API-driven,
@@ -74,6 +88,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
   private readonly config: OpenAiCompatibleConfig;
   private readonly fetchFn: FetchFn;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly retryBackoffMs: number;
 
   constructor(
     config: OpenAiCompatibleConfig = {},
@@ -82,6 +97,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     this.config = config;
     this.fetchFn = deps.fetchFn ?? globalThis.fetch;
     this.env = deps.env ?? process.env;
+    this.retryBackoffMs = positiveOr(deps.retryBackoffMs, DEFAULT_RETRY_BACKOFF_MS);
   }
 
   async launch(
@@ -196,35 +212,57 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     let content: string;
     try {
-      let mode = initialMode;
-      let res = await post(mode);
-      // A constraint rejection (400/422) is non-fatal: step down the ladder until
-      // the endpoint accepts the request or there is no weaker mode left to try.
-      while (!res.ok && (res.status === 400 || res.status === 422)) {
-        const downgraded = nextMode(mode);
-        if (downgraded === null) break;
-        mode = downgraded;
-        res = await post(mode);
+      // Bounded retry with exponential backoff on TRANSIENT failures (network
+      // reject, timeout-less 5xx/429/524) — a single lost response or a momentary
+      // endpoint overload self-heals instead of stranding the packet. A duplicate
+      // POST on a lost response costs only regenerated tokens (no duplicate side
+      // effect: the result file is overwritten, the worktree is last-write-wins).
+      // The constraint-ladder (400/422) degrade is a DIFFERENT, terminal path and
+      // is not retried here. AbortError = the overall deadline; never retried.
+      let attempt = 0;
+      for (;;) {
+        attempt += 1;
+        let res: Awaited<ReturnType<FetchFn>>;
+        try {
+          let mode = initialMode;
+          res = await post(mode);
+          // A constraint rejection (400/422) is non-fatal: step down the ladder until
+          // the endpoint accepts the request or there is no weaker mode left to try.
+          while (!res.ok && (res.status === 400 || res.status === 422)) {
+            const downgraded = nextMode(mode);
+            if (downgraded === null) break;
+            mode = downgraded;
+            res = await post(mode);
+          }
+        } catch (err) {
+          const aborted = err instanceof Error && err.name === "AbortError";
+          if (aborted) return fail(`openai-compatible request timed out after ${input.timeoutMs}ms.`);
+          if (attempt < MAX_TRANSIENT_ATTEMPTS && !controller.signal.aborted) {
+            await this.appendStderr(input.stderrPath, `transient request failure (${errText(err)}); retry ${attempt}/${MAX_TRANSIENT_ATTEMPTS - 1} after backoff`);
+            await sleep(this.retryBackoffMs * 2 ** (attempt - 1), controller.signal);
+            if (!controller.signal.aborted) continue;
+          }
+          return fail(`openai-compatible request failed: ${errText(err)}`);
+        }
+        if (!res.ok) {
+          const body = await safeText(res);
+          if (TRANSIENT_STATUSES.has(res.status) && attempt < MAX_TRANSIENT_ATTEMPTS && !controller.signal.aborted) {
+            await this.appendStderr(input.stderrPath, `transient HTTP ${res.status}; retry ${attempt}/${MAX_TRANSIENT_ATTEMPTS - 1} after backoff`);
+            await sleep(this.retryBackoffMs * 2 ** (attempt - 1), controller.signal);
+            if (!controller.signal.aborted) continue;
+          }
+          return fail(`openai-compatible endpoint returned HTTP ${res.status}: ${truncate(body, 600)}`);
+        }
+        const json = (await res.json()) as {
+          choices?: Array<{ message?: { content?: unknown } }>;
+        };
+        const raw = json.choices?.[0]?.message?.content;
+        if (typeof raw !== "string" || raw.trim().length === 0) {
+          return fail("openai-compatible endpoint returned an empty completion (no choices[0].message.content).");
+        }
+        content = raw;
+        break;
       }
-      if (!res.ok) {
-        const body = await safeText(res);
-        return fail(`openai-compatible endpoint returned HTTP ${res.status}: ${truncate(body, 600)}`);
-      }
-      const json = (await res.json()) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
-      };
-      const raw = json.choices?.[0]?.message?.content;
-      if (typeof raw !== "string" || raw.trim().length === 0) {
-        return fail("openai-compatible endpoint returned an empty completion (no choices[0].message.content).");
-      }
-      content = raw;
-    } catch (err) {
-      const aborted = err instanceof Error && err.name === "AbortError";
-      return fail(
-        aborted
-          ? `openai-compatible request timed out after ${input.timeoutMs}ms.`
-          : `openai-compatible request failed: ${errText(err)}`,
-      );
     } finally {
       clearTimeout(timer);
     }
@@ -270,14 +308,30 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       }
     }
 
-    if (parsed.result === undefined) {
+    // Tolerant result resolution: a model sometimes returns the result value
+    // DIRECTLY (a bare findings array, or a bare result object) instead of nested
+    // under `result`. When the parsed value carries no `{files,result}` wrapper
+    // shape, relay the whole value as the result. This is schema-gated downstream
+    // (the AuditResult[] / item-results validator is the authority at merge), so a
+    // tolerant relay can never ingest garbage — it only rescues the narrow
+    // "well-formed payload emitted at the top level" case. A genuine wrapper that
+    // dropped its result (files present, result absent) stays a clean failure.
+    const hasWrapperShape =
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      "files" in parsed;
+    const effectiveResult: unknown =
+      parsed.result !== undefined ? parsed.result : hasWrapperShape ? undefined : parsed;
+
+    if (effectiveResult === undefined) {
       return fail(
         `openai-compatible response omitted the "result" artifact (applied ${applied} file(s) but produced no result to write to ${input.resultPath}).`,
       );
     }
 
     try {
-      await writeJsonFile(input.resultPath, parsed.result);
+      await writeJsonFile(input.resultPath, effectiveResult);
     } catch (err) {
       return fail(`openai-compatible failed writing the result file: ${errText(err)}`);
     }
@@ -400,6 +454,26 @@ const SINGLE_SHOT_SYSTEM_PROMPT =
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Abortable backoff: resolves after `ms`, or early (without waiting) if the
+ * request's overall-deadline signal aborts, so a retry sleep never outlasts the
+ * launch timeout.
+ */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 /** A finite positive override, else the default (guards a 0 / negative / NaN config value). */

@@ -145,13 +145,16 @@ test("launch requires both base_url and model", async () => {
   expect((await noModel.launch(input)).accepted).toBe(false);
 });
 
-test("launch fails on a non-2xx HTTP response", async () => {
+test("launch fails immediately on a terminal (non-transient) non-2xx HTTP response", async () => {
   const { input } = makeCtx();
-  const fetchFn = fakeFetchReturning("rate limited", { ok: false, status: 429 });
-  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  // 403 is neither a constraint rejection (400/422) nor a transient status — it is
+  // terminal, so the launch fails on the first attempt with no retry.
+  const fetchFn = fakeFetchReturning("forbidden", { ok: false, status: 403 });
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn, retryBackoffMs: 1 });
   const res = await provider.launch(input);
   expect(res.accepted).toBe(false);
-  expect(res.error ?? "").toMatch(/HTTP 429/);
+  expect(res.error ?? "").toMatch(/HTTP 403/);
+  expect(fetchFn._calls, "a terminal status must not retry").toBe(1);
 });
 
 test("launch fails when the completion is not parseable JSON", async () => {
@@ -412,6 +415,105 @@ test("a degrade-exhausted request (both attempts fail) is fatal", async () => {
   expect(res.accepted).toBe(false);
   expect(res.error ?? "").toMatch(/HTTP 400/);
   expect(call, "first attempt + one retry, no loop").toBe(2);
+});
+
+// ---------------------------------------------------------------------------
+// C4 (NIM/Codex dispatch fix set): bounded fetch retry with backoff on TRANSIENT
+// failures — a momentary 5xx/429/524 or a network reject self-heals within the
+// attempt budget instead of stranding the packet. Constraint (400/422) and
+// terminal (403) statuses are NOT retried (covered above).
+// ---------------------------------------------------------------------------
+
+test("C4: a transient 503 is retried with backoff, then succeeds", async () => {
+  const { input } = makeCtx();
+  let call = 0;
+  const fetchFn = async () => {
+    call += 1;
+    if (call === 1) {
+      return { ok: false, status: 503, json: async () => ({}), text: async () => "overloaded" };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ files: [], result: { ok: true } }) } }] }),
+      text: async () => "",
+    };
+  };
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn, retryBackoffMs: 1 });
+  const res = await provider.launch(input);
+  expect(res.accepted, res.error).toBe(true);
+  expect(call, "one transient failure + one retry that succeeds").toBe(2);
+});
+
+test("C4: a transient network reject is retried, then succeeds", async () => {
+  const { input } = makeCtx();
+  let call = 0;
+  const fetchFn = async () => {
+    call += 1;
+    if (call === 1) throw new Error("ECONNRESET");
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ files: [], result: { ok: true } }) } }] }),
+      text: async () => "",
+    };
+  };
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn, retryBackoffMs: 1 });
+  const res = await provider.launch(input);
+  expect(res.accepted, res.error).toBe(true);
+  expect(call, "network reject retried once, succeeds").toBe(2);
+});
+
+test("C4: a persistent transient status exhausts the retry budget and fails", async () => {
+  const { input } = makeCtx();
+  const fetchFn = fakeFetchReturning("still overloaded", { ok: false, status: 503 });
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn, retryBackoffMs: 1 });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/HTTP 503/);
+  expect(fetchFn._calls, "1 initial + 2 retries = 3 attempts, then gives up").toBe(3);
+});
+
+// ---------------------------------------------------------------------------
+// C2 (NIM/Codex dispatch fix set): tolerant `result` parse — when the model
+// returns the result value DIRECTLY (bare array / bare object) instead of under
+// `result`, relay the whole payload. Schema-gated downstream, so it can never
+// ingest garbage; it only rescues the well-formed-top-level case.
+// ---------------------------------------------------------------------------
+
+test("C2: a bare result object at the top level is relayed as the result", async () => {
+  const { input } = makeCtx();
+  // No `{files,result}` wrapper — the model emitted the item-results object directly.
+  const content = JSON.stringify({ item_results: [{ finding_id: "N-1", status: "resolved" }] });
+  const fetchFn = fakeFetchReturning(content);
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  expect(res.accepted, res.error).toBe(true);
+  expect(JSON.parse(readFileSync(input.resultPath, "utf8"))).toEqual({
+    item_results: [{ finding_id: "N-1", status: "resolved" }],
+  });
+});
+
+test("C2: a bare array at the top level is relayed as the result (audit findings shape)", async () => {
+  const { input } = makeCtx();
+  const content = JSON.stringify([{ task_id: "t1", findings: [] }]);
+  const fetchFn = fakeFetchReturning(content);
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  expect(res.accepted, res.error).toBe(true);
+  expect(JSON.parse(readFileSync(input.resultPath, "utf8"))).toEqual([{ task_id: "t1", findings: [] }]);
+});
+
+test("C2: a wrapper that carries files but drops result still fails (not tolerated)", async () => {
+  const { input } = makeCtx();
+  // `files` present = the model used the wrapper contract but omitted `result`;
+  // this is a genuine omission, NOT a bare-payload relay case.
+  const content = JSON.stringify({ files: [{ path: "a.txt", content: "hi" }] });
+  const fetchFn = fakeFetchReturning(content);
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error ?? "").toMatch(/result/);
 });
 
 // ---------------------------------------------------------------------------
