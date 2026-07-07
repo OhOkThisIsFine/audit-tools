@@ -242,6 +242,57 @@ export async function writeContractArtifact(
   return envelope;
 }
 
+// ── Incremental reconvergence: empty-delta copy-forward (INV-IR-2) ─────────────
+
+/** The branch a re-emit took: a verbatim carry-forward, or a genuine re-emit. */
+export type ContractReconvergenceDecision = "carried_forward" | "reemitted";
+
+export interface ContractReconvergenceResult {
+  decision: ContractReconvergenceDecision;
+  envelope: ContractPipelineArtifactEnvelope;
+}
+
+/**
+ * Incrementally re-emit a contract artifact (contract-incremental-reconvergence,
+ * INV-IR-2). Given a freshly re-derived payload, compare its semantic projection to
+ * the PRIOR stored payload's using the SAME `payloadSemanticHash` the DEPENDENCY_MAP
+ * staleness walk uses (INV-IR-3):
+ *
+ *  - **Empty delta** (`payloadSemanticHash(name, prior) === payloadSemanticHash(name,
+ *    reDerived)`): a stamp/order-only upstream edit. The PRIOR payload is
+ *    re-enveloped forward VERBATIM — its dependency hashes reconverge to the current
+ *    upstreams (so the DAG stops reporting it stale) while the payload bytes are
+ *    unchanged — with ZERO worker/LLM dispatch. Because the load-bearing statement
+ *    prose is RETAINED in the projection (`semanticProjection`), a meaning-changing
+ *    reword is NOT an empty delta and therefore never collapses to a carry (CE-006).
+ *  - **Non-empty delta**: the re-derived payload is written as a genuine re-emit.
+ *
+ * The `decision` lets the caller gate any worker dispatch on `"reemitted"` — a
+ * carry-forward is guaranteed dispatch-free. (The batched structural gate, owned by
+ * contract-validation-gates, still runs over any re-emitted items — this function
+ * only decides carry-vs-reemit, it does not bypass validation.)
+ */
+export async function reconvergeContractArtifact(
+  artifactsDir: string,
+  name: ContractPipelineArtifactName,
+  reDerivedPayload: unknown,
+): Promise<ContractReconvergenceResult> {
+  const prior = await readContractArtifact(artifactsDir, name);
+  const priorPayload = envelopePayload(prior);
+  if (
+    prior &&
+    priorPayload !== undefined &&
+    payloadSemanticHash(name, priorPayload) === payloadSemanticHash(name, reDerivedPayload)
+  ) {
+    // Empty delta → carry the prior payload forward verbatim (INV-IR-2/IR-4:
+    // identity/order/classification preserved because the exact prior bytes are kept).
+    const envelope = await writeContractArtifact(artifactsDir, name, priorPayload);
+    return { decision: "carried_forward", envelope };
+  }
+  const envelope = await writeContractArtifact(artifactsDir, name, reDerivedPayload);
+  return { decision: "reemitted", envelope };
+}
+
 /**
  * Payload of a stored artifact whether or not it has been enveloped yet. A null
  * envelope (absent on disk) yields undefined; a bare payload that was written

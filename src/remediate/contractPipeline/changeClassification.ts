@@ -309,17 +309,36 @@ export function evaluatePairing(
 
 /**
  * Read an obligation's `change_classification` from a raw, untrusted payload.
- * Returns the narrowed classification, or `undefined` when absent/malformed — the
- * gates treat an unclassified TESTABLE obligation as a CHANGE (fail-closed), so a
- * dropped or corrupt classification can never relax the paired-test requirement.
+ * Returns the narrowed classification, or `undefined` only when the field is
+ * genuinely ABSENT — a truly unclassified obligation (e.g. a structural one), which
+ * the gates already treat as a CHANGE (fail-closed) at the consumer.
+ *
+ * A classification that is PRESENT but CORRUPT (not a record, or an unrecognized
+ * `change_kind`) is read as a fail-closed CHANGE rather than `undefined` (INV-IR-4):
+ * a dropped or garbled classification can never relax the paired-test requirement
+ * and can never let incremental item-scoping (contract-incremental-reconvergence)
+ * carry a changed item forward as if it were an unchanged addition.
  */
 export function readObligationChangeClassification(
   obligation: unknown,
 ): ObligationChangeClassification | undefined {
   if (!isRecord(obligation)) return undefined;
+  // Distinguish "absent" (no field → undefined, consumers stay fail-closed) from
+  // "present but corrupt" (field exists → an explicit fail-closed CHANGE verdict).
+  if (!("change_classification" in obligation)) return undefined;
   const cls = obligation.change_classification;
-  if (!isRecord(cls)) return undefined;
-  if (cls.change_kind !== "change" && cls.change_kind !== "addition") return undefined;
+  const failClosedChange = (touched_symbols: string[]): ObligationChangeClassification => ({
+    change_kind: "change",
+    touched_symbols,
+    determined_by: "touches_existing_symbol",
+  });
+  if (!isRecord(cls)) return failClosedChange([]);
+  if (cls.change_kind !== "change" && cls.change_kind !== "addition") {
+    const touched = Array.isArray(cls.touched_symbols)
+      ? (cls.touched_symbols as unknown[]).filter((t): t is string => typeof t === "string")
+      : [];
+    return failClosedChange(touched);
+  }
   const touched = Array.isArray(cls.touched_symbols)
     ? (cls.touched_symbols as unknown[]).filter((t): t is string => typeof t === "string")
     : [];

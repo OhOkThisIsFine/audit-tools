@@ -34,6 +34,7 @@ import {
   readObligationChangeClassification,
 } from "./changeClassification.js";
 import { derivePhaseCut, phaseCutModulesFromContracts } from "./phaseCut.js";
+import { payloadSemanticHash } from "./artifactStore.js";
 import { CP_FINALIZED_MODULE_CONTRACTS_VERSION } from "../validation/contractPipeline.js";
 
 /** The finalized-module-contract fields the obligation deriver reads. */
@@ -569,6 +570,160 @@ function applyModuleDependencyEdges(
     }
     node.depends_on = [...deps].sort();
   }
+}
+
+// ── Incremental reconvergence: item-scoped re-validation (INV-IR-1 / IR-4) ─────
+//
+// contract-incremental-reconvergence. When a localized upstream change re-stales a
+// downstream artifact, only the items deriving from the changed upstream item need
+// re-validation — the rest carry forward verbatim. The provenance key is
+// `ObligationEntry.module` for obligations and `obligation_id` for test specs.
+//
+// Fail-closed everywhere: an item whose provenance key cannot be established (no
+// `module`; a spec with no `obligation_id`; an id absent from the prior payload), or
+// whose `module` resolves to a name absent from the CURRENT upstream (re-slug / id
+// reuse → a wrong/nonexistent upstream item), falls into the FULL re-validation set.
+// Scoping must never UNDER-invalidate: a silently-missed real staleness is the worst
+// outcome (failure_mode "Under-invalidation").
+
+/** The per-item re-validation decision: which items re-validate vs. carry forward. */
+export interface ItemRevalidationScope {
+  /** Item ids (obligation id / obligation_id) that must be re-validated. */
+  revalidate: string[];
+  /** Item ids whose provenance resolves to an UNCHANGED upstream item (carry verbatim). */
+  carried_forward: string[];
+}
+
+export interface FinalizedModuleDelta {
+  /** Module names whose load-bearing projection differs from the prior contracts (incl. newly added). */
+  changed: Set<string>;
+  /** Module names the CURRENT (re-derived) contracts declare — the known-upstream set. */
+  current: Set<string>;
+}
+
+/** Finalized-module entries keyed by name (first occurrence wins; unnamed dropped). */
+function finalizedModulesByName(payload: unknown): Map<string, unknown> {
+  const record = isRecord(payload) ? payload : {};
+  const modules = Array.isArray(record.module_contracts) ? record.module_contracts : [];
+  const byName = new Map<string, unknown>();
+  for (const mod of modules) {
+    if (isRecord(mod) && typeof mod.name === "string" && mod.name.length > 0 && !byName.has(mod.name)) {
+      byName.set(mod.name, mod);
+    }
+  }
+  return byName;
+}
+
+/**
+ * Load-bearing semantic hash of ONE finalized module, computed through the SAME
+ * `payloadSemanticHash` projection the DEPENDENCY_MAP staleness walk uses (INV-IR-3)
+ * — so a module the scoping judges "unchanged" is exactly one the DAG judges
+ * non-stale, and a load-bearing reword flips both together (never a private,
+ * drift-prone per-module projection).
+ */
+function finalizedModuleSemanticHash(mod: unknown): string {
+  return payloadSemanticHash("finalized_module_contracts", { module_contracts: [mod] });
+}
+
+/**
+ * Diff two `finalized_module_contracts` payloads module-by-module on their
+ * load-bearing semantic projection. A module present in the current contracts but
+ * absent in the prior, or one whose projection differs, is `changed`. `current` is
+ * every module name the current upstream declares — the set a downstream item's
+ * provenance key must resolve into, else it is a nonexistent/re-slugged upstream
+ * (fail-closed change, see `scopeObligationRevalidation`).
+ */
+export function diffFinalizedModules(
+  priorFinalized: unknown,
+  reDerivedFinalized: unknown,
+): FinalizedModuleDelta {
+  const priorMods = finalizedModulesByName(priorFinalized);
+  const currentMods = finalizedModulesByName(reDerivedFinalized);
+  const changed = new Set<string>();
+  for (const [name, mod] of currentMods) {
+    const priorMod = priorMods.get(name);
+    if (
+      priorMod === undefined ||
+      finalizedModuleSemanticHash(mod) !== finalizedModuleSemanticHash(priorMod)
+    ) {
+      changed.add(name);
+    }
+  }
+  return { changed, current: new Set(currentMods.keys()) };
+}
+
+/** Defensive read of an obligation-ledger payload's obligation records. */
+function readLedgerObligations(ledger: unknown): Record<string, unknown>[] {
+  const record = isRecord(ledger) ? ledger : {};
+  const obligations = Array.isArray(record.obligations) ? record.obligations : [];
+  return obligations.filter((o): o is Record<string, unknown> => isRecord(o));
+}
+
+/** Defensive read of a test_validator_plan payload's spec records. */
+function readTestSpecs(plan: unknown): Record<string, unknown>[] {
+  const record = isRecord(plan) ? plan : {};
+  const specs = Array.isArray(record.test_specs) ? record.test_specs : [];
+  return specs.filter((s): s is Record<string, unknown> => isRecord(s));
+}
+
+/**
+ * Decide which obligations must re-validate vs. carry forward after a localized
+ * `finalized_module_contracts` change (INV-IR-1). Provenance key = `module`.
+ * An obligation re-validates when:
+ *   - it has no `module` (provenance key unestablishable) — fail-closed;
+ *   - its `module` is absent from `delta.current` (wrong/nonexistent — re-slug/id
+ *     reuse) — fail-closed as a change;
+ *   - its `module` is in `delta.changed`.
+ * Otherwise it carries forward (its upstream module is byte-identical).
+ */
+export function scopeObligationRevalidation(
+  ledger: ObligationLedger | unknown,
+  delta: FinalizedModuleDelta,
+): ItemRevalidationScope {
+  const revalidate: string[] = [];
+  const carried_forward: string[] = [];
+  for (const o of readLedgerObligations(ledger)) {
+    const id = typeof o.id === "string" ? o.id : "";
+    if (!id) continue;
+    const mod = typeof o.module === "string" ? o.module : "";
+    if (!mod || !delta.current.has(mod) || delta.changed.has(mod)) {
+      revalidate.push(id);
+    } else {
+      carried_forward.push(id);
+    }
+  }
+  return { revalidate, carried_forward };
+}
+
+/**
+ * Decide which `test_validator_plan` specs must re-validate vs. carry forward
+ * (INV-IR-1). Test specs are keyed by `obligation_id`. A spec re-validates when:
+ *   - it has no `obligation_id` (provenance key unestablishable) — fail-closed;
+ *   - its `obligation_id` is absent from the PRIOR plan (a new item) — fail-closed;
+ *   - its `obligation_id`'s obligation is in `revalidatedObligationIds`.
+ * Otherwise it carries forward.
+ */
+export function scopeTestSpecRevalidation(
+  reDerivedPlan: unknown,
+  priorPlan: unknown,
+  revalidatedObligationIds: ReadonlySet<string>,
+): ItemRevalidationScope {
+  const priorIds = new Set(
+    readTestSpecs(priorPlan)
+      .map((s) => (typeof s.obligation_id === "string" ? s.obligation_id : ""))
+      .filter((id) => id.length > 0),
+  );
+  const revalidate: string[] = [];
+  const carried_forward: string[] = [];
+  for (const spec of readTestSpecs(reDerivedPlan)) {
+    const id = typeof spec.obligation_id === "string" ? spec.obligation_id : "";
+    if (!id || !priorIds.has(id) || revalidatedObligationIds.has(id)) {
+      revalidate.push(id);
+    } else {
+      carried_forward.push(id);
+    }
+  }
+  return { revalidate, carried_forward };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
