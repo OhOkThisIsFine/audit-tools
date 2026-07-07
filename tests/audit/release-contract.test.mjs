@@ -88,8 +88,15 @@ test("one-command release helper wires the trusted publishing path", async () =>
   expect(helper).toMatch(/run\("git", \["add", "package\.json", "package-lock\.json"\]\)/);
   expect(helper).toMatch(/run\("git", \["commit", "-m", `release: \$\{tag\}`\]\)/);
   expect(helper).toMatch(/run\("git", \["tag", "-a", tag, "-m", tag\]\)/);
-  expect(helper).toMatch(/const releaseBranch = bumpOnly \? null : ensureMainBranch\(\)/);
-  expect(helper).toMatch(/run\("git", \["push", remoteName, releaseBranch\]\)/);
+  // CP-NODE-8 (ship-from-linked-worktree): ensureMainBranch now admits a linked-worktree /
+  // feature branch whose HEAD == origin/<default> (via the pure evaluateReleaseBranch), and the
+  // bump lands on the remote default branch via resolveReleasePushRefspec — so the gate result is
+  // `releaseGate` and the push target is the resolved refspec, not the raw branch name.
+  expect(helper).toMatch(/const releaseGate = bumpOnly \? null : ensureMainBranch\(\)/);
+  expect(helper).toMatch(/function evaluateReleaseBranch\(/);
+  expect(helper).toMatch(/function resolveReleasePushRefspec\(/);
+  expect(helper).toMatch(/const pushRefspec = resolveReleasePushRefspec\(releaseGate\)/);
+  expect(helper).toMatch(/run\("git", \["push", remoteName, pushRefspec\.target\]\)/);
   expect(helper).toMatch(/waiting for publish run/);
   expect(helper).toMatch(/waiting for npm registry/);
   expect(helper).toMatch(/run\("git", \["push", remoteName, tag\]\)/);
