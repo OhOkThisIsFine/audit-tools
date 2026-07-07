@@ -156,6 +156,16 @@ Via `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Re
 
 Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag) or `:publish` variants (also push + create GitHub Release + wait for CI). Use `/ship` skill — encodes trap list (CLAUDECODE unset for gates, CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at push/publish boundary.
 
+### Pipeline profiling (always-on)
+
+Profiling is a **standing feature** of every test + release run, single-sourced in `scripts/shared/profile.mjs` (never a manual flag). Ledgers land in `.audit-tools-profile/` (gitignored); under GitHub Actions each profile also appends a markdown table to the job summary.
+
+- **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
+- **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `vitest-latest.json` (shard runs suffix `-shardXofY`).
+- **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
+
+`*-history.ndjson` is the trend line — diff the latest record against prior runs to catch a time regression.
+
 ## Conventions & invariants
 
 - **Auditor-agnostic robustness — enforce in tooling, never host discretion.** The host/auditor agent is a variable of any strength, not a constant. Every workflow correctness property must be guaranteed by the tool itself — CLI option shape, contract validator, renderer template, dispatch-prompt text, scheduler logic, merge tolerance, write-scope enforcement — never by the host *remembering*, *noticing*, or *reasoning*. Any place the workflow only works because a capable host folded in guidance, relayed upstream evidence, paced dispatch safely, picked the right id, verified from disk, or hand-fixed a cross-block break is a **latent failure mode** → move it into the tool so it's impossible to get wrong. "Be careful" / "habit fix" / "my side" is never a fix; prefer changes that make the process *simpler*, not ones that add a step the host must remember. (Generalizes "Conversation-first" and "a needed manual flag is a bug signal".)

@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 .tmp/
+# Standing pipeline-profiling ledgers (scripts/shared/profile.mjs) — local timing
+# telemetry, never a tracked deliverable.
+.audit-tools-profile/
 .audit-artifacts/
 .audit-code/
 .remediate-code/

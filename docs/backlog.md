@@ -29,6 +29,43 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **NIM/Codex dispatch fix set — from a real run + adversarial review (2026-07-07).** `audit-code` in a Codex
+  host against an external repo, NIM (openai-compatible) backend, Claude quota exhausted → a 13-issue cascade.
+  Investigated + adversarially reviewed: the "host-proposes/broker-disposes" replan was **refuted** (`admitBatch`
+  IS the cost-first router — can't "keep the chokepoint, delete the router"; a veto broker regresses *liveness*;
+  host identity is a quota-**attribution** key, so moving it to host discretion violates
+  [[enforce-robustness-in-tooling-not-host-discretion]]) → corrected to **tool-proposes / host-overrides**. Root
+  cause is **mode-dependent**: headless → NIM keyed to its own pool, halt = every packet erroring tripping the
+  no-progress guard; attended (`--host-can-dispatch-subagents`) → the complement review routes to the host pool
+  mis-keyed `claude-code` (exhausted). Full root-cause + decided direction + file:lines in
+  [[host-provider-misattribution-nim-codex]]. Fixes to build, in ship order:
+  - **Lean halt fix first (headless erroring-packets):** (C2) tolerant `openai-compatible` `result` parse —
+    treat top-level content as the result when the wrapper field is absent (schema-gated downstream, can't ingest
+    garbage); (C4) bounded fetch retry+backoff on transient failures (5xx/429/524/timeout/reject); (C3-floor)
+    express a source-pool concurrency cap as `declaredCap` so `admitBatch`'s cap branch fires — NIM source pools
+    are built `hostConcurrencyLimit: null` so the cap is skipped → the 33/32 overrun; (D1) wire the existing
+    bounded auto-retry (`runInProcessAuditDispatch`) into the interactive loop **with backoff** so a transient
+    all-error pass self-heals instead of halting; (D2) name the `ingest-results --results` recovery path in the
+    blocked handoff.
+  - **Host-identity sourcing (attended-mode wall):** default the host provider from the existing
+    `isSelfSpawnBlocked("codex", env)` / `insideCodex` signal (reuse, no new env-sniff) with a `--host-provider`
+    override; stop defaulting `claude-code`. Property to hold: a run's fan-out is charged to the ACTUAL host's
+    meter, never a mis-keyed one — attribution stays mechanical. [[capability-is-per-auditor-not-per-audit]]
+  - **C3 AIMD adaptive ceiling** (on top of the `declaredCap` floor): learn a shared endpoint's live limit from
+    `ResourceExhausted` backpressure (multiplicative-decrease on rate-limit, additive-increase on success). Needs
+    a mutable per-pool ceiling + reworking the drop-and-requeue branch → decrement-and-retry. The real fix for a
+    multi-IDE-contended endpoint whose free-slot count moves.
+  - **C1 real source-pool budget** (quality, NOT the halt — the floor sizes packets *smaller*, they still fit):
+    converge openai-compatible budget onto `sources[].quota.context_tokens/output_tokens` (the legacy
+    `openai_compatible` block attaches no quota → guaranteed floor); a `/models` capability probe is a build lever
+    ONLY after live-validating NIM exposes `context_length`/`max_model_len`, and MUST sanity-clamp (a too-large
+    probe result over-admits → re-triggers the overrun). [[openai-compatible-provider]]
+  - **A1 rename `local-subprocess` → `worker-command` + gloss** ("runs `task.worker_command`; generic subprocess
+    fallback, not an LLM backend") across the name const, factory, `PROVIDER_NAMES`, examples, operator guide.
+    Sole-consumer, no back-compat shim.
+  B2 (host override at Gate-0) + the cost↔speed dial + free-pool max are the forward-track evolution of this —
+  see *Forward tracks*. Issue 13 (Codex session usage/approval limit) = env, not ours.
+
 - **Remediate contract/implement pipeline — dogfood frictions (fix in tooling).**
   Five open frictions surfaced driving one large `/remediate-code` run:
   - **Contract-pipeline re-convergence must be incremental — a localized change must not re-author the whole
@@ -146,11 +183,38 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   when its HEAD already equals `origin/main`, or auto-FF+rebuild the primary worktree — so a ship from a lap
   worktree is one command, not a five-step hand dance.
 
-- **Optional: cut vitest `collect` (~186s) / per-file isolation overhead (noted 2026-07-04).** Full-suite
-  `collect` is ~186s of module load/transform for 430 files; default `pool: 'forks'` adds per-file process
-  startup. `pool: 'threads'` and/or `isolate: false` could help, but many audit/remediate tests mutate fs
-  and spawn subprocesses → isolation-off risks cross-test bleed. Only pursue with per-file verification.
-  Lower priority than the sharding already shipped.
+- **Pipeline profiling is now standing (2026-07-06).** Always-on timing across test + release/publish,
+  single-sourced in `scripts/shared/profile.mjs`; ledgers land in `.audit-tools-profile/` (gitignored) +
+  a CI job-summary table. `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs`;
+  `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts`; `release-and-publish.mjs`
+  writes a `release` phase profile + a `publish-ci` per-job/per-step profile from the publish run's API.
+  Use the `*-history.ndjson` trend line to catch time regressions. Durable how-to in `CLAUDE.md` →
+  Release & publish → Pipeline profiling.
+
+- **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
+  numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
+  - **`verify:checks` gate = 95.8s, of which `smoke:packaged-audit-code` alone is 70.2s (73%).**
+    `smoke:packaged-remediate-code` is 13.2s; everything else is ~12s combined. **→ The highest-leverage gate
+    win is the packaged-audit-code smoke.** Internal breakdown (measured): `next-step ×~7 to dispatch_review`
+    = 35.9s (53% — the real audit-flow round-trips, inherent coverage), `npm install from tarball` 9.3s,
+    `next-step to present_report` 10.1s, `npm pack` 7.2s (incl. a prepack rebuild). The next-step round-trips
+    are fresh-process pipeline runs — cutting them cuts coverage, so this needs a real design (e.g. an
+    in-process multi-step driver for the smoke, or packing once and sharing the tarball across both smokes
+    since they build the identical `audit-tools` package), not a quick trim.
+  - **Easy wins SHIPPED 2026-07-06:** (1) dropped the redundant `check` (`tsc --noEmit`) from `verify:checks`
+    — `build` (tsc emit) type-checks identically, so it was a second full compile; gate 95.8s→90.8s local.
+    (2) dropped the `Type-check` step from `audit-code-test-suite.yml` (its `Build` step covers it) — a `tsc`
+    saved in each of 8 matrix jobs per push. (3) added the `release: vX.Y.Z` skip guard to
+    `audit-code-test-suite.yml` (mirrors `ci.yml`) — the version-bump push no longer re-runs the 8-job suite
+    (publish-package.yml runs the authoritative sharded suite for the release). `check` remains a standalone
+    script (commit hook, local pre-tag gate, dev typecheck).
+  - **Full vitest suite = 307s wall (452 files), `collect≈211s`** (confirms the old ~186s estimate), run
+    time dominated by audit integration tests that spawn real subprocesses: `audit-code-completion` 285s,
+    `audit-code-wrapper` 237s, `next-step` 165s, `cli-remediation` 111s. area:audit ≈ 1905s summed across
+    workers vs remediate 451s / shared 62s. `pool: 'threads'` / `isolate: false` won't help the run-time
+    tail (it's subprocess wall, not isolation overhead); the real lever is the sharding already shipped +
+    possibly splitting the few 100s+ integration files across more shards. Only pursue collect/pool changes
+    with per-file verification (many tests mutate fs / spawn subprocesses → isolation-off risks bleed).
 
 - **Dispatch admission-control rework — residual (env-bound / deeper, not blocking).** Shipped in full
   (commits 1/2a/2b-AUDIT/2b-REMEDIATE/driver-unification/commit-3/defect-1 — see `docs/HANDOFF.md` T5-3 /
@@ -219,6 +283,36 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   a coverage diff (2026-07-07) confirmed 9router's price table adds nothing over models.dev, so skip it.
   Relates [[quota-dispatch-vision]] / [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
   [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
+- **Cost↔speed dispatch dial + free-pool maximization (owner, 2026-07-07).** Generalizes the cost-first router
+  — which is the minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point;
+  lands ON TOP of the kept router, does not replace it. Run through the same adversarial pass as the routing
+  work before committing. Full design in [[host-provider-misattribution-nim-codex]] (forward-track section);
+  extends [[cost-first-routing-design]].
+  - **The dial (decided: cost ↔ throughput/speed, capability as a hard FLOOR).** Pool = (price $/Mtok, effective
+    Mtok/s [rate ∧ concurrency ∧ speed], capability). Capability floor = the existing `capable()` filter
+    (mechanical, per task/lens — a too-weak pool can't take a task at any price). Dial = operating point on the
+    discrete/enumerable frontier among capable pools; λ=0 = today's cheapest-fill (so the current router is the
+    corner, not a thing replaced). Set once at Gate-0 as durable POLICY; the router realizes it against the LIVE
+    frontier (drifts under AIMD/contention) — same static-policy/dynamic-execution split as B2. UI: 1D slider MVP
+    → 2D frontier plot (achievable curve, dominated region greyed) later. It's judgment/policy and low-dimensional
+    → safe to expose, and dodges the per-packet menu's context-tax + livelock the review killed.
+  - **B2 (near-term seed, the crude form of the dial):** keep the cost-first router as the default proposal
+    (liveness guaranteed for weak/headless hosts); the host reorders/excludes pools once at Gate-0 (reuse the
+    shipped interactive `provider_confirmation`), the router honors it live, falls through on a drained preferred
+    pool, and keeps `ClaimRegistry` claim-before-assign for concurrent-IDE safety.
+  - **Free-pool maximization (dial-independent).** Price-0 pools are first-fill at every operating point → free
+    is saturated before any paid pool, automatically — a property of the frontier, not a new mechanism (precondition:
+    each free source is registered as a price-0 pool). "Maxed" = saturated to LIVE sustainable throughput (AIMD
+    ceiling + `declaredCap` floor), NOT flooded — the incident WAS naive free-flood, so safe free-max **depends on
+    C3** (see Open bugs). Gated by the capability floor; $0 pools tie-broken by capability then speed (run in
+    parallel, each to its own ceiling). Real work = **register every free source as a pool** (NIM, opencode-free,
+    kilo, vertex-trial, multi-account) = the arbitrage-tier track [[arbitrage-dispatch-tier-design]] (Phase 0
+    zero-ban-risk free first, Phase 1 multi-account OAuth).
+  - **OPEN (owner calls):** (a) whether QUALITY also becomes tradeable vs cost (a true 2D dial, needs a per-task
+    quality-worth weighting) — default recorded = 1D cost↔speed + capability floor; (b) **free ban-risk boundary**
+    — "max free" = ALL free incl. ban-risk arbitrage sources, or zero-ban-risk-only by default with riskier ones
+    opt-in? Undecided pending a written explainer of what's actually risky (multi-account / aggregator ToS-ban
+    exposure, token security) before the owner lands it.
 
 - **Cost-first routing — collision-price preference (carried from W1, open).** Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md), durable design in memory [[cost-first-routing-design]].

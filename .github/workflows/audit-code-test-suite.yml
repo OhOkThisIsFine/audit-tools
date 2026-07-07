@@ -51,6 +51,12 @@ env:
 jobs:
   orchestration-tests:
     name: Orchestration tests (Node ${{ matrix.node-version }}, shard ${{ matrix.shard }}/4)
+    # Skip the suite on the `release: vX.Y.Z` bump push: that commit only bumps the
+    # version (the code was already exercised by this suite on the pre-bump commit),
+    # and publish-package.yml runs the authoritative sharded suite for the actual
+    # release. Re-running the 8-job matrix here would be a pure duplicate. Mirrors
+    # the same guard on ci.yml's `checks` job.
+    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: v') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -90,21 +96,16 @@ jobs:
           set -euo pipefail
           trap 'echo "::error::npm ci failed. Inspect the uploaded audit-code-test-suite npm logs artifact and rerun npm ci locally."' ERR
           npm ci
-      - name: Type-check
+      - name: Build (type-checks + emits dist)
         timeout-minutes: 10
         shell: bash
         working-directory: .
         run: |
           set -euo pipefail
-          trap 'echo "::error::npm run check failed. Review the uploaded audit-code-test-suite npm logs artifact and confirm the TypeScript build is green locally."' ERR
-          npm run check
-      - name: Build
-        timeout-minutes: 10
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
-          trap 'echo "::error::npm run build failed. Review the uploaded audit-code-test-suite npm logs artifact and rerun npm run build locally."' ERR
+          # `npm run build` (tsc emit) type-checks identically to `tsc --noEmit`, so a
+          # separate `check` step here would be a redundant second full compile. A type
+          # error fails this step exactly as a standalone check would.
+          trap 'echo "::error::npm run build failed (type error or emit failure). Rerun npm run build locally; a type error fails here just as npm run check would."' ERR
           npm run build
       - name: Run tests (shard ${{ matrix.shard }}/4)
         timeout-minutes: 15
