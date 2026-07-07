@@ -19,7 +19,7 @@
  * `mergeImplementResults` over a real repo + crafted accept-outcome sidecars.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync, rmSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -54,7 +54,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // These tests drive REAL git; do not mock node:child_process here.
 const RM_DIRS: string[] = [];
 const git = (repo: string, ...a: string[]) =>
-  spawnSync("git", a, { cwd: repo, encoding: "utf8", shell: false, windowsHide: true });
+  spawnSyncHidden("git", a, { cwd: repo, encoding: "utf8", shell: false, windowsHide: true });
 
 function initRepo(prefix: string): string {
   const repo = realpathSync(mkdtempSync(join(tmpdir(), prefix)));

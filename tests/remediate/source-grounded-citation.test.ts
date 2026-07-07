@@ -14,7 +14,7 @@
  * `git ls-files` lists staged files, so no commit is needed).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -27,7 +27,7 @@ import { validateContractCitationGrounding } from "../../src/remediate/validatio
 import type { Finding } from "../../src/remediate/state/types.js";
 
 function git(root: string, args: string[]): void {
-  spawnSync("git", args, { cwd: root, shell: false, windowsHide: true });
+  spawnSyncHidden("git", args, { cwd: root, shell: false, windowsHide: true });
 }
 
 function makeRepo(files: Record<string, string>): string {

@@ -18,7 +18,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import {
   validatePairedObligations,
   validateDecompositionFileScope,
@@ -47,7 +47,7 @@ async function makeTempDir(): Promise<string> {
 async function makeGitRepo(files: Record<string, string>): Promise<string> {
   const dir = await makeTempDir();
   const git = (...args: string[]) =>
-    spawnSync("git", args, { cwd: dir, encoding: "utf8", shell: false, windowsHide: true });
+    spawnSyncHidden("git", args, { cwd: dir, encoding: "utf8", shell: false, windowsHide: true });
   git("init");
   git("config", "user.email", "test@example.com");
   git("config", "user.name", "test");
