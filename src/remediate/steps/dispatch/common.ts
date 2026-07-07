@@ -107,6 +107,26 @@ export function isGitWorkTree(root: string): boolean {
   return !probe.error && probe.status === 0 && /true/.test(probe.stdout ?? "");
 }
 
+/**
+ * True when `commitOid` is reachable from `ref` (default HEAD) — the node-identity
+ * ancestry probe (INV-WTS-3). `git merge-base --is-ancestor <commit> <ref>` exits 0
+ * when the commit IS an ancestor, 1 when it is not, and >1 on a bad object. A
+ * landed node's cherry-pick commit stays an ancestor of HEAD as later siblings pile
+ * on top; a node whose landing was rolled back / clobbered is NOT an ancestor, so
+ * this distinguishes a genuinely-landed node from a false-close (a sibling or
+ * pre-existing file at the same path can never make it pass). Fail-closed: a git
+ * error / missing object returns false (treated as not-landed → re-block).
+ */
+export function gitCommitIsAncestor(root: string, commitOid: string, ref = "HEAD"): boolean {
+  if (!commitOid) return false;
+  const probe = spawnSyncHidden(
+    "git",
+    ["merge-base", "--is-ancestor", commitOid, ref],
+    { cwd: root, encoding: "utf8", shell: false },
+  );
+  return !probe.error && probe.status === 0;
+}
+
 /** True when `branch` resolves to a commit in the repo at `root`. */
 export function gitBranchExists(root: string, branch: string): boolean {
   const probe = spawnSyncHidden(

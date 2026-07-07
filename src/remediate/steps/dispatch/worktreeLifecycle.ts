@@ -102,23 +102,32 @@ export function seedUntrackedDeclaredPaths(
   }
 }
 
-/** Remove a git worktree. Best-effort: logs but does not throw on failure. */
+/**
+ * Remove ONE git worktree, PATH-SCOPED (INV-WTS-1/4). Always addresses only the
+ * named `worktreePath` via `git worktree remove --force <path>` — never a global
+ * `git worktree prune` that could drop a SIBLING node's registered-but-transiently-
+ * absent worktree. `git worktree remove --force` clears the registration even when
+ * the directory is already MISSING (a stale admin entry), so this alone replaces
+ * the prior global-prune reset step. Best-effort: a genuinely-absent + unregistered
+ * path (git reports "is not a working tree" and the dir does not exist) is a silent
+ * no-op; any other failure is surfaced on stderr, never thrown.
+ */
 export function removeWorktree(root: string, worktreePath: string): void {
-  // Already-absent worktree = silent no-op: no spawn, no stderr, no throw. A
-  // path that still exists but fails git-remove for another reason is surfaced
-  // exactly as before. We do NOT match on the 'not a working tree' stderr text.
-  if (!existsSync(worktreePath)) return;
   const result = spawnSyncHidden(
     "git",
     ["worktree", "remove", "--force", worktreePath],
     { cwd: root, encoding: "utf8", shell: false },
   );
-  if (result.status !== 0) {
-    const stderr = (result.stderr ?? "").trim();
-    process.stderr.write(
-      `[remediate-code] worktree remove failed (exit ${result.status ?? "unknown"}): ${stderr}\n`,
-    );
-  }
+  if (result.status === 0) return;
+  const stderr = (result.stderr ?? "").trim();
+  // "not a working tree" = the path was never a registered worktree. When the
+  // directory is ALSO absent there is genuinely nothing to remove → silent no-op.
+  // When the directory still exists (an orphaned plain dir) it is a real failure
+  // worth surfacing (the caller's rmSync then clears the leftover dir).
+  if (/not a working tree/i.test(stderr) && !existsSync(worktreePath)) return;
+  process.stderr.write(
+    `[remediate-code] worktree remove failed (exit ${result.status ?? "unknown"}): ${stderr}\n`,
+  );
 }
 
 /**
@@ -133,23 +142,32 @@ export function removeWorktree(root: string, worktreePath: string): void {
  * worktree/branch is the expected first-attempt case, not an error). Any partial
  * edits from a throttled prior attempt are intentionally discarded — the
  * re-dispatch redoes the node from HEAD.
+ *
+ * INV-WTS-1/4 (no sibling clobber, stale-sweep never prunes in-flight work): every
+ * step is scoped to THIS node's own `worktreePath` / `branchName`. There is NO
+ * global `git worktree prune` — a global prune drops the admin entry of ANY sibling
+ * worktree whose directory is transiently absent (a sibling between its own rmSync
+ * and re-create), which is the exact data-loss race this module closes. Path-scoped
+ * `removeWorktree` clears even a stale registration whose dir is already gone, so
+ * the prune is unnecessary. Callers serialize a node's reset/create against its own
+ * accept via `worktreeNodeLockPath` (INV-WTS-8), so two operations on the SAME node
+ * never interleave, while DIFFERENT nodes never touch each other's path.
  */
 export function resetNodeWorktreeAndBranch(
   root: string,
   worktreePath: string,
   branchName: string,
 ): void {
+  // Path-scoped removal: clears the registration (even a stale one whose dir is
+  // missing) for THIS node only — never a global prune that could drop a sibling.
   removeWorktree(root, worktreePath);
-  // Prune stale worktree admin entries (e.g. a dir deleted out from under git),
-  // otherwise `git worktree add` can refuse a path it still thinks is registered.
-  spawnSyncHidden("git", ["worktree", "prune"], { cwd: root, shell: false });
   // Force-delete the leftover branch from a prior attempt so `-b` recreates it.
   spawnSyncHidden("git", ["branch", "-D", branchName], { cwd: root, shell: false });
   // Force-remove a leftover worktree DIRECTORY: when a prior attempt's worktree
   // became an orphaned dir (registered admin entry gone but files remain),
-  // `git worktree remove` no-ops ("is not a working tree") and `git worktree add`
+  // `git worktree remove` reports "is not a working tree" and `git worktree add`
   // then refuses because the path already exists. Deleting the dir makes the
-  // re-create succeed. Best-effort.
+  // re-create succeed. Best-effort, and scoped to this node's own path.
   if (existsSync(worktreePath)) {
     rmSync(worktreePath, { recursive: true, force: true });
   }
@@ -171,10 +189,62 @@ export function resetNodeWorktreeAndBranch(
  * executable (e.g. `grep` on Windows), turning a correct fix into a phantom
  * contract failure that burned the retry budget.
  */
+/**
+ * INV-WTS-2 escape check: returns a LOUD diagnostic string when `worktreeRoot` is
+ * NOT safe to run a build-free verify in — either the cwd was removed (a concurrent
+ * sweep deleted the worktree → a bare command would ENOENT or resolve up to MAIN),
+ * or git resolves an ENCLOSING top-level distinct from the cwd (the worktree escaped
+ * to the main checkout). Returns null when the cwd IS its own git top-level (the
+ * healthy isolated-worktree case). A cwd that exists but is not inside any git work
+ * tree (`status != 0`, no spawn error) is NOT an escape — only a resolved enclosing
+ * top-level is — so that case returns null too (never a false refusal).
+ */
+function verifyCwdEscapeDiagnostic(worktreeRoot: string): string | null {
+  const probe = spawnSyncHidden(
+    "git",
+    ["rev-parse", "--show-toplevel"],
+    { cwd: worktreeRoot, encoding: "utf8", shell: false },
+  );
+  if (probe.error) {
+    return (
+      `[remediate-code] verify REFUSED: the verify cwd ${worktreeRoot} no longer exists ` +
+      `(${(probe.error as NodeJS.ErrnoException).code ?? "spawn error"}). The worktree was ` +
+      `removed out from under the verify (a concurrent sweep/accept); refusing to run a ` +
+      `build-free verify that would false-green against unrelated code.`
+    );
+  }
+  if (probe.status === 0) {
+    const top = (probe.stdout ?? "").trim();
+    if (top.length > 0 && canonicalPathKey(top) !== canonicalPathKey(worktreeRoot)) {
+      return (
+        `[remediate-code] verify REFUSED: git top-level for ${worktreeRoot} is ${top}, not ` +
+        `the cwd itself — the verify cwd is INSIDE an enclosing checkout (a per-node worktree ` +
+        `deleted out from under it resolves up to MAIN). Refusing to run a build-free verify ` +
+        `that would false-green against unrelated code.`
+      );
+    }
+  }
+  return null;
+}
+
 export function verifyNodeInWorktree(
   worktreePath: string,
   targetedCommands: string[],
+  /**
+   * INV-WTS-2: enforce that the verify cwd IS its own git top-level (a per-node
+   * ISOLATED worktree). Set by the accept-node path (`acceptNodeWorktree`) — the
+   * enforcement point — so a worktree deleted out from under the verify fails LOUD
+   * instead of resolving up to the enclosing MAIN checkout and false-greening
+   * against unrelated code. Left OFF (default) for the deliberately-main-rooted
+   * re-verify callers (triage re-runs a node's `targeted_commands` at the repo root,
+   * which is legitimately a subdir of no isolated worktree).
+   */
+  enforceWorktreeRoot = false,
 ): WorktreeVerifyResult {
+  if (enforceWorktreeRoot) {
+    const escape = verifyCwdEscapeDiagnostic(worktreePath);
+    if (escape !== null) return { passed: false, output: escape };
+  }
   const outputs: string[] = [];
   for (const cmd of targetedCommands) {
     const r = runShellCommand(cmd, {
@@ -332,6 +402,28 @@ export function baseBranchLockPath(root: string, runId: string): string {
   return join(root, ".audit-tools", "remediation", "runs", refSafeSegment(runId, "run"), "base-branch.lock");
 }
 
+/**
+ * Per-node worktree lock path (INV-WTS-1/8). Serializes create / reset / remove /
+ * accept for ONE node so a concurrent operation on the SAME node never interleaves
+ * (and a scoped removal can't race its own re-create). DISTINCT from
+ * {@link baseBranchLockPath} (base-branch.lock) and the per-run `rolling-session.lock`
+ * — `withFileLock` is a non-reentrant `wx` create, so sharing a path self-deadlocks
+ * (INV-WTS-6). Keyed on the block id so two DIFFERENT nodes hold DIFFERENT locks and
+ * never contend. INV-WTS-8: whenever both are held, this per-node lock is acquired
+ * BEFORE the base-branch lock on every accept path, so the fixed total order makes an
+ * AB/BA cross-lock deadlock unreachable by construction.
+ */
+export function worktreeNodeLockPath(root: string, runId: string, blockId: string): string {
+  return join(
+    root,
+    ".audit-tools",
+    "remediation",
+    "runs",
+    refSafeSegment(runId, "run"),
+    `worktree-${refSafeSegment(blockId, "node")}.lock`,
+  );
+}
+
 /** Durable ref under which a failed-but-committed node's commit is preserved. */
 export function quarantineRef(runId: string, blockId: string): string {
   return `refs/remediation-quarantine/${refSafeSegment(runId, "run")}/${refSafeSegment(blockId, "node")}`;
@@ -426,6 +518,41 @@ export function quarantineUncommittedWorktreeEdits(
     return null;
   }
   return quarantineFailedNodeCommit(root, branch, runId, blockId);
+}
+
+/**
+ * Point a node's durable quarantine ref straight at a captured commit OID, with no
+ * live branch dependency (INV-WTS-3/7 clobber recovery). Used when a concurrent
+ * sweep/accept has already reset or deleted the node's branch ref toward base so
+ * `quarantineFailedNodeCommit` (which rev-parses the branch) can no longer resolve
+ * the work — the captured OID from the node's own accept-outcome is still a
+ * reachable commit object, so preserving it here keeps the honest committed work
+ * recoverable instead of silently lost. Best-effort; returns the ref + commit, or
+ * null when the update-ref failed.
+ */
+export function quarantineCommitByOid(
+  root: string,
+  runId: string,
+  blockId: string,
+  commitOid: string,
+): { ref: string; commit: string } | null {
+  if (!commitOid) return null;
+  const ref = quarantineRef(runId, blockId);
+  const upd = spawnSyncHidden("git", ["update-ref", ref, commitOid], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (upd.status !== 0) {
+    process.stderr.write(
+      `[remediate-code] could not quarantine ${blockId} commit ${commitOid.slice(0, 8)}: ${(upd.stderr ?? "").trim()}\n`,
+    );
+    return null;
+  }
+  process.stderr.write(
+    `[remediate-code] preserved clobbered node ${blockId} commit ${commitOid.slice(0, 8)} at ${ref} for recovery\n`,
+  );
+  return { ref, commit: commitOid };
 }
 
 /** Clear a node's quarantine ref (e.g. once a later re-dispatch landed successfully). Best-effort. */

@@ -244,17 +244,27 @@ describe("removeWorktree", () => {
     expect(stderr).not.toHaveBeenCalled();
   });
 
-  it("absent path: no spawn, no stderr, no throw (silent no-op)", () => {
+  it("absent + unregistered path: path-scoped removal is a silent no-op (no stderr, no throw)", () => {
+    // INV-WTS-1/4: removeWorktree is path-scoped — it attempts `git worktree remove
+    // --force <path>` (which also clears a STALE registration whose dir is gone), and
+    // when git reports the path was never a working tree AND the dir is absent it is a
+    // genuine no-op: no stderr, no throw. (No global `git worktree prune` that could
+    // clobber a sibling.)
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "rmwt-absent-")));
     RM_DIRS.push(repo);
+    const git = (...a: string[]) =>
+      realSpawnSync("git", a, { cwd: repo, encoding: "utf8", shell: false });
+    git("init");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(join(repo, "f.txt"), "x\n");
+    git("add", "f.txt");
+    git("commit", "-m", "base");
     const absent = join(repo, "does", "not", "exist");
-    const spawnSpy = vi.fn(realSpawnSync as typeof spawnSync);
-    spawnSyncMock.mockImplementation(spawnSpy);
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
     expect(() => removeWorktree(repo, absent)).not.toThrow();
 
-    expect(spawnSpy).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
   });
 
@@ -288,6 +298,10 @@ describe("removeWorktree", () => {
 // ---------------------------------------------------------------------------
 
 describe("verifyNodeInWorktree", () => {
+  // INV-WTS-2: the worktree-root escape guard is OPT-IN (`enforceWorktreeRoot`),
+  // set only by the accept-node path — so these generic (unguarded) callers run the
+  // commands with no toplevel probe. The escape case is exercised separately (below
+  // + with real git in dispatch-worktree-safety.test.ts).
   it("runs each targeted_command as an opaque string through the platform shell in the worktree cwd", () => {
     spawnSyncMock.mockReturnValue(makeSpawnResult(0, "ok", ""));
 
@@ -362,6 +376,45 @@ describe("verifyNodeInWorktree", () => {
   it("returns passed: true and includes output when no commands are given", () => {
     const result = verifyNodeInWorktree("/repo/wt", []);
     expect(result.passed).toBe(true);
+  });
+
+  it("INV-WTS-2 (enforceWorktreeRoot): FAILS LOUD when the git top-level is an ENCLOSING checkout", () => {
+    // With enforcement on, the first probe (`rev-parse --show-toplevel`) resolves up
+    // to MAIN (the worktree was deleted out from under the verify) → refuse, never
+    // false-green against unrelated code in the enclosing checkout.
+    spawnSyncMock.mockReturnValue(makeSpawnResult(0, "/repo\n", "")); // toplevel = MAIN, != /repo/wt
+    const result = verifyNodeInWorktree("/repo/wt", ["npm run check"], true);
+    expect(result.passed).toBe(false);
+    expect(result.output).toMatch(/verify REFUSED|top-level/i);
+    // The command loop must NOT have run (no shell:true command spawned).
+    const ranCommand = spawnSyncMock.mock.calls.some(
+      (c) => c[0] === "npm run check" || (typeof c[1] === "object" && (c[1] as { shell?: boolean })?.shell === true),
+    );
+    expect(ranCommand).toBe(false);
+  });
+
+  it("INV-WTS-2 (enforceWorktreeRoot): does NOT refuse a cwd that is not itself a git work tree", () => {
+    // A cwd that EXISTS but is not inside a git work tree (git exits non-zero, NO
+    // spawn error) is not an escape — only a resolved ENCLOSING top-level is. The
+    // guard passes through and runs the commands.
+    spawnSyncMock
+      .mockReturnValueOnce(makeSpawnResult(128, "", "fatal: not a git repository")) // probe: non-git
+      .mockReturnValue(makeSpawnResult(0, "ok", "")); // command runs
+    const result = verifyNodeInWorktree("/repo/wt", ["npm run check"], true);
+    expect(result.passed).toBe(true);
+    expect(result.output).not.toMatch(/verify REFUSED/);
+  });
+
+  it("does NOT probe/guard when enforceWorktreeRoot is off (default): triage's main-root re-verify", () => {
+    // The generic caller (triage) runs commands with no toplevel probe at all.
+    spawnSyncMock.mockReturnValue(makeSpawnResult(0, "ok", ""));
+    const result = verifyNodeInWorktree("/some/main/root", ["exit 0"]);
+    expect(result.passed).toBe(true);
+    // Only the command spawned — no `rev-parse --show-toplevel` probe.
+    const probed = spawnSyncMock.mock.calls.some(
+      (c) => c[0] === "git" && Array.isArray(c[1]) && (c[1] as string[]).includes("--show-toplevel"),
+    );
+    expect(probed).toBe(false);
   });
 });
 

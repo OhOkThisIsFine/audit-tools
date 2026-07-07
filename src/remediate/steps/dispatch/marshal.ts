@@ -41,6 +41,7 @@ import {
 import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
+  isSkipStatus,
 } from "../../state/itemStatus.js";
 import { resnapshotAffectedFileHashes } from "../../utils/fileIntegrity.js";
 import { createReservationLedger } from "audit-tools/shared";
@@ -54,11 +55,13 @@ import {
   gitBranchExists,
   gitEditedFilesForBranch,
   gitHunksForBranch,
+  gitCommitIsAncestor,
   toRepoRelative,
 } from "./common.js";
 import {
   worktreePath,
   ensureRemediationBranchCheckedOut,
+  quarantineCommitByOid,
 } from "./worktreeLifecycle.js";
 import { scheduleWave, buildDispatchQuota } from "./waveScheduling.js";
 import {
@@ -800,6 +803,52 @@ async function mergeImplementResultsIntoState(
               : "");
           continue;
         }
+        // INV-WTS-7: a resolved_no_change is genuine ONLY when the node captured NO
+        // commit OID and git ground truth confirms an empty branch. A node that DID
+        // capture a commit OID but whose branch now reads empty is a CLOBBER (a
+        // concurrent sweep/accept reset its ref toward base) — an ancestry mismatch,
+        // NOT a genuine no-change: re-block to triage and recover its committed work
+        // from quarantine, never flip it terminal on a race-corrupted live read. A
+        // worker-claimed no-change whose branch actually HAS edits is likewise
+        // re-blocked (git ground truth over the self-report). Only fires on the
+        // rolling path (an accept-outcome exists); the interim main-tree path has no
+        // git ground truth and is unaffected.
+        if (itemResult.status === "resolved_no_change" && acceptOutcome) {
+          const noChangeBranch = worktreeBranchForBlock(blockId, runId);
+          const branchPresent = gitBranchExists(options.root, noChangeBranch);
+          const branchEdits = branchPresent
+            ? gitEditedFilesForBranch(options.root, noChangeBranch)
+            : null;
+          const branchHasEdits =
+            !!branchEdits && branchEdits.available && branchEdits.files.size > 0;
+          const branchEmpty =
+            !branchPresent ||
+            (!!branchEdits && branchEdits.available && branchEdits.files.size === 0);
+          const capturedOid = acceptOutcome.committedOid;
+          if (capturedOid && branchEmpty) {
+            quarantineCommitByOid(options.root, runId, blockId, capturedOid);
+            stateItem.status = "blocked";
+            markTerminal(stateItem);
+            stateItem.failure_reason =
+              `Node ${blockId} reported finding ${itemResult.finding_id} ` +
+              `resolved_no_change, but it had captured commit ${capturedOid.slice(0, 8)} and ` +
+              `its branch now reads empty — a concurrent sweep/accept clobbered its ref toward ` +
+              `base (ancestry mismatch, not a genuine no-change). Its committed work is ` +
+              `preserved under quarantine and the finding is routed to triage.`;
+            continue;
+          }
+          if (branchHasEdits) {
+            stateItem.status = "blocked";
+            markTerminal(stateItem);
+            const sample = [...branchEdits!.files].slice(0, 5).join(", ");
+            stateItem.failure_reason =
+              `Node ${blockId} reported finding ${itemResult.finding_id} ` +
+              `resolved_no_change, but its worktree branch actually has edits ` +
+              `(${sample}${branchEdits!.files.size > 5 ? ", …" : ""}); git ground truth ` +
+              `contradicts the no-change claim. Routed to triage.`;
+            continue;
+          }
+        }
         const spec = stateItem.item_spec;
         // The worker's explicit `resolved_no_change` is a no-change signal in its
         // own right; the spec heuristic is the fallback for a plain `resolved`.
@@ -974,21 +1023,46 @@ async function mergeImplementResultsIntoState(
     // "resolved" but committed nothing); the hard-failure case (outcome=error|timeout)
     // is caught earlier, in the collapsed loop's resolve branch, so a mislabeled
     // `resolved_no_change` can't slip past this resolvedFindingIds keying.
-    if (resolvedFindingIds.length > 0) {
-      if (acceptOutcome && !acceptOutcome.merged) {
+    if (resolvedFindingIds.length > 0 && acceptOutcome) {
+      const notLanded = !acceptOutcome.merged;
+      // INV-WTS-3: node-IDENTITY ancestry reconcile. A merged:true accept is only
+      // trusted after confirming THIS node's own landed cherry-pick commit is still
+      // reachable from the remediation HEAD (`git merge-base --is-ancestor`). A bare
+      // path-existence probe (`cat-file -e HEAD:<path>`) would false-PASS when a
+      // sibling or a pre-existing file sits at the same path (CE-001); the captured
+      // commit OID cannot. If the landing was rolled back / clobbered after accept,
+      // the OID is no longer an ancestor → re-block + recover from quarantine.
+      const ancestryLost =
+        acceptOutcome.merged &&
+        !!acceptOutcome.landedHeadOid &&
+        !gitCommitIsAncestor(options.root, acceptOutcome.landedHeadOid);
+      if (notLanded || ancestryLost) {
+        if (ancestryLost && acceptOutcome.committedOid) {
+          quarantineCommitByOid(options.root, runId, blockId, acceptOutcome.committedOid);
+        }
         for (const findingId of resolvedFindingIds) {
           const stateItem = state.items[findingId];
-          if (!stateItem || isTerminalStatus(stateItem.status)) continue;
+          // These findings were just set to `resolved` by THIS merge pass, so the
+          // re-block must be allowed to flip resolved→blocked. Only a user-SKIP
+          // terminal (deemed_inappropriate / ignored) is protected — never a bare
+          // `isTerminalStatus` guard, which would (wrongly) skip the resolved item
+          // this gate exists to override (INV-WTS-5).
+          if (!stateItem || isSkipStatus(stateItem.status)) continue;
           stateItem.status = "blocked";
           markTerminal(stateItem);
-          stateItem.failure_reason =
-            `Node ${blockId} reported finding ${findingId} resolved, but its tool-owned ` +
-            `verify/merge did not land the edits (outcome=${acceptOutcome.outcome}, ` +
-            `verify_passed=${acceptOutcome.verifyPassed}, merged=false); the fix is not in ` +
-            `the main tree. Routed to triage.` +
-            (acceptOutcome.diagnostic
-              ? `\nFailing command output:\n${acceptOutcome.diagnostic}`
-              : "");
+          stateItem.failure_reason = notLanded
+            ? `Node ${blockId} reported finding ${findingId} resolved, but its tool-owned ` +
+              `verify/merge did not land the edits (outcome=${acceptOutcome.outcome}, ` +
+              `verify_passed=${acceptOutcome.verifyPassed}, merged=false); the fix is not in ` +
+              `the main tree. Routed to triage.` +
+              (acceptOutcome.diagnostic
+                ? `\nFailing command output:\n${acceptOutcome.diagnostic}`
+                : "")
+            : `Node ${blockId} reported finding ${findingId} resolved and merged, but its ` +
+              `landed commit ${acceptOutcome.landedHeadOid!.slice(0, 8)} is no longer an ` +
+              `ancestor of the remediation HEAD — a concurrent sweep/accept rolled its landing ` +
+              `back (ancestry mismatch, closing the CE-001 path-existence false-close). Its ` +
+              `committed work is preserved under quarantine and the finding is routed to triage.`;
         }
       }
     }

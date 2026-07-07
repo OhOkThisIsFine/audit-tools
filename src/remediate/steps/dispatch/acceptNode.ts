@@ -21,6 +21,7 @@ import {
   dirtyMainTreeCollisions,
   mergeWorktree,
   baseBranchLockPath,
+  worktreeNodeLockPath,
   resetNodeWorktreeAndBranch,
   createWorktree,
   seedUntrackedDeclaredPaths,
@@ -110,6 +111,22 @@ export interface AcceptNodeWorktreeResult {
    * instead of an `outcome:error` with no captured stderr. Absent on success.
    */
   diagnostic?: string;
+  /**
+   * The node's OWN committed branch-tip OID, captured at commit time (INV-WTS-7).
+   * Present iff the node actually committed edits; ABSENT when the worker made no
+   * tracked change (the genuine `resolved_no_change` precondition). A captured OID
+   * that later reads as an empty branch at merge time is a CLOBBER, never a genuine
+   * no-change — the live branch state is never trusted over this captured OID.
+   */
+  committedOid?: string;
+  /**
+   * The MAIN-branch HEAD OID that landed this node's cherry-pick (INV-WTS-3),
+   * present only on `merged:true`. Its reachability from the live remediation-branch
+   * HEAD (`git merge-base --is-ancestor`) is the node-identity ancestry probe the
+   * disposition reconcile uses — a sibling/pre-existing file at the same path can
+   * never make it pass, and a rolled-back/clobbered landing fails it.
+   */
+  landedHeadOid?: string;
 }
 
 /**
@@ -132,13 +149,38 @@ export interface AcceptNodeWorktreeResult {
  * SAFETY: the main tree is touched only through `mergeWorktree` (cherry-pick of a
  * verified branch, aborts cleanly on conflict). No state mutation here — the
  * caller persists via `mergeImplementResults`.
+ *
+ * INV-WTS-8 (single total lock-acquisition order): the WHOLE accept is serialized
+ * through this node's own {@link worktreeNodeLockPath} FIRST, and the base-mutating
+ * section acquires {@link baseBranchLockPath} nested INSIDE it — never the other way
+ * around. The per-node lock is acquired before the base lock on every accept path, so
+ * the one fixed order makes an AB/BA cross-lock deadlock unreachable by construction
+ * (CE-008). The per-node lock also serializes this node's removeWorktree/reset against
+ * a concurrent same-node operation (INV-WTS-1). Both lock paths are distinct (INV-WTS-6)
+ * so the non-reentrant `withFileLock` never self-deadlocks.
  */
 export async function acceptNodeWorktree(
+  params: AcceptNodeWorktreeParams,
+): Promise<AcceptNodeWorktreeResult> {
+  return withFileLock(
+    worktreeNodeLockPath(params.root, params.runId, params.blockId),
+    () => acceptNodeWorktreeLocked(params),
+  );
+}
+
+/** The accept-node body, run while the per-node worktree lock (INV-WTS-8) is held. */
+async function acceptNodeWorktreeLocked(
   params: AcceptNodeWorktreeParams,
 ): Promise<AcceptNodeWorktreeResult> {
   const { root, runId, blockId, worktreeRoot: wt, branch, workerOutcome, targetedCommands, additionalVerifyCommands } = params;
   let verifyPassed = false;
   let merged = false;
+  // The node's own committed branch-tip OID (INV-WTS-7). Captured immediately after
+  // a successful commit and threaded into every downstream return so the disposition
+  // reconcile can tell a genuine no-change (no captured OID) from a clobbered
+  // genuine-edit node (captured OID + later-empty branch) — the live branch state is
+  // never trusted over this value.
+  let committedOid: string | undefined;
 
   if (workerOutcome === "rate_limited") {
     // Piece D — quota-death worktree preservation: a worker that died on a host
@@ -171,9 +213,22 @@ export async function acceptNodeWorktree(
   }
   if (!commit.committed) {
     // Worker reported success but made no tracked edits — nothing to verify or merge.
-    // The deterministic merge adjudicates the result file (resolved_no_change needs evidence).
+    // The deterministic merge adjudicates the result file (resolved_no_change needs
+    // evidence). NO committedOid is captured: this is the genuine no-change
+    // precondition (INV-WTS-7) — the branch legitimately has no commit of its own.
     removeWorktree(root, wt);
     return { outcome: "success", verifyPassed, merged };
+  }
+
+  // Capture the node's own committed branch tip (INV-WTS-7). The node DID commit, so
+  // any later reconcile that reads its branch as empty is a clobber, not a no-change.
+  const committedRev = spawnSyncHidden("git", ["rev-parse", branch], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  if (!committedRev.error && committedRev.status === 0) {
+    committedOid = committedRev.stdout.trim();
   }
 
   // Base-mutating critical section (INV-2/INV-3/CE-001/CE-002/CE-005) under a DISTINCT
@@ -258,7 +313,9 @@ export async function acceptNodeWorktree(
     }
     const verify =
       verifyCommands.length > 0
-        ? verifyNodeInWorktree(wt, verifyCommands)
+        ? // INV-WTS-2: enforce the worktree-root guard on the per-node verify so a
+          // worktree deleted out from under it fails LOUD instead of resolving up to MAIN.
+          verifyNodeInWorktree(wt, verifyCommands, true)
         : { passed: true, output: "" };
     verifyPassed = verify.passed;
     if (!verify.passed) {
@@ -368,11 +425,22 @@ export async function acceptNodeWorktree(
       }
     }
 
+    // Capture the MAIN-branch HEAD OID that landed this node's cherry-pick (INV-WTS-3).
+    // Its reachability from the live HEAD is the node-identity ancestry probe the
+    // disposition reconcile uses — never a bare path-existence check.
+    const landedHead = spawnSyncHidden("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      shell: false,
+    });
+    const landedHeadOid =
+      !landedHead.error && landedHead.status === 0 ? landedHead.stdout.trim() : undefined;
+
     // Landed successfully and the merged base is green: clear any quarantine ref left
     // by a prior failed attempt for this node so the recovery report lists only
     // genuinely-unrecovered work.
     clearQuarantinedCommit(root, runId, blockId);
-    return { outcome: "success", verifyPassed, merged };
+    return { outcome: "success", verifyPassed, merged, committedOid, landedHeadOid };
   });
 }
 
@@ -412,6 +480,10 @@ export async function recordNodeAcceptOutcome(
     merged: result.merged,
     // Only present on a failure outcome; gives triage the failing command + output.
     ...(result.diagnostic !== undefined ? { diagnostic: result.diagnostic } : {}),
+    // INV-WTS-3/7: the node's captured commit identity, ground truth the disposition
+    // reconcile trusts over any live branch/path read.
+    ...(result.committedOid !== undefined ? { committed_oid: result.committedOid } : {}),
+    ...(result.landedHeadOid !== undefined ? { landed_head_oid: result.landedHeadOid } : {}),
   });
 }
 
@@ -426,6 +498,8 @@ export async function loadNodeAcceptOutcome(
     verify_passed: boolean;
     merged: boolean;
     diagnostic?: string;
+    committed_oid?: string;
+    landed_head_oid?: string;
   }>(nodeAcceptOutcomePath(artifactsDir, runId, blockId));
   if (!raw) return null;
   return {
@@ -433,6 +507,8 @@ export async function loadNodeAcceptOutcome(
     verifyPassed: raw.verify_passed,
     merged: raw.merged,
     ...(raw.diagnostic !== undefined ? { diagnostic: raw.diagnostic } : {}),
+    ...(raw.committed_oid !== undefined ? { committedOid: raw.committed_oid } : {}),
+    ...(raw.landed_head_oid !== undefined ? { landedHeadOid: raw.landed_head_oid } : {}),
   };
 }
 
@@ -497,9 +573,19 @@ export async function executeNodeInWorktree(args: {
     // present), then create this node's isolated worktree (createWorktree also links
     // the main checkout's node_modules so verify can resolve deps), and seed
     // untracked declared targets a committed-files-only worktree can't see.
-    resetNodeWorktreeAndBranch(root, wt, branch);
-    createWorktree(root, wt, branch);
-    seedUntrackedDeclaredPaths(root, wt, seedPaths);
+    //
+    // INV-WTS-1/8: serialize this node's reset→create→seed through its OWN
+    // worktree lock so a concurrent same-node operation can't race the scoped
+    // removal against the re-create. A DIFFERENT node holds a DIFFERENT lock (keyed
+    // on block_id), so sibling nodes never contend and are never clobbered. This is
+    // a SEPARATE critical section from the accept's (released before the worker runs
+    // and re-acquired inside acceptNodeWorktree), so the non-reentrant lock never
+    // self-deadlocks.
+    await withFileLock(worktreeNodeLockPath(root, runId, block.block_id), async () => {
+      resetNodeWorktreeAndBranch(root, wt, branch);
+      createWorktree(root, wt, branch);
+      seedUntrackedDeclaredPaths(root, wt, seedPaths);
+    });
     const result = await dispatchNode({ block, slot, worktreeRoot: wt, resultPath });
     // Shared post-worker lifecycle. Verify commands are DERIVED from the node's
     // actually-touched tests inside acceptNodeWorktree (post-commit) — omit them so a
