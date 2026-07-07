@@ -88,6 +88,39 @@ import {
 import { planHybridDispatch, readSettledPools, addSettledPool } from "audit-tools/shared";
 import { resolveHostDispatchCapability } from "./args.js";
 
+// ── In-process dispatch: bounded no-progress retry (D1, NIM/Codex fix set) ─────
+
+/** Injectable backoff clock — tests pass a no-op so the retry loop is instant. */
+export interface DriveNoProgressRetryDeps {
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Re-drive an in-process rolling dispatch up to `maxRetries` times with exponential
+ * backoff WHILE `isNoProgress` holds. A fully-unproductive pass — every review packet
+ * errored at the provider so nothing ingested, nothing stranded, no pause — otherwise
+ * trips the no-progress guard and HALTS the run; a transient provider overload (a
+ * burst of 5xx/timeouts) should self-heal instead. Bounded (terminates on persistent
+ * failure) and paced (rapid retries won't outlast a real overload), so a genuinely
+ * stuck pass still falls through to the blocked handoff after the budget is spent.
+ * Re-driving is exactly what the whole next-step loop does across invocations — the
+ * still-pending tasks are re-dispatched — collapsed into one step so an autonomous
+ * loop that treats `blocked` as terminal doesn't halt on a blip.
+ */
+export async function driveWithNoProgressRetry<T>(
+  drive: () => Promise<T>,
+  isNoProgress: (result: T) => boolean,
+  opts: { maxRetries: number; baseBackoffMs: number; deps?: DriveNoProgressRetryDeps },
+): Promise<T> {
+  const sleep = opts.deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let result = await drive();
+  for (let attempt = 1; attempt <= opts.maxRetries && isNoProgress(result); attempt += 1) {
+    await sleep(opts.baseBackoffMs * 2 ** (attempt - 1));
+    result = await drive();
+  }
+  return result;
+}
+
 // ── Incoming-artifact helper ──────────────────────────────────────────────────
 
 /**
@@ -1327,13 +1360,21 @@ async function runHostDelegationObligation(
       selfCliPath: ctx.params.selfCliPath,
       timeoutMs: ctx.params.timeoutMs,
     });
-    const driven = await driveRollingAuditDispatch({
-      root: ctx.params.root,
-      artifactsDir: ctx.params.artifactsDir,
-      activeReviewRun,
-      sessionConfig: sessionConfig!,
-      timeoutMs: ctx.params.timeoutMs,
-    });
+    // D1: a transient all-errored pass (nothing ingested/stranded, not paused) is
+    // retried with backoff before we honour the no-progress guard, so a burst of
+    // provider 5xx/timeouts self-heals instead of halting the autonomous loop.
+    const driven = await driveWithNoProgressRetry(
+      () =>
+        driveRollingAuditDispatch({
+          root: ctx.params.root,
+          artifactsDir: ctx.params.artifactsDir,
+          activeReviewRun,
+          sessionConfig: sessionConfig!,
+          timeoutMs: ctx.params.timeoutMs,
+        }),
+      (d) => d.status !== "paused" && !d.ingest && d.stranded_ids.length === 0,
+      { maxRetries: 2, baseBackoffMs: 500 },
+    );
     await clearDispatchFiles(ctx.params.artifactsDir);
     // Resumable pause (DC-4): the pool exhausted after spill and the run is paused
     // on a `waiting_for_provider` state, persisted on the active-dispatch artifact.
@@ -1373,8 +1414,11 @@ async function runHostDelegationObligation(
           bundle,
           reason:
             `In-process rolling dispatch produced no results for ${driven.packet_count} ` +
-            `review packet(s) (provider '${sessionConfig?.provider}' errored on every packet); ` +
-            "stopping to avoid a no-progress loop.",
+            `review packet(s) (provider '${sessionConfig?.provider}' errored on every packet, and a ` +
+            "bounded auto-retry did not recover); stopping to avoid a no-progress loop. " +
+            "Recovery: once the backend is healthy, re-run next-step to re-dispatch; or hand the review " +
+            "results in directly with `audit-code ingest-results --results <file>` (or drop AuditResult[] " +
+            "files into the run's task-results/ dir, matched by task_id).",
         },
       };
     }
