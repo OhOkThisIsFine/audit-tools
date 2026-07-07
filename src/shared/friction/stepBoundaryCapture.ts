@@ -1,6 +1,7 @@
 import type { FrictionItem } from "../io/frictionCapture.js";
 import type { FrictionCaptureArtifact } from "../io/frictionCapture.js";
 import { captureFrictionEvent, type FrictionEvent } from "./captureFrictionEvent.js";
+import type { FrictionCategory } from "./frictionRecord.js";
 
 /**
  * CE-005 — the SINGLE shared backend-observed step-boundary chokepoint.
@@ -63,6 +64,47 @@ export type StepBoundaryEventType =
   | (string & {});
 
 /**
+ * Deterministic map from a backend step-boundary fact kind to the REAL close-out
+ * friction CATEGORY (one of `FRICTION_CATEGORIES`) it belongs to. This is what
+ * lets the auto-captured event feed the per-category friction walk directly:
+ * every backend fact is redundant/wasteful re-work or a something-the-tool-had-to
+ * -be-reminded-of, never the coarse `trap` bucket the sink used to stamp.
+ *
+ *  - `inefficient_feeding` — redundant / wasteful re-work: phase re-emits, repair
+ *    rounds, post-repair re-derives, no-change merges, quota escalations, and the
+ *    coverage-line mismatch (a re-round-trip to fix a mechanical mismatch).
+ *  - `tool_should_decide`  — a fact where the tool fell back to host discretion or
+ *    quarantined work the host must now shepherd: artifact rejection, the
+ *    intent-gate lock-across-judge fallback, and a node quarantine.
+ *
+ * The named members are pinned; any UNKNOWN `event_type` degrades to
+ * `inefficient_feeding` (the safe "this was avoidable re-work" default) so a new
+ * backend fact always lands in a real category — never `trap`, never uncovered.
+ */
+const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
+  phase_reemit: "inefficient_feeding",
+  repair_round: "inefficient_feeding",
+  post_repair_rederive: "inefficient_feeding",
+  no_change_merge: "inefficient_feeding",
+  quota_escalation: "inefficient_feeding",
+  coverage_total_lines_mismatch: "inefficient_feeding",
+  artifact_rejected: "tool_should_decide",
+  intent_gate_fallback: "tool_should_decide",
+  node_quarantine: "tool_should_decide",
+};
+
+/**
+ * The REAL close-out friction category for a step-boundary fact kind. Total: an
+ * unknown event type degrades to `inefficient_feeding` so the mapping is never
+ * undefined and a captured event is ALWAYS tagged with a real category.
+ */
+export function stepBoundaryFrictionCategory(
+  eventType: StepBoundaryEventType,
+): FrictionCategory {
+  return STEP_BOUNDARY_CATEGORY[eventType] ?? "inefficient_feeding";
+}
+
+/**
  * Percent-encode a single id component so the join delimiter (`:`) cannot appear
  * inside it. `encodeURIComponent` already escapes `:` (and `/`, `\`, `%`, etc.),
  * but it leaves a handful of safe sub-delimiters (`!'()*-._~`) unescaped — none of
@@ -107,6 +149,13 @@ export interface StepBoundaryFriction {
   severity?: FrictionItem["severity"];
   category?: FrictionItem["category"];
   area?: string;
+  /**
+   * Optional artifact/subject key this fact concerns (e.g. the node id, the
+   * contract id). The aggregation axis for the derived per-category observation:
+   * N facts on the SAME artifact collapse to one `inefficient_feeding` line.
+   * Falls back to `area`, then the discriminator, when unset.
+   */
+  artifact?: string;
 }
 
 /**
@@ -127,7 +176,17 @@ export async function captureStepBoundaryFriction(
     id: stepBoundaryEventId(fact.eventType, runId, fact.discriminator),
     note: fact.note,
     severity: fact.severity,
+    // The inherited `FrictionItem.category` (`bug|trap|suggestion`) is only a
+    // coarse ORIGIN hint. It is NEVER the close-out category — the close-out keys
+    // on `frictionCategory` below. Default the origin hint to `trap` (a standing
+    // tooling fact) but ALWAYS stamp a REAL close-out category so the event feeds
+    // the per-category walk instead of the dead `trap` bucket it used to land in.
     category: fact.category ?? "trap",
+    frictionCategory: stepBoundaryFrictionCategory(fact.eventType),
+    // The aggregation axis: N same-artifact backend facts collapse to ONE derived
+    // observation. Prefer the caller's explicit `artifact`, then the fact's area,
+    // then the discriminator (which is per-instance but still a stable subject key).
+    artifact: fact.artifact ?? fact.area ?? fact.discriminator,
     area: fact.area,
   };
   await captureFrictionEvent(artifactsDir, runId, event, tool);

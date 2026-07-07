@@ -11,24 +11,33 @@ import {
 import { readOptionalJsonFile, readOptionalTextFile } from '../io/json.js';
 import {
   type CapturedFrictionItem,
+  type FrictionCategory,
   type FrictionCategoryAttestation,
   type FrictionDisposition,
   type FrictionDispositionRecord,
   type FrictionOpenObservation,
   type TriagedFrictionArtifact,
+  FRICTION_CATEGORIES,
   appendFrictionUnderLock,
   frictionLockPath,
+  isFrictionCategory,
 } from './frictionRecord.js';
 
 export type {
   CapturedFrictionItem,
+  FrictionCategory,
   FrictionCategoryAttestation,
   FrictionDisposition,
   FrictionDispositionRecord,
   FrictionOpenObservation,
   TriagedFrictionArtifact,
 } from './frictionRecord.js';
-export { appendFrictionUnderLock, frictionLockPath } from './frictionRecord.js';
+export {
+  FRICTION_CATEGORIES,
+  appendFrictionUnderLock,
+  frictionLockPath,
+  isFrictionCategory,
+} from './frictionRecord.js';
 
 /**
  * O1 end-of-run friction TRIAGE — single-sourced for BOTH orchestrators so the
@@ -102,20 +111,6 @@ export const FRICTION_NAMED_DIMENSIONS = [
 ] as const;
 export type FrictionDimension = (typeof FRICTION_NAMED_DIMENSIONS)[number] | string;
 
-/**
- * The REQUIRED friction CATEGORIES — the coverage axis the blocking close-out
- * enforces EVERY run. The host must, for EACH category, either record ≥1
- * `open_observations[]` entry tagged with it OR an explicit
- * `category_attestations[]` "nothing to report". A category can never be skipped
- * by silence — that omission is exactly the failure this gate prevents.
- */
-export const FRICTION_CATEGORIES = [
-  'ambiguous_direction',   // direction/decision the tool or prompt left to the host that it should have resolved
-  'tool_should_decide',    // the host had to remember / notice / enforce something the tool should guarantee
-  'inefficient_feeding',   // redundant or wasteful work, poor context feeding, or a tool inefficiency
-] as const;
-export type FrictionCategory = (typeof FRICTION_CATEGORIES)[number];
-
 /** One-line human labels for each category, shown in the triage prompt. */
 export const FRICTION_CATEGORY_LABELS: Record<FrictionCategory, string> = {
   ambiguous_direction:
@@ -126,12 +121,209 @@ export const FRICTION_CATEGORY_LABELS: Record<FrictionCategory, string> = {
     'inefficient-feeding — redundant/wasteful work, poor context feeding, or a tool inefficiency',
 };
 
-/** Whether a value is one of the required friction categories (contract check). */
-export function isFrictionCategory(value: unknown): value is FrictionCategory {
-  return (
-    typeof value === 'string' &&
-    (FRICTION_CATEGORIES as readonly string[]).includes(value)
+/**
+ * Cost signals measured across an aggregate of same-category (and, where
+ * applicable, same-artifact) mechanical events. These are what let the walk say
+ * "this was expensive re-work" quantitatively, not just "something happened".
+ */
+export interface FrictionCostSignals {
+  /**
+   * Round-trips: the number of aggregated mechanical events. Each backend
+   * step-boundary fact is one avoidable round-trip (a re-emit, a repair round, a
+   * re-derive, …), so the event count IS the round-trip count.
+   */
+  round_trips: number;
+  /**
+   * Verbatim re-authors: aggregated events whose subject artifact was touched by
+   * MORE THAN ONE event — i.e. the same artifact was re-worked repeatedly. This
+   * is the "we re-authored the same thing again" signal.
+   */
+  verbatim_re_authors: number;
+  /**
+   * Summed token cost across the aggregated events, when the events carried a
+   * `tokens` measure (0 when none did — token accounting stays best-effort and
+   * never fabricated).
+   */
+  tokens: number;
+}
+
+/**
+ * The threshold an aggregate must reach to SURFACE as a pre-populated,
+ * auto-covering observation. Below it, the aggregate is still reported (so the
+ * host sees it) but does NOT auto-cover its category — the host still walks it.
+ * "Below MUST NOT fire" is the contract: a single, cheap round-trip is noise, not
+ * a surfaced friction observation.
+ */
+export const FRICTION_COST_SURFACE_THRESHOLD = 2;
+
+/** Whether an aggregate's cost is at/above the surface threshold (fires). */
+export function costSignalsSurface(signals: FrictionCostSignals): boolean {
+  return signals.round_trips >= FRICTION_COST_SURFACE_THRESHOLD;
+}
+
+/**
+ * ONE derived observation aggregated from N same-category mechanical events. This
+ * is the pre-populated close-out entry: N same-artifact backend facts collapse
+ * into a SINGLE `inefficient_feeding` (or other-category) observation with the
+ * measured cost signals and the covered event ids.
+ */
+export interface DerivedFrictionObservation {
+  /** The real close-out category this aggregate covers. */
+  category: FrictionCategory;
+  /** The aggregation subject (the shared artifact key, or "(mixed)" when several). */
+  artifact: string;
+  /** The ids of the mechanical events folded into this observation. */
+  event_ids: string[];
+  /** The measured cost across the folded events. */
+  cost: FrictionCostSignals;
+  /**
+   * True when the aggregate's cost is at/above the surface threshold: only these
+   * pre-populate/auto-cover the category. A below-threshold aggregate is still
+   * listed for the host but never fires (never auto-covers).
+   */
+  surfaced: boolean;
+  /** A ready-to-paste observation note summarizing the aggregate + cost. */
+  note: string;
+}
+
+/**
+ * The aggregation subject key for a mechanical event — the axis that collapses N
+ * same-subject events into ONE observation. Prefer the explicit `artifact`, then
+ * the coarse `area`, then the event id (per-instance, so an id-keyed event never
+ * folds with another — it stays a round_trips=1 singleton, below threshold).
+ */
+function aggregationKey(item: CapturedFrictionItem): string {
+  return item.artifact ?? item.area ?? item.id;
+}
+
+/**
+ * Measure the cost signals across an aggregate of mechanical events. Pure and
+ * deterministic — round_trips is the event count (each backend fact is one
+ * avoidable round-trip), verbatim_re_authors fires only when the SAME subject was
+ * touched by MORE THAN ONE event, and tokens sums the best-effort per-event
+ * measure (never fabricated: a missing/non-finite `tokens` contributes 0).
+ */
+export function measureFrictionCost(
+  items: readonly CapturedFrictionItem[],
+): FrictionCostSignals {
+  const round_trips = items.length;
+  const verbatim_re_authors = round_trips > 1 ? round_trips : 0;
+  const tokens = items.reduce(
+    (sum, item) =>
+      sum +
+      (typeof item.tokens === "number" && Number.isFinite(item.tokens)
+        ? item.tokens
+        : 0),
+    0,
   );
+  return { round_trips, verbatim_re_authors, tokens };
+}
+
+function derivedObservationNote(
+  agg: Omit<DerivedFrictionObservation, "note" | "surfaced">,
+  sample: string,
+): string {
+  const tokenPart = agg.cost.tokens > 0 ? `, ~${agg.cost.tokens} tokens` : "";
+  const repeat =
+    agg.cost.verbatim_re_authors > 0
+      ? `, ${agg.cost.verbatim_re_authors} repeat re-work`
+      : "";
+  return (
+    `auto-captured: ${agg.cost.round_trips} mechanical ${agg.category} ` +
+    `event(s) on \`${agg.artifact}\`${repeat}${tokenPart}. e.g. ${sample}`
+  );
+}
+
+/**
+ * Aggregate the run's mechanical events into ONE derived observation per
+ * (real category, artifact) group — the pre-population source for the host's
+ * category walk. Pure and deterministic:
+ *
+ *  - ONLY events carrying a REAL `frictionCategory` feed the walk; an untagged
+ *    legacy event covers no category (it is a bare pending subject, not a walk
+ *    contribution) so pre-population never invents coverage.
+ *  - N same-artifact same-category events collapse to ONE observation carrying
+ *    the measured cost (`measureFrictionCost`) and the covered event ids.
+ *  - `surfaced` is the below/above threshold gate: a single cheap round-trip
+ *    (round_trips < `FRICTION_COST_SURFACE_THRESHOLD`) is reported but does NOT
+ *    fire (never auto-covers its category) — "below MUST NOT fire".
+ *  - Output order is stable (canonical category order, then artifact) so a
+ *    re-derive never churns the record.
+ */
+export function deriveFrictionObservations(
+  frictions: readonly CapturedFrictionItem[],
+): DerivedFrictionObservation[] {
+  const groups = new Map<string, CapturedFrictionItem[]>();
+  for (const item of frictions) {
+    if (!isFrictionCategory(item.frictionCategory)) continue;
+    const key = `${item.frictionCategory} ${aggregationKey(item)}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(item);
+    else groups.set(key, [item]);
+  }
+
+  const derived: DerivedFrictionObservation[] = [];
+  for (const [key, items] of groups) {
+    const sep = key.indexOf(" ");
+    const category = key.slice(0, sep) as FrictionCategory;
+    const artifact = key.slice(sep + 1);
+    const cost = measureFrictionCost(items);
+    const base = { category, artifact, event_ids: items.map((i) => i.id), cost };
+    derived.push({
+      ...base,
+      surfaced: costSignalsSurface(cost),
+      note: derivedObservationNote(base, items[0].note),
+    });
+  }
+  derived.sort(
+    (a, b) =>
+      FRICTION_CATEGORIES.indexOf(a.category) -
+        FRICTION_CATEGORIES.indexOf(b.category) ||
+      a.artifact.localeCompare(b.artifact),
+  );
+  return derived;
+}
+
+/**
+ * The SURFACED derived observations mapped into the persisted
+ * `open_observations[]` shape — the pre-populated entries the close-out gate (and
+ * the Stop-hook backstop) read for category coverage. Only aggregates at/above
+ * the surface threshold are emitted; below-threshold aggregates never fire.
+ */
+export function prepopulatedObservations(
+  derived: readonly DerivedFrictionObservation[],
+): FrictionOpenObservation[] {
+  return derived
+    .filter((d) => d.surfaced)
+    .map((d) => ({
+      category: d.category,
+      dimension: "manual_interventions",
+      note: d.note,
+      artifact: d.artifact,
+      derived: true,
+    }));
+}
+
+/**
+ * Merge tool-derived observations into a record, preserving host-authored ones.
+ * The prior derived set (marked `derived`) is dropped and recomputed from the
+ * current `frictions[]`, so a re-derive is idempotent and always up to date;
+ * host-authored observations (no `derived` flag) are never touched. When nothing
+ * survives, the field is omitted so an empty run never churns the record.
+ */
+function mergeDerivedObservations(
+  record: TriagedFrictionArtifact,
+): TriagedFrictionArtifact {
+  const hostAuthored = (record.open_observations ?? []).filter((o) => !o.derived);
+  const derived = prepopulatedObservations(
+    deriveFrictionObservations(record.frictions ?? []),
+  );
+  const open_observations = [...hostAuthored, ...derived];
+  if (open_observations.length === 0) {
+    const { open_observations: _omit, ...rest } = record;
+    return rest;
+  }
+  return { ...record, open_observations };
 }
 
 /**
@@ -254,17 +446,18 @@ export async function decideFrictionTriage(
   const recordPath = frictionCapturePath(artifactsDir, sanitizeRunId(runId));
   const subjects = await collectTriageSubjects(artifactsDir, runId);
 
-  // Materialize the record on first call so the host always appends to an
-  // existing file rather than creating it from scratch.
-  let record = await readRecord(artifactsDir, runId);
-  if (!record) {
-    record = await appendFrictionUnderLock(
-      artifactsDir,
-      runId,
-      (r) => ({ ...r, tool: r.tool ?? tool }),
-      tool,
-    );
-  }
+  // Materialize the record (so the host always appends to an existing file) AND
+  // pre-populate the category walk in ONE locked merge: aggregate the run's
+  // tool-tagged mechanical events into derived `open_observations[]` entries so a
+  // category the backend already saw re-work in arrives pre-covered. The merge is
+  // host-preserving (host-authored observations/dispositions survive) and
+  // idempotent (the derived set is recomputed, never duplicated).
+  const record = await appendFrictionUnderLock(
+    artifactsDir,
+    runId,
+    (r) => mergeDerivedObservations({ ...r, tool: r.tool ?? tool }),
+    tool,
+  );
 
   const existingObservations: FrictionOpenObservation[] = record.open_observations ?? [];
   const existingAttestations: FrictionCategoryAttestation[] = record.category_attestations ?? [];
@@ -325,8 +518,19 @@ export function buildFrictionTriageBlock(triage: FrictionTriageDecision): string
 
   const covered = (c: FrictionCategory): boolean =>
     !triage.missing_categories.includes(c);
+  // Categories the tool ALREADY pre-populated from aggregated mechanical events —
+  // the host inherits these instead of walking them from scratch.
+  const prepopulated = new Set<string>(
+    triage.existing_observations
+      .filter((o) => o.derived && isFrictionCategory(o.category))
+      .map((o) => o.category as string),
+  );
   const categoryLines = FRICTION_CATEGORIES.map((c) => {
-    const status = covered(c) ? "✓ covered" : "✗ MISSING — owe an entry or attestation";
+    const status = covered(c)
+      ? prepopulated.has(c)
+        ? "✓ covered — pre-populated from mechanical events (review, don't re-walk)"
+        : "✓ covered"
+      : "✗ MISSING — owe an entry or attestation";
     return `- \`${c}\` — ${FRICTION_CATEGORY_LABELS[c]}\n    (${status})`;
   }).join("\n");
 

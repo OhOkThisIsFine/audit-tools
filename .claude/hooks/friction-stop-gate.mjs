@@ -44,9 +44,13 @@ const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const RECENT_MS = 12 * 60 * 60 * 1000;
 
 // The three required friction categories. Hardcoded (a hook can't import the TS
-// source without a build) — kept in sync with FRICTION_CATEGORIES in
-// src/shared/friction/triage.ts; a drift here only weakens the backstop, never the
-// authoritative close gate.
+// source without a build) — kept in lockstep with FRICTION_CATEGORIES, single-sourced
+// in src/shared/friction/frictionRecord.ts (re-exported through triage.ts). A drift
+// here only weakens the backstop, never the authoritative close gate, but the parity
+// is pinned by a test (tests/shared/friction-derived-observations.test.mjs) that
+// asserts this literal equals the source array. Tool-derived pre-populated
+// observations land in the SAME open_observations[] shape this gate reads, so a
+// category the backend already saw re-work in counts as covered here for free.
 const FRICTION_CATEGORIES = ["ambiguous_direction", "tool_should_decide", "inefficient_feeding"];
 
 /**

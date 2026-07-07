@@ -1,6 +1,7 @@
 import { type FrictionCaptureArtifact, type FrictionItem } from "../io/frictionCapture.js";
 import {
   type CapturedFrictionItem,
+  type FrictionCategory,
   appendFrictionUnderLock,
 } from "./frictionRecord.js";
 
@@ -47,6 +48,18 @@ export interface FrictionEvent extends FrictionItem {
    * already present in the run record is a no-op (per-event de-dup, INV-O1-6).
    */
   id: string;
+  /**
+   * The REAL close-out category (one of `FRICTION_CATEGORIES`) this event feeds.
+   * Carried through onto the persisted `CapturedFrictionItem` so the per-category
+   * friction walk keys on a real category, not the coarse `bug|trap|suggestion`
+   * origin hint. Optional so a bare `captureFrictionEvent` caller need not supply it.
+   */
+  frictionCategory?: FrictionCategory;
+  /**
+   * Optional artifact/subject key — the aggregation axis that collapses N
+   * same-artifact events into ONE derived observation.
+   */
+  artifact?: string;
 }
 
 /**
