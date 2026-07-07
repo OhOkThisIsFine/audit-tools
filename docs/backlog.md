@@ -36,11 +36,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   now idempotent (skips the write when unchanged), which shrinks but doesn't close the window. Harden BOTH helpers
   with the shared `withFileLock` on the multi-IDE cooperative path. [[multi-ide-concurrent-runs]]
 
-- **Full local `npm test` pops console windows on win32 (friction).** The audit integration tests spawn real
-  subprocesses (`npm pack`, packaged smokes, `where`/`which`, node children) and some bypass the window-hidden
-  spawn helper (INV-WH) → console windows flash during a local suite run (and `verify:release` smokes). Route
-  every test-side subprocess spawn through the windowless helper. Until then, run targeted vitest files locally
-  and lean on the sharded release CI for full-suite green.
+- **Console-window popups on win32 — hook spawns FIXED; test-suite spawns still open.** Two sources:
+  (1) **`.claude/hooks/` — ✅ FIXED (332301a9).** `async-typecheck.mjs` ran `execSync('npm run check')`
+  (shell:true) after EVERY source-`.ts` edit with no `windowsHide` → a console window popped per edit (the
+  "constant" flashing). `pre-commit-gate.mjs` did the same on every real `git commit` (execSync + git spawnSync).
+  Both now pass `windowsHide:true`. (2) **STILL OPEN — the test suite itself.** Audit integration tests spawn
+  real subprocesses (`npm pack`, packaged smokes, `where`/`which`, node children) and some bypass the
+  window-hidden spawn helper (INV-WH) → windows flash during a local `npm test` / `verify:release`. Route every
+  test-side subprocess spawn through the windowless helper. Until then, run targeted vitest files locally and
+  lean on the sharded release CI for full-suite green — and NEVER background a full local `npm test`.
 
 
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
