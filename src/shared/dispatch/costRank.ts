@@ -66,14 +66,28 @@ export function blendedPrice(price: ModelStatics["price"] | undefined): number |
 /**
  * Resolve a model id to its blended $/Mtok price via the vendored models.dev
  * snapshot, or `undefined` when the model is unknown / the dataset is empty.
+ *
+ * Optional `provider` pins the native (per-provider) price; omitting it takes the
+ * cheapest-collision default. Single-provider snapshots resolve identically
+ * either way.
  */
-export function resolveModelPrice(model: string | null | undefined): number | undefined {
-  return blendedPrice(resolveModelStatics(model)?.price);
+export function resolveModelPrice(
+  model: string | null | undefined,
+  provider?: string | null,
+): number | undefined {
+  return blendedPrice(resolveModelStatics(model, provider)?.price);
 }
 
 export interface CostRankInput {
   /** Model id for the price lookup (rung 2). `null`/unknown ⇒ falls through. */
   model: string | null | undefined;
+  /**
+   * Optional provider that owns this pool's model. When set, the price lookup
+   * pins that provider's native price on a cross-provider model-id collision;
+   * omitting it takes the cheapest-collision default. No effect on a
+   * single-provider snapshot.
+   */
+  provider?: string | null;
   /** Pool tier for the fallback ordinal (rung 3). */
   tier: DispatchModelTier | null | undefined;
   /**
@@ -99,7 +113,7 @@ export function deriveCostRank(input: CostRankInput): number {
     return CONFIRMED_ORDER_BAND_BASE + input.confirmedPosition;
   }
   // Rung 2 — real blended price when the dataset knows the model.
-  const price = resolveModelPrice(input.model);
+  const price = resolveModelPrice(input.model, input.provider);
   if (price !== undefined) return PRICE_BAND_BASE + price;
   // Rung 3 — tier ordinal, offset above every priced pool (unknown = overflow).
   return UNKNOWN_PRICE_BAND_BASE + tierRank(input.tier);
@@ -110,6 +124,11 @@ export interface CostCandidate {
   /** Stable identifier for the candidate (provider name, or `provider/model`). */
   key: string;
   model?: string | null;
+  /**
+   * Optional owning provider; pins the native price on a cross-provider model-id
+   * collision. Omit for the cheapest-collision default.
+   */
+  provider?: string | null;
   tier?: DispatchModelTier | null;
 }
 
@@ -131,7 +150,7 @@ export interface OrderedCostCandidate extends CostCandidate {
  */
 export function suggestCostOrdering(candidates: CostCandidate[]): OrderedCostCandidate[] {
   const priced = candidates.map((c) => {
-    const price = resolveModelPrice(c.model);
+    const price = resolveModelPrice(c.model, c.provider);
     return { candidate: c, price };
   });
   const sorted = [...priced].sort((a, b) => {

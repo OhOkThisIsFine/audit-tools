@@ -48,6 +48,37 @@ describe("resolveModelStatics", () => {
   });
 });
 
+describe("resolveModelStatics — optional provider scope (CP-NODE-9)", () => {
+  // The vendored snapshot has no cross-provider collision, so its per-provider
+  // index is empty and a provider-scoped lookup must degrade to the flat default
+  // — i.e. single-provider behaviour is byte-identical whether or not a provider
+  // is named. (The cheapest-collision collapse itself is pinned hermetically
+  // against the generator in update-models-collision.test.mjs.)
+  test("naming a provider returns the same record as the default lookup", () => {
+    const bare = resolveModelStatics("claude-opus-4-8");
+    const scoped = resolveModelStatics("claude-opus-4-8", "anthropic");
+    expect(scoped).toEqual(bare);
+  });
+  test("an unmatched provider degrades to the default, never to undefined", () => {
+    const bare = resolveModelStatics("claude-opus-4-8");
+    expect(resolveModelStatics("claude-opus-4-8", "no-such-provider")).toEqual(bare);
+  });
+  test("route-prefix stripping still applies under a provider scope", () => {
+    const expected = resolveModelStatics("claude-opus-4-8")?.context_tokens;
+    expect(resolveModelStatics("bedrock/claude-opus-4-8", "anthropic")?.context_tokens).toBe(
+      expected,
+    );
+  });
+  test("provider scope does not resurrect an unknown model", () => {
+    expect(resolveModelStatics("totally-made-up-model-xyz", "anthropic")).toBeUndefined();
+  });
+  test("null/empty provider behaves like no provider", () => {
+    const bare = resolveModelStatics("claude-opus-4-8");
+    expect(resolveModelStatics("claude-opus-4-8", null)).toEqual(bare);
+    expect(resolveModelStatics("claude-opus-4-8", "")).toEqual(bare);
+  });
+});
+
 describe("resolveLimits static_metadata rung", () => {
   const baseConfig = { quota: {} };
 

@@ -58,6 +58,42 @@ describe("resolveModelPrice", () => {
   });
 });
 
+describe("resolveModelPrice — optional provider scope (CP-NODE-9)", () => {
+  // The vendored snapshot is collision-free, so naming a provider must resolve
+  // the exact same price as the bare lookup (single-provider byte-identical).
+  // The cheapest-collision collapse is pinned against the generator in
+  // update-models-collision.test.mjs.
+  test("naming a provider yields the same price as the default lookup", () => {
+    expect(resolveModelPrice("claude-opus-4-8", "anthropic")).toBeCloseTo(
+      resolveModelPrice("claude-opus-4-8"),
+    );
+  });
+  test("an unmatched provider degrades to the default price", () => {
+    expect(resolveModelPrice("claude-sonnet-5", "no-such-provider")).toBeCloseTo(
+      resolveModelPrice("claude-sonnet-5"),
+    );
+  });
+  test("provider scope keeps an unknown model unpriced", () => {
+    expect(resolveModelPrice(UNKNOWN_MODEL, "anthropic")).toBeUndefined();
+  });
+});
+
+describe("deriveCostRank / suggestCostOrdering — provider is inert on a collision-free snapshot", () => {
+  test("deriveCostRank is unchanged by an added provider", () => {
+    const bare = deriveCostRank({ model: "claude-sonnet-5", tier: "standard" });
+    const scoped = deriveCostRank({ model: "claude-sonnet-5", provider: "anthropic", tier: "standard" });
+    expect(scoped).toBe(bare);
+  });
+  test("suggestCostOrdering preserves ordering when candidates carry a provider", () => {
+    const withProvider = suggestCostOrdering([
+      { key: "opus", model: "claude-opus-4-8", provider: "anthropic", tier: "deep" },
+      { key: "haiku", model: "claude-haiku-4-5", provider: "anthropic", tier: "small" },
+      { key: "sonnet", model: "claude-sonnet-5", provider: "anthropic", tier: "standard" },
+    ]);
+    expect(withProvider.map((s) => s.key)).toEqual(["haiku", "sonnet", "opus"]);
+  });
+});
+
 describe("deriveCostRank — rungs occupy disjoint bands", () => {
   test("rung 1: a confirmed position sorts in the lowest band", () => {
     expect(deriveCostRank({ model: "claude-opus-4-8", tier: "deep", confirmedPosition: 0 })).toBe(0);
