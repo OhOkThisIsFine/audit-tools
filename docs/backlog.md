@@ -199,6 +199,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
+- **Free/cheap multi-account "quota-arbitrage" dispatch tier (9router-inspired) — exploration → build.**
+  Fan dispatch across genuinely-free backends + (later) N captured subscription-OAuth accounts, rotating on
+  429/cooldown to exceed any single subscription's limit. Key finding: this is **extra SOURCE POOLS on our
+  existing machinery, not a new provider engine** — pool identity is already `(provider, account[, model])`,
+  the admission loop (`admitBatch` cost-first + spill) already IS the rotation engine, the `ReservationLedger`
+  already does per-key backoff, and Claude/Codex/Copilot arbitrage accounts get live per-account quota for free
+  via `BaseHttpQuotaSource`. Worker shape ≈ `OpenAiCompatibleProvider` (thin `buildHeaders`/`buildUrl` subclass)
+  except Kiro (AWS EventStream) + Cursor (protobuf). **Reuse (vendor+sync, MIT):** 9router's provider OAuth
+  catalogue (`PROVIDER_OAUTH` + token-refresh endpoints/client_ids) — the someone-else-maintained table the
+  corrected sourcing rule prefers; `ERROR_RULES` text classes. **Novel build:** a multi-account credential store
+  + refresh-under-lock (encrypted, rotation-loss-safe) generalizing `ClaudeOAuthQuotaSource`. **Risks:**
+  ToS/paid-account-ban (impersonating official CLIs — Claude/Codex/Cursor highest; opt-in, never default-on);
+  token-security surface (multi-account refresh tokens; encrypted/never-logged/atomic — recall the Antigravity
+  leak). **Phase 0 first slice (recommended, ~zero ban/security risk):** `opencode-free` (`Bearer public`) +
+  `vertex-trial` (operator's own GCP $300 SA) as free source pools reusing `OpenAiCompatibleProvider` → priced
+  ~0 by `deriveCostRank`, routed first, spill already handled. Then Phase 1 multi-account OAuth store
+  (Claude/Codex/Copilot). Design of record + full phased plan in memory [[arbitrage-dispatch-tier-design]];
+  a coverage diff (2026-07-07) confirmed 9router's price table adds nothing over models.dev, so skip it.
+  Relates [[quota-dispatch-vision]] / [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
+  [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
+
 - **Cost-first routing — collision-price preference (carried from W1, open).** Design of record
   [`spec/cost-first-routing.md`](../spec/cost-first-routing.md), durable design in memory [[cost-first-routing-design]].
   W2 core + interactive Gate-0 (host-prompt visibility, operator reorder, host-roster-at-Gate-0) are shipped —
