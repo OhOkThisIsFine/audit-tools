@@ -117,6 +117,27 @@ test("buildSourcePool: source.quota.max_concurrent becomes the pool's concurrenc
   expect(uncapped.concurrencyCap, "no max_concurrent → no cap").toBe(null);
 });
 
+test("buildSourcePool: a non-positive/non-finite max_concurrent clamps to null (never 0)", async () => {
+  // Guards the wedge: a 0 cap (or the "0 = unlimited" convention, or a stray negative)
+  // must NOT become concurrencyCap:0 — that would ceiling the pool to zero in-flight
+  // and spin the rolling engine, and would violate the summary schema's min(1).
+  for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 0.5]) {
+    const pool = await buildSourcePool({
+      source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: bad } },
+      quotaSource: STUB_QUOTA,
+      quotaEntries: {},
+    });
+    expect(pool.concurrencyCap, `max_concurrent=${bad} → null`).toBe(null);
+  }
+  // A fractional > 1 floors to an integer (schema requires int).
+  const frac = await buildSourcePool({
+    source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: 3.9 } },
+    quotaSource: STUB_QUOTA,
+    quotaEntries: {},
+  });
+  expect(frac.concurrencyCap).toBe(3);
+});
+
 test("buildHostModelPools stamps the host account (from the host credential) into every pool id", async () => {
   const quotaSource = new ClaudeOAuthQuotaSource({
     credentialsPath: writeClaudeCreds("orgA"),

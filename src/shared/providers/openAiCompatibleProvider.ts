@@ -278,6 +278,17 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       return fail(`openai-compatible response was not parseable JSON: ${errText(err)}`);
     }
 
+    // A bare JSON primitive (null / number / string / boolean) is never valid worker
+    // output — not a {files,result} wrapper, and not a relayable result object/array.
+    // Fail cleanly here rather than throwing on `parsed.files` below or (C2) relaying
+    // a primitive as the result.
+    if (parsed === null || typeof parsed !== "object") {
+      return fail(
+        `openai-compatible response was a bare JSON ${parsed === null ? "null" : typeof parsed} ` +
+          "(expected a {files,result} object or a result array/object).",
+      );
+    }
+
     // Apply the file edits into the worktree (repoRoot). The worktree branch diff
     // is the write-scope ground truth, so out-of-scope edits are caught at merge;
     // here we only defend against a path escaping the worktree entirely.
@@ -316,11 +327,10 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     // tolerant relay can never ingest garbage — it only rescues the narrow
     // "well-formed payload emitted at the top level" case. A genuine wrapper that
     // dropped its result (files present, result absent) stays a clean failure.
-    const hasWrapperShape =
-      parsed !== null &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      "files" in parsed;
+    // `parsed` is guaranteed an object or array here (primitives failed above), so a
+    // wrapper is a non-array object carrying `files`; anything else (a bare array or a
+    // bare result object) is relayed whole.
+    const hasWrapperShape = !Array.isArray(parsed) && "files" in parsed;
     const effectiveResult: unknown =
       parsed.result !== undefined ? parsed.result : hasWrapperShape ? undefined : parsed;
 

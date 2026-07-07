@@ -950,7 +950,9 @@ export function createRollingDispatcher<TPacket>(
         poolConcurrencyCap != null && optionCap != null
           ? Math.min(poolConcurrencyCap, optionCap)
           : (poolConcurrencyCap ?? optionCap);
-      if (effectiveCap != null && (inFlightPerPool.get(slot.poolId) ?? 0) >= effectiveCap) {
+      // A cap of ≥1 gates; a non-positive cap is treated as NO cap (never zero-admit),
+      // so a stray 0 can't wedge the engine into an infinite skip/no-progress spin.
+      if (effectiveCap != null && effectiveCap >= 1 && (inFlightPerPool.get(slot.poolId) ?? 0) >= effectiveCap) {
         continue;
       }
 

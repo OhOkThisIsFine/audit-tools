@@ -27,6 +27,17 @@ export function dispatchableSourceId(source: DispatchableSource, account?: strin
 }
 
 /**
+ * A source's declared in-flight COUNT cap, normalized to a positive integer or null
+ * (uncapped). Anything non-finite, ≤ 0, or fractional degrades to null rather than a
+ * value that would either wedge the rolling engine (0 ⇒ zero admits) or violate the
+ * summary schema's `min(1)`. The "0 = unlimited" operator convention maps to null.
+ */
+function positiveIntCapOrNull(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) return null;
+  return Math.floor(value);
+}
+
+/**
  * Bridge a generic {@link DispatchableSource} to the concrete per-provider config
  * block its provider constructor expects, so `createFreshSessionProvider` can build
  * the right backend FROM the source (not the global block). `endpoint` + `parameters`
@@ -223,8 +234,11 @@ export async function buildSourcePool(params: {
     // Endpoint-declared in-flight COUNT cap (independent of the host subagent
     // budget, which stays null for a backend source). Without it an optimistic
     // unmetered source (no token snapshot) dispatches every ready packet at once
-    // and overruns the endpoint — the NIM `33/32` incident.
-    concurrencyCap: source.quota?.max_concurrent ?? null,
+    // and overruns the endpoint — the NIM `33/32` incident. A non-positive /
+    // non-finite `max_concurrent` (incl. the "0 = unlimited" convention) clamps to
+    // null (uncapped) — never 0, which would ceiling the pool to zero in-flight and
+    // wedge the rolling engine, and would also violate the summary schema's min(1).
+    concurrencyCap: positiveIntCapOrNull(source.quota?.max_concurrent),
     quotaStateEntry: quotaEntries[poolKey] ?? null,
     // QuotaModelLimits is structurally a DiscoveredRateLimitsInput (RPM/TPM/context/
     // output) — the operator-declared per-source rate limit feeds the S4 fold.

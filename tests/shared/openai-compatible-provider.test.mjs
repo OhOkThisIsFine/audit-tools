@@ -504,6 +504,19 @@ test("C2: a bare array at the top level is relayed as the result (audit findings
   expect(JSON.parse(readFileSync(input.resultPath, "utf8"))).toEqual([{ task_id: "t1", findings: [] }]);
 });
 
+test("C2: a bare JSON primitive is rejected, not relayed as the result", async () => {
+  // A bare number/string/boolean/null is never valid worker output — fail cleanly
+  // rather than writing a garbage primitive result deferred to downstream validation.
+  for (const primitive of ["42", '"hello"', "true", "null"]) {
+    const { input } = makeCtx();
+    const fetchFn = fakeFetchReturning(primitive);
+    const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn });
+    const res = await provider.launch(input);
+    expect(res.accepted, `bare ${primitive} must not be accepted`).toBe(false);
+    expect(res.error ?? "").toMatch(/bare JSON/);
+  }
+});
+
 test("C2: a wrapper that carries files but drops result still fails (not tolerated)", async () => {
   const { input } = makeCtx();
   // `files` present = the model used the wrapper contract but omitted `result`;

@@ -317,6 +317,21 @@ test("createRollingDispatcher — a pool's own concurrencyCap ceilings its in-fl
   expect(peak, "in-flight COUNT never exceeded the pool's concurrencyCap").toBe(2);
 });
 
+test("createRollingDispatcher — a non-positive concurrencyCap is treated as NO cap (never wedges)", async () => {
+  // Defense-in-depth for the clamp: even if a concurrencyCap:0 reached a pool, the
+  // engine must treat it as uncapped rather than skipping every packet forever (which
+  // would spin the run on the no-progress tick).
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("nim", { concurrencyCap: 0 })],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => ({ packet, outcome: "success" }),
+  });
+  dispatcher.enqueue([makePacket("p1"), makePacket("p2"), makePacket("p3")]);
+  const results = await dispatcher.run();
+  expect(results.length, "all packets dispatch — cap:0 did not wedge the engine").toBe(3);
+});
+
 // ---------------------------------------------------------------------------
 // createRollingDispatcher — quota outcome recording
 // ---------------------------------------------------------------------------

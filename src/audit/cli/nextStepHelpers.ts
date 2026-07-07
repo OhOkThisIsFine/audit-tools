@@ -90,9 +90,10 @@ import { resolveHostDispatchCapability } from "./args.js";
 
 // ── In-process dispatch: bounded no-progress retry (D1, NIM/Codex fix set) ─────
 
-/** Injectable backoff clock — tests pass a no-op so the retry loop is instant. */
+/** Injectable clock — tests pass no-ops so the retry loop is instant and deterministic. */
 export interface DriveNoProgressRetryDeps {
   sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
 }
 
 /**
@@ -100,21 +101,28 @@ export interface DriveNoProgressRetryDeps {
  * backoff WHILE `isNoProgress` holds. A fully-unproductive pass — every review packet
  * errored at the provider so nothing ingested, nothing stranded, no pause — otherwise
  * trips the no-progress guard and HALTS the run; a transient provider overload (a
- * burst of 5xx/timeouts) should self-heal instead. Bounded (terminates on persistent
- * failure) and paced (rapid retries won't outlast a real overload), so a genuinely
- * stuck pass still falls through to the blocked handoff after the budget is spent.
- * Re-driving is exactly what the whole next-step loop does across invocations — the
- * still-pending tasks are re-dispatched — collapsed into one step so an autonomous
- * loop that treats `blocked` as terminal doesn't halt on a blip.
+ * burst of fast 5xx/errors) should self-heal instead. Bounded (terminates on
+ * persistent failure) and paced, so a genuinely stuck pass still falls through to the
+ * blocked handoff. Re-driving is exactly what the whole next-step loop does across
+ * invocations — the still-pending tasks re-dispatch — collapsed into one step so an
+ * autonomous loop that treats `blocked` as terminal doesn't halt on a blip.
+ *
+ * `maxTotalMs` bounds the added wall-time: retries stop once the cumulative elapsed
+ * time reaches it. Set to the dispatch timeout so an all-TIMEOUT pass (where the first
+ * drive alone already consumes ~one timeout window) spawns no expensive extra passes —
+ * the retry stays targeted at fast-failing passes, which is where it self-heals.
  */
 export async function driveWithNoProgressRetry<T>(
   drive: () => Promise<T>,
   isNoProgress: (result: T) => boolean,
-  opts: { maxRetries: number; baseBackoffMs: number; deps?: DriveNoProgressRetryDeps },
+  opts: { maxRetries: number; baseBackoffMs: number; maxTotalMs?: number; deps?: DriveNoProgressRetryDeps },
 ): Promise<T> {
   const sleep = opts.deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = opts.deps?.now ?? (() => Date.now());
+  const start = now();
   let result = await drive();
   for (let attempt = 1; attempt <= opts.maxRetries && isNoProgress(result); attempt += 1) {
+    if (opts.maxTotalMs != null && now() - start >= opts.maxTotalMs) break;
     await sleep(opts.baseBackoffMs * 2 ** (attempt - 1));
     result = await drive();
   }
@@ -1373,7 +1381,10 @@ async function runHostDelegationObligation(
           timeoutMs: ctx.params.timeoutMs,
         }),
       (d) => d.status !== "paused" && !d.ingest && d.stranded_ids.length === 0,
-      { maxRetries: 2, baseBackoffMs: 500 },
+      // Bound total added wall-time to one dispatch-timeout window: an all-timeout
+      // pass (first drive ≈ timeoutMs) then spawns no extra passes; only a fast-failing
+      // pass, where the retry actually helps, gets re-driven.
+      { maxRetries: 2, baseBackoffMs: 500, maxTotalMs: ctx.params.timeoutMs },
     );
     await clearDispatchFiles(ctx.params.artifactsDir);
     // Resumable pause (DC-4): the pool exhausted after spill and the run is paused

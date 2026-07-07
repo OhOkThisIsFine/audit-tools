@@ -57,6 +57,35 @@ test("D1: a productive first pass never retries (and never sleeps)", async () =>
   expect(waits).toEqual([]);
 });
 
+test("D1: maxTotalMs stops retries once the elapsed budget is spent (all-timeout guard)", async () => {
+  const { sleep } = fakeSleep();
+  // Injected clock: each drive advances the clock by ~a full timeout window, so after
+  // the first drive the elapsed budget is already spent and no retry is attempted.
+  let clock = 0;
+  const now = () => clock;
+  let calls = 0;
+  const result = await driveWithNoProgressRetry(
+    async () => { calls += 1; clock += 120_000; return noProgress; },
+    isNoProgress,
+    { maxRetries: 2, baseBackoffMs: 500, maxTotalMs: 120_000, deps: { sleep, now } },
+  );
+  expect(calls, "first drive spent the whole budget → no expensive retry").toBe(1);
+  expect(result.ingest).toBe(null);
+});
+
+test("D1: with headroom under maxTotalMs, fast-failing passes still retry", async () => {
+  const { sleep } = fakeSleep();
+  let clock = 0;
+  const now = () => clock;
+  let calls = 0;
+  await driveWithNoProgressRetry(
+    async () => { calls += 1; clock += 10; return noProgress; }, // fast fails
+    isNoProgress,
+    { maxRetries: 2, baseBackoffMs: 500, maxTotalMs: 120_000, deps: { sleep, now } },
+  );
+  expect(calls, "fast passes leave headroom → full retry budget used").toBe(3);
+});
+
 test("D1: a paused pass is NOT treated as no-progress (resumable, handled separately)", async () => {
   const { sleep, waits } = fakeSleep();
   let calls = 0;
