@@ -166,7 +166,8 @@ describe("remediate-code next-step --host-can-dispatch-subagents (true boolean)"
   it("bare flag does NOT swallow the next token", () => {
     const opts = parseNextStepOpts([F, "--input", "report.md"]);
     expect(opts.hostCanDispatchSubagents).toBe(true);
-    expect(opts.input).toBe("report.md");
+    // --input now accumulates into a string[] via its collect reducer.
+    expect(opts.input).toEqual(["report.md"]);
   });
 
   it("--no- form → false", () => {
@@ -189,6 +190,50 @@ describe("remediate-code next-step --host-can-dispatch-subagents (true boolean)"
     expect(() => parseNextStepOpts([`${F}=maybe`])).toThrow(
       /true or false/i,
     );
+  });
+});
+
+// --- repeatable --input accumulation (B4 / CP-NODE-4) ----------------------
+
+describe("remediate-code next-step --input (repeatable, collect reducer)", () => {
+  it("is registered as a value-bearing option (takes <path>)", () => {
+    const opt = nextStepCommand().options.find((o) => o.long === "--input");
+    expect(opt).toBeDefined();
+    // A collect reducer accumulates into an array; the option still takes a
+    // single <path> value per occurrence (NOT a greedy variadic <path...>).
+    expect(opt!.required).toBe(true);
+    expect(opt!.variadic).toBe(false);
+  });
+
+  it("declares an empty-array default (no --input → [])", () => {
+    const opt = nextStepCommand().options.find((o) => o.long === "--input");
+    expect(opt!.defaultValue).toEqual([]);
+  });
+
+  it("single --input → array of one (single --input unchanged)", () => {
+    expect(parseNextStepOpts(["--input", "report.md"]).input).toEqual([
+      "report.md",
+    ]);
+  });
+
+  it("repeated --input accumulates into a string[] in order", () => {
+    const opts = parseNextStepOpts([
+      "--input",
+      "a.md",
+      "--input",
+      "b.md",
+      "--input",
+      "c.md",
+    ]);
+    expect(opts.input).toEqual(["a.md", "b.md", "c.md"]);
+  });
+
+  it("--input does NOT greedily swallow following tokens (not variadic)", () => {
+    // A variadic <path...> would swallow `report.md` AND the trailing flag's
+    // value; a collect reducer takes exactly one value per occurrence.
+    const opts = parseNextStepOpts(["--input", "report.md", F]);
+    expect(opts.input).toEqual(["report.md"]);
+    expect(opts.hostCanDispatchSubagents).toBe(true);
   });
 });
 

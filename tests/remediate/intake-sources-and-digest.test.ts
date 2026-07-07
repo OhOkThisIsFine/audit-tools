@@ -14,9 +14,12 @@ import {
   computeContentHash,
   buildFindingsDigest,
   buildFindingEnumeration,
+  buildDocumentSourceManifest,
+  INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
   FINDINGS_DIGEST_SCHEMA_VERSION,
   FINDING_ENUMERATION_SCHEMA_VERSION,
 } from "../../src/remediate/intake.js";
+import { resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = join(__dirname, ".test-intake-sources-and-digest");
@@ -80,6 +83,56 @@ function makeReport(findingCount: number, overrides: Partial<AuditFindingsReport
     ...overrides,
   };
 }
+
+// ── buildDocumentSourceManifest — first-wins union dedup (B4 / CP-NODE-4) ──────
+
+describe("buildDocumentSourceManifest", () => {
+  it("maps each path to an order-stable input-NN document source", () => {
+    const manifest = buildDocumentSourceManifest(["a.md", "b.md"], "input");
+    expect(manifest.schema_version).toBe(INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION);
+    expect(manifest.created_from).toBe("input");
+    expect(manifest.sources).toEqual([
+      { type: "document", path: "a.md", label: "input-01" },
+      { type: "document", path: "b.md", label: "input-02" },
+    ]);
+  });
+
+  it("first-wins dedups paths that resolve to the same absolute path", () => {
+    // `report.md` and `./report.md` are the same file; the second collapses,
+    // and the labels stay order-stable + gap-free (input-01, input-02).
+    const manifest = buildDocumentSourceManifest(
+      ["report.md", "other.md", "./report.md"],
+      "input",
+    );
+    expect(manifest.sources.map((s) => s.path)).toEqual([
+      "report.md",
+      "other.md",
+    ]);
+    expect(manifest.sources.map((s) => s.label)).toEqual([
+      "input-01",
+      "input-02",
+    ]);
+  });
+
+  it("keeps the FIRST spelling of a duplicated resolved path", () => {
+    const manifest = buildDocumentSourceManifest(
+      [resolve("report.md"), "report.md"],
+      "input",
+    );
+    expect(manifest.sources).toHaveLength(1);
+    expect(manifest.sources[0].path).toBe(resolve("report.md"));
+    expect(manifest.sources[0].label).toBe("input-01");
+  });
+
+  it("distinct files stay distinct", () => {
+    const manifest = buildDocumentSourceManifest(
+      ["a.md", "b.md", "c.md"],
+      "default_candidates",
+    );
+    expect(manifest.sources).toHaveLength(3);
+    expect(manifest.created_from).toBe("default_candidates");
+  });
+});
 
 describe("buildFindingsDigest", () => {
   it("returns correct schema_version", () => {

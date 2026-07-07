@@ -81,14 +81,32 @@ export function intakePaths(artifactsDir: string): {
   };
 }
 
+/**
+ * Build a document source manifest from an ordered list of input paths.
+ *
+ * The paths are the first-wins-deduped UNION of every supplied `--input` (the
+ * CLI accumulates repeats into a string[]): duplicates that resolve to the same
+ * absolute path collapse to their first occurrence, preserving input order, and
+ * the surviving sources get order-stable `input-NN` labels (01, 02, …). Dedup is
+ * keyed on the resolved absolute path so `./a.md` and `a.md` (same file) are one
+ * source, while distinct files stay distinct.
+ */
 export function buildDocumentSourceManifest(
   paths: string[],
   createdFrom: IntakeSourceManifest["created_from"],
 ): IntakeSourceManifest {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const path of paths) {
+    const key = resolve(path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(path);
+  }
   return {
     schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
     created_from: createdFrom,
-    sources: paths.map((path, index) => ({
+    sources: deduped.map((path, index) => ({
       type: "document",
       path,
       label: `input-${String(index + 1).padStart(2, "0")}`,

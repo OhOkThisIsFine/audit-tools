@@ -382,7 +382,17 @@ function resolveInputPaths(
 ): InputResolution {
   const values = inputValues(input).filter((value) => value.trim().length > 0);
   if (values.length > 0) {
-    const checked = values.map((value) => resolve(root, value));
+    // First-wins dedup by resolved absolute path so a repeated `--input`
+    // (or two spellings of the same file) contributes a single source, keeping
+    // input order stable for the `input-NN` manifest labels.
+    const checked: string[] = [];
+    const seen = new Set<string>();
+    for (const value of values) {
+      const resolved = resolve(root, value);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      checked.push(resolved);
+    }
     const existing = checked.filter((candidate) => existsSync(candidate));
     return {
       supplied: true,

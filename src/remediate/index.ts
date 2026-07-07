@@ -74,7 +74,20 @@ program
     "Artifacts directory",
     ".audit-tools/remediation",
   )
-  .option("--input <path>", "Path to audit report or feedback document")
+  // Repeatable: each `--input <path>` accumulates into a string[] via a collect
+  // reducer (NOT a variadic `<path...>`, which would greedily swallow following
+  // tokens). A single `--input` still yields `["<path>"]`; downstream
+  // `inputValues`/`resolveInputPaths` normalize the one-vs-many shape and the
+  // source manifest is the first-wins-deduped union of the resolved paths.
+  .option(
+    "--input <path>",
+    "Path to audit report or feedback document (repeatable; unioned into intake)",
+    // Accumulator defaults to []; guard against an undefined `previous` so the
+    // first occurrence starts the array cleanly even if the default was cleared.
+    (value: string, previous: string[] | undefined) =>
+      (previous ?? []).concat([value]),
+    [] as string[],
+  )
   .option(
     "--guidance-file <path>",
     "Single-step bootstrap: write this file's contents to intake/conversation-start.md (sole, idempotent writer) before deciding the step",
