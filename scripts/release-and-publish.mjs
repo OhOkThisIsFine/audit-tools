@@ -147,15 +147,92 @@ function getDefaultBranch() {
   return "main";
 }
 
+// Pure, deterministic release-branch gate. Decides whether the current branch is
+// admissible to release from, given the default branch and (for a linked
+// worktree / feature branch) whether the local HEAD is already identical to the
+// remote default tip.
+//
+// Admits either:
+//   1. The default branch itself (the classic primary-worktree ship).
+//   2. Any other branch (e.g. a `claude/<lap>` worktree) whose local HEAD SHA
+//      equals origin/<default>'s SHA — i.e. the lap already landed on the remote
+//      default, so releasing in place mutates no primary worktree and introduces
+//      no new manual flag. Requires a git remote (isDetached branches with no
+//      current branch name are never admitted).
+//
+// Returns { allowed: true, branch, reason } or { allowed: false, reason }.
+// `reason` is a stable machine tag; the caller renders the operator message.
+export function evaluateReleaseBranch({
+  branch,
+  defaultBranch,
+  headSha,
+  remoteDefaultSha,
+} = {}) {
+  const currentBranch = typeof branch === "string" ? branch.trim() : "";
+  if (currentBranch.length === 0) {
+    return { allowed: false, reason: "detached_head" };
+  }
+  if (currentBranch === defaultBranch) {
+    return { allowed: true, branch: currentBranch, reason: "on_default_branch" };
+  }
+  const localSha = typeof headSha === "string" ? headSha.trim() : "";
+  const remoteSha = typeof remoteDefaultSha === "string" ? remoteDefaultSha.trim() : "";
+  if (localSha.length > 0 && remoteSha.length > 0 && localSha === remoteSha) {
+    return {
+      allowed: true,
+      branch: currentBranch,
+      reason: "worktree_head_equals_remote_default",
+    };
+  }
+  return { allowed: false, reason: "branch_not_synced_with_remote_default" };
+}
+
+function tryGitSha(revision) {
+  const result = spawnSync("git", ["rev-parse", "--verify", "--quiet", revision], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) return null;
+  const sha = result.stdout.trim();
+  return sha.length > 0 ? sha : null;
+}
+
 function ensureMainBranch() {
   const branch = run("git", ["branch", "--show-current"], { capture: true }).stdout.trim();
   const defaultBranch = getDefaultBranch();
+
+  // Only reach for remote-tip comparison when we're off the default branch —
+  // e.g. releasing in place from a `claude/<lap>` linked worktree whose HEAD has
+  // already been fast-forwarded onto origin/<default>.
+  let headSha = null;
+  let remoteDefaultSha = null;
   if (branch !== defaultBranch) {
+    const remoteName = getRemoteName();
+    headSha = tryGitSha("HEAD");
+    remoteDefaultSha = tryGitSha(`refs/remotes/${remoteName}/${defaultBranch}`);
+  }
+
+  const verdict = evaluateReleaseBranch({ branch, defaultBranch, headSha, remoteDefaultSha });
+  if (!verdict.allowed) {
     throw new Error(
-      `Release publishing expects the default branch ('${defaultBranch}'), but current branch is '${branch}'.`,
+      `Release publishing expects the default branch ('${defaultBranch}') or a linked worktree whose ` +
+        `HEAD already equals origin/${defaultBranch}, but current branch is '${branch}' ` +
+        `(${verdict.reason}).`,
     );
   }
-  return branch;
+  return { branch: verdict.branch, defaultBranch, reason: verdict.reason };
+}
+
+// Resolve the refspec that pushes the release (bump) commit onto the REMOTE
+// default branch. On the default branch itself we push the branch by name; from
+// a linked worktree/feature branch whose HEAD already equals origin/<default>,
+// we push HEAD onto the default branch (a fast-forward) so the tag commit lands
+// on the default branch's history — never mutating any primary worktree.
+export function resolveReleasePushRefspec({ branch, defaultBranch } = {}) {
+  if (branch === defaultBranch) return { target: defaultBranch };
+  return { target: `HEAD:refs/heads/${defaultBranch}` };
 }
 
 function bumpVersionAndTag(npm) {
@@ -352,7 +429,7 @@ async function main() {
   }
 
   ensureCleanWorktree();
-  const releaseBranch = bumpOnly ? null : ensureMainBranch();
+  const releaseGate = bumpOnly ? null : ensureMainBranch();
 
   if (bumpOnly) {
     console.log(`[release] bumping ${bump} version`);
@@ -372,8 +449,11 @@ async function main() {
   const { packageAfter, tag } = bumpVersionAndTag(npm);
   const remoteName = getRemoteName();
 
-  console.log(`[release] pushing ${releaseBranch} (${tag})`);
-  run("git", ["push", remoteName, releaseBranch]);
+  const pushRefspec = resolveReleasePushRefspec(releaseGate);
+  console.log(
+    `[release] pushing ${releaseGate.branch} -> ${remoteName}/${releaseGate.defaultBranch} (${tag})`,
+  );
+  run("git", ["push", remoteName, pushRefspec.target]);
 
   // Resolve the tag commit SHA so the publish-run waiter can key on run identity
   // (head_sha) rather than the reusable display name. Degrade to timestamp-only

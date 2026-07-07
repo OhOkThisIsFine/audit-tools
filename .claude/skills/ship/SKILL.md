@@ -31,6 +31,15 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 - Review `git status`. Exclude stray run artifacts (`tmp*.json`, `result.json`, `canary-results.json`, worker payloads). Unexplained foreign working-tree edits → partial-stage around them and ask — may be a concurrent session in this checkout.
 - Conventional commit message. Push `main` to the `audit-tools` remote.
+- **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
+  worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
+  `dist/`. Push the lap branch's landed work onto `main` (`git push audit-tools HEAD:main`, a fast-forward),
+  then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` now admits any
+  branch whose HEAD already equals `origin/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
+  the remote `main` via `HEAD:refs/heads/main`, and never touches the primary worktree. The `ensureCleanWorktree()`
+  CRLF/clean-tree guard and the `npm run check` pre-tag gate still run. No `--root`/branch flag is needed —
+  if the lap HEAD hasn't been fast-forwarded onto `origin/main` first, the guard refuses (fix the sync, don't
+  add a flag).
 
 ## 3. Publish (single package)
 
