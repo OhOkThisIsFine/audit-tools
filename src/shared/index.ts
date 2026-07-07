@@ -253,7 +253,6 @@ export {
   PROVIDER_SECTION_KEYS,
   ANALYZER_SETTINGS,
   AnalyzerSettingSchema,
-  resolveHostProviderName,
   resolveHostDispatchCapability,
 } from "./types/sessionConfig.js";
 
@@ -792,6 +791,8 @@ export {
 export {
   commandExists,
   isSelfSpawnBlocked,
+  resolveConversationHostProvider,
+  resolveHostProviderName,
   setCommandExistsForTesting,
 } from "./providers/providerPathGuard.js";
 
@@ -984,6 +985,7 @@ export {
   collectDispatchableSources,
   primaryInProcessSource,
   isDemotableInProcessProvider,
+  shouldDemotePrimaryInProcess,
   withSourceConfig,
   sourceByPoolId,
   buildHostModelPool,

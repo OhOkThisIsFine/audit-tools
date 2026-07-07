@@ -41,6 +41,7 @@ import {
   sourceByPoolId,
   captureStepBoundaryFriction,
   resolveHostProviderName,
+  resolveConversationHostProvider,
   type ResolvedProviderName,
 } from "audit-tools/shared";
 import type { AuditResult, AuditTask } from "../types.js";
@@ -130,11 +131,19 @@ export function resolvesToInProcessDispatchProvider(
  * demoted to the headless in-process pool only. An explicit conversation-host
  * provider (vscode-task / antigravity / local-subprocess / claude-code) IS a driver
  * and passes through unchanged.
+ *
+ * B1: when a headless backend is demoted, the driver is the CONVERSATION HOST —
+ * auto-detected (codex when the run is inside a Codex session, else claude-code)
+ * and overridable via `--host-provider` / `sessionConfig.host_provider`, NOT the
+ * literal `claude-code` (which mis-charged a Codex host's fan-out to the Claude
+ * pool). [[host-provider-misattribution-nim-codex]].
  */
 export function resolveHostDispatchProviderName(
   sessionConfig: SessionConfig | null | undefined,
 ): ResolvedProviderName {
-  if (resolvesToInProcessDispatchProvider(sessionConfig)) return "claude-code";
+  if (resolvesToInProcessDispatchProvider(sessionConfig)) {
+    return resolveConversationHostProvider({ sessionConfig });
+  }
   return resolveHostProviderName(sessionConfig);
 }
 

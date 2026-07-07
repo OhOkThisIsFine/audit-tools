@@ -193,6 +193,34 @@ describe("remediate-code next-step --host-can-dispatch-subagents (true boolean)"
   });
 });
 
+// --- B1 host-identity override (--host-provider) ---------------------------
+
+describe("remediate-code next-step --host-provider (B1 host-identity override)", () => {
+  it("is registered as a value-bearing option (takes <name>)", () => {
+    const opt = nextStepCommand().options.find((o) => o.long === "--host-provider");
+    expect(opt).toBeDefined();
+    expect(opt!.required).toBe(true);
+    expect(opt!.variadic).toBe(false);
+  });
+
+  it("absent → undefined (unset ⇒ env auto-detection downstream)", () => {
+    expect(parseNextStepOpts([]).hostProvider).toBeUndefined();
+  });
+
+  it("a valid provider name parses through to the option value", () => {
+    expect(parseNextStepOpts(["--host-provider", "codex"]).hostProvider).toBe("codex");
+    expect(parseNextStepOpts(["--host-provider", "claude-code"]).hostProvider).toBe(
+      "claude-code",
+    );
+  });
+
+  it("an unknown provider name fails loudly (attribution key must not silently mis-key)", () => {
+    expect(() => parseNextStepOpts(["--host-provider", "gpt5"])).toThrow(
+      /must be one of/i,
+    );
+  });
+});
+
 // --- repeatable --input accumulation (B4 / CP-NODE-4) ----------------------
 
 describe("remediate-code next-step --input (repeatable, collect reducer)", () => {

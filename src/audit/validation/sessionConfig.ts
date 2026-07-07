@@ -385,6 +385,19 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     }
   }
 
+  const hostProvider = value.host_provider;
+  if (hostProvider !== undefined) {
+    if (typeof hostProvider !== "string") {
+      pushIssue(issues, "host_provider", "host_provider must be a string.");
+    } else if (!VALID_PROVIDERS.has(hostProvider as ProviderName)) {
+      pushIssue(
+        issues,
+        "host_provider",
+        `Unsupported host_provider "${hostProvider}". Expected one of: ${Array.from(VALID_PROVIDERS).join(", ")}.`,
+      );
+    }
+  }
+
   const timeoutMs = value.timeout_ms;
   if (
     timeoutMs !== undefined &&

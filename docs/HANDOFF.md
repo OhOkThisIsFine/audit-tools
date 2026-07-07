@@ -18,15 +18,18 @@
   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
   [[conceptual-design-review-design]]. Per-lap shipped detail is NOT narrated here (changelog creep — see `git log`
   and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **NIM/Codex dispatch fix set — lean halt fix ✅ SHIPPED (v0.32.28).** C2 tolerant result parse + C4 bounded
-  transient fetch retry + C3 per-pool concurrency cap (`source.quota.max_concurrent` → rolling-engine in-flight
-  ceiling + host `declaredCap`; the real 33/32 overrun fix) + D1 bounded no-progress retry + D2 recovery-path
-  handoff — all green + adversarially reviewed. **Immediate next: B1 host-identity sourcing** — default the host
-  provider off the existing `isSelfSpawnBlocked("codex")`/`insideCodex` signal (reuse, no new env-sniff) with a
-  `--host-provider` override; stop defaulting `claude-code` (fixes the attended-mode host-complement wall). Then
-  C3-AIMD adaptive ceiling (mutable per-pool ceiling + drop-requeue→decrement-retry rework), C1 real source-pool
-  budget (converge onto `sources[].quota`), A1 rename `local-subprocess`→`worker-command`. Full detail + file:lines
-  in `docs/backlog.md` → Open bugs + [[host-provider-misattribution-nim-codex]].
+- **NIM/Codex dispatch fix set — lean halt fix + B1 host-identity ✅ SHIPPED (v0.32.28 / v0.32.29).** Lean tranche
+  (v0.32.28): C2 tolerant result parse + C4 bounded transient fetch retry + C3 per-pool concurrency cap + D1 bounded
+  no-progress retry + D2 recovery handoff. **B1 host-identity sourcing (v0.32.29):** NEW `resolveConversationHostProvider`
+  auto-detects the real host off `isSelfSpawnBlocked("codex")` (codex-first) with a `--host-provider` /
+  `sessionConfig.host_provider` override; `resolveHostProviderName` moved to `providerPathGuard.ts` and its
+  unset/auto fallback now delegates to the detector (was literal `claude-code`); all 3 demote/in-process host-key
+  sites route through it. Full adversarial pipeline caught 1 MAJOR (codex-host + `provider:codex`-inside-codex
+  double-booked one codex account) → NEW `shouldDemotePrimaryInProcess` same-agent guard. **Immediate next:
+  C3-AIMD adaptive ceiling** (mutable per-pool ceiling + drop-requeue→decrement-retry rework, on top of the shipped
+  `declaredCap` floor). Then C1 real source-pool budget (converge onto `sources[].quota`), A1 rename
+  `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md` → Open bugs +
+  [[host-provider-misattribution-nim-codex]].
 - **Then:** the cost↔speed dispatch dial + free-pool maximization forward track (lands ON TOP of the kept
   cost-first router; B2 host-reorder seed, capability floor, free-pool saturation gated by C3) + the free/cheap
   multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;

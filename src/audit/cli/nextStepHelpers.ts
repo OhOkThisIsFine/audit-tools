@@ -34,6 +34,7 @@ import {
   auditReportPath,
   groundDesignFindings,
   promotedAuditReportPath,
+  shouldDemotePrimaryInProcess,
   withFileLock,
 } from "audit-tools/shared";
 import type { AuditState } from "../types/auditState.js";
@@ -1454,7 +1455,13 @@ async function runHostDelegationObligation(
   // above was skipped) demotes its configured primary in-process backend into the
   // source-pool set, so the hybrid split fans the frontier across host + backend + NIM.
   const auditSourcePools = await buildAuditSourcePools(hybridCfg, {
-    demotePrimaryInProcess: hostCanDispatch,
+    // B1 same-agent guard: don't demote the primary backend to a source when the
+    // conversation host IS that provider (one account ⇒ host self-drives; else the
+    // host pool and the demoted-source pool double-book a single meter).
+    demotePrimaryInProcess: shouldDemotePrimaryInProcess({
+      sessionConfig: hybridCfg,
+      hostCanDispatch,
+    }),
   });
   if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditSourcePools.length > 0) {
     const pending = buildPendingAuditTasks(bundle);

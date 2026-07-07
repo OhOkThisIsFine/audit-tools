@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
   type AnalyzerSetting,
+  type ProviderName,
   type SessionConfig,
   isRecord,
   readOptionalJsonFile,
@@ -65,6 +66,39 @@ export async function persistAnalyzerSettings(
   const base = isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG };
   const current = isRecord(base.analyzers) ? base.analyzers : {};
   const merged = { ...base, analyzers: { ...current, ...settings } };
+
+  const issues = validateSessionConfig(merged);
+  if (issues.length > 0) {
+    throw new Error(formatConfigValidationIssues(configPath, issues));
+  }
+  await writeJsonFile(configPath, merged);
+  return merged as SessionConfig;
+}
+
+/**
+ * B1: durably record the `--host-provider` override onto `session-config.json`,
+ * preserving unknown fields, validating, and persisting. The conversation-host
+ * identity is stable for a run, and the audit host-review path (`semanticReviewStep`)
+ * re-reads the config file from disk — so persisting is the single-source seam that
+ * makes the override reach it regardless of which subcommand re-enters the run.
+ */
+export async function persistHostProvider(
+  artifactsDir: string,
+  hostProvider: ProviderName,
+): Promise<SessionConfig> {
+  const configPath = getSessionConfigPath(artifactsDir);
+  const raw = (await readOptionalJsonFile<unknown>(configPath)) ?? {
+    ...DEFAULT_SESSION_CONFIG,
+  };
+  const base = isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG };
+  // Idempotent: an unchanged value is a no-op write. The host identity is stable
+  // for a run, so a bare re-invocation re-passing --host-provider must not rewrite
+  // the shared config file (needless churn + a wider lost-update window against a
+  // concurrent writer on the multi-IDE cooperative path).
+  if (base.host_provider === hostProvider) {
+    return base as SessionConfig;
+  }
+  const merged = { ...base, host_provider: hostProvider };
 
   const issues = validateSessionConfig(merged);
   if (issues.length > 0) {

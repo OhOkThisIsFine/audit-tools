@@ -16,21 +16,6 @@ export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export type ResolvedProviderName = Exclude<ProviderName, "auto">;
 
 /**
- * The host's resolved provider identity for quota-key / driver-classification:
- * the configured `sessionConfig.provider`, defaulting to the conversation host
- * (`claude-code`) when unset or `auto`. Single-sourced so the `?? "claude-code"`
- * default and the `auto`-exclusion live in ONE place rather than being re-spelled
- * (with an ad-hoc cast) at each dispatch call site across both orchestrators.
- */
-export function resolveHostProviderName(
-  sessionConfig: { provider?: ProviderName } | null | undefined,
-): ResolvedProviderName {
-  const provider = sessionConfig?.provider;
-  if (provider === undefined || provider === "auto") return "claude-code";
-  return provider;
-}
-
-/**
  * The attended-vs-headless discriminator for dispatch (defect-1). TRUE (default,
  * conversation-first) means an attended conversation host is driving THIS invocation
  * and can fan out subagents — so a configured in-process backend (codex / opencode /
@@ -462,6 +447,19 @@ export interface ConfirmedProviderPoolRef {
 
 export interface SessionConfig {
   provider?: ProviderName;
+  /**
+   * Explicit override for the CONVERSATION-HOST identity — the auditor/agent
+   * actually driving THIS next-step process, whose account meter the dispatch
+   * fan-out is charged against (a quota-ATTRIBUTION key, distinct from
+   * `provider`, which may name a demoted headless backend that is only the
+   * per-packet worker). Normally left unset: `resolveConversationHostProvider`
+   * auto-detects the real host from the same in-session env signals the
+   * self-spawn guard reads (`isSelfSpawnBlocked` — CODEX* ⇒ codex, CLAUDECODE ⇒
+   * claude-code), defaulting to `claude-code`. Set this (via `--host-provider`)
+   * only to override that detection when the environment is ambiguous. `"auto"`
+   * is treated as unset (fall through to env detection).
+   */
+  host_provider?: ProviderName;
   timeout_ms?: number;
   ui_mode?: SessionUiMode;
   host_can_dispatch_subagents?: boolean;

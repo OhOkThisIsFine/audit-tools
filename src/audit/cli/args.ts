@@ -11,6 +11,8 @@ import {
   auditArtifactsDir,
   resolveRepoRoot,
   resolveHostDispatchCapability as sharedResolveHostDispatchCapability,
+  PROVIDER_NAMES,
+  type ProviderName,
   type SessionConfig,
   type HostModelRosterEntry,
 } from "audit-tools/shared";
@@ -222,6 +224,25 @@ export function getTimeoutMs(argv: string[], sessionConfig: SessionConfig): numb
 
 export function getExplicitProvider(argv: string[]): string | undefined {
   return getFlag(argv, "--provider");
+}
+
+/**
+ * B1: explicit conversation-host provider override (`--host-provider`). Names the
+ * auditor actually DRIVING this run, whose account meter the dispatch fan-out is
+ * charged to — a quota-ATTRIBUTION key, distinct from `--provider` (which may name
+ * a demoted headless backend that is only the per-packet worker). Normally left
+ * unset: the host is auto-detected from the run's own session env. Constrained to
+ * a known ProviderName so a typo fails LOUDLY here rather than silently mis-keying.
+ */
+export function getHostProvider(argv: string[]): ProviderName | null {
+  const value = getFlag(argv, "--host-provider");
+  if (value === undefined) return null;
+  if (!(PROVIDER_NAMES as readonly string[]).includes(value)) {
+    throw new Error(
+      `--host-provider must be one of: ${PROVIDER_NAMES.join(", ")} (got "${value}")`,
+    );
+  }
+  return value as ProviderName;
 }
 
 export function getHostModel(argv: string[]): string | null {

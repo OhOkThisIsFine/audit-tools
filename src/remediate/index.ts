@@ -22,6 +22,8 @@ import {
 import {
   setQuotaStateDir,
   parseHostModelRoster,
+  PROVIDER_NAMES,
+  type ProviderName,
   remediationArtifactsDir,
   resolveRepoRoot,
   mergeOpenCodeAgentPermissionRule,
@@ -52,6 +54,20 @@ try {
 } catch {
   // No opencode config available — proceed with empty permissions.
 }
+/**
+ * Commander parser for `--host-provider`: constrain the value to a known
+ * ProviderName so a typo fails LOUDLY at parse time (the identity is a
+ * quota-attribution key — a silently-wrong value would mis-charge fan-out).
+ */
+function parseHostProviderOption(value: string): ProviderName {
+  if ((PROVIDER_NAMES as readonly string[]).includes(value)) {
+    return value as ProviderName;
+  }
+  throw new Error(
+    `--host-provider must be one of: ${PROVIDER_NAMES.join(", ")} (got "${value}")`,
+  );
+}
+
 const _remediatorPermission = _opencodeJson.agent?.remediator?.permission ?? {};
 const OPENCODE_REMEDIATE_EDIT_PERMISSION: Record<string, string> =
   _remediatorPermission.edit ?? {};
@@ -125,6 +141,11 @@ program
     "Opaque model identity used only to key quota learning (provider/<id>)",
   )
   .option(
+    "--host-provider <name>",
+    "Override the auto-detected conversation-host provider that dispatch fan-out is charged to (default: detected from the run's own session env)",
+    parseHostProviderOption,
+  )
+  .option(
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
@@ -163,6 +184,7 @@ program
           ? parseHostModelRoster(options.hostModels)
           : undefined,
         hostModelId: options.hostModelId || undefined,
+        hostProvider: options.hostProvider as ProviderName | undefined,
         finalizeClosing: options.finalizeClosing === true,
         forceReplan: options.forceReplan === true,
       }),

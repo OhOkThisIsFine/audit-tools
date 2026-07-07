@@ -29,6 +29,20 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Session-config RMW helpers are unlocked (B1 review finding #4, minor).** `persistHostProvider` and the
+  pre-existing `persistAnalyzerSettings` (`src/audit/supervisor/sessionConfig.ts`) do read→merge→validate→
+  `writeJsonFile` with no `withFileLock`. `writeJsonFile` is atomic per-write (no torn file), but two concurrent
+  writers can interleave read↔write → last-writer-wins lost update of the other's field. `persistHostProvider` is
+  now idempotent (skips the write when unchanged), which shrinks but doesn't close the window. Harden BOTH helpers
+  with the shared `withFileLock` on the multi-IDE cooperative path. [[multi-ide-concurrent-runs]]
+
+- **Full local `npm test` pops console windows on win32 (friction).** The audit integration tests spawn real
+  subprocesses (`npm pack`, packaged smokes, `where`/`which`, node children) and some bypass the window-hidden
+  spawn helper (INV-WH) → console windows flash during a local suite run (and `verify:release` smokes). Route
+  every test-side subprocess spawn through the windowless helper. Until then, run targeted vitest files locally
+  and lean on the sharded release CI for full-suite green.
+
+
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
   recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
   - **Convergence guard keys on the reviewer-supplied counterexample *id string*, not CE content.** Two independent
@@ -72,10 +86,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `maxTotalMs` budget so an all-timeout pass spawns no extra passes) so a transient all-error pass self-heals
     instead of halting; (D2) `ingest-results --results` recovery path named in the blocked handoff. Landed through
     a full adversarial review pass (one clamp blocker + primitive-reject + retry-budget minors folded in).
-  - **Host-identity sourcing (attended-mode wall):** default the host provider from the existing
-    `isSelfSpawnBlocked("codex", env)` / `insideCodex` signal (reuse, no new env-sniff) with a `--host-provider`
-    override; stop defaulting `claude-code`. Property to hold: a run's fan-out is charged to the ACTUAL host's
-    meter, never a mis-keyed one — attribution stays mechanical. [[capability-is-per-auditor-not-per-audit]]
+  - **Host-identity sourcing (attended-mode wall) — ✅ SHIPPED (v0.32.29).** NEW single-sourced
+    `resolveConversationHostProvider` (`providerPathGuard.ts`): explicit `--host-provider` →
+    `sessionConfig.host_provider` → `isSelfSpawnBlocked("codex")`→codex → CLAUDECODE→claude-code → default. All
+    3 demote/in-process host-key sites route through it; `--host-provider` override + `host_provider` config
+    field wired both orchestrators (audit persists to session-config before load; remediate folds onto
+    sessionConfigImpl). Full adversarial pipeline caught 1 MAJOR: the codex-host + `provider:codex`-inside-codex
+    case double-booked ONE codex account (host pool + demoted-source pool both `codex/*`) — fixed by NEW
+    `shouldDemotePrimaryInProcess` same-agent guard (demote only when `conversationHost !== provider`; else host
+    self-drives as one pool). [[capability-is-per-auditor-not-per-audit]] / [[host-provider-misattribution-nim-codex]]
   - **C3 AIMD adaptive ceiling** (on top of the `declaredCap` floor): learn a shared endpoint's live limit from
     `ResourceExhausted` backpressure (multiplicative-decrease on rate-limit, additive-increase on success). Needs
     a mutable per-pool ceiling + reworking the drop-and-requeue branch → decrement-and-retry. The real fix for a

@@ -14,6 +14,7 @@ import { parseProviderModelKey } from "./httpQuotaSource.js";
 import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
+import { resolveConversationHostProvider } from "../providers/providerPathGuard.js";
 
 /**
  * The stable id of a dispatchable source — its explicit `id`, or a
@@ -273,6 +274,38 @@ const DEMOTABLE_IN_PROCESS_PROVIDERS: ReadonlySet<string> = new Set([
  */
 export function isDemotableInProcessProvider(providerName: string | undefined): boolean {
   return providerName !== undefined && DEMOTABLE_IN_PROCESS_PROVIDERS.has(providerName);
+}
+
+/**
+ * Whether an attended host should DEMOTE its configured primary in-process backend
+ * to a separate source pool (defect-1 concurrent fan-out). True only when the host
+ * can dispatch subagents AND the primary is a demotable backend AND — the B1
+ * same-agent guard — the resolved CONVERSATION HOST is a DIFFERENT provider than
+ * that backend.
+ *
+ * The same-agent guard is load-bearing: the primary demoted source shares the
+ * host's own credential (it carries no `credentials_path`), so when the host
+ * provider equals the primary provider they are ONE account. Emitting both a
+ * host pool AND a demoted-source pool for that one account double-books its
+ * budget/concurrency and — because `dispatchableSourceId` falls through to the
+ * same `buildProviderModelKey` format the host pool uses — can even collide on a
+ * single pool id. In that case there is no distinct host to fan out alongside;
+ * the host self-drives the backend as its single pool. Single-sourced so audit
+ * and remediate apply the identical guard. [[host-provider-misattribution-nim-codex]]
+ */
+export function shouldDemotePrimaryInProcess(options: {
+  sessionConfig: SessionConfig | null | undefined;
+  hostCanDispatch: boolean;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (!options.hostCanDispatch) return false;
+  const provider = options.sessionConfig?.provider;
+  if (!isDemotableInProcessProvider(provider)) return false;
+  const conversationHost = resolveConversationHostProvider({
+    sessionConfig: options.sessionConfig,
+    env: options.env,
+  });
+  return conversationHost !== provider;
 }
 
 /** Build a DispatchableSource for a configured `openai_compatible` block (the legacy

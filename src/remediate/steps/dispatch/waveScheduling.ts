@@ -21,6 +21,7 @@ import {
   buildSourcePools,
   buildHostModelPools,
   resolveHostProviderName,
+  resolveConversationHostProvider,
   isDemotableInProcessProvider,
 } from "audit-tools/shared";
 import {
@@ -392,14 +393,16 @@ export async function buildConfirmedPools(input: {
 }): Promise<CapacityPool[]> {
   // Defect-1: the ACTUAL configured backend (used to build the demoted source pool) vs
   // the HOST-pool identity. When an attended host demotes a headless backend to a source
-  // (codex/opencode/openai-compatible), the host pool must key to the CONVERSATION HOST
-  // (claude-code), not the backend — otherwise the host fan-out is charged against the
-  // backend's meter AND collides with the demoted source pool ([[capability-is-per-auditor-not-per-audit]]).
+  // (codex/opencode/openai-compatible), the host pool must key to the CONVERSATION HOST,
+  // not the backend — otherwise the host fan-out is charged against the backend's meter
+  // AND collides with the demoted source pool ([[capability-is-per-auditor-not-per-audit]]).
+  // B1: the conversation host is auto-detected (codex when inside a Codex session, else
+  // claude-code; --host-provider / host_provider overrides), NOT the literal claude-code.
   const actualProviderName = resolveHostProviderName(input.sessionConfig);
   const demoteHostIdentity =
     input.demotePrimaryInProcess === true && isDemotableInProcessProvider(actualProviderName);
   const hostProviderName: ResolvedProviderName = demoteHostIdentity
-    ? "claude-code"
+    ? resolveConversationHostProvider({ sessionConfig: input.sessionConfig })
     : actualProviderName;
 
   // Resolve identity/limits and build the per-rank host-model pools via the

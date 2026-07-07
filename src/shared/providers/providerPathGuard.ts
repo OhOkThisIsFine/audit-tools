@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
-import type { ResolvedProviderName } from "../types/sessionConfig.js";
+import type {
+  ProviderName,
+  ResolvedProviderName,
+} from "../types/sessionConfig.js";
 
 /**
  * Single-sourced PATH detection + self-spawn guard for the provider subsystem.
@@ -91,4 +94,71 @@ export function isSelfSpawnBlocked(
   }
   const signal = SELF_SPAWN_ENV_SIGNAL[provider];
   return signal !== undefined && Boolean(env[signal]);
+}
+
+/**
+ * The provider identity of the CONVERSATION HOST actually driving this
+ * next-step process — the agent whose account meter dispatch fan-out is charged
+ * against (a quota-ATTRIBUTION key). This is NOT `sessionConfig.provider`, which
+ * may name a headless backend that is merely the per-packet worker; it is "who
+ * is running me right now".
+ *
+ * Resolution order (first wins):
+ *   1. explicit override (`--host-provider`), when a real provider (not `auto`);
+ *   2. `sessionConfig.host_provider`, when a real provider (not `auto`);
+ *   3. env auto-detection — the SAME in-session signals the self-spawn guard
+ *      reads: inside a Codex session (`isSelfSpawnBlocked("codex")`) ⇒ `codex`;
+ *      inside a Claude Code session (`CLAUDECODE`) ⇒ `claude-code`;
+ *   4. default `claude-code` (the conversation-first host).
+ *
+ * B1 host-identity sourcing: keying the host fan-out off THIS (rather than
+ * literal `claude-code`) is what stops a Codex host from charging its packets to
+ * the exhausted Claude pool. Codex is checked before claude-code so a Codex host
+ * that also inherited `CLAUDECODE` resolves to its own meter; the explicit
+ * override remains the escape hatch for any genuinely ambiguous nesting.
+ * [[capability-is-per-auditor-not-per-audit]] / [[host-provider-misattribution-nim-codex]].
+ */
+export function resolveConversationHostProvider(options?: {
+  explicit?: ProviderName;
+  sessionConfig?: { host_provider?: ProviderName } | null;
+  env?: NodeJS.ProcessEnv;
+}): ResolvedProviderName {
+  const explicit = options?.explicit;
+  if (explicit !== undefined && explicit !== "auto") return explicit;
+  const configured = options?.sessionConfig?.host_provider;
+  if (configured !== undefined && configured !== "auto") return configured;
+  const env = options?.env ?? process.env;
+  if (isSelfSpawnBlocked("codex", env)) return "codex";
+  if (isSelfSpawnBlocked("claude-code", env)) return "claude-code";
+  return "claude-code";
+}
+
+/**
+ * The host's resolved provider identity for quota-key / driver-classification:
+ * an EXPLICIT `sessionConfig.provider` passes through; an unset / `auto`
+ * provider falls back to the auto-detected {@link resolveConversationHostProvider}
+ * (the `--host-provider` override / `host_provider` config / env detection /
+ * `claude-code`). Single-sourced so the fallback and the `auto`-exclusion live
+ * in ONE place rather than being re-spelled at each dispatch call site across
+ * both orchestrators.
+ *
+ * NOTE: this returns the configured provider verbatim when set — a run with
+ * `provider: codex` (codex as the driving host) keys to codex. The audit
+ * host-review path additionally DEMOTES a headless in-process backend to a
+ * worker (see `resolveHostDispatchProviderName`), routing the driver identity
+ * through {@link resolveConversationHostProvider} instead.
+ */
+export function resolveHostProviderName(
+  sessionConfig: { provider?: ProviderName; host_provider?: ProviderName } | null | undefined,
+  options?: { explicit?: ProviderName; env?: NodeJS.ProcessEnv },
+): ResolvedProviderName {
+  const provider = sessionConfig?.provider;
+  if (provider === undefined || provider === "auto") {
+    return resolveConversationHostProvider({
+      explicit: options?.explicit,
+      sessionConfig,
+      env: options?.env,
+    });
+  }
+  return provider;
 }

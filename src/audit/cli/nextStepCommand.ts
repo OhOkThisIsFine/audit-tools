@@ -36,6 +36,7 @@ import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
 import {
   loadSessionConfig,
+  persistHostProvider,
 } from "../supervisor/sessionConfig.js";
 import { ensureSupervisorDirs } from "../io/runArtifacts.js";
 import {
@@ -62,6 +63,7 @@ import {
   getHostModelId,
   getHostModelRoster,
   getHostOutputTokens,
+  getHostProvider,
   getOptionalBooleanFlag,
   getRootDir,
   getTimeoutMs,
@@ -113,8 +115,15 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   const hostOutputTokens = getHostOutputTokens(argv);
   const hostModelRoster = getHostModelRoster(argv);
   const hostModelId = getHostModelId(argv);
+  // B1: an explicit --host-provider override is folded onto session-config.json
+  // BEFORE load, so the loaded config (and the disk-reloading semanticReviewStep)
+  // key the fan-out to the ACTUAL conversation host. Unset ⇒ auto-detected from env.
+  const hostProvider = getHostProvider(argv);
   let sessionConfig: SessionConfig;
   try {
+    if (hostProvider !== null) {
+      await persistHostProvider(artifactsDir, hostProvider);
+    }
     sessionConfig = await loadSessionConfig(artifactsDir);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

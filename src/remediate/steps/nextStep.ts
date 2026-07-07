@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, isDemotableInProcessProvider, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -125,6 +125,12 @@ export interface NextStepOptions {
   hostModels?: HostModelRosterEntry[] | null;
   /** Opaque model identity for the quota key when no model name resolves. */
   hostModelId?: string | null;
+  /**
+   * B1: explicit conversation-host provider override (`--host-provider`). Folded
+   * onto `sessionConfig.host_provider` so the host quota-attribution key follows
+   * the ACTUAL host (auto-detected otherwise). `"auto"` is treated as unset.
+   */
+  hostProvider?: ProviderName;
   finalizeClosing?: boolean;
   forceReplan?: boolean;
   /**
@@ -1648,12 +1654,19 @@ async function buildImplementDispatchStep(ctx: {
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, options, store } = ctx;
 
-    const sessionConfigImpl = options.sessionConfig ??
+    const loadedSessionConfig = options.sessionConfig ??
       await readOptionalJsonFile<SessionConfig>(
         join(root, ".remediation-artifacts", "session-config.json"),
       ) ?? await readOptionalJsonFile<SessionConfig>(
         join(root, "session-config.json"),
       );
+    // B1: fold the `--host-provider` override onto `host_provider` so every
+    // downstream host resolver keys the fan-out to the ACTUAL conversation host.
+    // "auto" is treated as unset (fall through to env auto-detection).
+    const sessionConfigImpl =
+      options.hostProvider !== undefined && options.hostProvider !== "auto"
+        ? { ...(loadedSessionConfig ?? {}), host_provider: options.hostProvider }
+        : loadedSessionConfig;
     const canDispatchImpl = resolveHostDispatchCapability({
       hostCanDispatchSubagents: options.hostCanDispatchSubagents,
       sessionConfig: sessionConfigImpl,
@@ -1728,8 +1741,13 @@ async function buildImplementDispatchStep(ctx: {
     // backends (codex/opencode/openai-compatible). A non-demotable in-process provider
     // (subprocess-template/local-subprocess — no standalone source pool) keeps
     // self-driving regardless of attendance, so the monopoly branch still fires for it.
-    const demoteBackendToSource =
-      canDispatchImpl && isDemotableInProcessProvider(sessionConfigImpl?.provider);
+    // B1 same-agent guard: suppress the demote when the conversation host IS the
+    // primary backend provider (one account ⇒ host self-drives as a single pool),
+    // else host + demoted-source pools double-book that one meter.
+    const demoteBackendToSource = shouldDemotePrimaryInProcess({
+      sessionConfig: sessionConfigImpl,
+      hostCanDispatch: canDispatchImpl,
+    });
     if (
       rollingEngineEnabled &&
       !demoteBackendToSource &&
@@ -1778,10 +1796,12 @@ async function buildImplementDispatchStep(ctx: {
       // through HostSessionQuotaSource.recordLimit/isEscalated, so onEscalation is
       // unused here — the source only feeds buildConfirmedPools' sizing.
       // Defect-1: the host-session quota key must follow the CONVERSATION HOST, not a
-      // demoted backend — key it to claude-code when the configured primary is a
-      // demotable backend that this attended run is fanning out onto as a source.
+      // demoted backend — key it to the auto-detected conversation host (B1: codex
+      // when inside a Codex session, else claude-code; --host-provider overrides)
+      // when the configured primary is a demotable backend that this attended run is
+      // fanning out onto as a source.
       const hybridProviderName = demoteBackendToSource
-        ? "claude-code"
+        ? resolveConversationHostProvider({ sessionConfig: sessionConfigImpl })
         : resolveHostProviderName(sessionConfigImpl);
       const hybridHostSessionModelKey = buildProviderModelKey(
         hybridProviderName,
