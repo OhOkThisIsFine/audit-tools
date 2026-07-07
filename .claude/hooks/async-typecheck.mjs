@@ -94,6 +94,11 @@ try {
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 180_000,
+    // win32: a windowless parent (node launched by the IDE/agent) spawning a
+    // console child (cmd → npm → tsc) pops a console window unless suppressed.
+    // This hook fires after every source-.ts edit, so it is the most frequent
+    // offender — hide the window.
+    windowsHide: true,
   });
   process.exit(0);
 } catch (err) {

@@ -68,6 +68,7 @@ function git(args) {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
   return {
     ok: r.status === 0,
@@ -86,6 +87,7 @@ function gitWithIndex(indexFile, args) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, GIT_INDEX_FILE: indexFile },
+    windowsHide: true,
   });
   return { ok: r.status === 0, status: r.status, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
 }
@@ -143,6 +145,7 @@ function runGate() {
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 240_000,
+      windowsHide: true,
     });
   } catch (err) {
     const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
@@ -182,6 +185,7 @@ function runGate() {
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 240_000,
+      windowsHide: true,
     });
     return { blocked: false };
   } catch (err) {
