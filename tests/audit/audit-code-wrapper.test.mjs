@@ -240,7 +240,26 @@ async function withTempRepo(fn) {
     await writeFile(
       join(root, ".audit-tools/audit", "session-config.json"),
       JSON.stringify(
-        { provider: "local-subprocess" },
+        {
+          provider: "local-subprocess",
+          // Skip-all analyzer policy so the deterministic-frontier drain is
+          // reproducible regardless of the host analyzer cache. Under the default
+          // `auto` policy, an optional analyzer dependency that is absent from the
+          // cache (typescript for the .ts fixtures) owes an analyzer-install
+          // CONSENT decision — a genuine fold-level host-input pause the default
+          // drain correctly halts at (graph_enrichment_executor, CP-NODE-7). That
+          // makes the drain's stopping point cache-dependent (dev-with-cache
+          // reaches structure decomposition; clean CI pauses at structure). `skip`
+          // resolves every analyzer to `skip` (not `absent`+`auto`), so no consent
+          // is owed and the drain reaches structure decomposition everywhere.
+          analyzers: {
+            typescript: "skip",
+            python: "skip",
+            html: "skip",
+            css: "skip",
+            sql: "skip",
+          },
+        },
         null,
         2,
       ) + "\n",

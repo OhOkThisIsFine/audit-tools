@@ -254,8 +254,23 @@ test("advanceAudit emits a structured run log threading obligation → executor 
     const logPath = join(root, "run.log.jsonl");
     const runLogger = new RunLogger(logPath, { now: () => 0 });
 
-    const providerConf = await advanceAudit({}, { root, runLogger });
-    const intake = await advanceAudit(providerConf.updated_bundle, { root, runLogger });
+    // Skip-all analyzer policy so the default (fold-aware) drain is reproducible
+    // regardless of the host analyzer cache: under `auto`, an absent optional
+    // analyzer dependency owes an analyzer-install consent turn — a fold-level
+    // host-input pause the drain correctly halts at (CP-NODE-7) — whose firing is
+    // cache-dependent and would otherwise shift where each invocation stops (and
+    // thus which root-requiring executor a rootless call lands on). `root` is
+    // passed to every call so no drained executor throws "requires root".
+    const analyzers = {
+      typescript: "skip",
+      python: "skip",
+      html: "skip",
+      css: "skip",
+      sql: "skip",
+    };
+
+    const providerConf = await advanceAudit({}, { root, analyzers, runLogger });
+    const intake = await advanceAudit(providerConf.updated_bundle, { root, analyzers, runLogger });
     const preparedBundle = {
       ...intake.updated_bundle,
       auto_fixes_applied: { executed_tools: [], timestamp: "2026-04-22T00:00:00Z" },
@@ -266,7 +281,7 @@ test("advanceAudit emits a structured run log threading obligation → executor 
       },
       external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
     };
-    await advanceAudit(preparedBundle, { runLogger });
+    await advanceAudit(preparedBundle, { root, analyzers, runLogger });
 
     const events = (await readFile(logPath, "utf8"))
       .trim()

@@ -80,6 +80,36 @@ async function withTempRepo(fn) {
       ].join("\n"),
     );
 
+    // Pin a skip-all analyzer policy so the deterministic-frontier drain is
+    // reproducible across environments. The default `auto` policy owes an
+    // analyzer-install CONSENT decision whenever an optional analyzer dependency
+    // (typescript for the .ts fixtures) is not present in the host analyzer cache
+    // — and that consent is a genuine fold-level host-input pause the default
+    // drain correctly halts at (graph_enrichment_executor, CP-NODE-7). Whether it
+    // fires thus depends on the host cache: a dev machine WITH typescript cached
+    // drains through graph enrichment, a clean CI checkout WITHOUT it pauses at
+    // `structure_executor`. Skipping every analyzer resolves them all to `skip`
+    // (not `absent`+`auto`), so no install consent is owed and the drain reaches
+    // structure decomposition identically everywhere. Matches the SKIP_ANALYZERS
+    // discipline in drain-fold-stop.test.mjs.
+    await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
+    await writeFile(
+      join(root, ".audit-tools", "audit", "session-config.json"),
+      JSON.stringify(
+        {
+          analyzers: {
+            typescript: "skip",
+            python: "skip",
+            html: "skip",
+            css: "skip",
+            sql: "skip",
+          },
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
