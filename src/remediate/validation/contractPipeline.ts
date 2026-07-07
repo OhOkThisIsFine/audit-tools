@@ -306,6 +306,7 @@ export {
   validateDigestCoverage,
   validateReconciliationDerivation,
   validateContractCitationGrounding,
+  validateDecompositionFileScope,
   enumerateRepoTreePaths,
   isInsideGitWorkTree,
   deriveNodeModelTier,

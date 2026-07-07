@@ -24,11 +24,20 @@ import {
 import {
   CONTRACT_PIPELINE_VALIDATORS,
   validateVerificationReport,
+  validateDesignSpecGates,
+  validateImplementationDAGIntegrity,
+  validatePairedObligations,
+  validateEvidenceThreaded,
+  validateDigestCoverage,
+  validateReconciliationDerivation,
+  validateDecompositionFileScope,
 } from "./contractPipeline.js";
 import {
   CP_ARTIFACT_NAMES,
+  type ContractPipelineArtifactName,
   contractPipelineDir,
 } from "../contractPipeline/artifactStore.js";
+import { intakePaths } from "../intake.js";
 
 export interface ArtifactValidationResult {
   status: "ok" | "error";
@@ -380,14 +389,62 @@ export async function validateArtifacts(
   }
 
   // Contract-pipeline artifact validation (optional — only checked when present).
+  // Run the SAME full gate set next-step runs, accumulating EVERY failure across
+  // all present artifacts + gates into ONE result (B1 #3 — no per-invocation
+  // partial report that would force a fix→re-run→new-failure thrash). Per-artifact
+  // structural validators run first; the cross-artifact + decomposition gates run
+  // after so an authoring agent's `validate-artifact` reproduces exactly what
+  // next-step would reject.
   const cpDir = contractPipelineDir(artifactsDir);
+  const cpPayloads = new Map<ContractPipelineArtifactName, unknown>();
   for (const name of CP_ARTIFACT_NAMES) {
     const cpPath = join(cpDir, `${name}.json`);
     const cpRaw = await readJsonForValidation(cpPath, issues);
     if (!cpRaw) continue;
     // The envelope wraps the payload — validate the payload field.
     const payload = isRecord(cpRaw) && "payload" in cpRaw ? cpRaw.payload : cpRaw;
+    cpPayloads.set(name, payload);
     pushErrorIssues(issues, CONTRACT_PIPELINE_VALIDATORS[name](payload, name), `${cpPath}:`);
+  }
+
+  // Cross-artifact + decomposition gates. Each validator is individually tolerant
+  // of an absent input (returns [] when its primary payload is missing/malformed),
+  // so an incomplete pipeline never fabricates errors — only present artifacts are
+  // gated. This mirrors evaluateContractObligationsPromotionGate + the finalization
+  // design gate + the DAG-integrity gate that next-step runs.
+  if (cpPayloads.size > 0) {
+    const goalSpec = cpPayloads.get("goal_spec");
+    const sourceType =
+      isRecord(goalSpec) && typeof goalSpec.source_type === "string"
+        ? goalSpec.source_type
+        : undefined;
+    const obligationLedger = cpPayloads.get("obligation_ledger");
+    const testValidatorPlan = cpPayloads.get("test_validator_plan");
+    const finalizedContracts = cpPayloads.get("finalized_module_contracts");
+    const seamReport = cpPayloads.get("seam_reconciliation_report");
+    const assessment = cpPayloads.get("contract_assessment_report");
+    const judge = cpPayloads.get("judge_report");
+    const counterexample = cpPayloads.get("counterexample");
+    const dag = cpPayloads.get("implementation_dag");
+    const moduleDecomposition = cpPayloads.get("module_decomposition");
+    const findingEnumeration = await readJsonForValidation(
+      intakePaths(artifactsDir).findingEnumeration,
+      issues,
+    );
+
+    pushErrorIssues(issues, validatePairedObligations(obligationLedger, testValidatorPlan));
+    pushErrorIssues(issues, validateEvidenceThreaded(assessment, judge, dag));
+    pushErrorIssues(
+      issues,
+      validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
+    );
+    pushErrorIssues(issues, validateReconciliationDerivation(seamReport, finalizedContracts));
+    pushErrorIssues(issues, validateDesignSpecGates(finalizedContracts, obligationLedger));
+    pushErrorIssues(
+      issues,
+      validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
+    );
+    pushErrorIssues(issues, validateDecompositionFileScope(moduleDecomposition, root));
   }
 
   // Verification report at the root artifacts dir (from FINDING-027).

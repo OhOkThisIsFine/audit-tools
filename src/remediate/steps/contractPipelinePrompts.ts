@@ -23,7 +23,7 @@ interface ContractPipelineRole {
   description: string;
 }
 
-const ROLES: Record<string, ContractPipelineRole> = {
+export const ROLES: Record<string, ContractPipelineRole> = {
   goal_normalization: {
     title: "Goal Normalization",
     requiredInputKeys: [],
@@ -66,7 +66,7 @@ const ROLES: Record<string, ContractPipelineRole> = {
   }]
 }`,
     description:
-      "Decompose the goal into a set of named modules with rough responsibilities and file scope. Do not draft seam contracts yet — only identify modules and their file ownership.",
+      "Decompose the goal into a set of named modules with rough responsibilities and file scope. Do not draft seam contracts yet — only identify modules and their file ownership. Before assigning a module's file_scope, verify where the named responsibility logic ACTUALLY lives in the repository — open the candidate file and confirm it implements the logic. Do NOT scope a module at a thin re-export shim / barrel (a file that only does `export * from …` / `export { x } from …`): scope it at the file where the real logic lives, or the enforcing gate (validateDecompositionFileScope) will reject a shim-only file_scope.",
   },
   module_contract_drafting: {
     title: "Per-Module Contract Drafting",

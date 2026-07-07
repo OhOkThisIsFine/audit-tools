@@ -14,6 +14,8 @@
  *     and bidirectional coverage for the implementation DAG.
  */
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type ValidationIssue,
   type DispatchModelTier,
@@ -22,6 +24,9 @@ import {
   pushValidationIssue,
   groundDesignFinding,
   normalizeRepoPath,
+  isBareBasename,
+  resolveBasenameToTrackedPath,
+  enumerateTrackedFilePaths,
 } from "audit-tools/shared";
 import {
   evaluatePairing,
@@ -545,10 +550,15 @@ export function validatePairedObligations(
     const verdict: PairingVerdict = evaluatePairing(entry.assertions, anchors);
 
     if (!verdict.hasPositive) {
+      // Polarity escape-hatch (INV-CVG-3 / CE): the keyword classifier reads a
+      // satisfied path whose success is a block/`exit 2` action as "no positive"
+      // (a block/exit reads as a failure). Point the author at the explicit label
+      // override so a false negative is always recoverable without euphemising.
       pushValidationIssue(
         issues,
         `test_validator_plan.coverage[${id}].positive`,
-        `Testable obligation "${id}" (behavior change) has no positive (satisfied-path) assertion — a paired obligation must assert the behavior holds in the success case.`,
+        `Testable obligation "${id}" (behavior change) has no positive (satisfied-path) assertion — a paired obligation must assert the behavior holds in the success case. ` +
+          `If the success case is a block / \`exit 2\` action the polarity heuristic misreads as "no positive", prefix that assertion with an explicit \`POSITIVE:\` (or \`NEGATIVE:\`) label to override the classifier.`,
       );
     }
     if (!verdict.hasNegative) {
@@ -1222,6 +1232,186 @@ export function validateContractCitationGrounding(
   });
 
   return { treeReadable: true, issues };
+}
+
+// ── B5: decomposition file_scope points at real logic (not a re-export shim) ──
+//
+// A module_decomposition assigns each module a `file_scope[]` — the files where
+// that module's named responsibility logic is supposed to live. A latent failure
+// mode (B5): a decomposition scopes a module at a thin re-export barrel/shim
+// (`export * from "./real.js"`) instead of the file that actually implements the
+// responsibility. The implement worker then edits a file that holds no logic, or
+// hunts for the real site itself. This gate rejects a module whose file_scope
+// resolves ONLY to re-export shims.
+//
+// The shim signal is STRUCTURAL (a re-export/barrel shape), never a line-count
+// heuristic: a genuinely small real module (a five-line installer) must pass. It
+// is a rebuttable lead — a module that scopes at least one real-logic file passes
+// even if it also lists a barrel.
+//
+// Grounding reuses the SHARED, dotfile-safe resolver (findingGrounding.ts —
+// normalizeRepoPath keeps a dotfile-dir leading dot; resolveBasenameToTrackedPath
+// resolves a bare basename to its unique tracked path), so a scoped `.claude/x`
+// or bare `advance.ts` grounds identically to the M-B3 gate — no private copy of
+// dotfile/basename logic. Fail-closed ONLY on an unreadable git tree (mirrors
+// validateContractCitationGrounding); a valid-but-empty tree degrades to warning.
+
+/**
+ * A file is a re-export shim/barrel when — after stripping comments — every
+ * top-level statement is an import or a re-export, and at least one is a
+ * re-export (`export … from`, `export *`). A statement that defines logic (a
+ * function/class/enum, or a `const/let/var X = <value>` that is not itself a
+ * re-export) makes the file real. Structural, not line-count based.
+ *
+ * A file that cannot be read is treated as NOT a shim (never false-reject on an
+ * unreadable file — the tree-readability gate below is the only fail-closed path).
+ */
+function isReExportShim(absPath: string): boolean {
+  let content: string;
+  try {
+    content = readFileSync(absPath, "utf8");
+  } catch {
+    return false;
+  }
+  // Strip block + line comments so a doc-comment mentioning code is not counted.
+  const stripped = content
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  const statements = stripped
+    .split(";")
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter((s) => s.length > 0);
+  if (statements.length === 0) return false;
+
+  let hasReExport = false;
+  for (const stmt of statements) {
+    // `export * from "..."` / `export * as ns from "..."`
+    if (/^export\s+\*(?:\s+as\s+[A-Za-z0-9_$]+)?\s+from\s+['"]/.test(stmt)) {
+      hasReExport = true;
+      continue;
+    }
+    // `export { a, b } from "..."` / `export type { T } from "..."`
+    if (/^export\s+(?:type\s+)?\{[^}]*\}\s*from\s+['"]/.test(stmt)) {
+      hasReExport = true;
+      continue;
+    }
+    // `export { a, b }` (bare local re-list — carries no logic of its own)
+    if (/^export\s+(?:type\s+)?\{[^}]*\}$/.test(stmt)) continue;
+    // `export { default } from "..."` handled by the from-form above.
+    // A plain import (side-effect or named) carries no logic.
+    if (/^import\b/.test(stmt)) continue;
+    // Anything else — an `export function`, `export class`, `export const X = …`,
+    // or a bare statement — is real logic; the file is not a shim.
+    return false;
+  }
+  return hasReExport;
+}
+
+/**
+ * INV-CVG-4 (B5) — reject a module whose `file_scope` points ONLY at thin
+ * re-export shims rather than the file where its named responsibility logic
+ * lives. `moduleDecompositionPayload` is the (envelope-unwrapped) module_decomposition
+ * payload; `repoRoot` is the working-tree root enumerated via `git ls-files`.
+ *
+ * Behaviour:
+ *   - A scoped path that does not resolve to any tracked file is SKIPPED here (the
+ *     M-B3 citation gate owns path-existence; this gate only judges resolved files).
+ *   - A module is flagged only when it resolves ≥1 scoped path and EVERY resolved
+ *     path is a re-export shim (no real-logic file among them).
+ *   - Fail-closed only on an unreadable git tree (git missing / not a repo → error);
+ *     a valid-but-empty tree degrades to a warning (never hard-block a fresh repo).
+ */
+export function validateDecompositionFileScope(
+  moduleDecompositionPayload: unknown,
+  repoRoot: string,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (
+    !isRecord(moduleDecompositionPayload) ||
+    !Array.isArray(moduleDecompositionPayload.modules)
+  ) {
+    return issues;
+  }
+  const modules = moduleDecompositionPayload.modules as unknown[];
+
+  // Does any module actually declare a file_scope? If not, nothing to ground —
+  // do not spawn git or fail-closed on an unrelated empty tree.
+  const anyScope = modules.some(
+    (mod) =>
+      isRecord(mod) &&
+      Array.isArray(mod.file_scope) &&
+      (mod.file_scope as unknown[]).some((p) => typeof p === "string" && p.length > 0),
+  );
+  if (!anyScope) return issues;
+
+  // Tree readability gate (mirror validateContractCitationGrounding): the M-B3
+  // gate's `enumerateRepoTreePaths` (lowercased) decides readable-vs-empty; the
+  // shared case-preserving corpus is what we resolve + read files against.
+  const knownLower = enumerateRepoTreePaths(repoRoot);
+  if (knownLower.size === 0) {
+    if (isInsideGitWorkTree(repoRoot)) {
+      pushValidationIssue(
+        issues,
+        "decomposition_file_scope.repo_tree",
+        `The working tree at "${repoRoot}" is a valid git repo but has no tracked files yet (git ls-files is empty) — decomposition file_scope grounding cannot run, so it is SKIPPED with a warning rather than blocking. file_scope was not verified against the tree.`,
+        "warning",
+      );
+      return issues;
+    }
+    pushValidationIssue(
+      issues,
+      "decomposition_file_scope.repo_tree",
+      `Could not enumerate the working tree at "${repoRoot}" (git unavailable or not a git work tree) — decomposition file_scope grounding cannot run, so the gate fails closed. Verify repo_root points at a git working tree.`,
+    );
+    return issues;
+  }
+
+  const caseCorpus = enumerateTrackedFilePaths(repoRoot);
+  // normalizeRepoPath(tracked) → real on-disk case, so a scoped path grounds
+  // through the shared dotfile-safe normalizer without a private copy.
+  const byNorm = new Map<string, string>();
+  for (const p of caseCorpus) byNorm.set(normalizeRepoPath(p), p);
+
+  const resolveScoped = (scoped: string): string | undefined => {
+    const norm = normalizeRepoPath(scoped);
+    const direct = byNorm.get(norm);
+    if (direct) return direct;
+    if (isBareBasename(scoped)) return resolveBasenameToTrackedPath(scoped, caseCorpus);
+    return undefined;
+  };
+
+  for (const [i, mod] of modules.entries()) {
+    if (!isRecord(mod)) continue;
+    const fileScope = Array.isArray(mod.file_scope)
+      ? (mod.file_scope as unknown[]).filter((p): p is string => typeof p === "string" && p.length > 0)
+      : [];
+    if (fileScope.length === 0) continue;
+
+    let anyResolved = false;
+    let anyRealLogic = false;
+    const shims: string[] = [];
+    for (const scoped of fileScope) {
+      const real = resolveScoped(scoped);
+      if (!real) continue; // path existence is the M-B3 gate's concern
+      anyResolved = true;
+      if (isReExportShim(join(repoRoot, real))) {
+        shims.push(scoped);
+      } else {
+        anyRealLogic = true;
+      }
+    }
+
+    if (anyResolved && !anyRealLogic && shims.length > 0) {
+      const name = typeof mod.name === "string" && mod.name.length > 0 ? mod.name : `#${i}`;
+      pushValidationIssue(
+        issues,
+        `module_decomposition.modules[${i}].file_scope`,
+        `Module "${name}" file_scope points only at thin re-export shim(s) [${shims.join(", ")}] — a barrel/re-export carries no responsibility logic. Scope this module at the file where its named logic ACTUALLY lives, not a re-export shim.`,
+      );
+    }
+  }
+
+  return issues;
 }
 
 // ── (removed) Downstream-only repair propagation — S2, dropped ─────────────────
