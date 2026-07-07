@@ -314,7 +314,14 @@ export async function finalizeDispatchQuota(params: {
       poolId: alloc.pool_id,
       resourceKey: alloc.pool_id,
       budget: alloc.schedule.remaining_token_budget ?? Number.POSITIVE_INFINITY,
-      declaredCap: alloc.schedule.host_concurrency_limit?.active_subagents ?? null,
+      // Declared in-flight cap = the shared-host subagent limit OR, for an
+      // independent backend source, its endpoint-declared concurrency cap
+      // (source.quota.max_concurrent) so admitBatch's cap branch fires for an
+      // otherwise-optimistic source.
+      declaredCap:
+        alloc.schedule.host_concurrency_limit?.active_subagents ??
+        alloc.concurrencyCap ??
+        null,
       costRank: deriveCostRank({
         model: alloc.schedule.model,
         tier: alloc.rank,

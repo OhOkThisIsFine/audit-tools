@@ -98,6 +98,25 @@ test("buildSourcePool: explicit source.account overrides the credential read", a
   expect(pool.id).toBe("claude-code#declared-X/*");
 });
 
+test("buildSourcePool: source.quota.max_concurrent becomes the pool's concurrencyCap (else null)", async () => {
+  // C3 (NIM/Codex fix set): the endpoint-declared max-concurrency flows to the
+  // pool's count cap. A source is otherwise built hostConcurrencyLimit:null.
+  const capped = await buildSourcePool({
+    source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: 4 } },
+    quotaSource: STUB_QUOTA,
+    quotaEntries: {},
+  });
+  expect(capped.concurrencyCap).toBe(4);
+  expect(capped.hostConcurrencyLimit, "the host subagent budget stays null for a source").toBe(null);
+
+  const uncapped = await buildSourcePool({
+    source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k" },
+    quotaSource: STUB_QUOTA,
+    quotaEntries: {},
+  });
+  expect(uncapped.concurrencyCap, "no max_concurrent → no cap").toBe(null);
+});
+
 test("buildHostModelPools stamps the host account (from the host credential) into every pool id", async () => {
   const quotaSource = new ClaudeOAuthQuotaSource({
     credentialsPath: writeClaudeCreds("orgA"),

@@ -936,11 +936,21 @@ export function createRollingDispatcher<TPacket>(
 
       if (slot === null) continue;
 
-      // Apply optional maxConcurrentPerPool cap.
-      if (
-        options.maxConcurrentPerPool !== undefined &&
-        (inFlightPerPool.get(slot.poolId) ?? 0) >= options.maxConcurrentPerPool
-      ) {
+      // Per-pool in-flight COUNT cap. The pool's own endpoint-declared cap
+      // (`concurrencyCap`, e.g. a NIM worker's max-concurrency) and the global
+      // `maxConcurrentPerPool` option are BOTH honoured — the effective ceiling is
+      // the min of whichever are set. This is the throttle an optimistic (unmetered)
+      // source needs: with no token budget to gate on, without it the pass would
+      // dispatch every ready packet at once and overrun the endpoint (the NIM
+      // `33/32` incident). A packet skipped here stays pending and a later pass
+      // dispatches it once an in-flight slot frees.
+      const poolConcurrencyCap = confirmedPools.find((p) => p.id === slot.poolId)?.concurrencyCap ?? null;
+      const optionCap = options.maxConcurrentPerPool ?? null;
+      const effectiveCap =
+        poolConcurrencyCap != null && optionCap != null
+          ? Math.min(poolConcurrencyCap, optionCap)
+          : (poolConcurrencyCap ?? optionCap);
+      if (effectiveCap != null && (inFlightPerPool.get(slot.poolId) ?? 0) >= effectiveCap) {
         continue;
       }
 

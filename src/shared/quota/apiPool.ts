@@ -220,6 +220,11 @@ export async function buildSourcePool(params: {
     // non-provider-shaped id. The single-source derivation is the invariant here.
     hostModel: source.model ?? null,
     hostConcurrencyLimit: null,
+    // Endpoint-declared in-flight COUNT cap (independent of the host subagent
+    // budget, which stays null for a backend source). Without it an optimistic
+    // unmetered source (no token snapshot) dispatches every ready packet at once
+    // and overruns the endpoint — the NIM `33/32` incident.
+    concurrencyCap: source.quota?.max_concurrent ?? null,
     quotaStateEntry: quotaEntries[poolKey] ?? null,
     // QuotaModelLimits is structurally a DiscoveredRateLimitsInput (RPM/TPM/context/
     // output) — the operator-declared per-source rate limit feeds the S4 fold.

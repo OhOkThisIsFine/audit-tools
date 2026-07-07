@@ -271,6 +271,52 @@ test("createRollingDispatcher — re-dispatches immediately on result arrival (r
   expect(dispatchOrder.length, "total dispatch calls equals packet count").toBe(3);
 });
 
+test("createRollingDispatcher — a pool's own concurrencyCap ceilings its in-flight COUNT (no global option)", async () => {
+  // C3 (NIM/Codex fix set): an optimistic unmetered source has no token budget to
+  // throttle on, so without a per-pool COUNT cap the engine dispatches every ready
+  // packet at once and overruns the endpoint (the NIM 33/32 incident). The pool's
+  // own `concurrencyCap` must ceiling in-flight even when NO maxConcurrentPerPool
+  // option is passed.
+  await setupTmpQuotaDir();
+  let active = 0;
+  let peak = 0;
+  const resolvers = {};
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("nim", { concurrencyCap: 2 })],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => { resolvers[packet.id] = resolve; });
+      active -= 1;
+      return { packet, outcome: "success" };
+    },
+  });
+  // Five ready packets, cap 2 — no global maxConcurrentPerPool option in play.
+  dispatcher.enqueue([1, 2, 3, 4, 5].map((n) => makePacket(`p${n}`)));
+  const runPromise = dispatcher.run();
+
+  // Let the first pass fill to the cap and stabilize.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(active, "cap=2 admits at most 2 concurrently").toBeLessThanOrEqual(2);
+  expect(active, "cap=2 fills to the cap (endpoint not left idle)").toBe(2);
+
+  // Drain: resolve whatever is in flight; the engine backfills up to the cap each
+  // time until all five complete. peak must never exceed the cap.
+  let done = false;
+  runPromise.then(() => { done = true; });
+  while (!done) {
+    for (const id of Object.keys(resolvers)) {
+      const r = resolvers[id];
+      if (r) { delete resolvers[id]; r(); }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  const results = await runPromise;
+  expect(results.length, "all packets complete despite the cap").toBe(5);
+  expect(peak, "in-flight COUNT never exceeded the pool's concurrencyCap").toBe(2);
+});
+
 // ---------------------------------------------------------------------------
 // createRollingDispatcher — quota outcome recording
 // ---------------------------------------------------------------------------

@@ -272,6 +272,16 @@ export interface QuotaModelLimits {
   requests_per_minute?: number;
   input_tokens_per_minute?: number;
   output_tokens_per_minute?: number;
+  /**
+   * Hard cap on simultaneously in-flight requests to this source's endpoint — the
+   * endpoint-declared max-concurrency (e.g. a NIM worker's `N/M` local request
+   * limit). Enforced by COUNT of in-flight requests, independent of the token
+   * budget: an optimistic (unmetered) source with no token snapshot would
+   * otherwise dispatch every ready packet at once and overrun the endpoint. Flows
+   * to `CapacityPool.concurrencyCap` → the rolling engine's per-pool in-flight
+   * ceiling and the host-path `AdmissionPool.declaredCap`. Omit for no cap.
+   */
+  max_concurrent?: number;
 }
 
 export interface QuotaConfig {

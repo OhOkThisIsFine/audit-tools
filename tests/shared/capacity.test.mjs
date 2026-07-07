@@ -109,6 +109,22 @@ test("multi pool: summary exposes serializable per-pool quota metadata", () => {
   expect(summaries[0].resolved_limits.context_tokens > 0).toBe(true);
 });
 
+test("a pool's concurrencyCap is carried through the allocation AND the serialized summary", () => {
+  // C3 (NIM/Codex fix set): source pools carry an endpoint-declared count cap that
+  // is NOT the host subagent budget. It must survive both in-memory (audit reads
+  // the allocation) and serialization (remediate reads the summary) so each maps it
+  // to AdmissionPool.declaredCap. It is a separate ceiling, so it does NOT enter the
+  // slot math (host-less claude-code fans out on token/rate headroom as usual).
+  const capacity = computeDispatchCapacity({
+    pools: [hostPool("nim", { hostConcurrencyLimit: null, concurrencyCap: 3 })],
+    sessionConfig: {},
+    pendingItemTokens: new Array(10).fill(1000),
+  });
+  expect(capacity.pools[0].concurrencyCap, "allocation echoes the pool cap").toBe(3);
+  const summaries = summarizeDispatchCapacityPools(capacity);
+  expect(summaries[0].concurrency_cap, "summary serializes the pool cap").toBe(3);
+});
+
 test("computeDispatchCapacity rejects an empty pool list", () => {
   assert.throws(
     () => computeDispatchCapacity({

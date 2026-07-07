@@ -174,6 +174,18 @@ export interface CapacityPool {
    * session-config). null leaves only the rate / learned / first-contact caps.
    */
   hostConcurrencyLimit: HostConcurrencyLimit | null;
+  /**
+   * Hard cap on the COUNT of simultaneously in-flight requests to THIS pool's
+   * endpoint (endpoint-declared max-concurrency, from `source.quota.max_concurrent`).
+   * Distinct from {@link hostConcurrencyLimit}: that is the shared conversation-host
+   * subagent budget (folded into a GLOBAL budget across host pools); this is one
+   * independent backend endpoint's own simultaneity limit, enforced per-pool by the
+   * in-process rolling engine and surfaced as the host-path `AdmissionPool.declaredCap`.
+   * Needed because an optimistic (unmetered) source has no token budget to throttle on,
+   * so without a count cap it dispatches every ready packet at once and overruns the
+   * endpoint. null/absent = uncapped (quota headroom is the only throttle).
+   */
+  concurrencyCap?: number | null;
   /** Learned quota-state entry for this pool's provider/model key, if any. */
   quotaStateEntry?: QuotaStateEntry | null;
   /** RPM/TPM discovered for this pool (provider query or response headers). */
@@ -232,6 +244,13 @@ export interface PoolDispatchAllocation {
   quotaSignalDegraded?: boolean;
   /** Echo of {@link CapacityPool.quotaCoverage} — proactive-quota coverage for this pool. */
   quotaCoverage?: QuotaCoverageStatus;
+  /**
+   * Echo of {@link CapacityPool.concurrencyCap} — the pool's endpoint-declared
+   * in-flight count cap. Carried through unfolded so the host-path admission builder
+   * can surface it as `AdmissionPool.declaredCap`; never affects the slot math here
+   * (slot math is token/rate-based — the count cap is a separate ceiling).
+   */
+  concurrencyCap?: number | null;
 }
 
 /** Compact, serializable view of one pool allocation for dispatch-quota files. */
@@ -262,6 +281,12 @@ export const DispatchCapacityPoolSummarySchema = z
     quota_signal_degraded: z.boolean().optional(),
     /** Proactive-quota coverage status for this pool's provider (see classifyQuotaCoverage). */
     quota_coverage: QuotaCoverageStatusSchema.optional(),
+    /**
+     * Endpoint-declared in-flight COUNT cap for this pool (from source.quota.max_concurrent;
+     * see CapacityPool.concurrencyCap). Surfaced so the host-path admission builder can map
+     * it to `AdmissionPool.declaredCap` for an otherwise-optimistic backend source.
+     */
+    concurrency_cap: z.number().int().min(1).nullable().optional(),
   })
   .strict();
 export type DispatchCapacityPoolSummary = z.infer<
@@ -544,6 +569,7 @@ function schedulePool(
     // Raw signal carried through unfolded — does not enter the slot math above.
     ...(pool.quotaSignalDegraded ? { quotaSignalDegraded: true } : {}),
     ...(pool.quotaCoverage ? { quotaCoverage: pool.quotaCoverage } : {}),
+    ...(pool.concurrencyCap != null ? { concurrencyCap: pool.concurrencyCap } : {}),
   };
 }
 
@@ -583,5 +609,6 @@ export function summarizeDispatchCapacityPools(
     quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,
     ...(allocation.quotaSignalDegraded ? { quota_signal_degraded: true } : {}),
     ...(allocation.quotaCoverage ? { quota_coverage: allocation.quotaCoverage } : {}),
+    ...(allocation.concurrencyCap != null ? { concurrency_cap: allocation.concurrencyCap } : {}),
   }));
 }

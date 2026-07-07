@@ -458,7 +458,9 @@ function admissionPoolsFromSchedule(
       poolId: pool.pool_id,
       resourceKey: pool.pool_id,
       budget: pool.remaining_token_budget ?? Number.POSITIVE_INFINITY,
-      declaredCap: pool.host_concurrency_limit?.active_subagents ?? null,
+      // host subagent limit OR, for an independent backend source, its
+      // endpoint-declared concurrency cap (source.quota.max_concurrent).
+      declaredCap: pool.host_concurrency_limit?.active_subagents ?? pool.concurrency_cap ?? null,
       costRank: deriveCostRank({
         model: pool.model,
         tier: pool.rank,
