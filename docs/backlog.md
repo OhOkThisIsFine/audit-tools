@@ -29,6 +29,30 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Lap friction walk — arbitrage Phase-0 lap (2026-07-08).** Full three-category walk of the doc-review +
+  dial-adjudication + arbitrage-increment-1 lap:
+  - **(ambiguous-direction) A forward-track design memory carried two falsified technical premises — SECOND
+    instance of the pattern below.** [[arbitrage-dispatch-tier-design]] (written 2026-07-07) asserted (a)
+    "`deriveCostRank` prices free pools ~0 once registered" — FALSE (a non-models.dev model id falls to the
+    *worst* unknown-price band, the opposite of free-first), and (b) opencode-free is `Bearer public` zero-auth —
+    which needed live verification (the docs describe a paid API-key tier; the free-model path *does* work with
+    `Bearer public`, confirmed by probing). A lap trusting the memory would have shipped a config example that
+    ranks *last* + assumed an unverified endpoint. Verifying before building (live probe + seam map) caught both.
+    This is the exact recurrence of the entry immediately below — a design memory's technical premises must be
+    re-verified against current code AND live endpoints BEFORE building, not assumed. That the same pattern
+    recurred within one day is the signal it isn't yet tool-enforced; the durable fix is still
+    [[spec-degradation-and-doc-staleness]] (a memory is a point-in-time proposal, not a live spec).
+  - **(tool-should-decide) The wrapper dispatch table can silently drift from `cli.ts`'s command set (D-61).**
+    `audit-code cleanup` was documented + fully implemented in `src/audit/cli.ts` but had no case in
+    `wrapper/audit-code-wrapper-lib.mjs`, so the packaged bin answered `Unknown command: cleanup` for a
+    long-standing gap. Fixed + added a reachability test for `cleanup` specifically — but the GENERAL guard is
+    missing: nothing asserts the wrapper dispatch table covers `cli.ts`'s command set (or the documented
+    commands). A parity test (wrapper-reachable ⊇ cli.ts commands) would enforce it and catch the next drift.
+    [[enforce-robustness-in-tooling-not-host-discretion]]
+  - **(inefficient-feeding) None this lap** — recon was routed through Explore/`llm`-style subagents (the seam
+    map, the adversarial review) so the main context received conclusions, not file dumps; no large-file
+    re-read loop. Category attested clean.
+
 - **A forward-track design memory outlived a major closure and sent a build in the wrong initial direction
   (ambiguous-direction, 2026-07-08).** The cost↔speed dial's design (memory
   [[host-provider-misattribution-nim-codex]] forward-track, written 2026-07-07) defined its throughput axis +
