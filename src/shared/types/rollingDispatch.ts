@@ -94,4 +94,15 @@ export interface RollingDispatchEngineContract<TPacket = unknown> {
    * behaviour unchanged.
    */
   isPacketEscalated?: (packetId: string) => boolean;
+  /**
+   * Reactive cost verification: invoked once per pool when a declared-free pool is
+   * first observed charging (the engine has already demoted it out of free-first).
+   * The consumer wires it to friction emission. Optional — omit to leave the
+   * demotion silent (no friction).
+   */
+  onCostDrift?: (info: {
+    poolId: string;
+    observedCostUsd: number;
+    declaredCostPerMtok: number;
+  }) => void;
 }

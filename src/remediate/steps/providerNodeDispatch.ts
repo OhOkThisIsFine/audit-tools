@@ -148,6 +148,11 @@ export function makeProviderNodeDispatcher(
         return { packet, outcome: "rate_limited", rateLimit: { channel: "error", text: stderrText } };
       }
 
+      // Reactive cost verification: relay the endpoint-reported cost (when the
+      // provider surfaced one) so `handleResult` can demote a declared-free pool
+      // that started charging. Absent for providers that report no cost.
+      const observedCost =
+        launch.observedCostUsd != null ? { observedCostUsd: launch.observedCostUsd } : {};
       // The worker writes its result file per the prompt; confirm it landed and
       // parses. Contents are adjudicated by the deterministic merge downstream.
       const result = await readOptionalJsonFile<ImplementWorkerResult>(resultPath);
@@ -167,7 +172,7 @@ export function makeProviderNodeDispatcher(
           ),
         };
       }
-      return { packet, outcome: "success" };
+      return { packet, outcome: "success", ...observedCost };
     } catch (err) {
       return { packet, outcome: "error", error: err };
     }

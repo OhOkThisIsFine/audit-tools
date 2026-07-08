@@ -349,6 +349,11 @@ export function makeAuditProviderPacketDispatcher(params: {
         };
       }
 
+      // Reactive cost verification: relay the endpoint-reported cost (when the
+      // provider surfaced one) so `handleResult` can demote a declared-free pool
+      // that started charging. Absent for providers that report no cost.
+      const observedCost =
+        launch.observedCostUsd != null ? { observedCostUsd: launch.observedCostUsd } : {};
       // The worker writes its AuditResult[] per the prompt; confirm it landed and
       // parses. Contents are adjudicated by the deterministic merge downstream.
       const result = await readOptionalJsonFile<AuditResult[]>(resultPath);
@@ -372,7 +377,7 @@ export function makeAuditProviderPacketDispatcher(params: {
           ),
         };
       }
-      return { packet, outcome: "success" };
+      return { packet, outcome: "success", ...observedCost };
     } catch (err) {
       return { packet, outcome: "error", error: err };
     }
@@ -528,6 +533,27 @@ export async function driveRollingAuditDispatch(params: {
         }
       },
       isPacketEscalated: (packetId) => dispatch.hostSession.isEscalated(packetId),
+      // Reactive cost verification: a declared-free source pool observed charging
+      // has been demoted by the engine; surface it as reviewable friction so the
+      // operator reconciles the stale `cost_per_mtok:0` (routed through the single
+      // step-boundary chokepoint with this run's artifactsDir/runId, like escalation).
+      onCostDrift: ({ poolId, observedCostUsd, declaredCostPerMtok }) => {
+        void captureStepBoundaryFriction(
+          artifactsDir,
+          runId,
+          {
+            eventType: "declared_cost_drift",
+            discriminator: poolId,
+            note:
+              `pool "${poolId}" was declared free (cost_per_mtok=${declaredCostPerMtok}) ` +
+              `but reported cost=${observedCostUsd} — demoted out of free-first ordering; ` +
+              `reconcile the source's declared cost.`,
+            severity: "medium",
+            area: "dispatch/cost",
+          },
+          "audit-code",
+        );
+      },
     },
     dispatchPacket,
   );

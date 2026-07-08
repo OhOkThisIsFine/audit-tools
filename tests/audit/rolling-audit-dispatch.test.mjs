@@ -195,6 +195,47 @@ test("A8a: makeAuditProviderPacketDispatcher launches read-only against the repo
   expect(captured[0].uiMode).toBe("headless");
 });
 
+test("A8a: makeAuditProviderPacketDispatcher relays the provider's observedCostUsd onto the dispatch result", async (t) => {
+  // Reactive cost verification seam: the provider surfaces the endpoint-reported
+  // cost on LaunchFreshSessionResult; the dispatcher closure must carry it onto the
+  // RollingDispatchResult so handleResult can demote a declared-free pool that
+  // started charging. Guards the exact relay that was initially missing.
+  const { artifactsDir, runDir } = await makeRun();
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+  await mkdir(join(runDir, "task-results"), { recursive: true });
+
+  const dispatcher = makeAuditProviderPacketDispatcher({
+    root: artifactsDir,
+    artifactsDir,
+    runId: RUN_ID,
+    sessionConfig: { provider: "openai-compatible" },
+    timeoutMs: 1000,
+    createProvider: () => ({
+      name: "fake",
+      async launch(input) {
+        await writeFile(input.resultPath, JSON.stringify([]), "utf8");
+        return { accepted: true, observedCostUsd: 0.02 };
+      },
+    }),
+  });
+
+  const packet = {
+    id: "pkt-cost",
+    payload: {
+      packet_id: "pkt-cost",
+      prompt_path: join(runDir, "task-results", "pkt-cost-prompt.md"),
+      result_path: join(runDir, "task-results", "pkt-cost-result.json"),
+      access: { read_paths: [], write_paths: [], forbidden_patterns: [] },
+      complexity: { estimated_tokens: 100, priority: "medium" },
+    },
+    estimatedTokens: 100,
+    complexity: 0.5,
+  };
+  const outcome = await dispatcher(packet, { providerName: "openai-compatible", hostModel: null, poolId: "p" });
+  expect(outcome.outcome).toBe("success");
+  expect(outcome.observedCostUsd, "the endpoint-reported cost is relayed to the engine").toBe(0.02);
+});
+
 test("A8a: makeAuditProviderPacketDispatcher returns error when the provider rejects the launch", async (t) => {
   const { artifactsDir, runDir } = await makeRun();
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));

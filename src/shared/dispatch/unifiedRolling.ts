@@ -143,6 +143,16 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
   rebuildBetweenLevels?: () => Promise<void>;
   /** Observe each result as it completes (progress emission, caller bookkeeping). */
   onResult?: (result: RollingDispatchResult<TPayload>) => void;
+  /**
+   * Reactive cost verification: invoked once per pool when a declared-free pool is
+   * first observed charging (the engine has already demoted it). Forwarded to the
+   * engine; the consumer wires it to friction emission. Omit to leave demotion silent.
+   */
+  onCostDrift?: (info: {
+    poolId: string;
+    observedCostUsd: number;
+    declaredCostPerMtok: number;
+  }) => void;
   /** Engine escalation hooks (host-session rate-limit accrual + strand-not-requeue read). */
   recordRateLimit?: (packet: RollingDispatchPacket<TPayload>, result: RollingDispatchResult<TPayload>) => void;
   isPacketEscalated?: (packetId: string) => boolean;
@@ -201,6 +211,11 @@ export async function driveRolling<TItem, TPayload>(
     exhaustedPoolIds: [],
   };
   const exhausted = new Set<string>();
+  // ONE cost-demotion set for the whole drive: a per-sub-wave dispatcher would reset
+  // it at every sub-wave/level boundary, letting a lapsed-free pool regain free-first
+  // fill each boundary. Sharing it makes a demotion (and its single onCostDrift emit)
+  // span the entire run.
+  const costDemotedPoolIds = new Set<string>();
   let terminal: PartialCompletionTerminal | undefined;
   let rebuildInFlight = false; // single-flight guard (CE-001)
 
@@ -245,6 +260,8 @@ export async function driveRolling<TItem, TPayload>(
         ...(config.resolveOutputReservation
           ? { resolveOutputReservation: config.resolveOutputReservation }
           : {}),
+        ...(config.onCostDrift ? { onCostDrift: config.onCostDrift } : {}),
+        costDemotedPoolIds,
         onResult: (result) => {
           out.allResults.push(result);
           config.onResult?.(result);

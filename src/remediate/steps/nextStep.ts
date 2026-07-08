@@ -725,6 +725,16 @@ export interface DriveRollingDispatchOptions {
    * transient re-route behaviour unchanged (no escalation).
    */
   hostSession?: HostSessionQuotaSource;
+  /**
+   * Reactive cost verification: invoked once per pool when a declared-free pool is
+   * first observed charging (the engine has already demoted it). Forwarded to the
+   * shared driver; the caller wires it to friction. Omit to leave demotion silent.
+   */
+  onCostDrift?: (info: {
+    poolId: string;
+    observedCostUsd: number;
+    declaredCostPerMtok: number;
+  }) => void;
 }
 
 export interface DriveRollingDispatchResult {
@@ -819,6 +829,7 @@ export async function driveRollingDispatch(
     dispatchPacket: async (packet, slot) =>
       options.dispatchNode(blockById.get(packet.payload.block_id)!, slot),
     ...(options.root !== undefined ? { root: options.root } : {}),
+    ...(options.onCostDrift ? { onCostDrift: options.onCostDrift } : {}),
     // Single-flight (CE-001) is enforced by the unified driver.
     rebuildBetweenLevels: options.rebuildSharedBetweenLevels,
     // Host-session escalation: feed recordLimit (write) at the rate_limited observation
@@ -1181,6 +1192,26 @@ export async function driveRollingImplementDispatch(
     hostSession,
     scopeForBlock: (block) =>
       writePathsByBlock.get(block.block_id) ?? block.touched_files ?? [],
+    // Reactive cost verification: a declared-free source pool observed charging has
+    // been demoted by the engine; surface it as reviewable friction so the operator
+    // reconciles the stale `cost_per_mtok:0` (single step-boundary chokepoint).
+    onCostDrift: ({ poolId, observedCostUsd, declaredCostPerMtok }) => {
+      void captureStepBoundaryFriction(
+        artifactsDir,
+        runId,
+        {
+          eventType: "declared_cost_drift",
+          discriminator: poolId,
+          note:
+            `pool "${poolId}" was declared free (cost_per_mtok=${declaredCostPerMtok}) ` +
+            `but reported cost=${observedCostUsd} — demoted out of free-first ordering; ` +
+            `reconcile the source's declared cost.`,
+          severity: "medium",
+          area: "dispatch/cost",
+        },
+        "remediate-code",
+      );
+    },
   });
 
   // Piece D — persist the rolling engine's partial-completion terminal onto state

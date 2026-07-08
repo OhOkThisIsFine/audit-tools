@@ -80,6 +80,14 @@ export interface RollingDispatchResult<TPacket> {
   outcome: "success" | "rate_limited" | "timeout" | "error";
   /** Actual tokens consumed, if the provider reports it. */
   actualTokens?: number;
+  /**
+   * Endpoint-REPORTED cost for this request in USD, relayed by the dispatcher from
+   * the provider result (opencode's `cost` field). Consumed by the reactive
+   * cost-verification seam in `handleResult`: a pool DECLARED free
+   * (`declaredCostPerMtok === 0`) that reports a positive cost is demoted out of
+   * free-first ordering. Absent when the backend reports no cost (most endpoints).
+   */
+  observedCostUsd?: number | null;
   error?: unknown;
   /**
    * The worker ERROR/STATUS channel evidence that classified a `rate_limited`
@@ -160,6 +168,19 @@ export interface RollingDispatchState<TPacket> {
    * PartialCompletionTerminal (INV-QD-07).
    */
   strandedIds: Set<string>;
+  /**
+   * Pool ids demoted by reactive cost verification: a pool DECLARED free
+   * (`declaredCostPerMtok === 0`) that reported a positive cost on a completion, so
+   * its declared-free claim is falsified. Treated as quota-degraded by
+   * `selectProvider` (spilled to fallback behind healthy pools), so a stale
+   * `cost_per_mtok:0` can't silently keep free-first fill. In-memory: a fresh run
+   * re-verifies from scratch — a promotional free tier that returns is re-tried, and
+   * the durable cross-run operator signal is the per-pool friction event, not this
+   * set. Monotonic (never un-demoted mid-run). Scope is this dispatcher instance by
+   * default; when a driver injects a shared set (`config.costDemotedPoolIds`, as
+   * `driveRolling` does) it spans every sub-wave + level of the whole drive.
+   */
+  costDemotedPoolIds: Set<string>;
 }
 
 /** Consumer-provided configuration for the rolling dispatcher. */
@@ -177,6 +198,31 @@ export interface RollingDispatchConfig<TPacket> {
   ) => Promise<RollingDispatchResult<TPacket>>;
   /** Called synchronously after each packet completes (before the next enqueue pass). */
   onResult?: (result: RollingDispatchResult<TPacket>) => void;
+  /**
+   * Reactive cost verification (arbitrage tier): invoked ONCE per pool the FIRST
+   * time a pool declared free (`declaredCostPerMtok === 0`) reports a positive cost
+   * on a successful completion — its declared-free claim is falsified. The engine
+   * has already demoted the pool (added it to `costDemotedPoolIds` → spilled to
+   * fallback) by the time this fires; the hook is the consumer's seam to surface it
+   * as reviewable friction (the consumer owns `artifactsDir`/`runId`, which the
+   * packet-agnostic engine does not). Best-effort — a throwing hook never aborts
+   * dispatch. Omit to leave demotion silent (no friction emitted).
+   */
+  onCostDrift?: (info: {
+    poolId: string;
+    observedCostUsd: number;
+    declaredCostPerMtok: number;
+  }) => void;
+  /**
+   * Shared cost-demotion set for reactive cost verification. When a driver runs
+   * several dispatchers over one logical run (`driveRolling` creates one per
+   * file-ownership sub-wave per dependency level), it passes ONE set here so a pool
+   * demoted in an earlier sub-wave stays demoted (and `onCostDrift` fires once) for
+   * the whole drive — without it the demotion would reset at every sub-wave/level
+   * boundary and a lapsed-free pool would regain free-first fill each boundary. Omit
+   * for a standalone dispatcher (it owns a fresh per-instance set).
+   */
+  costDemotedPoolIds?: Set<string>;
   /**
    * Host-session escalation predicate. When a `rate_limited` packet has been
    * ESCALATED by the host-session source (its account-level wall re-tripped the
@@ -375,6 +421,11 @@ function isPoolQuotaDegraded(
  * transient-429 recovery re-routes a re-queued packet to a pool still within
  * headroom (INV-QD-07): the pool that rate-limited is excluded on the next pass.
  *
+ * Pools in `costDemotedPoolIds` (a declared-free pool that reported a positive
+ * cost — reactive cost verification) are treated as quota-degraded: still
+ * dispatchable, but spilled to the fallback group behind healthy pools so they
+ * lose their free-first preference.
+ *
  * Returns null if no eligible pool currently has quota headroom.
  */
 export function selectProvider<TPacket>(
@@ -385,6 +436,7 @@ export function selectProvider<TPacket>(
   sessionConfig: SessionConfig,
   exhaustedPoolIds: ReadonlySet<string> = new Set(),
   pausedPoolResetAt: ReadonlyMap<string, number> = new Map(),
+  costDemotedPoolIds: ReadonlySet<string> = new Set(),
   now: number = Date.now(),
 ): ProviderSlot | null {
   const complexity = scorePacketComplexity(packet);
@@ -454,10 +506,16 @@ export function selectProvider<TPacket>(
   // quota management is disabled the subsystem is inert — selection stays pure
   // capability order.
   const quotaManaged = sessionConfig.quota?.enabled !== false;
+  // A cost-demoted pool (declared free but observed charging) is treated as
+  // degraded so it spills behind healthy pools — the routing half of reactive cost
+  // verification. Folded in here (not into `isPoolQuotaDegraded`, which is a pure
+  // function of live quota signals) because the demotion set is dispatch-run state.
+  const isDegraded = (e: { pool: CapacityPool; schedule: WaveSchedule }): boolean =>
+    isPoolQuotaDegraded(e.pool, e.schedule) || costDemotedPoolIds.has(e.pool.id);
   const ordered = quotaManaged
     ? [
-        ...evaluated.filter((e) => !isPoolQuotaDegraded(e.pool, e.schedule)),
-        ...evaluated.filter((e) => isPoolQuotaDegraded(e.pool, e.schedule)),
+        ...evaluated.filter((e) => !isDegraded(e)),
+        ...evaluated.filter((e) => isDegraded(e)),
       ]
     : evaluated;
 
@@ -494,6 +552,8 @@ export function createRollingDispatcher<TPacket>(
     sessionConfig,
     dispatchPacket,
     onResult,
+    onCostDrift,
+    costDemotedPoolIds: injectedCostDemotedPoolIds,
     isPacketEscalated,
     recordRateLimit,
     reservationLedger,
@@ -508,6 +568,9 @@ export function createRollingDispatcher<TPacket>(
     exhaustedPoolIds: new Set(),
     pausedPoolResetAt: new Map(),
     strandedIds: new Set(),
+    // A driver-provided set (driveRolling) makes demotion span this run's sub-waves
+    // + levels; a standalone dispatcher owns a fresh per-instance set.
+    costDemotedPoolIds: injectedCostDemotedPoolIds ?? new Set(),
   };
 
   const inFlightTracker = new InFlightTokenTracker();
@@ -853,6 +916,38 @@ export function createRollingDispatcher<TPacket>(
       return;
     }
 
+    // Reactive cost verification (arbitrage tier): a pool DECLARED free
+    // (`declaredCostPerMtok === 0`) that reports a positive cost on a successful
+    // completion has a falsified free-first claim — demote it (spill to fallback via
+    // the degraded partition in selectProvider) so a stale `cost_per_mtok:0` can't
+    // keep silently winning free-first fill. Fires the consumer's friction hook ONCE
+    // per pool per drive (the set guards re-entry). Only `success` carries a cost;
+    // a declared cost that is undefined (host pools) or positive is out of scope
+    // (only free→charging), and a missing/zero observed cost is no signal.
+    if (result.outcome === "success") {
+      const servingPool = confirmedPools.find((p) => p.id === providerSlot.poolId);
+      const declared = servingPool?.declaredCostPerMtok;
+      const observed = result.observedCostUsd;
+      if (
+        declared === 0 &&
+        typeof observed === "number" &&
+        Number.isFinite(observed) &&
+        observed > 0 &&
+        !state.costDemotedPoolIds.has(providerSlot.poolId)
+      ) {
+        state.costDemotedPoolIds.add(providerSlot.poolId);
+        try {
+          onCostDrift?.({
+            poolId: providerSlot.poolId,
+            observedCostUsd: observed,
+            declaredCostPerMtok: declared,
+          });
+        } catch {
+          // Best-effort: a throwing friction hook must never abort dispatch.
+        }
+      }
+    }
+
     // Terminal completion (success / timeout / error): mark done, store result.
     state.completedIds.add(packetId);
     allResults.push(result);
@@ -943,6 +1038,7 @@ export function createRollingDispatcher<TPacket>(
         sessionConfig,
         state.exhaustedPoolIds,
         state.pausedPoolResetAt,
+        state.costDemotedPoolIds,
         Date.now(),
       );
 

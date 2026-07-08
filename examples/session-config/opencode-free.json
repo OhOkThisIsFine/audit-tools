@@ -1,0 +1,13 @@
+{
+  "provider": "claude-code",
+  "sources": [
+    {
+      "id": "opencode-free",
+      "provider": "openai-compatible",
+      "endpoint": "https://opencode.ai/zen/v1",
+      "model": "deepseek-v4-flash-free",
+      "api_key": "public",
+      "cost_per_mtok": 0
+    }
+  ]
+}

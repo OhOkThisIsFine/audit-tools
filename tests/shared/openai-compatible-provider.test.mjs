@@ -685,3 +685,86 @@ test("createFreshSessionProvider constructs the openai-compatible provider", () 
   );
   expect(provider.name).toBe("openai-compatible");
 });
+
+// ---------------------------------------------------------------------------
+// Reactive cost verification (arbitrage increment 2)
+// ---------------------------------------------------------------------------
+
+const { extractReportedCostUsd } = await import(
+  "../../src/shared/providers/openAiCompatibleProvider.ts"
+);
+
+test("extractReportedCostUsd — reads opencode's top-level string cost", () => {
+  expect(extractReportedCostUsd({ cost: "0" })).toBe(0);
+  expect(extractReportedCostUsd({ cost: "0.02" })).toBe(0.02);
+  expect(extractReportedCostUsd({ cost: "1.5" })).toBe(1.5);
+});
+
+test("extractReportedCostUsd — reads a numeric cost", () => {
+  expect(extractReportedCostUsd({ cost: 0 })).toBe(0);
+  expect(extractReportedCostUsd({ cost: 0.5 })).toBe(0.5);
+});
+
+test("extractReportedCostUsd — falls back to usage.cost / usage.total_cost", () => {
+  expect(extractReportedCostUsd({ usage: { cost: "0.01" } })).toBe(0.01);
+  expect(extractReportedCostUsd({ usage: { total_cost: 0.03 } })).toBe(0.03);
+  // Top-level cost wins over nested when both are present.
+  expect(extractReportedCostUsd({ cost: "0", usage: { cost: "9" } })).toBe(0);
+});
+
+test("extractReportedCostUsd — absent / garbage cost yields undefined (no false signal)", () => {
+  expect(extractReportedCostUsd({})).toBeUndefined();
+  expect(extractReportedCostUsd({ cost: null })).toBeUndefined();
+  expect(extractReportedCostUsd({ cost: "" })).toBeUndefined();
+  expect(extractReportedCostUsd({ cost: "free" })).toBeUndefined();
+  expect(extractReportedCostUsd({ cost: -0.5 })).toBeUndefined();
+  expect(extractReportedCostUsd({ cost: NaN })).toBeUndefined();
+});
+
+// A fetch that returns a completion body carrying an explicit `cost`, so the
+// provider surfaces the endpoint-reported cost on its launch result.
+function fakeFetchWithCost(content, cost) {
+  const fn = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ message: { content } }],
+      ...(cost !== undefined ? { cost } : {}),
+    }),
+    text: async () => (typeof content === "string" ? content : JSON.stringify(content)),
+  });
+  return fn;
+}
+
+test("launch surfaces observedCostUsd from the response cost field", async () => {
+  const { input } = makeCtx();
+  const body = JSON.stringify({ files: [], result: { ok: true } });
+  const provider = new OpenAiCompatibleProvider(minimalConfig, {
+    fetchFn: fakeFetchWithCost(body, "0.02"),
+  });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(true);
+  expect(res.observedCostUsd).toBe(0.02);
+});
+
+test("launch surfaces observedCostUsd 0 for a free (cost:'0') response", async () => {
+  const { input } = makeCtx();
+  const body = JSON.stringify({ files: [], result: { ok: true } });
+  const provider = new OpenAiCompatibleProvider(minimalConfig, {
+    fetchFn: fakeFetchWithCost(body, "0"),
+  });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(true);
+  expect(res.observedCostUsd).toBe(0);
+});
+
+test("launch omits observedCostUsd when the endpoint reports no cost", async () => {
+  const { input } = makeCtx();
+  const body = JSON.stringify({ files: [], result: { ok: true } });
+  const provider = new OpenAiCompatibleProvider(minimalConfig, {
+    fetchFn: fakeFetchWithCost(body, undefined),
+  });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(true);
+  expect(res.observedCostUsd).toBeUndefined();
+});

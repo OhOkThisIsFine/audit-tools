@@ -146,6 +146,35 @@ describe("driveRolling — unified in-process rolling driver", () => {
     expect(cfg.resolvePoolBudget("stub/*")).toBe(Number.POSITIVE_INFINITY);
   });
 
+  it("reactive cost verification: a declared-free pool that charges stays demoted across levels — onCostDrift fires ONCE per drive", async () => {
+    // Two levels ⇒ two dispatchers (the sub-wave/level boundary). A per-dispatcher
+    // demotion set would reset at the boundary and re-fire onCostDrift for level 2;
+    // the drive-level shared set persists the demotion so it fires exactly once.
+    setQuotaStateDir(await mkdtemp(join(tmpdir(), "unified-rolling-costdrift-")));
+    const freePool = {
+      id: "free/*",
+      providerName: "claude-code",
+      hostModel: null,
+      hostConcurrencyLimit: { active_subagents: 16, source: "session_config" },
+      declaredCostPerMtok: 0,
+    };
+    const drifts = [];
+    const run = await driveRolling({
+      levels: [[{ id: "L1" }], [{ id: "L2" }]],
+      confirmedPools: [freePool],
+      sessionConfig: SESSION,
+      toNode: (it) => ({ block_id: it.id, write_paths: [`src/${it.id}.ts`] }),
+      toPacket: packetFor,
+      // Declared-free pool reports a positive cost on every completion (lapsed free tier).
+      dispatchPacket: async (packet) => ({ packet, outcome: "success", observedCostUsd: 0.02 }),
+      onCostDrift: (info) => drifts.push(info),
+      rebuildBetweenLevels: async () => {},
+    });
+    expect(run.allResults).toHaveLength(2);
+    expect(drifts, "demotion persists across the level boundary → one emit").toHaveLength(1);
+    expect(drifts[0]).toEqual({ poolId: "free/*", observedCostUsd: 0.02, declaredCostPerMtok: 0 });
+  });
+
   it("rebuilds once between dependency levels (single-flight)", async () => {
     const track = { inFlight: 0, peak: 0, results: 0 };
     let rebuilds = 0;

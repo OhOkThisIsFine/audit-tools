@@ -519,6 +519,7 @@ test("selectProvider — skips a pool paused until a future reset (pause-honor, 
     unlimitedSession(),
     new Set(),
     pausedMap,
+    new Set(),
     now,
   );
   expect(slot !== null).toBeTruthy();
@@ -539,6 +540,7 @@ test("selectProvider — a pool whose reset has already passed is eligible again
     unlimitedSession(),
     new Set(),
     pausedMap,
+    new Set(),
     now,
   );
   expect(slot !== null, "past-reset pool is re-eligible").toBeTruthy();
@@ -872,6 +874,122 @@ test("createRollingDispatcher — fans work across two equal UNBOUNDED pools, no
   // Both equal pools do real work — the least-loaded tiebreak alternates same-rank
   // packets across pools rather than piling them all on the first (multi-pool fan-out).
   expect(usedPools.size, "both equal pools received dispatched work").toBe(2);
+});
+
+// ---------------------------------------------------------------------------
+// Reactive cost verification (arbitrage increment 2)
+// ---------------------------------------------------------------------------
+
+describe("createRollingDispatcher — reactive cost verification (declared-free pool observed charging)", () => {
+  it("demotes a declared-free pool that reports cost>0 and fires onCostDrift ONCE", async () => {
+    await setupTmpQuotaDir();
+    const drifts = [];
+    const dispatcher = createRollingDispatcher({
+      confirmedPools: [makePool("free-pool", { declaredCostPerMtok: 0 })],
+      sessionConfig: unlimitedSession(),
+      dispatchPacket: async (packet) => ({
+        packet,
+        outcome: "success",
+        observedCostUsd: 0.02,
+      }),
+      onCostDrift: (info) => drifts.push(info),
+    });
+    // Two packets on the same free pool: the drift hook must still fire only once.
+    dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
+    const results = await dispatcher.run();
+
+    expect(results.length, "both packets complete").toBe(2);
+    const state = dispatcher.getState();
+    expect(state.costDemotedPoolIds.has("free-pool"), "pool is cost-demoted").toBeTruthy();
+    expect(drifts.length, "onCostDrift fires once per pool per drive").toBe(1);
+    expect(drifts[0]).toEqual({
+      poolId: "free-pool",
+      observedCostUsd: 0.02,
+      declaredCostPerMtok: 0,
+    });
+  });
+
+  it("does NOT demote a declared-free pool that reports cost 0 (genuinely free)", async () => {
+    await setupTmpQuotaDir();
+    const drifts = [];
+    const dispatcher = createRollingDispatcher({
+      confirmedPools: [makePool("free-pool", { declaredCostPerMtok: 0 })],
+      sessionConfig: unlimitedSession(),
+      dispatchPacket: async (packet) => ({ packet, outcome: "success", observedCostUsd: 0 }),
+      onCostDrift: (info) => drifts.push(info),
+    });
+    dispatcher.enqueue([makePacket("p1")]);
+    await dispatcher.run();
+    expect(dispatcher.getState().costDemotedPoolIds.has("free-pool")).toBe(false);
+    expect(drifts.length).toBe(0);
+  });
+
+  it("does NOT demote a pool with no declared cost (host pool) even if it reports cost", async () => {
+    await setupTmpQuotaDir();
+    const drifts = [];
+    const dispatcher = createRollingDispatcher({
+      confirmedPools: [makePool("host-pool")], // declaredCostPerMtok undefined
+      sessionConfig: unlimitedSession(),
+      dispatchPacket: async (packet) => ({ packet, outcome: "success", observedCostUsd: 0.02 }),
+      onCostDrift: (info) => drifts.push(info),
+    });
+    dispatcher.enqueue([makePacket("p1")]);
+    await dispatcher.run();
+    expect(dispatcher.getState().costDemotedPoolIds.has("host-pool")).toBe(false);
+    expect(drifts.length).toBe(0);
+  });
+
+  it("does NOT demote a pool with a POSITIVE declared cost (only free→charging is in scope)", async () => {
+    await setupTmpQuotaDir();
+    const drifts = [];
+    const dispatcher = createRollingDispatcher({
+      confirmedPools: [makePool("paid-pool", { declaredCostPerMtok: 5 })],
+      sessionConfig: unlimitedSession(),
+      dispatchPacket: async (packet) => ({ packet, outcome: "success", observedCostUsd: 0.02 }),
+      onCostDrift: (info) => drifts.push(info),
+    });
+    dispatcher.enqueue([makePacket("p1")]);
+    await dispatcher.run();
+    expect(dispatcher.getState().costDemotedPoolIds.has("paid-pool")).toBe(false);
+    expect(drifts.length).toBe(0);
+  });
+
+  it("does NOT demote when the result carries no observedCostUsd (no signal)", async () => {
+    await setupTmpQuotaDir();
+    const drifts = [];
+    const dispatcher = createRollingDispatcher({
+      confirmedPools: [makePool("free-pool", { declaredCostPerMtok: 0 })],
+      sessionConfig: unlimitedSession(),
+      dispatchPacket: async (packet) => ({ packet, outcome: "success" }),
+      onCostDrift: (info) => drifts.push(info),
+    });
+    dispatcher.enqueue([makePacket("p1")]);
+    await dispatcher.run();
+    expect(dispatcher.getState().costDemotedPoolIds.has("free-pool")).toBe(false);
+    expect(drifts.length).toBe(0);
+  });
+});
+
+test("selectProvider — a cost-demoted pool spills behind a healthy peer", async () => {
+  // Two equal-rank pools; the free-pool would otherwise tie. Marked cost-demoted,
+  // it is treated as degraded and spills to the fallback group behind the healthy
+  // peer (quota management enabled so the health partition is active).
+  const packet = makePacket("p1");
+  const tracker = new InFlightTokenTracker();
+  const freePool = makePool("free-pool", { declaredCostPerMtok: 0 });
+  const healthy = makePool("healthy-pool");
+  const slot = selectProvider(
+    packet,
+    [freePool, healthy],
+    tracker,
+    {},
+    enabledSession(),
+    new Set(),
+    new Map(),
+    new Set(["free-pool"]),
+  );
+  expect(slot !== null, "a surviving pool is selected").toBeTruthy();
+  expect(slot.poolId, "cost-demoted free-pool spills behind the healthy peer").toBe("healthy-pool");
 });
 
 // ---------------------------------------------------------------------------

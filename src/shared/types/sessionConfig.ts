@@ -246,11 +246,12 @@ export interface DispatchableSource {
    * endpoint's price). Set `0` for a genuinely-free backend (e.g. a free arbitrage
    * pool) so it routes first; omit to fall back to the models.dev price / tier.
    *
-   * This is the a-priori SEED only, and is trusted verbatim: on its own, a pool
-   * declared free that later starts charging keeps first-fill priority. Auto-detecting
-   * a lapsed free tier (reading each response's actual reported cost and demoting the
-   * pool) is a SEPARATE, not-yet-enforced increment — until it lands, treat `0` as an
-   * operator assertion, not a tool-guaranteed invariant.
+   * This is the a-priori SEED. It is BACKED by reactive cost verification: when a
+   * response reports an actual cost (an endpoint that returns a `cost` field, e.g.
+   * opencode), a pool declared free (`0`) that reports a positive cost is demoted out
+   * of free-first for the rest of the run and a `declared_cost_drift` friction event
+   * fires so the operator reconciles the stale declaration. A backend that reports no
+   * cost has no such signal, so there `0` remains an operator assertion.
    */
   cost_per_mtok?: number;
   /**

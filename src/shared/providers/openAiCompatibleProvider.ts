@@ -211,6 +211,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       });
 
     let content: string;
+    let observedCostUsd: number | undefined;
     try {
       // Bounded retry with exponential backoff on TRANSIENT failures (network
       // reject, timeout-less 5xx/429/524) — a single lost response or a momentary
@@ -255,12 +256,20 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
         }
         const json = (await res.json()) as {
           choices?: Array<{ message?: { content?: unknown } }>;
+          cost?: unknown;
+          usage?: { cost?: unknown; total_cost?: unknown };
         };
         const raw = json.choices?.[0]?.message?.content;
         if (typeof raw !== "string" || raw.trim().length === 0) {
           return fail("openai-compatible endpoint returned an empty completion (no choices[0].message.content).");
         }
         content = raw;
+        // Reactive cost verification (arbitrage tier): capture the endpoint's OWN
+        // reported cost when present (opencode returns a top-level `cost:"0"` on the
+        // completion; some gateways nest it under `usage`). Read post-hoc from the
+        // finished response — never an estimate. A backend that reports no cost
+        // (standard OpenAI) leaves this undefined → no demotion signal downstream.
+        observedCostUsd = extractReportedCostUsd(json);
         break;
       }
     } finally {
@@ -353,6 +362,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       args: [baseUrl],
       stdoutPath: input.stdoutPath,
       stderrPath: input.stderrPath,
+      ...(observedCostUsd !== undefined ? { observedCostUsd } : {}),
     };
   }
 
@@ -464,6 +474,33 @@ const SINGLE_SHOT_SYSTEM_PROMPT =
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Extract the endpoint-REPORTED request cost (USD) from a chat-completions
+ * response, or `undefined` when the backend reports none. opencode returns a
+ * top-level `cost` (a STRING like `"0"` on the free models); some gateways nest a
+ * cost under `usage`. Coerces a string/number to a finite non-negative number;
+ * anything else (missing, negative, NaN, non-numeric) returns `undefined` so a
+ * backend with no cost signal — or a garbage value — never fabricates a demotion.
+ * This is the reliable free-vs-charging signal for the reactive cost-verification
+ * seam; standard OpenAI responses omit `cost` entirely and thus never trigger it.
+ */
+export function extractReportedCostUsd(json: {
+  cost?: unknown;
+  usage?: { cost?: unknown; total_cost?: unknown };
+}): number | undefined {
+  for (const candidate of [json.cost, json.usage?.cost, json.usage?.total_cost]) {
+    if (candidate === undefined || candidate === null) continue;
+    const value =
+      typeof candidate === "number"
+        ? candidate
+        : typeof candidate === "string" && candidate.trim() !== ""
+          ? Number(candidate)
+          : NaN;
+    if (Number.isFinite(value) && value >= 0) return value;
+  }
+  return undefined;
 }
 
 /**

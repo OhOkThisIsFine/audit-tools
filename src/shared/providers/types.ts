@@ -44,6 +44,18 @@ export interface LaunchFreshSessionResult {
   stdoutPath?: string;
   stderrPath?: string;
   error?: string;
+  /**
+   * Endpoint-REPORTED cost for this request in USD, when the backend returns one
+   * on its response (e.g. opencode's `cost` field on the chat.completion). This is
+   * the provider's OWN reported charge read post-hoc from a completed response —
+   * NOT an estimate and NOT a planning token count (the "token estimates stay
+   * local / never API-call token counting" rule governs PLANNING; reading a
+   * finished response's reported cost is after-the-fact measurement, allowed).
+   * Absent when the backend reports no cost (standard OpenAI endpoints omit it) —
+   * the reactive cost-verification seam only fires on a present, finite, positive
+   * value, so a no-cost backend never triggers a demotion.
+   */
+  observedCostUsd?: number | null;
 }
 
 export interface ProviderRateLimits {

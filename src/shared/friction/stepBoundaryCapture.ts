@@ -50,6 +50,11 @@ import type { FrictionCategory } from "./frictionRecord.js";
  *  - `node_quarantine`    — an implement node that committed edits but hard-failed
  *                           the tool's verify/scope/merge; work preserved under a
  *                           quarantine ref, NOT landed (discriminator: the node id).
+ *  - `declared_cost_drift` — a dispatch pool DECLARED free (`cost_per_mtok:0`)
+ *                           reported a positive cost on a completion (lapsed free
+ *                           tier); the tool demoted it out of free-first and the
+ *                           operator should reconcile the declared cost
+ *                           (discriminator: the pool id).
  */
 export type StepBoundaryEventType =
   | "phase_reemit"
@@ -61,6 +66,7 @@ export type StepBoundaryEventType =
   | "quota_escalation"
   | "coverage_total_lines_mismatch"
   | "node_quarantine"
+  | "declared_cost_drift"
   | (string & {});
 
 /**
@@ -91,6 +97,9 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   artifact_rejected: "tool_should_decide",
   intent_gate_fallback: "tool_should_decide",
   node_quarantine: "tool_should_decide",
+  // A declared-free pool that started charging is a stale operator config the tool
+  // surfaced and demoted around — the operator must reconcile the declared cost.
+  declared_cost_drift: "tool_should_decide",
 };
 
 /**
