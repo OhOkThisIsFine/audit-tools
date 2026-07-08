@@ -38,12 +38,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   a lint/test-invariant that flags `vi.spyOn(<module namespace>, …)` on a re-export barrel — the failure mode is
   silent and survives the very refactor the test exists to protect. Related: [[worktree-tests-miss-integration-guards]].
 
-- **Two adversarial reviews in a row found a defect the author's own green suite missed (ambiguous-direction).**
+- **THREE adversarial reviews in a row found a defect the author's own green suite missed (ambiguous-direction).**
   INV-QD-15's first cut left `tests/remediate/wave-scheduler.test.ts` RED and would have shipped; the bucket
-  deletion's first cut promoted a latent `success`-clears-live-cooldown bug (INV-QD-16) to the sole failure mode.
-  Both were caught only by an independent reviewer agent, not by the author pass. This is [[delegate-adversarial-phases-to-separate-agent]]
-  earning its keep — but it is still a *host habit*, not a tool obligation. The remediate contract pipeline already
-  runs adversarial rounds; the same gate should exist for hand-authored (non-node) changes to loop-core modules.
+  deletion's first cut promoted a latent `success`-clears-live-cooldown bug (INV-QD-16) to the sole failure mode;
+  and the v0.32.31 bug-(4) fix's first cut DROPPED the `pool.quotaStateEntry` snapshot entirely (green suite +
+  the new regression all passed), but an independent reviewer showed the snapshot is load-bearing in the
+  transient-read window — a prior-run cooldown would be lost to proactive spill on a Windows EBUSY read flake.
+  Corrected to `live ?? snapshot` order (keep the fallback). All three caught only by an independent reviewer agent,
+  never the author pass. This is [[delegate-adversarial-phases-to-separate-agent]] earning its keep — but it is
+  still a *host habit*, not a tool obligation. The remediate contract pipeline already runs adversarial rounds;
+  the same gate should exist for hand-authored (non-node) changes to loop-core modules. A related, generalizable
+  cause on the bug-(4) case: the backlog item stated the *fix-mechanism* ("prefer live") but not the *invariant*
+  (don't lose a prior-run cooldown to a transient IO flake), so the mechanism read as "drop the snapshot" — the
+  [[backlog-item-states-invariant-not-fix-mechanism]] failure mode, in the wild.
 
 - **Session-config RMW helpers are unlocked (B1 review finding #4, minor).** `persistHostProvider` and the
   pre-existing `persistAnalyzerSettings` (`src/audit/supervisor/sessionConfig.ts`) do read→merge→validate→
