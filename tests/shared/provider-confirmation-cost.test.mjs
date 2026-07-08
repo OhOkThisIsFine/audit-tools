@@ -19,6 +19,8 @@ const {
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
   readConfirmedCostPositions,
+  readConfirmedDispatchBias,
+  clampDispatchBias,
   parseProviderConfirmationInput,
   readProviderConfirmationInput,
   PROVIDER_CONFIRMATION_INPUT_FILENAME,
@@ -214,6 +216,91 @@ describe("parseProviderConfirmationInput — degrade-safe", () => {
     });
     expect(parsed.cost_order).toBeUndefined();
     expect(parsed.host_models).toEqual([{ model_id: "claude-haiku-4-5" }]);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Cost↔speed dispatch dial — Gate-0 bias capture + read-back
+// (spec/dispatch-cost-speed-dial.md)
+// -----------------------------------------------------------------------------
+
+describe("clampDispatchBias", () => {
+  test("clamps into [0,1]; non-finite/absent → undefined", () => {
+    expect(clampDispatchBias(0)).toBe(0);
+    expect(clampDispatchBias(1)).toBe(1);
+    expect(clampDispatchBias(0.4)).toBe(0.4);
+    expect(clampDispatchBias(5)).toBe(1);
+    expect(clampDispatchBias(-3)).toBe(0);
+    expect(clampDispatchBias(undefined)).toBeUndefined();
+    expect(clampDispatchBias("0.5")).toBeUndefined();
+    expect(clampDispatchBias(NaN)).toBeUndefined();
+  });
+});
+
+describe("parseProviderConfirmationInput — dispatch_bias", () => {
+  test("valid bias is clamped and retained", () => {
+    const parsed = parseProviderConfirmationInput({
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      dispatch_bias: 1.5,
+    });
+    expect(parsed.dispatch_bias).toBe(1); // clamped
+  });
+  test("absent/malformed bias is dropped (cost-first default)", () => {
+    const noField = parseProviderConfirmationInput({
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+    });
+    expect(noField.dispatch_bias).toBeUndefined();
+    const bad = parseProviderConfirmationInput({
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      dispatch_bias: "fast",
+    });
+    expect(bad.dispatch_bias).toBeUndefined();
+  });
+});
+
+describe("readConfirmedDispatchBias — Gate-0 → dispatch link", () => {
+  test("round-trips a confirmed bias through the shared artifact", async () => {
+    const root = await mkdtemp(join(tmpdir(), "audit-bias-conf-"));
+    try {
+      const input = {
+        schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+        dispatch_bias: 0.75,
+      };
+      const confirmation = buildSharedProviderConfirmation(NIM_CONFIG, process.env, [], [], undefined, input);
+      expect(confirmation.dispatch_bias).toBe(0.75);
+      await writeSharedProviderConfirmation(root, confirmation);
+      expect(await readConfirmedDispatchBias(root, NIM_CONFIG)).toBe(0.75);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("out-of-range operator bias is clamped on the way in", async () => {
+    const root = await mkdtemp(join(tmpdir(), "audit-bias-conf-"));
+    try {
+      const input = { schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION, dispatch_bias: 9 };
+      const confirmation = buildSharedProviderConfirmation(NIM_CONFIG, process.env, [], [], undefined, input);
+      await writeSharedProviderConfirmation(root, confirmation);
+      expect(await readConfirmedDispatchBias(root, NIM_CONFIG)).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("defaults to 0 (cost-first) when absent, no root, or no bias set", async () => {
+    expect(await readConfirmedDispatchBias(undefined, NIM_CONFIG)).toBe(0);
+    const root = await mkdtemp(join(tmpdir(), "audit-bias-conf-"));
+    try {
+      // No confirmation file at all → 0.
+      expect(await readConfirmedDispatchBias(root, NIM_CONFIG)).toBe(0);
+      // A confirmation with NO dispatch_bias field → 0 (backward compatible).
+      const confirmation = buildSharedProviderConfirmation(NIM_CONFIG);
+      expect(confirmation.dispatch_bias).toBeUndefined();
+      await writeSharedProviderConfirmation(root, confirmation);
+      expect(await readConfirmedDispatchBias(root, NIM_CONFIG)).toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

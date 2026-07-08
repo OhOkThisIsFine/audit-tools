@@ -18,7 +18,7 @@ import type {
   ResolvedProviderName,
 } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias } from "audit-tools/shared";
 import type { WorkerTask } from "../types/workerSession.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { writePacketSchemaFiles } from "../io/runArtifacts.js";
@@ -521,6 +521,9 @@ export async function prepareDispatchArtifacts(params: {
   // shared Gate-0 confirmation (spec/cost-first-routing.md). Best-effort — absent /
   // unreadable / roster-changed confirmation ⇒ costRank falls to real price then tier.
   const confirmedCostPositions = await readConfirmedCostPositions(params.root, sessionConfig);
+  // Cost↔speed dial: the operator's durable operating point from the same Gate-0
+  // confirmation (spec/dispatch-cost-speed-dial.md). Absent ⇒ 0 (cost-first default).
+  const dispatchBias = await readConfirmedDispatchBias(params.root, sessionConfig);
   const { dispatchQuotaPath, waveSchedule, dispatchCapacity, admission } = await finalizeDispatchQuota({
     runId,
     runDir,
@@ -532,6 +535,7 @@ export async function prepareDispatchArtifacts(params: {
     tierBudgets: dispatchPool.tierBudgets,
     grantLeases: params.grantLeases,
     confirmedCostPositions,
+    dispatchBias,
   });
 
   warnings.push(

@@ -270,6 +270,11 @@ export async function finalizeDispatchQuota(params: {
    * confirmed provider pool. Absent/empty ⇒ costRank falls to real price then tier.
    */
   confirmedCostPositions?: Map<string, number> | null;
+  /**
+   * Operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the Gate-0
+   * confirmation (spec/dispatch-cost-speed-dial.md). 0/absent ⇒ cost-first (default).
+   */
+  dispatchBias?: number;
 }): Promise<{
   dispatchQuota: DispatchQuota;
   dispatchQuotaPath: string;
@@ -346,6 +351,7 @@ export async function finalizeDispatchQuota(params: {
     outputCap: waveSchedule.resolved_limits.output_tokens,
     grantLeases: params.grantLeases !== false,
     ledger: createReservationLedger(),
+    ...(params.dispatchBias != null ? { dispatchBias: params.dispatchBias } : {}),
   });
 
   const dispatchQuota: DispatchQuota = {

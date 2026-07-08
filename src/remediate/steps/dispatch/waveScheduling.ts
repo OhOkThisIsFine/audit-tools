@@ -490,6 +490,11 @@ export async function buildDispatchQuota(
    * keyed by model id → 0-based confirmed position. Absent ⇒ price then tier.
    */
   confirmedCostPositions?: Map<string, number> | null,
+  /**
+   * Operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the Gate-0
+   * confirmation (spec/dispatch-cost-speed-dial.md). 0/absent ⇒ cost-first (default).
+   */
+  dispatchBias?: number,
 ): Promise<RemediationDispatchQuota> {
   let backoffState: BackoffState | null = null;
   const count = quotaStateEntry?.consecutive_429_count ?? 0;
@@ -510,6 +515,7 @@ export async function buildDispatchQuota(
     outputCap: schedule.resolved_limits.output_tokens,
     grantLeases,
     ledger: createReservationLedger(),
+    ...(dispatchBias != null ? { dispatchBias } : {}),
   });
 
   return {

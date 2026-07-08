@@ -82,6 +82,14 @@ export interface ProviderConfirmationInput {
    * `model_id` via `host_model_cost_order`.
    */
   host_models?: HostRosterModel[];
+  /**
+   * Cost↔speed dispatch bias (λ) ∈ [0, 1] — the operator's durable operating point
+   * on the cost-vs-throughput frontier (spec/dispatch-cost-speed-dial.md). 0 (default)
+   * = cost-first (today's behavior); 1 = throughput-first. Out-of-range values clamp
+   * to [0, 1]; omit to keep the cost-first default. Persisted on the shared
+   * confirmation and applied by `admitBatch` at every dispatch.
+   */
+  dispatch_bias?: number;
 }
 
 /**

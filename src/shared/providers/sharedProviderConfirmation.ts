@@ -62,7 +62,17 @@ import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "../types/providerConfirmati
  * the cross-tool session artifact, a distinct shape that also carries the
  * roster snapshot used for staleness.
  */
-export const SHARED_PROVIDER_CONFIRMATION_VERSION = "1.0.0" as const;
+export const SHARED_PROVIDER_CONFIRMATION_VERSION = "1.1.0" as const;
+
+/**
+ * Clamp an operator-supplied cost↔speed dispatch bias (λ) to [0, 1], or `undefined`
+ * when it is absent/non-finite. Single-sourced so parse-time and read-time agree.
+ * (spec/dispatch-cost-speed-dial.md).
+ */
+export function clampDispatchBias(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(1, Math.max(0, value));
+}
 
 /** File name of the shared session-level confirmation under `.audit-tools/`. */
 export const SHARED_PROVIDER_CONFIRMATION_FILENAME =
@@ -101,6 +111,14 @@ export interface SharedProviderConfirmation {
    * order. Absent/empty on the headless path (no host roster is reported).
    */
   host_model_cost_order?: HostModelCostEntry[];
+  /**
+   * Operator-confirmed cost↔speed dispatch bias (λ) ∈ [0, 1], the durable operating
+   * point on the cost-vs-throughput frontier (spec/dispatch-cost-speed-dial.md). Read
+   * back at dispatch by `readConfirmedDispatchBias` and applied by `admitBatch`. Absent
+   * ⇒ the cost-first default (λ=0), so a confirmation written before this field existed
+   * (or a headless run) behaves exactly as before.
+   */
+  dispatch_bias?: number;
   /**
    * Sorted snapshot of the provider NAMES discovered when this was written.
    * Compared against the current discovered roster to detect staleness.
@@ -251,6 +269,9 @@ export function buildSharedProviderConfirmation(
     ...(annotated.host_model_cost_order.length > 0
       ? { host_model_cost_order: annotated.host_model_cost_order }
       : {}),
+    ...(clampDispatchBias(input?.dispatch_bias) != null
+      ? { dispatch_bias: clampDispatchBias(input?.dispatch_bias) }
+      : {}),
     roster: sortRoster(discovered.map((p) => p.name)),
   };
 }
@@ -352,6 +373,9 @@ function parseSharedProviderConfirmation(
     obj.host_model_cost_order.every(isHostModelCostEntry)
       ? (obj.host_model_cost_order as HostModelCostEntry[])
       : undefined;
+  // dispatch_bias is optional + additive; a malformed/out-of-range value degrades to
+  // the cost-first default (clamp → undefined only when non-finite), never blocking.
+  const dispatchBias = clampDispatchBias(obj.dispatch_bias);
   return {
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
@@ -360,6 +384,7 @@ function parseSharedProviderConfirmation(
     ...(hostModels && hostModels.length > 0
       ? { host_model_cost_order: hostModels }
       : {}),
+    ...(dispatchBias != null ? { dispatch_bias: dispatchBias } : {}),
     roster: obj.roster,
   };
 }
@@ -457,6 +482,25 @@ export async function readConfirmedCostPositions(
   return positions;
 }
 
+/**
+ * Read the operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the shared
+ * Gate-0 confirmation for the dispatch build sites (spec/dispatch-cost-speed-dial.md).
+ * Single-sourced so audit and remediate apply the identical operating point.
+ * Best-effort and never throws: an absent `root`, a missing/malformed confirmation, a
+ * roster that has since changed (`reconfirm`), or an absent field all yield the
+ * cost-first default `0`. Only a `confirmed` (roster-fresh) confirmation contributes.
+ */
+export async function readConfirmedDispatchBias(
+  root: string | undefined,
+  sessionConfig: SessionConfig = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  if (!root) return 0;
+  const read = await readSharedProviderConfirmation(root, sessionConfig, env);
+  if (!read || read.status !== "confirmed") return 0;
+  return clampDispatchBias(read.confirmation.dispatch_bias) ?? 0;
+}
+
 // ---------------------------------------------------------------------------
 // Interactive Gate-0 operator input (spec/cost-first-routing.md — Gate-0)
 // ---------------------------------------------------------------------------
@@ -491,6 +535,7 @@ export function parseProviderConfirmationInput(
   const include = stringArray(obj.include) as
     | ResolvedProviderName[]
     | undefined;
+  const dispatchBias = clampDispatchBias(obj.dispatch_bias);
   const hostModels = Array.isArray(obj.host_models)
     ? obj.host_models
         .filter(
@@ -512,6 +557,7 @@ export function parseProviderConfirmationInput(
     ...(exclude ? { exclude } : {}),
     ...(include ? { include } : {}),
     ...(hostModels && hostModels.length > 0 ? { host_models: hostModels } : {}),
+    ...(dispatchBias != null ? { dispatch_bias: dispatchBias } : {}),
   };
 }
 

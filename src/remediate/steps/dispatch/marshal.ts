@@ -14,7 +14,7 @@ import {
 } from "../../state/types.js";
 import type { SessionConfig, HostModelRosterEntry } from "audit-tools/shared";
 import { captureStepBoundaryFriction } from "audit-tools/shared";
-import { readConfirmedCostPositions } from "audit-tools/shared";
+import { readConfirmedCostPositions, readConfirmedDispatchBias } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
   readJsonFile,
@@ -400,6 +400,12 @@ export async function prepareImplementDispatch(
     options.root,
     waveOptions?.sessionConfig ?? {},
   );
+  // Cost↔speed dial: the operator's durable operating point from the same Gate-0
+  // confirmation (spec/dispatch-cost-speed-dial.md). Absent ⇒ 0 (cost-first default).
+  const dispatchBias = await readConfirmedDispatchBias(
+    options.root,
+    waveOptions?.sessionConfig ?? {},
+  );
   const quota = await buildDispatchQuota(
     runId,
     "implement",
@@ -408,6 +414,7 @@ export async function prepareImplementDispatch(
     waveOptions?.grantLeases ?? true,
     null,
     confirmedCostPositions,
+    dispatchBias,
   );
   await writeJsonFile(join(dir, "dispatch-quota.json"), quota);
 

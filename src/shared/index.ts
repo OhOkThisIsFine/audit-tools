@@ -1254,7 +1254,7 @@ export {
 
 // DC-2 — shared session-level provider confirmation (cross-tool Gate-0 artifact)
 export type { SharedProviderConfirmation, SharedProviderConfirmationRead } from "./providers/sharedProviderConfirmation.js";
-export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, currentProviderRoster, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput } from "./providers/sharedProviderConfirmation.js";
+export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, currentProviderRoster, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedDispatchBias, clampDispatchBias, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput } from "./providers/sharedProviderConfirmation.js";
 
 export type {
   EncodedClause,
