@@ -18,7 +18,7 @@ import type {
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
 import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory } from "audit-tools/shared";
-import type { ProviderConfirmationResult } from "audit-tools/shared";
+import type { ProviderConfirmationResult, AccessMemory } from "audit-tools/shared";
 import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type {
@@ -147,6 +147,7 @@ type ArtifactPayloadMap = {
   audit_plan_metrics: AuditPlanMetrics;
   task_affinity_graph: TaskAffinityGraph;
   requeue_tasks: AuditTask[];
+  access_memory: AccessMemory;
 
   // --- Phase 4: Reporting ---
   audit_report: string;
@@ -309,6 +310,7 @@ export const ARTIFACT_DEFINITIONS = {
   audit_plan_metrics: jsonArtifact("audit_plan_metrics.json", "execution"),
   task_affinity_graph: jsonArtifact("task_affinity_graph.json", "execution"),
   requeue_tasks: jsonArtifact("requeue_tasks.json", "execution"),
+  access_memory: jsonArtifact("access_memory.json", "execution"),
   audit_report: textArtifact(AUDIT_REPORT_FILENAME, "reporting"),
   audit_findings: jsonArtifact(AUDIT_FINDINGS_FILENAME, "reporting"),
   synthesis_narrative: jsonArtifact("synthesis-narrative.json", "reporting"),

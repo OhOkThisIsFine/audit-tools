@@ -56,6 +56,17 @@ export {
 export type { AccessDeclaration } from "./types/accessDeclaration.js";
 export { AccessDeclarationSchema } from "./types/accessDeclaration.js";
 export type {
+  AccessMemory,
+  AccessMemoryPathRecord,
+  AccessMemorySymbolRecord,
+} from "./types/accessMemory.js";
+export {
+  ACCESS_MEMORY_VERSION,
+  AccessMemorySchema,
+  AccessMemoryPathRecordSchema,
+  AccessMemorySymbolRecordSchema,
+} from "./types/accessMemory.js";
+export type {
   FindingSeverity,
   FindingConfidence,
   FindingLocation,

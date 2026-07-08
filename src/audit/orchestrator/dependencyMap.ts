@@ -150,6 +150,13 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "external_analyzer_results.json",
     "scope.json",
   ],
+  // Access-memory is harvested from the ingested result ledger in the same
+  // advanceAudit call that appends it (dependency-first metadata), so it records
+  // the post-append audit_results revision — no cycle. It is a pure downstream
+  // summary of what results covered; nothing plans off it yet (packet-composition
+  // bias threads in at the dispatch code level, not as a DAG edge, to avoid a
+  // coverage→results→access_memory→coverage cycle).
+  "access_memory.json": ["audit_results.jsonl"],
   "audit_plan_metrics.json": [
     "repo_manifest.json",
     "file_disposition.json",

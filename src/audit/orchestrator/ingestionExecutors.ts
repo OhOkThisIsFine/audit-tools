@@ -17,6 +17,7 @@ import {
   updateAuditTaskStatuses,
 } from "./resultIngestion.js";
 import { appendResultsToLedger } from "./ledger.js";
+import { deriveAccessMemory } from "./accessMemory.js";
 import {
   refreshResultBaselines,
   rekeyDriftedResults,
@@ -218,9 +219,18 @@ export function runResultIngestionExecutor(
     ingestedResults,
     liveTasksByTaskId,
   );
+  // Deterministic per-run access-memory: a pure summary of what the ingested
+  // result ledger covered, harvested in the same step that appends the ledger so
+  // it records the post-append audit_results revision (dependency-first). Raw
+  // counters only — the continuity ranking that consumes them is derived JIT at
+  // dispatch, never persisted. Fed the RAW `mergedResults` ledger (not
+  // `selectCurrentResults`) on purpose: re-dispatch/deepening touches are
+  // attention signal for a continuity bias (see deriveAccessMemory docs).
+  const accessMemory = deriveAccessMemory(mergedResults);
   const finalBundle: ArtifactBundle = {
     ...selectiveDeepening.bundle,
     requeue_tasks: requeuePayload.tasks,
+    access_memory: accessMemory,
     ...(priorMetadata
       ? {
           artifact_metadata: {
@@ -247,6 +257,7 @@ export function runResultIngestionExecutor(
       "audit_tasks.json",
       "audit_plan_metrics.json",
       "requeue_tasks.json",
+      "access_memory.json",
     ],
     progress_summary:
       `Ingested ${results.length} audit result entries and refreshed dependent artifacts.` +

@@ -91,6 +91,7 @@ audit-code into an implementation pipeline.
 | `audit_plan_metrics.json` | JSON | Planning metrics and cost estimates for the current task set. |
 | `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; partitioned just-in-time at dispatch, never persisted back. |
 | `requeue_tasks.json` | JSON | Re-audit tasks derived from coverage/flow-coverage gaps. |
+| `access_memory.json` | JSON | Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses), used to bias later packet composition toward continuity. Raw counters only; the ranking that consumes them is derived JIT at dispatch. |
 
 ### Reporting
 

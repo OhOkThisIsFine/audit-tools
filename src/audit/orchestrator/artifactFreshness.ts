@@ -33,6 +33,10 @@ const NON_SEMANTIC_FIELDS_BY_ARTIFACT: Record<string, readonly string[]> = {
   // `generated_at` defensively so a future provenance stamp can never churn the
   // synthesis<->narrative signature (OBL-C006).
   "synthesis-narrative.json": ["generated_at"],
+  // Access-memory carries `run_id` as provenance only; it's run-constant so it
+  // can't churn intra-run today, but stripping it keeps provenance out of the
+  // semantic content hash defensively (mirrors the `generated_at` strips above).
+  "access_memory.json": ["run_id"],
 };
 
 function stripFields(
