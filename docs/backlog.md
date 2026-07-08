@@ -402,6 +402,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   signal we add lives in the per-packet back payload and must never mutate or reorder the fixed prefix.
   A change that saves selection tokens but busts cache-hit can cost more than it saves; item (3) is the
   regression guard that makes that measurable.
+  **Increment 1 SHIPPED (v0.32.38, 2026-07-08) — the piggybacked prefix-ordering fix (#4):** `buildPacketPrompt`
+  (`src/audit/cli/dispatch/packetPrompt.ts`) now leads with the de-interpolated static `## Output` schema block as
+  the cache-eligible fixed prefix and trails ALL per-packet volatile content; a tool-enforced test pins the ordering
+  + prefix-purity invariant. This makes the cross-cutting guard real for the rest of the track. Items (1)/(2)/(3)
+  below remain open.
 
   - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
     *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step
