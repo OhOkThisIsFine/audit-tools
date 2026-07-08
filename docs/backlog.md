@@ -126,10 +126,10 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   shape-valid `test_validator_plan` missing its scoped positive+negative pair self-validates "ok", then fails the
   gate at next-step → round-trip. Fix = single-source the cross-gate set and run it from the singular command too
   (load on-disk sibling CP artifacts, substitute the in-flight payload, absent-input-tolerant so a partial
-  pipeline never false-fails). **DESIGN QUESTION before shipping:** making a single-artifact self-check load
-  on-disk siblings + run cross-gates changes its nature — confirm that's intended (vs a lighter shape-only
-  check). This is a contract-pipeline (loop-core) change → route through the adversarial pipeline, not a lone
-  autonomous agent. Extends the CP-NODE contract-validation work.
+  pipeline never false-fails). **Design confirmed (owner, 2026-07-08): YES — the singular self-check SHOULD load
+  on-disk siblings + run the cross-gates** (a self-check that says "ok" on something next-step will reject is worse
+  than none; a check that lies is the defect). This is a contract-pipeline (loop-core) change → route through the
+  adversarial pipeline, not a lone autonomous agent. Extends the CP-NODE contract-validation work.
 
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
@@ -272,24 +272,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     unspecified⇒1-sequential) via an auto `is_conversation_host` discriminator — no manual declaration. **Also
     unified (owner steer):** the two near-duplicate AdmissionPool build maps DELETED → one shared
     `admissionPoolsFromSummaries`, so audit/remediate can't drift. Regression + non-vacuous ordering tests added.
-  - **RESIDUAL / next:**
-    - **`/models` concurrency probe — DEFERRED, needs its own design pass (owner, 2026-07-08).** The idea was
-      an AUTO refinement feeding the throughput derivation where a provider *declares* no concurrency. Scoping
-      found the mechanism under-specified: a standard OpenAI-compatible `/v1/models` returns model ids/metadata,
-      **not** concurrency limits — so "probe concurrency via /models" has no direct signal. The consumer plumbing
-      is already built and ready (a probed value funnels through `positiveIntCapOrNull` (`src/shared/quota/apiPool.ts:36`,
-      the sanity-clamp) → `concurrency_cap` on the pool summary → `deriveThroughputConcurrency`
-      (`src/shared/dispatch/admissionLoop.ts:76`)). The buildable-but-unpinned path is a **rate-limit-header**
-      probe (`x-ratelimit-limit-requests`/`-tokens`) rather than the `/models` body; there is no HTTP `/models`
-      or rate-header client in `src/` today (greenfield). Pin the actual concurrency signal before building.
-    - **B2 host-reorder seed — OPEN, scope to clarify (owner, 2026-07-08).** Gate-0 already ships provider-level
-      `exclude`/`include` + cost `cost_order` on the versioned `provider_confirmation` contract
-      (`src/shared/types/providerConfirmation.ts`), fully wired input→persist→readback→dispatch. The open question
-      is whether B2 wants *more* — a **pool-keyed** reorder/exclude field distinct from the provider-name exclude
-      and the cost order (greenfield: mirror the `dispatch_bias` precedent — contract type → clamp → parse → stamp →
-      `readConfirmedX` → dispatch) — or whether the shipped provider exclude + cost_order already IS the
-      host-reorder capability (then close B2). No pool-scoped vocabulary exists on the contract today (it keys on
-      provider names + `model_id`). Decide the scope before building.
+  - **RESIDUAL / next — ALL CLOSED (owner, 2026-07-08):**
+    - **`/models` concurrency probe — DROPPED (not deferred).** Owner ruled concurrency an almost-irrelevant
+      primitive and banned *hunting* for a concurrency value: use a handed signal if one arrives, otherwise stop
+      looking. No probe/discovery mechanism is to be built. The already-built consumer plumbing
+      (`positiveIntCapOrNull` `src/shared/quota/apiPool.ts` → `concurrency_cap` → `deriveThroughputConcurrency`
+      `src/shared/dispatch/admissionLoop.ts`) stays harmlessly ready for a *handed* signal.
+      [[concurrency-is-declared-or-absent-never-learned]]
+    - **B2 host-reorder seed — CLOSED.** The shipped provider-level `exclude`/`include` + `cost_order` on the
+      versioned `provider_confirmation` contract (`src/shared/types/providerConfirmation.ts`) IS the host-reorder
+      capability. No pool-keyed reorder field wanted.
   - **Free-pool maximization (dial-independent).** Price-0 pools are first-fill at every operating point → free
     is saturated before any paid pool automatically (`costRank` already delivers it once a source is registered).
     "Maxed" = saturated to the pool's declared sustainable ceiling (`declaredCap` + rate limits + reactive 429

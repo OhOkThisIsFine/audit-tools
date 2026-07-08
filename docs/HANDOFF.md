@@ -25,11 +25,11 @@
   too (was a silent degrade — the closed parity gap). **Deliberate behavior change:** a remediate run with a
   technically-invalid config (e.g. `timeout_ms: 0`) now throws at load instead of silently ignoring it — this is
   remediate conforming to the shared config contract audit has always enforced, not a new contract.
-- **Cost↔speed dial residuals — adjudicated 2026-07-08, both deferred (see `docs/backlog.md`, dial bullet):**
-  the `/models` concurrency probe is DEFERRED pending a design pass (a standard `/v1/models` exposes no
-  concurrency signal; rate-limit headers are the buildable-but-unpinned path); B2 host-reorder is OPEN
-  pending a scope call (pool-keyed field vs. the already-shipped provider `exclude` + `cost_order`). The
-  dead `buildProviderConfirmationDisplay` (D-71) was deleted.
+- **Cost↔speed dial residuals — ALL CLOSED 2026-07-08 (owner):** the `/models` concurrency probe is
+  DROPPED (owner: concurrency is an almost-irrelevant primitive — stop hunting for a concurrency value;
+  use a handed signal if one arrives, never go looking; [[concurrency-is-declared-or-absent-never-learned]]);
+  B2 host-reorder is CLOSED (the shipped provider `exclude`/`include` + `cost_order` IS the capability);
+  dead `buildProviderConfirmationDisplay` (D-71) deleted. Dial itself code-complete + reviewed — nothing open.
 - **Dispatch admission-control — residual (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -43,9 +43,9 @@
   in v0.32.27.** The 10-node `backlog-handoff-max-sweep-2026-07-06` plan fully landed (manual node-by-node recovery
   after the original worktree-wipe/state-desync incident). Durable status/recovery in
   [[remediate-max-sweep-run-2026-07-06]] / [[remediate-worktree-wipe-state-desync]].
-- **Open items** (all in `docs/backlog.md`): the shipped dial's residuals (`/models` concurrency
-  probe; B2 host-reorder seed) and the free-pool / quota-arbitrage forward track (immediate-next
-  above); env-bound live validations (quota pre-wall pacing, friction escalation, selective-deepening
+- **Open items** (all in `docs/backlog.md`): the free-pool / quota-arbitrage forward track; the
+  context-efficiency track (item #1 session access-memory = **the picked next-lap item**, 2026-07-08);
+  env-bound live validations (quota pre-wall pacing, friction escalation, selective-deepening
   convergence, clippy/rubocop live spawn); provider-blocked schema CE-004 residual (claude-code host
   only — the NIM guided-decoding path shipped).
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
