@@ -422,7 +422,17 @@ export function selectProvider<TPacket>(
     // pool.id is the canonical (provider, account, model) key — use it directly so
     // scheduling and outcome-recording index the SAME account-stamped quota entry.
     const poolKey = pool.id;
-    const quotaStateEntry = pool.quotaStateEntry ?? quotaStateEntries[poolKey] ?? null;
+    // Prefer the LIVE quota entry over `pool.quotaStateEntry` (a frozen snapshot
+    // captured at pool construction). `refreshQuotaStateIfNeeded` reloads the whole
+    // on-disk state before every dispatchPass, so the live record is same-or-fresher:
+    // reading the snapshot FIRST would hide a cooldown learned mid-run (INV-QD-16) —
+    // the exact signal INV-QD-14 proactive spill needs — since the snapshot is fixed
+    // at build time and never sees the mid-run write. The snapshot stays only as a
+    // last-resort fallback for the narrow window where the live read is transiently
+    // unavailable (readQuotaState throwing → the cache retains its prior/empty state),
+    // so a prior-run cooldown still drives proactive spill instead of waiting for the
+    // reactive 429 floor. Both are keyed by pool.id, so they can never index apart.
+    const quotaStateEntry = quotaStateEntries[poolKey] ?? pool.quotaStateEntry ?? null;
     const inFlightTokens = inFlightTracker.getInFlightTokens(pool.id);
     return scheduleWave({
       providerName: pool.providerName,

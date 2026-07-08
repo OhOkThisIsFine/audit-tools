@@ -29,16 +29,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`selectProvider` cannot see a cooldown learned mid-run (MEDIUM).** `scheduleForPool` reads
-  `pool.quotaStateEntry ?? quotaStateEntries[poolKey]` (`src/shared/dispatch/rollingDispatch.ts`).
-  `CapacityPool.quotaStateEntry` (`src/shared/quota/capacity.ts`) is a **static snapshot** captured at pool
-  construction, so when it is present a freshly-written `cooldown_until` is never observed → `isPoolQuotaDegraded` is
-  inert and the INV-QD-14 proactive spill never deprioritises the throttled pool. Prefer the live
-  `quotaStateEntries[poolKey]` over the frozen snapshot. **Pre-existing on main.** Now the *only* remaining
-  hole in cooldown propagation: INV-QD-15 made the write atomic and INV-QD-16 stopped a concurrent success
-  from cancelling a live cooldown, so a mid-run cooldown is durably on disk — the frozen snapshot is what
-  still hides it from `selectProvider`.
-
 - **A test can drive a deleted code path through a module-namespace spy and pass vacuously (tool-should-decide).**
   Two `tests/remediate/wave-scheduler.test.ts` tests drove the quota-read failure path via
   `vi.spyOn(quotaModule, "readQuotaState")` on a *re-export*. When the source switched to an internal call, the spy

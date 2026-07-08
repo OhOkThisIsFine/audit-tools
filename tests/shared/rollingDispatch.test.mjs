@@ -756,13 +756,63 @@ test("selectProvider — spills off a pool in active cooldown to a peer with hea
   await setupTmpQuotaDir();
   const packet = makePacket("p1", { complexity: 0.5 });
   const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-  // cooling-pool has an active learned cooldown → scheduleWave reports cooldown_until → degraded.
+  // cooling-pool has an active learned cooldown carried in the LIVE quota-state
+  // record (keyed by pool id) — the same channel a mid-run 429 writes it to.
+  // scheduleWave reports cooldown_until → degraded → spill.
+  const cooling = makePool("cooling-pool");
+  const healthy = makePool("healthy-pool");
+  const tracker = new InFlightTokenTracker();
+  const liveEntries = { "cooling-pool": { cooldown_until: future } };
+  const slot = selectProvider(packet, [cooling, healthy], tracker, liveEntries, enabledSession());
+  expect(slot !== null).toBeTruthy();
+  expect(slot.poolId, "a pool in active cooldown is spilled over for a healthy peer").toBe("healthy-pool");
+});
+
+test("selectProvider — a cooldown learned mid-run (live entry) is observed even when the pool's frozen snapshot is stale-healthy (bug 4)", async () => {
+  // Regression for bug (4): scheduleForPool must read the LIVE quotaStateEntries
+  // record, never the `pool.quotaStateEntry` snapshot captured at construction. A
+  // pool built while healthy (non-null snapshot with NO cooldown) then throttled
+  // mid-run gets its cooldown written to the live cache; if selection short-circuits
+  // on the frozen snapshot, INV-QD-14 spill never sees the cooldown and load keeps
+  // hitting the throttled pool. The live entry must win.
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 0.5 });
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  // Frozen snapshot is present but healthy (no cooldown) — the exact masking shape.
+  const throttled = makePool("throttled-pool", {
+    quotaStateEntry: { cooldown_until: null, consecutive_429_count: 0 },
+  });
+  const healthy = makePool("healthy-pool");
+  const tracker = new InFlightTokenTracker();
+  // The cooldown exists ONLY in the live record, keyed by pool id.
+  const liveEntries = { "throttled-pool": { cooldown_until: future } };
+  const slot = selectProvider(packet, [throttled, healthy], tracker, liveEntries, enabledSession());
+  expect(slot !== null).toBeTruthy();
+  expect(
+    slot.poolId,
+    "the live cooldown must be observed despite a stale-healthy frozen snapshot → spill to the healthy peer",
+  ).toBe("healthy-pool");
+});
+
+test("selectProvider — falls back to the pool's construction snapshot cooldown when the live record is unavailable (transient-read window)", async () => {
+  // Complement to bug (4): the live record is PREFERRED, but when it is empty for a
+  // pool (the narrow window where readQuotaState transiently fails and the cache
+  // retains empty state) the frozen `pool.quotaStateEntry` snapshot — captured from a
+  // successful construction-time read — is the last-resort signal, so a prior-run
+  // cooldown still drives INV-QD-14 proactive spill rather than waiting for a 429.
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 0.5 });
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   const cooling = makePool("cooling-pool", { quotaStateEntry: { cooldown_until: future } });
   const healthy = makePool("healthy-pool");
   const tracker = new InFlightTokenTracker();
+  // Live record is EMPTY for cooling-pool → the snapshot fallback must supply the cooldown.
   const slot = selectProvider(packet, [cooling, healthy], tracker, {}, enabledSession());
   expect(slot !== null).toBeTruthy();
-  expect(slot.poolId, "a pool in active cooldown is spilled over for a healthy peer").toBe("healthy-pool");
+  expect(
+    slot.poolId,
+    "snapshot cooldown is the fallback when the live record is unavailable → still spill",
+  ).toBe("healthy-pool");
 });
 
 test("selectProvider — all pools degraded still yields a slot; capability order applies within the fallback group (INV-QD-14)", async () => {

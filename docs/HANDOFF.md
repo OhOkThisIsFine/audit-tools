@@ -46,10 +46,15 @@
   bug the poisoned buckets had been compensating for: `recordWaveOutcome` cleared a *live* `cooldown_until` on any
   success, though a concurrent success was dispatched before the 429 and is no evidence the limit is over
   (**INV-QD-16**, fixed: only an already-expired cooldown clears).
-  **Immediate next: bug (4)** — `selectProvider` should read the live quota entry, not the frozen
-  `pool.quotaStateEntry` snapshot (`docs/backlog.md` → Open bugs). Then C1 real source-pool budget (converge onto
-  `sources[].quota`), A1 rename `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md`
-  → Open bugs + [[host-provider-misattribution-nim-codex]].
+  **Bug (4) CLOSED (this lap):** `selectProvider`'s `scheduleForPool` now reads the LIVE `quotaStateEntries[poolKey]`
+  first and only falls back to the frozen `pool.quotaStateEntry` snapshot when the live read is transiently
+  unavailable — so a `cooldown_until` learned mid-run is observed (INV-QD-14 spill), and a prior-run cooldown still
+  drives proactive spill through a transient-read window instead of waiting for the reactive 429 floor.
+  Adversarially reviewed (independent reviewer confirmed no regression; the `live ?? snapshot` order is what
+  preserves the transient-read fallback the snapshot-only drop would have lost).
+  **Immediate next: C1 real source-pool budget** (converge onto `sources[].quota`), then A1 rename
+  `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md` →
+  [[host-provider-misattribution-nim-codex]].
 - **Then:** the cost↔speed dispatch dial + free-pool maximization forward track (lands ON TOP of the kept
   cost-first router; B2 host-reorder seed, capability floor, free-pool saturation gated by C3) + the free/cheap
   multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;
