@@ -293,31 +293,17 @@ export function buildPacketPrompt(params: {
   // at planning time and is never threaded verbatim into a worker prompt
   // (INV-S04; guarded by no-verbatim-free-form-intent.test.mjs).
   return [
+    // ── Fixed prefix: identical across every packet in a run, so it stays a
+    //    cache-eligible prompt prefix. All per-packet volatile content (## Packet
+    //    / ## Files / ## Tasks / ## Final response, and every resultPath/packet_id
+    //    interpolation) lives in the BACK payload below and must never precede
+    //    this block. (spec/audit-workflow-design.md §Prompt caching.)
     "You are a code auditor. Review this packet once, then emit exactly one result per listed task.",
-    repoRoot ? `Repository root: ${repoRoot}` : "Repository root: use the root from the step contract.",
-    "Set the shell/tool workdir to the repository root when running backend commands.",
+    "Set the shell/tool workdir to the repository root (given below) when running backend commands.",
     "",
-    "## Packet",
-    `packet_id: ${packet.packet_id}`,
-    `task_count: ${packet.task_ids.length}`,
-    `lenses: ${packet.lenses.join(", ")}`,
-    `estimated_tokens: ${packet.estimated_tokens}`,
-    `result_path: ${resultPath}`,
-    "",
-    "## Files to read",
-    largeFileMode
-      ? "Use targeted Read/Grep calls. Paths are repo-relative to the repository root above."
-      : "Use your Read tool. Paths are repo-relative to the repository root above.",
-    "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
-    fileList,
-    "",
-    ...renderPacketGraphContext(packet),
-    ...largeFileSection,
-    "## Tasks",
-    ...taskSections,
     "## Output",
     "Produce one JSON array containing exactly one AuditResult object for each listed task,",
-    `and WRITE that array (and nothing else) to your result_path: ${resultPath}`,
+    "and WRITE that array (and nothing else) to your result_path (listed in the ## Packet section below).",
     "Use your Write tool to write that one file. Do not edit source files, run shell commands,",
     "or write any other file. After writing, reply with the one-line confirmation below — do not",
     "paste the JSON array into your reply.",
@@ -336,7 +322,7 @@ export function buildPacketPrompt(params: {
     "  unit_id       copy from the task metadata",
     "  pass_id       copy from the task metadata",
     "  lens          copy from the task metadata",
-    "  file_coverage [{path, total_lines}] - copy the exact template from each task section above. You MUST include total_lines. Do not omit or zero it out, as this will cause fatal validation errors.",
+    "  file_coverage [{path, total_lines}] - copy the exact template from each task section below. You MUST include total_lines. Do not omit or zero it out, as this will cause fatal validation errors.",
     "  findings      [] or array of finding objects",
     "",
     "Lens verification tasks:",
@@ -371,7 +357,29 @@ export function buildPacketPrompt(params: {
     "3. Only reference files from the packet unless a finding genuinely crosses a boundary.",
     "4. findings: [] is correct when you find nothing genuine.",
     "5. Do not use TaskCreate, spawn background agents, or launch sub-agents. Write your results",
-    `   directly to ${resultPath} using your Write tool, then reply with the confirmation below.`,
+    "   directly to your result_path using your Write tool, then reply with the confirmation below.",
+    "",
+    // ── Volatile back payload: per-packet; must never precede the fixed prefix. ──
+    repoRoot ? `Repository root: ${repoRoot}` : "Repository root: use the root from the step contract.",
+    "",
+    "## Packet",
+    `packet_id: ${packet.packet_id}`,
+    `task_count: ${packet.task_ids.length}`,
+    `lenses: ${packet.lenses.join(", ")}`,
+    `estimated_tokens: ${packet.estimated_tokens}`,
+    `result_path: ${resultPath}`,
+    "",
+    "## Files to read",
+    largeFileMode
+      ? "Use targeted Read/Grep calls. Paths are repo-relative to the repository root above."
+      : "Use your Read tool. Paths are repo-relative to the repository root above.",
+    "Use host Read and Grep tools for source inspection. Do not use shell search commands.",
+    fileList,
+    "",
+    ...renderPacketGraphContext(packet),
+    ...largeFileSection,
+    "## Tasks",
+    ...taskSections,
     "",
     "## Final response",
     `After writing the JSON array to ${resultPath}, reply exactly: valid: ${packet.packet_id}, findings=<total finding count>`,

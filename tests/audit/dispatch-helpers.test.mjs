@@ -135,6 +135,38 @@ test("N-worker-prompt-and-result-contract: buildPacketPrompt — writes to resul
   expect(prompt, "prompt must include a required grounding instruction").toMatch(/Grounding \(required\)/i);
 });
 
+test("cache-safety: buildPacketPrompt keeps the static ## Output schema as a fixed prefix, all per-packet volatility at the back", () => {
+  // The large ## Output schema block is identical for every packet in a run, so
+  // it must lead as a cache-eligible prompt prefix; per-packet volatile content
+  // (packet_id / result_path / files / tasks) must all follow it. A regression
+  // that hoists volatile content ahead of ## Output busts provider prefix caching.
+  // (spec/audit-workflow-design.md §Prompt caching.)
+  const packet = makePacket("abc");
+  const resultPath = "/artifacts/runs/run-1/task-results/abc-inline-result.json";
+  const prompt = buildPacketPrompt({
+    packet,
+    packetTasks: [makeAuditTask("abc")],
+    fileList: "- src/abc.ts (100 lines)",
+    largeFileSection: [],
+    taskSections: ["### task-abc"],
+    resultPath,
+  });
+
+  const outputIdx = prompt.indexOf("## Output");
+  const packetIdx = prompt.indexOf("## Packet");
+  const tasksIdx = prompt.indexOf("## Tasks");
+  expect(outputIdx, "## Output must be present").toBeGreaterThanOrEqual(0);
+  expect(outputIdx < packetIdx, "static ## Output schema must precede volatile ## Packet").toBeTruthy();
+  expect(outputIdx < tasksIdx, "static ## Output schema must precede volatile ## Tasks").toBeTruthy();
+
+  // The fixed prefix (everything before ## Packet) must carry no per-packet
+  // interpolation — no result_path value and no packet_id value — or the prefix
+  // differs per packet and never caches.
+  const prefix = prompt.slice(0, packetIdx);
+  expect(prefix.includes(resultPath), "fixed prefix must not embed the volatile result_path").toBe(false);
+  expect(/\babc\b/.test(prefix), "fixed prefix must not embed the volatile packet_id").toBe(false);
+});
+
 // ── step-prompt ↔ packet-prompt result contract (no drift) ─────────────────────
 
 test("N-worker-prompt-and-result-contract: rolling-dispatch step prompt and packet prompt agree the worker WRITES its result_path", () => {
