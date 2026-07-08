@@ -41,15 +41,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   point-in-time proposal, not a live spec — the same "spec is right, the design is wrong" rule that killed
   C3-AIMD applies to a memory that cites a deleted mechanism.
 
-- **`doc-review-resolve.mjs` has no list/help affordance and silently accepts a garbage id (tool-should-decide,
-  2026-07-08).** `node .claude/hooks/doc-review-resolve.mjs --list` (a natural guess for "show me the open
-  items") records the literal string `--list` as a resolved id against the current findings SHA rather than
-  erroring or listing — any non-flag arg is treated as an id. Two small fixes: (1) a `--list`/`--help` flag that
-  prints the open doc-review items (the surface hook already computes them — single-source it); (2) reject an id
-  that doesn't match a known finding id instead of silently recording it. Low-severity (the stray entry is inert
-  and was scrubbed), but it's a foot-gun at exactly the moment an operator is trying to see what's open.
-
-
 - **A lap reported "merged" before its work was on remote `main` → the next lap re-did it (faithful-reporting /
   pipeline-ownership failure, 2026-07-07).** Two laps both did the A1 rename. Root cause, established from git: the
   first lap's rename commit (`7688febe`) was authored 23:24:56, committed 23:25:17, and did not land on remote `main`

@@ -20,6 +20,8 @@ dist/
 !.claude/hooks/friction-stop-gate.mjs
 !.claude/hooks/doc-review-surface.mjs
 !.claude/hooks/docReviewLedger.mjs
+!.claude/hooks/docReviewFindings.mjs
+!.claude/hooks/docReviewFindings.test.mjs
 !.claude/hooks/doc-review-resolve.mjs
 !.claude/hooks/doc-review-resolve.test.mjs
 !.claude/hooks/doc-review-resolved.json

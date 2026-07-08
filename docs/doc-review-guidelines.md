@@ -304,7 +304,11 @@ After the host applies or rejects items, it records them:
 
 ```
 node .claude/hooks/doc-review-resolve.mjs <ID>...   # e.g. AF-1 D-5 D-6 D-7
+node .claude/hooks/doc-review-resolve.mjs --list    # show the open ids (matches the surface digest)
 ```
+
+Ids are validated against the open findings block — an id matching no known finding is
+rejected, not silently recorded (a leading `-` is always a flag, never an id).
 
 Those IDs stop surfacing immediately — no waiting for the nightly, and no push to
 the `doc-review` branch (which would race the cloud routine that owns it). When
