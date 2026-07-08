@@ -39,9 +39,7 @@ what is found in the repo.
 
 **Shown to the user:**
 - Each discovered provider's name, representative model, blended price, capability tier, cost
-  order, and inclusion status. (A quota-state display helper —
-  `buildProviderConfirmationDisplay` — exists in `audit-tools/shared` but is not wired into the
-  live Gate-0 prompt; quota is not currently shown at confirmation time.)
+  order, and inclusion status
 - Which will be included by default
 
 **User can:**
@@ -88,10 +86,7 @@ design review.
 *Disposition override proposals:*
 - Scan `file_disposition` for suspicious inclusions the heuristics missed
   (build output, vendored code, generated files that slipped through)
-- Propose per-file status corrections with reasons (the accepted `disposition_overrides`
-  schema also supports directory-prefix paths at consumption time, but the tool's automatic
-  override-proposal scan currently emits one row per file, never an aggregated per-directory
-  proposal)
+- Propose per-file status corrections with reasons
 
 *Lens proposals:*
 - Analyze `design_assessment` findings and codebase character to propose lens
