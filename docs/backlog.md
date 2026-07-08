@@ -240,11 +240,23 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     unified (owner steer):** the two near-duplicate AdmissionPool build maps DELETED → one shared
     `admissionPoolsFromSummaries`, so audit/remediate can't drift. Regression + non-vacuous ordering tests added.
   - **RESIDUAL / next:**
-    - **`/models` concurrency probe = the future AUTO refinement** (discovered, still not declared) — feeds the
-      throughput derivation a richer signal where a provider states nothing; must sanity-clamp a probed value
-      before it reaches the rank (poison→over-admit). Ties into the deferred openai-compatible `/models` probe.
-    - **B2 host-reorder seed** (host reorders/excludes pools once at Gate-0) already has its substrate in the
-      shipped interactive `provider_confirmation`; the reorder wiring is separate from the λ dial and still open.
+    - **`/models` concurrency probe — DEFERRED, needs its own design pass (owner, 2026-07-08).** The idea was
+      an AUTO refinement feeding the throughput derivation where a provider *declares* no concurrency. Scoping
+      found the mechanism under-specified: a standard OpenAI-compatible `/v1/models` returns model ids/metadata,
+      **not** concurrency limits — so "probe concurrency via /models" has no direct signal. The consumer plumbing
+      is already built and ready (a probed value funnels through `positiveIntCapOrNull` (`src/shared/quota/apiPool.ts:36`,
+      the sanity-clamp) → `concurrency_cap` on the pool summary → `deriveThroughputConcurrency`
+      (`src/shared/dispatch/admissionLoop.ts:76`)). The buildable-but-unpinned path is a **rate-limit-header**
+      probe (`x-ratelimit-limit-requests`/`-tokens`) rather than the `/models` body; there is no HTTP `/models`
+      or rate-header client in `src/` today (greenfield). Pin the actual concurrency signal before building.
+    - **B2 host-reorder seed — OPEN, scope to clarify (owner, 2026-07-08).** Gate-0 already ships provider-level
+      `exclude`/`include` + cost `cost_order` on the versioned `provider_confirmation` contract
+      (`src/shared/types/providerConfirmation.ts`), fully wired input→persist→readback→dispatch. The open question
+      is whether B2 wants *more* — a **pool-keyed** reorder/exclude field distinct from the provider-name exclude
+      and the cost order (greenfield: mirror the `dispatch_bias` precedent — contract type → clamp → parse → stamp →
+      `readConfirmedX` → dispatch) — or whether the shipped provider exclude + cost_order already IS the
+      host-reorder capability (then close B2). No pool-scoped vocabulary exists on the contract today (it keys on
+      provider names + `model_id`). Decide the scope before building.
   - **Free-pool maximization (dial-independent).** Price-0 pools are first-fill at every operating point → free
     is saturated before any paid pool automatically (`costRank` already delivers it once a source is registered).
     "Maxed" = saturated to the pool's declared sustainable ceiling (`declaredCap` + rate limits + reactive 429

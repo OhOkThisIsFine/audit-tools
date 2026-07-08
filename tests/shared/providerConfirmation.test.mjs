@@ -3,7 +3,6 @@ import { test, expect } from "vitest";
 const {
   discoverProviders,
   queryProviderQuota,
-  buildProviderConfirmationDisplay,
   applyProviderConfirmationSelections,
 } = await import("../../src/shared/providers/providerConfirmation.ts");
 
@@ -230,38 +229,6 @@ test("OBS-9a9091ad: queryProviderQuota does NOT invoke the injected log on succe
   );
   expect(result).toEqual({ requests_per_minute: 60 });
   expect(logged.length, "log must not fire when the query succeeds").toBe(0);
-});
-
-// ---------------------------------------------------------------------------
-// buildProviderConfirmationDisplay
-// ---------------------------------------------------------------------------
-
-test("buildProviderConfirmationDisplay returns table with expected headers", () => {
-  const discovered = [
-    { name: "claude-code", command: "claude", capabilityTier: "frontier", detected: true },
-  ];
-  const display = buildProviderConfirmationDisplay(discovered);
-  expect(display.includes("| Provider |"), "should include Provider column").toBeTruthy();
-  expect(display.includes("| Tier |"), "should include Tier column").toBeTruthy();
-  expect(display.includes("| Quota |"), "should include Quota column").toBeTruthy();
-  expect(display.includes("| Default |"), "should include Default column").toBeTruthy();
-  expect(display.includes("claude-code"), "should include provider name").toBeTruthy();
-  expect(display.includes("frontier"), "should include tier").toBeTruthy();
-  expect(display.includes("included"), "frontier provider should be marked included").toBeTruthy();
-});
-
-test("buildProviderConfirmationDisplay returns message when pool is empty", () => {
-  const display = buildProviderConfirmationDisplay([]);
-  expect(display.length > 0).toBeTruthy();
-  expect(!display.includes("|"), "empty pool should not produce a table").toBeTruthy();
-});
-
-test("buildProviderConfirmationDisplay marks worker-command as add explicitly", () => {
-  const discovered = [
-    { name: "worker-command", command: undefined, capabilityTier: "unknown", detected: true },
-  ];
-  const display = buildProviderConfirmationDisplay(discovered);
-  expect(display.includes("add explicitly"), "worker-command should not be default").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------

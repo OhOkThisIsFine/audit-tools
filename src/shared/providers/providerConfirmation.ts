@@ -222,49 +222,6 @@ export async function queryProviderQuota(
 }
 
 /**
- * Build a markdown table summarising the discovered provider pool for display
- * in Gate-0 confirmation prompts.
- *
- * | Provider | Tier | Quota | Default |
- */
-export function buildProviderConfirmationDisplay(
-  discovered: DiscoveredProvider[],
-): string {
-  if (discovered.length === 0) {
-    return "No providers detected on PATH.";
-  }
-
-  const rows = discovered.map((p) => {
-    const tier = p.capabilityTier;
-    const quota =
-      p.quotaState == null
-        ? "—"
-        : [
-            p.quotaState.requests_per_minute != null
-              ? `${p.quotaState.requests_per_minute} rpm`
-              : null,
-            p.quotaState.input_tokens_per_minute != null
-              ? `${p.quotaState.input_tokens_per_minute} itpm`
-              : null,
-          ]
-            .filter(Boolean)
-            .join(", ") || "—";
-
-    // worker-command requires explicit addition because it blocks auto-dispatch.
-    const isDefault = p.name !== "worker-command";
-    const defaultCol = isDefault ? "included" : "add explicitly";
-    const statusNote = p.reason ? ` *(${p.reason})*` : "";
-    return `| ${p.name}${statusNote} | ${tier} | ${quota} | ${defaultCol} |`;
-  });
-
-  return [
-    "| Provider | Tier | Quota | Default |",
-    "| --- | --- | --- | --- |",
-    ...rows,
-  ].join("\n");
-}
-
-/**
  * Apply user selections to the discovered pool, returning a ConfirmedProviderPool
  * suitable for persistence in SessionConfig.confirmed_provider_pool.
  *

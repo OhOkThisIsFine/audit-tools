@@ -783,7 +783,6 @@ export type {
 export {
   discoverProviders,
   queryProviderQuota,
-  buildProviderConfirmationDisplay,
   applyProviderConfirmationSelections,
   representativeModelId,
   annotateConfirmedPoolCost,
