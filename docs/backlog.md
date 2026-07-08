@@ -29,6 +29,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Two laps grabbed the same backlog item concurrently → duplicated whole-item work (tool-should-decide, 2026-07-07).**
+  Two independent sessions each fast-forwarded at lap start, both read the same HANDOFF "immediate next" (A1 rename),
+  and both did the full rename in parallel. One shipped v0.32.33; the other's identical commit was rejected on push
+  (behind remote) and discarded — a full rename's worth of wasted work. `start-lap` fast-forwards *once* at open but
+  there is no lap-level claim on "who owns which backlog item", so nothing prevents the collision mid-lap. This is the
+  concrete manifestation of the cooperative-runs gap ([[multi-ide-concurrent-runs-design]] task-claiming): a lap
+  should stake a claim on the item it starts (reuse the ClaimRegistry / step-slot design) so a second lap sees it
+  taken and picks the next one. Salvage from the collision: the loser's sweep caught a stale comment the winner's
+  rename missed — landed as a follow-up chore.
+
 - **A test can drive a deleted code path through a module-namespace spy and pass vacuously (tool-should-decide).**
   Two `tests/remediate/wave-scheduler.test.ts` tests drove the quota-read failure path via
   `vi.spyOn(quotaModule, "readQuotaState")` on a *re-export*. When the source switched to an internal call, the spy
