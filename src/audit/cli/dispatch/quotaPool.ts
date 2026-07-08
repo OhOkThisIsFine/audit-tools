@@ -4,9 +4,7 @@ import {
   buildHostModelPools,
   computeDispatchAdmission,
   createReservationLedger,
-  tierRank,
-  deriveCostRank,
-  lookupConfirmedPosition,
+  admissionPoolsFromSummaries,
 } from "audit-tools/shared";
 import type {
   ProviderRateLimits,
@@ -301,37 +299,15 @@ export async function finalizeDispatchQuota(params: {
   const waveSchedule = dispatchCapacity.primary.schedule;
 
   // Admission control: instead of reporting a computed `max_concurrent_agents`, GRANT
-  // the affordable admitted set (cost-first-capable, ledger-leased). Each capacity
-  // allocation becomes an admission pool — budget = its live remaining token budget
-  // (null → optimistic +Inf); declared cap = its host in-flight cap passed verbatim;
-  // cost/capability rank from its tier; capacity = its context window (a packet's
-  // input+output envelope must fit). The cheapest capable pool with headroom wins.
-  const admissionPools: AdmissionPool[] = dispatchCapacity.pools.map((alloc) => {
-    // costRank is a REAL cost axis (blended $/Mtok via the shared cost-first
-    // engine), decoupled from capabilityRank (still the tier ordinal). See
-    // spec/cost-first-routing.md. Confirmed operator ordering (rung 1) threads in
-    // via confirmedPositions keyed by pool_id; absent ⇒ price (rung 2) ⇒ tier (rung 3).
-    return {
-      poolId: alloc.pool_id,
-      resourceKey: alloc.pool_id,
-      budget: alloc.schedule.remaining_token_budget ?? Number.POSITIVE_INFINITY,
-      // Declared in-flight cap = the shared-host subagent limit OR, for an
-      // independent backend source, its endpoint-declared concurrency cap
-      // (source.quota.max_concurrent) so admitBatch's cap branch fires for an
-      // otherwise-optimistic source.
-      declaredCap:
-        alloc.schedule.host_concurrency_limit?.active_subagents ??
-        alloc.concurrencyCap ??
-        null,
-      costRank: deriveCostRank({
-        model: alloc.schedule.model,
-        tier: alloc.rank,
-        confirmedPosition: lookupConfirmedPosition(params.confirmedCostPositions, alloc.schedule.model),
-      }),
-      capabilityRank: tierRank(alloc.rank),
-      capacityTokens: alloc.schedule.resolved_limits.context_tokens,
-    };
-  });
+  // the affordable admitted set (cost-first-capable, ledger-leased). AdmissionPool
+  // construction is single-sourced in `admissionPoolsFromSummaries` so audit and
+  // remediate cannot drift on how a capacity pool maps to an admission pool — audit
+  // summarizes its dispatch capacity, remediate passes its `capacity_pools`, both feed
+  // the SAME builder (budget, declaredCap, costRank rung-1, capability, throughput).
+  const admissionPools: AdmissionPool[] = admissionPoolsFromSummaries(
+    summarizeDispatchCapacityPools(dispatchCapacity),
+    params.confirmedCostPositions,
+  );
   // Per-packet reservation = input estimate + output envelope (declared output cap at
   // cold start; the learned (resourceKey,lens) ratio refines it once a provider
   // reports usage — dormant on the always-on claude-code host per design). The

@@ -9,10 +9,8 @@ import type {
   DiscoveredRateLimitsInput,
   HostModelRosterEntry,
   CapacityPool,
-  AdmissionPool,
 } from "audit-tools/shared";
-import { computeDispatchAdmission, createReservationLedger, tierRank } from "audit-tools/shared";
-import { deriveCostRank, lookupConfirmedPosition } from "audit-tools/shared";
+import { computeDispatchAdmission, createReservationLedger, admissionPoolsFromSummaries } from "audit-tools/shared";
 import { scheduleWave as computePoolWaveSchedule } from "audit-tools/shared";
 import {
   buildQuotaSource,
@@ -113,6 +111,8 @@ function _capacityPoolSummary(
     source: schedule.source,
     resolved_limits: schedule.resolved_limits,
     host_concurrency_limit: schedule.host_concurrency_limit,
+    // The quota-off path builds the single primary conversation-host pool (no backend source).
+    is_conversation_host: true,
     cooldown_until: schedule.cooldown_until,
     estimated_wave_tokens: schedule.estimated_wave_tokens,
     binding_cap: schedule.binding_cap ?? "none",
@@ -428,42 +428,6 @@ export async function buildConfirmedPools(input: {
   return primaryPools;
 }
 
-/**
- * Build the `AdmissionPool[]` the admission loop admits against from a schedule's
- * per-pool capacity summaries — the remediate analog of audit's `finalizeDispatchQuota`
- * pool mapping (both feed the single-sourced `computeDispatchAdmission`, so the two
- * orchestrators can't drift). Budget = the pool's live remaining token budget
- * (null ⇒ optimistic +Inf); declared cap = its host in-flight cap passed VERBATIM
- * (null ⇒ none — the only place an explicit agent-count exists); cost/capability rank
- * from its tier; capacity = its context window (a packet's input+output envelope must fit).
- */
-function admissionPoolsFromSchedule(
-  schedule: WaveScheduleResult,
-  confirmedCostPositions?: Map<string, number> | null,
-): AdmissionPool[] {
-  return (schedule.capacity_pools ?? []).map((pool) => {
-    // costRank is a REAL cost axis (blended $/Mtok via the shared cost-first
-    // engine), decoupled from capabilityRank (still the tier ordinal). See
-    // spec/cost-first-routing.md. Rung 1 (operator-confirmed) via the model-keyed
-    // map; absent ⇒ price (rung 2) ⇒ tier (rung 3).
-    return {
-      poolId: pool.pool_id,
-      resourceKey: pool.pool_id,
-      budget: pool.remaining_token_budget ?? Number.POSITIVE_INFINITY,
-      // host subagent limit OR, for an independent backend source, its
-      // endpoint-declared concurrency cap (source.quota.max_concurrent).
-      declaredCap: pool.host_concurrency_limit?.active_subagents ?? pool.concurrency_cap ?? null,
-      costRank: deriveCostRank({
-        model: pool.model,
-        tier: pool.rank,
-        confirmedPosition: lookupConfirmedPosition(confirmedCostPositions, pool.model),
-      }),
-      capabilityRank: tierRank(pool.rank),
-      capacityTokens: pool.resolved_limits.context_tokens,
-    };
-  });
-}
-
 export async function buildDispatchQuota(
   runId: string,
   phase: DispatchPhase,
@@ -505,7 +469,7 @@ export async function buildDispatchQuota(
   // it once a provider reports usage — dormant on the always-on claude-code host).
   const admission = await computeDispatchAdmission({
     packets: admissionPackets,
-    pools: admissionPoolsFromSchedule(schedule, confirmedCostPositions),
+    pools: admissionPoolsFromSummaries(schedule.capacity_pools ?? [], confirmedCostPositions),
     outputCap: schedule.resolved_limits.output_tokens,
     grantLeases,
     ledger: createReservationLedger(),

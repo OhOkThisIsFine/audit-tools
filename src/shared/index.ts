@@ -1177,6 +1177,8 @@ export {
 export {
   admitBatch,
   computeDispatchAdmission,
+  deriveThroughputConcurrency,
+  admissionPoolsFromSummaries,
   AdmissionGrantSchema,
   AdmissionExplainSchema,
   DispatchAdmissionSchema,

@@ -251,6 +251,14 @@ export interface PoolDispatchAllocation {
    * (slot math is token/rate-based — the count cap is a separate ceiling).
    */
   concurrencyCap?: number | null;
+  /**
+   * True when this pool is the conversation host's own pool (no backing
+   * {@link CapacityPool.source}), false for a configured backend source. Carried so
+   * the throughput axis of the cost↔speed dial can tell a hardware-parallel source
+   * (uncapped ⇒ fast) from a subagent-bounded host (unspecified ⇒ sequential) — the
+   * `declaredCap == null` sentinel alone is ambiguous. See deriveThroughputConcurrency.
+   */
+  isConversationHost: boolean;
 }
 
 /** Compact, serializable view of one pool allocation for dispatch-quota files. */
@@ -264,6 +272,8 @@ export const DispatchCapacityPoolSummarySchema = z
     source: LimitSourceSchema,
     resolved_limits: ResolvedLimitsSchema,
     host_concurrency_limit: HostConcurrencyLimitSchema.nullable(),
+    /** Host-vs-source discriminator for the dial throughput axis (see PoolDispatchAllocation.isConversationHost). */
+    is_conversation_host: z.boolean(),
     cooldown_until: z.string().nullable(),
     estimated_wave_tokens: z.number().int().min(0),
     binding_cap: WaveBindingCapSchema,
@@ -565,6 +575,9 @@ function schedulePool(
       ? Math.min(schedule.max_concurrent, itemTokens.length)
       : schedule.max_concurrent,
     schedule,
+    // A pool built from a backend `source` is a dispatchable endpoint; one without is
+    // the conversation host's own pool. Drives the dial throughput axis (host-vs-source).
+    isConversationHost: pool.source === undefined,
     // Raw signal carried through unfolded — does not enter the slot math above.
     ...(pool.quotaSignalDegraded ? { quotaSignalDegraded: true } : {}),
     ...(pool.quotaCoverage ? { quotaCoverage: pool.quotaCoverage } : {}),
@@ -600,6 +613,7 @@ export function summarizeDispatchCapacityPools(
     source: allocation.schedule.source,
     resolved_limits: allocation.schedule.resolved_limits,
     host_concurrency_limit: allocation.schedule.host_concurrency_limit,
+    is_conversation_host: allocation.isConversationHost,
     cooldown_until: allocation.schedule.cooldown_until,
     estimated_wave_tokens: allocation.schedule.estimated_wave_tokens,
     binding_cap: allocation.schedule.binding_cap ?? "none",

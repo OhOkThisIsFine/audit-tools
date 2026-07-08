@@ -20,6 +20,9 @@
 import { z } from "zod";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { estimatePacketCost } from "../quota/packetCost.js";
+import type { DispatchCapacityPoolSummary } from "../quota/capacity.js";
+import { tierRank } from "./tierRank.js";
+import { deriveCostRank, lookupConfirmedPosition } from "./costRank.js";
 
 /** One packet the admission loop may grant this pass. */
 export interface AdmissionCandidate {
@@ -43,8 +46,77 @@ export interface AdmissionPool {
   costRank: number;
   /** Capability rank — HIGHER is more capable; ties break toward more capable. */
   capabilityRank: number;
+  /**
+   * Throughput rank for the cost↔speed dial — the pool's effective PARALLELISM (higher
+   * = faster; `+Infinity` = hardware-parallel). Consulted only when λ > 0. Derived
+   * pool-class-aware by {@link deriveThroughputConcurrency} at the build site — a
+   * backend source's uncapped default is `+Infinity` (parallel) while the conversation
+   * host's unspecified default is `1` (sequential), so `declaredCap`'s ambiguous `null`
+   * sentinel is NOT reused for the rank. See spec/dispatch-cost-speed-dial.md.
+   */
+  throughputConcurrency: number;
   /** Largest packet cost this pool can fit (context window − output). */
   capacityTokens: number;
+}
+
+/**
+ * Derive a pool's throughput rank (effective parallelism) pool-class-aware — the fix
+ * for the `declaredCap == null` ambiguity (spec/dispatch-cost-speed-dial.md): the same
+ * "no cap" sentinel means opposite speeds on the two pool classes, so throughput cannot
+ * be read off `declaredCap` alone.
+ *
+ * - **Backend source** (an endpoint that accepts concurrent requests): an uncapped
+ *   source is hardware-parallel ⇒ `+Infinity` (fastest); a declared `max_concurrent`
+ *   ⇒ that count.
+ * - **Conversation host**: its parallelism IS its subagent budget; unspecified ⇒ the
+ *   host is effectively SEQUENTIAL ⇒ `1` (ranks slowest), NOT unbounded. This is what
+ *   stops λ=1 from crowning the default zero-declaration host over a metered parallel
+ *   source — with no manual declaration.
+ */
+export function deriveThroughputConcurrency(params: {
+  isConversationHost: boolean;
+  hostActiveSubagents?: number | null;
+  sourceConcurrencyCap?: number | null;
+}): number {
+  if (params.isConversationHost) {
+    return params.hostActiveSubagents ?? 1;
+  }
+  return params.sourceConcurrencyCap ?? Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Build the admission pool set from the serializable per-pool capacity summaries —
+ * the SINGLE source of truth both orchestrators use (audit summarizes its dispatch
+ * capacity; remediate passes `schedule.capacity_pools`), so the two cannot drift on
+ * how a pool maps to an {@link AdmissionPool}. Every field is derived here once:
+ * budget (optimistic `+Infinity` when no live ceiling), the hard in-flight cap
+ * (`declaredCap` — host subagent budget OR endpoint `max_concurrent`), cost rank
+ * (with the operator-confirmed position as rung 1; spec/cost-first-routing.md), the
+ * capability tier ordinal, the throughput rank (pool-class-aware concurrency;
+ * spec/dispatch-cost-speed-dial.md), and the context-window fit ceiling.
+ */
+export function admissionPoolsFromSummaries(
+  summaries: readonly DispatchCapacityPoolSummary[],
+  confirmedCostPositions?: Map<string, number> | null,
+): AdmissionPool[] {
+  return summaries.map((pool) => ({
+    poolId: pool.pool_id,
+    resourceKey: pool.pool_id,
+    budget: pool.remaining_token_budget ?? Number.POSITIVE_INFINITY,
+    declaredCap: pool.host_concurrency_limit?.active_subagents ?? pool.concurrency_cap ?? null,
+    costRank: deriveCostRank({
+      model: pool.model,
+      tier: pool.rank,
+      confirmedPosition: lookupConfirmedPosition(confirmedCostPositions, pool.model),
+    }),
+    capabilityRank: tierRank(pool.rank),
+    throughputConcurrency: deriveThroughputConcurrency({
+      isConversationHost: pool.is_conversation_host,
+      hostActiveSubagents: pool.host_concurrency_limit?.active_subagents,
+      sourceConcurrencyCap: pool.concurrency_cap,
+    }),
+    capacityTokens: pool.resolved_limits.context_tokens,
+  }));
 }
 
 /** A successful admission: one packet leased to one pool. */
@@ -148,24 +220,10 @@ function poolIdCmp(a: AdmissionPool, b: AdmissionPool): number {
   return a.poolId < b.poolId ? -1 : a.poolId > b.poolId ? 1 : 0;
 }
 
-/**
- * A pool's throughput proxy for the cost↔speed dial (spec/dispatch-cost-speed-dial.md):
- * its declared CONCURRENCY (how many packets it runs in parallel), which is the same
- * real-world property as `declaredCap` and clears a batch proportionally faster. This
- * is auto-derived from what the provider already declares (a source's `max_concurrent`
- * or the host's subagent budget) — no operator rate declaration, and no learned/measured
- * signal (honors "concurrency is declared or absent, never learned"). An ABSENT cap
- * (`null`) ⇒ unbounded parallelism ⇒ `+Infinity` (ranks fastest); a small cap (the
- * sequential-ish host) ranks slower than an uncapped/high-concurrency source.
- */
-function throughputOf(pool: AdmissionPool): number {
-  return pool.declaredCap == null ? Number.POSITIVE_INFINITY : pool.declaredCap;
-}
-
-/** Descending throughput; `+Infinity`-safe (Infinity−Infinity would be NaN). */
+/** Descending throughput (effective parallelism); `+Infinity`-safe (Inf−Inf = NaN). */
 function speedFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
-  const ta = throughputOf(a);
-  const tb = throughputOf(b);
+  const ta = a.throughputConcurrency;
+  const tb = b.throughputConcurrency;
   if (ta !== tb) {
     if (ta === Number.POSITIVE_INFINITY) return -1;
     if (tb === Number.POSITIVE_INFINITY) return 1;

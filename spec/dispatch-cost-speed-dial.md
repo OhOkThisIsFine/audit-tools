@@ -45,29 +45,38 @@ Two constraints shape this:
   hand-declare a per-pool rate to get correct speed routing. So the throughput signal must come from
   what is already known auto-magically, never from a new operator field.
 
-The signal that satisfies both is the concurrency the pool **already carries** on `AdmissionPool.declaredCap`
-— sourced auto from a provider's declared in-flight cap (a source's `source.quota.max_concurrent`,
-e.g. Codex 6 / a NIM endpoint's `max_num_seqs`) or the conversation host's subagent budget
-(`host_concurrency_limit.active_subagents`). Concurrency is the dominant factor in how fast a *batch*
-clears — a pool that runs N in parallel clears ~N× per round-trip — and it is the same real-world
-property as the in-flight cap, so one number honestly serves both roles.
+The signal that satisfies both is the pool's **effective parallelism**, sourced auto from what the
+provider already declares. But it must be derived **pool-class-aware**, because the naïve "read it off
+`declaredCap`" is a trap: `declaredCap == null` (no in-flight cap) means *opposite* speeds on the two
+pool classes — "hardware-parallel, genuinely fast" for a backend source, but "no subagent budget
+declared ⇒ effectively sequential" for the conversation host. Reusing that one ambiguous sentinel for
+the speed rank crowns the default zero-declaration host as fastest and lets it monopolize the wave at
+λ=1 — the exact opposite of the dial's intent (a real defect, caught in adversarial review).
 
-**`throughputOf(pool)`** (higher = faster):
+**`deriveThroughputConcurrency(pool)`** (higher = faster), keyed on the host-vs-source discriminator
+`DispatchCapacityPoolSummary.is_conversation_host` (auto — a pool built from a backend
+`CapacityPool.source` is a source; one without is the host):
 
-- **`declaredCap` finite** → that concurrency (Codex 6 ranks below an uncapped local endpoint, above a
-  sequential host with a subagent budget of 1).
-- **`declaredCap` null** → unbounded parallelism ⇒ **`+Infinity`** (ranks fastest). Correct: an
-  uncapped source (e.g. a local NIM server) takes as many as budget allows and is hardware-bound. This
-  does **not** spuriously crown the conversation host in the multi-pool case the dial actually matters
-  for: an attended host carries a finite `active_subagents` limit, so a genuinely-parallel uncapped
-  source out-ranks it at λ=1 — which is exactly the "dial toward speed → push work onto the parallel
-  pool" behavior the operator wants, with zero declaration.
+- **Backend source** — an endpoint that accepts concurrent requests: `source.quota.max_concurrent` when
+  declared (Codex 6, a NIM `max_num_seqs`), else **`+Infinity`** (uncapped ⇒ hardware-parallel ⇒ fastest;
+  a local NIM server is HW-bound, and the operator's config is authoritative).
+- **Conversation host** — its parallelism IS its subagent budget: `host_concurrency_limit.active_subagents`
+  when declared, else **`1`** (unspecified ⇒ effectively SEQUENTIAL ⇒ ranks slowest). This is what stops
+  λ=1 from crowning the default host over a metered parallel source — with **no** manual declaration.
 
-`declaredCap` thus feeds BOTH the throughput rank (this axis) and the hard in-flight cap (the spill
-loop) — the same quantity, used honestly for both. Declared rate limits (TPM/RPM) are **not** part of
-the throughput rank (mixing a tokens/min magnitude with a concurrency count is unsound); their effect
-is already in the pool's *budget* (the scheduler folds TPM into `remaining_token_budget`), which gates
-admission separately. Capability is likewise a separate hard floor, not a throughput term.
+So at λ=1 an uncapped/high-concurrency source out-ranks a sequential host, and the operator's dial toward
+speed actually pushes work onto the parallel pool. `declaredCap` still separately feeds the hard in-flight
+cap gate in the spill loop (unchanged); the throughput rank is its own pool-class-aware quantity, not a
+reuse of the cap's ambiguous null. Declared rate limits (TPM/RPM) are **not** part of the throughput rank
+(mixing a tokens/min magnitude with a concurrency count is unsound); their effect is already in the pool's
+*budget* (the scheduler folds TPM into `remaining_token_budget`), which gates admission separately.
+Capability is likewise a separate hard floor, not a throughput term.
+
+**One builder, no drift.** Both orchestrators construct their `AdmissionPool[]` through the single shared
+`admissionPoolsFromSummaries(summaries, confirmedCostPositions)` — audit summarizes its dispatch capacity,
+remediate passes `schedule.capacity_pools`, both feed the same function that derives budget / declaredCap /
+costRank / capabilityRank / throughputConcurrency / capacityTokens once. There is no per-orchestrator pool
+map to drift (the earlier duplicated build sites are deleted).
 
 **Future refinement (auto, not manual):** the deferred openai-compatible `/models` capability probe
 (`docs/backlog.md`) can *discover* an endpoint's concurrency / context window at run time and feed it
@@ -145,9 +154,12 @@ which the existing `costRank` already delivers.
 - **λ = 0 is behavior-identical to the pre-dial cost-first router.** The dial is additive; the
   default operating point is the min-cost corner. (Enforced by a test asserting the λ=0 admission
   order equals the pre-dial order on a mixed pool set.)
-- **Throughput is auto-derived declared concurrency — never learned, measured, or hand-declared.**
-  `throughputOf(pool)` is a pure function of `declaredCap` (null ⇒ +Infinity). No learned ceiling, no
-  measured tokens/sec, no EWMA, and no new operator rate field (a needed manual flag is a bug signal).
+- **Throughput is auto-derived, pool-class-aware effective parallelism — never learned, measured, or
+  hand-declared.** `deriveThroughputConcurrency` is a pure function of the declared source cap / host
+  subagent budget + the `is_conversation_host` discriminator. No learned ceiling, no measured tokens/sec,
+  no EWMA, and no new operator rate field (a needed manual flag is a bug signal).
+- **One AdmissionPool builder.** Both orchestrators go through `admissionPoolsFromSummaries`; there is no
+  per-orchestrator pool-construction map to drift.
 - **Capability stays a hard floor.** The `capable()` filter runs first and is untouched; the dial
   ranks only among capable pools and never trades capability for cost or speed.
 - **The dial reorders, never un-gates.** declaredCap, budget headroom (ledger), cooldowns, and
