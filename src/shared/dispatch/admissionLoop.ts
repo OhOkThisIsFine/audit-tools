@@ -107,6 +107,7 @@ export function admissionPoolsFromSummaries(
     costRank: deriveCostRank({
       model: pool.model,
       tier: pool.rank,
+      declaredCostPerMtok: pool.declared_cost_per_mtok,
       confirmedPosition: lookupConfirmedPosition(confirmedCostPositions, pool.model),
     }),
     capabilityRank: tierRank(pool.rank),

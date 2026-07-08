@@ -240,6 +240,20 @@ export interface DispatchableSource {
   /** Per-source quota / rate-limit (rpm, tpm, context/output tokens). */
   quota?: QuotaModelLimits;
   /**
+   * Operator-declared blended `$/Mtok` for THIS source's endpoint — the a-priori
+   * cost signal the admission router ranks on (rung 2 of `deriveCostRank`,
+   * authoritative over the models.dev catalog because the operator knows their own
+   * endpoint's price). Set `0` for a genuinely-free backend (e.g. a free arbitrage
+   * pool) so it routes first; omit to fall back to the models.dev price / tier.
+   *
+   * This is the a-priori SEED only, and is trusted verbatim: on its own, a pool
+   * declared free that later starts charging keeps first-fill priority. Auto-detecting
+   * a lapsed free tier (reading each response's actual reported cost and demoting the
+   * pool) is a SEPARATE, not-yet-enforced increment — until it lands, treat `0` as an
+   * operator assertion, not a tool-guaranteed invariant.
+   */
+  cost_per_mtok?: number;
+  /**
    * Path to THIS source's own credential file, when it authenticates as a
    * different account than the host (e.g. a Claude CLI signed into a second
    * account: its own `.credentials.json`; a second Codex `auth.json`). The

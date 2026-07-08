@@ -186,6 +186,14 @@ export interface CapacityPool {
    * endpoint. null/absent = uncapped (quota headroom is the only throttle).
    */
   concurrencyCap?: number | null;
+  /**
+   * Operator-declared a-priori `$/Mtok` for this pool's endpoint (from
+   * `source.cost_per_mtok`). Carried through unfolded to the summary → the admission
+   * cost rank (rung 2, authoritative over the models.dev catalog); `0` = declared-free
+   * → routes first. null/absent ⇒ fall through to the catalog price / tier. Never
+   * enters the slot math.
+   */
+  declaredCostPerMtok?: number | null;
   /** Learned quota-state entry for this pool's provider/model key, if any. */
   quotaStateEntry?: QuotaStateEntry | null;
   /** RPM/TPM discovered for this pool (provider query or response headers). */
@@ -252,6 +260,12 @@ export interface PoolDispatchAllocation {
    */
   concurrencyCap?: number | null;
   /**
+   * Echo of {@link CapacityPool.declaredCostPerMtok} — the pool's operator-declared
+   * a-priori `$/Mtok`. Carried through unfolded so the summary can surface it to the
+   * admission cost rank; never affects the slot math here.
+   */
+  declaredCostPerMtok?: number | null;
+  /**
    * True when this pool is the conversation host's own pool (no backing
    * {@link CapacityPool.source}), false for a configured backend source. Carried so
    * the throughput axis of the cost↔speed dial can tell a hardware-parallel source
@@ -297,6 +311,13 @@ export const DispatchCapacityPoolSummarySchema = z
      * it to `AdmissionPool.declaredCap` for an otherwise-optimistic backend source.
      */
     concurrency_cap: z.number().int().min(1).nullable().optional(),
+    /**
+     * Operator-declared a-priori $/Mtok for this pool's endpoint (from
+     * source.cost_per_mtok; see CapacityPool.declaredCostPerMtok). Surfaced so the
+     * admission builder feeds it to deriveCostRank as rung 2 (authoritative over the
+     * models.dev catalog); 0 = declared-free → routes first.
+     */
+    declared_cost_per_mtok: z.number().min(0).nullable().optional(),
   })
   .strict();
 export type DispatchCapacityPoolSummary = z.infer<
@@ -582,6 +603,7 @@ function schedulePool(
     ...(pool.quotaSignalDegraded ? { quotaSignalDegraded: true } : {}),
     ...(pool.quotaCoverage ? { quotaCoverage: pool.quotaCoverage } : {}),
     ...(pool.concurrencyCap != null ? { concurrencyCap: pool.concurrencyCap } : {}),
+    ...(pool.declaredCostPerMtok != null ? { declaredCostPerMtok: pool.declaredCostPerMtok } : {}),
   };
 }
 
@@ -623,5 +645,6 @@ export function summarizeDispatchCapacityPools(
     ...(allocation.quotaSignalDegraded ? { quota_signal_degraded: true } : {}),
     ...(allocation.quotaCoverage ? { quota_coverage: allocation.quotaCoverage } : {}),
     ...(allocation.concurrencyCap != null ? { concurrency_cap: allocation.concurrencyCap } : {}),
+    ...(allocation.declaredCostPerMtok != null ? { declared_cost_per_mtok: allocation.declaredCostPerMtok } : {}),
   }));
 }

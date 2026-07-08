@@ -39,6 +39,17 @@ function positiveIntCapOrNull(value: number | undefined): number | null {
 }
 
 /**
+ * A source's operator-declared `$/Mtok`, normalized to a non-negative finite number
+ * or null (unknown → fall through to the models.dev price / tier at rank time). `0`
+ * is a VALID declaration (a genuinely-free backend) and is preserved; only a
+ * negative / non-finite value degrades to null so it can never be trusted as "free".
+ */
+function nonNegativeCostOrNull(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+/**
  * Bridge a generic {@link DispatchableSource} to the concrete per-provider config
  * block its provider constructor expects, so `createFreshSessionProvider` can build
  * the right backend FROM the source (not the global block). `endpoint` + `parameters`
@@ -240,6 +251,10 @@ export async function buildSourcePool(params: {
     // null (uncapped) — never 0, which would ceiling the pool to zero in-flight and
     // wedge the rolling engine, and would also violate the summary schema's min(1).
     concurrencyCap: positiveIntCapOrNull(source.quota?.max_concurrent),
+    // Operator-declared a-priori $/Mtok for this endpoint → the admission cost rank
+    // (rung 2, authoritative over the models.dev catalog). 0 = declared-free → routes
+    // first. null when unset/invalid ⇒ falls through to the catalog price / tier.
+    declaredCostPerMtok: nonNegativeCostOrNull(source.cost_per_mtok),
     quotaStateEntry: quotaEntries[poolKey] ?? null,
     // QuotaModelLimits is structurally a DiscoveredRateLimitsInput (RPM/TPM/context/
     // output) — the operator-declared per-source rate limit feeds the S4 fold.

@@ -8,7 +8,9 @@
  * three rungs (mirroring `resolveLimits`):
  *
  *   1. operator-confirmed ordering  (Gate-0 approved provider/model position)
- *   2. models.dev blended price      (real $/Mtok from the vendored dataset)
+ *   2. price band: an operator-declared per-source `$/Mtok` (authoritative over the
+ *      catalog — the operator knows their own configured endpoint's cost, e.g. a free
+ *      arbitrage backend declares 0), else the models.dev blended price
  *   3. tier ordinal                  (pre-existing fallback)
  *
  * The rungs occupy DISJOINT numeric bands so a dollar value is never compared
@@ -44,6 +46,15 @@ export const COST_BLEND_OUTPUT_WEIGHT = 0.25;
 export const CONFIRMED_ORDER_BAND_BASE = 0;
 export const PRICE_BAND_BASE = 1_000_000;
 export const UNKNOWN_PRICE_BAND_BASE = 2_000_000;
+
+/**
+ * Width of the price band — the maximum in-band $/Mtok before a price would overflow
+ * into the unknown-price band and invert ordering. models.dev's dearest models are
+ * ~$75/Mtok, far inside this, but an OPERATOR-declared price is unbounded input, so
+ * the declared rung guards against a nonsensical value silently breaking the
+ * band-disjointness invariant (a declared price this large routes last, as unknown).
+ */
+export const PRICE_BAND_WIDTH = UNKNOWN_PRICE_BAND_BASE - PRICE_BAND_BASE;
 
 /**
  * Blend a models.dev price pair into one representative $/Mtok scalar. Returns
@@ -91,6 +102,15 @@ export interface CostRankInput {
   /** Pool tier for the fallback ordinal (rung 3). */
   tier: DispatchModelTier | null | undefined;
   /**
+   * Operator-declared `$/Mtok` for this pool's own configured source (rung 2,
+   * authoritative OVER the models.dev lookup — the operator knows their endpoint's
+   * price, e.g. a free arbitrage backend declares `0`). `null`/absent ⇒ fall through
+   * to the models.dev price / tier. A declared `0` sorts free-first (price-band floor),
+   * still BELOW any Gate-0 confirmed position (rung 1). A negative/non-finite value is
+   * ignored (falls through), never trusted as "free".
+   */
+  declaredCostPerMtok?: number | null;
+  /**
    * Operator-confirmed integer position for this pool's provider/model (rung 1).
    * `null`/absent when the run carries no confirmed ordering, or this pool was
    * not in it (e.g. a source pool that appeared after confirmation) — such a pool
@@ -112,7 +132,19 @@ export function deriveCostRank(input: CostRankInput): number {
   ) {
     return CONFIRMED_ORDER_BAND_BASE + input.confirmedPosition;
   }
-  // Rung 2 — real blended price when the dataset knows the model.
+  // Rung 2a — operator-declared per-source price is authoritative over the generic
+  // models.dev catalog: the operator knows their own endpoint's cost. A declared 0
+  // lands at the price-band floor → free-first, below any positive-priced pool (but
+  // still above a rung-1 confirmed position). Negative/non-finite is ignored.
+  if (
+    typeof input.declaredCostPerMtok === "number" &&
+    Number.isFinite(input.declaredCostPerMtok) &&
+    input.declaredCostPerMtok >= 0 &&
+    input.declaredCostPerMtok < PRICE_BAND_WIDTH
+  ) {
+    return PRICE_BAND_BASE + input.declaredCostPerMtok;
+  }
+  // Rung 2b — real blended price when the dataset knows the model.
   const price = resolveModelPrice(input.model, input.provider);
   if (price !== undefined) return PRICE_BAND_BASE + price;
   // Rung 3 — tier ordinal, offset above every priced pool (unknown = overflow).

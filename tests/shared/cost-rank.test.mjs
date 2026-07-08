@@ -147,6 +147,57 @@ describe("deriveCostRank — rungs occupy disjoint bands", () => {
   });
 });
 
+describe("deriveCostRank — operator-declared per-source price (rung 2, arbitrage free-first)", () => {
+  test("a declared 0 sorts at the price-band floor (free-first)", () => {
+    expect(deriveCostRank({ model: UNKNOWN_MODEL, tier: "deep", declaredCostPerMtok: 0 })).toBe(PRICE_BAND_BASE);
+  });
+  test("a declared-free pool beats every positive-priced and every unknown-price pool", () => {
+    const free = deriveCostRank({ model: UNKNOWN_MODEL, tier: "deep", declaredCostPerMtok: 0 });
+    const cheapestPriced = deriveCostRank({ model: "claude-haiku-4-5", tier: "small" }); // ~2.00
+    const unknownCheapTier = deriveCostRank({ model: UNKNOWN_MODEL, tier: "small" });
+    expect(free).toBeLessThan(cheapestPriced);
+    expect(free).toBeLessThan(unknownCheapTier);
+  });
+  test("declared price is authoritative OVER the models.dev catalog for the same model", () => {
+    // claude-opus-4-8 is priced ~10.00 in the vendored set; a declared 0.5 must win.
+    const declared = deriveCostRank({ model: "claude-opus-4-8", tier: "deep", declaredCostPerMtok: 0.5 });
+    const catalog = deriveCostRank({ model: "claude-opus-4-8", tier: "deep" });
+    expect(declared).toBe(PRICE_BAND_BASE + 0.5);
+    expect(declared).toBeLessThan(catalog);
+  });
+  test("declared pools order by their declared dollars", () => {
+    const cheap = deriveCostRank({ model: UNKNOWN_MODEL, tier: "deep", declaredCostPerMtok: 0 });
+    const dearer = deriveCostRank({ model: UNKNOWN_MODEL, tier: "deep", declaredCostPerMtok: 3 });
+    expect(cheap).toBeLessThan(dearer);
+  });
+  test("a Gate-0 confirmed position still beats a declared 0 (rung 1 > rung 2)", () => {
+    const confirmed = deriveCostRank({ model: UNKNOWN_MODEL, tier: "deep", declaredCostPerMtok: 0, confirmedPosition: 0 });
+    const declaredFree = deriveCostRank({ model: UNKNOWN_MODEL, tier: "deep", declaredCostPerMtok: 0 });
+    expect(confirmed).toBeLessThan(declaredFree);
+  });
+  test("a negative / non-finite declared value is ignored (never trusted as free) — falls through", () => {
+    const negative = deriveCostRank({ model: "claude-sonnet-5", tier: "standard", declaredCostPerMtok: -1 });
+    const nan = deriveCostRank({ model: "claude-sonnet-5", tier: "standard", declaredCostPerMtok: Number.NaN });
+    const catalog = deriveCostRank({ model: "claude-sonnet-5", tier: "standard" });
+    expect(negative).toBe(catalog);
+    expect(nan).toBe(catalog);
+  });
+  test("declared price on an unknown model still lands in the price band, not the unknown band", () => {
+    const declared = deriveCostRank({ model: UNKNOWN_MODEL, tier: "deep", declaredCostPerMtok: 1 });
+    expect(declared).toBeGreaterThanOrEqual(PRICE_BAND_BASE);
+    expect(declared).toBeLessThan(UNKNOWN_PRICE_BAND_BASE);
+  });
+  test("a nonsensical declared cost >= the price-band width falls through (never overflows the band)", () => {
+    // A declared value large enough to overflow into the unknown band is rejected as
+    // the declared rung and falls through to models.dev / tier — the band-disjointness
+    // invariant holds even for absurd operator input.
+    const huge = deriveCostRank({ model: UNKNOWN_MODEL, tier: "small", declaredCostPerMtok: 5_000_000 });
+    const plainUnknown = deriveCostRank({ model: UNKNOWN_MODEL, tier: "small" });
+    expect(huge).toBe(plainUnknown);
+    expect(huge).toBeGreaterThanOrEqual(UNKNOWN_PRICE_BAND_BASE);
+  });
+});
+
 describe("suggestCostOrdering — Gate-0 suggestion", () => {
   test("orders known cheapest-first, unknown-price last by tier", () => {
     const suggestion = suggestCostOrdering([
