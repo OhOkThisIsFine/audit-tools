@@ -12,10 +12,15 @@
   creep — see `git log` and project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
 - **Immediate next:** the free/cheap multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md`
-  → Forward tracks; [[arbitrage-dispatch-tier-design]]) and the shipped cost↔speed dial's own
-  residuals (`/models` concurrency probe; B2 host-reorder seed — both in `docs/backlog.md`, dial
-  bullet). Then the remaining env-bound live validations (quota pre-wall pacing, friction escalation,
-  selective-deepening convergence, clippy/rubocop live spawn).
+  → Forward tracks; [[arbitrage-dispatch-tier-design]]) — Phase-0 first slice = `opencode-free` +
+  `vertex-trial` source pools; opens with owner-gated setup calls (opencode `Bearer public` ToS,
+  a GCP $300-trial service account for vertex-trial). Then the remaining env-bound live validations
+  (quota pre-wall pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn).
+- **Cost↔speed dial residuals — adjudicated 2026-07-08, both deferred (see `docs/backlog.md`, dial bullet):**
+  the `/models` concurrency probe is DEFERRED pending a design pass (a standard `/v1/models` exposes no
+  concurrency signal; rate-limit headers are the buildable-but-unpinned path); B2 host-reorder is OPEN
+  pending a scope call (pool-keyed field vs. the already-shipped provider `exclude` + `cost_order`). The
+  dead `buildProviderConfirmationDisplay` (D-71) was deleted.
 - **Dispatch admission-control — residual (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
