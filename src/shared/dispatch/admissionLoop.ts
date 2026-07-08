@@ -43,13 +43,6 @@ export interface AdmissionPool {
   costRank: number;
   /** Capability rank — HIGHER is more capable; ties break toward more capable. */
   capabilityRank: number;
-  /**
-   * Throughput score — HIGHER is faster (sustained token-intake rate the pool's
-   * declared limits permit; `+Infinity` ⇒ rate-unbounded/unmetered). Only consulted
-   * when the dispatch bias (λ) is > 0; see {@link AdmitBatchInput.dispatchBias} and
-   * spec/dispatch-cost-speed-dial.md.
-   */
-  throughputScore: number;
   /** Largest packet cost this pool can fit (context window − output). */
   capacityTokens: number;
 }
@@ -155,10 +148,24 @@ function poolIdCmp(a: AdmissionPool, b: AdmissionPool): number {
   return a.poolId < b.poolId ? -1 : a.poolId > b.poolId ? 1 : 0;
 }
 
+/**
+ * A pool's throughput proxy for the cost↔speed dial (spec/dispatch-cost-speed-dial.md):
+ * its declared CONCURRENCY (how many packets it runs in parallel), which is the same
+ * real-world property as `declaredCap` and clears a batch proportionally faster. This
+ * is auto-derived from what the provider already declares (a source's `max_concurrent`
+ * or the host's subagent budget) — no operator rate declaration, and no learned/measured
+ * signal (honors "concurrency is declared or absent, never learned"). An ABSENT cap
+ * (`null`) ⇒ unbounded parallelism ⇒ `+Infinity` (ranks fastest); a small cap (the
+ * sequential-ish host) ranks slower than an uncapped/high-concurrency source.
+ */
+function throughputOf(pool: AdmissionPool): number {
+  return pool.declaredCap == null ? Number.POSITIVE_INFINITY : pool.declaredCap;
+}
+
 /** Descending throughput; `+Infinity`-safe (Infinity−Infinity would be NaN). */
 function speedFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
-  const ta = a.throughputScore;
-  const tb = b.throughputScore;
+  const ta = throughputOf(a);
+  const tb = throughputOf(b);
   if (ta !== tb) {
     if (ta === Number.POSITIVE_INFINITY) return -1;
     if (tb === Number.POSITIVE_INFINITY) return 1;

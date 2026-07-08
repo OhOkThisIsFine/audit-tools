@@ -30,37 +30,49 @@ The dial is **1D**: cost ↔ throughput, with **capability as a hard floor** (no
 Whether *quality* also becomes tradeable (a true 2D dial needing a per-task quality-worth weighting)
 is deferred — see *Deferred*.
 
-## The throughput axis — declared signals only
+## The throughput axis — concurrency, auto-derived (no declaration)
 
-**Throughput is composed only from signals the provider or operator DECLARES. Nothing is learned or
-measured.** This is a direct consequence of the settled rule *"concurrency is declared or absent,
-never learned"* ([[concurrency-is-declared-or-absent-never-learned]]): the earlier dial sketch
-defined speed against an AIMD adaptive concurrency ceiling, which was built, adversarially reviewed,
-and reverted. There is no learned ceiling to lean on, and we do not add a measured tokens/sec signal
-(that is the same class of learned dispatch signal C3-AIMD burned on).
+**Throughput is the pool's declared CONCURRENCY — how many packets it runs in parallel — and it is
+auto-derived from what the provider already states. Nothing is learned, measured, or hand-declared.**
 
-The declared inputs already exist on every pool, on `discoveredLimits` / `resolved_limits`
-(`src/shared/quota/types.ts` `ResolvedLimits`) and `source.quota` (`QuotaModelLimits`):
+Two constraints shape this:
 
-- `input_tokens_per_minute` / `output_tokens_per_minute` (TPM) — the sustained token intake rate.
-- `requests_per_minute` (RPM) — the sustained request rate.
-- `concurrencyCap` / `declaredCap` — a hard in-flight COUNT cap (already enforced as a hard admission
-  gate in the `admitBatch` spill loop; it is a parallelism bound, not a rate).
+- *"Concurrency is declared or absent, never learned"* ([[concurrency-is-declared-or-absent-never-learned]]):
+  an earlier dial sketch ranked speed against an AIMD adaptive concurrency ceiling, which was built,
+  adversarially reviewed, and reverted. There is no learned ceiling, and we do not add a measured
+  tokens/sec signal (the same class of learned dispatch signal C3-AIMD burned on).
+- *A needed manual flag is a bug signal* (the owner, 2026-07-08): the operator must **not** have to
+  hand-declare a per-pool rate to get correct speed routing. So the throughput signal must come from
+  what is already known auto-magically, never from a new operator field.
 
-**`throughputScore(pool)`** — the sustained token-intake rate the pool's declared limits permit
-(higher = faster):
+The signal that satisfies both is the concurrency the pool **already carries** on `AdmissionPool.declaredCap`
+— sourced auto from a provider's declared in-flight cap (a source's `source.quota.max_concurrent`,
+e.g. Codex 6 / a NIM endpoint's `max_num_seqs`) or the conversation host's subagent budget
+(`host_concurrency_limit.active_subagents`). Concurrency is the dominant factor in how fast a *batch*
+clears — a pool that runs N in parallel clears ~N× per round-trip — and it is the same real-world
+property as the in-flight cap, so one number honestly serves both roles.
 
-1. **TPM present** → `throughputScore = input_tokens_per_minute` (the aggregate sustained rate; a
-   provider's own concurrency allowance is already subsumed by the rate it publishes).
-2. **TPM absent, RPM present** → derive from RPM against a representative packet size
-   (`requests_per_minute × REPRESENTATIVE_PACKET_TOKENS`), a declared-signal proxy for token rate.
-3. **No declared rate limit** → the pool is rate-unbounded; it ranks as **fastest**
-   (`+Infinity`). This is correct: an unmetered endpoint (e.g. a local NIM server) is
-   hardware-bound, not rate-capped, and the operator's declared config is authoritative.
+**`throughputOf(pool)`** (higher = faster):
 
-`declaredCap` does **not** enter `throughputScore` (it is a count, not a rate); it stays the hard
-parallelism gate it already is in the spill loop. Capability is likewise a separate hard floor, not a
-throughput term.
+- **`declaredCap` finite** → that concurrency (Codex 6 ranks below an uncapped local endpoint, above a
+  sequential host with a subagent budget of 1).
+- **`declaredCap` null** → unbounded parallelism ⇒ **`+Infinity`** (ranks fastest). Correct: an
+  uncapped source (e.g. a local NIM server) takes as many as budget allows and is hardware-bound. This
+  does **not** spuriously crown the conversation host in the multi-pool case the dial actually matters
+  for: an attended host carries a finite `active_subagents` limit, so a genuinely-parallel uncapped
+  source out-ranks it at λ=1 — which is exactly the "dial toward speed → push work onto the parallel
+  pool" behavior the operator wants, with zero declaration.
+
+`declaredCap` thus feeds BOTH the throughput rank (this axis) and the hard in-flight cap (the spill
+loop) — the same quantity, used honestly for both. Declared rate limits (TPM/RPM) are **not** part of
+the throughput rank (mixing a tokens/min magnitude with a concurrency count is unsound); their effect
+is already in the pool's *budget* (the scheduler folds TPM into `remaining_token_budget`), which gates
+admission separately. Capability is likewise a separate hard floor, not a throughput term.
+
+**Future refinement (auto, not manual):** the deferred openai-compatible `/models` capability probe
+(`docs/backlog.md`) can *discover* an endpoint's concurrency / context window at run time and feed it
+here — a richer auto signal, still never a hand-declared rate. It must sanity-clamp a probed value
+before it reaches the rank (a poisoned probe must not over-admit).
 
 ## Operating-point selection — ordinal blend (total order preserved)
 
@@ -87,10 +99,11 @@ Properties:
   from the min-cost corner toward the max-throughput corner — the LP-duality "pick λ → get an
   operating point" the frontier framing describes.
 
-The blend enters at exactly one place — the sort in `admitBatch` (`admissionLoop.ts:167-169`), the
-single point where pool ordering is decided. Spill (walk to the next pool on budget/cap exhaustion),
-the reservation ledger, and `ClaimRegistry` claim-before-assign are all unchanged: the dial reorders
-*which pool is tried first*, never weakens a headroom or safety gate.
+The blend enters at exactly one place — `orderCandidates` feeding the per-packet loop in `admitBatch`,
+the single point where pool ordering is decided. Spill (walk to the next pool on budget/cap
+exhaustion), the reservation ledger, and `ClaimRegistry` claim-before-assign are all unchanged: the
+dial reorders *which pool is tried first*, never weakens a headroom or safety gate. The λ clamp coerces
+a non-finite bias to 0 at this chokepoint, so no caller can make it emit a NaN comparator.
 
 ## Where the dial is set — Gate-0 durable policy
 
@@ -132,16 +145,18 @@ which the existing `costRank` already delivers.
 - **λ = 0 is behavior-identical to the pre-dial cost-first router.** The dial is additive; the
   default operating point is the min-cost corner. (Enforced by a test asserting the λ=0 admission
   order equals the pre-dial order on a mixed pool set.)
-- **Throughput uses declared signals only.** No learned ceiling, no measured tokens/sec, no
-  EWMA on the dispatch path. `throughputScore` is a pure function of `ResolvedLimits` / `QuotaModelLimits`.
+- **Throughput is auto-derived declared concurrency — never learned, measured, or hand-declared.**
+  `throughputOf(pool)` is a pure function of `declaredCap` (null ⇒ +Infinity). No learned ceiling, no
+  measured tokens/sec, no EWMA, and no new operator rate field (a needed manual flag is a bug signal).
 - **Capability stays a hard floor.** The `capable()` filter runs first and is untouched; the dial
   ranks only among capable pools and never trades capability for cost or speed.
 - **The dial reorders, never un-gates.** declaredCap, budget headroom (ledger), cooldowns, and
   claim-before-assign are all applied after the dial's ordering exactly as today.
 - **Parity.** Both orchestrators derive the ordering through the one shared `admitBatch`; the bias is
   threaded identically via `computeDispatchAdmission`. They cannot drift.
-- **No model→price or model→rate literal in backend code.** Throughput inputs come only from declared
-  config / discovered limits, like `costRank`'s price (two-tier dependency policy).
+- **No model→price or model→concurrency literal in backend code.** Throughput comes only from the
+  provider's declared concurrency (or a future discovered probe), like `costRank`'s price (two-tier
+  dependency policy).
 
 ## Deferred / open
 
