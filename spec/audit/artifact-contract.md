@@ -14,7 +14,7 @@ Artifacts are the continuity layer for the single-entrypoint audit engine. They 
 ## Source of truth
 
 The canonical, machine-readable artifact registry is `ARTIFACT_DEFINITIONS` in
-`src/audit/io/artifacts.ts` — 34 entries, each declaring a filename, a phase
+`src/audit/io/artifacts.ts` — 36 entries, each declaring a filename, a phase
 (`intake` / `analysis` / `execution` / `reporting` / `supervisor`), and typed
 read/write functions (JSON, NDJSON, or plain text). This document is the
 declarative reference; that table is authoritative. For exact upstream
@@ -57,6 +57,8 @@ the staleness DAG (see dependency-map.md).
 | `design_assessment.json` | JSON | Deterministic + optional host-delegated design assessment (see below). |
 | `structure_decomposition.json` | JSON | Deterministic structure-layer decomposition (overlay-and-delta operator over behavior-graph + intent sources); emits non-co-localization findings. |
 | `charter_register.json` | JSON | Phase-C charter layer over the structure decomposition, gated by the confirmed intent-checkpoint ceiling. |
+| `charter_clarification.json` | JSON | Phase-D charter-alignment triangulation loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |
+| `systemic_challenge.json` | JSON | Phase-E second-order-adversary improvement-seeking challenge loop over the charter register, gated by the confirmed intent-checkpoint ceiling. |
 | `analyzer_capability.json` | JSON | Marker: outcome of the optional graph-enrichment pass (`applied`/`omitted`) + per-analyzer provenance. |
 | `external_analyzer_acquisition.json` | JSON | Marker: external-analyzer acquisition run record (gitleaks + consent-gated eslint/semgrep/jscpd). |
 

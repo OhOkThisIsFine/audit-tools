@@ -7,7 +7,7 @@ This document defines the bounded executable steps available to the orchestrator
 ## Source of truth
 
 The canonical, machine-readable registry is `EXECUTOR_REGISTRY` in
-`src/audit/orchestrator/executors.ts` — 23 entries, each declaring an `id`, a
+`src/audit/orchestrator/executors.ts` — 25 entries, each declaring an `id`, a
 `kind` (`deterministic` runs inline; `host_delegation` pauses the pipeline and
 asks the active LLM/host agent to do the work), and the `obligation_ids` it
 satisfies. `nextStep.ts`'s priority chain (see `CLAUDE.md` → audit-code
@@ -52,10 +52,9 @@ actual friction triage fires from the `present_report` terminal step
 | `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | `analyzer_capability.json` (+ refreshed `graph_bundle.json` when analyzer edges merge in) |
 | `design_assessment_executor` | deterministic | `design_assessment_current` | `design_assessment.json` (deterministic pass) |
 | `structure_decomposition_executor` | deterministic | `structure_decomposition_current` | `structure_decomposition.json` (overlay-and-delta structure operator) |
-| `charter_extraction_executor` | host_delegation | `charter_extraction_current` | `charter_register.json`; at a deep+ ceiling emits an LLM charter-extraction step, otherwise the runner omits at the default shallow ceiling |
+| `charter_extraction_executor` | host_delegation | `charter_extraction_current` | `charter_register.json` (Phase C charter layer); at a deep+ ceiling emits an LLM charter-extraction step, otherwise the runner omits deterministically at the default shallow ceiling |
 | `design_review_contract` | host_delegation | `design_review_contract_completed` | updates `design_assessment.json` (contract-assessment mode — invariants/boundaries/obligations) |
 | `design_review_conceptual` | host_delegation | `design_review_conceptual_completed` | updates `design_assessment.json` (conceptual-critique mode — philosophy/alternatives) |
-| `charter_extraction_executor` | host_delegation | `charter_extraction_current` | `charter_register.json` (Phase C charter layer; omits deterministically at a shallow ceiling) |
 | `charter_clarification_executor` | host_delegation | `charter_clarification_current` | `charter_clarification.json` (Phase D triangulation loop; assembles deterministically at a shallow ceiling / zero attention) |
 | `systemic_challenge_executor` | host_delegation | `systemic_challenge_current` | `systemic_challenge.json` (Phase E second-order-adversary loop-until-dry; omits deterministically at a shallow ceiling) |
 | `syntax_resolution_executor` | deterministic | `syntax_resolved` | `syntax_resolution_status.json` |

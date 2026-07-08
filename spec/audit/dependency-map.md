@@ -45,6 +45,14 @@ different analyzer version can classify files differently).
 | `design_assessment.json` | `unit_manifest.json`, `critical_flows.json` |
 | `structure_decomposition.json` | `repo_manifest.json`, `file_disposition.json`, `graph_bundle.json` |
 | `charter_register.json` | `structure_decomposition.json`, `intent_checkpoint.json`, `repo_manifest.json` |
+| `charter_clarification.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
+| `systemic_challenge.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json` |
+
+`charter_clarification.json` (Phase D charter-alignment triangulation loop) and
+`systemic_challenge.json` (Phase E second-order-adversary challenge loop) both
+anchor to the same triad as `charter_register.json` so the two conceptual-review
+outputs stale together whenever the charter register, the intent ceiling, or the
+repo manifest changes.
 
 `analyzer_capability.json` is the marker recording the outcome of the optional
 graph-enrichment pass (`applied` / `omitted`, plus per-analyzer resolution +
@@ -93,7 +101,7 @@ note the extension: this is **not** a `.json` array.
 
 | Artifact | Depends on |
 |---|---|
-| `audit-report.md` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `structure_decomposition.json`, `charter_register.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_report.json`, `audit_results.jsonl`, `agent-feedback.jsonl` |
+| `audit-report.md` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_report.json`, `audit_results.jsonl`, `agent-feedback.jsonl` |
 | `synthesis-narrative.json` | `audit-findings.json` |
 
 The human render (`audit-report.md`) depends on every analysis artifact plus
@@ -126,7 +134,8 @@ exactly once; an unchanged file keeps its revision, so finalization converges.
 If `repo_manifest.json` changes, every structure artifact (`graph_bundle.json`,
 `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`,
 `risk_register.json`, `git_history.json`, `design_assessment.json`,
-`structure_decomposition.json`, `charter_register.json`) and every
+`structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`,
+`systemic_challenge.json`) and every
 downstream planning/execution/reporting artifact that lists it as a dependency
 is stale.
 
