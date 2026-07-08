@@ -233,7 +233,12 @@ test("INV-shared-tests-07: quota symbols exported from shared index", async () =
   expect(typeof shared.readQuotaState, "readQuotaState — INV-shared-tests-07").toBe("function");
   expect(typeof shared.writeQuotaState, "writeQuotaState — INV-shared-tests-07").toBe("function");
   expect(typeof shared.recordWaveOutcome, "recordWaveOutcome — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.computeMaxSafeConcurrency, "computeMaxSafeConcurrency — INV-shared-tests-07").toBe("function");
+  expect(typeof shared.readQuotaStateOrDegrade, "readQuotaStateOrDegrade — INV-shared-tests-07").toBe("function");
+  // NEGATIVE: the learned-concurrency inference is deleted, not merely unused.
+  // Concurrency is DECLARED by the provider or ABSENT — never learned from an
+  // outcome stream. Re-exporting a computeMaxSafeConcurrency would resurrect it.
+  expect(shared.computeMaxSafeConcurrency, "computeMaxSafeConcurrency must NOT exist").toBeUndefined();
+  expect(shared.computeRampUpConcurrency, "computeRampUpConcurrency must NOT exist").toBeUndefined();
 
   // Capacity.
   expect(typeof shared.computeDispatchCapacity, "computeDispatchCapacity — INV-shared-tests-07").toBe("function");

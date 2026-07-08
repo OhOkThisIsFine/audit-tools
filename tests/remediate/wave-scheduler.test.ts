@@ -9,7 +9,6 @@ import {
 } from "../../src/remediate/steps/dispatch.js";
 import {
   computeBackoffCooldownMs,
-  computeBackoffFailureWeight,
 } from "../../src/remediate/quota/index.js";
 import {
   CODEX_DEFAULT_MAX_THREADS,
@@ -368,7 +367,6 @@ function makeQuotaStateEntry(
 ): QuotaStateEntry {
   return {
     updated_at: "2026-01-01T00:00:00.000Z",
-    buckets: {},
     cooldown_until: null,
     last_429_at: null,
     ...overrides,
@@ -395,9 +393,6 @@ describe("buildDispatchQuota — backoff state from learned quota entry", () => 
     expect(quota.backoff_state!.consecutive_429_count).toBe(3);
     expect(quota.backoff_state!.current_cooldown_ms).toBe(
       computeBackoffCooldownMs(3),
-    );
-    expect(quota.backoff_state!.current_failure_weight).toBe(
-      computeBackoffFailureWeight(3),
     );
   });
 
@@ -573,7 +568,6 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
         providerName: "antigravity",
         sessionConfig: {},
         hostConcurrencyLimit: null,
-        quotaStateEntry: null,
       }),
     ).toBe(false);
   });
@@ -584,7 +578,6 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
         providerName: "antigravity",
         sessionConfig: {},
         hostConcurrencyLimit: { active_subagents: 8, source: "session_config" } as any,
-        quotaStateEntry: null,
       }),
     ).toBe(true);
   });
@@ -595,23 +588,22 @@ describe("classifyCapableHost (off the cold-start floor)", () => {
         providerName: "antigravity",
         sessionConfig: {} as any,
         hostConcurrencyLimit: { active_subagents: 3, source: "session_config" } as any,
-        quotaStateEntry: null,
       }),
     ).toBe(false);
   });
 
-  it("learned evidence above the floor lifts the host off it", () => {
-    const entry = makeQuotaStateEntry({
-      buckets: { "6": { weight: 5, last_success_at: "2026-01-01T00:00:00.000Z" } } as any,
-    });
+  it("nothing but a DECLARED ceiling can lift a host off the floor", () => {
+    // Capability is declared, never inferred. The removed branch let recorded
+    // "safe concurrency" evidence lift a host off the cold-start floor — a
+    // learned-concurrency inference. With no reported ceiling, a host stays at
+    // the floor no matter what its quota history says.
     expect(
       classifyCapableHost({
         providerName: "antigravity",
         sessionConfig: {},
         hostConcurrencyLimit: null,
-        quotaStateEntry: entry,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 
@@ -1178,7 +1170,6 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
           active_subagents: CAPABLE_CEILING,
           source: "session_config",
         } as any,
-        quotaStateEntry: null,
       }),
     ).toBe(true);
   });
@@ -1216,7 +1207,6 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
         providerName: "antigravity",
         sessionConfig: {},
         hostConcurrencyLimit: null,
-        quotaStateEntry: null,
       }),
     ).toBe(false);
   });
@@ -1288,78 +1278,76 @@ describe("F4 fail-3 [CP-NODE-51]: token estimate is local estimateTokensFromByte
 // ---------------------------------------------------------------------------
 // F4 inv-9 (CP-NODE-47) — await-completion records the just-finished wave's
 // outcome BEFORE the next scheduling decision: each ObservedWaveOutcome is
-// persisted to QuotaState via recordWaveOutcome, so the learned concurrency the
-// next schedule reads back reflects that finished wave. A `success` outcome
-// lifts the learned safe concurrency to the observed wave width; a follow-up
-// `rate_limited` outcome bumps consecutive_429_count, stamps last_429_at, sets a
-// cooldown_until, and drives the learned safe concurrency back down — all read
-// back from the SAME persisted QuotaState. (The inv-5 cooldown_until persists
-// earlier and independently of this outcome accounting.)
+// persisted to QuotaState via recordWaveOutcome, so the REACTIVE BACKOFF state
+// the next schedule reads back reflects that finished wave. A `success` clears
+// the 429 streak and cooldown; a `rate_limited` bumps consecutive_429_count,
+// stamps last_429_at, and sets a cooldown.
+//
+// It records NO concurrency evidence: concurrency is declared or absent, never
+// learned from an outcome stream. (The inv-5 cooldown_until persists earlier and
+// independently of this outcome accounting.)
 // ---------------------------------------------------------------------------
 
-describe("F4 inv-9 [CP-NODE-47]: success/rate_limited outcome via recordWaveOutcome updates learned state; next schedule reflects it", () => {
-  it("persists each wave outcome to QuotaState so the next decision's learned concurrency reflects the just-finished wave", async () => {
-    const {
-      setQuotaStateDir,
-      recordWaveOutcome,
-      readQuotaState,
-      computeMaxSafeConcurrency,
-    } = await import("../../src/remediate/quota/index.js");
+describe("F4 inv-9 [CP-NODE-47]: success/rate_limited outcome via recordWaveOutcome updates reactive state; next schedule reflects it", () => {
+  it("persists each wave outcome to QuotaState so the next decision's backoff state reflects the just-finished wave", async () => {
+    const { setQuotaStateDir, recordWaveOutcome, readQuotaState } = await import(
+      "../../src/remediate/quota/index.js"
+    );
+    // The SHARED (synchronous) scheduleWave — not remediate's async dispatch wrapper.
+    const { scheduleWave: sharedScheduleWave } = await import("audit-tools/shared");
     const { mkdtemp, rm } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
 
     const dir = await mkdtemp(join(tmpdir(), "cp-node-47-quota-"));
-    const HALF_LIFE = 24;
     const KEY = "claude-code/*";
-    const WAVE = 4;
     try {
       setQuotaStateDir(dir);
 
-      // Cold start: no learned evidence → safe concurrency floors at 1.
-      const cold = await readQuotaState();
-      expect(computeMaxSafeConcurrency(cold.entries[KEY] ?? { updated_at: "", buckets: {}, cooldown_until: null, last_429_at: null }, HALF_LIFE)).toBe(1);
+      // Cold start: no entry at all.
+      expect((await readQuotaState()).entries[KEY]).toBeUndefined();
 
-      // A wave of width 4 finishes successfully. await-completion records the
-      // outcome BEFORE the next decision: it is persisted to QuotaState.
-      await recordWaveOutcome(
-        KEY,
-        { concurrency: WAVE, estimated_tokens: 1000, outcome: "success" },
-        HALF_LIFE,
-      );
+      // A wave finishes successfully. await-completion records the outcome BEFORE
+      // the next decision: it is persisted to QuotaState.
+      await recordWaveOutcome(KEY, { outcome: "success" });
 
-      // The NEXT decision reads the persisted state back: every bucket 1..4 now
-      // carries success evidence, so learned safe concurrency reflects the
-      // just-finished wave width.
-      const afterSuccess = await readQuotaState();
-      const successEntry = afterSuccess.entries[KEY];
+      const successEntry = (await readQuotaState()).entries[KEY];
       expect(successEntry).toBeDefined();
       expect(successEntry.consecutive_429_count ?? 0).toBe(0);
       expect(successEntry.cooldown_until).toBeNull();
-      expect(successEntry.buckets[String(WAVE)].success_weight).toBeGreaterThanOrEqual(1);
-      expect(computeMaxSafeConcurrency(successEntry, HALF_LIFE)).toBe(WAVE);
+      // No concurrency evidence is recorded — there is nowhere for it to go.
+      expect("buckets" in successEntry).toBe(false);
 
-      // The same wave then hits a 429. Recording the rate_limited outcome bumps
-      // consecutive_429_count, stamps last_429_at, sets a cooldown, and spreads
-      // failure evidence onto the bucket — all persisted to the SAME state.
-      await recordWaveOutcome(
-        KEY,
-        { concurrency: WAVE, estimated_tokens: 1000, outcome: "rate_limited" },
-        HALF_LIFE,
-      );
+      // The same wave then hits a 429: 429 streak, last_429_at, and a cooldown,
+      // all persisted to the SAME state and read back by the next decision.
+      await recordWaveOutcome(KEY, { outcome: "rate_limited" });
 
-      const afterRateLimit = await readQuotaState();
-      const rlEntry = afterRateLimit.entries[KEY];
+      const rlEntry = (await readQuotaState()).entries[KEY];
       expect(rlEntry.consecutive_429_count).toBe(1);
       expect(rlEntry.last_429_at).not.toBeNull();
       expect(rlEntry.cooldown_until).not.toBeNull();
-      expect(rlEntry.buckets[String(WAVE)].failure_weight).toBeGreaterThan(0);
-      // The next decision now reads a LOWER learned safe concurrency: the bucket
-      // at the throttled width is poisoned by failure evidence, so the scan
-      // stops below it — the just-finished rate-limited wave shaped the decision.
-      expect(computeMaxSafeConcurrency(rlEntry, HALF_LIFE)).toBeLessThan(WAVE);
+
+      // Close the loop: the NEXT scheduling decision, fed the persisted entry,
+      // actually reflects the just-finished wave — it throttles to 1 on the
+      // cooldown. (Asserting persistence alone would not catch a scheduler that
+      // ignored the entry.)
+      const throttled = sharedScheduleWave({
+        providerName: "claude-code",
+        sessionConfig: { quota: { enabled: true } } as any,
+        hostModel: null,
+        requestedConcurrency: 8,
+        quotaStateEntry: rlEntry,
+      });
+      expect(throttled.max_concurrent).toBe(1);
+      expect(throttled.binding_cap).toBe("cooldown");
+
+      // And an in-flight success landing DURING that cooldown must not cancel it
+      // (INV-QD-16) — the next decision stays throttled.
+      await recordWaveOutcome(KEY, { outcome: "success" });
+      const stillThrottled = (await readQuotaState()).entries[KEY];
+      expect(stillThrottled.cooldown_until).toBe(rlEntry.cooldown_until);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 });

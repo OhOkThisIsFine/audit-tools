@@ -171,7 +171,7 @@ export interface CapacityPool {
   /**
    * Hard ceiling on simultaneously active subagents for this pool, if the host
    * reported one (e.g. `--host-max-active-subagents`, or `parallel_workers` from
-   * session-config). null leaves only the rate / learned / first-contact caps.
+   * session-config). null leaves only the rate / token-budget caps.
    */
   hostConcurrencyLimit: HostConcurrencyLimit | null;
   /**
@@ -342,7 +342,6 @@ const CAP_PRIORITY: Record<WaveBindingCap, number> = {
   token_budget: 5,
   tpm: 4,
   rpm: 3,
-  learned: 2,
   none: 0,
 };
 
@@ -390,8 +389,8 @@ function deriveGlobalHostBudget(pools: CapacityPool[]): number | null {
  *
  * The pending layout is partitioned across pools in caller order, with each pool
  * receiving the largest remaining item estimates that fit in its current wave.
- * Each pool is then scheduled independently, so RPM, TPM, learned limits, cooldowns,
- * and real-time quota snapshots remain per-backend.
+ * Each pool is then scheduled independently, so RPM, TPM, cooldowns, and real-time
+ * quota snapshots remain per-backend.
  *
  * The host concurrency limit (e.g. `--host-max-active-subagents`) is GLOBAL: it
  * constrains the total across all pools, not each pool independently. When multiple
@@ -483,7 +482,7 @@ export function computeDispatchCapacity(
  *
  *  1. **Exploratory pass** — call `schedulePool` over ALL remaining items to get
  *     an unconstrained slot estimate and the full binding-cap attribution (RPM,
- *     TPM, learned, etc.). Using the full remaining set lets the TPM budget see
+ *     TPM, token_budget, etc.). Using the full remaining set lets the TPM budget see
  *     the realistic token landscape rather than only the items already assigned.
  *
  *  2. **Initial assigned-slice pass** — narrow the token list to `assignedCount`

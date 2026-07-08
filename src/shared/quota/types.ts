@@ -51,14 +51,8 @@ export const ResolvedLimitsSchema = z
   .strict();
 export type ResolvedLimits = z.infer<typeof ResolvedLimitsSchema>;
 
-export interface ConcurrencyBucket {
-  success_weight: number;
-  failure_weight: number;
-}
-
 export interface QuotaStateEntry {
   updated_at: string;
-  buckets: Record<string, ConcurrencyBucket>;
   cooldown_until: string | null;
   last_429_at: string | null;
   consecutive_429_count?: number;
@@ -99,7 +93,6 @@ export const WaveBindingCapSchema = z.enum([
   "rpm",
   "tpm",
   "token_budget",
-  "learned",
   "cooldown",
   "host_concurrency",
   "none",
@@ -136,20 +129,22 @@ export const BackoffStateSchema = z
   .object({
     consecutive_429_count: z.number().int().min(0),
     current_cooldown_ms: z.number().int().min(0),
-    current_failure_weight: z.number().min(0),
   })
   .strict();
 export type BackoffState = z.infer<typeof BackoffStateSchema>;
 
 export interface ObservedWaveOutcome {
-  concurrency: number;
-  estimated_tokens: number;
   /**
-   * - `success`: wave completed without error.
+   * - `success`: wave completed without error — clears the 429 streak and cooldown,
+   *   but NEVER a still-live cooldown (a concurrent success is not evidence a 429
+   *   is over).
    * - `rate_limited`: provider signalled 429 / quota exhaustion — applies cooldown + backoff.
-   * - `timeout`: execution deadline exceeded — records failure weight but no rate-limit cooldown.
-   * - `error`: provider returned a non-quota error (crash, network failure) — records failure
-   *   weight only; does NOT apply rate-limit cooldown (distinct from quota exhaustion).
+   * - `timeout`: execution deadline exceeded — no rate-limit cooldown.
+   * - `error`: provider returned a non-quota error (crash, network failure) — no
+   *   rate-limit cooldown (distinct from quota exhaustion).
+   *
+   * The outcome carries no `concurrency`: concurrency is DECLARED by the provider
+   * or ABSENT, never inferred from an outcome stream.
    */
   outcome: "success" | "rate_limited" | "timeout" | "error";
   cooldown_until?: string | null;

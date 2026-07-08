@@ -63,10 +63,7 @@ export async function buildAuditSourcePools(
   const quotaEntries: Record<string, QuotaStateEntry> = (
     await readQuotaStateOrDegrade("audit source-pool build")
   ).entries;
-  const quotaSource = buildQuotaSource({
-    halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
-      ?.empirical_half_life_hours,
-  });
+  const quotaSource = buildQuotaSource();
   return buildSourcePools({
     sessionConfig,
     primaryProviderName,

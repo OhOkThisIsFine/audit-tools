@@ -72,7 +72,6 @@ test("MNT-56e100e0: converging allocation preserves exploratory binding cap on n
       quota: {
         enabled: true,
         safety_margin: 1.0,
-        empirical_half_life_hours: 24,
       },
     },
     // Many large items so TPM fires on the exploratory pass (3000 TPM / 2000 per

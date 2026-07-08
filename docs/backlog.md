@@ -29,33 +29,31 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`recordWaveOutcome` is called with a hardcoded `concurrency: 1` from the rolling engine (HIGH).**
-  `src/shared/dispatch/rollingDispatch.ts` passes `{ concurrency: 1, … }` for *every* packet. Consequences in
-  `src/shared/quota/state.ts`: on `rate_limited`, failure weight spreads from `concurrency` through
-  `+FAILURE_SPREAD_BUCKETS(4)`, so buckets **1–5** all get `failure_weight >= 1.0` → `computeMaxSafeConcurrency`
-  scans from n=1, sees bucket "1" poisoned, and **breaks immediately ⇒ maxSafe = 1** for the whole 24h half-life.
-  A 429 that happened at 8 in flight is recorded as evidence that *one* concurrent request is unsafe. On `success`,
-  `successCeiling = min(1, 32) = 1`, so only bucket "1" ever accrues success weight ⇒ the bucket learner **can never
-  learn above 1** from rolling dispatch. Consumed for real fan-out by `learnedQuotaSource` / `waveScheduling` on the
-  host path. **Pre-existing on main.** NOTE — the fix is *not* obviously "pass the real in-flight count": per
-  [[concurrency-is-declared-or-absent-never-learned]] a tool-computed `maxSafeConcurrency` is itself the thing the
-  admission-control spec forbids. Decide first whether `buckets` / `computeMaxSafeConcurrency` /
-  `computeRampUpConcurrency` are **legacy from the pre-admission-control era and should be deleted**, or whether they
-  should be fed correct data. Do not fix the symptom before answering that.
-
-- **`updated_at` doubles as the bucket decay clock (MEDIUM).** `applyDecayToEntry` (`src/shared/quota/state.ts`)
-  computes `elapsedHours` from `entry.updated_at` and skips decay entirely below 3.6s — i.e. it treats `updated_at`
-  as "time of last decay". But `recordTokensPerPctObservation` and `recordOutputRatioObservation` bump `updated_at`
-  **without** decaying, discarding the elapsed interval forever. Any writer that is not `recordWaveOutcomeUnsafe`
-  silently suppresses bucket decay. Fix: split a `buckets_decayed_at` field from `updated_at`, set only by the decay
-  path. **Pre-existing on main** (rare today because the slope/ratio writers are gated and fire infrequently).
-
 - **`selectProvider` cannot see a cooldown learned mid-run (MEDIUM).** `scheduleForPool` reads
   `pool.quotaStateEntry ?? quotaStateEntries[poolKey]` (`src/shared/dispatch/rollingDispatch.ts`).
   `CapacityPool.quotaStateEntry` (`src/shared/quota/capacity.ts`) is a **static snapshot** captured at pool
   construction, so when it is present a freshly-written `cooldown_until` is never observed → `isPoolQuotaDegraded` is
   inert and the INV-QD-14 proactive spill never deprioritises the throttled pool. Prefer the live
-  `quotaStateEntries[poolKey]` over the frozen snapshot. **Pre-existing on main.**
+  `quotaStateEntries[poolKey]` over the frozen snapshot. **Pre-existing on main.** Now the *only* remaining
+  hole in cooldown propagation: INV-QD-15 made the write atomic and INV-QD-16 stopped a concurrent success
+  from cancelling a live cooldown, so a mid-run cooldown is durably on disk — the frozen snapshot is what
+  still hides it from `selectProvider`.
+
+- **A test can drive a deleted code path through a module-namespace spy and pass vacuously (tool-should-decide).**
+  Two `tests/remediate/wave-scheduler.test.ts` tests drove the quota-read failure path via
+  `vi.spyOn(quotaModule, "readQuotaState")` on a *re-export*. When the source switched to an internal call, the spy
+  stopped intercepting: one test failed loudly (good), but the sibling **negative** contract (CP-NODE-52,
+  "the rejection does not throw") kept passing while never executing the failure path. A green negative test that
+  exercises nothing is worse than no test. Both now drive a real corrupt `quota-state.json`. Generalizable guard:
+  a lint/test-invariant that flags `vi.spyOn(<module namespace>, …)` on a re-export barrel — the failure mode is
+  silent and survives the very refactor the test exists to protect. Related: [[worktree-tests-miss-integration-guards]].
+
+- **Two adversarial reviews in a row found a defect the author's own green suite missed (ambiguous-direction).**
+  INV-QD-15's first cut left `tests/remediate/wave-scheduler.test.ts` RED and would have shipped; the bucket
+  deletion's first cut promoted a latent `success`-clears-live-cooldown bug (INV-QD-16) to the sole failure mode.
+  Both were caught only by an independent reviewer agent, not by the author pass. This is [[delegate-adversarial-phases-to-separate-agent]]
+  earning its keep — but it is still a *host habit*, not a tool obligation. The remediate contract pipeline already
+  runs adversarial rounds; the same gate should exist for hand-authored (non-node) changes to loop-core modules.
 
 - **Session-config RMW helpers are unlocked (B1 review finding #4, minor).** `persistHostProvider` and the
   pre-existing `persistAnalyzerSettings` (`src/audit/supervisor/sessionConfig.ts`) do read→merge→validate→

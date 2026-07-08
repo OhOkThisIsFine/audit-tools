@@ -46,7 +46,7 @@ function unlimitedSession() {
 // proactive cross-pool spill ordering (INV-QD-14), which is inert when quota is
 // disabled (selection then stays pure capability order).
 function enabledSession() {
-  return { quota: { enabled: true, safety_margin: 1.0, empirical_half_life_hours: 24 } };
+  return { quota: { enabled: true, safety_margin: 1.0 } };
 }
 
 async function setupTmpQuotaDir() {
@@ -118,7 +118,6 @@ test("selectProvider — a single pool nominally at RPM=0 still yields a slot (s
     quota: {
       enabled: true,
       safety_margin: 1.0,
-      empirical_half_life_hours: 24,
       models: { "test-model": { requests_per_minute: 0 } },
     },
   };

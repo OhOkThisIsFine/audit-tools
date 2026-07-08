@@ -9,7 +9,6 @@ import { OpenCodeQuotaSource } from "./openCodeQuotaSource.js";
 import { RunLogger } from "../observability/runLog.js";
 
 export interface BuildQuotaSourceOptions {
-  halfLifeHours?: number;
   additionalSources?: QuotaSource[];
   runLogger?: RunLogger;
   /**
@@ -138,7 +137,7 @@ export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSo
   return new CompositeQuotaSource([
     ...proactive,
     ...(options.additionalSources ?? []),
-    new LearnedQuotaSource(options.halfLifeHours ?? 24),
+    new LearnedQuotaSource(),
   ], options.runLogger);
 }
 

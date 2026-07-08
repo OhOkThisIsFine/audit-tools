@@ -37,7 +37,6 @@ import type { QuotaStateEntry, QuotaState, WaveSchedule } from "../quota/types.j
 import {
   scheduleWave,
   buildProviderModelKey,
-  DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
   QUOTA_REMAINING_PCT_LOW,
 } from "../quota/scheduler.js";
 import {
@@ -178,11 +177,6 @@ export interface RollingDispatchConfig<TPacket> {
   ) => Promise<RollingDispatchResult<TPacket>>;
   /** Called synchronously after each packet completes (before the next enqueue pass). */
   onResult?: (result: RollingDispatchResult<TPacket>) => void;
-  /**
-   * Half-life for decaying empirical quota evidence (hours).
-   * Defaults to DEFAULT_EMPIRICAL_HALF_LIFE_HOURS.
-   */
-  halfLifeHours?: number;
   /**
    * Host-session escalation predicate. When a `rate_limited` packet has been
    * ESCALATED by the host-session source (its account-level wall re-tripped the
@@ -422,8 +416,8 @@ export function selectProvider<TPacket>(
 
   // Ask scheduleWave whether each pool can accept one more slot, accounting for
   // in-flight tokens as additional estimated slot cost. The schedule already
-  // folds in the real-time quota snapshot, learned limits, and any active
-  // cooldown, so it doubles as the health signal for the spill ordering below.
+  // folds in the real-time quota snapshot, the resolved provider limits, and any
+  // active cooldown, so it doubles as the health signal for the spill ordering below.
   const scheduleForPool = (pool: CapacityPool): WaveSchedule => {
     // pool.id is the canonical (provider, account, model) key — use it directly so
     // scheduling and outcome-recording index the SAME account-stamped quota entry.
@@ -490,7 +484,6 @@ export function createRollingDispatcher<TPacket>(
     sessionConfig,
     dispatchPacket,
     onResult,
-    halfLifeHours = DEFAULT_EMPIRICAL_HALF_LIFE_HOURS,
     isPacketEscalated,
     recordRateLimit,
     reservationLedger,
@@ -741,11 +734,12 @@ export function createRollingDispatcher<TPacket>(
 
     state.inFlight.delete(packetId);
 
-    // Record quota outcome. 'error' is a distinct quota outcome (non-quota
-    // failure — no cooldown, only failure weight); 'rate_limited' applies the
-    // backoff cooldown that throttles the exhausted pool's learned limits.
+    // Record quota outcome. 'error' is a distinct quota outcome (a non-quota
+    // failure — it leaves the 429 streak and cooldown alone); only 'rate_limited'
+    // applies the backoff cooldown that throttles the exhausted pool.
     // The pool id IS the canonical (provider, account, model) quota key — record the
-    // outcome under it so learned state lands on the same entry scheduling reads.
+    // outcome under it so the reactive backoff state lands on the same entry
+    // scheduling reads.
     const providerModelKey = providerSlot.poolId;
     const quotaOutcome = result.outcome === "success" ? "success"
       : result.outcome === "rate_limited" ? "rate_limited"
@@ -753,15 +747,7 @@ export function createRollingDispatcher<TPacket>(
       : "timeout" as const;
 
     try {
-      await recordWaveOutcome(
-        providerModelKey,
-        {
-          concurrency: 1,
-          estimated_tokens: estimatedTokens,
-          outcome: quotaOutcome,
-        },
-        halfLifeHours,
-      );
+      await recordWaveOutcome(providerModelKey, { outcome: quotaOutcome });
     } catch {
       // Non-fatal: quota recording failure should not abort dispatch.
     }

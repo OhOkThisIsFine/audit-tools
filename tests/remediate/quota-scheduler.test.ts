@@ -3,11 +3,7 @@ import type { QuotaStateEntry, SessionConfig } from "audit-tools/shared";
 import {
   scheduleWave,
   buildProviderModelKey,
-  decayWeight,
-  computeMaxSafeConcurrency,
-  computeRampUpConcurrency,
   computeBackoffCooldownMs,
-  computeBackoffFailureWeight,
   classifyProvider,
   computeDispatchCapacity,
   estimateTokensFromBytes,
@@ -31,7 +27,6 @@ const baseConfig: SessionConfig = {
 function makeEntry(overrides: Partial<QuotaStateEntry> = {}): QuotaStateEntry {
   return {
     updated_at: new Date().toISOString(),
-    buckets: {},
     cooldown_until: null,
     last_429_at: null,
     consecutive_429_count: 0,
@@ -103,11 +98,6 @@ describe("scheduleWave (quota module)", () => {
     const pastTime = new Date(Date.now() - 60_000).toISOString();
     const entry = makeEntry({
       cooldown_until: pastTime,
-      buckets: {
-        "1": { success_weight: 3, failure_weight: 0 },
-        "2": { success_weight: 3, failure_weight: 0 },
-        "3": { success_weight: 3, failure_weight: 0 },
-      },
     });
     const result = scheduleWave({
       providerName: "claude-code",
@@ -118,41 +108,6 @@ describe("scheduleWave (quota module)", () => {
     });
     expect(result.max_concurrent).toBeGreaterThan(1);
     expect(result.cooldown_until).toBeNull();
-  });
-
-  it("uses learned concurrency cap", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 5, failure_weight: 0 },
-        "3": { success_weight: 1, failure_weight: 10 },
-      },
-    });
-    const result = scheduleWave({
-      providerName: "claude-code",
-      sessionConfig: baseConfig,
-      hostModel: null,
-      requestedConcurrency: 20,
-      quotaStateEntry: entry,
-    });
-    expect(result.max_concurrent).toBeLessThanOrEqual(3);
-  });
-
-  it("ramps up concurrency after consecutive successes", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 5, failure_weight: 0 },
-      },
-    });
-    const result = scheduleWave({
-      providerName: "claude-code",
-      sessionConfig: { ...baseConfig, quota: { enabled: true, ramp_up_enabled: true } },
-      hostModel: null,
-      requestedConcurrency: 20,
-      quotaStateEntry: entry,
-    });
-    expect(result.max_concurrent).toBe(3);
   });
 
   it("throttles to 1 when a window is genuinely exhausted (remaining 0)", () => {
@@ -180,16 +135,7 @@ describe("scheduleWave (quota module)", () => {
   });
 
   it("does NOT halve a low-but-nonzero window (cliffs removed; budget governs)", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 5, failure_weight: 0 },
-        "3": { success_weight: 5, failure_weight: 0 },
-        "4": { success_weight: 5, failure_weight: 0 },
-        "5": { success_weight: 5, failure_weight: 0 },
-        "6": { success_weight: 5, failure_weight: 0 },
-      },
-    });
+    const entry = makeEntry();
     const result = scheduleWave({
       providerName: "claude-code",
       sessionConfig: baseConfig,
@@ -274,81 +220,6 @@ describe("buildProviderModelKey", () => {
   });
 });
 
-describe("decayWeight", () => {
-  it("returns 0 for zero weight", () => {
-    expect(decayWeight(0, 24, 24)).toBe(0);
-  });
-
-  it("halves weight after one half-life", () => {
-    expect(decayWeight(4, 24, 24)).toBeCloseTo(2, 5);
-  });
-
-  it("returns 0 for zero half-life", () => {
-    expect(decayWeight(5, 1, 0)).toBe(0);
-  });
-});
-
-describe("computeMaxSafeConcurrency", () => {
-  it("returns 1 with no buckets", () => {
-    expect(computeMaxSafeConcurrency(makeEntry(), 24)).toBe(1);
-  });
-
-  it("returns highest bucket with sufficient evidence", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 5, failure_weight: 0 },
-        "3": { success_weight: 5, failure_weight: 0 },
-        "4": { success_weight: 0, failure_weight: 5 },
-      },
-    });
-    expect(computeMaxSafeConcurrency(entry, 24)).toBe(3);
-  });
-
-  it("stops at bucket with more failure than success", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 1, failure_weight: 2 },
-      },
-    });
-    expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
-  });
-});
-
-describe("computeRampUpConcurrency", () => {
-  it("returns maxSafe+1 after sufficient clean successes", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 5, failure_weight: 0 },
-      },
-    });
-    expect(computeRampUpConcurrency(entry, 24)).toBe(3);
-  });
-
-  it("does not ramp up when the top bucket carries meaningful failure evidence", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 5, failure_weight: 0 },
-        // failure_weight >= MIN_EVIDENCE_WEIGHT (0.5) counts as real evidence, so
-        // bucket 2 stays maxSafe (5 > 1.0) but ramp-up to 3 is suppressed.
-        "2": { success_weight: 5, failure_weight: 1.0 },
-      },
-    });
-    expect(computeRampUpConcurrency(entry, 24)).toBe(2);
-  });
-
-  it("does not ramp up with insufficient successes", () => {
-    const entry = makeEntry({
-      buckets: {
-        "1": { success_weight: 1, failure_weight: 0 },
-      },
-    });
-    expect(computeRampUpConcurrency(entry, 24)).toBe(1);
-  });
-});
-
 describe("computeBackoffCooldownMs", () => {
   it("returns 60s for first 429", () => {
     expect(computeBackoffCooldownMs(1)).toBe(BASE_COOLDOWN_MS);
@@ -361,17 +232,6 @@ describe("computeBackoffCooldownMs", () => {
 
   it("caps at 15 minutes", () => {
     expect(computeBackoffCooldownMs(10)).toBe(MAX_COOLDOWN_MS);
-  });
-});
-
-describe("computeBackoffFailureWeight", () => {
-  it("returns 1.0 for first 429", () => {
-    expect(computeBackoffFailureWeight(1)).toBe(1.0);
-  });
-
-  it("escalates for consecutive 429s", () => {
-    expect(computeBackoffFailureWeight(3)).toBe(2.0);
-    expect(computeBackoffFailureWeight(5)).toBe(3.0);
   });
 });
 

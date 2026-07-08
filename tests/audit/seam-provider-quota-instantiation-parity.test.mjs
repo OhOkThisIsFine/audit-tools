@@ -75,21 +75,17 @@ const SHARED_QUOTA_SYMBOLS = [
   "classifyProvider",
   // State I/O
   "readQuotaState",
+  "readQuotaStateOrDegrade",
   "writeQuotaState",
   "getQuotaStatePath",
   "setQuotaStateDir",
-  // Concurrency + wave
-  "computeMaxSafeConcurrency",
+  // Wave (no learned concurrency cap — concurrency is declared or absent)
   "recordWaveOutcome",
-  "computeRampUpConcurrency",
   "scheduleWave",
   "buildProviderModelKey",
   // Backoff
   "computeBackoffCooldownMs",
-  "computeBackoffFailureWeight",
   "computeCooldownUntil",
-  "decayWeight",
-  "applyDecayToEntry",
   // Rate-limit detection
   "detectRateLimitError",
   // File lock

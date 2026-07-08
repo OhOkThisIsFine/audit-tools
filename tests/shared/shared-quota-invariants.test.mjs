@@ -347,17 +347,17 @@ test("INV-shared-quota-10: parallel recordWaveOutcome calls converge to a consis
   try {
     setQuotaStateDir(dir);
     const key = "test/model";
-    // Fire 5 concurrent success recordings at concurrency 3.
+    // Fire 5 concurrent 429 recordings. Each is a read-modify-write of the same
+    // entry; if any pair interleaved, an increment would be lost.
     await Promise.all(Array.from({ length: 5 }, () =>
-      recordWaveOutcome(key, { concurrency: 3, estimated_tokens: 0, outcome: "success" }, 24),
+      recordWaveOutcome(key, { outcome: "rate_limited" }),
     ));
     const state = await readQuotaState();
     const entry = state.entries[key];
     expect(entry !== undefined, "entry must exist after concurrent writes").toBeTruthy();
-    // Each success adds 1.0 to buckets 1..3. 5 calls → success_weight should be ~5.
-    for (const n of [1, 2, 3]) {
-      expect(entry.buckets[String(n)]?.success_weight > 0, `bucket ${n} must have positive success_weight after concurrent writes`).toBeTruthy();
-    }
+    // Serialized by the file lock: every increment lands, none is lost.
+    expect(entry.consecutive_429_count, "all 5 concurrent 429 increments must land").toBe(5);
+    expect(entry.cooldown_until, "a 429 must leave a cooldown").not.toBe(null);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

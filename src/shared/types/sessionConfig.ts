@@ -274,8 +274,6 @@ export interface QuotaConfig {
   safety_margin?: number;
   default_context_tokens?: number;
   reserved_output_tokens?: number;
-  empirical_half_life_hours?: number;
-  ramp_up_enabled?: boolean;
   host_active_subagent_limit?: number;
   models?: Record<string, QuotaModelLimits>;
 }

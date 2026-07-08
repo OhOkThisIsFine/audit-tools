@@ -3,22 +3,18 @@ import { test, expect } from "vitest";
 const {
   scheduleWave,
   buildProviderModelKey,
-  decayWeight,
-  computeMaxSafeConcurrency,
-  computeRampUpConcurrency,
   computeBackoffCooldownMs,
-  computeBackoffFailureWeight,
 } = await import("audit-tools/shared");
 const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } = await import("../../src/audit/quota/hostLimits.ts");
 const { resolveHostModel } = await import("../../src/audit/quota/index.ts");
 
-// Helper to build a quota state entry with preset bucket weights
-function makeEntry(buckets, overrides = {}) {
+/** A quota-state entry: reactive backoff state only — no concurrency evidence. */
+function makeEntry(overrides = {}) {
   return {
     updated_at: new Date().toISOString(),
-    buckets,
     cooldown_until: null,
     last_429_at: null,
+    consecutive_429_count: 0,
     ...overrides,
   };
 }
@@ -33,57 +29,6 @@ test("buildProviderModelKey uses provider/* when no model given", () => {
 test("buildProviderModelKey includes model when provided", () => {
   expect(buildProviderModelKey("anthropic", "claude-sonnet-4-6")).toBe("anthropic/claude-sonnet-4-6");
 });
-
-// ── decayWeight ──────────────────────────────────────────────────────────────
-
-test("decayWeight returns original value with zero elapsed time", () => {
-  expect(decayWeight(10, 0, 24)).toBe(10);
-});
-
-test("decayWeight halves weight after one half-life", () => {
-  const result = decayWeight(10, 24, 24);
-  expect(Math.abs(result - 5) < 0.001, `expected ~5, got ${result}`).toBeTruthy();
-});
-
-test("decayWeight returns 0 for non-positive halfLifeHours", () => {
-  expect(decayWeight(10, 1, 0)).toBe(0);
-});
-
-// ── computeMaxSafeConcurrency ────────────────────────────────────────────────
-
-test("computeMaxSafeConcurrency returns 1 when no buckets", () => {
-  const entry = makeEntry({});
-  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
-});
-
-test("computeMaxSafeConcurrency returns highest safe bucket", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0.1 },
-    "2": { success_weight: 4, failure_weight: 0.1 },
-    "3": { success_weight: 3, failure_weight: 0.1 },
-    "4": { success_weight: 0.1, failure_weight: 5 }, // unsafe
-  });
-  expect(computeMaxSafeConcurrency(entry, 24)).toBe(3);
-});
-
-test("computeMaxSafeConcurrency stops at first unsafe bucket", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 0.1, failure_weight: 5 }, // unsafe — should stop here
-    "3": { success_weight: 5, failure_weight: 0 },   // won't reach this
-  });
-  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
-});
-
-test("computeMaxSafeConcurrency requires minimum evidence weight", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 0.1, failure_weight: 0 }, // below MIN_EVIDENCE_WEIGHT of 0.5
-  });
-  // Even though success > failure, there's not enough evidence
-  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
-});
-
-// ── scheduleWave ─────────────────────────────────────────────────────────────
 
 test("scheduleWave returns requestedConcurrency when quota is disabled", () => {
   const schedule = scheduleWave({
@@ -189,16 +134,7 @@ test("scheduleWave caps wave size by host active subagent limit", () => {
     description: "Codex Desktop active subagent limit.",
   };
   // Provide quota state so first-contact cap doesn't interfere
-  const quotaStateEntry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 5, failure_weight: 0 },
-    "3": { success_weight: 5, failure_weight: 0 },
-    "4": { success_weight: 5, failure_weight: 0 },
-    "5": { success_weight: 5, failure_weight: 0 },
-    "6": { success_weight: 5, failure_weight: 0 },
-    "7": { success_weight: 5, failure_weight: 0 },
-    "8": { success_weight: 5, failure_weight: 0 },
-  });
+  const quotaStateEntry = makeEntry();
   const schedule = scheduleWave({
     providerName: "local-subprocess",
     sessionConfig: {},
@@ -364,44 +300,9 @@ test("scheduleWave dispatches the full wave when discovered limits are generous"
   expect(schedule.max_concurrent).toBe(16); // 20 * 0.8 safety margin = 16
 });
 
-test("scheduleWave bypasses first-contact cap when quota state exists", () => {
-  const schedule = scheduleWave({
-    providerName: "opencode",
-    sessionConfig: {},
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: makeEntry({
-      "1": { success_weight: 5, failure_weight: 0 },
-      "2": { success_weight: 5, failure_weight: 0 },
-      "3": { success_weight: 5, failure_weight: 0 },
-      "4": { success_weight: 5, failure_weight: 0 },
-      "5": { success_weight: 5, failure_weight: 0 },
-    }),
-  });
-  expect(schedule.max_concurrent).toBe(6); // ramp-up: 5 succeeded + 1
-});
-
-test("scheduleWave respects learned concurrency cap (ramp-up disabled)", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 5, failure_weight: 0 },
-    "3": { success_weight: 5, failure_weight: 0 },
-    "4": { success_weight: 5, failure_weight: 0 },
-    "5": { success_weight: 0, failure_weight: 5 },
-  });
-  const schedule = scheduleWave({
-    providerName: "claude-code",
-    sessionConfig: { quota: { ramp_up_enabled: false } },
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: entry,
-  });
-  expect(schedule.max_concurrent).toBe(4);
-});
-
 test("scheduleWave reduces to 1 during active cooldown", () => {
   const cooldownUntil = new Date(Date.now() + 60_000).toISOString();
-  const entry = makeEntry({}, { cooldown_until: cooldownUntil });
+  const entry = makeEntry({ cooldown_until: cooldownUntil });
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {},
@@ -415,13 +316,7 @@ test("scheduleWave reduces to 1 during active cooldown", () => {
 
 test("scheduleWave ignores expired cooldown", () => {
   const expiredCooldown = new Date(Date.now() - 1000).toISOString();
-  const entry = makeEntry(
-    {
-      "1": { success_weight: 5, failure_weight: 0 },
-      "2": { success_weight: 5, failure_weight: 0 },
-    },
-    { cooldown_until: expiredCooldown },
-  );
+  const entry = makeEntry({ cooldown_until: expiredCooldown });
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {},
@@ -540,81 +435,6 @@ test("computeBackoffCooldownMs handles count 0 gracefully", () => {
   expect(computeBackoffCooldownMs(0)).toBe(60_000);
 });
 
-test("computeBackoffFailureWeight escalates with consecutive failures", () => {
-  expect(computeBackoffFailureWeight(1)).toBe(1.0);
-  expect(computeBackoffFailureWeight(2)).toBe(1.5);
-  expect(computeBackoffFailureWeight(3)).toBe(2.0);
-  expect(computeBackoffFailureWeight(5)).toBe(3.0);
-});
-
-test("computeBackoffFailureWeight handles count 0 gracefully", () => {
-  expect(computeBackoffFailureWeight(0)).toBe(1.0);
-});
-
-// ── Cold-start ramp-up ──────────────────────────────────────────────────────
-
-test("computeRampUpConcurrency returns maxSafe+1 with sufficient consecutive successes", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 3, failure_weight: 0 },
-  });
-  expect(computeRampUpConcurrency(entry, 24)).toBe(3);
-});
-
-test("computeRampUpConcurrency stays at maxSafe with insufficient evidence", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 1, failure_weight: 0 },
-  });
-  expect(computeRampUpConcurrency(entry, 24)).toBe(1);
-});
-
-test("computeRampUpConcurrency stays at maxSafe when top bucket has failures", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 5, failure_weight: 1.0 },
-  });
-  // Bucket 2 has real failure evidence (failure_weight 1.0 >= MIN_EVIDENCE_WEIGHT),
-  // so the safe-concurrency scan breaks AT bucket 2 — the last fully-safe level is 1
-  // → maxSafe=1 (the old success>failure rule wrongly admitted bucket 2 as safe).
-  // The maxSafe bucket (1) is itself clean and well-evidenced, so ramp-up still
-  // probes one level above the corrected ceiling: rampUp = maxSafe + 1 = 2.
-  expect(computeMaxSafeConcurrency(entry, 24)).toBe(1);
-  expect(computeRampUpConcurrency(entry, 24)).toBe(2);
-});
-
-test("scheduleWave uses ramp-up by default with quota state", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 5, failure_weight: 0 },
-  });
-  const schedule = scheduleWave({
-    providerName: "claude-code",
-    sessionConfig: {},
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: entry,
-  });
-  // maxSafe=2, ramp-up gives 3
-  expect(schedule.max_concurrent).toBe(3);
-});
-
-test("scheduleWave disables ramp-up when ramp_up_enabled is false", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 5, failure_weight: 0 },
-  });
-  const schedule = scheduleWave({
-    providerName: "claude-code",
-    sessionConfig: { quota: { ramp_up_enabled: false } },
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: entry,
-  });
-  expect(schedule.max_concurrent).toBe(2);
-});
-
-// ── binding_cap (OBS-005): which cap bound the final wave size ───────────────
-
 test("scheduleWave reports binding_cap='rpm' when the RPM limit binds", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
@@ -648,22 +468,6 @@ test("scheduleWave reports binding_cap='tpm' when the TPM limit binds", () => {
   expect(schedule.binding_cap).toBe("tpm");
 });
 
-test("scheduleWave reports binding_cap='learned' when the learned cap binds", () => {
-  const entry = makeEntry({
-    "1": { success_weight: 5, failure_weight: 0 },
-    "2": { success_weight: 5, failure_weight: 0 },
-    "3": { success_weight: 0, failure_weight: 5 },
-  });
-  const schedule = scheduleWave({
-    providerName: "claude-code",
-    sessionConfig: { quota: { ramp_up_enabled: false } },
-    hostModel: null,
-    requestedConcurrency: 22,
-    quotaStateEntry: entry,
-  });
-  expect(schedule.binding_cap).toBe("learned");
-});
-
 test("scheduleWave reports binding_cap='token_budget' when a small learned budget binds", () => {
   // A pool near a window wall with a learned slope: the token budget caps the wave
   // below the requested size and attributes token_budget.
@@ -672,23 +476,9 @@ test("scheduleWave reports binding_cap='token_budget' when a small learned budge
     sessionConfig: { quota: { safety_margin: 1 } },
     hostModel: null,
     requestedConcurrency: 10,
-    quotaStateEntry: makeEntry(
-      {
-        "1": { success_weight: 5, failure_weight: 0 },
-        "2": { success_weight: 5, failure_weight: 0 },
-        "3": { success_weight: 5, failure_weight: 0 },
-        "4": { success_weight: 5, failure_weight: 0 },
-        "5": { success_weight: 5, failure_weight: 0 },
-        "6": { success_weight: 5, failure_weight: 0 },
-        "7": { success_weight: 5, failure_weight: 0 },
-        "8": { success_weight: 5, failure_weight: 0 },
-        "9": { success_weight: 5, failure_weight: 0 },
-        "10": { success_weight: 5, failure_weight: 0 },
-      },
-      // 100 tokens per percent; window at 40% remaining (well above the near-wall
-      // floor) → budget = 40*100 = 4000.
-      { tokens_per_pct: { session: 100 } },
-    ),
+    // 100 tokens per percent; window at 40% remaining (well above the near-wall
+    // floor) → budget = 40*100 = 4000.
+    quotaStateEntry: makeEntry({ tokens_per_pct: { session: 100 } }),
     // Each slot ~2000 tokens → only 2 fit in 4000.
     estimatedSlotTokens: [2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000],
     quotaSourceSnapshot: {
@@ -707,7 +497,7 @@ test("scheduleWave reports binding_cap='token_budget' when a small learned budge
 
 test("scheduleWave reports binding_cap='cooldown' during an active cooldown", () => {
   const cooldownUntil = new Date(Date.now() + 60_000).toISOString();
-  const entry = makeEntry({}, { cooldown_until: cooldownUntil });
+  const entry = makeEntry({ cooldown_until: cooldownUntil });
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {},
@@ -780,5 +570,26 @@ test("scheduleWave reports binding_cap='none' when nothing reduces the requested
     requestedConcurrency: 4,
   });
   expect(schedule.max_concurrent).toBe(4);
+  expect(schedule.binding_cap).toBe("none");
+});
+
+test("a quotaStateEntry NEVER caps the wave — concurrency is declared or absent", () => {
+  // The learned-concurrency inference (safe/failure buckets → maxSafe/ramp-up cap)
+  // was deleted: a rate-limit signal cannot teach a concurrency number. What
+  // survives on the entry is reactive backoff (cooldown_until / 429 streak), and
+  // an entry with no ACTIVE cooldown narrows nothing.
+  const schedule = scheduleWave({
+    providerName: "opencode",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 22,
+    quotaStateEntry: {
+      updated_at: new Date().toISOString(),
+      cooldown_until: null,
+      last_429_at: null,
+      consecutive_429_count: 0,
+    },
+  });
+  expect(schedule.max_concurrent).toBe(22);
   expect(schedule.binding_cap).toBe("none");
 });

@@ -15,7 +15,6 @@ import {
   resolveLimits,
   type ProviderType,
 } from "./limits.js";
-import { computeMaxSafeConcurrency, computeRampUpConcurrency } from "./state.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_OUTPUT_TOKENS } from "../tokens.js";
 
 /**
@@ -153,8 +152,6 @@ export interface ScheduleWaveOptions {
 // instead of re-typing the number.
 /** Fraction of a discovered RPM/TPM limit we actually schedule against. */
 export const DEFAULT_SAFETY_MARGIN = 0.8;
-/** Half-life (hours) for decaying learned concurrency evidence. */
-export const DEFAULT_EMPIRICAL_HALF_LIFE_HOURS = 24;
 /**
  * Reference cold-start floor for the capable-vs-cold host CLASSIFICATION (no
  * longer a scheduler wave cap — the token-budget gate replaced the invented
@@ -172,8 +169,7 @@ const COLD_START_CONCURRENCY = 3;
  * scheduler wave-sizing cap (the invented cold-start/fallback caps were removed in
  * favour of the token-budget gate); it survives solely as the reference point for
  * the capable-vs-cold host CLASSIFICATION in `classifyCapableHost`
- * (brokeredDispatch): a host reporting a ceiling above this floor, or learned
- * evidence above it, is "capable".
+ * (brokeredDispatch): a host reporting a ceiling above this floor is "capable".
  */
 const AGENT_HOST_CONCURRENCY = 8;
 
@@ -466,23 +462,14 @@ function sumTopN(sorted: number[], n: number): number {
 }
 
 /**
- * Compute the wave size after applying the RPM cap, the TPM cap, and the
- * learned-limit cap — but BEFORE the token-budget gate and the host-concurrency
- * ceiling, both of which `scheduleWave` applies. Pure: it never mutates an outer
- * variable, so each cap is a single `Math.min` at the end of its branch.
+ * Result of the uncapped wave-size computation: the wave size after the RPM and
+ * TPM caps, but BEFORE the token-budget gate and the host-concurrency ceiling,
+ * both of which `scheduleWave` applies and folds into the final `binding_cap`.
+ * `binding_cap` records which of the RPM / TPM caps last reduced the value (or
+ * "none" if nothing did), so the caller can attribute the decision.
  *
- * The host-concurrency limit and the token-budget gate are deliberately NOT
- * considered here — they are the only two things allowed to constrain
- * concurrency beyond real provider RPM/TPM/learned limits, and both are applied
- * by `scheduleWave`. With no learned history, no RPM/TPM, no host limit, and no
- * token budget signal, this function invents NO ceiling.
- */
-/**
- * Result of the uncapped wave-size computation. `binding_cap` records which of
- * the RPM / TPM / learned caps last reduced the value (or "none" if nothing did),
- * so the caller can attribute the decision. The cooldown, token-budget, and
- * host-concurrency caps are applied by `scheduleWave` itself and folded into the
- * final `binding_cap` there.
+ * With no RPM/TPM, no host limit, and no token-budget signal, NO ceiling is
+ * invented — there is no learned concurrency cap, by design.
  */
 interface UncappedWaveSize {
   size: number;
@@ -495,9 +482,6 @@ interface ComputeUncappedWaveSizeInput {
   safetyMargin: number;
   avgTokens: number;
   slotsSorted: number[] | null;
-  quotaStateEntry: QuotaStateEntry | null;
-  quota: QuotaConfig;
-  halfLifeHours: number;
 }
 
 function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedWaveSize {
@@ -507,9 +491,6 @@ function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedW
     safetyMargin,
     avgTokens,
     slotsSorted,
-    quotaStateEntry,
-    quota,
-    halfLifeHours,
   } = input;
   let current = initialSize;
   let bindingCap: WaveBindingCap = "none";
@@ -545,21 +526,11 @@ function computeUncappedWaveSize(input: ComputeUncappedWaveSizeInput): UncappedW
     }
   }
 
-  // Learned concurrency cap (from recorded safe/failure buckets). With no learned
-  // history there is NO invented ceiling here: concurrency is governed solely by
-  // real provider limits (RPM/TPM above), the host-reported subagent ceiling
-  // (applied at the call site), and the token-budget gate (applied by
-  // scheduleWave). An unconfigured provider with no signals stays uncapped.
-  if (quotaStateEntry) {
-    const rampUp = quota.ramp_up_enabled !== false;
-    const cap = rampUp
-      ? computeRampUpConcurrency(quotaStateEntry, halfLifeHours)
-      : computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours);
-    if (cap < current) {
-      current = cap;
-      bindingCap = "learned";
-    }
-  }
+  // There is NO invented ceiling here. Concurrency is governed solely by real
+  // provider limits (RPM/TPM above), a DECLARED provider concurrency cap, the
+  // host-reported subagent ceiling (applied at the call site), and the
+  // token-budget gate (applied by scheduleWave). A provider with no signals stays
+  // uncapped — we never infer a safe concurrency from an outcome stream.
   return { size: current, binding_cap: bindingCap };
 }
 
@@ -617,8 +588,6 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   }
 
   const safetyMargin = quota.safety_margin ?? DEFAULT_SAFETY_MARGIN;
-  const halfLifeHours =
-    quota.empirical_half_life_hours ?? DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
 
   const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel, discoveredLimits });
 
@@ -640,8 +609,8 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   }
 
   // During an active cooldown we throttle to a single request and skip all cap
-  // logic; otherwise apply RPM/TPM and learned caps. The token-budget gate and
-  // host-concurrency ceiling are applied below.
+  // logic; otherwise apply RPM/TPM. The token-budget gate and host-concurrency
+  // ceiling are applied below.
   let waveSize = requestedConcurrency;
   let bindingCap: WaveBindingCap = "none";
   if (cooldownUntil) {
@@ -654,9 +623,6 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       safetyMargin,
       avgTokens,
       slotsSorted,
-      quotaStateEntry,
-      quota,
-      halfLifeHours,
     });
     waveSize = uncapped.size;
     bindingCap = uncapped.binding_cap;

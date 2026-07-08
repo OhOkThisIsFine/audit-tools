@@ -1,4 +1,3 @@
-import { DEFAULT_EMPIRICAL_HALF_LIFE_HOURS } from "audit-tools/shared";
 import type { SessionConfig } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
@@ -8,7 +7,6 @@ import {
   readQuotaStateOrDegrade,
   resolveLimits,
   resolveHostActiveSubagentLimit,
-  computeMaxSafeConcurrency,
   getQuotaStatePath,
   lookupDiscoveredLimits,
 } from "../quota/index.js";
@@ -47,15 +45,12 @@ export async function cmdQuota(argv: string[]): Promise<void> {
 
   const quotaState = await readQuotaStateOrDegrade("quota command");
   const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
-  const halfLifeHours =
-    sessionConfig.quota?.empirical_half_life_hours ??
-    DEFAULT_EMPIRICAL_HALF_LIFE_HOURS;
   const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
     explicitLimit: getHostMaxActiveSubagents(argv),
     sessionConfig,
   });
 
-  const quotaSource = buildQuotaSource({ halfLifeHours });
+  const quotaSource = buildQuotaSource();
   const quotaSourceSnapshot = await quotaSource.queryCurrentUsage(providerModelKey).catch(() => null);
   const queryDiscoveredLimits = await lookupDiscoveredLimits(providerModelKey).catch(() => null);
 
@@ -86,11 +81,13 @@ export async function cmdQuota(argv: string[]): Promise<void> {
         confidence,
         source,
         host_concurrency_limit: hostConcurrencyLimit,
-        learned_caps: quotaStateEntry
+        // Reactive backoff state — what the last 429 taught us. There is no
+        // learned concurrency cap to report: concurrency is declared or absent.
+        reactive_state: quotaStateEntry
           ? {
-              max_safe_concurrency: computeMaxSafeConcurrency(quotaStateEntry, halfLifeHours),
               cooldown_until: quotaStateEntry.cooldown_until,
               last_429_at: quotaStateEntry.last_429_at,
+              consecutive_429_count: quotaStateEntry.consecutive_429_count ?? 0,
             }
           : null,
         quota_source_snapshot: quotaSourceSnapshot,

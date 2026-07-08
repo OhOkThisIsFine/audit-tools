@@ -137,18 +137,21 @@ export function estimateSlotTokens(slot: BrokeredDispatchSlot): number {
 }
 
 /**
- * Classify whether a host is "capable" — i.e. it advertises real concurrency
+ * Classify whether a host is "capable" — i.e. it DECLARES real concurrency
  * head-room ABOVE the conservative cold-start (first-contact) floor. On first
- * contact, with no learned evidence and no reported host ceiling, a host sits AT
- * the floor and is NOT yet capable; once it reports an active-subagent ceiling
- * (or learned evidence lifts the cap) above the floor, it is. Single-sourced
- * here so both halves classify identically off the SAME floor.
+ * contact, with no reported host ceiling, a host sits AT the floor and is NOT yet
+ * capable; once it reports an active-subagent ceiling above the floor, it is.
+ * Single-sourced here so both halves classify identically off the SAME floor.
+ *
+ * Capability is DECLARED, never inferred: there is no observational evidence that
+ * can lift a host off the floor. (The former "any recorded safe concurrency
+ * bucket lifts the host" branch was a learned-concurrency inference — see
+ * `spec/audit/dispatch-admission-control.md`.)
  */
 export function classifyCapableHost(input: {
   providerName: ResolvedProviderName;
   sessionConfig: SessionConfig;
   hostConcurrencyLimit?: HostConcurrencyLimit | null;
-  quotaStateEntry?: QuotaStateEntry | null;
 }): boolean {
   // Cold-start floor comes from the single classifier struct (CE-005) — there is
   // no separable floor constant to re-derive it from. (The former
@@ -157,14 +160,7 @@ export function classifyCapableHost(input: {
   // gate, and this floor serves only the capable-vs-cold host classification.)
   const floor = Math.max(1, classifyProvider(input.providerName).concurrencyFloor);
   const reported = input.hostConcurrencyLimit?.active_subagents ?? null;
-  if (reported != null && reported > floor) return true;
-  // Learned evidence (any recorded safe bucket) lifts the host off the floor.
-  const buckets = input.quotaStateEntry?.buckets ?? {};
-  for (const key of Object.keys(buckets)) {
-    const c = Number(key);
-    if (Number.isFinite(c) && c > floor) return true;
-  }
-  return false;
+  return reported != null && reported > floor;
 }
 
 /**
@@ -236,7 +232,6 @@ function persistPoolCooldownBestEffort(poolKey: string, cooldownUntil: string): 
     const existing = state.entries[poolKey];
     const entry: QuotaStateEntry = existing ?? {
       updated_at: new Date().toISOString(),
-      buckets: {},
       cooldown_until: null,
       last_429_at: null,
     };
@@ -295,7 +290,6 @@ export function createBrokeredRepairDispatch(): BrokeredRepairDispatch {
           ? { ...effectiveQuotaStateEntry, cooldown_until: merged }
           : {
               updated_at: new Date().toISOString(),
-              buckets: {},
               cooldown_until: merged,
               last_429_at: null,
             };
@@ -329,7 +323,6 @@ export function createBrokeredRepairDispatch(): BrokeredRepairDispatch {
         providerName: input.providerName,
         sessionConfig: input.sessionConfig,
         hostConcurrencyLimit: input.hostConcurrencyLimit ?? null,
-        quotaStateEntry: input.quotaStateEntry ?? null,
       });
 
       const { admittedSlots, estimatedTokens, refused } = fitWaveToBudget(

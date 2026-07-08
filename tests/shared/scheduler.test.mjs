@@ -8,7 +8,6 @@ function baseSessionConfig(overrides = {}) {
     quota: {
       enabled: true,
       safety_margin: 0.8,
-      empirical_half_life_hours: 24,
       ...overrides,
     },
   };
@@ -26,7 +25,6 @@ test("rpm cap: scheduleWave respects requests_per_minute limit", () => {
       quota: {
         enabled: true,
         safety_margin: 1.0, // no safety shrinkage so cap is exact
-        empirical_half_life_hours: 24,
         models: {
           "test/model": { requests_per_minute: 4 },
         },
@@ -50,7 +48,6 @@ test("tpm cap: scheduleWave respects input_tokens_per_minute limit", () => {
       quota: {
         enabled: true,
         safety_margin: 1.0,
-        empirical_half_life_hours: 24,
         models: {
           "test/model": { input_tokens_per_minute: 5000 },
         },
@@ -66,16 +63,16 @@ test("tpm cap: scheduleWave respects input_tokens_per_minute limit", () => {
   expect(schedule.binding_cap).toBe("tpm");
 });
 
-test("learned cap: scheduleWave uses quotaStateEntry when provided", () => {
-  // A quota-state entry with a very low success score drives the learned cap.
-  // Inject a state entry with a single success at concurrency 1 and no higher
-  // evidence — computeRampUpConcurrency will return 1.
+test("no learned cap: a quotaStateEntry NEVER caps the wave (concurrency is declared or absent)", () => {
+  // Historic behaviour: a quota-state entry carrying concurrency "evidence" drove
+  // a learned ceiling and set binding_cap="learned". That inference is a category
+  // error — concurrency is DECLARED by the provider or ABSENT. The entry now
+  // carries only reactive backoff state, and never narrows a wave on its own.
   const quotaStateEntry = {
-    buckets: {
-      "1": { success_weight: 1, failure_weight: 0 },
-    },
+    updated_at: new Date().toISOString(),
     consecutive_429_count: 0,
     cooldown_until: null,
+    last_429_at: null,
   };
   const schedule = scheduleWave({
     providerName: "claude-code",
@@ -85,10 +82,9 @@ test("learned cap: scheduleWave uses quotaStateEntry when provided", () => {
     quotaStateEntry,
     hostConcurrencyLimit: null,
   });
-  expect(schedule.max_concurrent, "max_concurrent should be capped by learned history").toBe(1);
-  expect(schedule.binding_cap).toBe("learned");
+  expect(schedule.max_concurrent, "a quota-state entry must not narrow the wave").toBe(10);
+  expect(schedule.binding_cap).toBe("none");
 });
-
 test("no invented cap: scheduleWave leaves the wave uncapped with no learned/host/rate/budget signal", () => {
   // The former unknown_hosted / cold-start fallback caps are gone. With no
   // learned history, no host limit, no RPM/TPM, and no live snapshot, nothing
@@ -96,7 +92,7 @@ test("no invented cap: scheduleWave leaves the wave uncapped with no learned/hos
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: { enabled: true, safety_margin: 0.8, empirical_half_life_hours: 24 },
+      quota: { enabled: true, safety_margin: 0.8 },
     },
     hostModel: null,
     requestedConcurrency: 20,
@@ -111,7 +107,7 @@ test("no invented cap: an unconfigured local provider is also uncapped", () => {
   const schedule = scheduleWave({
     providerName: "local-subprocess",
     sessionConfig: {
-      quota: { enabled: true, safety_margin: 0.8, empirical_half_life_hours: 24 },
+      quota: { enabled: true, safety_margin: 0.8 },
     },
     hostModel: null,
     requestedConcurrency: 20,
@@ -150,7 +146,6 @@ test("discovered capability: explicit per-model config still wins over discovery
       quota: {
         enabled: true,
         safety_margin: 0.8,
-        empirical_half_life_hours: 24,
         models: { "test/model": { context_tokens: 128_000, output_tokens: 8_192 } },
       },
     },
@@ -194,7 +189,6 @@ test("host_concurrency cap: a tighter host ceiling overrides a looser quota cap 
       quota: {
         enabled: true,
         safety_margin: 1.0,
-        empirical_half_life_hours: 24,
         models: { "test/model": { requests_per_minute: 8 } },
       },
     },
@@ -215,7 +209,6 @@ test("host_concurrency cap: a looser host ceiling does NOT override a tighter qu
       quota: {
         enabled: true,
         safety_margin: 1.0,
-        empirical_half_life_hours: 24,
         models: { "test/model": { requests_per_minute: 3 } },
       },
     },
@@ -236,7 +229,6 @@ test("cooldown cap: an active cooldown throttles to one slot and short-circuits 
       quota: {
         enabled: true,
         safety_margin: 1.0,
-        empirical_half_life_hours: 24,
         models: { "test/model": { requests_per_minute: 50 } },
       },
     },

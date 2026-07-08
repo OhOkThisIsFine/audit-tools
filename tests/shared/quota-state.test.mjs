@@ -13,11 +13,6 @@ const {
   emptyQuotaState,
   QuotaStateUnavailableError,
   recordWaveOutcome,
-  clearBucketFailureEvidence,
-  applyDecayToEntry,
-  computeRampUpConcurrency,
-  computeMaxSafeConcurrency,
-  MAX_BUCKET_LEVEL,
   foldTokensPerPctObservation,
   recordTokensPerPctObservation,
 } = await import("../../src/shared/quota/state.ts");
@@ -34,287 +29,41 @@ async function withTempStateDir(fn) {
 
 const KEY = "provider/model";
 
-test("failure spread applies weight to exactly FAILURE_SPREAD_BUCKETS+1 buckets starting at concurrency", async () => {
+test("recordWaveOutcome success clears the 429 streak once the cooldown has run its course", async () => {
   await withTempStateDir(async () => {
-    // A timeout is a non-success outcome that runs the failure-spread branch
-    // with a flat weight of 1.0 (no 429 backoff math involved).
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "timeout" }, 24);
+    // A 429 sets a LIVE cooldown; a success while it is live must not cancel it
+    // (INV-QD-16). Only after it expires does a success reset the pool.
+    await recordWaveOutcome(KEY, { outcome: "rate_limited" });
+    const after429 = (await readQuotaState()).entries[KEY];
+    expect(after429.cooldown_until !== null, "cooldown_until should be set after a rate_limited outcome").toBeTruthy();
 
-    const state = await readQuotaState();
-    const buckets = state.entries[KEY].buckets;
-    // concurrency (2) through concurrency + 4 (6) inclusive => 5 buckets.
-    for (const n of [2, 3, 4, 5, 6]) {
-      expect(buckets[String(n)]?.failure_weight > 0, `bucket ${n} should have failure_weight`).toBeTruthy();
-    }
-    // One past the spread must not be touched.
-    expect(buckets["7"]?.failure_weight ?? 0).toBe(0);
-    // Below the starting concurrency must not be touched either.
-    expect(buckets["1"]?.failure_weight ?? 0).toBe(0);
-  });
-});
+    // Rewind the cooldown to the past, then record the success.
+    await writeQuotaState({
+      version: 2,
+      entries: { [KEY]: { ...after429, cooldown_until: new Date(Date.now() - 1_000).toISOString() } },
+    });
+    await recordWaveOutcome(KEY, { outcome: "success" });
 
-test("failure spread starts at the reported concurrency for rate_limited outcomes", async () => {
-  await withTempStateDir(async () => {
-    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "rate_limited" }, 24);
-
-    const state = await readQuotaState();
-    const buckets = state.entries[KEY].buckets;
-    // concurrency (1) through concurrency + 4 (5) inclusive => 5 buckets.
-    for (const n of [1, 2, 3, 4, 5]) {
-      expect(buckets[String(n)]?.failure_weight > 0, `bucket ${n} should have failure_weight`).toBeTruthy();
-    }
-    expect(buckets["6"]?.failure_weight ?? 0).toBe(0);
-  });
-});
-
-test("success increments buckets 1..concurrency and persists across a reload", async () => {
-  await withTempStateDir(async () => {
-    // First record a 429 so consecutive_429_count is non-zero, then prove a
-    // success resets it to 0.
-    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "rate_limited" }, 24);
-    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "success" }, 24);
-
-    const state = await readQuotaState();
-    const entry = state.entries[KEY];
-    const buckets = entry.buckets;
-    // Success at concurrency 3 increments success_weight on buckets 1..3.
-    for (const n of [1, 2, 3]) {
-      expect(buckets[String(n)]?.success_weight > 0, `bucket ${n} should have success_weight`).toBeTruthy();
-    }
-    // Bucket 4 (above the reported concurrency) is not credited a success.
-    expect(buckets["4"]?.success_weight ?? 0).toBe(0);
-    // The success path resets the consecutive 429 counter.
+    const entry = (await readQuotaState()).entries[KEY];
+    expect(entry.cooldown_until, "an expired cooldown must be cleared by a success").toBe(null);
     expect(entry.consecutive_429_count).toBe(0);
-
-    // Disk round-trip: a fresh readQuotaState() returns the same persisted
-    // buckets/weights, confirming withFileLock + writeQuotaState wrote state.
-    const reread = await readQuotaState();
-    expect(reread.entries[KEY].buckets).toEqual(buckets);
-  });
-});
-
-test("recordWaveOutcome success clears cooldown_until", async () => {
-  await withTempStateDir(async () => {
-    // Case 1: cooldown_until is set from a prior 429 — a success clears it.
-    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "rate_limited" }, 24);
-    {
-      const stateAfter429 = await readQuotaState();
-      expect(stateAfter429.entries[KEY].cooldown_until !== null, "cooldown_until should be set after a rate_limited outcome").toBeTruthy();
-    }
-
-    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24);
-    {
-      const stateAfterSuccess = await readQuotaState();
-      const entry = stateAfterSuccess.entries[KEY];
-      expect(entry.cooldown_until, "cooldown_until must be null after a success outcome").toBe(null);
-      // consecutive_429_count must also be cleared.
-      expect(entry.consecutive_429_count).toBe(0);
-    }
   });
 
   await withTempStateDir(async () => {
-    // Case 2: no prior 429 — success keeps cooldown_until null (no regression).
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
+    // No prior 429 — success keeps cooldown_until null (no regression).
+    await recordWaveOutcome(KEY, { outcome: "success" });
     const state = await readQuotaState();
     expect(state.entries[KEY].cooldown_until, "cooldown_until should remain null when no prior cooldown existed").toBe(null);
   });
 });
 
-test("applyDecayToEntry returns the same entry reference when elapsed time is below 0.001 hours", () => {
-  const entry = {
-    updated_at: new Date().toISOString(),
-    buckets: { "1": { success_weight: 2.0, failure_weight: 1.0 } },
-    cooldown_until: null,
-    last_429_at: null,
-    consecutive_429_count: 0,
-  };
-  const result = applyDecayToEntry(entry, 24);
-  // The early-exit guard (elapsedHours < 0.001) must return the exact same reference.
-  expect(result, "should return the identical object reference when elapsed < 0.001h").toBe(entry);
-  // No bucket mutation.
-  expect(entry.buckets["1"].success_weight).toBe(2.0);
-  expect(entry.buckets["1"].failure_weight).toBe(1.0);
-});
-
-test("applyDecayToEntry decays all bucket weights to near-zero after many half-lives", () => {
-  const entry = {
-    updated_at: new Date(Date.now() - 720 * 3600000).toISOString(), // 30 half-lives ago
-    buckets: { "1": { success_weight: 0.001, failure_weight: 0.001 } },
-    cooldown_until: null,
-    last_429_at: null,
-    consecutive_429_count: 0,
-  };
-  const result = applyDecayToEntry(entry, 24);
-  expect(result.buckets["1"].success_weight < 1e-6, `success_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].success_weight}`).toBeTruthy();
-  expect(result.buckets["1"].failure_weight < 1e-6, `failure_weight should be near-zero after 30 half-lives, got ${result.buckets["1"].failure_weight}`).toBeTruthy();
-});
-
-test("applyDecayToEntry halves weights after exactly one half-life and preserves other fields", () => {
-  const entry = {
-    updated_at: new Date(Date.now() - 24 * 3600000).toISOString(), // 24 hours ago = 1 half-life
-    buckets: { "1": { success_weight: 4.0, failure_weight: 2.0 } },
-    cooldown_until: null,
-    last_429_at: null,
-    consecutive_429_count: 0,
-  };
-  const result = applyDecayToEntry(entry, 24);
-  // Must be a new object, not the same reference.
-  expect(result, "should return a new object after decay").not.toBe(entry);
-  // Weights halved (within 1% tolerance to account for sub-millisecond clock drift).
-  expect(Math.abs(result.buckets["1"].success_weight - 2.0) < 0.01, `success_weight should be ~2.0 after one half-life, got ${result.buckets["1"].success_weight}`).toBeTruthy();
-  expect(Math.abs(result.buckets["1"].failure_weight - 1.0) < 0.01, `failure_weight should be ~1.0 after one half-life, got ${result.buckets["1"].failure_weight}`).toBeTruthy();
-  // Other fields preserved.
-  expect(result.updated_at, "updated_at should be preserved").toBe(entry.updated_at);
-  expect(result.cooldown_until, "cooldown_until should be preserved").toBe(null);
-  // Original not mutated.
-  expect(entry.buckets["1"].success_weight, "original success_weight must not be mutated").toBe(4.0);
-});
-
-// Helper: build a minimal QuotaStateEntry with a single bucket at level N.
-function makeEntryWithBucket(n, success_weight, failure_weight) {
-  return {
-    updated_at: new Date().toISOString(),
-    buckets: { [String(n)]: { success_weight, failure_weight } },
-    cooldown_until: null,
-    last_429_at: null,
-    consecutive_429_count: 0,
-  };
-}
-
-test("computeRampUpConcurrency: allows ramp-up when failure_weight has decayed below MIN_EVIDENCE_WEIGHT", () => {
-  // RAMP_UP_MIN_SUCCESSES = 2; MIN_EVIDENCE_WEIGHT = 0.5
-  // failure_weight = 0.1 (below threshold) → ramp-up permitted: returns N+1
-  const entry = makeEntryWithBucket(1, 3.0, 0.1);
-  const result = computeRampUpConcurrency(entry, 24);
-  expect(result, "failure_weight 0.1 < MIN_EVIDENCE_WEIGHT should permit ramp-up to N+1").toBe(2);
-});
-
-test("computeRampUpConcurrency: suppresses ramp-up when failure_weight equals MIN_EVIDENCE_WEIGHT", () => {
-  // failure_weight exactly 0.5 (at threshold boundary) → ramp-up suppressed: returns N
-  const entry = makeEntryWithBucket(1, 3.0, 0.5);
-  const result = computeRampUpConcurrency(entry, 24);
-  expect(result, "failure_weight === MIN_EVIDENCE_WEIGHT should suppress ramp-up").toBe(1);
-});
-
-test("computeRampUpConcurrency: suppresses ramp-up when failure_weight exceeds MIN_EVIDENCE_WEIGHT", () => {
-  // failure_weight = 1.0 (above threshold) → ramp-up suppressed: returns N
-  const entry = makeEntryWithBucket(1, 3.0, 1.0);
-  const result = computeRampUpConcurrency(entry, 24);
-  expect(result, "failure_weight > MIN_EVIDENCE_WEIGHT should suppress ramp-up").toBe(1);
-});
-
-test("computeRampUpConcurrency: allows ramp-up when failure_weight is exactly zero (no failures ever)", () => {
-  // failure_weight = 0 (never any failures) → ramp-up permitted: returns N+1
-  const entry = makeEntryWithBucket(1, 3.0, 0);
-  const result = computeRampUpConcurrency(entry, 24);
-  expect(result, "failure_weight === 0 should permit ramp-up to N+1").toBe(2);
-});
-
-// ── ARC-09b7ce76-2 regression: bucket map growth cap ──────────────────────────
-
-test("ARC-09b7ce76-2: success at very high concurrency does not write buckets above MAX_BUCKET_LEVEL", async () => {
-  await withTempStateDir(async () => {
-    // Report a success at a concurrency far above the scan ceiling (MAX_BUCKET_LEVEL=32).
-    const highConcurrency = MAX_BUCKET_LEVEL + 20; // e.g. 52
-    await recordWaveOutcome(KEY, { concurrency: highConcurrency, estimated_tokens: 0, outcome: "success" }, 24);
-
-    const state = await readQuotaState();
-    const buckets = state.entries[KEY].buckets;
-    const keys = Object.keys(buckets).map(Number);
-
-    // No bucket key must exceed MAX_BUCKET_LEVEL — those entries are never read
-    // back and would grow the file indefinitely.
-    const aboveCeiling = keys.filter((k) => k > MAX_BUCKET_LEVEL);
-    expect(aboveCeiling.length, `success path wrote buckets above MAX_BUCKET_LEVEL (${MAX_BUCKET_LEVEL}): ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`).toBe(0);
-    // Buckets 1..MAX_BUCKET_LEVEL must be written (proof that success evidence is recorded).
-    expect(buckets[String(MAX_BUCKET_LEVEL)]?.success_weight > 0, `bucket ${MAX_BUCKET_LEVEL} (the ceiling) must have success evidence`).toBeTruthy();
-  });
-});
-
-test("ARC-09b7ce76-2: failure spread does not write buckets above MAX_BUCKET_LEVEL + FAILURE_SPREAD_BUCKETS", async () => {
-  await withTempStateDir(async () => {
-    // Failure at a concurrency so high that the spread would go far past the scan ceiling.
-    const highConcurrency = MAX_BUCKET_LEVEL + 10; // 42 — spread would go to 46
-    await recordWaveOutcome(KEY, { concurrency: highConcurrency, estimated_tokens: 0, outcome: "timeout" }, 24);
-
-    const state = await readQuotaState();
-    const buckets = state.entries[KEY].buckets;
-    const keys = Object.keys(buckets).map(Number);
-
-    // FAILURE_SPREAD_BUCKETS = 4 → ceiling is MAX_BUCKET_LEVEL + 4 = 36
-    // No key must exceed that ceiling.
-    const failureCeiling = MAX_BUCKET_LEVEL + 4; // 36
-    const aboveCeiling = keys.filter((k) => k > failureCeiling);
-    expect(aboveCeiling.length, `failure spread wrote buckets above ceiling ${failureCeiling}: ${aboveCeiling.join(",")} — ARC-09b7ce76-2 regression`).toBe(0);
-  });
-});
-
-test("ARC-09b7ce76-2: normal failure spread within range still writes all expected buckets", async () => {
-  await withTempStateDir(async () => {
-    // Failure at concurrency 2 → spread 2..6 inclusive (FAILURE_SPREAD_BUCKETS=4).
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "timeout" }, 24);
-
-    const state = await readQuotaState();
-    const buckets = state.entries[KEY].buckets;
-    for (const n of [2, 3, 4, 5, 6]) {
-      expect(buckets[String(n)]?.failure_weight > 0, `bucket ${n} must have failure evidence after spread`).toBeTruthy();
-    }
-    expect(buckets["7"]?.failure_weight ?? 0, "bucket 7 must not be touched").toBe(0);
-  });
-});
-
-// ── ARC-09b7ce76-2 regression: clearBucketFailureEvidence recovery ─────────────
-
-test("ARC-09b7ce76-2: clearBucketFailureEvidence zeros failure_weight on the target bucket only", async () => {
-  await withTempStateDir(async () => {
-    // Record a failure at concurrency 3 → spread 3..7.
-    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "timeout" }, 24);
-
-    // Verify the failure is there.
-    const before = await readQuotaState();
-    expect(before.entries[KEY].buckets["3"].failure_weight > 0, "bucket 3 must have failure evidence").toBeTruthy();
-    expect(before.entries[KEY].buckets["4"].failure_weight > 0, "bucket 4 must have failure evidence").toBeTruthy();
-
-    // Clear failure evidence at level 3 only.
-    await clearBucketFailureEvidence(KEY, 3);
-
-    const after = await readQuotaState();
-    expect(after.entries[KEY].buckets["3"].failure_weight, "clearBucketFailureEvidence must zero failure_weight on bucket 3").toBe(0);
-    // Bucket 4 must be unchanged — only the targeted bucket is cleared.
-    expect(after.entries[KEY].buckets["4"].failure_weight > 0, "bucket 4 failure_weight must be unchanged after clearing only bucket 3").toBeTruthy();
-  });
-});
-
-test("ARC-09b7ce76-2: clearBucketFailureEvidence preserves success_weight", async () => {
-  await withTempStateDir(async () => {
-    // Record a success at 3 then a failure at 3.
-    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "success" }, 24);
-    await recordWaveOutcome(KEY, { concurrency: 3, estimated_tokens: 0, outcome: "timeout" }, 24);
-
-    const before = await readQuotaState();
-    const successWeightBefore = before.entries[KEY].buckets["3"].success_weight;
-    expect(successWeightBefore > 0, "bucket 3 must have success evidence before clearing").toBeTruthy();
-
-    await clearBucketFailureEvidence(KEY, 3);
-
-    const after = await readQuotaState();
-    expect(after.entries[KEY].buckets["3"].failure_weight, "failure_weight must be zeroed").toBe(0);
-    expect(after.entries[KEY].buckets["3"].success_weight, "success_weight must be preserved after clearing failure evidence").toBe(successWeightBefore);
-  });
-});
-
-// ── COR-d528d2cd: 'error' outcome must be distinct from 'timeout' ─────────────
-
-test("COR-d528d2cd: 'error' outcome records failure weight but does NOT set rate-limit cooldown", async () => {
+test("COR-d528d2cd: an 'error' outcome does NOT set a rate-limit cooldown", async () => {
   await withTempStateDir(async () => {
     // Record an 'error' outcome (non-quota failure).
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "error" }, 24);
+    await recordWaveOutcome(KEY, { outcome: "error" });
 
     const state = await readQuotaState();
     const entry = state.entries[KEY];
-
-    // Failure weight must be present (error is penalised like timeout).
-    expect(entry.buckets["2"]?.failure_weight > 0, "error outcome must record failure_weight on the bucket").toBeTruthy();
 
     // consecutive_429_count must NOT be incremented — errors are not rate limits.
     expect(entry.consecutive_429_count ?? 0, "error outcome must not increment consecutive_429_count").toBe(0);
@@ -328,13 +77,12 @@ test("COR-d528d2cd: 'error' outcome records failure weight but does NOT set rate
   });
 });
 
-test("COR-d528d2cd: 'timeout' outcome records failure weight and does NOT set rate-limit cooldown", async () => {
+test("COR-d528d2cd: a 'timeout' outcome does NOT set a rate-limit cooldown", async () => {
   await withTempStateDir(async () => {
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "timeout" }, 24);
+    await recordWaveOutcome(KEY, { outcome: "timeout" });
 
     const state = await readQuotaState();
     const entry = state.entries[KEY];
-    expect(entry.buckets["2"]?.failure_weight > 0, "timeout outcome must record failure_weight").toBeTruthy();
     expect(entry.consecutive_429_count ?? 0, "timeout must not increment consecutive_429_count").toBe(0);
     expect(entry.cooldown_until, "timeout must not set cooldown_until").toBe(null);
     // COR-610ddf2c: a timeout is not a 429 — last_429_at must stay null.
@@ -344,7 +92,7 @@ test("COR-d528d2cd: 'timeout' outcome records failure weight and does NOT set ra
 
 test("COR-610ddf2c: only a 'rate_limited' outcome stamps last_429_at", async () => {
   await withTempStateDir(async () => {
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "rate_limited" }, 24);
+    await recordWaveOutcome(KEY, { outcome: "rate_limited" });
     const entry = (await readQuotaState()).entries[KEY];
     expect(typeof entry.last_429_at === "string" && entry.last_429_at.length > 0, "a rate_limited outcome must stamp last_429_at with an ISO timestamp").toBeTruthy();
   });
@@ -355,15 +103,14 @@ test("COR-d528d2cd: 'error' and 'timeout' produce identical quota state (both ar
   const KEY_TMO = "provider/model-timeout";
 
   await withTempStateDir(async () => {
-    await recordWaveOutcome(KEY_ERR, { concurrency: 3, estimated_tokens: 0, outcome: "error" }, 24);
-    await recordWaveOutcome(KEY_TMO, { concurrency: 3, estimated_tokens: 0, outcome: "timeout" }, 24);
+    await recordWaveOutcome(KEY_ERR, { outcome: "error" });
+    await recordWaveOutcome(KEY_TMO, { outcome: "timeout" });
 
     const state = await readQuotaState();
     const errEntry = state.entries[KEY_ERR];
     const tmoEntry = state.entries[KEY_TMO];
 
-    // Both should have identical failure_weight and zero cooldown.
-    expect(errEntry.buckets["3"]?.failure_weight, "error and timeout must produce identical failure_weight at the observed concurrency").toBe(tmoEntry.buckets["3"]?.failure_weight);
+    // Both are non-quota failures: no cooldown, no 429 streak.
     expect(errEntry.cooldown_until, "error: no cooldown").toBe(null);
     expect(tmoEntry.cooldown_until, "timeout: no cooldown").toBe(null);
     expect(errEntry.consecutive_429_count ?? 0, "error: no 429 count").toBe(0);
@@ -374,7 +121,7 @@ test("COR-d528d2cd: 'error' and 'timeout' produce identical quota state (both ar
 test("COR-d528d2cd: 'rate_limited' outcome correctly increments 429 count and sets cooldown", async () => {
   await withTempStateDir(async () => {
     // Confirm rate_limited is not confused with error/timeout.
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "rate_limited" }, 24);
+    await recordWaveOutcome(KEY, { outcome: "rate_limited" });
 
     const state = await readQuotaState();
     const entry = state.entries[KEY];
@@ -382,70 +129,6 @@ test("COR-d528d2cd: 'rate_limited' outcome correctly increments 429 count and se
     expect(entry.cooldown_until !== null, "rate_limited must set cooldown_until").toBeTruthy();
   });
 });
-
-test("ARC-09b7ce76-2: clearBucketFailureEvidence on missing key or bucket is a no-op", async () => {
-  await withTempStateDir(async () => {
-    // No-op when key does not exist yet.
-    await clearBucketFailureEvidence("nonexistent/key", 5);
-    const state = await readQuotaState();
-    expect(Object.keys(state.entries).length, "state must remain empty after no-op clear").toBe(0);
-
-    // No-op when bucket does not exist for a known key.
-    await recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24);
-    await clearBucketFailureEvidence(KEY, 99); // bucket 99 was never written
-    const stateAfter = await readQuotaState();
-    expect(stateAfter.entries[KEY], "key entry must still exist").toBeTruthy();
-    expect(stateAfter.entries[KEY].buckets["1"]?.success_weight > 0, "existing bucket must be unaffected").toBeTruthy();
-  });
-});
-
-test("ARC-09b7ce76-2: clearing blocking failure unblocks computeMaxSafeConcurrency for higher levels", async () => {
-  await withTempStateDir(async () => {
-    // Build evidence: success at levels 1 and 2, then a failure at 2 that blocks further scan.
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
-    // Failure at 2 adds failure_weight to 2..6, which dominates at level 2 and breaks the scan.
-    await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "timeout" }, 24);
-
-    const stateBlocked = await readQuotaState();
-    const entryBlocked = stateBlocked.entries[KEY];
-    // Failure weight at bucket 2 dominates → scan breaks at 2 → maxSafe = 1.
-    const maxBefore = computeMaxSafeConcurrency(entryBlocked, 24);
-    expect(maxBefore, "scan must stop at the failed bucket before recovery").toBe(1);
-
-    // Clear the blocking failure at level 2.
-    await clearBucketFailureEvidence(KEY, 2);
-
-    const stateAfter = await readQuotaState();
-    const entryAfter = stateAfter.entries[KEY];
-    const maxAfter = computeMaxSafeConcurrency(entryAfter, 24);
-    expect(maxAfter >= 2, `maxSafe must advance past the cleared bucket — got ${maxAfter}`).toBeTruthy();
-  });
-});
-
-// ── default scan ceiling is MAX_BUCKET_LEVEL (MNT-ba639774 / COR-ba639774) ─────
-// computeMaxSafeConcurrency / computeRampUpConcurrency previously defaulted
-// `maxToCheck` to a bare literal 32 while MAX_BUCKET_LEVEL = 32 is the documented
-// write ceiling. They now default to the named constant so the scan range and the
-// persisted bucket range cannot silently drift apart.
-
-test("MNT-ba639774: computeMaxSafeConcurrency default scan ceiling tracks MAX_BUCKET_LEVEL", () => {
-  // Contiguous all-success buckets 1..MAX_BUCKET_LEVEL → the default scan must
-  // reach the ceiling (maxSafe === MAX_BUCKET_LEVEL). A scan capped below the
-  // write ceiling would stop short and under-report safe concurrency.
-  const buckets = {};
-  for (let n = 1; n <= MAX_BUCKET_LEVEL; n++) {
-    buckets[String(n)] = { success_weight: 1.0, failure_weight: 0 };
-  }
-  const entry = { updated_at: new Date().toISOString(), buckets, cooldown_until: null, last_429_at: null, consecutive_429_count: 0 };
-  // Default maxToCheck (= MAX_BUCKET_LEVEL): reaches the ceiling.
-  expect(computeMaxSafeConcurrency(entry, 24), "default scan must reach MAX_BUCKET_LEVEL when every bucket up to it is safe").toBe(MAX_BUCKET_LEVEL);
-  // An explicit lower ceiling stops earlier — proves the default is the cap, not
-  // a hidden internal constant.
-  expect(computeMaxSafeConcurrency(entry, 24, 5), "an explicit maxToCheck must override the default ceiling").toBe(5);
-});
-
-// ── Token-budget slope learning (tokens_per_pct) ────────────────────────────
 
 test("foldTokensPerPctObservation seeds a new window slope from the first sample", () => {
   // 5000 tokens over a 5-percent drop (0.50 → 0.45) → slope 1000 tokens/percent.
@@ -550,7 +233,8 @@ test("INV-QD-15: a lock-free reader never observes a torn file while writes are 
     for (let i = 0; i < 400; i++) {
       entries[`provider-${i}/model-${i}`] = {
         updated_at: new Date().toISOString(),
-        buckets: { 1: { success_weight: i, failure_weight: 0 } },
+        consecutive_429_count: i % 3,
+        tokens_per_pct: { session: 1000 + i },
         cooldown_until: null,
         last_429_at: null,
       };
@@ -584,14 +268,15 @@ test("INV-QD-15: a lock-held RMW quarantines a CORRUPT file, preserves the bytes
     try {
       // Without a repair path a corrupt file is TERMINAL: cooldown persistence and
       // limit learning stay dead for the life of that file.
-      await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
+      await recordWaveOutcome(KEY, { outcome: "rate_limited" });
     } finally {
       process.stderr.write = original;
     }
 
     // Healed: the live file is valid again and carries the new outcome.
     const healed = await readQuotaState();
-    expect(healed.entries[KEY].buckets["1"].success_weight).toBe(1.0);
+    expect(healed.entries[KEY].consecutive_429_count).toBe(1);
+    expect(healed.entries[KEY].cooldown_until).not.toBe(null);
 
     // Evidence preserved, never deleted.
     const quarantined = (await readdir(dir)).filter((f) => f.includes(".corrupt-"));
@@ -611,11 +296,118 @@ test("INV-QD-15: a transient-UNREADABLE file is never quarantined and never sile
     await mkdir(getQuotaStatePath());
 
     await expect(
-      recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24),
+      recordWaveOutcome(KEY, { outcome: "success" }),
     ).rejects.toThrow(QuotaStateUnavailableError);
 
     // Nothing was quarantined; the path is untouched.
     expect((await readdir(dir)).filter((f) => f.includes(".corrupt-")).length).toBe(0);
     expect((await stat(getQuotaStatePath())).isDirectory()).toBe(true);
+  });
+});
+
+// ── INV-QD-16: a concurrent success must not cancel a live cooldown ───────────
+//
+// Packets run concurrently. A success completing at T+2s was almost certainly
+// dispatched BEFORE the 429 at T, so it is not evidence the rate limit is over.
+// Unconditionally clearing `cooldown_until` on success let the next invocation
+// schedule a full-width wave into a still-throttled pool and restart the
+// exponential backoff from its base. (Previously masked by the deleted bucket
+// learner, whose poisoned buckets pinned maxSafe=1 regardless.)
+
+test("INV-QD-16: a success does NOT clear a LIVE cooldown, nor reset the 429 streak", async () => {
+  await withTempStateDir(async () => {
+    await recordWaveOutcome(KEY, { outcome: "rate_limited" });
+    await recordWaveOutcome(KEY, { outcome: "rate_limited" });
+    const throttled = (await readQuotaState()).entries[KEY];
+    expect(throttled.consecutive_429_count).toBe(2);
+    const liveCooldown = throttled.cooldown_until;
+    expect(new Date(liveCooldown).getTime()).toBeGreaterThan(Date.now());
+
+    // An in-flight packet, dispatched before the 429s, now completes fine.
+    await recordWaveOutcome(KEY, { outcome: "success" });
+
+    const after = (await readQuotaState()).entries[KEY];
+    expect(after.cooldown_until, "a live cooldown must survive a concurrent success").toBe(
+      liveCooldown,
+    );
+    expect(after.consecutive_429_count, "the 429 streak must survive too — the next 429 escalates").toBe(2);
+  });
+});
+
+test("INV-QD-16: a success DOES clear an already-expired cooldown", async () => {
+  await withTempStateDir(async () => {
+    await writeQuotaState({
+      version: 2,
+      entries: {
+        [KEY]: {
+          updated_at: new Date().toISOString(),
+          cooldown_until: new Date(Date.now() - 60_000).toISOString(),
+          last_429_at: new Date(Date.now() - 120_000).toISOString(),
+          consecutive_429_count: 3,
+        },
+      },
+    });
+
+    await recordWaveOutcome(KEY, { outcome: "success" });
+
+    const after = (await readQuotaState()).entries[KEY];
+    expect(after.cooldown_until, "an expired cooldown is cleared").toBe(null);
+    expect(after.consecutive_429_count, "and the streak resets").toBe(0);
+  });
+});
+
+test("INV-QD-16: an unparseable cooldown_until self-heals on the next success", async () => {
+  await withTempStateDir(async () => {
+    await writeQuotaState({
+      version: 2,
+      entries: {
+        [KEY]: {
+          updated_at: new Date().toISOString(),
+          cooldown_until: "not-a-timestamp",
+          last_429_at: null,
+          consecutive_429_count: 1,
+        },
+      },
+    });
+    // NaN > Date.now() is false → treated as expired → cleared, never wedged.
+    await recordWaveOutcome(KEY, { outcome: "success" });
+    expect((await readQuotaState()).entries[KEY].cooldown_until).toBe(null);
+  });
+});
+
+// ── INV-QD-15 (migration): writing is the migration ───────────────────────────
+
+test("INV-QD-15: a legacy `buckets` blob is dropped on the next v2 write, not carried forever", async () => {
+  await withTempStateDir(async () => {
+    // A quota-state.json written by a build that still had the bucket learner.
+    await writeFile(
+      getQuotaStatePath(),
+      JSON.stringify({
+        version: 1,
+        entries: {
+          [KEY]: {
+            updated_at: new Date().toISOString(),
+            buckets: { 1: { success_weight: 3, failure_weight: 0 } },
+            cooldown_until: null,
+            last_429_at: null,
+            tokens_per_pct: { session: 1234 },
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    // It reads back fine (no migration break) …
+    expect((await readQuotaState()).entries[KEY].buckets).toBeDefined();
+
+    // … and the next write projects it onto the v2 field set.
+    await recordWaveOutcome(KEY, { outcome: "rate_limited" });
+
+    const persisted = JSON.parse(await readFile(getQuotaStatePath(), "utf8"));
+    expect(persisted.version).toBe(2);
+    expect("buckets" in persisted.entries[KEY], "v2 means no bucket learner").toBe(false);
+    // Fields that still gate dispatch are preserved verbatim.
+    expect(persisted.entries[KEY].tokens_per_pct).toEqual({ session: 1234 });
+    expect(persisted.entries[KEY].consecutive_429_count).toBe(1);
   });
 });

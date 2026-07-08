@@ -1,18 +1,8 @@
 import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
-import type { ConcurrencyBucket, ObservedWaveOutcome, QuotaState, QuotaStateEntry } from "./types.js";
+import type { ObservedWaveOutcome, QuotaState, QuotaStateEntry } from "./types.js";
 import { withFileLock } from "./fileLock.js";
 import { writeJsonFile } from "../io/json.js";
-
-const MIN_EVIDENCE_WEIGHT = 0.5;
-// A failure at concurrency N is evidence against N and the few levels above it
-// (a failure at 5 makes 6, 7, 8, 9 suspect too), so failure weight spreads over
-// this many buckets past the observed concurrency.
-const FAILURE_SPREAD_BUCKETS = 4;
-// computeMaxSafeConcurrency (and computeRampUpConcurrency) scans up to this many
-// levels. Bucket writes are capped at this ceiling so quota-state.json does not
-// grow indefinitely with entries that will never be read back.
-export const MAX_BUCKET_LEVEL = 32;
 
 let _statePath: string | undefined;
 
@@ -23,31 +13,6 @@ export function setQuotaStateDir(dir: string): void {
 export function getQuotaStatePath(): string {
   if (!_statePath) throw new Error("Quota state dir not set — call setQuotaStateDir() first.");
   return _statePath;
-}
-
-export function decayWeight(
-  weight: number,
-  elapsedHours: number,
-  halfLifeHours: number,
-): number {
-  if (halfLifeHours <= 0 || weight <= 0) return 0;
-  return weight * Math.pow(0.5, elapsedHours / halfLifeHours);
-}
-
-export function applyDecayToEntry(
-  entry: QuotaStateEntry,
-  halfLifeHours: number,
-): QuotaStateEntry {
-  const elapsedHours = (Date.now() - new Date(entry.updated_at).getTime()) / (1000 * 60 * 60);
-  if (elapsedHours < 0.001) return entry;
-  const decayed: Record<string, ConcurrencyBucket> = {};
-  for (const [key, bucket] of Object.entries(entry.buckets)) {
-    decayed[key] = {
-      success_weight: decayWeight(bucket.success_weight, elapsedHours, halfLifeHours),
-      failure_weight: decayWeight(bucket.failure_weight, elapsedHours, halfLifeHours),
-    };
-  }
-  return { ...entry, buckets: decayed };
 }
 
 function isQuotaState(value: unknown): value is QuotaState {
@@ -212,50 +177,32 @@ export async function readQuotaStateForUpdate(context: string): Promise<QuotaSta
  * whole new one, never a prefix.
  */
 export async function writeQuotaState(state: QuotaState): Promise<void> {
-  const normalized: QuotaState = { ...state, version: 2 };
-  await writeJsonFile(getQuotaStatePath(), normalized);
+  const entries: Record<string, QuotaStateEntry> = {};
+  for (const [key, entry] of Object.entries(state.entries)) {
+    entries[key] = normalizeEntry(entry);
+  }
+  await writeJsonFile(getQuotaStatePath(), { version: 2, entries } satisfies QuotaState);
 }
 
-export function computeMaxSafeConcurrency(
-  entry: QuotaStateEntry,
-  halfLifeHours: number,
-  maxToCheck = MAX_BUCKET_LEVEL,
-): number {
-  const decayed = applyDecayToEntry(entry, halfLifeHours);
-  let maxSafe = 1;
-  for (let n = 1; n <= maxToCheck; n++) {
-    const bucket = decayed.buckets[String(n)];
-    if (!bucket) break;
-    if (
-      bucket.success_weight >= MIN_EVIDENCE_WEIGHT &&
-      bucket.failure_weight < MIN_EVIDENCE_WEIGHT
-    ) {
-      maxSafe = n;
-    } else {
-      break;
-    }
+/**
+ * Project an entry onto the v2 field set. A file written by an older build carries
+ * a `buckets` blob from the deleted concurrency learner; reading it round-trips
+ * harmlessly, but persisting it back under a `version: 2` stamp — which is
+ * supposed to mean "no bucket learner" — would keep the dead field alive forever.
+ * Writing is the migration.
+ */
+function normalizeEntry(entry: QuotaStateEntry): QuotaStateEntry {
+  const normalized: QuotaStateEntry = {
+    updated_at: entry.updated_at,
+    cooldown_until: entry.cooldown_until,
+    last_429_at: entry.last_429_at,
+  };
+  if (entry.consecutive_429_count !== undefined) {
+    normalized.consecutive_429_count = entry.consecutive_429_count;
   }
-  return maxSafe;
-}
-
-const RAMP_UP_MIN_SUCCESSES = 2;
-
-export function computeRampUpConcurrency(
-  entry: QuotaStateEntry,
-  halfLifeHours: number,
-  maxToCheck = MAX_BUCKET_LEVEL,
-): number {
-  const maxSafe = computeMaxSafeConcurrency(entry, halfLifeHours, maxToCheck);
-  const decayed = applyDecayToEntry(entry, halfLifeHours);
-  const bucket = decayed.buckets[String(maxSafe)];
-  if (
-    bucket &&
-    bucket.success_weight >= RAMP_UP_MIN_SUCCESSES &&
-    bucket.failure_weight < MIN_EVIDENCE_WEIGHT
-  ) {
-    return maxSafe + 1;
-  }
-  return maxSafe;
+  if (entry.tokens_per_pct !== undefined) normalized.tokens_per_pct = entry.tokens_per_pct;
+  if (entry.output_per_input !== undefined) normalized.output_per_input = entry.output_per_input;
+  return normalized;
 }
 
 // EWMA weight for a new tokens_per_pct observation folded into the running
@@ -412,7 +359,7 @@ export async function recordTokensPerPctObservation(
 }
 
 function blankEntry(): QuotaStateEntry {
-  return { updated_at: new Date().toISOString(), buckets: {}, cooldown_until: null, last_429_at: null };
+  return { updated_at: new Date().toISOString(), cooldown_until: null, last_429_at: null };
 }
 
 export const BASE_COOLDOWN_MS = 60_000;
@@ -423,66 +370,44 @@ export function computeBackoffCooldownMs(consecutive429Count: number): number {
   return Math.min(ms, MAX_COOLDOWN_MS);
 }
 
-export function computeBackoffFailureWeight(consecutive429Count: number): number {
-  return 1.0 + 0.5 * Math.max(0, consecutive429Count - 1);
-}
-
+/**
+ * Record the outcome of a dispatched wave against a pool's quota entry: a success
+ * clears the cooldown and the 429 streak; a 429 extends both.
+ *
+ * It records no concurrency evidence. Concurrency is DECLARED by the provider
+ * (`source.quota.max_concurrent` → `CapacityPool.concurrencyCap`) or ABSENT, in
+ * which case quota headroom and rate limits are the only throttle. Inferring a
+ * safe concurrency from an outcome stream is a category error — see
+ * `spec/audit/dispatch-admission-control.md`.
+ */
 export async function recordWaveOutcome(
   providerModelKey: string,
   outcome: ObservedWaveOutcome,
-  halfLifeHours: number,
 ): Promise<void> {
   const lockPath = getQuotaStatePath() + ".lock";
-  await withFileLock(lockPath, () => recordWaveOutcomeUnsafe(providerModelKey, outcome, halfLifeHours));
-}
-
-/**
- * Targeted recovery: zero out the failure_weight on a single concurrency bucket
- * for a given provider-model key. Use this when a sparse or stale failure entry
- * at level `concurrency` is permanently capping the inferred safe concurrency —
- * the scan in computeMaxSafeConcurrency breaks at the first bucket whose
- * failure_weight dominates, so clearing one bad entry unblocks all higher levels.
- *
- * This is faster than waiting for the 24-hour decay half-life to clear bad entries.
- * success_weight is preserved; only the failure evidence is removed.
- */
-export async function clearBucketFailureEvidence(
-  providerModelKey: string,
-  concurrency: number,
-): Promise<void> {
-  const lockPath = getQuotaStatePath() + ".lock";
-  await withFileLock(lockPath, async () => {
-    const state = await readQuotaStateForUpdate("clearBucketFailureEvidence");
-    const entry = state.entries[providerModelKey];
-    if (!entry) return;
-    const bucket = entry.buckets[String(concurrency)];
-    if (!bucket) return;
-    bucket.failure_weight = 0;
-    entry.updated_at = new Date().toISOString();
-    state.entries[providerModelKey] = entry;
-    await writeQuotaState(state);
-  });
+  await withFileLock(lockPath, () => recordWaveOutcomeUnsafe(providerModelKey, outcome));
 }
 
 async function recordWaveOutcomeUnsafe(
   providerModelKey: string,
   outcome: ObservedWaveOutcome,
-  halfLifeHours: number,
 ): Promise<void> {
   const state = await readQuotaStateForUpdate("recordWaveOutcome");
-  const entry = applyDecayToEntry(state.entries[providerModelKey] ?? blankEntry(), halfLifeHours);
+  const entry = state.entries[providerModelKey] ?? blankEntry();
 
   if (outcome.outcome === "success") {
-    entry.consecutive_429_count = 0;
-    entry.cooldown_until = null;
-    // Cap at MAX_BUCKET_LEVEL: levels above this are never read back by
-    // computeMaxSafeConcurrency, so writing them would grow the state file
-    // indefinitely without ever influencing scheduling decisions.
-    const successCeiling = Math.min(outcome.concurrency, MAX_BUCKET_LEVEL);
-    for (let n = 1; n <= successCeiling; n++) {
-      const bucket = entry.buckets[String(n)] ?? { success_weight: 0, failure_weight: 0 };
-      bucket.success_weight += 1.0;
-      entry.buckets[String(n)] = bucket;
+    // A success does NOT cancel a live cooldown. Packets run concurrently, so a
+    // success completing at T+2s was almost certainly dispatched BEFORE the 429
+    // at T — it is not evidence the rate limit is over. Clearing the cooldown
+    // here would let the very next invocation schedule a full-width wave into a
+    // still-throttled pool AND restart the exponential backoff from its base.
+    // Only an already-expired cooldown is cleared (which also self-heals an
+    // unparseable timestamp, since NaN > now is false).
+    const cooldownActive =
+      entry.cooldown_until != null && new Date(entry.cooldown_until).getTime() > Date.now();
+    if (!cooldownActive) {
+      entry.consecutive_429_count = 0;
+      entry.cooldown_until = null;
     }
   } else {
     const prev429Count = entry.consecutive_429_count ?? 0;
@@ -501,24 +426,6 @@ async function recordWaveOutcomeUnsafe(
       entry.cooldown_until = new Date(Date.now() + backoffMs).toISOString();
     } else if (outcome.cooldown_until) {
       entry.cooldown_until = outcome.cooldown_until;
-    }
-
-    const failureWeight = outcome.outcome === "rate_limited"
-      ? computeBackoffFailureWeight(new429Count)
-      : 1.0;
-    // Spread failure evidence from outcome.concurrency through
-    // outcome.concurrency + FAILURE_SPREAD_BUCKETS, but cap at
-    // MAX_BUCKET_LEVEL + FAILURE_SPREAD_BUCKETS — beyond this ceiling the
-    // scan loop in computeMaxSafeConcurrency will never reach, so additional
-    // entries only bloat the file.
-    const failureCeiling = Math.min(
-      outcome.concurrency + FAILURE_SPREAD_BUCKETS,
-      MAX_BUCKET_LEVEL + FAILURE_SPREAD_BUCKETS,
-    );
-    for (let n = outcome.concurrency; n <= failureCeiling; n++) {
-      const bucket = entry.buckets[String(n)] ?? { success_weight: 0, failure_weight: 0 };
-      bucket.failure_weight += failureWeight;
-      entry.buckets[String(n)] = bucket;
     }
   }
 

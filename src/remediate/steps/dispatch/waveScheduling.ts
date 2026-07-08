@@ -35,7 +35,6 @@ import {
   readQuotaStateOrDegrade,
   buildProviderModelKey,
   computeBackoffCooldownMs,
-  computeBackoffFailureWeight,
   summarizeDispatchCapacityPools,
 } from "../../quota/index.js";
 export { resolveHostActiveSubagentLimit };
@@ -221,8 +220,6 @@ async function buildHostPoolPreamble(
   // (graduated remaining_pct → LOW/CRITICAL throttle before a 429), gating on the
   // exact key so it never masks the proactive/learned sources.
   const quotaSource = buildQuotaSource({
-    halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
-      ?.empirical_half_life_hours,
     hostSession:
       input.hostSession ??
       new HostSessionQuotaSource({
@@ -494,7 +491,6 @@ export async function buildDispatchQuota(
     backoffState = {
       consecutive_429_count: count,
       current_cooldown_ms: computeBackoffCooldownMs(count),
-      current_failure_weight: computeBackoffFailureWeight(count),
     };
   }
 

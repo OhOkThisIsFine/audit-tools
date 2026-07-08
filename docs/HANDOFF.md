@@ -30,15 +30,21 @@
   provider or ABSENT, never learned. The shipped `declaredCap` floor covers case 1; quota + rate limits cover case 2.
   It was built, adversarially reviewed by three independent reviewers, and reverted — see
   [[concurrency-is-declared-or-absent-never-learned]] and `docs/backlog.md`.
-  **Immediate next: the four pre-existing quota-state bugs that review surfaced** (`docs/backlog.md` → Open bugs),
-  in order: (1) `quota-state.json` torn read fails OPEN → make `writeQuotaState` atomic (temp+rename, the
-  `remediate/state/store.ts` pattern); (2) decide whether `buckets` / `computeMaxSafeConcurrency` /
-  `computeRampUpConcurrency` are legacy-to-DELETE **before** fixing the hardcoded
-  `recordWaveOutcome(…, {concurrency: 1})` that poisons them; (3) split `buckets_decayed_at` from `updated_at`;
-  (4) `selectProvider` should read the live quota entry, not the frozen `pool.quotaStateEntry` snapshot.
-  Then C1 real source-pool budget (converge onto `sources[].quota`), A1 rename
-  `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md` → Open bugs +
-  [[host-provider-misattribution-nim-codex]].
+  **Quota-state bugs (1)–(3) are CLOSED.** (1) `quota-state.json` torn read failed OPEN → `writeQuotaState` is now
+  atomic (temp+rename via the shared `writeJsonFile`), `readQuotaState` throws `QuotaStateUnavailableError` rather
+  than conflating an unusable file with cold start, `readQuotaStateOrDegrade` is the one loud opt-in degrade, and the
+  lock-held RMW path quarantines corrupt bytes aside and rebuilds (INV-QD-15; `reservationLedger` + `claimRegistry`
+  had the same truncating-write shape and are now atomic too). (2)+(3) resolved **by deletion**: the bucket learner
+  (`buckets`, `computeMaxSafeConcurrency`, `computeRampUpConcurrency`, `clearBucketFailureEvidence`, the decay
+  machinery, `ObservedWaveOutcome.concurrency`, `quota.{empirical_half_life_hours,ramp_up_enabled}`) was
+  pre-admission-control legacy that inferred a concurrency number from a rate-limit signal — the exact category error
+  [[concurrency-is-declared-or-absent-never-learned]] closes. It is gone; `updated_at`-as-decay-clock went with it.
+  What survives on the entry is reactive backoff (`cooldown_until` / `last_429_at` / `consecutive_429_count`) plus
+  `tokens_per_pct` / `output_per_input`, which are what actually gate admission.
+  **Immediate next: bug (4)** — `selectProvider` should read the live quota entry, not the frozen
+  `pool.quotaStateEntry` snapshot (`docs/backlog.md` → Open bugs). Then C1 real source-pool budget (converge onto
+  `sources[].quota`), A1 rename `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md`
+  → Open bugs + [[host-provider-misattribution-nim-codex]].
 - **Then:** the cost↔speed dispatch dial + free-pool maximization forward track (lands ON TOP of the kept
   cost-first router; B2 host-reorder seed, capability floor, free-pool saturation gated by C3) + the free/cheap
   multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;
