@@ -1152,6 +1152,10 @@ export type {
   OrderedCostCandidate,
 } from "./dispatch/costRank.js";
 
+// Throughput axis for the cost↔speed dispatch dial (spec/dispatch-cost-speed-dial.md).
+export { throughputScore, REPRESENTATIVE_PACKET_TOKENS } from "./dispatch/throughputScore.js";
+export type { ThroughputSignals } from "./dispatch/throughputScore.js";
+
 // Rolling dispatch engine (packet-type-agnostic, quota-only throttle)
 export type {
   RollingDispatchPacket,

@@ -19,7 +19,17 @@ function pkt(id, cost, complexity = 0.5) {
   return { id, cost, complexity };
 }
 
-function pool(poolId, { budget = Infinity, declaredCap = null, costRank = 0, capabilityRank = 0, capacityTokens = Infinity } = {}) {
+function pool(
+  poolId,
+  {
+    budget = Infinity,
+    declaredCap = null,
+    costRank = 0,
+    capabilityRank = 0,
+    throughputScore = Infinity,
+    capacityTokens = Infinity,
+  } = {},
+) {
   return {
     poolId,
     resourceKey: poolId,
@@ -27,6 +37,7 @@ function pool(poolId, { budget = Infinity, declaredCap = null, costRank = 0, cap
     declaredCap,
     costRank,
     capabilityRank,
+    throughputScore,
     capacityTokens,
   };
 }
@@ -124,4 +135,100 @@ test("grants persist as ledger leases and the artifact shape validates", async (
     explains: res.explains,
   };
   expect(() => DispatchAdmissionSchema.parse(admission)).not.toThrow();
+});
+
+// ── Cost↔speed dispatch dial (spec/dispatch-cost-speed-dial.md) ──────────────
+
+test("dial λ=0 (default) ignores throughput — the cheapest pool wins even when slowest", async () => {
+  const ledger = await freshLedger();
+  const cheapSlow = pool("cheap#a/m", { costRank: 0, throughputScore: 1000 });
+  const priceyFast = pool("fast#a/m", { costRank: 2, throughputScore: 100000 });
+  const res = await admitBatch({ packets: [pkt("p1", 100)], pools: [priceyFast, cheapSlow], ledger });
+  expect(res.granted[0].pool_id).toBe("cheap#a/m");
+});
+
+test("dial λ=1 (max speed) routes to the fastest capable pool, not the cheapest", async () => {
+  const ledger = await freshLedger();
+  const cheapSlow = pool("cheap#a/m", { costRank: 0, throughputScore: 1000 });
+  const priceyFast = pool("fast#a/m", { costRank: 2, throughputScore: 100000 });
+  const res = await admitBatch({
+    packets: [pkt("p1", 100)],
+    pools: [cheapSlow, priceyFast],
+    ledger,
+    dispatchBias: 1,
+  });
+  expect(res.granted[0].pool_id).toBe("fast#a/m");
+});
+
+test("dial: an unmetered pool (throughput +Infinity) ranks fastest at λ=1", async () => {
+  const ledger = await freshLedger();
+  const metered = pool("metered#a/m", { costRank: 0, throughputScore: 500000 });
+  const unmetered = pool("local#a/m", { costRank: 2, throughputScore: Infinity });
+  const res = await admitBatch({
+    packets: [pkt("p1", 100)],
+    pools: [metered, unmetered],
+    ledger,
+    dispatchBias: 1,
+  });
+  expect(res.granted[0].pool_id).toBe("local#a/m");
+});
+
+test("dial: bias clamps to [0,1] — >1 behaves as 1, <0 as 0", async () => {
+  const cheapSlow = () => pool("cheap#a/m", { costRank: 0, throughputScore: 1000 });
+  const priceyFast = () => pool("fast#a/m", { costRank: 2, throughputScore: 100000 });
+
+  const over = await admitBatch({
+    packets: [pkt("p1", 100)],
+    pools: [cheapSlow(), priceyFast()],
+    ledger: await freshLedger(),
+    dispatchBias: 5,
+  });
+  expect(over.granted[0].pool_id).toBe("fast#a/m"); // clamps to 1 → speed-first
+
+  const under = await admitBatch({
+    packets: [pkt("p1", 100)],
+    pools: [cheapSlow(), priceyFast()],
+    ledger: await freshLedger(),
+    dispatchBias: -2,
+  });
+  expect(under.granted[0].pool_id).toBe("cheap#a/m"); // clamps to 0 → cost-first
+});
+
+test("dial: an intermediate λ can pick a pool that is neither cheapest nor fastest-at-λ0", async () => {
+  // cheap (cost 0, slow), mid (cost 1, FASTEST), costly (cost 2, mid-speed).
+  // λ=0 → cheap; λ=0.5 blended ordinals → mid strictly wins (0.5 < 1 < 1.5).
+  const cheap = () => pool("cheap#a/m", { costRank: 0, throughputScore: 100 });
+  const mid = () => pool("mid#a/m", { costRank: 1, throughputScore: 10000 });
+  const costly = () => pool("costly#a/m", { costRank: 2, throughputScore: 1000 });
+
+  const atZero = await admitBatch({
+    packets: [pkt("p1", 100)],
+    pools: [cheap(), mid(), costly()],
+    ledger: await freshLedger(),
+    dispatchBias: 0,
+  });
+  expect(atZero.granted[0].pool_id).toBe("cheap#a/m");
+
+  const atHalf = await admitBatch({
+    packets: [pkt("p1", 100)],
+    pools: [cheap(), mid(), costly()],
+    ledger: await freshLedger(),
+    dispatchBias: 0.5,
+  });
+  expect(atHalf.granted[0].pool_id).toBe("mid#a/m");
+});
+
+test("dial: spill still walks the blended order when the fastest pool is cap-reached", async () => {
+  const ledger = await freshLedger();
+  const fastest = pool("fastest#a/m", { costRank: 2, throughputScore: 100000, declaredCap: 1 });
+  const nextFast = pool("next#a/m", { costRank: 1, throughputScore: 50000 });
+  const res = await admitBatch({
+    packets: [pkt("p1", 100), pkt("p2", 100)],
+    pools: [fastest, nextFast],
+    ledger,
+    dispatchBias: 1,
+  });
+  const byPacket = Object.fromEntries(res.granted.map((g) => [g.packet_id, g.pool_id]));
+  expect(byPacket.p1).toBe("fastest#a/m"); // fills its cap of 1
+  expect(byPacket.p2).toBe("next#a/m"); // spills to the next-fastest
 });

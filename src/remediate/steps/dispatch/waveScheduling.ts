@@ -12,7 +12,7 @@ import type {
   AdmissionPool,
 } from "audit-tools/shared";
 import { computeDispatchAdmission, createReservationLedger, tierRank } from "audit-tools/shared";
-import { deriveCostRank, lookupConfirmedPosition } from "audit-tools/shared";
+import { deriveCostRank, lookupConfirmedPosition, throughputScore } from "audit-tools/shared";
 import { scheduleWave as computePoolWaveSchedule } from "audit-tools/shared";
 import {
   buildQuotaSource,
@@ -459,6 +459,12 @@ function admissionPoolsFromSchedule(
         confirmedPosition: lookupConfirmedPosition(confirmedCostPositions, pool.model),
       }),
       capabilityRank: tierRank(pool.rank),
+      // Throughput axis (declared signals only) for the cost↔speed dial; consulted
+      // only when the operator sets a bias λ>0. See spec/dispatch-cost-speed-dial.md.
+      throughputScore: throughputScore({
+        inputTokensPerMinute: pool.resolved_limits.input_tokens_per_minute,
+        requestsPerMinute: pool.resolved_limits.requests_per_minute,
+      }),
       capacityTokens: pool.resolved_limits.context_tokens,
     };
   });

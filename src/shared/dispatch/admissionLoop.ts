@@ -43,6 +43,13 @@ export interface AdmissionPool {
   costRank: number;
   /** Capability rank — HIGHER is more capable; ties break toward more capable. */
   capabilityRank: number;
+  /**
+   * Throughput score — HIGHER is faster (sustained token-intake rate the pool's
+   * declared limits permit; `+Infinity` ⇒ rate-unbounded/unmetered). Only consulted
+   * when the dispatch bias (λ) is > 0; see {@link AdmitBatchInput.dispatchBias} and
+   * spec/dispatch-cost-speed-dial.md.
+   */
+  throughputScore: number;
   /** Largest packet cost this pool can fit (context window − output). */
   capacityTokens: number;
 }
@@ -122,12 +129,72 @@ export interface AdmitBatchInput {
    */
   capable?: (pool: AdmissionPool, packet: AdmissionCandidate) => boolean;
   leaseTtlMs?: number;
+  /**
+   * Cost↔speed dispatch bias (λ) ∈ [0, 1] — the operator-set operating point on the
+   * cost-vs-throughput frontier among capable pools (spec/dispatch-cost-speed-dial.md).
+   * λ=0 (default) is pure cost-first — byte-identical to the pre-dial ordering. λ=1 is
+   * pure throughput (fastest-capable-first). 0<λ<1 blends the two axes' ordinals.
+   * Out-of-range values clamp to [0, 1].
+   */
+  dispatchBias?: number;
 }
 
 /** Default capability gate: the pool's window must fit the packet's reservation. */
 function defaultCapable(pool: AdmissionPool, packet: AdmissionCandidate): boolean {
   if (!Number.isFinite(pool.capacityTokens) || pool.capacityTokens <= 0) return true;
   return pool.capacityTokens >= packet.cost;
+}
+
+/** Cost-first order: cheapest first, ties toward the more capable pool. */
+function costFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
+  return a.costRank - b.costRank || b.capabilityRank - a.capabilityRank;
+}
+
+/** Deterministic tiebreak so equal-key orderings are stable across processes. */
+function poolIdCmp(a: AdmissionPool, b: AdmissionPool): number {
+  return a.poolId < b.poolId ? -1 : a.poolId > b.poolId ? 1 : 0;
+}
+
+/** Descending throughput; `+Infinity`-safe (Infinity−Infinity would be NaN). */
+function speedFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
+  const ta = a.throughputScore;
+  const tb = b.throughputScore;
+  if (ta !== tb) {
+    if (ta === Number.POSITIVE_INFINITY) return -1;
+    if (tb === Number.POSITIVE_INFINITY) return 1;
+    return tb - ta;
+  }
+  return b.capabilityRank - a.capabilityRank || poolIdCmp(a, b);
+}
+
+/**
+ * Order the capable pools for one packet at the operating point `bias` (λ).
+ *
+ * λ=0 (or a single candidate) ⇒ the exact pre-dial cost-first order. Otherwise blend
+ * the two axes' ORDINALS within this candidate set — a $/Mtok cost value cannot be
+ * linearly mixed with a tokens/min rate, so each axis contributes its dense integer
+ * rank, keeping a well-defined total order (spec/dispatch-cost-speed-dial.md).
+ */
+function orderCandidates(pools: AdmissionPool[], bias: number): AdmissionPool[] {
+  const ordered = pools.slice();
+  if (bias <= 0 || ordered.length <= 1) {
+    return ordered.sort(costFirstCmp);
+  }
+  const costOrdinal = new Map<string, number>();
+  ordered
+    .slice()
+    .sort((a, b) => costFirstCmp(a, b) || poolIdCmp(a, b))
+    .forEach((pool, i) => costOrdinal.set(pool.poolId, i));
+  const speedOrdinal = new Map<string, number>();
+  ordered
+    .slice()
+    .sort(speedFirstCmp)
+    .forEach((pool, i) => speedOrdinal.set(pool.poolId, i));
+  const blended = (pool: AdmissionPool): number =>
+    (1 - bias) * (costOrdinal.get(pool.poolId) ?? 0) + bias * (speedOrdinal.get(pool.poolId) ?? 0);
+  return ordered.sort(
+    (a, b) => blended(a) - blended(b) || b.capabilityRank - a.capabilityRank || costFirstCmp(a, b) || poolIdCmp(a, b),
+  );
 }
 
 /**
@@ -143,6 +210,7 @@ function defaultCapable(pool: AdmissionPool, packet: AdmissionCandidate): boolea
  */
 export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResult> {
   const capable = input.capable ?? defaultCapable;
+  const bias = Math.min(1, Math.max(0, input.dispatchBias ?? 0));
   const granted: AdmissionGrant[] = [];
   const explains: AdmissionExplain[] = [];
   const blocked: string[] = [];
@@ -162,11 +230,13 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
   }
 
   for (const packet of input.packets) {
-    // Cost-first-capable: cheapest capable pool first; ties break toward the more
-    // capable pool so equal-cost lanes prefer the one with more headroom.
-    const candidates = input.pools
-      .filter((pool) => capable(pool, packet))
-      .sort((a, b) => a.costRank - b.costRank || b.capabilityRank - a.capabilityRank);
+    // Capability is a hard floor (filter), then order the survivors at the operating
+    // point λ: cost-first at λ=0 (default, unchanged), sliding toward throughput-first
+    // as λ→1. Spill still walks this order to the next pool with headroom.
+    const candidates = orderCandidates(
+      input.pools.filter((pool) => capable(pool, packet)),
+      bias,
+    );
 
     if (candidates.length === 0) {
       explains.push({
@@ -258,6 +328,8 @@ export async function computeDispatchAdmission(input: {
   grantLeases: boolean;
   ledger: ReservationLedger;
   capable?: (pool: AdmissionPool, packet: AdmissionCandidate) => boolean;
+  /** Cost↔speed operating point λ ∈ [0,1]; see {@link AdmitBatchInput.dispatchBias}. */
+  dispatchBias?: number;
 }): Promise<DispatchAdmission> {
   const candidates: AdmissionCandidate[] = input.packets.map((p) => ({
     id: p.id,
@@ -276,6 +348,7 @@ export async function computeDispatchAdmission(input: {
     pools: input.pools,
     ledger: input.ledger,
     ...(input.capable ? { capable: input.capable } : {}),
+    ...(input.dispatchBias != null ? { dispatchBias: input.dispatchBias } : {}),
   });
   return {
     granted_packet_ids: admit.granted.map((g) => g.packet_id),

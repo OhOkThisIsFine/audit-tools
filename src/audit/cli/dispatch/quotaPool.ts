@@ -6,6 +6,7 @@ import {
   createReservationLedger,
   tierRank,
   deriveCostRank,
+  throughputScore,
   lookupConfirmedPosition,
 } from "audit-tools/shared";
 import type {
@@ -324,6 +325,12 @@ export async function finalizeDispatchQuota(params: {
         confirmedPosition: lookupConfirmedPosition(params.confirmedCostPositions, alloc.schedule.model),
       }),
       capabilityRank: tierRank(alloc.rank),
+      // Throughput axis (declared signals only) for the cost↔speed dial; consulted
+      // only when the operator sets a bias λ>0. See spec/dispatch-cost-speed-dial.md.
+      throughputScore: throughputScore({
+        inputTokensPerMinute: alloc.schedule.resolved_limits.input_tokens_per_minute,
+        requestsPerMinute: alloc.schedule.resolved_limits.requests_per_minute,
+      }),
       capacityTokens: alloc.schedule.resolved_limits.context_tokens,
     };
   });
