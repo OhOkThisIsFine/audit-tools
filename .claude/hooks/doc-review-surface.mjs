@@ -30,6 +30,10 @@ function git(args, timeout) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout,
+    // win32: a windowless hook parent spawning a console child (git) pops a
+    // console window unless suppressed. This hook fires at every SessionStart
+    // (and runs `git fetch`), so it flashes a window on each start — hide it.
+    windowsHide: true,
   });
 }
 

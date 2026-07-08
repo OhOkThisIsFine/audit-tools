@@ -17,7 +17,10 @@ import { readFileSync } from 'node:fs';
 const GUIDELINES = 'docs/doc-review-guidelines.md';
 
 function git(args) {
-  return execFileSync('git', args, { encoding: 'utf8' });
+  // win32: a windowless parent spawning a console child (git) pops a console window
+  // unless suppressed. This script runs inside `verify:checks`, so an unguarded spawn
+  // flashes a window on every gate run — INV-WH.
+  return execFileSync('git', args, { encoding: 'utf8', windowsHide: true });
 }
 
 // Tracked docs/*.md on disk (recursive). git ls-files keeps us to checked-in

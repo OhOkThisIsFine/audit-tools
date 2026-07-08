@@ -321,6 +321,7 @@ test("INV-shared-tests-07: observability and IO symbols exported from shared ind
 
 const REPO_ROOT = resolve(__dirname, "../..");
 const TESTS_ROOT = resolve(__dirname, "..");
+const SCRIPTS_ROOT = resolve(REPO_ROOT, "scripts");
 const SPAWN_HELPER = resolve(TESTS_ROOT, "helpers/spawn.mjs");
 
 // Files under tests/ that are EXECUTED AS SPAWNED CHILD `node` processes (not run
@@ -349,16 +350,26 @@ function walkFiles(dir) {
   return out;
 }
 
-// Does an import statement from "node:child_process" pull in a spawn/exec name?
+// Does an import statement from the child_process module pull in a spawn/exec name?
+// BOTH specifiers must be accepted: `node:child_process` AND the bare `child_process`.
+// The guard once matched only the `node:`-prefixed form, which silently exempted every
+// file using the bare specifier (that hole is how two smoke scripts reintroduced a
+// window flash). Never narrow this back to one specifier.
 function importsRawChildProcessSpawn(source) {
-  // Match `import { … } from "node:child_process"` (single or double quotes).
-  const importRe = /import\s*\{([^}]*)\}\s*from\s*["']node:child_process["']/g;
+  // Match `import { … } from "child_process"` / `"node:child_process"` (either quote).
+  const importRe = /import\s*\{([^}]*)\}\s*from\s*["'](?:node:)?child_process["']/g;
   let m;
   while ((m = importRe.exec(source)) !== null) {
     const names = m[1].split(",").map((s) => s.trim().split(/\s+as\s+/)[0].trim());
     if (names.some((n) => SPAWN_CALLEES.includes(n))) return true;
   }
   return false;
+}
+
+// A raw child_process call site, excluding method calls on some other object — without
+// the leading-dot exclusion a plain `someRegex.exec(source)` reads as `child_process.exec()`.
+function rawCallRegex(callee) {
+  return new RegExp(`(?<![.\\w$])${callee}\\s*\\(`, "g");
 }
 
 test("INV-WH: tests/helpers/spawn.mjs exists and exports the window-hidden spawn wrappers", async () => {
@@ -407,22 +418,30 @@ test("INV-WH: no test file imports a raw spawn/exec entry point from node:child_
   expect(files.length > 20, "INV-WH walker must discover the test tree").toBeTruthy();
 });
 
-test("INV-WH: spawn-carrying dev/CI scripts + child-executed test helpers hide the window on every raw call", () => {
+test("INV-WH: EVERY spawn-carrying script + child-executed test helper hides the window on every raw call", () => {
+  // Enumerate by WALKING `scripts/`, never by whitelist. A hardcoded two-file list is
+  // exactly how `scripts/check-doc-manifest.mjs` (run inside `verify:checks`) and
+  // `scripts/remediate/smoke-linked-remediate-code.mjs` silently reintroduced a console
+  // flash: they simply were not on the list. Any NEW spawning script is now covered the
+  // moment it lands, with no one having to remember to register it.
   const scripts = [
-    resolve(REPO_ROOT, "scripts/release-and-publish.mjs"),
-    resolve(REPO_ROOT, "scripts/postinstall.mjs"),
+    ...walkFiles(SCRIPTS_ROOT).filter((f) => f.endsWith(".mjs")),
     ...CHILD_EXECUTED_SPAWN_FILES,
   ];
 
   const violations = [];
+  let scanned = 0;
   for (const script of scripts) {
     expect(existsSync(script), `${script} must exist — INV-WH`).toBeTruthy();
     const source = readFileSync(script, "utf8");
+    // Only scripts that actually reach into child_process can pop a window.
+    if (!importsRawChildProcessSpawn(source)) continue;
+    scanned += 1;
     // Find each raw child_process call and require windowsHide within the call's
     // option object (the ~600 chars following the callee comfortably cover the
     // multi-line option objects these scripts use).
     for (const callee of SPAWN_CALLEES) {
-      const callRe = new RegExp(`\\b${callee}\\s*\\(`, "g");
+      const callRe = rawCallRegex(callee);
       let m;
       while ((m = callRe.exec(source)) !== null) {
         const window = source.slice(m.index, m.index + 600);
@@ -438,4 +457,7 @@ test("INV-WH: spawn-carrying dev/CI scripts + child-executed test helpers hide t
     violations,
     `These script spawn calls do not pass windowsHide:true, so a windowless parent flashes a console window on win32 — add windowsHide:true to each: ${violations.join("; ")} — INV-WH`,
   ).toEqual([]);
+  // Sanity: a broken walker (or a regex that stops matching the import form) must not
+  // silently pass by scanning nothing.
+  expect(scanned >= 6, `INV-WH must scan the spawn-carrying scripts (scanned ${scanned})`).toBeTruthy();
 });

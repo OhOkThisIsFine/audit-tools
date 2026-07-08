@@ -30,7 +30,9 @@ function resolveSpawn(command, args) {
 
 function spawnNpm(args, options) {
   const resolved = resolveSpawn(npm, args);
-  return spawnSync(resolved.command, resolved.args, { windowsHide: true, ...options });
+  // windowsHide LAST so a caller's `options` can never clobber it (INV-WH) — the same
+  // force-last contract tests/helpers/spawn.mjs uses.
+  return spawnSync(resolved.command, resolved.args, { ...options, windowsHide: true });
 }
 
 function defaultSmokeTmpRoot() {

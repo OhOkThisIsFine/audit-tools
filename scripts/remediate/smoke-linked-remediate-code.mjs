@@ -27,7 +27,9 @@ function check(label, fn) {
 }
 
 function run(...args) {
-  return spawnSync(process.execPath, [wrapper, ...args], { encoding: "utf8" });
+  // windowsHide: a windowless parent spawning a console child (node) flashes a console
+  // window on win32 — INV-WH.
+  return spawnSync(process.execPath, [wrapper, ...args], { encoding: "utf8", windowsHide: true });
 }
 
 console.log("smoke:linked-remediate-code");
