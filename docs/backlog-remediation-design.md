@@ -43,7 +43,8 @@ shipped-vs-open status.
   `frictionCapture.ts`; all mechanical seams call it; appends ride O2's `withFileLock`.
 - **git_history registration (F6↔F1):** F1 registers `git_history.json` in the DAG + `dep-map.md`
   atomically with F6.
-- **own-vs-acquire (F5↔F6):** git-history + secret-scan are owned, not acquired through F5's adapter seam.
+- **own-vs-acquire (F5↔F6):** git-history mining is owned (F6); secret-scanning is acquired through
+  F5's adapter seam (the default-run `gitleaksCandidate`), not owned.
 
 ## Dependency ordering (why foundations lead)
 
@@ -67,7 +68,7 @@ data-loss/dispatch fixes before the next track builds on them.
 These are accepted design flaws found by independent critic+judge; the **fix** is the invariant the
 implementation must hold.
 
-- **Ledger identity (CE-001 / FC-001):** `{unit_id, lens, pass_id}` is NOT unique (deepening/steward +
+- **Ledger identity (CE-001):** `{unit_id, lens, pass_id}` is NOT unique (deepening/steward +
   base worker; or O3 re-dispatch emitting a fresh result with unchanged coordinate). The ledger is keyed
   by a per-record **instance id** (append-only, every record distinct); `identity_key` is a *grouping*
   key for re-association (one→many), never a primary key; content_key adds a result-content discriminator.
