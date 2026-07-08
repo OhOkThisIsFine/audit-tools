@@ -24,6 +24,7 @@ import { loadArtifactBundle } from "../io/artifacts.js";
 import { writePacketSchemaFiles } from "../io/runArtifacts.js";
 import type { AuditTask } from "../types.js";
 import { sizeIndexFromManifest, orderTasksForPacketReview, buildReviewPacketsFromPartition } from "../orchestrator/reviewPackets.js";
+import { computeContinuityScores } from "../orchestrator/continuityScore.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { taskResultPath, packetPromptPath, artifactNameForId } from "./args.js";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
@@ -264,6 +265,17 @@ export async function prepareDispatchArtifacts(params: {
     ),
   );
   const sizeIndex = sizeIndexFromManifest(bundle.repo_manifest);
+  // Access-memory continuity bias (increment 2b): score files by how connected
+  // they are to already-touched code, JIT from the persisted access_memory
+  // counters + the dependency graph. Feeds packet ORDERING (a back-payload
+  // selection concern) at the packetization sites below; empty when there's no
+  // signal yet, in which case ordering is identical to pre-2b. Not threaded into
+  // orderTasksForPacketReview — that task order is re-derived by the JIT
+  // partitioner downstream, so biasing it would be discarded work.
+  const continuityScores = computeContinuityScores(
+    bundle.access_memory,
+    bundle.graph_bundle,
+  );
   const orderedTasks = orderTasksForPacketReview(dispatchTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
@@ -326,6 +338,7 @@ export async function prepareDispatchArtifacts(params: {
     graphBundle: bundle.graph_bundle,
     lineIndex,
     sizeIndex,
+    continuityScores,
   });
   if (dispatchPool.tierBudgets) {
     packets = fitPacketsToTierBudgets({
@@ -337,6 +350,7 @@ export async function prepareDispatchArtifacts(params: {
       lineIndex,
       sizeIndex,
       graphBundle: bundle.graph_bundle,
+      continuityScores,
     });
   }
   const tasksById = new Map(orderedTasks.map((task) => [task.task_id, task]));

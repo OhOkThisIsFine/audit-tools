@@ -48,6 +48,15 @@ export interface BuildReviewPacketOptions {
   lineIndex?: Record<string, number>;
   /** Path → size_bytes (from the repo manifest); drives byte-based token sizing. */
   sizeIndex?: Record<string, number>;
+  /**
+   * Optional per-file continuity scores (normalized graph path → score) from the
+   * access-memory layer. When present, packets are ordered so higher-continuity
+   * packets (more connected to already-touched code) sort first WITHIN a priority
+   * tier — an additive selection bias that only affects packet ordering (a
+   * back-payload concern), never composition or the cached prompt prefix. Absent
+   * or empty → identical to pre-2b ordering.
+   */
+  continuityScores?: Map<string, number>;
   maxTasksPerPacket?: number;
   /**
    * Soft per-packet content-token budget. Defaults to
@@ -124,12 +133,78 @@ function compareTasksForPacket(a: AuditTask, b: AuditTask): number {
   return a.task_id.localeCompare(b.task_id);
 }
 
-function comparePackets(a: ReviewPacket, b: ReviewPacket): number {
-  const priorityDelta = priorityRank(b.priority) - priorityRank(a.priority);
-  if (priorityDelta !== 0) return priorityDelta;
-  const sizeDelta = b.task_ids.length - a.task_ids.length;
-  if (sizeDelta !== 0) return sizeDelta;
-  return a.packet_id.localeCompare(b.packet_id);
+/**
+ * Sum a packet's member-file continuity scores (rounded to fixed precision so
+ * ULP-level float differences can't reorder packets). Higher = more of the
+ * packet's files are connected to already-touched code.
+ */
+function packetContinuityMass(
+  packet: ReviewPacket,
+  scores: Map<string, number>,
+): number {
+  let sum = 0;
+  for (const path of packet.file_paths) {
+    sum += scores.get(normalizeGraphPath(path)) ?? 0;
+  }
+  return Math.round(sum * 1e6) / 1e6;
+}
+
+/**
+ * Packet ordering comparator. Priority is always the dominant audit signal;
+ * continuity (when access-memory scores are supplied) is a secondary key that
+ * biases selection WITHIN a priority tier toward packets connected to
+ * already-touched code, ahead of the raw size / id tiebreaks. With no scores it
+ * degrades to the original priority → size → id order.
+ */
+function makeComparePackets(
+  continuityByPacketId?: Map<string, number>,
+): (a: ReviewPacket, b: ReviewPacket) => number {
+  return (a, b) => {
+    const priorityDelta = priorityRank(b.priority) - priorityRank(a.priority);
+    if (priorityDelta !== 0) return priorityDelta;
+    if (continuityByPacketId) {
+      const aContinuity = continuityByPacketId.get(a.packet_id) ?? 0;
+      const bContinuity = continuityByPacketId.get(b.packet_id) ?? 0;
+      if (bContinuity !== aContinuity) return bContinuity - aContinuity;
+    }
+    const sizeDelta = b.task_ids.length - a.task_ids.length;
+    if (sizeDelta !== 0) return sizeDelta;
+    return a.packet_id.localeCompare(b.packet_id);
+  };
+}
+
+const comparePackets = makeComparePackets();
+
+/**
+ * Build the packet-id → continuity-mass index used to order packets, or
+ * undefined when no (non-empty) continuity scores were supplied — in which case
+ * callers fall back to the plain `comparePackets`.
+ */
+function continuityIndexForPackets(
+  packets: ReviewPacket[],
+  scores: Map<string, number> | undefined,
+): Map<string, number> | undefined {
+  if (!scores || scores.size === 0) return undefined;
+  return new Map(
+    packets.map((packet) => [packet.packet_id, packetContinuityMass(packet, scores)]),
+  );
+}
+
+/**
+ * The single canonical packet ordering: priority → continuity (when access-memory
+ * scores are supplied) → size → id. Single-sourced so every site that emits an
+ * ordered packet list — the two packetizers AND the per-tier re-split in
+ * `fitPacketsToTierBudgets` — orders identically and the bias (and strict
+ * priority monotonicity) can never be silently dropped by one of them.
+ */
+export function orderReviewPackets(
+  packets: ReviewPacket[],
+  continuityScores?: Map<string, number>,
+): ReviewPacket[] {
+  const continuityIndex = continuityIndexForPackets(packets, continuityScores);
+  return packets.sort(
+    continuityIndex ? makeComparePackets(continuityIndex) : comparePackets,
+  );
 }
 
 function chunkPacketTasks(
@@ -466,7 +541,7 @@ function buildReviewPacketPlanningData(
     graphEdges,
     groups,
     planningGraphEdges,
-    packets: packets.sort(comparePackets),
+    packets: orderReviewPackets(packets, options.continuityScores),
   };
 }
 
@@ -487,6 +562,12 @@ export interface BuildPartitionPacketOptions {
   lineIndex?: Record<string, number>;
   sizeIndex?: Record<string, number>;
   graphBundle?: GraphBundle;
+  /**
+   * Optional per-file continuity scores (see BuildReviewPacketOptions). Orders
+   * the materialized packets so higher-continuity packets sort first within a
+   * priority tier; absent/empty → identical to pre-2b ordering.
+   */
+  continuityScores?: Map<string, number>;
 }
 
 /**
@@ -531,7 +612,7 @@ export function buildReviewPacketsFromPartition(
     packetIndex += 1;
   }
 
-  return packets.sort(comparePackets);
+  return orderReviewPackets(packets, options.continuityScores);
 }
 
 export function orderTasksForPacketReview(

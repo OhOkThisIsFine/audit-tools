@@ -7,6 +7,7 @@ import type { DispatchComplexity } from "./types.js";
 import {
   orderTasksForPacketReview,
   buildReviewPacketsFromPartition,
+  orderReviewPackets,
   sizeIndexFromManifest,
 } from "../../orchestrator/reviewPackets.js";
 import {
@@ -81,6 +82,10 @@ export function buildPendingAuditTasks(bundle: ArtifactBundle) {
   const lineIndex = Object.fromEntries(
     pendingTasks.flatMap((task) => Object.entries(task.file_line_counts ?? {})),
   );
+  // No continuity bias here: this returns a task ORDER that every downstream
+  // consumer re-derives (the JIT partitioner + admission re-order independently),
+  // so a continuity pass would be discarded work. The bias lives where it bites —
+  // the final packet sort in buildReviewPacketsFromPartition / fitPacketsToTierBudgets.
   return orderTasksForPacketReview(pendingTasks, {
     graphBundle: bundle.graph_bundle,
     lineIndex,
@@ -162,6 +167,8 @@ export function fitPacketsToTierBudgets(params: {
   lineIndex?: Record<string, number>;
   sizeIndex?: Record<string, number>;
   graphBundle?: GraphBundle;
+  /** Continuity scores so a per-tier re-split preserves the access-memory ordering bias. */
+  continuityScores?: Map<string, number>;
 }): ReviewPacket[] {
   const { tierBudgets, sessionConfig } = params;
   let packets = params.packets;
@@ -194,6 +201,7 @@ export function fitPacketsToTierBudgets(params: {
           graphBundle: params.graphBundle,
           lineIndex: params.lineIndex,
           sizeIndex: params.sizeIndex,
+          continuityScores: params.continuityScores,
         },
       );
       if (subPackets.length <= 1) {
@@ -206,7 +214,12 @@ export function fitPacketsToTierBudgets(params: {
     packets = next;
     if (!changed) break;
   }
-  return packets;
+  // Re-establish the canonical global order: an in-place split appends a packet's
+  // sub-packets where the parent sat, so without this a low-priority sub-packet
+  // could sit ahead of a higher-priority packet (priority-monotonicity break) and
+  // the continuity ordering would be lost across the split boundary. One final
+  // sort restores both (priority → continuity → size → id).
+  return orderReviewPackets(packets, params.continuityScores);
 }
 
 /**
