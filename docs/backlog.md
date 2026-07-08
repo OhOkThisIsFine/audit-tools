@@ -126,14 +126,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   check). This is a contract-pipeline (loop-core) change → route through the adversarial pipeline, not a lone
   autonomous agent. Extends the CP-NODE contract-validation work.
 
-- **NIM `/models` capability probe — deferred, not yet built.** Residual from the (shipped) C1
-  real source-pool budget work (2026-07-07 NIM/Codex dispatch fix set): the `/models` capability
-  probe is a build lever ONLY after live-validating that a given NIM endpoint actually exposes
-  `context_length`/`max_model_len`, and it MUST sanity-clamp before feeding the discovered value
-  into `resolveContextBudget` (a too-large probe over-admits). No code implements this discovery
-  yet. Distinct from the cost↔speed-dispatch-dial forward-track below (that's price/throughput
-  tuning; this is context-window auto-discovery). [[openai-compatible-provider]]
-
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
   - **`verify:checks` gate = 95.8s, of which `smoke:packaged-audit-code` alone is 70.2s (73%).**

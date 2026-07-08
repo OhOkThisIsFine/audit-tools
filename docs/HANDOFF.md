@@ -8,86 +8,14 @@
 
 ## Live state
 
-- **v0.32.34 published on npm as `latest`.** Latest lap shipped the **cost↔speed dispatch dial** (see the ⚙️
-  bullet below) together with the previously-parked **session-config RMW-lock** code fix. Prior (v0.32.33): the
-  **A1 `local-subprocess`→`worker-command` provider rename** (sole-consumer, no shim — see the A1 bullet below). Prior (v0.32.32): **C1 real source-pool budget**
-  (legacy `openai_compatible` block gains a `quota` that converges onto the source pool, off the default floor;
-  shared-consumer robustness — `resolveContextBudget` floors at 0, discovered rung drops an inverted `output ≥ context`;
-  operator quota validated) — see the C1 bullet below. Prior (v0.32.31): bug (4) `selectProvider` reads the live quota entry. Prior
-  (v0.32.30): quota-state durability (INV-QD-15) and the
-  **deletion of the concurrency bucket learner** (−862 LOC), which unmasked and fixed INV-QD-16 (a concurrent
-  `success` must not cancel a live cooldown) — see the quota bullet below. Prior (v0.32.29): B1 host-identity
-  sourcing. Prior (v0.32.28): the NIM/Codex dispatch-fix lean tranche. Prior (v0.32.27): the "everything code-fixable" backlog sweep landed (11 nodes) **plus
-  the HIGH remediate worktree-safety fix** — per-node worktree isolation + total lock order + OID-ancestry
-  reconcile + `resolved_no_change` captured-OID grounding, so concurrent `accept-node` can no longer wipe sibling
-  in-flight worktrees or desync `state.json` from git. **Conceptual design-review Phases A–E all landed** (charter
-  LAYER, overlay-and-delta structure operator, charter extraction + charter-aware conceptual prompt, charter-delta
-  clarification loop, systemic improvement-seeking challenge loop). Design of record
-  [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
-  [[conceptual-design-review-design]]. Per-lap shipped detail is NOT narrated here (changelog creep — see `git log`
-  and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **✅ The previously-pending session-config RMW-lock fix SHIPPED in v0.32.34** (bundled with the dial). Still on
-  main unreleased-as-code: the `validate-artifact` singular-self-check gap is FILED (not fixed) in
-  `docs/backlog.md` for the adversarial pipeline (a drafted patch exists but was held — loop-core).
-- **NIM/Codex dispatch fix set — lean halt fix + B1 host-identity ✅ SHIPPED (v0.32.28 / v0.32.29).** Lean tranche
-  (v0.32.28): C2 tolerant result parse + C4 bounded transient fetch retry + C3 per-pool concurrency cap + D1 bounded
-  no-progress retry + D2 recovery handoff. **B1 host-identity sourcing (v0.32.29):** NEW `resolveConversationHostProvider`
-  auto-detects the real host off `isSelfSpawnBlocked("codex")` (codex-first) with a `--host-provider` /
-  `sessionConfig.host_provider` override; `resolveHostProviderName` moved to `providerPathGuard.ts` and its
-  unset/auto fallback now delegates to the detector (was literal `claude-code`); all 3 demote/in-process host-key
-  sites route through it. Full adversarial pipeline caught 1 MAJOR (codex-host + `provider:codex`-inside-codex
-  double-booked one codex account) → NEW `shouldDemotePrimaryInProcess` same-agent guard.
-  **C3-AIMD is CLOSED — not needed, do not re-propose** (the owner, 2026-07-07): concurrency is DECLARED by the
-  provider or ABSENT, never learned. The shipped `declaredCap` floor covers case 1; quota + rate limits cover case 2.
-  It was built, adversarially reviewed by three independent reviewers, and reverted — see
-  [[concurrency-is-declared-or-absent-never-learned]] and `docs/backlog.md`.
-  **Quota-state bugs (1)–(3) are CLOSED.** (1) `quota-state.json` torn read failed OPEN → `writeQuotaState` is now
-  atomic (temp+rename via the shared `writeJsonFile`), `readQuotaState` throws `QuotaStateUnavailableError` rather
-  than conflating an unusable file with cold start, `readQuotaStateOrDegrade` is the one loud opt-in degrade, and the
-  lock-held RMW path quarantines corrupt bytes aside and rebuilds (INV-QD-15; `reservationLedger` + `claimRegistry`
-  had the same truncating-write shape and are now atomic too). (2)+(3) resolved **by deletion**: the bucket learner
-  (`buckets`, `computeMaxSafeConcurrency`, `computeRampUpConcurrency`, `clearBucketFailureEvidence`, the decay
-  machinery, `ObservedWaveOutcome.concurrency`, `quota.{empirical_half_life_hours,ramp_up_enabled}`) was
-  pre-admission-control legacy that inferred a concurrency number from a rate-limit signal — the exact category error
-  [[concurrency-is-declared-or-absent-never-learned]] closes. It is gone; `updated_at`-as-decay-clock went with it.
-  What survives on the entry is reactive backoff (`cooldown_until` / `last_429_at` / `consecutive_429_count`) plus
-  `tokens_per_pct` / `output_per_input`, which are what actually gate admission. The deletion **unmasked** a latent
-  bug the poisoned buckets had been compensating for: `recordWaveOutcome` cleared a *live* `cooldown_until` on any
-  success, though a concurrent success was dispatched before the 429 and is no evidence the limit is over
-  (**INV-QD-16**, fixed: only an already-expired cooldown clears).
-  **Bug (4) CLOSED (this lap):** `selectProvider`'s `scheduleForPool` now reads the LIVE `quotaStateEntries[poolKey]`
-  first and only falls back to the frozen `pool.quotaStateEntry` snapshot when the live read is transiently
-  unavailable — so a `cooldown_until` learned mid-run is observed (INV-QD-14 spill), and a prior-run cooldown still
-  drives proactive spill through a transient-read window instead of waiting for the reactive 429 floor.
-  Adversarially reviewed (independent reviewer confirmed no regression; the `live ?? snapshot` order is what
-  preserves the transient-read fallback the snapshot-only drop would have lost).
-  **C1 real source-pool budget — ✅ SHIPPED (this lap).** A legacy `openai_compatible` block gained a
-  `quota?: QuotaModelLimits` field that `openAiCompatibleSource` copies onto the folded/demoted source, so a
-  configured window/concurrency reaches `buildSourcePool`'s `discoveredLimits`/`concurrencyCap` instead of the
-  `DEFAULT_CONTEXT_TOKENS`/`DEFAULT_OUTPUT_TOKENS` floor — converged onto the SAME `sources[].quota` shape. Full
-  adversarial pass corrected the premise (a bad window fails CLOSED / starves, not over-admits) and moved the
-  guarantee into the SHARED consumer so it holds on both orchestrators regardless of validation:
-  `resolveContextBudget` floors at 0 (never negative) and the `discovered_capability` rung ignores an inverted
-  `output ≥ context` reservation. Operator quota is also validated at config load (audit path, defense-in-depth;
-  `max_concurrent: 0` = unlimited sentinel honored). [[openai-compatible-provider]].
-  **A1 rename `local-subprocess`→`worker-command` — ✅ SHIPPED:** provider identity renamed across name const
-  (`WORKER_COMMAND_PROVIDER_NAME`), class (`WorkerCommandProvider`/`workerCommandProvider.ts`), `PROVIDER_NAMES` /
-  `DISPATCHABLE_SOURCE_PROVIDERS`, factory, example config, operator guide + gloss; sole-consumer, no shim. Detail in
-  `docs/backlog.md`.
-  **Immediate next:** finish the cost↔speed dial — see the dedicated bullet below.
-- **⚙️ Cost↔speed dispatch dial — ✅ SHIPPED v0.32.34 (2026-07-08).** 1D dial (λ∈[0,1], capability a hard floor)
-  on TOP of the kept cost-first router: λ=0 = byte-identical to today (adversarially confirmed); λ>0 = ordinal-blend
-  of cost vs **auto-derived pool-class-aware parallelism** (`deriveThroughputConcurrency`: source uncapped⇒+Inf,
-  host unspecified⇒1); Gate-0 `dispatch_bias` captures it as durable policy; both orchestrators build pools through
-  ONE shared `admissionPoolsFromSummaries` (no drift). Default 0 ⇒ zero behavior change until set. Two independent
-  adversarial passes ran; the 2nd caught R-1 (declaredCap-null crowned the sequential host at λ=1) → fixed
-  pool-class-aware + regression-tested. Design of record
-  [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md), [[cost-speed-dispatch-dial]].
-  **Residual (additive forward tracks in `docs/backlog.md`, dial bullet): (1)** the `/models` concurrency probe as
-  the future *auto* throughput refinement; **(2)** B2 host-reorder seed.
-- **Then:** the free/cheap multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;
-  [[arbitrage-dispatch-tier-design]]). Then the remaining env-bound live validations (quota pre-wall pacing,
-  friction escalation, selective-deepening convergence, clippy/rubocop live spawn).
+- **v0.32.34 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
+  creep — see `git log` and project memory [[live-status]]); this section is current-state +
+  open-work roadmap only.
+- **Immediate next:** the free/cheap multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md`
+  → Forward tracks; [[arbitrage-dispatch-tier-design]]) and the shipped cost↔speed dial's own
+  residuals (`/models` concurrency probe; B2 host-reorder seed — both in `docs/backlog.md`, dial
+  bullet). Then the remaining env-bound live validations (quota pre-wall pacing, friction escalation,
+  selective-deepening convergence, clippy/rubocop live spawn).
 - **Dispatch admission-control — residual (env-bound / deeper, in `docs/backlog.md`):**
   (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
   (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
@@ -101,10 +29,11 @@
   in v0.32.27.** The 10-node `backlog-handoff-max-sweep-2026-07-06` plan fully landed (manual node-by-node recovery
   after the original worktree-wipe/state-desync incident). Durable status/recovery in
   [[remediate-max-sweep-run-2026-07-06]] / [[remediate-worktree-wipe-state-desync]].
-- **Open items** (all in `docs/backlog.md`): the NIM/Codex dispatch fix set (immediate-next above); the cost↔speed
-  dial + free-pool / quota-arbitrage forward tracks; env-bound live validations (quota pre-wall pacing, friction
-  escalation, selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004 residual
-  (claude-code host only — the NIM guided-decoding path shipped).
+- **Open items** (all in `docs/backlog.md`): the shipped dial's residuals (`/models` concurrency
+  probe; B2 host-reorder seed) and the free-pool / quota-arbitrage forward track (immediate-next
+  above); env-bound live validations (quota pre-wall pacing, friction escalation, selective-deepening
+  convergence, clippy/rubocop live spawn); provider-blocked schema CE-004 residual (claude-code host
+  only — the NIM guided-decoding path shipped).
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
