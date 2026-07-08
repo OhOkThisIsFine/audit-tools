@@ -3,6 +3,7 @@ import { accessSync, constants } from "node:fs";
 import { promisify } from "node:util";
 import {
   ANALYZER_SETTINGS,
+  DISPATCHABLE_SOURCE_PROVIDERS,
   PROVIDER_NAMES,
   SESSION_UI_MODES,
   type AnalyzerSetting,
@@ -19,6 +20,128 @@ const execFileAsync = promisify(execFile);
 const VALID_PROVIDERS = new Set<ProviderName>(PROVIDER_NAMES);
 const VALID_UI_MODES = new Set<SessionUiMode>(SESSION_UI_MODES);
 const VALID_ANALYZER_SETTINGS = new Set<AnalyzerSetting>(ANALYZER_SETTINGS);
+const VALID_DISPATCHABLE_SOURCE_PROVIDERS = new Set<string>(
+  DISPATCHABLE_SOURCE_PROVIDERS,
+);
+
+/**
+ * Every `QuotaModelLimits` field is a positive-integer count (token windows,
+ * per-minute rate limits, in-flight cap) that feeds admission sizing / rate
+ * limiting directly — an out-of-range value silently over- or under-admits (a
+ * too-large `context_tokens` over-sizes packets → the exact overrun C1 guards
+ * against). Reject it at config load rather than let it reach the scheduler.
+ */
+// Token windows and per-minute rate limits must be strictly positive integers.
+// `max_concurrent` is separate: the runtime treats 0 as the documented
+// "unlimited" sentinel (`positiveIntCapOrNull` maps 0 → null), so it allows a
+// non-negative integer.
+const QUOTA_POSITIVE_INT_FIELDS = [
+  "context_tokens",
+  "output_tokens",
+  "requests_per_minute",
+  "input_tokens_per_minute",
+  "output_tokens_per_minute",
+] as const;
+
+function validateQuotaModelLimits(
+  value: unknown,
+  path: string,
+  issues: ValidationIssue[],
+): void {
+  if (!isRecord(value)) {
+    pushIssue(issues, path, "quota must be a JSON object.");
+    return;
+  }
+  const badFields = new Set<string>();
+  for (const key of QUOTA_POSITIVE_INT_FIELDS) {
+    const entry = value[key];
+    if (
+      entry !== undefined &&
+      (typeof entry !== "number" || !Number.isInteger(entry) || entry <= 0)
+    ) {
+      pushIssue(
+        issues,
+        `${path}.${key}`,
+        `${key} must be a positive integer when provided.`,
+      );
+      badFields.add(key);
+    }
+  }
+  const maxConcurrent = value.max_concurrent;
+  if (
+    maxConcurrent !== undefined &&
+    (typeof maxConcurrent !== "number" ||
+      !Number.isInteger(maxConcurrent) ||
+      maxConcurrent < 0)
+  ) {
+    pushIssue(
+      issues,
+      `${path}.max_concurrent`,
+      "max_concurrent must be a non-negative integer when provided (0 = unlimited).",
+    );
+  }
+  // Cross-field: a reserved output that meets or exceeds the context leaves no
+  // room for input. Skip when either field already failed its per-field check
+  // (the per-field error is the actionable one; a second message here is noise).
+  const context = value.context_tokens;
+  const output = value.output_tokens;
+  if (
+    typeof context === "number" &&
+    typeof output === "number" &&
+    Number.isFinite(context) &&
+    Number.isFinite(output) &&
+    !badFields.has("context_tokens") &&
+    !badFields.has("output_tokens") &&
+    output >= context
+  ) {
+    pushIssue(
+      issues,
+      `${path}.output_tokens`,
+      "output_tokens must be less than context_tokens (no room for input otherwise).",
+    );
+  }
+}
+
+/**
+ * Validate `sessionConfig.sources[]` — the explicit dispatchable-source pool
+ * list. Shape-guards each entry's provider and (the C1 concern) its `quota`,
+ * which is now the single source of truth for a source pool's admission budget.
+ */
+function validateDispatchableSources(
+  value: unknown,
+  issues: ValidationIssue[],
+): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    pushIssue(
+      issues,
+      "sources",
+      "sources must be an array of dispatchable source objects.",
+    );
+    return;
+  }
+  value.forEach((source, index) => {
+    const path = `sources[${index}]`;
+    if (!isRecord(source)) {
+      pushIssue(issues, path, "each source must be a JSON object.");
+      return;
+    }
+    const provider = source.provider;
+    if (
+      typeof provider !== "string" ||
+      !VALID_DISPATCHABLE_SOURCE_PROVIDERS.has(provider)
+    ) {
+      pushIssue(
+        issues,
+        `${path}.provider`,
+        `provider must be one of: ${Array.from(VALID_DISPATCHABLE_SOURCE_PROVIDERS).join(", ")}.`,
+      );
+    }
+    if (source.quota !== undefined) {
+      validateQuotaModelLimits(source.quota, `${path}.quota`, issues);
+    }
+  });
+}
 
 function pushIssue(
   issues: ValidationIssue[],
@@ -252,6 +375,9 @@ function validateOpenAiCompatibleSection(
       );
     }
   }
+  if (value.quota !== undefined) {
+    validateQuotaModelLimits(value.quota, `${path}.quota`, issues);
+  }
 }
 
 // Maximum wall-clock time for a PATH probe (where/which). 5 s is generous
@@ -470,6 +596,7 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     issues,
     provider === "openai-compatible",
   );
+  validateDispatchableSources(value.sources, issues);
 
   if (value.synthesis !== undefined) {
     if (!isRecord(value.synthesis)) {

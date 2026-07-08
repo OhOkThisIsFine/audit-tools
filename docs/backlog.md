@@ -52,6 +52,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (don't lose a prior-run cooldown to a transient IO flake), so the mechanism read as "drop the snapshot" — the
   [[backlog-item-states-invariant-not-fix-mechanism]] failure mode, in the wild.
 
+- **Remediate does no session-config field validation — parity gap (tool-should-decide, from C1 review).** The
+  full field validator `validateSessionConfig` (`src/audit/validation/sessionConfig.ts`) runs ONLY on the audit
+  orchestrator (`src/audit/supervisor/sessionConfig.ts`); remediate loads `session-config.json` and feeds it
+  straight to the SHARED scheduler with no field checks. C1 closed the *correctness* half in the shared consumer
+  (`resolveContextBudget` floors at 0; the discovered rung drops an inverted window), so a bad quota can no longer
+  wedge either orchestrator — but a remediate operator gets no loud config-load error for a malformed
+  `quota`/`sources[]`, just a silent degrade to the floor. "Keep orchestrators in parity" says both should reject
+  bad config at load. Fix: route remediate's config load through the same validator (or single-source the
+  field-validation into `audit-tools/shared` and call it from both). [[enforce-robustness-in-tooling-not-host-discretion]]
+
 - **Session-config RMW helpers are unlocked (B1 review finding #4, minor).** `persistHostProvider` and the
   pre-existing `persistAnalyzerSettings` (`src/audit/supervisor/sessionConfig.ts`) do read→merge→validate→
   `writeJsonFile` with no `withFileLock`. `writeJsonFile` is atomic per-write (no torn file), but two concurrent
@@ -147,11 +157,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     showed the implementation stranded every packet under its own target condition (a burst of concurrent 429s applies
     one multiplicative decrease *per victim*, flooring the ceiling and exhausting the pool) and defeated the DC-4
     livelock guard. See [[concurrency-is-declared-or-absent-never-learned]].
-  - **C1 real source-pool budget** (quality, NOT the halt — the floor sizes packets *smaller*, they still fit):
-    converge openai-compatible budget onto `sources[].quota.context_tokens/output_tokens` (the legacy
-    `openai_compatible` block attaches no quota → guaranteed floor); a `/models` capability probe is a build lever
-    ONLY after live-validating NIM exposes `context_length`/`max_model_len`, and MUST sanity-clamp (a too-large
-    probe result over-admits → re-triggers the overrun). [[openai-compatible-provider]]
+  - **C1 real source-pool budget — ✅ SHIPPED.** `openai_compatible` gained a `quota?: QuotaModelLimits` field
+    copied onto the folded/demoted source → reaches `buildSourcePool` `discoveredLimits`/`concurrencyCap` off the
+    default floor, converged onto the `sources[].quota` shape; the shared `resolveContextBudget` floors at 0 and the
+    `discovered_capability` rung drops an inverted `output ≥ context` reservation (holds on BOTH orchestrators);
+    operator quota validated at config load. Residual (deferred, unchanged): the `/models` capability probe is a
+    build lever ONLY after live-validating NIM exposes `context_length`/`max_model_len`, and MUST sanity-clamp
+    before feeding the discovered rung (a too-large probe over-admits). [[openai-compatible-provider]]
   - **A1 rename `local-subprocess` → `worker-command` + gloss** ("runs `task.worker_command`; generic subprocess
     fallback, not an LLM backend") across the name const, factory, `PROVIDER_NAMES`, examples, operator guide.
     Sole-consumer, no back-compat shim.

@@ -228,8 +228,10 @@ export function collectOversizedWarnings(
   if (waveSchedule.confidence === "low") {
     return [];
   }
-  const fallbackBudget =
-    waveSchedule.resolved_limits.context_tokens - waveSchedule.resolved_limits.output_tokens;
+  const fallbackBudget = Math.max(
+    0,
+    waveSchedule.resolved_limits.context_tokens - waveSchedule.resolved_limits.output_tokens,
+  );
   const warnings: Array<{ code: string; message: string }> = [];
   for (const p of plan) {
     const tier = p.model_hint?.tier;

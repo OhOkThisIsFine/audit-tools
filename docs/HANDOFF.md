@@ -52,8 +52,17 @@
   drives proactive spill through a transient-read window instead of waiting for the reactive 429 floor.
   Adversarially reviewed (independent reviewer confirmed no regression; the `live ?? snapshot` order is what
   preserves the transient-read fallback the snapshot-only drop would have lost).
-  **Immediate next: C1 real source-pool budget** (converge onto `sources[].quota`), then A1 rename
-  `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md` →
+  **C1 real source-pool budget — ✅ SHIPPED (this lap).** A legacy `openai_compatible` block gained a
+  `quota?: QuotaModelLimits` field that `openAiCompatibleSource` copies onto the folded/demoted source, so a
+  configured window/concurrency reaches `buildSourcePool`'s `discoveredLimits`/`concurrencyCap` instead of the
+  `DEFAULT_CONTEXT_TOKENS`/`DEFAULT_OUTPUT_TOKENS` floor — converged onto the SAME `sources[].quota` shape. Full
+  adversarial pass corrected the premise (a bad window fails CLOSED / starves, not over-admits) and moved the
+  guarantee into the SHARED consumer so it holds on both orchestrators regardless of validation:
+  `resolveContextBudget` floors at 0 (never negative) and the `discovered_capability` rung ignores an inverted
+  `output ≥ context` reservation. Operator quota is also validated at config load (audit path, defense-in-depth;
+  `max_concurrent: 0` = unlimited sentinel honored). [[openai-compatible-provider]].
+  **Immediate next: A1 rename `local-subprocess`→`worker-command`** (name const, factory, `PROVIDER_NAMES`,
+  examples, operator guide; sole-consumer, no back-compat shim). Full detail + file:lines in `docs/backlog.md` →
   [[host-provider-misattribution-nim-codex]].
 - **Then:** the cost↔speed dispatch dial + free-pool maximization forward track (lands ON TOP of the kept
   cost-first router; B2 host-reorder seed, capability floor, free-pool saturation gated by C3) + the free/cheap

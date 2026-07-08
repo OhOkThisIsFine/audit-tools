@@ -232,6 +232,57 @@ test("collectDispatchableSources: demotePrimaryInProcess adds the codex primary 
   expect(demoted[0].provider).toBe("codex");
 });
 
+// ── C1: legacy openai_compatible block's quota converges onto the source pool ──
+
+test("C1: a legacy openai_compatible.quota converges onto the folded source (fold + demote)", () => {
+  const quota = { context_tokens: 128_000, output_tokens: 8_000, max_concurrent: 6 };
+  // Fold-in path (openai-compatible is NOT the primary).
+  const folded = collectDispatchableSources(
+    { openai_compatible: { base_url: "http://nim/v1", model: "m", quota } },
+    "claude-code",
+  );
+  expect(folded.length).toBe(1);
+  expect(folded[0].provider).toBe("openai-compatible");
+  expect(folded[0].quota).toEqual(quota);
+
+  // Primary-demote path (openai-compatible IS the primary, attended host).
+  const demoted = primaryInProcessSource(
+    { openai_compatible: { base_url: "http://nim/v1", model: "m", quota } },
+    "openai-compatible",
+  );
+  expect(demoted.quota).toEqual(quota);
+
+  // Absent quota stays undefined → the source falls to the conservative floor,
+  // exactly as before C1 (no regression for unconfigured operators).
+  const noQuota = collectDispatchableSources(
+    { openai_compatible: { base_url: "http://nim/v1", model: "m" } },
+    "claude-code",
+  );
+  expect(noQuota[0].quota).toBeUndefined();
+});
+
+test("C1: a legacy-derived source's quota reaches discoveredLimits + concurrencyCap (off the floor)", async () => {
+  const quota = { context_tokens: 128_000, output_tokens: 8_000, max_concurrent: 6 };
+  const [source] = collectDispatchableSources(
+    { openai_compatible: { base_url: "http://nim/v1", model: "m", quota } },
+    "claude-code",
+  );
+  const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
+  // discoveredLimits feeds resolveLimits' discovered_capability rung → real window,
+  // not DEFAULT_CONTEXT_TOKENS. concurrencyCap comes from the same quota.
+  expect(pool.discoveredLimits?.context_tokens).toBe(128_000);
+  expect(pool.discoveredLimits?.output_tokens).toBe(8_000);
+  expect(pool.concurrencyCap).toBe(6);
+
+  // Legacy block WITHOUT quota → discoveredLimits null → resolveLimits floor.
+  const [floorSource] = collectDispatchableSources(
+    { openai_compatible: { base_url: "http://nim/v1", model: "m" } },
+    "claude-code",
+  );
+  const floorPool = await buildSourcePool({ source: floorSource, quotaSource: STUB_QUOTA, quotaEntries: {} });
+  expect(floorPool.discoveredLimits).toBe(null);
+});
+
 test("collectDispatchableSources: attended openai-compatible primary demotes alongside a second NIM source", () => {
   const cfg = {
     sources: [{ provider: "codex", endpoint: "codex" }],

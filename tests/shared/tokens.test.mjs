@@ -64,3 +64,11 @@ test("resolveContextBudget prefers explicit values, else the conservative floor"
   const defaults = resolveContextBudget({});
   expect(defaults).toBe(Math.floor((DEFAULT_CONTEXT_TOKENS - DEFAULT_OUTPUT_TOKENS) * BLOCK_SAFETY_MARGIN));
 });
+
+test("resolveContextBudget floors at 0 — a reserved output ≥ context never goes negative", () => {
+  // A malformed/degenerate window (output meets or exceeds context) yields no
+  // usable input budget; the pool fails CLOSED (0) rather than propagating a
+  // negative budget. Guards the remediate path where no config validator runs.
+  expect(resolveContextBudget({ contextTokens: 4_000, reservedOutputTokens: 8_000 })).toBe(0);
+  expect(resolveContextBudget({ contextTokens: 4_000, reservedOutputTokens: 4_000 })).toBe(0);
+});

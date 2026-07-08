@@ -3,6 +3,7 @@ import { test, expect } from "vitest";
 const { resolveLimits, hostClassFor, resolveHostModel } = await import(
   "../../src/shared/quota/limits.ts"
 );
+const { DEFAULT_OUTPUT_TOKENS } = await import("../../src/shared/tokens.ts");
 
 test("hostClassFor maps claude-code to hosted", () => {
   expect(hostClassFor("claude-code")).toBe("hosted");
@@ -56,6 +57,22 @@ test("resolveLimits uses discovered_capability when the handshake reports a wind
   expect(result.confidence).toBe("high");
   expect(result.limits.context_tokens).toBe(200_000);
   expect(result.limits.output_tokens).toBe(32_000);
+});
+
+test("resolveLimits respects a discovered context but ignores an inverted output reservation", () => {
+  // A degenerate discovered window (output ≥ context — e.g. a malformed operator
+  // quota that reached the scheduler without a validator) must not size against
+  // the bad output: keep the real context ceiling (no over-admit) and fall to the
+  // conservative default output so the pair can't wedge a negative budget.
+  const result = resolveLimits({
+    providerName: "openai-compatible",
+    sessionConfig: {},
+    hostModel: "nim/some-model",
+    discoveredLimits: { context_tokens: 4_000, output_tokens: 8_000 },
+  });
+  expect(result.source).toBe("discovered_capability");
+  expect(result.limits.context_tokens).toBe(4_000);
+  expect(result.limits.output_tokens).toBe(DEFAULT_OUTPUT_TOKENS);
 });
 
 test("resolveLimits uses static_metadata for a named model in the models.dev snapshot", () => {

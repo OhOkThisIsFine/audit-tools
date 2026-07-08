@@ -131,10 +131,25 @@ export function resolveLimits(options: ResolveLimitsOptions): LimitResolutionRes
   // the real model (e.g. 200k) instead of the conservative default.
   const discoveredContext = options.discoveredLimits?.context_tokens;
   if (typeof discoveredContext === "number" && discoveredContext > 0) {
+    // Respect the discovered context as the real ceiling (never fall through to a
+    // larger static/default floor that would over-admit against a smaller
+    // endpoint). Use the discovered output reservation only when it is positive
+    // AND leaves room for input (output < context); a degenerate or inverted
+    // value (e.g. a malformed operator quota that reached the remediate scheduler
+    // without a config-load validator) falls to the conservative default so the
+    // pair can't produce a wedged budget. Enforced in the SHARED consumer so the
+    // property holds for both orchestrators, not just the audit validator path.
+    const discoveredOutput = options.discoveredLimits?.output_tokens;
+    const usableOutput =
+      typeof discoveredOutput === "number" &&
+      discoveredOutput > 0 &&
+      discoveredOutput < discoveredContext
+        ? discoveredOutput
+        : defaults.output_tokens;
     return {
       limits: {
         context_tokens: discoveredContext,
-        output_tokens: options.discoveredLimits?.output_tokens ?? defaults.output_tokens,
+        output_tokens: usableOutput,
         requests_per_minute: options.discoveredLimits?.requests_per_minute ?? null,
         input_tokens_per_minute: options.discoveredLimits?.input_tokens_per_minute ?? null,
         output_tokens_per_minute: options.discoveredLimits?.output_tokens_per_minute ?? null,

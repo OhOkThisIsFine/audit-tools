@@ -753,6 +753,87 @@ test("validateSessionConfig validates the dispatch sub-object fields", () => {
     )).toBeTruthy();
 });
 
+test("C1: validateSessionConfig validates openai_compatible.quota (operator-supplied budget)", () => {
+  // A well-formed window/concurrency block passes.
+  expect(validateSessionConfig({
+      provider: "openai-compatible",
+      openai_compatible: {
+        base_url: "http://nim/v1",
+        model: "m",
+        quota: { context_tokens: 128_000, output_tokens: 8_000, max_concurrent: 6 },
+      },
+    })).toEqual([]);
+
+  // A non-positive / non-integer token count is rejected (would over/under-admit).
+  const badCtx = validateSessionConfig({
+    openai_compatible: { base_url: "http://nim/v1", model: "m", quota: { context_tokens: 0 } },
+  });
+  expect(badCtx.some(
+      (i) => i.path === "openai_compatible.quota.context_tokens" &&
+        /positive integer/i.test(i.message),
+    )).toBeTruthy();
+
+  const floatCap = validateSessionConfig({
+    openai_compatible: { base_url: "http://nim/v1", model: "m", quota: { max_concurrent: 2.5 } },
+  });
+  expect(floatCap.some(
+      (i) => i.path === "openai_compatible.quota.max_concurrent" &&
+        /non-negative integer/i.test(i.message),
+    )).toBeTruthy();
+
+  // max_concurrent: 0 is the documented "unlimited" sentinel (runtime maps 0 →
+  // null), so it must NOT be rejected; a negative is.
+  expect(validateSessionConfig({
+      provider: "openai-compatible",
+      openai_compatible: { base_url: "http://nim/v1", model: "m", quota: { max_concurrent: 0 } },
+    })).toEqual([]);
+  const negCap = validateSessionConfig({
+    openai_compatible: { base_url: "http://nim/v1", model: "m", quota: { max_concurrent: -1 } },
+  });
+  expect(negCap.some(
+      (i) => i.path === "openai_compatible.quota.max_concurrent" &&
+        /non-negative integer/i.test(i.message),
+    )).toBeTruthy();
+
+  // output_tokens >= context_tokens leaves no room for input → rejected.
+  const inverted = validateSessionConfig({
+    openai_compatible: { base_url: "http://nim/v1", model: "m", quota: { context_tokens: 4_000, output_tokens: 4_000 } },
+  });
+  expect(inverted.some(
+      (i) => i.path === "openai_compatible.quota.output_tokens" &&
+        /less than context_tokens/i.test(i.message),
+    )).toBeTruthy();
+});
+
+test("C1: validateSessionConfig validates sources[] provider + quota", () => {
+  // A valid explicit source with a quota block passes.
+  expect(validateSessionConfig({
+      sources: [
+        { provider: "openai-compatible", endpoint: "http://a/v1", model: "m", quota: { context_tokens: 64_000 } },
+      ],
+    })).toEqual([]);
+
+  // sources is not an array → issue on 'sources'.
+  const notArray = validateSessionConfig({ sources: { provider: "codex" } });
+  expect(notArray.some(
+      (i) => i.path === "sources" && /must be an array/i.test(i.message),
+    )).toBeTruthy();
+
+  // An unknown provider is rejected.
+  const badProvider = validateSessionConfig({ sources: [{ provider: "made-up" }] });
+  expect(badProvider.some(
+      (i) => i.path === "sources[0].provider" && /must be one of/i.test(i.message),
+    )).toBeTruthy();
+
+  // A bad per-source quota is caught at the source's path.
+  const badQuota = validateSessionConfig({
+    sources: [{ provider: "openai-compatible", quota: { output_tokens: -1 } }],
+  });
+  expect(badQuota.some(
+      (i) => i.path === "sources[0].quota.output_tokens" && /positive integer/i.test(i.message),
+    )).toBeTruthy();
+});
+
 test("validateConfiguredProviderEnvironment checks explicit executable paths without PATH probing", async () => {
   let pathLookups = 0;
   let commandLookups = 0;

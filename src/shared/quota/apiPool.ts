@@ -335,6 +335,11 @@ function openAiCompatibleSource(
         ? { referenced_files_total_byte_cap: oc.referenced_files_total_byte_cap }
         : {}),
     },
+    // C1: converge the legacy block's budget onto the source-pool quota so a
+    // configured window/concurrency reaches buildSourcePool's discoveredLimits /
+    // concurrencyCap instead of the default context/output floor. Absent quota
+    // stays undefined → the conservative floor, exactly as before.
+    ...(oc.quota !== undefined ? { quota: oc.quota } : {}),
   };
 }
 

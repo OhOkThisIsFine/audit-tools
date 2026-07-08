@@ -251,6 +251,7 @@ export {
   PROVIDER_NAMES,
   SESSION_UI_MODES,
   PROVIDER_SECTION_KEYS,
+  DISPATCHABLE_SOURCE_PROVIDERS,
   ANALYZER_SETTINGS,
   AnalyzerSettingSchema,
   resolveHostDispatchCapability,

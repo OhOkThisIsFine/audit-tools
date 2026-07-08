@@ -59,5 +59,9 @@ export function resolveContextBudget(input: {
   const contextTokens = input.contextTokens ?? DEFAULT_CONTEXT_TOKENS;
   const outputTokens = input.reservedOutputTokens ?? DEFAULT_OUTPUT_TOKENS;
   const margin = input.safetyMargin ?? BLOCK_SAFETY_MARGIN;
-  return Math.floor((contextTokens - outputTokens) * margin);
+  // Floor at 0: a window whose reserved output meets or exceeds its context
+  // (a malformed operator quota, or a too-small endpoint) yields no usable input
+  // budget — the pool then fails CLOSED (refuses slots) rather than propagating a
+  // negative budget. Holds regardless of which orchestrator or validator ran.
+  return Math.max(0, Math.floor((contextTokens - outputTokens) * margin));
 }

@@ -142,6 +142,18 @@ export interface OpenAiCompatibleConfig {
   referenced_file_byte_cap?: number;
   /** Aggregate byte cap across all inlined referenced files (default 256 KiB). */
   referenced_files_total_byte_cap?: number;
+  /**
+   * Per-endpoint quota / rate-limit — the SAME shape a {@link DispatchableSource}
+   * carries in `quota`, so a legacy `openai_compatible` block converges onto the
+   * source-pool budget instead of falling to the default context/output floor
+   * (`DEFAULT_CONTEXT_TOKENS` / `DEFAULT_OUTPUT_TOKENS`). Set `context_tokens` /
+   * `output_tokens` to size dispatch packets against this endpoint's real window
+   * (e.g. a 128k NIM deployment), and `max_concurrent` to declare its in-flight
+   * cap — both flow through `openAiCompatibleSource` → `buildSourcePool`
+   * (`discoveredLimits` / `concurrencyCap`) identically to an explicit
+   * `sources[]` entry. Omit for the conservative default floor.
+   */
+  quota?: QuotaModelLimits;
 }
 
 export interface VSCodeTaskConfig {
