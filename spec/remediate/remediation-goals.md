@@ -202,9 +202,13 @@ blocked items, Phase 3b is skipped.
 - Remove `.audit-tools/remediation/` and any scratch files, logs, or
   branches created only to support remediation.
 - Execute the confirmed closing action. The fixed enumeration is:
-  `commit`, `push`, `open-pr`, `publish`, `tag`, `none`, `custom`. The
-  `custom` option takes a user-supplied command and records its exit
-  code and output; it is an explicit opt-out from Phase 4 determinism.
+  `commit`, `push`, `open-pr`, `publish`, `tag`, `merge-to-base`, `none`, `custom`.
+  `merge-to-base` lands the run as a single revertable `--no-ff` merge into the
+  branch it was launched from (aborting safely on conflict) — the opt-in fix
+  for runs dispatched on an isolated `remediation/<runId>` branch that would
+  otherwise never reach the base branch. The `custom` option takes a
+  user-supplied command and records its exit code and output; it is an
+  explicit opt-out from Phase 4 determinism.
 
 ## Deterministic vs LLM boundaries
 

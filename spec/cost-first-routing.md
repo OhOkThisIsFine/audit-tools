@@ -110,8 +110,9 @@ replacement for it.
   one rung of one field; capability routing and the capacity-fit gate are untouched.
 - **Parity.** Audit (`finalizeDispatchQuota`) and remediate (`admissionPoolsFromSchedule`)
   both derive `costRank` through the one shared `deriveCostRank` — they cannot drift.
-- **Collision resolution is first-sorted-provider-wins, not price-preferred.**
-  `scripts/shared/update-models.mjs`'s `flatten()` visits providers alphabetically and keeps
-  the first hit for a model id served by multiple providers; prices largely agree across
-  providers so this is an accepted approximation, not a bug. Preferring the native/cheapest
-  price on collision is an open item — see `docs/backlog.md` (cost-first-routing (d)).
+- **Collision resolution prefers the cheapest priced candidate.**
+  `scripts/shared/update-models.mjs`'s `flatten()` visits providers alphabetically, and on a
+  cross-provider model-id collision keeps the entry with the lowest blended price (ties broken
+  by sorted-provider order, and an unpriced record always loses to a priced one). Every
+  provider's own record is still indexed under `byProvider` so a provider-scoped lookup can pin
+  the native price instead of the cheapest-collision default.
