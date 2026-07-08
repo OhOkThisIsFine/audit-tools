@@ -106,15 +106,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     re-accepted after a repair" and raised a FALSE non-convergence block that escalated to a user decision — while a
     real, new, accepted defect was being correctly repaired. Fix: key convergence detection on a CE content /
     violated-obligation fingerprint, or auto-mint unique CE ids; never trust the reviewer's free-text id.
-  - **Test-plan re-derive doesn't apply the empty-delta copy-forward.** The shipped B1 incremental re-convergence
-    (CP-NODE-2) covers contract artifacts, but a `test_validator_plan` re-derive still presents an ALL-empty skeleton
-    even though `test-plan-carry.json` holds the prior assertions and ~118/128 specs are byte-identical carries — the
-    host had to script the carry every round. Extend the copy-forward (auto-carry unchanged specs by obligation_id;
-    blank only specs whose obligation text changed) to the test plan.
-  - **Drafting-prompt vs finalized-artifact schema disagree on `inputs`/`outputs` shape.** The per-module
-    contract-drafting prompt lets drafters author `inputs`/`outputs` as objects, but the `finalized_module_contracts`
-    validator requires `string[]`; the finalize step carries the objects through → validate-artifact rejects them.
-    Single-source the shape (coerce/normalize at finalize, or constrain the drafting schema).
   - **Cross-file contract/invariant regressions escape node-local verify and surface only at ship-time CI.** Per-node
     implement workers verify their OWN targeted tests but don't run the repo-wide guards their refactors break
     (id-glossary INV-family registry, INV-WH raw-spawn, release-contract source-shape, drain-lifecycle analyzer-cache
@@ -135,71 +126,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   check). This is a contract-pipeline (loop-core) change → route through the adversarial pipeline, not a lone
   autonomous agent. Extends the CP-NODE contract-validation work.
 
-- **NIM/Codex dispatch fix set — from a real run + adversarial review (2026-07-07).** `audit-code` in a Codex
-  host against an external repo, NIM (openai-compatible) backend, Claude quota exhausted → a 13-issue cascade.
-  Investigated + adversarially reviewed: the "host-proposes/broker-disposes" replan was **refuted** (`admitBatch`
-  IS the cost-first router — can't "keep the chokepoint, delete the router"; a veto broker regresses *liveness*;
-  host identity is a quota-**attribution** key, so moving it to host discretion violates
-  [[enforce-robustness-in-tooling-not-host-discretion]]) → corrected to **tool-proposes / host-overrides**. Root
-  cause is **mode-dependent**: headless → NIM keyed to its own pool, halt = every packet erroring tripping the
-  no-progress guard; attended (`--host-can-dispatch-subagents`) → the complement review routes to the host pool
-  mis-keyed `claude-code` (exhausted). Full root-cause + decided direction + file:lines in
-  [[host-provider-misattribution-nim-codex]]. Fixes to build, in ship order:
-  - **Lean halt fix — ✅ SHIPPED (v0.32.28, headless erroring-packets):** (C2) tolerant `openai-compatible`
-    `result` parse — relays a bare result array/object at the top level when the `{files,result}` wrapper is
-    absent (schema-gated downstream; bare primitives/null rejected); (C4) bounded fetch retry+backoff on transient
-    failures (5xx/429/524/timeout/reject); (C3-floor) per-pool concurrency cap `source.quota.max_concurrent` →
-    `CapacityPool.concurrencyCap` → rolling-engine in-flight ceiling AND host-path `declaredCap` (NIM source pools
-    were built `hostConcurrencyLimit:null` so the cap was skipped → the 33/32 overrun; a ≤0 cap clamps to
-    null-uncapped, never a 0-admit wedge); (D1) bounded no-progress retry (`driveWithNoProgressRetry`, backoff +
-    `maxTotalMs` budget so an all-timeout pass spawns no extra passes) so a transient all-error pass self-heals
-    instead of halting; (D2) `ingest-results --results` recovery path named in the blocked handoff. Landed through
-    a full adversarial review pass (one clamp blocker + primitive-reject + retry-budget minors folded in).
-  - **Host-identity sourcing (attended-mode wall) — ✅ SHIPPED (v0.32.29).** NEW single-sourced
-    `resolveConversationHostProvider` (`providerPathGuard.ts`): explicit `--host-provider` →
-    `sessionConfig.host_provider` → `isSelfSpawnBlocked("codex")`→codex → CLAUDECODE→claude-code → default. All
-    3 demote/in-process host-key sites route through it; `--host-provider` override + `host_provider` config
-    field wired both orchestrators (audit persists to session-config before load; remediate folds onto
-    sessionConfigImpl). Full adversarial pipeline caught 1 MAJOR: the codex-host + `provider:codex`-inside-codex
-    case double-booked ONE codex account (host pool + demoted-source pool both `codex/*`) — fixed by NEW
-    `shouldDemotePrimaryInProcess` same-agent guard (demote only when `conversationHost !== provider`; else host
-    self-drives as one pool). [[capability-is-per-auditor-not-per-audit]] / [[host-provider-misattribution-nim-codex]]
-  - **C3 AIMD adaptive ceiling — ❌ CLOSED, NOT NEEDED (the owner, 2026-07-07). Do not re-propose.** Built, reviewed
-    by three independent adversarial reviewers, and reverted. The premise was a category error: it tried to *learn a
-    concurrency number from a rate-limit signal*. **Concurrency is either DECLARED by the provider or ABSENT — it is
-    never learned.** Two cases, no third: (1) a provider states a hard in-flight cap (Codex 6, a NIM endpoint's
-    `max_num_seqs`) → pass it through verbatim, which is the already-shipped `source.quota.max_concurrent` →
-    `declaredCap` floor; (2) no hard cap → concurrency is not a meaningful quantity, and quota headroom + rate limits
-    are the only throttle. If such an endpoint pushes back, that is a 429 → the reactive path (`cooldown_until`,
-    `consecutive_429_count`, backoff) handles it. `spec/audit/dispatch-admission-control.md:243` ("never a value the
-    tool computes") was correct as written and should have killed this design before it was built. The reviewers also
-    showed the implementation stranded every packet under its own target condition (a burst of concurrent 429s applies
-    one multiplicative decrease *per victim*, flooring the ceiling and exhausting the pool) and defeated the DC-4
-    livelock guard. See [[concurrency-is-declared-or-absent-never-learned]].
-  - **C1 real source-pool budget — ✅ SHIPPED.** `openai_compatible` gained a `quota?: QuotaModelLimits` field
-    copied onto the folded/demoted source → reaches `buildSourcePool` `discoveredLimits`/`concurrencyCap` off the
-    default floor, converged onto the `sources[].quota` shape; the shared `resolveContextBudget` floors at 0 and the
-    `discovered_capability` rung drops an inverted `output ≥ context` reservation (holds on BOTH orchestrators);
-    operator quota validated at config load. Residual (deferred, unchanged): the `/models` capability probe is a
-    build lever ONLY after live-validating NIM exposes `context_length`/`max_model_len`, and MUST sanity-clamp
-    before feeding the discovered rung (a too-large probe over-admits). [[openai-compatible-provider]]
-  - **A1 rename `local-subprocess` → `worker-command` + gloss — ✅ SHIPPED.** Provider identity renamed across
-    the name const (`WORKER_COMMAND_PROVIDER_NAME`), class (`WorkerCommandProvider` in
-    `workerCommandProvider.ts`), `PROVIDER_NAMES` / `DISPATCHABLE_SOURCE_PROVIDERS`, factory, examples
-    (`examples/session-config/worker-command.json`), and operator guide; gloss "runs `task.worker_command`;
-    generic subprocess fallback, not an LLM backend" added at the const + operator-guide provider list.
-    Sole-consumer, no back-compat shim (kebab string, PascalCase, camelCase import paths, and the message
-    string all converged).
-  B2 (host override at Gate-0) + the cost↔speed dial + free-pool max are the forward-track evolution of this —
-  see *Forward tracks*. Issue 13 (Codex session usage/approval limit) = env, not ours.
-
-- **Pipeline profiling is now standing (2026-07-06).** Always-on timing across test + release/publish,
-  single-sourced in `scripts/shared/profile.mjs`; ledgers land in `.audit-tools-profile/` (gitignored) +
-  a CI job-summary table. `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs`;
-  `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts`; `release-and-publish.mjs`
-  writes a `release` phase profile + a `publish-ci` per-job/per-step profile from the publish run's API.
-  Use the `*-history.ndjson` trend line to catch time regressions. Durable how-to in `CLAUDE.md` →
-  Release & publish → Pipeline profiling.
+- **NIM `/models` capability probe — deferred, not yet built.** Residual from the (shipped) C1
+  real source-pool budget work (2026-07-07 NIM/Codex dispatch fix set): the `/models` capability
+  probe is a build lever ONLY after live-validating that a given NIM endpoint actually exposes
+  `context_length`/`max_model_len`, and it MUST sanity-clamp before feeding the discovered value
+  into `resolveContextBudget` (a too-large probe over-admits). No code implements this discovery
+  yet. Distinct from the cost↔speed-dispatch-dial forward-track below (that's price/throughput
+  tuning; this is context-window auto-discovery). [[openai-compatible-provider]]
 
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
@@ -211,13 +144,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     are fresh-process pipeline runs — cutting them cuts coverage, so this needs a real design (e.g. an
     in-process multi-step driver for the smoke, or packing once and sharing the tarball across both smokes
     since they build the identical `audit-tools` package), not a quick trim.
-  - **Easy wins SHIPPED 2026-07-06:** (1) dropped the redundant `check` (`tsc --noEmit`) from `verify:checks`
-    — `build` (tsc emit) type-checks identically, so it was a second full compile; gate 95.8s→90.8s local.
-    (2) dropped the `Type-check` step from `audit-code-test-suite.yml` (its `Build` step covers it) — a `tsc`
-    saved in each of 8 matrix jobs per push. (3) added the `release: vX.Y.Z` skip guard to
-    `audit-code-test-suite.yml` (mirrors `ci.yml`) — the version-bump push no longer re-runs the 8-job suite
-    (publish-package.yml runs the authoritative sharded suite for the release). `check` remains a standalone
-    script (commit hook, local pre-tag gate, dev typecheck).
   - **Full vitest suite = 307s wall (452 files), `collect≈211s`** (confirms the old ~186s estimate), run
     time dominated by audit integration tests that spawn real subprocesses: `audit-code-completion` 285s,
     `audit-code-wrapper` 237s, `next-step` 165s, `cli-remediation` 111s. area:audit ≈ 1905s summed across
