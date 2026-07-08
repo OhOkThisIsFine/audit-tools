@@ -8,7 +8,7 @@
 
 ## Live state
 
-- **v0.32.34 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
+- **v0.32.35 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
 - **Immediate next:** the free/cheap multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md`
