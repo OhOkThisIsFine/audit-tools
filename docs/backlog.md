@@ -510,6 +510,19 @@ Standing gotchas worth keeping for any agent (strong or weak):
   `rtk git fetch audit-tools main && git log --oneline HEAD..audit-tools/main` — if that lists commits,
   rebase/reset onto main BEFORE writing code. (Strengthens [[audit-tools-worktree-traps]].)
 
+- **Background long-running command piped through `tail` hides interim progress.** Running a long command
+  in the background as `cmd 2>&1 | tail -N` (e.g. `npm run release:patch:publish 2>&1 | tail -40`) makes the
+  output file stay EMPTY until the command exits — `tail` buffers and only flushes its last N lines at EOF.
+  To watch progress on a background job, do NOT pipe through `tail`; let the harness capture full output (it
+  tails the file for you) or redirect to a file and `tail -f` that file separately. Observed 2026-07-08 during
+  a release ship — polled an empty file for minutes before realizing the pipe was the cause.
+
+- **`git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is
+  NOT a rejection.** On a fast-forward push straight to `main` the remote emits that branch-protection
+  message, but the ref still updates (`04a7338c..8279d0de  HEAD -> main`, no `! [remote rejected]`). Confirm
+  by `git fetch audit-tools main && git rev-parse audit-tools/main` == local HEAD — don't assume the push
+  failed on seeing the advisory. Observed 2026-07-08.
+
 - **Codex CLI is a poor executor for large read-heavy audit packets under a wall-clock budget.** Observed
   2026-07-04: 2 concurrent codex executors ran 5+ min with zero results and 8k+ lines of echoed reasoning.
   Route only small / low-line packets to the codex pool, or drop it from the audit executor pool for
