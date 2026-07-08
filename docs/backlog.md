@@ -307,9 +307,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   — the minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point ON TOP of
   the kept router (does not replace it). Design of record now [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md);
   extends [[cost-first-routing-design]].
-  - **✅ BUILT on branch `claude/start-lap-command-d1ca1a` (2026-07-08; NOT yet merged to main / released —
-    owner holding release).** 1D dial, λ ∈ [0,1], capability a hard floor. Four commits (88652854 substrate →
-    9dcf3474 Gate-0 capture → 092f729b review hardening → 3abf6f25 concurrency pivot):
+  - **✅ SHIPPED v0.32.34 (2026-07-08).** 1D dial, λ ∈ [0,1], capability a hard floor. Seven commits
+    (substrate → Gate-0 capture → review hardening → concurrency pivot → R-1 fix + builder unification):
     - **Ordinal-blend admission ordering** (`admissionLoop.ts orderCandidates`): λ=0 = **byte-identical** to the
       pre-dial cost-first sort (adversarially confirmed); λ>0 blends per-axis ORDINALS within the capable set
       (total order, no scale-mixing). The dial reorders only — declaredCap/budget/ledger/claim gates untouched.

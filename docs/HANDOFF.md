@@ -8,8 +8,9 @@
 
 ## Live state
 
-- **v0.32.33 published on npm as `latest`.** Latest lap shipped the **A1 `local-subprocess`→`worker-command`
-  provider rename** (sole-consumer, no shim — see the A1 bullet below). Prior (v0.32.32): **C1 real source-pool budget**
+- **v0.32.34 published on npm as `latest`.** Latest lap shipped the **cost↔speed dispatch dial** (see the ⚙️
+  bullet below) together with the previously-parked **session-config RMW-lock** code fix. Prior (v0.32.33): the
+  **A1 `local-subprocess`→`worker-command` provider rename** (sole-consumer, no shim — see the A1 bullet below). Prior (v0.32.32): **C1 real source-pool budget**
   (legacy `openai_compatible` block gains a `quota` that converges onto the source pool, off the default floor;
   shared-consumer robustness — `resolveContextBudget` floors at 0, discovered rung drops an inverted `output ≥ context`;
   operator quota validated) — see the C1 bullet below. Prior (v0.32.31): bug (4) `selectProvider` reads the live quota entry. Prior
@@ -25,11 +26,9 @@
   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
   [[conceptual-design-review-design]]. Per-lap shipped detail is NOT narrated here (changelog creep — see `git log`
   and project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **⚠️ `main` is AHEAD of published v0.32.33 — a release is PENDING.** Two unreleased lap commits (2026-07-08):
-  `2296e52f` session-config RMW-lock code fix (real code → wants a publish) + `ab444072` CLAUDECODE-ceremony/
-  standing-traps docs cleanup (docs-only). The next `release:patch:publish` picks them up; the lap was wrapped
-  before releasing per owner. Also on main unreleased: the `validate-artifact` singular-self-check gap is FILED
-  (not fixed) in `docs/backlog.md` for the adversarial pipeline (a drafted patch exists but was held — loop-core).
+- **✅ The previously-pending session-config RMW-lock fix SHIPPED in v0.32.34** (bundled with the dial). Still on
+  main unreleased-as-code: the `validate-artifact` singular-self-check gap is FILED (not fixed) in
+  `docs/backlog.md` for the adversarial pipeline (a drafted patch exists but was held — loop-core).
 - **NIM/Codex dispatch fix set — lean halt fix + B1 host-identity ✅ SHIPPED (v0.32.28 / v0.32.29).** Lean tranche
   (v0.32.28): C2 tolerant result parse + C4 bounded transient fetch retry + C3 per-pool concurrency cap + D1 bounded
   no-progress retry + D2 recovery handoff. **B1 host-identity sourcing (v0.32.29):** NEW `resolveConversationHostProvider`
@@ -76,17 +75,16 @@
   `DISPATCHABLE_SOURCE_PROVIDERS`, factory, example config, operator guide + gloss; sole-consumer, no shim. Detail in
   `docs/backlog.md`.
   **Immediate next:** finish the cost↔speed dial — see the dedicated bullet below.
-- **⚙️ Cost↔speed dispatch dial — BUILT + adversarially reviewed on branch `claude/start-lap-command-d1ca1a`,
-  NOT merged/released (2026-07-08).** 1D dial (λ∈[0,1], capability a hard floor) on TOP of the kept cost-first
-  router: λ=0 = byte-identical to today (adversarially confirmed); λ>0 = ordinal-blend of cost vs **auto-derived
-  pool-class-aware parallelism** (`deriveThroughputConcurrency`: source uncapped⇒+Inf, host unspecified⇒1); Gate-0
-  `dispatch_bias` captures it as durable policy; both orchestrators build pools through ONE shared
-  `admissionPoolsFromSummaries` (no drift). Default 0 ⇒ zero behavior change until set. **Six commits** (88652854 →
-  9dcf3474 → 092f729b → 3abf6f25 → ab5e6fab → a1bcc6a0), all green + dead-code clean. Two independent adversarial
-  passes ran; the 2nd caught R-1 (declaredCap-null crowned the sequential host at λ=1) → fixed pool-class-aware +
-  regression-tested. Design of record [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md).
-  **Residual (in `docs/backlog.md` → Forward tracks, dial bullet): (1)** the `/models` concurrency probe as the
-  future *auto* refinement; **(2)** B2 host-reorder seed. Both are additive; the dial is code-complete + reviewed.
+- **⚙️ Cost↔speed dispatch dial — ✅ SHIPPED v0.32.34 (2026-07-08).** 1D dial (λ∈[0,1], capability a hard floor)
+  on TOP of the kept cost-first router: λ=0 = byte-identical to today (adversarially confirmed); λ>0 = ordinal-blend
+  of cost vs **auto-derived pool-class-aware parallelism** (`deriveThroughputConcurrency`: source uncapped⇒+Inf,
+  host unspecified⇒1); Gate-0 `dispatch_bias` captures it as durable policy; both orchestrators build pools through
+  ONE shared `admissionPoolsFromSummaries` (no drift). Default 0 ⇒ zero behavior change until set. Two independent
+  adversarial passes ran; the 2nd caught R-1 (declaredCap-null crowned the sequential host at λ=1) → fixed
+  pool-class-aware + regression-tested. Design of record
+  [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md), [[cost-speed-dispatch-dial]].
+  **Residual (additive forward tracks in `docs/backlog.md`, dial bullet): (1)** the `/models` concurrency probe as
+  the future *auto* throughput refinement; **(2)** B2 host-reorder seed.
 - **Then:** the free/cheap multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;
   [[arbitrage-dispatch-tier-design]]). Then the remaining env-bound live validations (quota pre-wall pacing,
   friction escalation, selective-deepening convergence, clippy/rubocop live spawn).
