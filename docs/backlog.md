@@ -29,6 +29,44 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **`quota-state.json` torn read fails OPEN → unbounded dispatch (HIGH).** `writeQuotaState`
+  (`src/shared/quota/state.ts`) is a truncating `writeFile` with **no temp-then-rename** (contrast
+  `src/remediate/state/store.ts`, which does it correctly), and `refreshQuotaStateIfNeeded`
+  (`src/shared/dispatch/rollingDispatch.ts`) reads it **without** the `quota-state.json.lock` that every writer
+  takes. A co-located peer's write truncates the file mid-read → `JSON.parse` throws → `readQuotaState` swallows the
+  error and returns `{version:2, entries:{}}`. The engine then sees *no* `cooldown_until`, *no* learned limits, and
+  *no* `concurrencyCap`-adjacent state — i.e. the degrade direction is **fail-open**, not fail-safe. Fix: make
+  `writeQuotaState` atomic (temp + `rename`, the `store.ts` pattern); an empty-state fallback must never silently
+  mean "no throttle". Found by adversarial review of the (reverted) C3-AIMD change; **pre-existing on main.**
+
+- **`recordWaveOutcome` is called with a hardcoded `concurrency: 1` from the rolling engine (HIGH).**
+  `src/shared/dispatch/rollingDispatch.ts` passes `{ concurrency: 1, … }` for *every* packet. Consequences in
+  `src/shared/quota/state.ts`: on `rate_limited`, failure weight spreads from `concurrency` through
+  `+FAILURE_SPREAD_BUCKETS(4)`, so buckets **1–5** all get `failure_weight >= 1.0` → `computeMaxSafeConcurrency`
+  scans from n=1, sees bucket "1" poisoned, and **breaks immediately ⇒ maxSafe = 1** for the whole 24h half-life.
+  A 429 that happened at 8 in flight is recorded as evidence that *one* concurrent request is unsafe. On `success`,
+  `successCeiling = min(1, 32) = 1`, so only bucket "1" ever accrues success weight ⇒ the bucket learner **can never
+  learn above 1** from rolling dispatch. Consumed for real fan-out by `learnedQuotaSource` / `waveScheduling` on the
+  host path. **Pre-existing on main.** NOTE — the fix is *not* obviously "pass the real in-flight count": per
+  [[concurrency-is-declared-or-absent-never-learned]] a tool-computed `maxSafeConcurrency` is itself the thing the
+  admission-control spec forbids. Decide first whether `buckets` / `computeMaxSafeConcurrency` /
+  `computeRampUpConcurrency` are **legacy from the pre-admission-control era and should be deleted**, or whether they
+  should be fed correct data. Do not fix the symptom before answering that.
+
+- **`updated_at` doubles as the bucket decay clock (MEDIUM).** `applyDecayToEntry` (`src/shared/quota/state.ts`)
+  computes `elapsedHours` from `entry.updated_at` and skips decay entirely below 3.6s — i.e. it treats `updated_at`
+  as "time of last decay". But `recordTokensPerPctObservation` and `recordOutputRatioObservation` bump `updated_at`
+  **without** decaying, discarding the elapsed interval forever. Any writer that is not `recordWaveOutcomeUnsafe`
+  silently suppresses bucket decay. Fix: split a `buckets_decayed_at` field from `updated_at`, set only by the decay
+  path. **Pre-existing on main** (rare today because the slope/ratio writers are gated and fire infrequently).
+
+- **`selectProvider` cannot see a cooldown learned mid-run (MEDIUM).** `scheduleForPool` reads
+  `pool.quotaStateEntry ?? quotaStateEntries[poolKey]` (`src/shared/dispatch/rollingDispatch.ts`).
+  `CapacityPool.quotaStateEntry` (`src/shared/quota/capacity.ts`) is a **static snapshot** captured at pool
+  construction, so when it is present a freshly-written `cooldown_until` is never observed → `isPoolQuotaDegraded` is
+  inert and the INV-QD-14 proactive spill never deprioritises the throttled pool. Prefer the live
+  `quotaStateEntries[poolKey]` over the frozen snapshot. **Pre-existing on main.**
+
 - **Session-config RMW helpers are unlocked (B1 review finding #4, minor).** `persistHostProvider` and the
   pre-existing `persistAnalyzerSettings` (`src/audit/supervisor/sessionConfig.ts`) do read→merge→validate→
   `writeJsonFile` with no `withFileLock`. `writeJsonFile` is atomic per-write (no torn file), but two concurrent
@@ -99,10 +137,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     case double-booked ONE codex account (host pool + demoted-source pool both `codex/*`) — fixed by NEW
     `shouldDemotePrimaryInProcess` same-agent guard (demote only when `conversationHost !== provider`; else host
     self-drives as one pool). [[capability-is-per-auditor-not-per-audit]] / [[host-provider-misattribution-nim-codex]]
-  - **C3 AIMD adaptive ceiling** (on top of the `declaredCap` floor): learn a shared endpoint's live limit from
-    `ResourceExhausted` backpressure (multiplicative-decrease on rate-limit, additive-increase on success). Needs
-    a mutable per-pool ceiling + reworking the drop-and-requeue branch → decrement-and-retry. The real fix for a
-    multi-IDE-contended endpoint whose free-slot count moves.
+  - **C3 AIMD adaptive ceiling — ❌ CLOSED, NOT NEEDED (the owner, 2026-07-07). Do not re-propose.** Built, reviewed
+    by three independent adversarial reviewers, and reverted. The premise was a category error: it tried to *learn a
+    concurrency number from a rate-limit signal*. **Concurrency is either DECLARED by the provider or ABSENT — it is
+    never learned.** Two cases, no third: (1) a provider states a hard in-flight cap (Codex 6, a NIM endpoint's
+    `max_num_seqs`) → pass it through verbatim, which is the already-shipped `source.quota.max_concurrent` →
+    `declaredCap` floor; (2) no hard cap → concurrency is not a meaningful quantity, and quota headroom + rate limits
+    are the only throttle. If such an endpoint pushes back, that is a 429 → the reactive path (`cooldown_until`,
+    `consecutive_429_count`, backoff) handles it. `spec/audit/dispatch-admission-control.md:243` ("never a value the
+    tool computes") was correct as written and should have killed this design before it was built. The reviewers also
+    showed the implementation stranded every packet under its own target condition (a burst of concurrent 429s applies
+    one multiplicative decrease *per victim*, flooring the ceiling and exhausting the pool) and defeated the DC-4
+    livelock guard. See [[concurrency-is-declared-or-absent-never-learned]].
   - **C1 real source-pool budget** (quality, NOT the halt — the floor sizes packets *smaller*, they still fit):
     converge openai-compatible budget onto `sources[].quota.context_tokens/output_tokens` (the legacy
     `openai_compatible` block attaches no quota → guaranteed floor); a `/models` capability probe is a build lever

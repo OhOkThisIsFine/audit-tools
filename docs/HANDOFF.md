@@ -25,9 +25,18 @@
   `sessionConfig.host_provider` override; `resolveHostProviderName` moved to `providerPathGuard.ts` and its
   unset/auto fallback now delegates to the detector (was literal `claude-code`); all 3 demote/in-process host-key
   sites route through it. Full adversarial pipeline caught 1 MAJOR (codex-host + `provider:codex`-inside-codex
-  double-booked one codex account) → NEW `shouldDemotePrimaryInProcess` same-agent guard. **Immediate next:
-  C3-AIMD adaptive ceiling** (mutable per-pool ceiling + drop-requeue→decrement-retry rework, on top of the shipped
-  `declaredCap` floor). Then C1 real source-pool budget (converge onto `sources[].quota`), A1 rename
+  double-booked one codex account) → NEW `shouldDemotePrimaryInProcess` same-agent guard.
+  **C3-AIMD is CLOSED — not needed, do not re-propose** (the owner, 2026-07-07): concurrency is DECLARED by the
+  provider or ABSENT, never learned. The shipped `declaredCap` floor covers case 1; quota + rate limits cover case 2.
+  It was built, adversarially reviewed by three independent reviewers, and reverted — see
+  [[concurrency-is-declared-or-absent-never-learned]] and `docs/backlog.md`.
+  **Immediate next: the four pre-existing quota-state bugs that review surfaced** (`docs/backlog.md` → Open bugs),
+  in order: (1) `quota-state.json` torn read fails OPEN → make `writeQuotaState` atomic (temp+rename, the
+  `remediate/state/store.ts` pattern); (2) decide whether `buckets` / `computeMaxSafeConcurrency` /
+  `computeRampUpConcurrency` are legacy-to-DELETE **before** fixing the hardcoded
+  `recordWaveOutcome(…, {concurrency: 1})` that poisons them; (3) split `buckets_decayed_at` from `updated_at`;
+  (4) `selectProvider` should read the live quota entry, not the frozen `pool.quotaStateEntry` snapshot.
+  Then C1 real source-pool budget (converge onto `sources[].quota`), A1 rename
   `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md` → Open bugs +
   [[host-provider-misattribution-nim-codex]].
 - **Then:** the cost↔speed dispatch dial + free-pool maximization forward track (lands ON TOP of the kept
