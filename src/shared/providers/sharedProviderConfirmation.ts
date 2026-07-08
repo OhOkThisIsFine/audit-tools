@@ -62,7 +62,7 @@ import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "../types/providerConfirmati
  * the cross-tool session artifact, a distinct shape that also carries the
  * roster snapshot used for staleness.
  */
-export const SHARED_PROVIDER_CONFIRMATION_VERSION = "1.1.0" as const;
+export const SHARED_PROVIDER_CONFIRMATION_VERSION = "1.0.0" as const;
 
 /**
  * Clamp an operator-supplied cost↔speed dispatch bias (λ) to [0, 1], or `undefined`

@@ -210,7 +210,11 @@ function orderCandidates(pools: AdmissionPool[], bias: number): AdmissionPool[] 
  */
 export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResult> {
   const capable = input.capable ?? defaultCapable;
-  const bias = Math.min(1, Math.max(0, input.dispatchBias ?? 0));
+  // Clamp λ into [0,1] AND coerce a non-finite (NaN/±Infinity) input to the cost-first
+  // default — this is the single ordering chokepoint, so it must never emit a NaN
+  // comparator regardless of caller (callers also pre-clamp; this is the enforced floor).
+  const rawBias = input.dispatchBias ?? 0;
+  const bias = Number.isFinite(rawBias) ? Math.min(1, Math.max(0, rawBias)) : 0;
   const granted: AdmissionGrant[] = [];
   const explains: AdmissionExplain[] = [];
   const blocked: string[] = [];

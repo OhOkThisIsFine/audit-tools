@@ -218,6 +218,20 @@ test("dial: an intermediate λ can pick a pool that is neither cheapest nor fast
   expect(atHalf.granted[0].pool_id).toBe("mid#a/m");
 });
 
+test("dial: a non-finite bias (NaN) coerces to the cost-first default, not a NaN comparator", async () => {
+  const ledger = await freshLedger();
+  const cheapSlow = pool("cheap#a/m", { costRank: 0, throughputScore: 1000 });
+  const priceyFast = pool("fast#a/m", { costRank: 2, throughputScore: 100000 });
+  // NaN must not slip past the clamp into the sort (would yield engine-defined order).
+  const res = await admitBatch({
+    packets: [pkt("p1", 100)],
+    pools: [priceyFast, cheapSlow],
+    ledger,
+    dispatchBias: NaN,
+  });
+  expect(res.granted[0].pool_id).toBe("cheap#a/m"); // cost-first default
+});
+
 test("dial: spill still walks the blended order when the fastest pool is cap-reached", async () => {
   const ledger = await freshLedger();
   const fastest = pool("fastest#a/m", { costRank: 2, throughputScore: 100000, declaredCap: 1 });
