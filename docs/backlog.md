@@ -74,15 +74,28 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   now idempotent (skips the write when unchanged), which shrinks but doesn't close the window. Harden BOTH helpers
   with the shared `withFileLock` on the multi-IDE cooperative path. [[multi-ide-concurrent-runs]]
 
-- **Console-window popups on win32 — hook spawns FIXED; test-suite spawns still open.** Two sources:
-  (1) **`.claude/hooks/` — ✅ FIXED (332301a9).** `async-typecheck.mjs` ran `execSync('npm run check')`
-  (shell:true) after EVERY source-`.ts` edit with no `windowsHide` → a console window popped per edit (the
-  "constant" flashing). `pre-commit-gate.mjs` did the same on every real `git commit` (execSync + git spawnSync).
-  Both now pass `windowsHide:true`. (2) **STILL OPEN — the test suite itself.** Audit integration tests spawn
-  real subprocesses (`npm pack`, packaged smokes, `where`/`which`, node children) and some bypass the
-  window-hidden spawn helper (INV-WH) → windows flash during a local `npm test` / `verify:release`. Route every
-  test-side subprocess spawn through the windowless helper. Until then, run targeted vitest files locally and
-  lean on the sharded release CI for full-suite green — and NEVER background a full local `npm test`.
+- **Console-window popups on win32 — ✅ RESOLVED 2026-07-07. The "test-suite spawns" claim was FALSE.**
+  Established by controlled probe (a SessionStart hook running `node -e "process.exit(0)"`, all else disabled →
+  **zero** windows), so: the harness spawns hook TOP-LEVELS windowless; a console CHILD of a hook pops unless that
+  spawn passes `windowsHide: true` (which DOES cover its whole subtree); and **Bash-tool children never pop at any
+  depth** — `npm run check` (npm → node → tsc) is silent, because the Bash tool's shell owns a real console. The
+  test suite and vitest's worker pool were therefore never involved; that line in this backlog sent three
+  investigations down the wrong path. Actual causes, all fixed:
+  (1) `.claude/hooks/` `async-typecheck.mjs` + `pre-commit-gate.mjs` unguarded child spawns — FIXED 332301a9.
+  (2) Two **INV-WH guard holes** — the script check hardcoded two filenames (so `scripts/check-doc-manifest.mjs`,
+  which runs inside `verify:checks`, and `scripts/remediate/smoke-linked-remediate-code.mjs` spawned unhidden), and
+  its import regex matched only `"node:child_process"` (so the two smoke scripts importing bare `"child_process"`
+  were never scanned at all). The guard now WALKS `scripts/**/*.mjs` and accepts `(?:node:)?child_process`; verified
+  red-green. Also `.claude/hooks/doc-review-surface.mjs` (`git fetch` at SessionStart) and the
+  `{ windowsHide: true, ...options }` clobber in `smoke-packaged-remediate-code.mjs`. — FIXED 33bd78c7.
+  (3) **The flood itself was a SYMPTOM, not a spawn bug.** The headroom proxy WEDGED (alive, holding :8787, serving
+  nothing) and its VBS supervisor watched for *exit*, so it never restarted. The headroom plugin's
+  `PreToolUse(Bash|PowerShell)` `headroom init hook ensure` then tried to respawn it before every shell tool call;
+  each attempt hung at pre-load, blew the hook's 15s timeout, and popped a console on the way out. Fixed OUTSIDE this
+  repo with a `/readyz`-health-checked supervisor (verified by `NtSuspendProcess` fault injection).
+  See [[headroom-proxy-wedge-and-supervision]] / [[hook-spawns-must-be-windowless]].
+  **Standing rule:** any hook or test helper that spawns a subprocess must pass `windowsHide: true`, and
+  `{ windowsHide: true, ...options }` is a bug — spread options FIRST, force the flag LAST.
 
 
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
