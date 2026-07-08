@@ -1127,6 +1127,29 @@ test.concurrent("audit-code wrapper rejects unknown commands with exit 1 and hel
   }
 });
 
+test.concurrent("audit-code wrapper routes `cleanup` to the dist command (not an unknown-command failure)", async () => {
+  // Regression: `cleanup` had a full case in src/audit/cli.ts but was never wired
+  // into the wrapper dispatch table, so the documented `audit-code cleanup` was
+  // unreachable through the packaged bin (fell through to "Unknown command").
+  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cleanup-"));
+  try {
+    const { child, stdoutRef, stderrRef } = spawnWrapper(["cleanup", "--dry-run"], {
+      cwd: tempDir,
+    });
+    await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", resolve);
+    });
+    // The dispatch table recognizes it: no "Unknown command: cleanup".
+    expect(stderrRef.value).not.toMatch(/Unknown command: cleanup/);
+    // It reaches the real cleanup executor, which emits its structured result.
+    expect(stdoutRef.value).toMatch(/"artifacts_dir"/);
+    expect(stdoutRef.value).toMatch(/"dry_run":\s*true/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test.concurrent("audit-code wrapper prints package version", async () => {
   const { stdout } = await runWrapper(["--version"]);
   expect(stdout.trim()).toBe(packageVersion);

@@ -2,9 +2,11 @@
 
 ## Public product surface
 
-The intended public product surface is a single logical skill call:
-
-`advance_audit`
+The intended public product surface is a single logical skill call, `advance_audit` — the
+aspirational entrypoint name this contract is written against. The current shipped surface for that
+call is the conversation-first `audit-code next-step` CLI / `/audit-code` slash command (with
+`audit-code advance-audit` as a direct CLI precursor); `advance_audit` is the logical name those
+executors sit behind.
 
 Everything else in the repository should be treated as internal support for that entrypoint unless explicitly documented otherwise.
 
@@ -14,11 +16,11 @@ A single invocation of `advance_audit` should:
 
 1. load current audit state and artifacts
 2. validate current state
-3. determine the highest-priority valid next obligation
-4. select one executor for that obligation
-5. execute exactly one bounded step
-6. persist updated artifacts and state
-7. return a structured execution summary
+3. drain the deterministic obligation frontier — repeatedly: determine the highest-priority valid
+   next obligation, select one executor, execute that bounded step, persist — folding successive
+   deterministic steps into the one invocation
+4. halt the drain at the first host-input pause, non-drainable step, or the drain ceiling
+5. return a single structured execution summary covering the whole drain
 
 ## Required inputs
 
@@ -71,9 +73,14 @@ There is no `artifacts_marked_stale` field.
 
 ## Bounded-step guarantee
 
-One invocation should perform one bounded step only.
+An invocation performs a **fold-aware drain of the deterministic obligation frontier**, not a single
+obligation. It repeatedly selects and executes the highest-priority *valid* bounded step, folding
+successive deterministic steps into the one call, and halts at the first of: a host-input pause (any
+operator-interactive step breaks the fold), a non-drainable step, or the drain ceiling. "Bounded" is
+the guarantee that no invocation runs the audit to completion and no invocation crosses a host-input
+boundary — not that it performs exactly one obligation.
 
-Examples of valid bounded steps:
+Each folded step is itself a bounded unit. Examples of valid bounded steps:
 
 - create repo manifest
 - refresh structure artifacts
@@ -84,8 +91,8 @@ Examples of valid bounded steps:
 
 Examples of invalid unbounded behavior:
 
-- recursively attempt to finish the entire audit in one invocation
-- perform several unrelated executors just because they are easy
+- continue draining past a host-input boundary instead of pausing for the operator
+- select an executor for an obligation whose upstream dependencies are not yet valid
 - refresh downstream artifacts before validating upstream consistency
 
 ## Selection contract

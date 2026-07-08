@@ -11,10 +11,10 @@ npm run verify:release
 
 `verify:release` covers:
 
-- TypeScript typecheck (`check`)
+- TypeScript typecheck (`build`)
 - dead-code export gate (`check:deadcode`)
 - doc-manifest reconciliation gate (`check:doc-manifest`)
-- full automated test suite (`test`)
+- full automated test suite (`vitest run`)
 - host-install verification for both bins (`verify:hosts`, `verify:remediate-hosts`)
 - packaged-install smoke coverage for both bins (`smoke:packaged-audit-code`, `smoke:packaged-remediate-code`)
 

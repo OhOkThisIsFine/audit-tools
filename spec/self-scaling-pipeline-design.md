@@ -2,7 +2,6 @@
 
 > Supersedes the earlier "give document input a separate lean fast path" framing of the
 > *Make the loop cheaper* backlog item. Durable conceptual design; no dated status here.
-> (the owner + agent, 2026-06-26, distilled from the loop laps 1–3 cost analysis.)
 
 ## Problem
 
@@ -14,7 +13,11 @@ the same orchestration as a concurrency-correctness change. The prior mitigation
 `leanFastPath` that *skipped* the whole design ceremony for pre-vetted structured-audit
 findings — was too trusting (remediation routinely re-finds errors in audit conclusions); it has
 since been softened (see Mechanisms, Dial A) to a mandatory light-review floor rather than a
-zero-scrutiny skip. It remains too narrow in scope (document/backlog input still can't reach it).
+zero-scrutiny skip. It remains too narrow in scope (document/backlog input still can't reach it),
+and remains a structurally-forked eligible/ineligible gate rather than a point on the Dial A/B
+continuum. The A6 target ("self-scaling pipeline, not forked paths") is to collapse `leanFastPath`
+into the dial as its lowest-risk tier rather than keep it as separate code — tracked as open work
+in `docs/backlog.md`.
 
 ## Two distinct cost drivers (measured)
 

@@ -280,6 +280,11 @@ export async function runAuditCodeWrapper({
     return;
   }
 
+  if (argv[0] === 'cleanup') {
+    await runDistCommand('cleanup', argv.slice(1));
+    return;
+  }
+
   if (argv[0] === 'quota') {
     await runDistCommand('quota', argv.slice(1), { ensureArtifactsDir: true });
     return;

@@ -205,7 +205,7 @@ This is the ClaimRegistry / HybridSpillCoordinator lineage generalized: the
 ClaimRegistry already coordinates *task* claiming across agents; this adds *quota*
 claiming (token leases) on the same shared-ledger, account-keyed pattern.
 
-## Resolved decisions (owner, 2026-07-04 — these were the Open tensions)
+## Admission decisions
 
 The owner resolved the fork: **build the full proactive reservation ledger now**
 (not the deferred reactive-only minimal core), because the full ledger is judged
@@ -246,7 +246,7 @@ ledger is layered on top of it, never in place of it.
    The reactive floor is still built first and independently correct; the ledger is
    the refinement layered on it, both shipping under one atomic-replace change.
 
-**Sharpened framing (owner, 2026-07-04): concurrency is not a computed quantity.**
+**Framing: concurrency is not a computed quantity.**
 There is no "how many agents" number to derive, report, or make emergent — the
 count is *entirely* a function of quota/token headroom (admit while the resourceKey's
 budget covers the next task's cost). The ONLY place an explicit agent-count exists is
@@ -258,7 +258,7 @@ allows and hands the host exactly that granted set; the granted set is the
 instantaneous admission width, not a reported concurrency. "Concurrency is not the
 thing to think about" — budget is.
 
-## Host-path admission shape (2b build) — resolved
+## Host-path admission shape
 
 The model above says the tool "hands the host exactly that granted set." That has
 more than one faithful implementation; these are pinned so any-strength builder lands

@@ -320,6 +320,39 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
     real endpoint is reachable.
 
+- **Unify the full rolling-dispatch lifecycle shell across audit + remediate (doc-review D-66/D-67/C-7,
+  2026-07-08).** Today the genuinely-shared surface is the *admission decision* only
+  (`computeDispatchAdmission`, single-sourced in `audit-tools/shared`). Two lifecycle shells around it are
+  NOT shared: (a) the pause lifecycle — audit owns `waiting_for_provider`/`pausedState.ts`/`filterNewProviders`;
+  remediate has its own separately-implemented `quota_paused` analogue; (b) OD3's heartbeat + merge-time
+  ownership-gate revocation protocol — wired only to the short-lived coordination mutexes
+  (`withClaimHeartbeat` on bundle-mutation / `phase:main`), NOT the long-lived per-task/per-node execution
+  claims (`task-claims.json`, remediate node-claims), which hold a long lease with no live heartbeat and
+  rest on dedup-by-id at ingest; `mergeAndIngestCommand.ts` has no ownership gate. Owner decision
+  (2026-07-08): the full lifecycle-shell sharing + OD3-on-long-claims is still-intended future work, not
+  abandoned — this tracks it. Design-of-record specs
+  ([`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md) OD3;
+  [`spec/audit-workflow-design.md`](../spec/audit-workflow-design.md);
+  [`spec/remediation-workflow-design.md`](../spec/remediation-workflow-design.md)) now scope the shared
+  claim to admission-math and point here for the unification. [[multi-ide-concurrent-runs-design]] /
+  [[dispatch-admission-control-design]]
+
+- **Collapse `leanFastPath` into the Dial A/B continuum as its lowest-risk tier (doc-review D-68,
+  2026-07-08).** `leanFastPath.ts` remains a structurally-forked eligible/ineligible gate (now with a
+  mandatory light-review floor, `interpretLeanLightReviewVerdict`), not a point on the self-scaling dial —
+  which cuts against A6 ("self-scaling pipeline, not forked paths", [[self-scaling-pipeline-not-forked-paths]]).
+  Target end-state: fold it into the dial as the lowest-risk tier rather than keep separate code. Design of
+  record [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md).
+
+- **Move the per-lap cadence rules (risk-tier + friction-walk) from host-habit to tool-enforcement
+  (doc-review D-69, 2026-07-08).** "Risk-tier every lap" and "Full friction walk every lap" are both
+  self-labeled *"the host workaround until the self-scaling pipeline makes it the tool's own job"* — i.e.
+  correctness rests on the host *remembering* to risk-tier and run a friction walk, which is the
+  "a needed manual flag is a bug signal" smell applied to a cadence. `CLAUDE.md`'s "Redesign before
+  scheduled autonomy" defers this deliberately; this entry makes the tool-enforcement target an explicit
+  forward-track rather than a rule living only in HANDOFF's cadence section.
+  [[enforce-robustness-in-tooling-not-host-discretion]] / [[self-scaling-pipeline-not-forked-paths]]
+
 ## Deferred / waiting
 
 - **A2 finding-quality oracle** — the `score-audit` scorer is built; needs operator-authored

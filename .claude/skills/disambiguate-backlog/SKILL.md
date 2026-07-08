@@ -100,8 +100,8 @@ read-heavy verification, `general-purpose` for drafting):
   code.
 
 Run these against the project's durable principles (`CLAUDE.md` Concepts, Conventions &
-Preferences — ideal-code-over-compat, language-neutral, everything-agnostic,
-enforce-robustness-in-tooling) so propositions are pre-filtered for fit. A
+Preferences, and `docs/project-philosophy.md` — ideal-code-over-compat, language-neutral,
+everything-agnostic, enforce-robustness-in-tooling) so propositions are pre-filtered for fit. A
 proposition that violates a standing decision is a con worth naming, not a silent
 drop.
 

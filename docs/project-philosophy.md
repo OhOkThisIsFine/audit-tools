@@ -35,9 +35,12 @@ smart. Everything in Part A radiates from this. *(home: `CLAUDE.md` → auditor-
 
 - **One pipeline, two halves.** audit → findings contract; remediate → consumes + fixes. Each emits a
   machine contract (JSON, source of truth) + human render (md).
-- **Obligation-driven, one bounded step per invocation.** Neither tool runs to completion. Each `next-step`
-  derives state, picks the highest-priority unsatisfied obligation, does one bounded unit, persists,
-  returns → resumable, parallelizable, failure-isolated.
+- **Obligation-driven, bounded per invocation (fold-aware drain).** Neither tool runs to completion. Each
+  `next-step` derives state and drains the deterministic obligation frontier — highest-priority-first,
+  folding successive bounded steps into the one call — persisting each, and halts at the first host-input
+  pause, non-drainable step, or drain ceiling. "Bounded" is the fold-aware drain, not one obligation per
+  call: no invocation finishes the run or crosses a host-input boundary → resumable, parallelizable,
+  failure-isolated.
 - **Orchestrate by priority, not a state machine.** Prefer validity over speed, deterministic over
   inferential, upstream over downstream, bounded over sweeping.
 - **Artifacts are continuity; the dependency DAG is truth.** Staleness propagates along an explicit
@@ -71,8 +74,11 @@ right id / verified from disk / hand-fixed a break* is a **latent failure mode**
 
 Provider/backend, host IDE/agent, **OS/platform**, model, shell, language/ecosystem — ALL runtime-discovered
 or contract-abstracted, never baked in. The named rules are *instances of one principle*, not a closed list.
-- **Model/provider/IDE agnostic:** no hardcoded model names/windows/tier-maps; a hardcoded model table is a
-  bug.
+- **Model/provider/IDE agnostic:** discover model identities / windows / prices dynamically, or consume a
+  *synced, not-forked* someone-else-maintained table (e.g. `models.dev`); never a table *we* hand-maintain
+  as a primary source — that hand-maintained table is the bug (`KNOWN_MODEL_LIMITS` was retired for it).
+  Tiering routes by *relative* advertised capability, never a named-model→tier map. (Home: `CLAUDE.md`'s
+  fuller statement wins on the nuance.)
 - **Language-neutral by contract:** graph edges `from`/`to`/`kind` (+optional `direction`/`confidence`/
   `reason`); new analyzers *enrich* shared artifacts, never fork planning.
 - **OS/platform-agnostic:** no platform-baked path/shell/command/line-ending assumptions in core logic;
@@ -218,7 +224,8 @@ end-of-sprint-cleanup-standing-step)*
   logic AND independently re-verify the target symbol's own type/shape. Narrow scope is the top churn driver.
 - **Log friction the moment you hit it** — full friction walk each loop lap; log all three categories
   (ambiguous-direction / tool-should-decide / inefficient-feeding) durably to backlog, unprompted; don't
-  trust the empty mechanical set. *(home: `CLAUDE.md`; memory: disambiguation-completes-or-leaves,
+  trust the empty mechanical set. *(Only "log friction" is homed in `CLAUDE.md`; "disambiguation completes
+  or leaves" and "front-load broad search" are memory-only. Memory: disambiguation-completes-or-leaves,
   front-load-broad-search-before-contract-authoring, log-all-friction-categories-every-lap)*
 
 ---

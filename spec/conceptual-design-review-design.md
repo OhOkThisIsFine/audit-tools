@@ -3,7 +3,6 @@
 > How the auditor's conceptual design pass finds *design* defects: not "is this module
 > correct/clean" but "is this the right module, serving the right purpose, as well as a better
 > design could." Durable conceptual design; no dated status here.
-> (the owner + agent, 2026-07-05, distilled from the "adapt /init for design reviewers" conversation.)
 
 ## Problem — the defect lives at a seam, not an altitude
 
@@ -228,7 +227,7 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 ## Ties to existing machinery (reuse, don't rebuild)
 
 - **`intent_checkpoint` upgrade** — capture the goal **graph + edges** (the four charters with
-  provenance + the ceiling meta-intent), not a flat intent list. This is the source of the charter
+  provenance + the ceiling meta-intent), not a flat intent list. This seeds the charter
   layer.
 - **`ClarificationRequest` / `waiting_for_clarification`** — charter-alignment questions are these,
   sourced from charter-deltas instead of implementation ambiguity.

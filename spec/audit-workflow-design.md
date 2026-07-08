@@ -397,11 +397,15 @@ full set):
   is not hard-gated on full `audit_tasks_completed` once a sanctioned
   partial-completion terminal fires. "Never an undefined or indefinite stall"
   must hold for the audit consumer too.
-- **`waiting_for_provider` paused state.** When the confirmed pool empties, the
-  engine enters an explicit resumable paused state; re-discovery surfaces only
-  genuinely-new providers and never re-offers a Gate-1 settled exclusion. A
-  no-progress livelock guard bounds oscillation (N pauses without net new
-  capacity → consumer terminal).
+- **`waiting_for_provider` paused state (audit consumer layer).** The shared engine
+  single-sources the *admission decision* (`computeDispatchAdmission`); the audit
+  consumer wraps it in an explicit resumable `waiting_for_provider` paused state. When
+  the confirmed pool empties, that state is entered; re-discovery surfaces only
+  genuinely-new providers and never re-offers a Gate-1 settled exclusion. A no-progress
+  livelock guard bounds oscillation (N pauses without net new capacity → consumer
+  terminal). The pause-lifecycle shell is per-consumer, not itself shared; unifying it
+  across audit + remediation beyond the shared admission math is tracked as open work in
+  `docs/backlog.md`.
 - **Per-clause `free_form_intent` escape hatch.** The interpreter decomposes a
   compound intent into clauses and assesses each clause's encodability
   independently; any clause it cannot encode as priority/lens/scope signals
@@ -410,6 +414,7 @@ full set):
   sibling clauses encode cleanly. Detection keys on per-clause encodability, not
   total-encoding-failure.
 - **Pinned shared APIs + integration checkpoint.** The three shared APIs
-  (rolling dispatch engine, Gate-0/Gate-1 provider confirmation, free_form_intent
+  (rolling dispatch engine — the shared admission decision, `computeDispatchAdmission`;
+  Gate-0/Gate-1 provider confirmation; free_form_intent
   interpreter) are pinned/versioned seam contracts; wire them through one real
   consumer (audit-code) end-to-end and validate before the full fan-out.

@@ -396,14 +396,17 @@ grants) scoped to the node's package.
 
 ## Cross-tool alignment (shared with the auditor)
 
-- **Rolling dispatch engine lives in `audit-tools/shared`.** Both tools use the
-  same loop (quota tracking, per-packet provider selection, capacity re-check on
-  result arrival) with different packet types. It exposes a consumer-neutral
-  terminal: when the confirmed pool empties mid-run and the livelock guard trips,
-  remediation routes the stranded subtree through close with a partial report
-  (audit synthesizes on partial coverage). An explicit `waiting_for_provider`
-  paused state is resumable; re-discovery surfaces only genuinely-new providers
-  and never re-offers a Gate-0 settled exclusion.
+- **Shared admission math; per-orchestrator pause lifecycle.** The dispatch *admission
+  decision* — quota tracking, per-packet provider selection, capacity re-check on result
+  arrival — is single-sourced in `audit-tools/shared` (`computeDispatchAdmission`), and both
+  tools drive it with different packet types. The *pause lifecycle* wrapped around that
+  decision is per-orchestrator: the audit side owns the `waiting_for_provider` resumable
+  paused state, remediation owns its own analogous `quota_paused` mechanism. Both expose a
+  consumer-neutral terminal: when the confirmed pool empties mid-run and the livelock guard
+  trips, remediation routes the stranded subtree through close with a partial report (audit
+  synthesizes on partial coverage). Re-discovery surfaces only genuinely-new providers and
+  never re-offers a Gate-0 settled exclusion. (Unifying the full pause-lifecycle shell across
+  both tools — beyond the shared admission math — is tracked as open work in `docs/backlog.md`.)
 - **Provider confirmation is session-level and shared** (Gate 0). One confirmation
   covers an audit→remediate pipeline run.
 - **`free_form_intent` interpretation parity.** Interpret-don't-thread is the rule

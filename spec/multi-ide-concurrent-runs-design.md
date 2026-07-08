@@ -210,3 +210,12 @@ what" — no separate roster.
   Layer (1) makes revocation *timely*; layer (2) makes it *airtight*. The lease length and heartbeat
   interval are a `(taskLeaseMs, heartbeatMs)` pair with `heartbeatMs << taskLeaseMs << (typical task
   duration ceiling)`; concrete values set in slice 2.
+
+  **Open — design target, not the shipped long-lived-claim mechanism.** The heartbeat + revocation
+  protocol above is wired only to the short-lived coordination mutexes (`withClaimHeartbeat` on
+  bundle-mutation and `phase:main`). The long-lived per-task / per-node *execution* claims
+  (`task-claims.json`, remediate's node-claims) intentionally hold a long lease with **no live
+  heartbeat** across the out-of-process worker run, and rest on dedup-by-`task_id` / dedup-by-id at
+  ingest as the correctness backstop for a rare lease overrun; `mergeAndIngestCommand.ts` carries no
+  ownership gate. Extending OD3's heartbeat + merge-time ownership gate onto those long-lived
+  execution claims is tracked as open work in `docs/backlog.md`.

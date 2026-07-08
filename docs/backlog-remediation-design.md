@@ -107,11 +107,13 @@ implementation must hold.
 
 ## Still-gated (not landable on tooling alone)
 
-> These are the only genuinely-open items in this doc; they should also be tracked as open work in
-> [`backlog.md`](backlog.md) (this doc is architecture-of-record, not a status tracker).
+> **D7/D8** are the only genuinely-open items in this doc; they should be tracked as open work in
+> [`backlog.md`](backlog.md) (this doc is architecture-of-record, not a status tracker). The F5-consent and
+> Parity notes below are durable rationale — an implemented control and a standing preference — not open
+> backlog items.
 
 - **D7/D8** need a manual proxy session / churn measurement this tooling can't produce — record as gated,
   never present as landable now.
 - **F5 fetch-and-run** of third-party tools is a real ACE / supply-chain surface: per-run consent is the
-  primary control, default set explicitly enumerated + first-use consent.
+  primary control (already implemented), default set explicitly enumerated + first-use consent.
 - **Parity** is single-source extraction, never a drift-test (standing preference).

@@ -42,7 +42,8 @@
 
 - **Risk-tier every lap** ([[risk-tier-loop-laps-cheap-vs-heavy]]): full adversarial contract pipeline only
   for risky/complex changes; trivial mechanical clusters run lean (one implementation agent → full-suite
-  gate → ship). This is the *host workaround* until the self-scaling pipeline makes it the tool's own job.
+  gate → ship). This is the *host workaround* until the self-scaling pipeline makes it the tool's own job
+  (tool-enforcement target now tracked as a forward-track in `docs/backlog.md`).
 - **Full friction walk every lap** ([[log-all-friction-categories-every-lap]]): log all three categories
   (ambiguous-direction / tool-should-decide / inefficient-feeding) to backlog + `open_observations`; don't
   trust the empty mechanical friction set.
