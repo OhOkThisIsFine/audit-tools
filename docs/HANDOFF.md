@@ -8,9 +8,9 @@
 
 ## Live state
 
-- **v0.32.35 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
-  creep — see `git log` and project memory [[live-status]]); this section is current-state +
-  open-work roadmap only.
+- **v0.32.36 published on npm as `latest`** (arbitrage Phase-0 A2 complete — reactive cost
+  verification). Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and
+  project memory [[live-status]]); this section is current-state + open-work roadmap only.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08).**
   ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1 (a-priori declared
   per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification: demote a
