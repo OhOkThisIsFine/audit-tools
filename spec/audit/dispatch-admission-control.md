@@ -176,7 +176,13 @@ ordering matters).
   driver-identity field — driver identity for quota already rides the
   `HostDispatchDescriptor` (above). The host-pool identity is decoupled from the demoted
   source: the host pool keys to the conversation host (claude-code) while the backend's own
-  source pool keys to the backend, so the two never alias.
+  source pool keys to the backend. The demotion itself is additionally gated by a same-agent
+  guard (`shouldDemotePrimaryInProcess`): when the resolved conversation-host provider equals
+  the configured primary backend, they are one credential/account — demoting would
+  double-book that account's budget and could even collide on the same `pool_id`. In that
+  case demotion is skipped entirely and the host self-drives the backend as its single pool;
+  only when the two providers differ does demotion produce two genuinely distinct,
+  non-aliasing pools.
 
 ## What changes
 
@@ -313,6 +319,11 @@ remediate (this is `resolvePoolBudget`'s input; see [[claude-usage-endpoint-body
   `QuotaUsageSnapshot { remaining_pct (0–1), reset_at, requests_remaining,
   tokens_remaining, windows[] }`. The budget derivation reads only this shape, so a
   Claude pool, a Codex pool, and a NIM pool run through identical code.
+- **`openai_compatible` converges onto the same source-pool shape.** A legacy
+  `openai_compatible` config block now carries its own `quota` (the same
+  `QuotaModelLimits` shape a `sources[]` entry carries) — it converges onto identical
+  budget derivation rather than falling to the generic default-token floor a
+  quota-less legacy block used to hit.
 - **Per-window slopes — never one collapsed slope.** A provider exposes several
   concurrent limit windows, each with its own denominator (Claude: 5-hour `session` +
   7-day `weekly`; Codex: primary-5h + secondary-weekly). The same N tokens is a large
