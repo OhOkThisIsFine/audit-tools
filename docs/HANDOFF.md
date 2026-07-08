@@ -11,16 +11,15 @@
 - **v0.32.35 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
-- **Immediate next: quota-arbitrage tier Phase-0 opencode-free — increment 2 (reactive cost verification).**
-  The tier is in progress ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks). Owner chose
-  the robust A2 design. **Increment 1 (a-priori declared per-source cost → free-first ordering) is SHIPPED to
-  main, unreleased (`6349bdc5`), adversarially reviewed + green.** Increment 2 = read each response's actual
-  reported cost and demote a declared-free pool that starts charging (+ friction event) — loop-core, full
-  adversarial pipeline; seams specced in the memory + backlog. **Do NOT cut the arbitrage release until
-  increment 2 lands** (increment 1 alone = A1, not the chosen A2). opencode-free is live-verified (`Bearer public`,
-  free models, `cost:"0"`); it's a pure-config `sources[]` entry. vertex-trial deferred (needs a GCP $300-trial
-  SA). Then the remaining env-bound live validations (quota pre-wall pacing, friction escalation,
-  selective-deepening convergence, clippy/rubocop live spawn).
+- **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08).**
+  ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1 (a-priori declared
+  per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification: demote a
+  declared-free pool that reports cost>0 + `declared_cost_drift` friction, `65ace2c1`, adversarially reviewed —
+  1 MEDIUM found+fixed, green) both landed. **Immediate next: cut the arbitrage-tier patch release** (A2 was the
+  release gate; now unblocked). After release, the only remaining Phase-0 work is **env-bound live validations**
+  (a real opencode-free run confirming declared-free routing + a live lapsed-free demotion + the friction event) —
+  owner runs these. vertex-trial deferred (needs a GCP $300-trial SA). Other standing env-bound validations:
+  quota pre-wall pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn.
 - **Cost↔speed dial residuals — adjudicated 2026-07-08, both deferred (see `docs/backlog.md`, dial bullet):**
   the `/models` concurrency probe is DEFERRED pending a design pass (a standard `/v1/models` exposes no
   concurrency signal; rate-limit headers are the buildable-but-unpinned path); B2 host-reorder is OPEN

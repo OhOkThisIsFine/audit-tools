@@ -236,21 +236,25 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   a coverage diff (2026-07-07) confirmed 9router's price table adds nothing over models.dev, so skip it.
   Relates [[quota-dispatch-vision]] / [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
   [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
-  - **Phase-0 opencode-free — IN PROGRESS (owner chose A2 = declared seed + reactive verification, 2026-07-08).**
+  - **Phase-0 opencode-free — CODE-COMPLETE (A2 = declared seed + reactive verification, shipped 2026-07-08).**
     opencode-free is live-verified: base `https://opencode.ai/zen/v1`, public `/models`, free models via
     `Bearer public` returning `cost:"0"` (design premise held; docs' "API key" is the PAID tier). opencode-free
     is a pure-config `sources[]` entry (`api_key:"public"` + `cost_per_mtok:0`) — no provider code.
-    - **Increment 1 — declared per-source cost seam → SHIPPED to main (unreleased), commit `6349bdc5`.**
+    - **Increment 1 — declared per-source cost seam → SHIPPED, commit `6349bdc5`.**
       `DispatchableSource.cost_per_mtok` → `deriveCostRank` rung 2a (declared 0 = free-first). The design memory's
       "deriveCostRank prices free ~0 automatically" was FALSE (non-models.dev ids → worst band); this is the real fix.
-      Adversarially reviewed + green. Unreleased on purpose — increment 1 alone = A1, not the chosen A2.
-    - **Increment 2 — reactive cost verification → NEXT (loop-core, full pipeline).** Read each response's actual
-      reported cost (opencode returns `cost`); a declared-free pool that reports cost>0 (lapsed free tier) is demoted
-      out of free-first + a friction event fires. Seams + full spec in [[arbitrage-dispatch-tier-design]] (Phase-0
-      build status). **DON'T cut the arbitrage-tier release until increment 2 lands** (A2 = 1+2). Config-example doc
-      for opencode-free ships with increment 2. `OpenAiCompatibleConfig` singleton can't declare a cost (no field) —
-      acceptable, arbitrage pools use `sources[]`; note in that doc.
+    - **Increment 2 — reactive cost verification → SHIPPED, commit `65ace2c1` (loop-core, full pipeline).**
+      Provider extracts the endpoint-reported cost (opencode's `cost`) → `LaunchFreshSessionResult.observedCostUsd`;
+      dispatcher closures relay it to `RollingDispatchResult`; the rolling engine's `handleResult` demotes a
+      declared-free pool that reports cost>0 (folded into `selectProvider`'s degraded partition, once per pool) +
+      fires a `declared_cost_drift` friction event. `driveRolling` shares ONE demotion set across sub-waves/levels so
+      the demotion + single friction emit span the whole drive (adversarial-review catch — a per-dispatcher set
+      leaked free-first back at each level boundary). Ships `examples/session-config/opencode-free.json` + README.
+      Adversarially reviewed (1 MEDIUM found + fixed) + green (6063 tests). A2 (1+2) complete → arbitrage-tier
+      release unblocked.
     - **vertex-trial → deferred** (needs operator's GCP $300-trial SA JSON).
+    - **Remaining Phase-0 = env-bound live validations only** (no more code): a real opencode-free run confirming
+      declared-free routing + a live lapsed-free demotion + the `declared_cost_drift` friction event end-to-end.
 - **Cost↔speed dispatch dial + free-pool maximization (owner, 2026-07-07).** Generalizes the cost-first router
   — the minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point ON TOP of
   the kept router (does not replace it). Design of record now [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md);
