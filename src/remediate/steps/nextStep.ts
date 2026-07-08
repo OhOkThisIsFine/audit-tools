@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
@@ -1686,9 +1686,9 @@ async function buildImplementDispatchStep(ctx: {
   const { root, artifactsDir, state, options, store } = ctx;
 
     const loadedSessionConfig = options.sessionConfig ??
-      await readOptionalJsonFile<SessionConfig>(
+      await readValidatedSessionConfig(
         join(root, ".remediation-artifacts", "session-config.json"),
-      ) ?? await readOptionalJsonFile<SessionConfig>(
+      ) ?? await readValidatedSessionConfig(
         join(root, "session-config.json"),
       );
     // B1: fold the `--host-provider` override onto `host_provider` so every
@@ -2988,10 +2988,10 @@ async function handleReadyIntakeContractPipeline(
   // dispatch one (fail-safe: mandate by default).
   const sessionConfigForDispatch =
     options?.sessionConfig ??
-    (await readOptionalJsonFile<SessionConfig>(
+    (await readValidatedSessionConfig(
       join(root, ".remediation-artifacts", "session-config.json"),
     )) ??
-    (await readOptionalJsonFile<SessionConfig>(
+    (await readValidatedSessionConfig(
       join(root, "session-config.json"),
     ));
   const hostCanDispatchSubagents = resolveHostDispatchCapability({
@@ -3895,11 +3895,15 @@ export async function decideNextStep(
   ) as NextStepOptions;
   const root = resolveRoot(normalizedOptions.root);
   const artifactsDir = resolveArtifactsDir(root, normalizedOptions.artifactsDir);
+  // This read exists only to configure the run-logger. The authoritative
+  // validated load (with `.remediation-artifacts/` path precedence + operator
+  // warning surface) happens inside the loop, so suppress warnings here to avoid
+  // emitting the same warning twice per invocation. Errors still throw.
   const sessionConfig =
     normalizedOptions.sessionConfig ??
-    (await readOptionalJsonFile<SessionConfig>(
-      join(root, "session-config.json"),
-    ));
+    (await readValidatedSessionConfig(join(root, "session-config.json"), {
+      onWarnings: () => {},
+    }));
   const runLogger = new RunLogger(join(artifactsDir, "run.log.jsonl"), {
     enabled: sessionConfig?.observability?.run_log ?? true,
   });

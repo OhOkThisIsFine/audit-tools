@@ -104,16 +104,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (don't lose a prior-run cooldown to a transient IO flake), so the mechanism read as "drop the snapshot" — the
   [[backlog-item-states-invariant-not-fix-mechanism]] failure mode, in the wild.
 
-- **Remediate does no session-config field validation — parity gap (tool-should-decide, from C1 review).** The
-  full field validator `validateSessionConfig` (`src/audit/validation/sessionConfig.ts`) runs ONLY on the audit
-  orchestrator (`src/audit/supervisor/sessionConfig.ts`); remediate loads `session-config.json` and feeds it
-  straight to the SHARED scheduler with no field checks. C1 closed the *correctness* half in the shared consumer
-  (`resolveContextBudget` floors at 0; the discovered rung drops an inverted window), so a bad quota can no longer
-  wedge either orchestrator — but a remediate operator gets no loud config-load error for a malformed
-  `quota`/`sources[]`, just a silent degrade to the floor. "Keep orchestrators in parity" says both should reject
-  bad config at load. Fix: route remediate's config load through the same validator (or single-source the
-  field-validation into `audit-tools/shared` and call it from both). [[enforce-robustness-in-tooling-not-host-discretion]]
-
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
   recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
   - **Convergence guard keys on the reviewer-supplied counterexample *id string*, not CE content.** Two independent

@@ -65,10 +65,7 @@ async function mutateSessionConfigLocked(
         result = base as SessionConfig;
         return;
       }
-      const issues = validateSessionConfig(merged);
-      if (issues.length > 0) {
-        throw new Error(formatConfigValidationIssues(configPath, issues));
-      }
+      throwOnConfigErrors(configPath, validateSessionConfig(merged));
       await writeJsonFile(configPath, merged);
       result = merged as SessionConfig;
     },
@@ -90,6 +87,26 @@ function formatConfigValidationIssues(
   return `Invalid ${configPath}:\n${formatValidationIssues(issues).replace(/^  /gm, "- ")}`;
 }
 
+/**
+ * A config only fails to LOAD on `error`-severity issues. `warning`-severity
+ * issues (e.g. `dangerously_skip_permissions=true`) are surfaced to stderr but
+ * must not block the load — they flag a legitimate-but-risky operator choice, not
+ * an unusable config.
+ */
+function throwOnConfigErrors(
+  configPath: string,
+  issues: ValidationIssue[],
+): void {
+  const errors = issues.filter((issue) => issue.severity === "error");
+  if (errors.length > 0) {
+    throw new Error(formatConfigValidationIssues(configPath, errors));
+  }
+  const warnings = issues.filter((issue) => issue.severity === "warning");
+  if (warnings.length > 0) {
+    console.warn(formatConfigValidationIssues(configPath, warnings));
+  }
+}
+
 export async function loadSessionConfig(
   artifactsDir: string,
 ): Promise<SessionConfig> {
@@ -100,10 +117,7 @@ export async function loadSessionConfig(
     return { ...DEFAULT_SESSION_CONFIG };
   }
 
-  const issues = validateSessionConfig(rawConfig);
-  if (issues.length > 0) {
-    throw new Error(formatConfigValidationIssues(configPath, issues));
-  }
+  throwOnConfigErrors(configPath, validateSessionConfig(rawConfig));
 
   return rawConfig as SessionConfig;
 }

@@ -25,6 +25,7 @@ import { join } from "node:path";
 import {
   writeJsonFile,
   readOptionalJsonFile,
+  readValidatedSessionConfig,
   formatValidationIssues,
   hashContent,
   isRecord,
@@ -1588,7 +1589,7 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
     // same wave-sizing implement dispatch consumes. itemCount = module count.
     const sessionConfig =
       options.sessionConfig ??
-      (await readOptionalJsonFile<SessionConfig>(
+      (await readValidatedSessionConfig(
         join(root, "session-config.json"),
       ));
     const schedule: WaveScheduleResult = await scheduleWave({

@@ -29,8 +29,14 @@ export async function cmdValidate(argv: string[]): Promise<void> {
           "session_config",
           validateSessionConfig(rawSessionConfig),
         );
+  // Only `error`-severity config issues make the config unusable — a
+  // `warning` (e.g. dangerously_skip_permissions=true) is surfaced but must not
+  // suppress provider probing/resolution or fail the command.
+  const sessionConfigErrorCount = sessionConfigIssues.filter(
+    (issue) => issue.severity === "error",
+  ).length;
   const providerIssues =
-    rawSessionConfig === undefined || sessionConfigIssues.length > 0
+    rawSessionConfig === undefined || sessionConfigErrorCount > 0
       ? []
       : prefixValidationIssues(
           "session_config",
@@ -44,7 +50,7 @@ export async function cmdValidate(argv: string[]): Promise<void> {
   const resolvedProvider =
     rawSessionConfig === undefined
       ? "worker-command"
-      : sessionConfigIssues.length > 0
+      : sessionConfigErrorCount > 0
         ? null
         : resolveFreshSessionProviderName(
             undefined,
@@ -67,5 +73,8 @@ export async function cmdValidate(argv: string[]): Promise<void> {
       2,
     ),
   );
-  process.exitCode = issues.length > 0 ? 1 : 0;
+  // Exit non-zero only when something is genuinely wrong (error severity);
+  // advisory warnings are reported in `issues` but do not fail the command.
+  const errorCount = issues.filter((issue) => issue.severity === "error").length;
+  process.exitCode = errorCount > 0 ? 1 : 0;
 }

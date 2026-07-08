@@ -8,18 +8,23 @@
 
 ## Live state
 
-- **v0.32.36 published on npm as `latest`** (arbitrage Phase-0 A2 complete — reactive cost
-  verification). Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` and
-  project memory [[live-status]]); this section is current-state + open-work roadmap only.
-- **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08).**
-  ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1 (a-priori declared
-  per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification: demote a
-  declared-free pool that reports cost>0 + `declared_cost_drift` friction, `65ace2c1`, adversarially reviewed —
-  1 MEDIUM found+fixed, green) both landed. **Immediate next: cut the arbitrage-tier patch release** (A2 was the
-  release gate; now unblocked). After release, the only remaining Phase-0 work is **env-bound live validations**
-  (a real opencode-free run confirming declared-free routing + a live lapsed-free demotion + the friction event) —
-  owner runs these. vertex-trial deferred (needs a GCP $300-trial SA). Other standing env-bound validations:
-  quota pre-wall pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn.
+- **v0.32.37 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
+  creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
+  roadmap only.
+- **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,
+  released v0.32.36).** ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1
+  (a-priori declared per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification:
+  demote a declared-free pool that reports cost>0 + `declared_cost_drift` friction, `65ace2c1`) both landed. The
+  only remaining Phase-0 work is **env-bound live validations** (a real opencode-free run confirming declared-free
+  routing + a live lapsed-free demotion + the friction event) — owner runs these. vertex-trial deferred (needs a
+  GCP $300-trial SA). Other standing env-bound validations: quota pre-wall pacing, friction escalation,
+  selective-deepening convergence, clippy/rubocop live spawn.
+- **Session-config validation is now single-sourced across both orchestrators (v0.32.37).** The full field
+  validator `validateSessionConfig` moved to `audit-tools/shared`; remediate's `session-config.json` reads route
+  through a shared `readValidatedSessionConfig` load-boundary helper, so a malformed config fails loud in remediate
+  too (was a silent degrade — the closed parity gap). **Deliberate behavior change:** a remediate run with a
+  technically-invalid config (e.g. `timeout_ms: 0`) now throws at load instead of silently ignoring it — this is
+  remediate conforming to the shared config contract audit has always enforced, not a new contract.
 - **Cost↔speed dial residuals — adjudicated 2026-07-08, both deferred (see `docs/backlog.md`, dial bullet):**
   the `/models` concurrency probe is DEFERRED pending a design pass (a standard `/v1/models` exposes no
   concurrency signal; rate-limit headers are the buildable-but-unpinned path); B2 host-reorder is OPEN

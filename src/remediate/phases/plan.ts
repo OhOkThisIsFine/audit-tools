@@ -24,6 +24,7 @@ import {
 } from "./grounding.js";
 import {
   readOptionalJsonFile,
+  readValidatedSessionConfig,
   writeJsonFile,
   readJsonFile,
   formatValidationIssues,
@@ -868,7 +869,7 @@ export async function applyPlanPipeline(
   blocks = mergeBlocksSharingFiles(blocks, findings, options.root);
 
   // Split blocks that would exceed the implementation agent's context budget.
-  const sessionConfig = await readOptionalJsonFile<SessionConfig>(
+  const sessionConfig = await readValidatedSessionConfig(
     join(options.root, "session-config.json"),
   );
   const contextBudget = resolveContextBudgetFromConfig(sessionConfig ?? null);
@@ -1173,7 +1174,7 @@ async function runPlanWorkerTask<T>(params: {
 }): Promise<T> {
   const { label, obligationId, buildPrompt, options, deps } = params;
   const sessionConfig =
-    (await readOptionalJsonFile<SessionConfig>(
+    (await readValidatedSessionConfig(
       join(options.root, "session-config.json"),
     )) || {};
   const provider = createFreshSessionProvider(undefined, sessionConfig);

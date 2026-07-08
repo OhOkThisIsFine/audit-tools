@@ -664,7 +664,13 @@ export {
   validateAuditFindingsReport,
   isValidAuditFindingsReport,
 } from "./validation/findingsReport.js";
-export { validateSessionConfig } from "./validation/sessionConfig.js";
+export {
+  validateSessionConfig,
+  readValidatedSessionConfig,
+  isBareExecutableName,
+  isDirectExecutablePath,
+  isSupportedConfiguredCommand,
+} from "./validation/sessionConfig.js";
 
 // Validation: finding grounding primitives (quote-and-verify + path normalizer;
 // single source for both orchestrators — drift-plan E3 + P7). INV-GND-02: a
