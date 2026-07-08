@@ -8,8 +8,10 @@
 
 ## Live state
 
-- **v0.32.28 published on npm as `latest`.** Latest lap shipped the NIM/Codex dispatch-fix lean tranche (see the
-  dedicated bullet below). Prior (v0.32.27): the "everything code-fixable" backlog sweep landed (11 nodes) **plus
+- **v0.32.30 published on npm as `latest`.** Latest lap shipped quota-state durability (INV-QD-15) and the
+  **deletion of the concurrency bucket learner** (−862 LOC), which unmasked and fixed INV-QD-16 (a concurrent
+  `success` must not cancel a live cooldown) — see the quota bullet below. Prior (v0.32.29): B1 host-identity
+  sourcing. Prior (v0.32.28): the NIM/Codex dispatch-fix lean tranche. Prior (v0.32.27): the "everything code-fixable" backlog sweep landed (11 nodes) **plus
   the HIGH remediate worktree-safety fix** — per-node worktree isolation + total lock order + OID-ancestry
   reconcile + `resolved_no_change` captured-OID grounding, so concurrent `accept-node` can no longer wipe sibling
   in-flight worktrees or desync `state.json` from git. **Conceptual design-review Phases A–E all landed** (charter
@@ -40,7 +42,10 @@
   pre-admission-control legacy that inferred a concurrency number from a rate-limit signal — the exact category error
   [[concurrency-is-declared-or-absent-never-learned]] closes. It is gone; `updated_at`-as-decay-clock went with it.
   What survives on the entry is reactive backoff (`cooldown_until` / `last_429_at` / `consecutive_429_count`) plus
-  `tokens_per_pct` / `output_per_input`, which are what actually gate admission.
+  `tokens_per_pct` / `output_per_input`, which are what actually gate admission. The deletion **unmasked** a latent
+  bug the poisoned buckets had been compensating for: `recordWaveOutcome` cleared a *live* `cooldown_until` on any
+  success, though a concurrent success was dispatched before the 429 and is no evidence the limit is over
+  (**INV-QD-16**, fixed: only an already-expired cooldown clears).
   **Immediate next: bug (4)** — `selectProvider` should read the live quota entry, not the frozen
   `pool.quotaStateEntry` snapshot (`docs/backlog.md` → Open bugs). Then C1 real source-pool budget (converge onto
   `sources[].quota`), A1 rename `local-subprocess`→`worker-command`. Full detail + file:lines in `docs/backlog.md`
