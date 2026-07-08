@@ -10,10 +10,11 @@ The `/remediate-code` contract pipeline (intake → goal_spec → context → de
 contracts → seam → finalize → critique → test-plan → assessment → counterexample → judge(+repair)
 → impl-DAG → review → dispatch → triage → close) applies the **same full ceremony to every input
 regardless of size or risk**. Empirically (laps 1–3) that made a one-line log-removal cost roughly
-the same orchestration as a concurrency-correctness change. The crude existing mitigation — a
-separate `leanFastPath` that *skips* the whole design ceremony for pre-vetted structured-audit
-findings — is both too narrow (document/backlog input can't reach it) and **too trusting**
-(remediation routinely re-finds errors in audit conclusions, so blindly skipping review is unsafe).
+the same orchestration as a concurrency-correctness change. The prior mitigation — a separate
+`leanFastPath` that *skipped* the whole design ceremony for pre-vetted structured-audit
+findings — was too trusting (remediation routinely re-finds errors in audit conclusions); it has
+since been softened (see Mechanisms, Dial A) to a mandatory light-review floor rather than a
+zero-scrutiny skip. It remains too narrow in scope (document/backlog input still can't reach it).
 
 ## Two distinct cost drivers (measured)
 
@@ -36,9 +37,10 @@ Critique / counterexample scrutiny scales with the assessed risk/complexity:
 - high → full independent critique + counterexample + judge (as laps 1/3 used, and earned).
 
 **Floor is *light*, never *off*.** Nothing — including pre-vetted structured-audit findings — gets
-zero scrutiny, because remediation legitimately catches upstream (audit) errors. The existing
-structured-audit lean path that skips review entirely is, by this standard, too trusting and should
-be **softened from "skip" to "light review,"** not preserved as a zero-scrutiny fork.
+zero scrutiny, because remediation legitimately catches upstream (audit) errors. The
+structured-audit lean path now runs one bounded light adversarial pass before proceeding
+(`leanFastPath.ts`'s `interpretLeanLightReviewVerdict`), escalating to the full pipeline on any
+concern — a mandatory light-review floor, not a zero-scrutiny fork.
 
 ### Dial B — phase granularity / round-trips (the ceremony saving)
 - **Collapse in general**: phases that are one coherent act of authoring (e.g. decomposition +

@@ -159,10 +159,12 @@ grounded, high-confidence, non-systemic finding set) skip the adversarial
 contract-design loop while still rejoining the normal plan→implement→close
 machinery (deterministic grounding, block derivation, file-hash integrity,
 verify-before-merge) — it does not skip traceability or verification, only the
-expensive negotiation phases. That doc also flags the fast path as worth
-re-examining ("too trusting"). Treat this section's "both paths run the [full]
-pipeline" as the default; the lean fast path is the sanctioned, narrowly-scoped
-exception, not a contradiction of the rationale above.
+expensive negotiation phases. The fast path runs a mandatory light adversarial
+pass (`interpretLeanLightReviewVerdict`) before proceeding, escalating to the
+full pipeline on any concern — no longer a bare skip. Treat this section's
+"both paths run the [full] pipeline" as the default; the lean fast path is the
+sanctioned, narrowly-scoped exception, not a contradiction of the rationale
+above.
 
 ### Multi-agent seam negotiation
 
