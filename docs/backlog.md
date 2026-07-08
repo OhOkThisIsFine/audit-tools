@@ -404,6 +404,71 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   forward-track rather than a rule living only in HANDOFF's cadence section.
   [[enforce-robustness-in-tooling-not-host-discretion]] / [[self-scaling-pipeline-not-forked-paths]]
 
+- **Context-efficiency track (3 items, GrapeRoot-derived).** Investigated the `codex-cli-compact` /
+  GrapeRoot context engine (2026-07-06); its open techniques map to three adaptable builds. GrapeRoot's
+  core engine is closed and its benchmarks are vendor-reported — we take the *ideas*, not the code.
+  **CROSS-CUTTING GUARD for all three: never break provider prefix caching.** Every change below MUST
+  preserve the stable-prefix invariant already stated in
+  [`spec/audit-workflow-design.md`](../spec/audit-workflow-design.md) §Prompt caching — *shared context
+  (schema / instructions / repo metadata) at the FRONT = cache-eligible fixed prefix; agent-specific,
+  turn-varying payload at the BACK*. GrapeRoot re-ranks `recommended_files` every turn, which is exactly
+  the prefix-churning move that busts prompt caching — the anti-pattern to avoid. Any dynamic/session
+  signal we add lives in the per-packet back payload and must never mutate or reorder the fixed prefix.
+  A change that saves selection tokens but busts cache-hit can cost more than it saves; item (3) is the
+  regression guard that makes that measurable.
+
+  - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
+    *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step
+    record of what earlier steps actually read/edited/covered, so later packets re-include (and workers
+    re-read) the same god-files cold every step — our known waste hotspot ([[worktree-large-files-reread-loop]]:
+    large files re-read 15–21×/session). Build a persisted per-run access-memory that biases later
+    packet selection + staleness prioritization toward continuity (files/symbols earlier steps touched
+    are likelier relevant and cheaper to re-include). Invariants:
+    - **Derive from existing result artifacts, not a new hook.** The signal is already latent —
+      `AuditResult.file_coverage[]` records what each task covered; remediate node results record touched
+      files. Harvest deterministically from what the tool already sees; do not add a host-side capture step
+      (enforce-in-tooling, not host discretion).
+    - **Cache-safe placement (the guard above).** The access-memory influence changes only *which*
+      files/symbols the per-packet back payload includes — it MUST NOT reorder or re-weight anything in the
+      fixed shared prefix. Confine all volatility to the back.
+    - **Deterministic, content-derived order (no temporal churn).** Access is inherently temporal, but the
+      persisted record MUST serialize path-sorted with per-path counters/flags as *values* — never an
+      access-ordered array — or it churns the artifact content hash every step and cascades phantom
+      staleness down the DAG (the standing "extractors emit stable, content-derived array order" invariant;
+      cf. [[staleness-churn-repo-manifest-file-order]]).
+    - **DAG-tracked artifact, not ad-hoc freshness.** The access-memory record is a first-class
+      `.audit-tools` artifact on the explicit dependency map (`spec/audit/dependency-map.md`), so staleness
+      propagates deterministically — never an ad-hoc per-step freshness check.
+
+  - **(2) Symbol-addressable reads (`path::symbol`) — sub-file packet granularity.** *Smaller optimization.*
+    When a lens needs one function from a god-file, dispatch a symbol slice, not the whole file, shrinking
+    packet bytes. Symbol boundaries already exist deterministically in the extractors
+    (`unit_manifest.json` / `surface_manifest.json`), so this enriches shared artifacts, not per-language
+    forks. Invariants:
+    - **Fail-safe to whole-file** when a symbol boundary is unavailable or ambiguous — never drop context to
+      chase a slice.
+    - **Coverage/citation semantics must stay valid.** `AuditResult.file_coverage[].total_lines` must match
+      actual line counts (schema gate); define partial-read coverage as the symbol's line span (not the
+      whole file) so the gate doesn't false-fail, and carry symbol-slice citations back to real file line
+      ranges so the source-grounded citation gate (M-B3) still resolves.
+    - **Cache-safe by construction** — slices are back-payload; the prefix is untouched.
+
+  - **(3) Token-efficiency eval harness — measure, don't assert, context savings.** *Real gap.* We assert
+    "budget context before LLM dispatch" but never measure per-step token cost, so a regression (or a
+    caching-buster from items 1/2) is invisible. Build the COST counterpart to the A2 quality oracle
+    (`score-audit`): a repeatable benchmark over a fixed prompt corpus × complexity levels reporting real
+    input/output tokens **and prefix cache-hit ratio** per step, so cost and quality are the two measured
+    axes (GrapeRoot benchmarks both). Invariants:
+    - **Must surface cache-hit ratio / prefix stability explicitly** — this is what makes the cross-cutting
+      caching guard enforceable: a change that cuts selection tokens but busts the cached prefix shows up as
+      a cache-hit regression, not a phantom win.
+    - **Measure from recorded run ledgers / headroom telemetry, not metered API calls.** Reading *actual*
+      provider-reported usage of a completed run is post-hoc measurement (allowed); it does NOT violate
+      "token estimates stay local and deterministic — never API-call token counting in planning/dispatch"
+      (that rule governs planning, not after-the-fact benchmarking). Keep the boundary clean:
+      `estimateTokensFromBytes` for planning; ledger/telemetry reads for the benchmark.
+    - **Reuse the A2 corpus infrastructure** where possible so cost+quality run off one labeled corpus.
+
 ## Deferred / waiting
 
 - **A2 finding-quality oracle** — the `score-audit` scorer is built; needs operator-authored
