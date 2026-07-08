@@ -6,130 +6,264 @@ the process this implements.
 
 <!-- DOC-REVIEW-OPEN:START -->
 ### Proposed instruction-file edits (approve to apply)
-None this run — `CLAUDE.md`/`AGENTS.md` checked out clean against every named file, symbol,
-command, path, and count (verified by both reviewer and adversary independently).
+- [I-8] CLAUDE.md — the Artifacts list (`.audit-tools/audit/`) enumerates 14 files; the live
+  `ARTIFACT_DEFINITIONS` registry (`src/audit/io/artifacts.ts`) has 36 — proposed: either expand the
+  list with the 22 missing names (`provider_confirmation.json`, `auto_fixes_applied.json`,
+  `intent_checkpoint.json`, `flow_coverage.json`, `git_history.json`, `design_assessment.json`,
+  `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`,
+  `systemic_challenge.json`, `analyzer_capability.json`, `scope.json`,
+  `runtime_validation_tasks.json`, `external_analyzer_results.json`,
+  `external_analyzer_acquisition.json`, `syntax_resolution_status.json`, `audit_plan_metrics.json`,
+  `requeue_tasks.json`, `audit_state.json`, `artifact_metadata.json`, `tooling_manifest.json`,
+  `audit-report.md`), or replace the hand-copied list with a pointer ("see `ARTIFACT_DEFINITIONS` in
+  `src/audit/io/artifacts.ts` for the full set") — see I-10 below, this is the second time this
+  exact enumeration has drifted.
+- [I-9] CLAUDE.md — five bullets carry a pinned date that is status-noise per
+  `documentation-philosophy.md` (a policy doesn't need a date to remain load-bearing): "Hook-enforced
+  since 2026-06-11" (Green-at-every-commit), "(the owner, 2026-06-16; next-steps-and-doc-homes
+  element + report template added 2026-06-25.)" (End-of-sprint cleanup), "Token estimates stay local
+  and deterministic (2026-06-11)", "Two-tier dependency policy … (2026-06-17)", "Dead-code release
+  gate … (2026-06-27)" — proposed: drop all five dates, keep the policy text.
+- [I-10] CLAUDE.md — the `PRIORITY` obligation-chain enumeration and the Artifacts list (I-8) are
+  both hand-copied snapshots of arrays that live in code, and both have now drifted at least once
+  (this run added 2 obligations to the chain and never back-filled the artifact list). Per
+  `documentation-philosophy.md`'s "one home per concept," should CLAUDE.md keep restating these two
+  enumerations verbatim, or reference the source directly (`PRIORITY` in
+  `src/audit/orchestrator/nextStep.ts`; `ARTIFACT_DEFINITIONS` in `src/audit/io/artifacts.ts`) and
+  keep only the shape/concept in prose?
+- [I-11] `docs/doc-review-guidelines.md` — this file's own preamble says "Edit it here on `main` —
+  the routine reads it, never rewrites it," so the routine cannot auto-apply this even though it's a
+  narrow factual fix: the "generated host assets" manifest row (line ~187) carries a trailing
+  parenthetical — *"(open: audit-code's `.agent/.../SKILL.md` + `.github/prompts/audit-code.prompt.md`
+  have no drift guard yet — `docs/backlog.md`.)"* — that is now false. Commit `7346ffa3` added both
+  missing drift guards (`tests/audit/host-asset-renderer-drift.test.mjs:131-139` and `:145-156`, both
+  passing today); `docs/backlog.md`'s own copy of this note was already updated in the same commit.
+  Proposed: delete the `*(open: ...)*` sentence from that row.
 
 ### Design decisions for you
-- [D-47] CLAUDE.md — Preferences, the "Two-tier dependency policy" bullet is tagged
-  `(2026-06-17, A5)` — a leftover internal slice-id from the commit that introduced it. Since then
-  `docs/project-philosophy.md` created its own public `A5`/`A10`/etc. section numbering and assigns
-  *this exact policy* to **A10**, while its own **A5** is an unrelated conviction ("Conversation-first").
-  Not a code-contradicted fact, just a naming collision that could mislead a reader cross-referencing
-  the two docs. Drop the stray `A5` tag (keep just the date), or leave it as a historical slice-id with
-  no claimed relationship to `project-philosophy.md`'s lettering?
-- [D-48] `.claude/skills/start-lap/SKILL.md` — new this window, not registered in
-  `doc-review-guidelines.md`'s manifest table (the "meta-tooling / dev-workflow" row lists only
-  `disambiguate-backlog` and `ship`). Content/commands verified factually accurate — this is purely an
-  existence-review gap (`scripts/check-doc-manifest.mjs` doesn't gate `.claude/skills/**` at all, so
-  nothing mechanical would ever catch it). Register it in that row alongside its two siblings (same
-  shape: standalone hand-written dev-workflow how-to), or is a different routing intended?
-- [D-49] `docs/audit-pkg/operator-guide.md` — entirely silent on the new Gate-0 provider-confirmation
-  subsystem (`src/shared/providers/providerConfirmation.ts` — an interactive host-delegation step that
-  now fires on every run before anything else). Unlike the enumerated-list fixes already auto-applied
-  elsewhere, this doc has no exhaustive workflow list to patch narrowly — the gap is a whole new
-  host-visible interactive behavior with no home yet. Should it gain a section (under "Session config"
-  or "Backend fallback") describing the confirmation prompt, how to respond, and how
-  `confirmed_provider_pool` persists?
-- [D-50] `README.md` (root) — the audit-code "step by step" walkthrough (step 4, "Review the design")
-  doesn't mention the structural-decomposition/charter-extraction phase now sitting between design
-  assessment and the two design-review passes — a real, user-visible capability (detects non-co-located
-  modules, extracts/confirms a charter register) with no mention in the top-level product narrative.
-  Expand step 4, or is this deliberately left implicit (staying only in `CLAUDE.md`'s priority chain)?
-- [D-51] `spec/audit-workflow-design.md` — now that the pipeline diagram/prose names
-  `structure_decomposition` and `charter_extraction` (fixed this run), the doc still has no descriptive
-  `##` section for either phase (every other pipeline stage gets one, e.g. "Design review (two parallel
-  passes)"). The rationale exists only as code comments in `dependencyMap.ts`. Should full descriptive
-  sections be authored here, transcribing that rationale into the doc?
-- [D-52] `spec/remediation-workflow-design.md` — the "Risk classification & implementation preview"
-  section (and the `risk_preview` pipeline-diagram step) describes a mechanism that no longer exists:
-  `impl_preview_acknowledged.json` and the `safe`/`substantive`/`context_dependent` classification have
-  zero hits anywhere in `src/` — it was replaced (commit `46179f29`) by the review-approval gate
-  (`src/remediate/review/reviewGate.ts`/`reviewNecessity.ts`), which tiers findings
-  `strategic`/`concrete`/`mechanical`, persists `review_request.json`/`review_resolution.json`/
-  `review_decision.json`, fires **before** the contract pipeline (not after), and currently only on Path
-  A. This is a full mechanism replacement plus a reordering, not a narrow rename — should this section
-  and the pipeline diagram be rewritten to describe the current gate (tiers, artifact names, its
-  pre-pipeline/Path-A-only firing point)?
-- [D-53] `spec/host-validation.md` / `docs/backlog.md` — still open (carried forward, no new evidence
-  changes it): `/audit-code` has a manual GUI-host live-dispatch checklist; `/remediate-code` has the
-  automated no-drift gate (`verify:remediate-hosts`) but no manual GUI-host checklist sibling, which the
-  "keep orchestrators in parity" convention suggests it should have. Add one, or is there a reason
-  `/remediate-code` doesn't need it (e.g. always paired with an audit run that already exercises the
-  host)?
-- [D-54] `docs/backlog.md` — the "Backlog mechanism sub-items can drift from code reality" entry (Open
-  bugs / frictions section) is mis-homed: it's a closed lesson with no further code action (verify a
-  named mechanism against source before building it), which reads like a "Durable trap," not an open
-  bug. Move it to the Durable-traps section, or is it deliberately staged as a recent-lap friction note
-  that ages out on its own?
-- [D-55] `docs/HANDOFF.md` — T5-3 (dispatch-admission-control) still carries a denser
-  commit-level "what shipped" recap than sibling T5 entries (e.g. T5-1/T5-2 are pointer + one-line
-  verdict). Should T5 entries be uniformly terser, with commit-level detail left to `git log` only? Or
-  is the denser style an intentional exception for tracks with multiple sub-parts?
-- [D-56] Code bug found incidentally while verifying `spec/audit-workflow-design.md`'s pipeline claims,
-  not a doc issue — flagging so it lands somewhere: `buildAuditObligations()` in
-  `src/audit/cli/nextStepHelpers.ts` (the CLI conversation-first `next-step` fold) has an obligation-def
-  entry for every `PRIORITY` id **except** `structure_decomposition_current` — it's present in
-  `PRIORITY`, `EXECUTOR_REGISTRY`, and `deriveAuditState`, but missing from this function's returned
-  array (lines ~959–1075). Since `findNextObligation`/`advance()` only scans obligations present in that
-  array, the CLI's `next-step` loop may skip straight past `structure_decomposition_current` to
-  `intent_checkpoint_current` regardless of whether structure-decomposition has actually run. No test
-  currently exercises this CLI fold path for this obligation. Worth a `docs/backlog.md` entry /
-  investigation independent of this doc-review pass.
+- [D-57] `docs/project-philosophy.md` — B6's home-pointer line reads `*(home: CLAUDE.md; memory:
+  disambiguation-completes-or-leaves, front-load-broad-search-before-contract-authoring,
+  log-all-friction-categories-every-lap)*`, but only "log friction" has any correlate in `CLAUDE.md`
+  (line 225, and even that's a loose paraphrase, not a restatement) — the other two memory keys don't
+  appear in `CLAUDE.md` at all. Every other multi-bullet pointer in this doc that mixes a
+  CLAUDE.md-resident item with memory-only items explicitly discloses it (B1, B3, A7); B6 doesn't.
+  Do you want B1/B3's explicit-disclaimer style (name the memory-only pair), A7's implicit style
+  (quote only the one CLAUDE.md-homed bullet), or was the blanket pointer intentional (e.g. all
+  three are meant to eventually land in CLAUDE.md)?
+- [D-58] `docs/project-philosophy.md` — A4's one-line restatement ("no hardcoded model
+  names/windows/tier-maps; a hardcoded model table is a bug") still mirrors the *old*, simpler
+  CLAUDE.md wording and hasn't been updated for the new nuance CLAUDE.md now states (a *synced,
+  not-forked* third-party table like `models.dev` is fine; the ban is on a table *we* hand-maintain
+  as a primary source — `KNOWN_MODEL_LIMITS` was retired for this reason). Per this doc's own rule
+  "the home wins" this isn't wrong, just an incomplete pointer that could mislead a reader who trusts
+  the map over the home — worth syncing the one-liner, or leave as-is since the home is authoritative?
+- [D-59] `docs/backlog-remediation-design.md` — the closing note says D7/D8 + F5 fetch-and-run
+  consent + Parity "should also be tracked as open work in `backlog.md`," but `backlog.md` has zero
+  matching entries for D7/D8 (verified — no "D7"/"D8" text anywhere else in the repo), while F5's
+  consent gate is already implemented (`acquisitionEngine.ts:191-224`, CE-005) and Parity is already
+  a standing CLAUDE.md/memory preference — so F5/Parity read as durable rationale, not open backlog
+  items, and lumping them in with the genuinely-open D7/D8 pair is misleading. Tighten the note to
+  name only D7/D8, or add D7/D8 to `backlog.md` now?
+- [D-60] `.claude/skills/disambiguate-backlog/SKILL.md` — step 3's principle-citation line cites
+  only `CLAUDE.md` Concepts/Conventions/Preferences, not `docs/project-philosophy.md`, even though
+  this same file already cites `project-philosophy.md` elsewhere (§"why it works this way", A7).
+  Should step 3 also cite `project-philosophy.md` for consistency?
+- [D-61] `docs/audit-pkg/operator-guide.md` — this is a **code bug found incidentally while
+  verifying the doc**, not a doc-content issue, but it needs a home: the documented `audit-code
+  cleanup` / `audit-code cleanup --dry-run` command is unreachable through the actual packaged CLI.
+  `wrapper/audit-code-wrapper-lib.mjs`'s dispatch table (what the packaged `audit-code` bin actually
+  runs) has no case for `cleanup`, even though `src/audit/cli.ts` has a full `cleanup` case and the
+  underlying `cleanupStaleArtifactsDir`/`cmdCleanup` logic matches the doc's description exactly.
+  Verified live (rebuilt + ran `node audit-code.mjs cleanup --dry-run` → `Unknown command: cleanup`,
+  exit 1) and via full `git log -p` on the wrapper file (zero history of `cleanup` ever being wired —
+  a long-standing gap, not a regression). The repo's own generated `opencode.json` even has a
+  permission rule for `*audit-code.mjs* cleanup*`, implying the command was expected to be reachable.
+  Auto-applying a doc-only fix (deleting the `cleanup` mentions) would just hide a real broken
+  feature, so this needs a code decision: wire `cleanup` into the wrapper dispatch table (low
+  effort, the logic already exists), or intentionally keep it CLI-only and strike it from the
+  operator guide?
+- [D-62] `spec/audit/dispatch-admission-control.md` — three dated/status-flavored headers in an
+  otherwise-timeless design doc: `## Resolved decisions (owner, 2026-07-04 — these were the Open
+  tensions)`, `**Sharpened framing (owner, 2026-07-04):**`, and `## Host-path admission shape (2b
+  build) — resolved`. Per the status-noise rule, de-status (drop the dates, state the resolution as
+  the current design) or keep the dated-decision-log framing intentionally?
+- [D-63] `spec/audit/entrypoint-contract.md` — the doc names the intended public product surface as
+  a single skill call `advance_audit`, but this literal name appears nowhere else in the codebase or
+  any other doc; the actual shipped surface is `audit-code next-step` CLI / `/audit-code` slash
+  command. Is this superseded pre-conversation-first naming that should be re-anchored to the real
+  surface, or is `advance_audit` intentionally a forward-looking target name for a literal
+  skill-tool wrapper you intend to build later?
+- [D-64] `spec/audit/entrypoint-contract.md` — **significant, code-confirmed contradiction**: the
+  doc's "Bounded-step guarantee" section states *"One invocation should perform one bounded step
+  only"* and explicitly lists as **invalid**: *"perform several unrelated executors just because
+  they are easy"* / *"refresh downstream artifacts before validating upstream consistency."* But
+  `advanceAudit` (`src/audit/orchestrator/advance.ts`) now **drains multiple deterministic
+  obligation steps in one call by default** (commits `4af98dc9` → `5031ae48` → `d061340a`, all
+  within this review window) — up to `MAX_DRAIN_STEPS = 64`, halting only at host-input pauses or a
+  non-drainable step. This also cuts against `CLAUDE.md`'s "One bounded step per invocation. Neither
+  orchestrator runs to completion in a single call" and `project-philosophy.md` A1 ("does **one**
+  bounded unit"). The commit history (built → reverted to opt-in once for a regression → made
+  default-on again with dedicated test coverage) reads as a deliberate architecture change the specs
+  were simply never updated for. Should `entrypoint-contract.md`'s "Bounded-step guarantee" section
+  (and `CLAUDE.md`/`project-philosophy.md`'s "one bounded step" framing) be rewritten to describe
+  the drain-with-fold-aware-halt model as the sanctioned definition of "bounded" — or should the
+  drain loop itself be constrained back to one obligation per call?
+- [D-65] `spec/conceptual-design-review-design.md` — "**`intent_checkpoint` upgrade** — capture the
+  goal graph + edges … This is the source of the charter layer." Code shows `intent_checkpoint` is
+  read-only input to charter extraction; the computed goal graph/charters/deltas are written only to
+  the separate `charter_register.json` (kept separate "to avoid a staleness cycle" per the code's own
+  comment) — nothing writes back to `intent_checkpoint`. Reword "is the source of" to "seeds"/"gates"?
+  Also: the preamble carries a pinned date ("the owner + agent, 2026-07-05, distilled from…") —
+  status-noise, drop it or keep as an intentional provenance stamp?
+- [D-66] `spec/multi-ide-concurrent-runs-design.md` — "OD3 — long lease + heartbeats + a REVOCATION
+  protocol" is presented as **settled**, but the actually-shipped per-**task**/per-**node** claim
+  mechanisms (`task-claims.json`, remediate's node-claims) explicitly do **not** heartbeat — a code
+  comment says the lease is long "because the claim is held across an OUT-OF-PROCESS host worker run
+  with no live heartbeat," and `withClaimHeartbeat` (which does implement the OD3 layer-1 protocol)
+  is used only for the two short-lived coordination mutexes (bundle-mutation, `phase:main`), never
+  for the long-lived execution claims. No ownership-gate check exists in `mergeAndIngestCommand.ts`
+  either. Was OD3's heartbeat+ownership-gate protocol deliberately narrowed to the short-lived
+  mutexes only (dedup-by-id accepted as sufficient for long-lived claims), or is wiring it onto the
+  task/node claims still pending work this doc should mark open rather than "settled"? Also: three
+  pinned-date section headers ("the owner, 2026-07-02") — status-noise, de-date or keep as
+  provenance?
+- [D-67] `spec/remediation-workflow-design.md` — "the rolling dispatch engine lives in
+  `audit-tools/shared`. Both tools use the same loop … An explicit `waiting_for_provider` paused
+  state is resumable." True only at the admission-**math** layer (`computeDispatchAdmission` is
+  genuinely shared) — the `waiting_for_provider` lifecycle state / `pausedState.ts` /
+  `filterNewProviders` shell is consumed only by audit-side code; remediate has its own,
+  separately-implemented `quota_paused` mechanism that's functionally analogous but not the same
+  code. See also C-7 below — this same overclaim appears in two other docs.
+- [D-68] `spec/self-scaling-pipeline-design.md` — `leanFastPath.ts` still exists as an explicit
+  binary eligible/ineligible gate bypassing most of the pipeline for a narrow class of findings
+  (now with a mandatory light-review floor, per the fix already applied this run) — is this
+  structurally-forked gate consistent with A6 ("self-scaling pipeline, not forked paths"), or should
+  it eventually collapse into the Dial A/B continuum as a low-risk tier rather than live as separate
+  code? Also: the preamble carries a pinned date ("the owner + agent, 2026-06-26, distilled
+  from…") — status-noise, drop or keep?
+- [D-69] `docs/backlog.md` / `docs/HANDOFF.md` — the "Risk-tier every lap" and "Full friction walk
+  every lap" cadence rules are both explicitly self-labeled *"the host workaround until the
+  self-scaling pipeline makes it the tool's own job"* — i.e. correctness here rests on the host
+  *remembering* to risk-tier and run a friction walk each lap, which is the A3 smell
+  ("a needed manual flag is a bug signal"). `CLAUDE.md`'s "Redesign before scheduled autonomy"
+  standing decision explicitly defers this. Is the current self-aware, named-exception framing
+  sufficient, or should this be tracked as an explicit forward-track item toward tool-enforcement
+  rather than living only as a cadence rule the host must recall?
+- [D-70] `docs/audit-pkg/release.md` (low priority) — the `verify:release` bullet list's parenthetical
+  script-name citations are slightly imprecise: `verify:checks` invokes `build` (not a separate
+  `check` script) for the TypeScript step, and `verify:release` invokes `vitest run` directly (not
+  `npm run test`, which also runs `build` first). Behavior is correct either way (a typecheck and the
+  full suite both do run) — worth a wording tweak, or not worth a commit?
+- [D-71] `spec/audit-workflow-design.md` — while fixing this file's Gate-1 "shown to the user"
+  column list (auto-applied this run), the repo's `design-docs-declarative` test forbids
+  current-state language in this doc, so the corrected wording had to drop the finding rather than
+  state it: `buildProviderConfirmationDisplay` (`src/shared/providers/providerConfirmation.ts`) is a
+  quota-state display helper with no production caller anywhere — it's exercised only by its own
+  test. Is this dead code to delete (per the dead-code release-gate policy, once you confirm nothing
+  plans to wire it in), or a not-yet-connected piece of Gate-1 quota display that should be wired up?
 
 ### Doc-set condensation
-- [C-5] `spec/audit/dispatch-admission-control.md` ("Pool selection — cost-first, capability-tiebreak")
-  vs `spec/cost-first-routing.md` — the admission-control doc's section restates cost-first-routing's
-  core mechanism (cheapest-capable-first, `costRank`/`capabilityRank`) but carries no cross-reference to
-  `spec/cost-first-routing.md`, even though cost-first-routing.md says it "pairs with" the admission-
-  control doc — the pointer is one-directional. Add a pointer from that section to
-  `spec/cost-first-routing.md` (which should stay the sole owner of the mechanism), or trim the section
-  to a one-line summary + link?
-- [C-6] (minor) `.claude/skills/ship/SKILL.md` and `.claude/skills/start-lap/SKILL.md` both independently
-  state "Remote `audit-tools`, branch `main` (not origin, not master)." Likely necessary
-  self-containment (each skill must stand alone when invoked) rather than harmful duplication — flagging
-  per the one-home-per-concept pass in case a single shared source is preferred.
+- [C-6] (carried forward, minor) `.claude/skills/ship/SKILL.md` and
+  `.claude/skills/start-lap/SKILL.md` both independently state "Remote `audit-tools`, branch `main`
+  (not origin, not master)." Still present in both files this run. Likely necessary
+  self-containment (each skill must stand alone when invoked) rather than harmful duplication —
+  flagging per the one-home-per-concept pass in case a single shared source is preferred.
+- [C-7] `spec/audit-workflow-design.md`, `spec/remediation-workflow-design.md`, and
+  `spec/multi-ide-concurrent-runs-design.md` (OD3 section) each independently claim or half-claim a
+  fully-shared "rolling dispatch engine" between audit and remediate. In each case the actual
+  sharing turns out to be partial: only the admission-math (`computeDispatchAdmission`) is genuinely
+  single-sourced; the `waiting_for_provider` pause-lifecycle shell is audit-only, and the OD3
+  heartbeat/revocation protocol is mutex-only (see D-66, D-67). Recommend resolving as ONE
+  consolidated decision — "what exactly is 'the shared rolling dispatch engine' — admission math
+  only, or the full lifecycle shell too, and is the latter still planned or abandoned?" — rather
+  than three separately-worded doc edits that would otherwise each restate the same overclaim.
+- [C-8] `spec/cross-provider-quota-matrix.md` — the entire doc is built around dozens of dated
+  "LIVE-confirmed 2026-06-17" / "research 2026-06-17" stamps scattered through its body (not just an
+  intro line), including one note that is now doubly stale against today's date ("NOTE on this
+  machine: `active_until` is `2026-06-11`, already past"). The underlying technical content
+  (endpoints, credential paths, mapping formulas) is genuinely durable and belongs in `spec/`, but
+  the dated "as of DATE, confirmed against a live host" framing reads as a research log. Split —
+  durable mechanism tables stay here with dates stripped (confidence stated as "HIGH — verified
+  against source," no date), and the "as of DATE the following was confirmed live" narrative moves
+  to a dated `docs/reviews/*.md` artifact (matching the existing pattern, e.g.
+  `docs/reviews/quota-prewall-pacing-diagnosis-2026-06-30.md`) — or is the dated research-log framing
+  intentional/load-bearing here (i.e. "confidence: HIGH (live-confirmed)" is itself part of the
+  durable signal quality this doc records)?
 <!-- DOC-REVIEW-OPEN:END -->
 
 ## FYI — auto-applied this run (informational, not open items)
 
-Third run of this routine. All 17 D-30..D-46/I-3..I-7/C-4 items escalated by the second run were
-resolved by the owner in commits `dc5c1718` and `0e6e43b3` before this run started (verified, not just
-trusted — re-checked each against current code). `spec/dispatch-token-budget-gate.md` was retired per
-C-4/D-41 (folded into `dispatch-admission-control.md`); its 17 stale ledger entries were dropped rather
-than carried forward.
+Fourth run of this routine. Reviewed all 56 in-scope `*.md` files (56 tracked, matching the
+canonical manifest — `check-doc-manifest.mjs` passes) via 8 parallel reviewer agents (one per
+manifest cluster) against the 84-commit window since the last check (baseline `1a5bbe4d`), + 8
+independent parallel adversary agents re-checking every item from scratch. The adversary pass
+found real staleness the reviewer missed or mis-scoped in 4 of 8 clusters (README.md's pipeline
+narrative — two gaps; `docs/backlog-remediation-design.md`'s dead `FC-001` citation and a
+misattributed note in `docs/end-of-sprint-report-template.md`; `docs/backlog.md`'s NIM/Codex entry
+— full-delete vs trim); a judge subagent resolved all 5 contested items (3 auto-apply, 1 escalate,
+2 confirmed-clean-no-action — see below).
 
-Reviewed every in-scope doc (33 files, ~743 ledger items + 3 new files) via 9 parallel reviewer agents
-(one per manifest cluster) + 9 independent parallel adversary agents re-checking every file from
-scratch. The adversary pass caught real staleness the reviewer missed in two clusters (the README
-cluster's `src/audit/adapters/README.md` and `examples/README.md`, and `docs/audit-pkg/release.md`'s
-publish-workflow description) — verified directly against source/CI config before accepting the
-adversary's findings over the reviewer's "clean" verdict. No judge tie-break was otherwise needed;
-every other cluster's reviewer and adversary passes converged independently.
+**Race with concurrent lap work, reconciled before push:** 9 unrelated commits (the cost↔speed
+dispatch dial, `v0.32.34` release) landed on `main` mid-review, independently touching
+`docs/backlog.md` and `docs/HANDOFF.md` in the same sections this run's fixes targeted (the dial
+shipped exactly the "immediate next" item both docs pointed to). Rebased onto the new `main` tip;
+resolved by re-deriving the trim against the merged content (keep the new v0.32.34/dial state,
+still apply the same changelog-creep trim + shipped-entry-cleanup policy) rather than blindly
+replaying the stale diff — re-ran the full green gate after reconciling. One net new duplicate
+caught in the process: `docs/backlog.md` had gained a standalone "NIM `/models` capability probe"
+entry from this run's own trim (see below) that then duplicated the dial's own newly-shipped
+"RESIDUAL / next" bullet describing the identical gap — deleted the redundant standalone entry,
+kept the one under the dial bullet. A new file appeared in this same window,
+`spec/dispatch-cost-speed-dial.md` — not reviewed this run (it shipped fresh, mid-review, with no
+prior ledger entry); it gets a normal first full review next run via the diff-scoped incremental
+model, same as any new spec doc.
 
-8 discrete stale-factual-fix commits landed on `main` (green gate: build + check + doc-manifest +
-full vitest suite, 442 files / 5788 tests, run once after all edits, before the first push):
+**One item the review pass found but could NOT auto-apply despite being narrow/factual:**
+`docs/doc-review-guidelines.md`'s own manifest row carried a stale parenthetical (the "generated
+host assets" drift-guard note), but this file's preamble is explicit — *"Edit it here on `main` —
+the routine reads it, never rewrites it"* — so it is escalated as I-11 above instead of applied,
+even though every other signal (reviewer + adversary agreement, code-verified) would otherwise have
+qualified it for auto-apply.
 
-- `docs/audit-pkg/product.md`, `development.md`, `contracts.md`; `spec/audit-workflow-design.md`;
-  `spec/audit/dependency-map.md`, `artifact-contract.md`, `executor-catalog.md`, `state-machine.md` —
-  reflected the two new pipeline steps (`structure_decomposition_current`, `charter_extraction_current`)
-  and their artifacts across the audit spec/package docs (34 artifacts not 32; 23 executors not 21).
-- `spec/cost-first-routing.md`, `spec/audit/dispatch-admission-control.md` — fixed a stale
-  collision-resolution claim (code is first-sorted-provider-wins, not price-preferred), a stale symbol
-  name, and a parity claim that was actually already resolved.
-- `spec/remediate/remediation-goals.md`, `spec/contract-authoring-determinism-design.md` — fixed a
-  `plan.source` overclaim, a renamed review-completion field (`reviewed` → split
-  `contract_reviewed`/`conceptual_reviewed`), and `idRegistry.ts`'s overstated scope.
-- `src/audit/README.md`, `src/audit/adapters/README.md`, `examples/README.md` — module/adapter/example
-  index gaps (missing `decompose/`, `clippy`/`rubocop`, several example files never listed).
-- `docs/audit-pkg/release.md` — the publish job doesn't run `verify:release` (split into parallel
-  gate/test jobs; publish only rebuilds `dist/`).
-- `docs/glossary-ids.md` — a moved file path (`INV-SOO`) and 3 missing lens prefixes (`SEC-`/`PRF-`/`OPR-`).
-- `.claude/skills/disambiguate-backlog/SKILL.md`, `docs/project-philosophy.md` — two mis-citations
-  pointing at `CLAUDE.md` for wording that doesn't live there.
-- `docs/backlog.md`, `docs/HANDOFF.md` — trimmed three fully/partially-shipped backlog entries
-  (dispatch-admission-control, cost-first-routing, charter-extraction phases A–C) to their open
-  remainders, and removed three HANDOFF "Live state" bullets that duplicated the same shipped detail
-  HANDOFF's own header says it shouldn't narrate.
+11 discrete stale-factual-fix commits landed on `main` (green gate: build + check + doc-manifest +
+full vitest suite, run three times total this run — before the first push, after a
+declarative-language-gate fix, and again after the rebase reconciliation — all green):
 
-Full diffs are on `main` (commits `3e4f9b9d`..`1a5bbe4d`); this section is FYI only, not something to
-act on.
+- `spec/audit/artifact-contract.md`, `dependency-map.md`, `executor-catalog.md`, `state-machine.md`
+  — backfilled the two Phase D/E artifacts (`charter_clarification.json`, `systemic_challenge.json`)
+  that were added to the registry/executors/dependency-map/priority-chain in code but never
+  reflected in these four docs (36 not 34 artifacts; 25 not 23 executors; a duplicate executor-table
+  row from the merge).
+- `spec/audit/dispatch-admission-control.md` — added the same-agent demote-guard clause and the
+  `openai_compatible` legacy-quota-convergence sentence (C1) missing from the host-identity and
+  token-budget sections.
+- `src/audit/README.md`, `src/audit/adapters/README.md`, `docs/backlog-remediation-design.md` — fixed
+  a backwards own-vs-acquire claim (secret-scanning is ACQUIRED via F5's `gitleaksCandidate`, not
+  owned; git-history-mining is the F6-owned signal) present in two files, likely propagated from one
+  to the other; also backfilled two missing module-index entries (`clarification/`, `systemic/`) and
+  dropped a dead `FC-001` citation (code labels the invariant `CE-001`/`CE-001b` only).
+- `docs/glossary-ids.md` — updated `INV-DS`/`INV-RSD`/`SEAM-RSD-*` site pointers, stale since
+  `dispatch.ts` was split into `dispatch/{dagNodeFields,implementPrompt,marshal,writeScope}.ts`.
+- `spec/cost-first-routing.md`, `spec/remediate/remediation-goals.md` — fixed a stale
+  collision-resolution direction claim (code now prefers cheapest price, not first-sorted-provider)
+  and a closing-actions enumeration missing `merge-to-base` (B5, shipped).
+- `spec/audit-workflow-design.md` — fixed the Gate-1 "shown to the user" column list (no quota
+  column in the live prompt) and the disposition-override-proposal scope claim (file-only, not
+  per-directory, at generation time).
+- `spec/self-scaling-pipeline-design.md`, `spec/remediation-workflow-design.md` — reworded the
+  `leanFastPath` "too trusting" problem framing to reflect the light-review floor already shipped.
+- `docs/backlog.md` — trimmed the NIM/Codex dispatch fix set entry to its one genuinely-open
+  residual (the `/models` capability probe; 4 of 5 sub-items were fully shipped/closed), deleted a
+  fully-duplicate "pipeline profiling" bullet (already in `CLAUDE.md`), trimmed a shipped "easy wins"
+  sub-bullet, and deleted two meta-friction claims disproven by direct code inspection (both fixes
+  they describe were already shipped before the sweep that claimed to observe the gaps).
+- `docs/HANDOFF.md` — trimmed ~70 lines of changelog-creep shipped-detail narration from "Live
+  state" (violating the doc's own stated policy) and fixed a stale/self-contradictory "Open items"
+  pointer.
+- `README.md` — added the missing Phase D/E mentions to the audit-code pipeline walkthrough and
+  replaced the retired "classified risk preview" description in the remediate-code walkthrough with
+  the current tiered review-approval gate.
+
+Full diffs are on `main` (11 commits, `0e2e0ca7`..`8e1abb87`, rebased onto `main`'s tip after the
+concurrent dial/v0.32.34 lap landed — see the race-reconciliation note above); this section is FYI
+only, not something to act on.
