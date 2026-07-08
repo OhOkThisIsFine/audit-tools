@@ -25,6 +25,11 @@
   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md),
   [[conceptual-design-review-design]]. Per-lap shipped detail is NOT narrated here (changelog creep — see `git log`
   and project memory [[live-status]]); this section is current-state + open-work roadmap only.
+- **⚠️ `main` is AHEAD of published v0.32.33 — a release is PENDING.** Two unreleased lap commits (2026-07-08):
+  `2296e52f` session-config RMW-lock code fix (real code → wants a publish) + `ab444072` CLAUDECODE-ceremony/
+  standing-traps docs cleanup (docs-only). The next `release:patch:publish` picks them up; the lap was wrapped
+  before releasing per owner. Also on main unreleased: the `validate-artifact` singular-self-check gap is FILED
+  (not fixed) in `docs/backlog.md` for the adversarial pipeline (a drafted patch exists but was held — loop-core).
 - **NIM/Codex dispatch fix set — lean halt fix + B1 host-identity ✅ SHIPPED (v0.32.28 / v0.32.29).** Lean tranche
   (v0.32.28): C2 tolerant result parse + C4 bounded transient fetch retry + C3 per-pool concurrency cap + D1 bounded
   no-progress retry + D2 recovery handoff. **B1 host-identity sourcing (v0.32.29):** NEW `resolveConversationHostProvider`
