@@ -19,10 +19,10 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 - Fresh worktree → `npm install` first (otherwise tsc resolves `audit-tools/shared` against a stale `dist/` → fake "missing export" errors).
 - `npm run build && npm run check` from repo root — zero errors.
-- Fast local checks with CLAUDECODE unset (set = one audit-code provider test fails), Bash tool:
-  `env -u CLAUDECODE npx vitest run --changed` (only tests touching your uncommitted edits) +
-  `env -u CLAUDECODE npm run smoke:packaged-audit-code && env -u CLAUDECODE npm run smoke:packaged-remediate-code`.
-- Want the belt-and-suspenders full local run anyway? `env -u CLAUDECODE npm run verify:release`
+- Fast local checks, Bash tool:
+  `npx vitest run --changed` (only tests touching your uncommitted edits) +
+  `npm run smoke:packaged-audit-code && npm run smoke:packaged-remediate-code`.
+- Want the belt-and-suspenders full local run anyway? `npm run verify:release`
   (= `verify:checks` + full vitest) — but the sharded CI gate re-runs it authoritatively either way.
 - Failing test → rerun alone before calling it a regression; EBUSY/EPERM = flake suspect first (the smokes
   pack a tarball and are Windows-flaky on temp-dir EPERM/EBUSY).
@@ -43,7 +43,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 ## 3. Publish (single package)
 
-- Repo root, CLAUDECODE unset: `env -u CLAUDECODE npm run release:patch:publish` (or `:minor:` / `:major:`).
+- Repo root: `npm run release:patch:publish` (or `:minor:` / `:major:`).
   `scripts/release-and-publish.mjs` runs a fast local pre-tag gate (`npm run check` only — the full `verify:release`
   already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
   the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as

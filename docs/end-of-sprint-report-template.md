@@ -13,7 +13,7 @@ so a silent omission can't masquerade as "nothing to report".
 ## Sprint closeout — <one-line: what this sprint did + outcome (e.g. shipped audit-tools@X.Y.Z)>
 
 ### Verification
-- Build + typecheck: <green/red> (`env -u CLAUDECODE npm run build && npm run check`)
+- Build + typecheck: <green/red> (`npm run build && npm run check`)
 - Tests: <suite(s) run> → <pass/fail counts>, on a clean, fully-pushed tree at `<commit>`
 
 ### Landed this sprint

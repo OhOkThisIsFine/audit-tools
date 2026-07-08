@@ -236,9 +236,8 @@ timeless doc are exactly the status-noise we flag).
 4. Agree → stands. Contested → **Judge** → final disposition + apply/escalate
    (default-escalate).
 5. **Apply** (final = stale-factual-fix, and the file is *not* an instruction
-   file): make the edit on `main`. Before pushing, run the **full green gate**
-   with the host-signalling env unset (set → one audit-code provider test fails):
-   `env -u CLAUDECODE npm run build && npm run check && npm test` — must be
+   file): make the edit on `main`. Before pushing, run the **full green gate**:
+   `npm run build && npm run check && npm test` — must be
    zero-error / all-pass. **The `npm test` step is non-negotiable, not just
    `build`+`check`:** several in-scope `*.md` files are the *source of truth* for
    generated host-integration assets (e.g. `skills/audit-code/audit-code.prompt.md`
@@ -318,7 +317,7 @@ the disposition is shared across machines.
 - Verify from code, never from prose.
 - No code anchor → it is a question for the owner, never a silent deletion.
 - Instruction files (`CLAUDE.md`, `AGENTS*.md`) are **never** auto-edited.
-- The **full** green gate — `env -u CLAUDECODE npm run build && npm run check &&
+- The **full** green gate — `npm run build && npm run check &&
   npm test` — passes before any `main` push. Never `build`+`check` alone: the
   test suite is what catches a doc edit that desyncs a generated host asset from
   its source-of-truth `.md`.

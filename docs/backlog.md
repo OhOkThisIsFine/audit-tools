@@ -85,30 +85,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   now idempotent (skips the write when unchanged), which shrinks but doesn't close the window. Harden BOTH helpers
   with the shared `withFileLock` on the multi-IDE cooperative path. [[multi-ide-concurrent-runs]]
 
-- **Console-window popups on win32 — ✅ RESOLVED 2026-07-07. The "test-suite spawns" claim was FALSE.**
-  Established by controlled probe (a SessionStart hook running `node -e "process.exit(0)"`, all else disabled →
-  **zero** windows), so: the harness spawns hook TOP-LEVELS windowless; a console CHILD of a hook pops unless that
-  spawn passes `windowsHide: true` (which DOES cover its whole subtree); and **Bash-tool children never pop at any
-  depth** — `npm run check` (npm → node → tsc) is silent, because the Bash tool's shell owns a real console. The
-  test suite and vitest's worker pool were therefore never involved; that line in this backlog sent three
-  investigations down the wrong path. Actual causes, all fixed:
-  (1) `.claude/hooks/` `async-typecheck.mjs` + `pre-commit-gate.mjs` unguarded child spawns — FIXED 332301a9.
-  (2) Two **INV-WH guard holes** — the script check hardcoded two filenames (so `scripts/check-doc-manifest.mjs`,
-  which runs inside `verify:checks`, and `scripts/remediate/smoke-linked-remediate-code.mjs` spawned unhidden), and
-  its import regex matched only `"node:child_process"` (so the two smoke scripts importing bare `"child_process"`
-  were never scanned at all). The guard now WALKS `scripts/**/*.mjs` and accepts `(?:node:)?child_process`; verified
-  red-green. Also `.claude/hooks/doc-review-surface.mjs` (`git fetch` at SessionStart) and the
-  `{ windowsHide: true, ...options }` clobber in `smoke-packaged-remediate-code.mjs`. — FIXED 33bd78c7.
-  (3) **The flood itself was a SYMPTOM, not a spawn bug.** The headroom proxy WEDGED (alive, holding :8787, serving
-  nothing) and its VBS supervisor watched for *exit*, so it never restarted. The headroom plugin's
-  `PreToolUse(Bash|PowerShell)` `headroom init hook ensure` then tried to respawn it before every shell tool call;
-  each attempt hung at pre-load, blew the hook's 15s timeout, and popped a console on the way out. Fixed OUTSIDE this
-  repo with a `/readyz`-health-checked supervisor (verified by `NtSuspendProcess` fault injection).
-  See [[headroom-proxy-wedge-and-supervision]] / [[hook-spawns-must-be-windowless]].
-  **Standing rule:** any hook or test helper that spawns a subprocess must pass `windowsHide: true`, and
-  `{ windowsHide: true, ...options }` is a bug — spread options FIRST, force the flag LAST.
-
-
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
   recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
   - **Convergence guard keys on the reviewer-supplied counterexample *id string*, not CE content.** Two independent
@@ -268,6 +244,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
+- **`isolation:"worktree"` on a dispatch node is host-discretion — should be tool-enforced (traps audit
+  2026-07-08).** The durable trap "never pass `isolation:"worktree"` to the Agent tool when dispatching a
+  remediate/audit implement node" is currently a *host-remembers* rule: the dispatch plan already creates the
+  node's worktree, but nothing stops the host from ALSO passing the Agent tool's own `isolation:"worktree"`,
+  which spawns a second unrelated worktree where the subagent's edits land invisibly → `accept-node`'s
+  cherry-pick sees no diff. Per enforce-in-tooling this latent failure should be made impossible/detected:
+  e.g. `accept-node` fail-loud when the node's designated worktree has no commits (the edits went elsewhere),
+  or the dispatch contract assert the subagent's git toplevel equals the designated worktree root.
+  [[no-agent-isolation-worktree-for-dispatch-nodes]] / [[enforce-robustness-in-tooling-not-host-discretion]]
+
 ## Forward tracks
 
 - **Free/cheap multi-account "quota-arbitrage" dispatch tier (9router-inspired) — exploration → build.**
@@ -315,11 +301,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     parallel, each to its own ceiling). Real work = **register every free source as a pool** (NIM, opencode-free,
     kilo, vertex-trial, multi-account) = the arbitrage-tier track [[arbitrage-dispatch-tier-design]] (Phase 0
     zero-ban-risk free first, Phase 1 multi-account OAuth).
-  - **OPEN (owner calls):** (a) whether QUALITY also becomes tradeable vs cost (a true 2D dial, needs a per-task
-    quality-worth weighting) — default recorded = 1D cost↔speed + capability floor; (b) **free ban-risk boundary**
-    — "max free" = ALL free incl. ban-risk arbitrage sources, or zero-ban-risk-only by default with riskier ones
-    opt-in? Undecided pending a written explainer of what's actually risky (multi-account / aggregator ToS-ban
-    exposure, token security) before the owner lands it.
+  - **OPEN (owner call):** whether QUALITY also becomes tradeable vs cost (a true 2D dial, needs a per-task
+    quality-worth weighting) — default recorded = 1D cost↔speed + capability floor.
 
 - **models.dev static window can over-state a specific deployment (carried from W1).** The snapshot lists e.g.
   `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
@@ -463,8 +446,6 @@ Standing gotchas worth keeping for any agent (strong or weak):
   expect these and either keep the added latency off the hot path (the finite-budget gate that keeps the
   ledger unwired on the claude-code path) or widen the test's delay well past worst-case admission latency.
   (`tests/remediate/rolling-dispatch-file-ownership-ordering.test.ts` §INV-SOO-03/05.)
-- **CLAUDECODE** is set in-session → UNSET for true-green gate runs (`env -u CLAUDECODE …`; set = one
-  audit-code provider test fails).
 - **Fresh git worktree lacks `node_modules`** → `audit-tools/shared` resolves a stale `dist/` (spurious
   "no exported member") → run `npm install` in the worktree first.
 - **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`).
@@ -501,13 +482,15 @@ Standing gotchas worth keeping for any agent (strong or weak):
   PowerShell tool for absolute-path commands.
 - **PowerShell**: assign `foreach` output to a var before piping to `ConvertTo-Json`; `-Filter` is not regex
   (use `Where-Object -match`); single-element arrays unwrap in `ConvertTo-Json` (bracket-wrap the payload).
-- **When you delete a *shipped* file, grep the smoke/verify scripts** for a `requiredPackagedPaths`-style list
-  (the packaged-smoke gate asserts specific tarball files).
-- **A production runtime `import` declared as a `devDependency` ships a broken packaged/global install** —
-  local dev + the vitest suite still pass (devDeps are present there), so ONLY `smoke:packaged-*`
-  (`verify:release`) catches the `ERR_MODULE_NOT_FOUND`. When you add an `import` to any `src/` module that
-  lands in `dist/` on a production path, confirm the package is under `dependencies`, not `devDependencies`.
-  (Bit once 2026-07-04: `zod-to-json-schema`, used by `src/audit/contracts/workerSchemas.ts`.)
+- **Packaged/global-install drift is caught ONLY by `smoke:packaged-*` (`verify:release`), never by dev or
+  vitest — so it fails the release gate loudly, not silently.** Two ways to break the tarball that pass every
+  local check: (1) a production runtime `import` declared as a `devDependency` — devDeps are present in dev +
+  the vitest suite, so only the packaged smoke hits `ERR_MODULE_NOT_FOUND` (when you add an `import` to any
+  `src/` module that lands in `dist/` on a production path, confirm the package is under `dependencies`; bit
+  once 2026-07-04 by `zod-to-json-schema` in `src/audit/contracts/workerSchemas.ts`); (2) deleting a *shipped*
+  file that the smoke's `requiredPackagedPaths` list asserts (`scripts/audit/smoke-packaged-audit-code.mjs`,
+  `verify-hosts.mjs`) → the gate fails on the missing tarball path. Diagnostic, not a silent trap: if
+  `smoke:packaged` errors on a missing/absent module or path, this is why.
 - **Async typecheck hook = stale-dist false alarm** after a shared-source edit (it runs `tsc` before the
   central rebuild); the authoritative gate is `npm run check` after `npm run build`.
 - **Prefer a dependency-injection seam over module mocking** in tests. Under vitest, `vi.spyOn`/`vi.mock`

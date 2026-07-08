@@ -8,10 +8,11 @@
 
 ## Live state
 
-- **v0.32.32 published on npm as `latest`.** Latest lap shipped **C1 real source-pool budget** (legacy
-  `openai_compatible` block gains a `quota` that converges onto the source pool, off the default floor; shared-consumer
-  robustness — `resolveContextBudget` floors at 0, discovered rung drops an inverted `output ≥ context`; operator quota
-  validated) — see the C1 bullet below. Prior (v0.32.31): bug (4) `selectProvider` reads the live quota entry. Prior
+- **v0.32.33 published on npm as `latest`.** Latest lap shipped the **A1 `local-subprocess`→`worker-command`
+  provider rename** (sole-consumer, no shim — see the A1 bullet below). Prior (v0.32.32): **C1 real source-pool budget**
+  (legacy `openai_compatible` block gains a `quota` that converges onto the source pool, off the default floor;
+  shared-consumer robustness — `resolveContextBudget` floors at 0, discovered rung drops an inverted `output ≥ context`;
+  operator quota validated) — see the C1 bullet below. Prior (v0.32.31): bug (4) `selectProvider` reads the live quota entry. Prior
   (v0.32.30): quota-state durability (INV-QD-15) and the
   **deletion of the concurrency bucket learner** (−862 LOC), which unmasked and fixed INV-QD-16 (a concurrent
   `success` must not cancel a live cooldown) — see the quota bullet below. Prior (v0.32.29): B1 host-identity
@@ -105,9 +106,9 @@
 - **Full friction walk every lap** ([[log-all-friction-categories-every-lap]]): log all three categories
   (ambiguous-direction / tool-should-decide / inefficient-feeding) to backlog + `open_observations`; don't
   trust the empty mechanical friction set.
-- **Release:** `env -u CLAUDECODE npm run release:patch:publish`; recover a bad attempt with
-  `gh release delete vX.Y.Z --cleanup-tag` + forward-bump. Run gate/test with `env -u CLAUDECODE`.
-  Run `env -u CLAUDECODE npm run verify:release` locally before tagging (local pre-tag gate is only `check`).
+- **Release:** `npm run release:patch:publish`; recover a bad attempt with
+  `gh release delete vX.Y.Z --cleanup-tag` + forward-bump.
+  Run `npm run verify:release` locally before tagging (local pre-tag gate is only `check`).
   CI gate is split for speed (2026-07-04): `verify:release` = `verify:checks` (cheap deterministic chain) +
   vitest; `ci.yml`/`publish-package.yml` run `verify:checks` and a **4-way sharded vitest matrix** as
   parallel jobs, publish `needs:` both. vitest was ~93% of the old serial gate → sharding is the only lever

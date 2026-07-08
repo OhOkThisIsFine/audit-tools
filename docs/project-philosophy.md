@@ -172,7 +172,7 @@ ship process. They'd change if the developer or workflow changed; they don't des
 
 **The agent owns the ship pipeline** — commit → push → merge → publish → verify-live → reinstall global
 bins, end-to-end by default. Never park at the push/publish boundary. Hand back only for destructive
-ambiguity. Encoded in the `/ship` skill (CLAUDECODE unset for gates, CRLF clean-tree guard, allow-scripts
+ambiguity. Encoded in the `/ship` skill (CRLF clean-tree guard, allow-scripts
 postinstall, release-CI-is-the-real-signal). *(home: `CLAUDE.md`; global `~/.claude/CLAUDE.md`; memory:
 agent-owns-ship-pipeline)*
 

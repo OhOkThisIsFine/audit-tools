@@ -154,7 +154,7 @@ pending → planning → implementing → closing → complete
 
 Via `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version) → `next` dist-tag, else `latest`. CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded `vitest run`) jobs → `publish` (needs both).
 
-Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag) or `:publish` variants (also push + create GitHub Release + wait for CI). Use `/ship` skill — encodes trap list (CLAUDECODE unset for gates, CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at push/publish boundary.
+Trigger via package's `release:patch` / `:minor` / `:major` scripts (bump + commit + tag) or `:publish` variants (also push + create GitHub Release + wait for CI). Use `/ship` skill — encodes trap list (CRLF clean-tree guard, allow-scripts postinstall on global reinstall, release-CI-is-the-real-signal) and never parks at push/publish boundary.
 
 ### Pipeline profiling (always-on)
 
