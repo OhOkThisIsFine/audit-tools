@@ -323,14 +323,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
       `dispatch_bias`; persisted on the shared confirmation (`readConfirmedDispatchBias`); both orchestrators
       thread it to `computeDispatchAdmission`. Headless auto-completes λ=0. Default 0 everywhere ⇒ zero behavior
       change until an operator sets it.
+  - **✅ Adversarial pass on the concurrency axis DONE (2026-07-08) — found + fixed R-1.** The pass caught that
+    `throughputOf = declaredCap (null⇒+Inf)` had RELOCATED R-1, not fixed it: the default zero-declaration
+    claude-code host resolves `declaredCap=null` → crowned fastest AND monopolized the wave at λ=1 (null
+    budget/cap). Root: `declaredCap==null` means opposite speeds on the host vs a source. Fixed (`a1bcc6a0`) by
+    deriving throughput **pool-class-aware** (`deriveThroughputConcurrency`: source uncapped⇒+Inf, host
+    unspecified⇒1-sequential) via an auto `is_conversation_host` discriminator — no manual declaration. **Also
+    unified (owner steer):** the two near-duplicate AdmissionPool build maps DELETED → one shared
+    `admissionPoolsFromSummaries`, so audit/remediate can't drift. Regression + non-vacuous ordering tests added.
   - **RESIDUAL / next:**
-    - **Fresh adversarial pass on the CONCURRENCY throughput axis.** The independent review (all 7 vectors,
-      λ=0 identity, gates, NaN) covered the *rate*-based v1; the concurrency pivot landed AFTER it. The blend/gates
-      are unchanged so the delta is small, but `throughputOf` + declaredCap now double-dutying as speed-rank AND
-      cap-gate wants its own skeptical pass before this is called done.
-    - **`/models` concurrency probe = the future AUTO refinement** (discovered, still not declared) — feeds
-      `throughputOf` a richer signal where a provider states nothing; must sanity-clamp a probed value before it
-      reaches the rank (poison→over-admit). Ties into the deferred openai-compatible `/models` probe (see W-tracks).
+    - **`/models` concurrency probe = the future AUTO refinement** (discovered, still not declared) — feeds the
+      throughput derivation a richer signal where a provider states nothing; must sanity-clamp a probed value
+      before it reaches the rank (poison→over-admit). Ties into the deferred openai-compatible `/models` probe.
     - **B2 host-reorder seed** (host reorders/excludes pools once at Gate-0) already has its substrate in the
       shipped interactive `provider_confirmation`; the reorder wiring is separate from the λ dial and still open.
   - **Free-pool maximization (dial-independent).** Price-0 pools are first-fill at every operating point → free

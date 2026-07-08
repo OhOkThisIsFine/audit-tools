@@ -76,17 +76,17 @@
   `DISPATCHABLE_SOURCE_PROVIDERS`, factory, example config, operator guide + gloss; sole-consumer, no shim. Detail in
   `docs/backlog.md`.
   **Immediate next:** finish the cost↔speed dial — see the dedicated bullet below.
-- **⚙️ Cost↔speed dispatch dial — BUILT on branch `claude/start-lap-command-d1ca1a`, NOT merged/released
-  (2026-07-08).** 1D dial (λ∈[0,1], capability a hard floor) on TOP of the kept cost-first router: λ=0 =
-  byte-identical to today (adversarially confirmed); λ>0 = ordinal-blend of cost vs **auto-derived declared
-  concurrency** (`throughputOf` = `declaredCap`, null⇒+Inf); Gate-0 `dispatch_bias` captures it as durable
-  policy; both orchestrators threaded; default 0 ⇒ zero behavior change until set. Four commits (88652854 →
-  9dcf3474 → 092f729b → 3abf6f25), all green + dead-code clean. Design of record
-  [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md). **Residual (in `docs/backlog.md`
-  → Forward tracks, dial bullet): (1)** a FRESH adversarial pass on the concurrency throughput axis (the shipped
-  review covered the superseded rate-based v1; the pivot landed after it); **(2)** the `/models` concurrency
-  probe as the future *auto* refinement; **(3)** B2 host-reorder seed. The concurrency-throughput approach was
-  the owner's steer (*a needed manual flag is a bug signal* — no hand-declared rate); confirm it lands as intended.
+- **⚙️ Cost↔speed dispatch dial — BUILT + adversarially reviewed on branch `claude/start-lap-command-d1ca1a`,
+  NOT merged/released (2026-07-08).** 1D dial (λ∈[0,1], capability a hard floor) on TOP of the kept cost-first
+  router: λ=0 = byte-identical to today (adversarially confirmed); λ>0 = ordinal-blend of cost vs **auto-derived
+  pool-class-aware parallelism** (`deriveThroughputConcurrency`: source uncapped⇒+Inf, host unspecified⇒1); Gate-0
+  `dispatch_bias` captures it as durable policy; both orchestrators build pools through ONE shared
+  `admissionPoolsFromSummaries` (no drift). Default 0 ⇒ zero behavior change until set. **Six commits** (88652854 →
+  9dcf3474 → 092f729b → 3abf6f25 → ab5e6fab → a1bcc6a0), all green + dead-code clean. Two independent adversarial
+  passes ran; the 2nd caught R-1 (declaredCap-null crowned the sequential host at λ=1) → fixed pool-class-aware +
+  regression-tested. Design of record [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md).
+  **Residual (in `docs/backlog.md` → Forward tracks, dial bullet): (1)** the `/models` concurrency probe as the
+  future *auto* refinement; **(2)** B2 host-reorder seed. Both are additive; the dial is code-complete + reviewed.
 - **Then:** the free/cheap multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;
   [[arbitrage-dispatch-tier-design]]). Then the remaining env-bound live validations (quota pre-wall pacing,
   friction escalation, selective-deepening convergence, clippy/rubocop live spawn).
