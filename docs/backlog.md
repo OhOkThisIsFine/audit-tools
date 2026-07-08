@@ -541,6 +541,11 @@ Standing gotchas worth keeping for any agent (strong or weak):
   bare `**/<name>/` — an unanchored glob (e.g. `**/friction/`) regenerates on every `ensure`/postinstall and
   can shadow a same-named SOURCE dir (`src/shared/friction/`), which a file-level edit can't fix. (`.audit-code/`
   is fine — distinct name, no source collision.)
+- **The Bash tool is POSIX sh, NOT PowerShell — a PowerShell here-string (`@'…'@`) in a `git commit -m`
+  becomes literal `@` characters** top-and-bottom of the message (`@\n<body>\n@`), silently corrupting the
+  subject line. Seen twice in one lap (both caught pre-push, amended). For any MULTI-LINE commit/PR body,
+  write the message to a temp file and use `git commit -F <file>` (single-line messages via `-m "…"` are
+  fine). Applies to every native exe called from the Bash tool, not just git.
 - **Wall-clock peak-concurrency tests are latency-fragile.** The rolling-driver integration tests assert
   `peak == N` by dispatching N nodes with a short `setTimeout` and reading the max simultaneous in-flight
   count. Any change that adds per-dispatch latency on the dispatch path (e.g. the reservation-ledger's
