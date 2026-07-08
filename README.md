@@ -127,9 +127,13 @@ a summary before anything is committed.
    declared to be organized (directories, docs, comments), and flags where the two disagree:
    a tightly-coupled cluster no declared boundary owns, or a declared purpose smeared across
    the codebase. On a deeper review it then has an LLM extract and confirm each subsystem's
-   charter — what it's *stated* to do versus what the code *reveals* it does — and surfaces the gaps.
+   charter — what it's *stated* to do versus what the code *reveals* it does — and surfaces the
+   gaps, then triangulates any charter question still worth resolving into a clear yes/no before
+   moving on.
 5. **Review the design** — two parallel passes: a contract pass (invariants, boundaries,
-   obligations) and a conceptual pass (philosophy, alternatives, better directions).
+   obligations) and a conceptual pass (philosophy, alternatives, better directions). On a deeper
+   review it also runs a second-order adversarial pass over the whole codebase asking "is there a
+   fundamentally better way to do this?", looping until a round turns up nothing new.
 6. **Plan** — turns the risk register into bounded, prioritized review tasks.
 7. **Review in parallel** — dispatches the review tasks to your LLMs, routing riskier work to
    more capable models, and deep-dives selectively.
@@ -147,11 +151,13 @@ a summary before anything is committed.
    parallel, detects and reconciles seams (where one module's output must match another's
    input), then derives obligations and a test plan. Riskier changes get an independent
    critic-and-judge pass.
-5. **Preview the risk** — shows the classified risk, file list, and commit message before
-   anything runs.
+5. **Review the findings** — presents every finding bucketed by how much of your judgment it
+   needs (strategic / concrete / mechanical); you approve or decline each before anything
+   proceeds to implementation.
 6. **Implement in parallel** — executes the changes in isolated worktrees, running tests and
    verifying each unit; failures are triaged and retried or blocked.
-7. **Close** — runs the closing action and writes `remediation-outcomes.json` +
+7. **Close** — previews the file list and commit message for your confirmation (unless
+   pre-authorized), then runs the closing action and writes `remediation-outcomes.json` +
    `remediation-report.md`.
 
 ### CLI (backend / fallback)
