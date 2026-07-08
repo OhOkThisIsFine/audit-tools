@@ -291,7 +291,7 @@ test.concurrent("next-step reads host_can_dispatch_subagents from session-config
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
         {
-          provider: "local-subprocess",
+          provider: "worker-command",
           host_can_dispatch_subagents: true,
         },
         null,

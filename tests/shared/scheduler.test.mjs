@@ -105,7 +105,7 @@ test("no invented cap: scheduleWave leaves the wave uncapped with no learned/hos
 
 test("no invented cap: an unconfigured local provider is also uncapped", () => {
   const schedule = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: {
       quota: { enabled: true, safety_margin: 0.8 },
     },
@@ -126,7 +126,7 @@ test("discovered capability: context window overrides the 32k default for a null
   // model:null normally falls to the 32k provider/default floor. A discovered
   // 200k window must take over so the partition sizes to the real model.
   const schedule = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: baseSessionConfig(),
     hostModel: null,
     requestedConcurrency: 4,
@@ -163,7 +163,7 @@ test("discovered capability: absent context window leaves resolution unchanged",
   // Only RPM/TPM discovered (no context window) → context still resolves from
   // the existing rungs, not the discovered channel.
   const schedule = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: baseSessionConfig(),
     hostModel: null,
     requestedConcurrency: 4,

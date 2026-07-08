@@ -10,10 +10,10 @@ import {
 } from "./workerTaskLaunch.js";
 
 export const MISSING_WORKER_COMMAND_MESSAGE =
-  "local-subprocess provider requires task.worker_command.";
+  "worker-command provider requires task.worker_command.";
 
-export class LocalSubprocessProvider implements FreshSessionProvider {
-  name = "local-subprocess";
+export class WorkerCommandProvider implements FreshSessionProvider {
+  name = "worker-command";
   private readonly launchCommand: typeof spawnLoggedCommand;
 
   constructor(launchCommand: typeof spawnLoggedCommand = spawnLoggedCommand) {

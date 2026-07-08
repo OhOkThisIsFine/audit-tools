@@ -24,7 +24,7 @@ export function hostClassFor(providerName: ResolvedProviderName): ProviderType {
       // learned-limits, same as claude-code.
       return "hosted";
     case "opencode":
-    case "local-subprocess":
+    case "worker-command":
       return "local";
     case "subprocess-template":
     case "vscode-task":

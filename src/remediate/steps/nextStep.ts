@@ -932,7 +932,7 @@ const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
   "codex",
   "opencode",
   "subprocess-template",
-  "local-subprocess",
+  "worker-command",
 ]);
 
 function resolvesToInProcessDispatchProvider(
@@ -1739,7 +1739,7 @@ async function buildImplementDispatchStep(ctx: {
     // lets the backend self-drive.
     // Defect-1: DEMOTE (attended concurrent fan-out) applies only to the demotable
     // backends (codex/opencode/openai-compatible). A non-demotable in-process provider
-    // (subprocess-template/local-subprocess — no standalone source pool) keeps
+    // (subprocess-template/worker-command — no standalone source pool) keeps
     // self-driving regardless of attendance, so the monopoly branch still fires for it.
     // B1 same-agent guard: suppress the demote when the conversation host IS the
     // primary backend provider (one account ⇒ host self-drives as a single pool),

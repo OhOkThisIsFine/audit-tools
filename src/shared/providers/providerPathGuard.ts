@@ -66,7 +66,7 @@ export function setCommandExistsForTesting(
  *
  * Only `claude-code` and `codex` have a self-spawn hazard: they are headless
  * CLIs auto-spawned as fresh subprocesses. The other providers are either
- * IDE/template-bound, an API pool, or the always-available local-subprocess
+ * IDE/template-bound, an API pool, or the always-available worker-command
  * fallback — none can self-spawn.
  */
 const SELF_SPAWN_ENV_SIGNAL: Partial<Record<ResolvedProviderName, string>> = {

@@ -70,7 +70,7 @@ test("loadSessionConfig rejects invalid repo-local config with field details", a
   });
 });
 
-test("buildAuditCodeHandoff quotes suggested command paths and falls back to local-subprocess guidance", () => {
+test("buildAuditCodeHandoff quotes suggested command paths and falls back to worker-command guidance", () => {
   const artifactsDir = join("tmp", "audit artifacts");
   const handoff = buildAuditCodeHandoff({
     root: "repo-root",
@@ -91,7 +91,7 @@ test("buildAuditCodeHandoff quotes suggested command paths and falls back to loc
       'audit-code advance-audit --batch-results "',
     )).toBeTruthy();
   expect(handoff.suggested_commands[1].endsWith('audit-results-batch"')).toBeTruthy();
-  expect(handoff.interactive_provider_hint ?? "").toMatch(/Provider: local-subprocess/i);
+  expect(handoff.interactive_provider_hint ?? "").toMatch(/Provider: worker-command/i);
   expect(handoff.interactive_provider_hint ?? "").toMatch(/For automatic LLM review, configure an interactive provider/i);
 });
 

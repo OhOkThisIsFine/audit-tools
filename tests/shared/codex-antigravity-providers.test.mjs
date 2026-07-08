@@ -222,7 +222,7 @@ test("classifyProvider maps codex to hosted and antigravity to unknown", () => {
 // Guard: the bare-availability codex tie-break is last-resort only — it must NOT
 // fire when claude or opencode is also available. With no provider configured and
 // all three binaries on PATH, resolution preserves today's behavior (claude and
-// opencode both available => neither bare tie-break fires => local-subprocess),
+// opencode both available => neither bare tie-break fires => worker-command),
 // so codex does not change existing setups.
 test("codex tie-break does not preempt claude/opencode availability", () => {
   const resolved = resolveFreshSessionProviderName(
@@ -246,7 +246,7 @@ test("configured claude takes precedence over configured codex", () => {
 });
 
 // Minimal deps that satisfies FreshSessionProviderDeps for the auto path.
-// The auto path resolves to local-subprocess or another non-claude/opencode
+// The auto path resolves to worker-command or another non-claude/opencode
 // provider in most test environments, so these branches are never called.
 const autoDeps = {
   orchestratorName: "test",
@@ -259,7 +259,7 @@ const autoDeps = {
 };
 
 // The test's premise is that auto-resolution falls through to a NON-agent
-// provider (local-subprocess), which only holds when NO agent CLI is detectable.
+// provider (worker-command), which only holds when NO agent CLI is detectable.
 // If ANY auto-resolvable agent CLI is on PATH (claude / codex / opencode),
 // auto-resolution picks it instead — claude/opencode hit the stubbed-throw deps,
 // codex constructs a real provider and no "no capable agent" diagnostic is
@@ -421,10 +421,10 @@ test("chooseAutoProvider: tie-break resolves claude-code when only claude is ava
   expect(resolved).toBe("claude-code");
 });
 
-test("PB-1: bare-PATH opencode (no config, no claude) is NOT tie-broken to; falls through to local-subprocess", () => {
+test("PB-1: bare-PATH opencode (no config, no claude) is NOT tie-broken to; falls through to worker-command", () => {
   // A detected-on-PATH opencode is OPT-IN. There is no bare-availability opencode
   // tie-break rung, so with no opencode config and no claude, resolution falls
-  // through to local-subprocess rather than launching opencode unprompted.
+  // through to worker-command rather than launching opencode unprompted.
   const resolved = resolveFreshSessionProviderName(
     "auto",
     {},
@@ -433,7 +433,7 @@ test("PB-1: bare-PATH opencode (no config, no claude) is NOT tie-broken to; fall
       commandExists: (cmd) => cmd === "opencode",
     },
   );
-  expect(resolved).toBe("local-subprocess");
+  expect(resolved).toBe("worker-command");
 });
 
 test("chooseAutoProvider: last-resort resolves codex when only codex is available", () => {
@@ -448,18 +448,18 @@ test("chooseAutoProvider: last-resort resolves codex when only codex is availabl
   expect(resolved).toBe("codex");
 });
 
-test("chooseAutoProvider: falls back to local-subprocess when nothing is available and no config", () => {
+test("chooseAutoProvider: falls back to worker-command when nothing is available and no config", () => {
   const resolved = resolveFreshSessionProviderName(
     "auto",
     {},
     { env: {}, commandExists: noCommands },
   );
-  expect(resolved).toBe("local-subprocess");
+  expect(resolved).toBe("worker-command");
 });
 
 // ── self-spawn guards ─────────────────────────────────────────────────────────
 
-test("chooseAutoProvider: insideClaudeCode forces claudeAvailable=false, falls to local-subprocess with no other provider", () => {
+test("chooseAutoProvider: insideClaudeCode forces claudeAvailable=false, falls to worker-command with no other provider", () => {
   const resolved = resolveFreshSessionProviderName(
     "auto",
     {},
@@ -470,7 +470,7 @@ test("chooseAutoProvider: insideClaudeCode forces claudeAvailable=false, falls t
     },
   );
   expect(resolved).not.toBe("claude-code");
-  expect(resolved).toBe("local-subprocess");
+  expect(resolved).toBe("worker-command");
 });
 
 test("chooseAutoProvider: insideCodex in-session rung fires before codexAvailable self-spawn guard", () => {

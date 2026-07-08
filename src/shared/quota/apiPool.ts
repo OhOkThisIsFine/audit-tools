@@ -69,8 +69,8 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
           ...p,
         },
       };
-    case "local-subprocess":
-      // local-subprocess takes no construction config (host-dispatch default).
+    case "worker-command":
+      // worker-command takes no construction config (host-dispatch default).
       return {};
   }
 }
@@ -253,7 +253,7 @@ export async function buildSourcePool(params: {
 
 /**
  * The in-process backends that can be DEMOTED to a source pool when an attended host
- * drives (defect-1): the API/CLI worker backends. Excludes `local-subprocess` /
+ * drives (defect-1): the API/CLI worker backends. Excludes `worker-command` /
  * `subprocess-template` — those are host-dispatch defaults, not standalone source
  * pools to fan out onto alongside the host.
  */
@@ -268,7 +268,7 @@ const DEMOTABLE_IN_PROCESS_PROVIDERS: ReadonlySet<string> = new Set([
  * attended host drives (defect-1): the API/CLI worker backends only. Callers gate the
  * in-process-monopoly branch on this so an attended host fans out onto the backend as a
  * source (host + backend + NIM concurrent) while a non-demotable in-process provider
- * (`subprocess-template` / `local-subprocess`, which carry no standalone source pool)
+ * (`subprocess-template` / `worker-command`, which carry no standalone source pool)
  * keeps self-driving. Also the discriminator for demoting the host-pool identity back
  * to the conversation host when the configured primary is one of these backends.
  */

@@ -3,7 +3,7 @@ import type { DispatchModelTier } from "./stepContract.js";
 
 export const PROVIDER_NAMES = [
   "auto",
-  "local-subprocess",
+  "worker-command",
   "subprocess-template",
   "claude-code",
   "codex",
@@ -191,7 +191,7 @@ export const DISPATCHABLE_SOURCE_PROVIDERS = [
   "openai-compatible",
   "codex",
   "opencode",
-  "local-subprocess",
+  "worker-command",
   "subprocess-template",
 ] as const;
 export type DispatchableSourceProvider =
@@ -208,7 +208,7 @@ export type DispatchableSourceProvider =
  * `endpoint` + `parameters` are interpreted per provider: for `openai-compatible`
  * the endpoint is the API `base_url` and `parameters` carries `temperature` /
  * `headers` / `max_output_tokens` / …; for a CLI (`codex` / `opencode` /
- * `local-subprocess`) the endpoint is the launcher command and `parameters` carries
+ * `worker-command`) the endpoint is the launcher command and `parameters` carries
  * `extra_args` / `sandbox_mode` / `command_template` / …. The bridge to each
  * provider's concrete config block lives in `sourceProviderConfig` (shared).
  */

@@ -664,7 +664,7 @@ export async function installBootstrap(argv, options = {}) {
 
   const sessionConfigPath = join(root, '.audit-tools', 'remediation', 'session-config.json');
   if (!(await fileExists(sessionConfigPath))) {
-    const defaultConfig = { provider: 'local-subprocess' };
+    const defaultConfig = { provider: 'worker-command' };
     await mkdir(dirname(sessionConfigPath), { recursive: true });
     await writeFile(sessionConfigPath, JSON.stringify(defaultConfig, null, 2) + '\n', 'utf8');
     results.push({ path: sessionConfigPath, mode: 'created' });

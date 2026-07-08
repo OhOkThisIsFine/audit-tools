@@ -34,7 +34,7 @@ test("discoverProviders assigns correct capability tiers for well-known names", 
     { name: "claude-code", command: "claude", capabilityTier: "frontier", detected: true },
     { name: "opencode",    command: "opencode", capabilityTier: "capable", detected: true },
     { name: "codex",       command: "codex",    capabilityTier: "capable", detected: true },
-    { name: "local-subprocess", command: undefined, capabilityTier: "unknown", detected: false },
+    { name: "worker-command", command: undefined, capabilityTier: "unknown", detected: false },
   ];
 
   for (const p of syntheticProviders) {
@@ -46,7 +46,7 @@ test("discoverProviders assigns correct capability tiers for well-known names", 
   expect(tierMap["claude-code"]).toBe("frontier");
   expect(tierMap["opencode"]).toBe("capable");
   expect(tierMap["codex"]).toBe("capable");
-  expect(tierMap["local-subprocess"]).toBe("unknown");
+  expect(tierMap["worker-command"]).toBe("unknown");
 });
 
 test("discoverProviders surfaces openai-compatible when configured (config-gated, not PATH-probed)", () => {
@@ -130,12 +130,12 @@ test("applyProviderConfirmationSelections appends addUndetected providers with d
 
 test("queryProviderQuota returns null when queryLimits is not implemented", async () => {
   const syntheticDiscovered = {
-    name: "local-subprocess",
+    name: "worker-command",
     capabilityTier: "unknown",
     detected: true,
   };
   const providerWithoutQueryLimits = {
-    name: "local-subprocess",
+    name: "worker-command",
     launch: async () => ({ accepted: false }),
     // no queryLimits method
   };
@@ -256,12 +256,12 @@ test("buildProviderConfirmationDisplay returns message when pool is empty", () =
   expect(!display.includes("|"), "empty pool should not produce a table").toBeTruthy();
 });
 
-test("buildProviderConfirmationDisplay marks local-subprocess as add explicitly", () => {
+test("buildProviderConfirmationDisplay marks worker-command as add explicitly", () => {
   const discovered = [
-    { name: "local-subprocess", command: undefined, capabilityTier: "unknown", detected: true },
+    { name: "worker-command", command: undefined, capabilityTier: "unknown", detected: true },
   ];
   const display = buildProviderConfirmationDisplay(discovered);
-  expect(display.includes("add explicitly"), "local-subprocess should not be default").toBeTruthy();
+  expect(display.includes("add explicitly"), "worker-command should not be default").toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------

@@ -43,7 +43,7 @@ export async function cmdValidate(argv: string[]): Promise<void> {
   ];
   const resolvedProvider =
     rawSessionConfig === undefined
-      ? "local-subprocess"
+      ? "worker-command"
       : sessionConfigIssues.length > 0
         ? null
         : resolveFreshSessionProviderName(

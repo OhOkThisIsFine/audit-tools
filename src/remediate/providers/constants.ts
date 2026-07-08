@@ -1,1 +1,1 @@
-export { LOCAL_SUBPROCESS_PROVIDER_NAME } from "audit-tools/shared";
+export { WORKER_COMMAND_PROVIDER_NAME } from "audit-tools/shared";

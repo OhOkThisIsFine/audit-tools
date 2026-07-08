@@ -162,7 +162,7 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
   // CapacityPool with unlimited quota so selectProvider always grants a slot.
   const pool = {
     id: "test-pool",
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     hostModel: null,
     hostConcurrencyLimit: null,
   };

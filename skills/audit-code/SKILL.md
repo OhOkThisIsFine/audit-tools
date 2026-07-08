@@ -165,8 +165,8 @@ audit-code advance-audit
 
 For repo-local backend usage:
 
-- omitted provider remains `local-subprocess`
-- `local-subprocess` should stop cleanly once semantic review is needed and
+- omitted provider remains `worker-command`
+- `worker-command` should stop cleanly once semantic review is needed and
   expose scoped task artifacts for the slash-command orchestrator
 - `provider: "auto"` is the explicit opt-in best-effort routing mode
 - explicit provider names remain available when an operator wants a specific backend

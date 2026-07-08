@@ -104,7 +104,7 @@ contract's `capacity_pools[]`), classified from the pure no-creds capability che
 - **`established`** — a proactive source in code covers this provider (live-vs-missing-
   creds is the orthogonal `quota_signal_degraded` flag).
 - **`reactive_only`** — the provider has no proactive surface BY NATURE (static API
-  key / local model: NIM, vLLM, Ollama, local-subprocess, generic openai-compatible).
+  key / local model: NIM, vLLM, Ollama, worker-command, generic openai-compatible).
   Not a gap — reactive 429 is correct; no nudge.
 - **`unestablished`** — no source covers this provider. The environment isn't supported
   yet.

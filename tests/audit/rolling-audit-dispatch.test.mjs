@@ -36,11 +36,11 @@ test("A8a: resolvesToInProcessDispatchProvider is true only for explicit program
   expect(resolvesToInProcessDispatchProvider({ provider: "claude-code" })).toBe(false);
   expect(resolvesToInProcessDispatchProvider({ provider: "vscode-task" })).toBe(false);
   expect(resolvesToInProcessDispatchProvider({ provider: "antigravity" })).toBe(false);
-  // local-subprocess / subprocess-template are NOT in-process for audit: they need a
-  // per-worker command a read-only review packet lacks, and local-subprocess is the
+  // worker-command / subprocess-template are NOT in-process for audit: they need a
+  // per-worker command a read-only review packet lacks, and worker-command is the
   // conventional host-dispatch default (routing it in-process would hijack the
   // host-subagent dispatch_review path).
-  expect(resolvesToInProcessDispatchProvider({ provider: "local-subprocess" })).toBe(false);
+  expect(resolvesToInProcessDispatchProvider({ provider: "worker-command" })).toBe(false);
   expect(resolvesToInProcessDispatchProvider({ provider: "subprocess-template" })).toBe(false);
   // No explicit provider → host-subagent default (auto-resolution is NOT in-process).
   expect(resolvesToInProcessDispatchProvider({})).toBe(false);

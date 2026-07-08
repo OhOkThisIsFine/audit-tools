@@ -168,7 +168,7 @@ function rostersEqual(
 
 /**
  * Build a fresh shared confirmation from auto-discovery. Guarantees the
- * always-available `local-subprocess` fallback is present in the pool (it blocks
+ * always-available `worker-command` fallback is present in the pool (it blocks
  * auto-dispatch and so is never PATH-detected, but the pool must always be able
  * to fall back to it) and stamps the schema version, session-level flag, and
  * confirmation timestamp.
@@ -179,7 +179,7 @@ function rostersEqual(
  * it is OUT of the dispatchable pool by default — launching it would self-spawn a
  * fresh agent from inside an active session of the same agent. The operator can
  * deliberately re-include it by naming it in `include`; that overrides the
- * exclusion (the host still always retains the local-subprocess fallback).
+ * exclusion (the host still always retains the worker-command fallback).
  *
  * @param sessionConfig - Current session config; may be an empty `{}`.
  * @param env           - Process env snapshot; defaults to `process.env`.
@@ -210,13 +210,13 @@ export function buildSharedProviderConfirmation(
 
   const pool: ConfirmedPoolEntry[] = [];
 
-  // Always include local-subprocess as a fallback — it's always available and is
+  // Always include worker-command as a fallback — it's always available and is
   // never surfaced by PATH discovery (it blocks auto-dispatch by design).
-  if (!discovered.some((p) => p.name === "local-subprocess")) {
+  if (!discovered.some((p) => p.name === "worker-command")) {
     pool.push({
-      name: "local-subprocess",
+      name: "worker-command",
       capability_tier: "unknown" satisfies CapabilityTier,
-      excluded: excludeSet.has("local-subprocess"),
+      excluded: excludeSet.has("worker-command"),
       reason: "always-available fallback; no PATH detection required",
     });
   }

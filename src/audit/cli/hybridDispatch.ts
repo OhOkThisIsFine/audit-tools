@@ -31,8 +31,8 @@ import {
 
 /**
  * Backends audit can drive IN-PROCESS as the per-packet review worker. Narrower than
- * remediate's set: `local-subprocess` / `subprocess-template` are excluded (a read-only
- * review packet carries no per-worker command, and `local-subprocess` is audit's
+ * remediate's set: `worker-command` / `subprocess-template` are excluded (a read-only
+ * review packet carries no per-worker command, and `worker-command` is audit's
  * conventional host-dispatch default). The host (`claude-code`) and IDE backends are
  * the batch host-review path, never in-process.
  */

@@ -12,8 +12,8 @@ describe("PROVIDER_NAMES contains the expected provider strings", () => {
     expect(PROVIDER_NAMES.includes("auto")).toBeTruthy();
   });
 
-  it("contains 'local-subprocess'", () => {
-    expect(PROVIDER_NAMES.includes("local-subprocess")).toBeTruthy();
+  it("contains 'worker-command'", () => {
+    expect(PROVIDER_NAMES.includes("worker-command")).toBeTruthy();
   });
 
   it("contains 'subprocess-template'", () => {

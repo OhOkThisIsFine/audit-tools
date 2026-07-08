@@ -535,7 +535,7 @@ test("validateSessionConfig rejects compound command strings and environment val
 
 test("validateSessionConfig accepts boolean host dispatch capability", () => {
   expect(validateSessionConfig({
-      provider: "local-subprocess",
+      provider: "worker-command",
       host_can_dispatch_subagents: true,
     })).toEqual([]);
 
@@ -551,7 +551,7 @@ test("validateSessionConfig accepts boolean host dispatch capability", () => {
 
 test("validateSessionConfig validates the analyzers map of resolution settings", () => {
   expect(validateSessionConfig({
-      provider: "local-subprocess",
+      provider: "worker-command",
       analyzers: { typescript: "ephemeral", python: "skip" },
     })).toEqual([]);
 
@@ -708,7 +708,7 @@ test("validateArtifactBundle logs a summary to stderr when issues are found", ()
 test("validateSessionConfig validates the dispatch sub-object fields", () => {
   // Valid dispatch object — no issues
   expect(validateSessionConfig({
-      provider: "local-subprocess",
+      provider: "worker-command",
       dispatch: { confirm_threshold: 2, max_packets: 10 },
     })).toEqual([]);
 
@@ -1051,12 +1051,12 @@ test("TST-6f9f6681: validateConfiguredProviderEnvironment accepts codex explicit
 
 test("TST-6f9f6681-2: validateSessionConfig accepts synthesis object with narrative boolean", () => {
   expect(validateSessionConfig({
-      provider: "local-subprocess",
+      provider: "worker-command",
       synthesis: { narrative: true },
     }), "synthesis.narrative: true should produce no issues").toEqual([]);
 
   expect(validateSessionConfig({
-      provider: "local-subprocess",
+      provider: "worker-command",
       synthesis: { narrative: false },
     }), "synthesis.narrative: false should produce no issues").toEqual([]);
 });
@@ -1081,7 +1081,7 @@ test("TST-6f9f6681-2: validateSessionConfig rejects synthesis.narrative as non-b
 
 test("TST-6f9f6681-2: validateSessionConfig accepts dispatch.routing_tiers with valid deep_at and standard_at", () => {
   expect(validateSessionConfig({
-      provider: "local-subprocess",
+      provider: "worker-command",
       dispatch: { routing_tiers: { deep_at: 0.8, standard_at: 0.4 } },
     }), "routing_tiers with deep_at >= standard_at should produce no issues").toEqual([]);
 });

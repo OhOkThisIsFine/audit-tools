@@ -57,7 +57,7 @@ describe("shouldDemotePrimaryInProcess", () => {
   it("does not demote a non-demotable provider or when the host cannot dispatch", () => {
     expect(
       shouldDemotePrimaryInProcess({
-        sessionConfig: { provider: "local-subprocess" },
+        sessionConfig: { provider: "worker-command" },
         hostCanDispatch: true,
         env: CLEAN_ENV,
       }),

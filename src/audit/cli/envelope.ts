@@ -1,6 +1,6 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
-import { LOCAL_SUBPROCESS_PROVIDER_NAME } from "../providers/constants.js";
+import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
 import {
   buildAuditCodeHandoff,
   writeAuditCodeHandoffArtifacts,
@@ -78,7 +78,7 @@ export async function emitEnvelope(params: {
 }
 
 export function buildManualReviewBlocker(providerName: string): string {
-  return providerName === LOCAL_SUBPROCESS_PROVIDER_NAME
+  return providerName === WORKER_COMMAND_PROVIDER_NAME
     ? "Audit blocked: waiting for manual audit results or interactive provider configuration."
     : "Ready for LLM semantic review. If the host exposes a callable subagent tool, prepare dispatch and fan out packets. " +
       "If not, use single-task fallback: review only the first pending task, write one AuditResult to the run audit-results path, execute worker_command, then stop.";

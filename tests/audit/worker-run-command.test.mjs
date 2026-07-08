@@ -271,7 +271,7 @@ test.concurrent("cmdWorkerRun re-throws when writeJsonFile fails for the final r
     await mkdir(resultPath, { recursive: true }); // result_path is now a directory
 
     const task = buildTask({
-      preferred_executor: "local-subprocess",
+      preferred_executor: "worker-command",
       result_path: resultPath,
       repo_root: dir,
       artifacts_dir: join(dir, ".audit-tools/audit"),

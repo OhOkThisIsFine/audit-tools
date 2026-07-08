@@ -64,7 +64,7 @@ describe("resolveHostDispatchProviderName demotes an inherited backend to a non-
     withHostEnv({}, () => {
       for (const provider of [
         "claude-code",
-        "local-subprocess",
+        "worker-command",
         "vscode-task",
         "antigravity",
       ]) {

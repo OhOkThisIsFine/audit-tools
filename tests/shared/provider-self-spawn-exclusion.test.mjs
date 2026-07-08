@@ -10,7 +10,7 @@ import { test, expect } from "vitest";
 //   - carry a MACHINE-READABLE blocked flag (not just a free-text reason),
 //   - EXCLUDE the blocked provider from the dispatchable pool by default,
 //   - allow the operator to explicitly re-include it,
-//   - ALWAYS retain the local-subprocess fallback,
+//   - ALWAYS retain the worker-command fallback,
 //   - single-source the PATH guard with a test-injectable detection hook.
 // ---------------------------------------------------------------------------
 
@@ -40,7 +40,7 @@ test("isSelfSpawnBlocked is the single-sourced, machine-readable guard", () => {
   expect(isSelfSpawnBlocked("codex", {})).toBe(false);
   // Providers without a self-spawn hazard are never blocked.
   expect(isSelfSpawnBlocked("opencode", { OPENCODE: "1" })).toBe(false);
-  expect(isSelfSpawnBlocked("local-subprocess", {})).toBe(false);
+  expect(isSelfSpawnBlocked("worker-command", {})).toBe(false);
 });
 
 test("discoverProviders stamps a machine-readable selfSpawnBlocked flag", () => {
@@ -107,9 +107,9 @@ test("an operator exclude always wins over an include", () => {
   expect(claude.excluded, "explicit exclude wins over include").toBe(true);
 });
 
-// ── always-available local-subprocess fallback ───────────────────────────────
+// ── always-available worker-command fallback ───────────────────────────────
 
-test("local-subprocess fallback is ALWAYS retained, even inside a blocked session", () => {
+test("worker-command fallback is ALWAYS retained, even inside a blocked session", () => {
   const built = buildSharedProviderConfirmation(
     {},
     { CLAUDECODE: "1", CODEX: "1" },
@@ -117,8 +117,8 @@ test("local-subprocess fallback is ALWAYS retained, even inside a blocked sessio
     [],
     detectAll,
   );
-  const local = built.provider_pool.find((e) => e.name === "local-subprocess");
-  expect(local, "local-subprocess must always be in the pool").toBeTruthy();
+  const local = built.provider_pool.find((e) => e.name === "worker-command");
+  expect(local, "worker-command must always be in the pool").toBeTruthy();
   expect(local.excluded, "the fallback is never excluded").toBe(false);
 });
 

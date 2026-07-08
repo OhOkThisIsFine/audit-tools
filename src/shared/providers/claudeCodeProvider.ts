@@ -53,14 +53,14 @@ export function buildActiveClaudeCodeSessionMessage(args: {
 }): string {
   return (
     "claude-code provider cannot be used inside an active Claude Code session. " +
-    `Set provider to "local-subprocess" in ${args.sessionConfigPath}, ` +
+    `Set provider to "worker-command" in ${args.sessionConfigPath}, ` +
     `then run ${args.slashCommand} conversationally and follow the dispatch prompts manually.`
   );
 }
 
 const DEFAULT_ACTIVE_SESSION_MESSAGE =
   "claude-code provider cannot be used inside an active Claude Code session. " +
-  'Set provider to "local-subprocess" in the session-config.json, then run ' +
+  'Set provider to "worker-command" in the session-config.json, then run ' +
   "the orchestrator conversationally and follow the dispatch prompts manually.";
 
 /**

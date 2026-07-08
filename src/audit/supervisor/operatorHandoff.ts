@@ -8,7 +8,7 @@ import type {
   ObligationState,
 } from "../types/auditState.js";
 import type { ProviderName } from "audit-tools/shared";
-import { LOCAL_SUBPROCESS_PROVIDER_NAME } from "../providers/constants.js";
+import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
 
 export interface AuditCodeHandoffInput {
   flag:
@@ -221,7 +221,7 @@ function buildInteractiveProviderHint(
     return `Configuration error: Verify --root points to the intended repository root and that the tree contains auditable files.`;
   }
 
-  const providerLabel = providerName ?? LOCAL_SUBPROCESS_PROVIDER_NAME;
+  const providerLabel = providerName ?? WORKER_COMMAND_PROVIDER_NAME;
   return `Provider: ${providerLabel}. This is a deterministic semantic-review handoff, not a failed audit. Use host subagents when the active toolset provides them; otherwise use the single-task fallback and stop after the worker command. For automatic LLM review, configure an interactive provider in ${sessionConfigPath}; that is only needed for backend-launched review.`;
 }
 

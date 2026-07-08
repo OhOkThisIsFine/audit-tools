@@ -681,7 +681,7 @@ export async function validateConfiguredProviderEnvironment(
   const issues: ValidationIssue[] = [];
   const lookupCommand = options.commandExists ?? commandExists;
   const lookupPath = options.pathExists ?? configuredPathExists;
-  const provider = sessionConfig.provider ?? "local-subprocess";
+  const provider = sessionConfig.provider ?? "worker-command";
 
   if (provider === "claude-code") {
     const command = sessionConfig.claude_code?.command ?? "claude";

@@ -26,7 +26,7 @@ import {
   writeAuditCodeHandoffArtifacts,
   type ActiveReviewRun,
 } from "../supervisor/operatorHandoff.js";
-import { LOCAL_SUBPROCESS_PROVIDER_NAME } from "../providers/constants.js";
+import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
 import { addFileLineCountHints } from "./lineIndex.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 import { buildBlockedAuditState, buildManualReviewBlocker } from "./envelope.js";
@@ -200,7 +200,7 @@ export async function ensureSemanticReviewRun(params: {
             state: params.state,
             obligationId: params.obligationId,
             executor: "agent",
-            blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+            blocker: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
           });
     const blockedBundle = { ...params.bundle, audit_state: blockedState };
     await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
@@ -211,8 +211,8 @@ export async function ensureSemanticReviewRun(params: {
       artifactsDir: params.artifactsDir,
       bundle: blockedBundle,
       audit_state: blockedState,
-      progress_summary: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
-      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+      progress_summary: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
+      providerName: WORKER_COMMAND_PROVIDER_NAME,
       activeReviewRun: existingRun,
     });
     return {
@@ -226,7 +226,7 @@ export async function ensureSemanticReviewRun(params: {
     state: params.state,
     obligationId: params.obligationId,
     executor: "agent",
-    blocker: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
+    blocker: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
   });
   await withFileLock(artifactTreeLockPath(params.artifactsDir), () =>
     writeCoreArtifacts(params.artifactsDir, {
@@ -245,8 +245,8 @@ export async function ensureSemanticReviewRun(params: {
     artifactsDir: params.artifactsDir,
     bundle: blockedBundle,
     audit_state: blockedState,
-    progress_summary: buildManualReviewBlocker(LOCAL_SUBPROCESS_PROVIDER_NAME),
-    providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+    progress_summary: buildManualReviewBlocker(WORKER_COMMAND_PROVIDER_NAME),
+    providerName: WORKER_COMMAND_PROVIDER_NAME,
     activeReviewRun,
   });
   return { state: blockedState, bundle: blockedBundle, activeReviewRun };

@@ -53,7 +53,7 @@ export interface HybridDispatchInput {
   /**
    * Classify a pool as one the orchestrator launches IN-PROCESS this cycle (vs. the
    * conversation host / IDE pool). Tool-specific: audit's in-process set excludes
-   * `local-subprocess` / `subprocess-template`; remediate's includes them.
+   * `worker-command` / `subprocess-template`; remediate's includes them.
    */
   isInProcess: (pool: { providerName: string }) => boolean;
 }

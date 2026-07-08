@@ -66,8 +66,8 @@ test("sourceProviderConfig bridges a source to its provider's config block", () 
   expect(cx.codex.model).toBe("gpt-5");
   expect(cx.codex.sandbox_mode).toBe("workspace-write");
 
-  // local-subprocess takes no construction config.
-  expect(sourceProviderConfig({ provider: "local-subprocess" })).toEqual({});
+  // worker-command takes no construction config.
+  expect(sourceProviderConfig({ provider: "worker-command" })).toEqual({});
 });
 
 test("dispatchableSourceId: explicit id wins; else provider:model keeps two sources distinct", () => {
@@ -194,7 +194,7 @@ test("isDemotableInProcessProvider: only the API/CLI worker backends demote", ()
   expect(isDemotableInProcessProvider("openai-compatible")).toBeTruthy();
   // Not demotable: the conversation host, IDE backends, host-dispatch defaults.
   expect(isDemotableInProcessProvider("claude-code")).toBeFalsy();
-  expect(isDemotableInProcessProvider("local-subprocess")).toBeFalsy();
+  expect(isDemotableInProcessProvider("worker-command")).toBeFalsy();
   expect(isDemotableInProcessProvider("subprocess-template")).toBeFalsy();
   expect(isDemotableInProcessProvider(undefined)).toBeFalsy();
 });

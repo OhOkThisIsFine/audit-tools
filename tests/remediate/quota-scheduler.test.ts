@@ -199,7 +199,7 @@ describe("scheduleWave (quota module)", () => {
 
   it("dispatches the full requested wave for a local provider with no signal", () => {
     const result = scheduleWave({
-      providerName: "local-subprocess",
+      providerName: "worker-command",
       sessionConfig: { ...baseConfig, quota: { enabled: true } },
       hostModel: null,
       requestedConcurrency: 10,
@@ -299,7 +299,7 @@ describe("M5 dispatch broker — classifyProvider single struct (inv-1, inv-7, C
     expect(agentHost.concurrencyFloor).toBeGreaterThan(3);
     expect(agentHost.driverMechanism).toBe("y_dispatcher");
 
-    const localBackend = classifyProvider("local-subprocess");
+    const localBackend = classifyProvider("worker-command");
     expect(localBackend.hostClass).toBe("local");
     expect(localBackend.driverMechanism).toBe("in_process_slot_pull");
   });
@@ -579,7 +579,7 @@ describe("M5-WIRING convergence — no dispatch path bypasses the broker (inv-1,
 describe("M5-WIRING convergence — floor+mechanism from the single classifyProvider struct (inv-5, CE-005)", () => {
   it("classifyProvider surfaces BOTH the concurrency floor and the driver mechanism in one struct", () => {
     const hosted = classifyProvider("claude-code");
-    const local = classifyProvider("local-subprocess");
+    const local = classifyProvider("worker-command");
     // One struct owns all three fields — host class, floor, and mechanism.
     expect(Object.keys(hosted).sort()).toEqual([
       "concurrencyFloor",
@@ -609,7 +609,7 @@ describe("M5-WIRING convergence — floor+mechanism from the single classifyProv
   it("classifyProvider keys off provider-class, never a model-name table (no-hardcoded-models)", () => {
     expect(classifyProvider("codex").hostClass).toBe("hosted");
     expect(classifyProvider("antigravity").hostClass).toBe("unknown");
-    expect(classifyProvider("local-subprocess").hostClass).toBe("local");
+    expect(classifyProvider("worker-command").hostClass).toBe("local");
   });
 });
 

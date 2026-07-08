@@ -122,7 +122,7 @@ function reverifyBlockedItemAgainstTree(
     state.plan?.blocks.find((b) => b.items.includes(item.finding_id));
   // No-worker guard (2026-07-06): a passing tree verify only proves this node's
   // work was DONE if an implement worker actually RAN and left a result. When the
-  // provider produced nothing (e.g. `local-subprocess` no-op) the merge marks the
+  // provider produced nothing (e.g. `worker-command` no-op) the merge marks the
   // node blocked with no result file; a GENERIC `build && check` targeted_command
   // then passes on ANY green tree and would FALSE-resolve an un-implemented node.
   // This is distinct from the deliverable-existence guard below — an edit-node's

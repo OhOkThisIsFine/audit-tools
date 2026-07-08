@@ -47,13 +47,13 @@ export function confirmProviders(
 
   const pool: ConfirmedPoolEntry[] = [];
 
-  // Always include local-subprocess as a fallback — it's always available.
-  const hasLocalSubprocess = discovered.some((p) => p.name === "local-subprocess");
-  if (!hasLocalSubprocess) {
+  // Always include worker-command as a fallback — it's always available.
+  const hasWorkerCommand = discovered.some((p) => p.name === "worker-command");
+  if (!hasWorkerCommand) {
     pool.push({
-      name: "local-subprocess",
+      name: "worker-command",
       capability_tier: "unknown",
-      excluded: excludeSet.has("local-subprocess"),
+      excluded: excludeSet.has("worker-command"),
       reason: "always-available fallback; no PATH detection required",
     });
   }
@@ -67,7 +67,7 @@ export function confirmProviders(
     });
   }
 
-  // COR-108468ae: the dead-code second guard below was removed — local-subprocess
+  // COR-108468ae: the dead-code second guard below was removed — worker-command
   // is unconditionally added before the loop when not discovered, so this check
   // was always a no-op (the first block already guarantees presence).
 

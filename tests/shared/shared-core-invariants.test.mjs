@@ -601,8 +601,8 @@ test("INV-shared-core-14: createFreshSessionProvider does NOT emit RunLogger eve
       runLogger,
     };
 
-    // Explicit "local-subprocess" is not auto-detection — no event should be emitted.
-    createFreshSessionProvider("local-subprocess", {}, deps);
+    // Explicit "worker-command" is not auto-detection — no event should be emitted.
+    createFreshSessionProvider("worker-command", {}, deps);
 
     const content = await readFile(logPath, "utf8").catch(() => "");
     expect(content.trim(), "explicit provider name must not produce a RunLogger event (only auto-resolution does)").toBe("");
@@ -623,7 +623,7 @@ test("INV-shared-core-14: FreshSessionProviderDeps.runLogger is optional (no log
   };
 
   assert.doesNotThrow(
-    () => createFreshSessionProvider("local-subprocess", {}, deps),
+    () => createFreshSessionProvider("worker-command", {}, deps),
     "createFreshSessionProvider must not throw when runLogger is absent",
   );
 });

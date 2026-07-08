@@ -101,12 +101,12 @@ test("audit hybrid: a quotaSignalDegraded NIM pool still gets a floored slot (sa
   }
 });
 
-test("audit hybrid: in-process provider classification (host / IDE / local-subprocess are NOT in-process)", () => {
+test("audit hybrid: in-process provider classification (host / IDE / worker-command are NOT in-process)", () => {
   expect(isInProcessAuditPool({ providerName: "openai-compatible" })).toBe(true);
   expect(isInProcessAuditPool({ providerName: "codex" })).toBe(true);
   expect(isInProcessAuditPool({ providerName: "opencode" })).toBe(true);
   expect(isInProcessAuditPool({ providerName: "claude-code" })).toBe(false);
   expect(isInProcessAuditPool({ providerName: "vscode-task" })).toBe(false);
   // Excluded for audit (it IS audit's conventional host-dispatch default).
-  expect(isInProcessAuditPool({ providerName: "local-subprocess" })).toBe(false);
+  expect(isInProcessAuditPool({ providerName: "worker-command" })).toBe(false);
 });

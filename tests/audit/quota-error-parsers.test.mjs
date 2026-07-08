@@ -89,7 +89,7 @@ test("getErrorParserForProvider returns GenericErrorParser for unknown providers
   expect(parser.name).toBe("generic");
 });
 
-test("getErrorParserForProvider returns GenericErrorParser for local-subprocess", () => {
-  const parser = getErrorParserForProvider("local-subprocess");
+test("getErrorParserForProvider returns GenericErrorParser for worker-command", () => {
+  const parser = getErrorParserForProvider("worker-command");
   expect(parser.name).toBe("generic");
 });

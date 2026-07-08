@@ -164,9 +164,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     operator quota validated at config load. Residual (deferred, unchanged): the `/models` capability probe is a
     build lever ONLY after live-validating NIM exposes `context_length`/`max_model_len`, and MUST sanity-clamp
     before feeding the discovered rung (a too-large probe over-admits). [[openai-compatible-provider]]
-  - **A1 rename `local-subprocess` → `worker-command` + gloss** ("runs `task.worker_command`; generic subprocess
-    fallback, not an LLM backend") across the name const, factory, `PROVIDER_NAMES`, examples, operator guide.
-    Sole-consumer, no back-compat shim.
+  - **A1 rename `local-subprocess` → `worker-command` + gloss — ✅ SHIPPED.** Provider identity renamed across
+    the name const (`WORKER_COMMAND_PROVIDER_NAME`), class (`WorkerCommandProvider` in
+    `workerCommandProvider.ts`), `PROVIDER_NAMES` / `DISPATCHABLE_SOURCE_PROVIDERS`, factory, examples
+    (`examples/session-config/worker-command.json`), and operator guide; gloss "runs `task.worker_command`;
+    generic subprocess fallback, not an LLM backend" added at the const + operator-guide provider list.
+    Sole-consumer, no back-compat shim (kebab string, PascalCase, camelCase import paths, and the message
+    string all converged).
   B2 (host override at Gate-0) + the cost↔speed dial + free-pool max are the forward-track evolution of this —
   see *Forward tracks*. Issue 13 (Codex session usage/approval limit) = env, not ours.
 

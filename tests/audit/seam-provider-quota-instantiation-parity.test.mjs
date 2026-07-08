@@ -21,8 +21,8 @@
  *   3. resolveFreshSessionProviderName is a pure pass-through to shared:
  *      explicit provider name → same result from both orchestrators.
  *
- *   4. createFreshSessionProvider('local-subprocess', {}) returns an object
- *      whose `name` is 'local-subprocess' in both orchestrators.
+ *   4. createFreshSessionProvider('worker-command', {}) returns an object
+ *      whose `name` is 'worker-command' in both orchestrators.
  *
  *   5. hostLimits.detectHostActiveSubagentLimit reads distinct env prefixes
  *      (AUDIT_CODE vs REMEDIATE_CODE) so neither bleeds into the other.
@@ -135,7 +135,7 @@ test("both providers/index expose createFreshSessionProvider and resolveFreshSes
 // 3. resolveFreshSessionProviderName: explicit provider passes through identically
 
 test("resolveFreshSessionProviderName: explicit provider name produces same result in both orchestrators", () => {
-  const providerNames = ["local-subprocess", "claude-code", "opencode", "codex"];
+  const providerNames = ["worker-command", "claude-code", "opencode", "codex"];
   for (const name of providerNames) {
     const auditResult = auditProviders.resolveFreshSessionProviderName(
       name,
@@ -152,19 +152,19 @@ test("resolveFreshSessionProviderName: explicit provider name produces same resu
   }
 });
 
-// 4. createFreshSessionProvider: local-subprocess produces provider with correct name
+// 4. createFreshSessionProvider: worker-command produces provider with correct name
 
-test("createFreshSessionProvider: local-subprocess instantiates correctly in both orchestrators", () => {
+test("createFreshSessionProvider: worker-command instantiates correctly in both orchestrators", () => {
   const auditProvider = auditProviders.createFreshSessionProvider(
-    "local-subprocess",
+    "worker-command",
     {},
   );
   const remediateProvider = remediateProviders.createFreshSessionProvider(
-    "local-subprocess",
+    "worker-command",
     {},
   );
-  expect(auditProvider.name).toBe("local-subprocess");
-  expect(remediateProvider.name).toBe("local-subprocess");
+  expect(auditProvider.name).toBe("worker-command");
+  expect(remediateProvider.name).toBe("worker-command");
   expect(typeof auditProvider.launch).toBe("function");
   expect(typeof remediateProvider.launch).toBe("function");
 });

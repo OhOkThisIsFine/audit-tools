@@ -241,7 +241,7 @@ async function withTempRepo(fn) {
       join(root, ".audit-tools/audit", "session-config.json"),
       JSON.stringify(
         {
-          provider: "local-subprocess",
+          provider: "worker-command",
           // Skip-all analyzer policy so the deterministic-frontier drain is
           // reproducible regardless of the host analyzer cache. Under the default
           // `auto` policy, an optional analyzer dependency that is absent from the
@@ -566,7 +566,7 @@ test.concurrent("audit-code wrapper can explain a resolved task id", async () =>
   });
 });
 
-test.concurrent("next-step reaches a ready review dispatch step from repo root under local-subprocess", async () => {
+test.concurrent("next-step reaches a ready review dispatch step from repo root under worker-command", async () => {
   await withTempRepo(async (root) => {
     const step = await startDispatchRun(root);
 

@@ -13,8 +13,8 @@ test("hostClassFor maps opencode to local", () => {
   expect(hostClassFor("opencode")).toBe("local");
 });
 
-test("hostClassFor maps local-subprocess to local", () => {
-  expect(hostClassFor("local-subprocess")).toBe("local");
+test("hostClassFor maps worker-command to local", () => {
+  expect(hostClassFor("worker-command")).toBe("local");
 });
 
 test("hostClassFor maps subprocess-template and vscode-task to unknown", () => {
@@ -102,7 +102,7 @@ test("resolveLimits falls back to provider_default when model is unknown to the 
 
 test("resolveLimits uses quota.default_context_tokens from session config", () => {
   const result = resolveLimits({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: { quota: { default_context_tokens: 128_000, reserved_output_tokens: 8_192 } },
   });
   expect(result.limits.context_tokens).toBe(128_000);
@@ -149,7 +149,7 @@ test("resolveHostModel returns explicit hostModel argument when provided", () =>
 
 test("resolveHostModel returns null when no argument, no env var, no session config, no provider default", () => {
   const result = resolveHostModel({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: {},
     env: {},
     envVar: "AUDIT_CODE_HOST_MODEL",
@@ -159,7 +159,7 @@ test("resolveHostModel returns null when no argument, no env var, no session con
 
 test("resolveHostModel reads from env var when no explicit argument", () => {
   const result = resolveHostModel({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: {},
     env: { AUDIT_CODE_HOST_MODEL: "anthropic/claude-opus-4-7" },
     envVar: "AUDIT_CODE_HOST_MODEL",
@@ -169,7 +169,7 @@ test("resolveHostModel reads from env var when no explicit argument", () => {
 
 test("resolveHostModel explicit argument takes precedence over env var", () => {
   const result = resolveHostModel({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: {},
     explicitModel: "anthropic/claude-sonnet-4-6",
     env: { AUDIT_CODE_HOST_MODEL: "anthropic/claude-opus-4-7" },

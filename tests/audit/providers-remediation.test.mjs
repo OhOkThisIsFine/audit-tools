@@ -11,7 +11,7 @@ const {
 } = await import("../../src/audit/providers/claudeCodeProvider.ts");
 const { createOpenCodeProvider } = await import("../../src/audit/providers/opencodeProvider.ts");
 const {
-  LocalSubprocessProvider,
+  WorkerCommandProvider,
   MISSING_WORKER_COMMAND_MESSAGE,
 } = await import("audit-tools/shared");
 const { spawnLoggedCommand } = await import(
@@ -186,7 +186,7 @@ test("ClaudeCodeProvider (audit-code) does not skip permissions by default", asy
   });
 });
 
-test("LocalSubprocessProvider rejects tasks without worker_command", async () => {
+test("WorkerCommandProvider rejects tasks without worker_command", async () => {
   await withTempDir("audit-code-local-provider-empty-", async (root) => {
     const input = buildLaunchInput(root);
     await writeFile(
@@ -195,7 +195,7 @@ test("LocalSubprocessProvider rejects tasks without worker_command", async () =>
       "utf8",
     );
 
-    const provider = new LocalSubprocessProvider();
+    const provider = new WorkerCommandProvider();
     await assert.rejects(
       () => provider.launch(input),
       new RegExp(MISSING_WORKER_COMMAND_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
@@ -203,7 +203,7 @@ test("LocalSubprocessProvider rejects tasks without worker_command", async () =>
   });
 });
 
-test("LocalSubprocessProvider forwards worker_command through the launcher", async () => {
+test("WorkerCommandProvider forwards worker_command through the launcher", async () => {
   await withTempDir("audit-code-local-provider-", async (root) => {
     const input = buildLaunchInput(root);
     await writeFile(
@@ -220,7 +220,7 @@ test("LocalSubprocessProvider forwards worker_command through the launcher", asy
     );
 
     const launches = [];
-    const provider = new LocalSubprocessProvider(async (command, args, passedInput) => {
+    const provider = new WorkerCommandProvider(async (command, args, passedInput) => {
       launches.push({ command, args, passedInput });
       return { accepted: true, exitCode: 0, signal: null };
     });

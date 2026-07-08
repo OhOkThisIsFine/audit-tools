@@ -28,7 +28,7 @@ test("cmdWorkerRun writes a failed WorkerResult when the result write throws a n
       repo_root: dir,
       artifacts_dir: join(dir, ".audit-tools/audit"),
       obligation_id: "audit_tasks_completed",
-      preferred_executor: "local-subprocess",
+      preferred_executor: "worker-command",
       result_path: resultPath,
       worker_command: ["node", "-e", "process.exit(0)"],
       audit_results_path: undefined,
@@ -61,7 +61,7 @@ test("cmdWorkerRun writes a failed WorkerResult when the result write throws a n
       runAuditStep: async () => ({
         progress_made: true,
         progress_summary: "mock step completed",
-        selected_executor: "local-subprocess",
+        selected_executor: "worker-command",
         artifacts_written: [],
         next_likely_step: null,
       }),

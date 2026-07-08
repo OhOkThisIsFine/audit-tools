@@ -25,8 +25,8 @@ export interface WorkerTask {
    */
   max_retries?: number;
   /**
-   * Command and arguments for the LocalSubprocessProvider to launch directly.
-   * When present, LocalSubprocessProvider uses worker_command[0] as the executable
+   * Command and arguments for the WorkerCommandProvider to launch directly.
+   * When present, WorkerCommandProvider uses worker_command[0] as the executable
    * and worker_command.slice(1) as its arguments instead of throwing.
    */
   worker_command?: string[];

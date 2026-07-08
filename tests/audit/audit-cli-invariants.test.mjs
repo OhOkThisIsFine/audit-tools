@@ -15,16 +15,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 
 // ── INV-audit-cli-01: buildManualReviewBlocker provider routing ───────────────
-// local-subprocess is the headless path that CANNOT dispatch sub-agents; all
+// worker-command is the headless path that CANNOT dispatch sub-agents; all
 // other (LLM) providers CAN. The messages must be assigned accordingly
 // (COR-dc621e7a fix).
 
 const { buildManualReviewBlocker } = await import("../../src/audit/cli/envelope.ts");
 
-test("INV-audit-cli-01: local-subprocess → blocked/manual message", () => {
-  const msg = buildManualReviewBlocker("local-subprocess");
-  expect(msg, "local-subprocess must get the manual-waiting message, not LLM fan-out").toMatch(/waiting for manual audit results/);
-  expect(msg, "local-subprocess must NOT get the LLM fan-out message").not.toMatch(/Ready for LLM semantic review/);
+test("INV-audit-cli-01: worker-command → blocked/manual message", () => {
+  const msg = buildManualReviewBlocker("worker-command");
+  expect(msg, "worker-command must get the manual-waiting message, not LLM fan-out").toMatch(/waiting for manual audit results/);
+  expect(msg, "worker-command must NOT get the LLM fan-out message").not.toMatch(/Ready for LLM semantic review/);
 });
 
 test("INV-audit-cli-01: LLM providers → fan-out message", () => {
@@ -80,7 +80,7 @@ test("INV-audit-cli-03: buildWorkerResult accepts all valid WorkerResultStatus v
       obligationId: "ob-1",
       status,
       progressMade: status === "completed",
-      selectedExecutor: "local-subprocess",
+      selectedExecutor: "worker-command",
       artifactsWritten: [],
       summary: "test",
       nextLikelyStep: null,
@@ -159,7 +159,7 @@ test("INV-audit-cli-06: buildEnvelope includes contract_version in output", () =
   const envelope = buildEnvelope({
     audit_state: { status: "active" },
     selected_obligation: "repo_manifest",
-    selected_executor: "local-subprocess",
+    selected_executor: "worker-command",
     progress_made: true,
     artifacts_written: [],
     progress_summary: "done",
@@ -168,7 +168,7 @@ test("INV-audit-cli-06: buildEnvelope includes contract_version in output", () =
   });
   expect(envelope.contract_version).toBe(ADVANCE_AUDIT_CONTRACT_VERSION);
   expect(envelope.selected_obligation).toBe("repo_manifest");
-  expect(envelope.selected_executor).toBe("local-subprocess");
+  expect(envelope.selected_executor).toBe("worker-command");
   expect(envelope.progress_made).toBe(true);
 });
 
@@ -181,7 +181,7 @@ const { isLlmDispatchExecutor } = await import("../../src/audit/cli/envelope.ts"
 test("INV-audit-cli-07: agent and rolling_dispatch_executor are LLM dispatch executors", () => {
   expect(isLlmDispatchExecutor("agent"), "'agent' is a dispatch executor").toBeTruthy();
   expect(isLlmDispatchExecutor("rolling_dispatch_executor"), "'rolling_dispatch_executor' is a dispatch executor").toBeTruthy();
-  expect(!isLlmDispatchExecutor("local-subprocess"), "'local-subprocess' is not a dispatch executor").toBeTruthy();
+  expect(!isLlmDispatchExecutor("worker-command"), "'worker-command' is not a dispatch executor").toBeTruthy();
   expect(!isLlmDispatchExecutor(null), "null is not a dispatch executor").toBeTruthy();
 });
 

@@ -10,7 +10,7 @@ import type { QuotaProbeStatus, QuotaSource } from "./quotaSource.js";
  *                      live-vs-missing-creds split is the orthogonal
  *                      `quota_signal_degraded` flag.
  *  - `reactive_only` — this provider has NO proactive surface BY NATURE (a static
- *                      API key / local model: NIM, vLLM, local-subprocess). Not a
+ *                      API key / local model: NIM, vLLM, worker-command). Not a
  *                      gap — reactive 429 is the correct and only signal.
  *  - `unestablished` — NO source in code covers this provider. The environment is
  *                      not yet supported; the host agent is nudged to self-track or
@@ -34,7 +34,7 @@ export const REACTIVE_ONLY_PROVIDERS: ReadonlySet<string> = new Set([
   "openai-compatible",
   "nvidia-nim",
   "nvidia-nim-local",
-  "local-subprocess",
+  "worker-command",
   "ollama",
 ]);
 

@@ -139,13 +139,13 @@ Default:
 
 ```json
 {
-  "provider": "local-subprocess"
+  "provider": "worker-command"
 }
 ```
 
 Supported providers:
 
-- `local-subprocess`
+- `worker-command` — runs `task.worker_command`; generic subprocess fallback, not an LLM backend
 - `auto`
 - `subprocess-template`
 - `claude-code`
@@ -155,7 +155,7 @@ Supported providers:
 - `vscode-task`
 - `antigravity`
 
-`local-subprocess` is the safest fallback default. `auto` is explicit opt-in.
+`worker-command` is the safest fallback default. `auto` is explicit opt-in.
 External providers are compatibility bridges, not the intended default review
 owner.
 
@@ -163,7 +163,7 @@ Common fields:
 
 ```json
 {
-  "provider": "local-subprocess",
+  "provider": "worker-command",
   "timeout_ms": 1800000,
   "ui_mode": "headless",
   "agent_task_batch_size": 1,

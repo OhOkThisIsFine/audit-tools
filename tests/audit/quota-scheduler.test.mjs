@@ -136,7 +136,7 @@ test("scheduleWave caps wave size by host active subagent limit", () => {
   // Provide quota state so first-contact cap doesn't interfere
   const quotaStateEntry = makeEntry();
   const schedule = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: {},
     hostModel: null,
     requestedConcurrency: 36,
@@ -149,7 +149,7 @@ test("scheduleWave caps wave size by host active subagent limit", () => {
 
 test("scheduleWave applies host active subagent limit even when quota is disabled", () => {
   const schedule = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: { quota: { enabled: false } },
     hostModel: null,
     requestedConcurrency: 36,
@@ -259,7 +259,7 @@ test("resolveHostModel: explicit -> config -> env -> null", () => {
 test("scheduleWave invents NO ceiling for an unconfigured local provider", () => {
   // No fallback / cold-start cap anymore: an unconfigured local provider with no
   // learned state and no rate limits dispatches the full requested wave.
-  for (const providerName of ["opencode", "local-subprocess"]) {
+  for (const providerName of ["opencode", "worker-command"]) {
     const schedule = scheduleWave({
       providerName,
       sessionConfig: {},
@@ -274,7 +274,7 @@ test("scheduleWave invents NO ceiling for an unconfigured local provider", () =>
 
 test("scheduleWave still applies host limit for an unconfigured local provider", () => {
   const schedule = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: {},
     hostModel: null,
     requestedConcurrency: 22,
@@ -510,7 +510,7 @@ test("scheduleWave reports binding_cap='cooldown' during an active cooldown", ()
 
 test("scheduleWave reports binding_cap='host_concurrency' when the host limit binds", () => {
   const schedule = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: { quota: { enabled: false } },
     hostModel: null,
     requestedConcurrency: 36,
@@ -551,7 +551,7 @@ test("F4 inv-3: a reported host limit binds; with no handshake signal nothing in
   });
   expect(unknownLimit).toBe(null);
   const unknown = scheduleWave({
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     sessionConfig: {},
     hostModel: null,
     requestedConcurrency: 96,

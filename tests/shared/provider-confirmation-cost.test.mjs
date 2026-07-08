@@ -40,7 +40,7 @@ describe("representativeModelId", () => {
   test("returns undefined for providers with no configured model", () => {
     expect(representativeModelId("claude-code", NIM_CONFIG)).toBeUndefined();
     expect(representativeModelId("openai-compatible", {})).toBeUndefined();
-    expect(representativeModelId("local-subprocess", {})).toBeUndefined();
+    expect(representativeModelId("worker-command", {})).toBeUndefined();
   });
 });
 
@@ -48,7 +48,7 @@ describe("annotateConfirmedPoolCost", () => {
   const basePool = [
     { name: "claude-code", capability_tier: "frontier", excluded: false },
     { name: "openai-compatible", capability_tier: "capable", excluded: false },
-    { name: "local-subprocess", capability_tier: "unknown", excluded: false },
+    { name: "worker-command", capability_tier: "unknown", excluded: false },
   ];
 
   test("prices the configured model and orders it ahead of unpriceable entries", () => {
@@ -125,7 +125,7 @@ describe("annotateConfirmedPool — operator ordering override (b)", () => {
   const basePool = [
     { name: "claude-code", capability_tier: "frontier", excluded: false },
     { name: "openai-compatible", capability_tier: "capable", excluded: false },
-    { name: "local-subprocess", capability_tier: "unknown", excluded: false },
+    { name: "worker-command", capability_tier: "unknown", excluded: false },
   ];
 
   test("no input → price-ascending suggestion (openai-compatible first)", () => {
@@ -140,12 +140,12 @@ describe("annotateConfirmedPool — operator ordering override (b)", () => {
   test("operator cost_order wins for named keys; omitted keep suggested order", () => {
     const input = {
       schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
-      // Operator demotes the priced pool below local-subprocess.
-      cost_order: ["local-subprocess", "claude-code"],
+      // Operator demotes the priced pool below worker-command.
+      cost_order: ["worker-command", "claude-code"],
     };
     const { provider_pool } = annotateConfirmedPool(basePool, NIM_CONFIG, input);
     const order = Object.fromEntries(provider_pool.map((e) => [e.name, e.cost_order]));
-    expect(order["local-subprocess"]).toBe(0);
+    expect(order["worker-command"]).toBe(0);
     expect(order["claude-code"]).toBe(1);
     // openai-compatible was not named → appended after, still dense.
     expect(order["openai-compatible"]).toBe(2);
@@ -164,7 +164,7 @@ describe("annotateConfirmedPool — operator ordering override (b)", () => {
 describe("annotateConfirmedPool — host roster pricing (c)", () => {
   const basePool = [
     { name: "claude-code", capability_tier: "frontier", excluded: false },
-    { name: "local-subprocess", capability_tier: "unknown", excluded: false },
+    { name: "worker-command", capability_tier: "unknown", excluded: false },
   ];
 
   test("host models become priced, ordered entries in host_model_cost_order", () => {

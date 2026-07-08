@@ -65,7 +65,7 @@ import {
   persistAnalyzerSettings,
 } from "../supervisor/sessionConfig.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
-import { LOCAL_SUBPROCESS_PROVIDER_NAME } from "../providers/constants.js";
+import { WORKER_COMMAND_PROVIDER_NAME } from "../providers/constants.js";
 import { clearDispatchFiles } from "../io/runArtifacts.js";
 import { runAuditStep } from "./auditStep.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
@@ -288,7 +288,7 @@ export async function buildTerminalStep(
       reportRendered && state.status !== "complete"
         ? `Audit report already rendered; ending run. ${blockedReason}`
         : blockedReason,
-    providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+    providerName: WORKER_COMMAND_PROVIDER_NAME,
   });
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
@@ -1577,7 +1577,7 @@ async function emitNoExecutorBlocked(
     bundle,
     audit_state: state,
     progress_summary: reason,
-    providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+    providerName: WORKER_COMMAND_PROVIDER_NAME,
   });
   return { kind: "emit", step: { kind: "blocked", state, bundle, reason } };
 }
@@ -1697,7 +1697,7 @@ export async function runDeterministicForNextStep(
       bundle,
       audit_state: state,
       progress_summary: decision.reason,
-      providerName: LOCAL_SUBPROCESS_PROVIDER_NAME,
+      providerName: WORKER_COMMAND_PROVIDER_NAME,
     });
     // Evaluate friction triage BEFORE promotion, then promote only once triage
     // is satisfied (see promoteIfFrictionSatisfied). Promoting while triage is

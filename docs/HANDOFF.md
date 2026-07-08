@@ -65,9 +65,11 @@
   `resolveContextBudget` floors at 0 (never negative) and the `discovered_capability` rung ignores an inverted
   `output ≥ context` reservation. Operator quota is also validated at config load (audit path, defense-in-depth;
   `max_concurrent: 0` = unlimited sentinel honored). [[openai-compatible-provider]].
-  **Immediate next: A1 rename `local-subprocess`→`worker-command`** (name const, factory, `PROVIDER_NAMES`,
-  examples, operator guide; sole-consumer, no back-compat shim). Full detail + file:lines in `docs/backlog.md` →
-  [[host-provider-misattribution-nim-codex]].
+  **A1 rename `local-subprocess`→`worker-command` — ✅ SHIPPED:** provider identity renamed across name const
+  (`WORKER_COMMAND_PROVIDER_NAME`), class (`WorkerCommandProvider`/`workerCommandProvider.ts`), `PROVIDER_NAMES` /
+  `DISPATCHABLE_SOURCE_PROVIDERS`, factory, example config, operator guide + gloss; sole-consumer, no shim. Detail in
+  `docs/backlog.md`.
+  **Immediate next:** the cost↔speed dispatch dial + free-pool maximization forward track (see *Then* below).
 - **Then:** the cost↔speed dispatch dial + free-pool maximization forward track (lands ON TOP of the kept
   cost-first router; B2 host-reorder seed, capability floor, free-pool saturation gated by C3) + the free/cheap
   multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md` → Forward tracks;

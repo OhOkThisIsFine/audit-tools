@@ -4,12 +4,12 @@ const { buildManualReviewBlocker, buildBlockedAuditState } =
   await import("../../src/audit/cli/envelope.ts");
 
 // ── buildManualReviewBlocker ────────────────────────────────────────────────
-// local-subprocess = headless/local provider that CANNOT dispatch sub-agents →
+// worker-command = headless/local provider that CANNOT dispatch sub-agents →
 // blocked, waiting for manual results. LLM providers (codex, claude-code, etc.)
 // CAN dispatch → "Ready for LLM semantic review" fan-out message (COR-dc621e7a).
 
-test("buildManualReviewBlocker returns blocked message for local-subprocess (cannot dispatch)", () => {
-  expect(buildManualReviewBlocker("local-subprocess")).toBe("Audit blocked: waiting for manual audit results or interactive provider configuration.");
+test("buildManualReviewBlocker returns blocked message for worker-command (cannot dispatch)", () => {
+  expect(buildManualReviewBlocker("worker-command")).toBe("Audit blocked: waiting for manual audit results or interactive provider configuration.");
 });
 
 test("buildManualReviewBlocker returns fan-out instructions for LLM providers", () => {

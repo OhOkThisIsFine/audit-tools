@@ -91,7 +91,7 @@ test("cmdStatus includes recent run ledger entries", async () => {
       runs: [
         {
           run_id: "run-001",
-          provider: "local-subprocess",
+          provider: "worker-command",
           obligation_id: "plan",
           selected_executor: "planning_executor",
           status: "completed",
@@ -101,7 +101,7 @@ test("cmdStatus includes recent run ledger entries", async () => {
         },
         {
           run_id: "run-002",
-          provider: "local-subprocess",
+          provider: "worker-command",
           obligation_id: "audit_tasks",
           selected_executor: "dispatch_executor",
           status: "completed",

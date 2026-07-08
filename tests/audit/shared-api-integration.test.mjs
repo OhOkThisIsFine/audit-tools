@@ -47,11 +47,11 @@ test("runRollingDispatch: dispatches items and calls onResult once per item", as
     { id: "p2", payload: "task-2", estimatedTokens: 100, complexity: 0.5 },
   ];
 
-  // Mock pool — local-subprocess, no concurrency limit
+  // Mock pool — worker-command, no concurrency limit
   const pool = [
     {
-      id: "local-subprocess:null",
-      providerName: "local-subprocess",
+      id: "worker-command:null",
+      providerName: "worker-command",
       hostModel: null,
       hostConcurrencyLimit: null,
     },
@@ -143,8 +143,8 @@ test("runRollingDispatch: one packet outcome:failed is included in results with 
 
   const pool = [
     {
-      id: "local-subprocess:null",
-      providerName: "local-subprocess",
+      id: "worker-command:null",
+      providerName: "worker-command",
       hostModel: null,
       hostConcurrencyLimit: null,
     },
@@ -220,17 +220,17 @@ test("confirmProviders: every pool entry has name, capability_tier, excluded fla
   }
 });
 
-test("confirmProviders: local-subprocess is present and not excluded by default", () => {
+test("confirmProviders: worker-command is present and not excluded by default", () => {
   const result = confirmProviders({}, {}, []);
-  const local = result.provider_pool.find((e) => e.name === "local-subprocess");
-  expect(local, "local-subprocess in pool").toBeTruthy();
+  const local = result.provider_pool.find((e) => e.name === "worker-command");
+  expect(local, "worker-command in pool").toBeTruthy();
   expect(local.excluded).toBe(false);
 });
 
-test("confirmProviders: local-subprocess is marked excluded when explicitly excluded", () => {
-  const result = confirmProviders({}, {}, ["local-subprocess"]);
-  const local = result.provider_pool.find((e) => e.name === "local-subprocess");
-  expect(local, "local-subprocess still in pool when excluded").toBeTruthy();
+test("confirmProviders: worker-command is marked excluded when explicitly excluded", () => {
+  const result = confirmProviders({}, {}, ["worker-command"]);
+  const local = result.provider_pool.find((e) => e.name === "worker-command");
+  expect(local, "worker-command still in pool when excluded").toBeTruthy();
   expect(local.excluded).toBe(true);
 });
 
@@ -306,11 +306,11 @@ test("all three shared APIs compose end-to-end without throwing", async () => {
     { id: "task-2", payload: { lens: "performance" }, estimatedTokens: 200, complexity: 0.3 },
   ];
 
-  // Use local-subprocess pool (always available)
+  // Use worker-command pool (always available)
   const pool = [
     {
-      id: "local-subprocess:null",
-      providerName: "local-subprocess",
+      id: "worker-command:null",
+      providerName: "worker-command",
       hostModel: null,
       hostConcurrencyLimit: null,
     },

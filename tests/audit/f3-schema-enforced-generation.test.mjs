@@ -51,7 +51,7 @@ const noopDeps = {
 };
 
 const brokerContext = {
-  providerName: "local-subprocess",
+  providerName: "worker-command",
   sessionConfig: {},
   hostModel: null,
 };
@@ -61,7 +61,7 @@ test("F3: discovery is provider-agnostic — agentic CLIs degrade to 'none'", ()
     "claude-code",
     "codex",
     "opencode",
-    "local-subprocess",
+    "worker-command",
     "subprocess-template",
     "vscode-task",
     "antigravity",
@@ -90,7 +90,7 @@ test("F3: openai-compatible discovers json_schema_constrained by default, degrad
 });
 
 test("F3: descriptor is discovered ONCE and stamped on the constructed provider", () => {
-  const provider = createFreshSessionProvider("local-subprocess", {}, noopDeps);
+  const provider = createFreshSessionProvider("worker-command", {}, noopDeps);
   expect(provider.outputConstraint, "provider carries a discovered descriptor").toBeTruthy();
   expect(provider.outputConstraint.mode).toBe("none");
 
@@ -110,7 +110,7 @@ test("F3 inv-2: descriptor is output-constraint-scoped only — no concurrency/a
   const forbiddenKeyPattern = /concurrency|agent.?nest|host.?concurrency|parallel|nesting/i;
 
   for (const [name, config] of [
-    ["local-subprocess", {}],
+    ["worker-command", {}],
     ["openai-compatible", { openai_compatible: { base_url: "https://x/v1", model: "m" } }],
   ]) {
     const provider = createFreshSessionProvider(name, config, noopDeps);
@@ -316,7 +316,7 @@ test("F3 inv-3: discovery runs exactly ONCE per constructed provider, ZERO per e
   expect(!/discoverOutputConstraintCapability/.test(emitSrc), "emit path must READ the stamped descriptor, never re-discover per emit").toBeTruthy();
 
   // (b) One construction → one descriptor object reused across many emits.
-  const provider = createFreshSessionProvider("local-subprocess", {}, noopDeps);
+  const provider = createFreshSessionProvider("worker-command", {}, noopDeps);
   const stamped = provider.outputConstraint;
   expect(stamped, "construction stamps a descriptor exactly once").toBeTruthy();
 
@@ -508,7 +508,7 @@ test("F3 inv-6 [CP-NODE-27]: enforcement core has no per-backend branching (para
     'claude-code',
     'codex',
     'opencode',
-    'local-subprocess',
+    'worker-command',
     'subprocess-template',
     'vscode-task',
     'antigravity',

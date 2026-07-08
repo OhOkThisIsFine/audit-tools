@@ -74,7 +74,7 @@ async function persistEdgeReasoningState(root, artifactsDir, { flag, strip = fal
     join(artifactsDir, "session-config.json"),
     JSON.stringify(
       {
-        provider: "local-subprocess",
+        provider: "worker-command",
         analyzers: { typescript: "skip" },
         graph: { llm_edge_reasoning: flag },
       },

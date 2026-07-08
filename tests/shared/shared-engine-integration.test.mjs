@@ -62,7 +62,7 @@ test("capability-tier routing: classifyProvider returns correct host-class for e
   expect(classifyProvider("claude-code").hostClass, "claude-code → hosted").toBe("hosted");
   expect(classifyProvider("codex").hostClass, "codex → hosted").toBe("hosted");
   expect(classifyProvider("opencode").hostClass, "opencode → local").toBe("local");
-  expect(classifyProvider("local-subprocess").hostClass, "local-subprocess → local").toBe("local");
+  expect(classifyProvider("worker-command").hostClass, "worker-command → local").toBe("local");
   expect(classifyProvider("subprocess-template").hostClass, "subprocess-template → unknown").toBe("unknown");
   expect(classifyProvider("vscode-task").hostClass, "vscode-task → unknown").toBe("unknown");
   expect(classifyProvider("antigravity").hostClass, "antigravity → unknown").toBe("unknown");

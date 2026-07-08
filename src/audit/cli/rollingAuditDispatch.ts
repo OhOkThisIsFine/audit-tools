@@ -89,9 +89,9 @@ function workerResultOutputSchema(): Record<string, unknown> | null {
  * launch needs only the packet prompt: the API-driven `openai-compatible` (the
  * validated NIM path) and the headless CLIs `codex` / `opencode` (which build their
  * own invocation from the prompt). Deliberately NARROWER than remediate's set:
- * `local-subprocess` / `subprocess-template` are excluded because they require a
+ * `worker-command` / `subprocess-template` are excluded because they require a
  * per-worker `worker_command` that a read-only review packet does not carry, and
- * `local-subprocess` is audit's conventional host-dispatch default provider (so
+ * `worker-command` is audit's conventional host-dispatch default provider (so
  * routing it in-process would hijack the host-subagent `dispatch_review` path). The
  * conversation host (claude-code) and IDE backends (vscode-task / antigravity) are
  * excluded for the same reasons as remediate. "auto" is intentionally absent, so
@@ -129,7 +129,7 @@ export function resolvesToInProcessDispatchProvider(
  * started with `provider: codex` and later resumed by a Claude host never keys or
  * charges the host fan-out against codex's meter. `sessionConfig.provider` is thus
  * demoted to the headless in-process pool only. An explicit conversation-host
- * provider (vscode-task / antigravity / local-subprocess / claude-code) IS a driver
+ * provider (vscode-task / antigravity / worker-command / claude-code) IS a driver
  * and passes through unchanged.
  *
  * B1: when a headless backend is demoted, the driver is the CONVERSATION HOST —

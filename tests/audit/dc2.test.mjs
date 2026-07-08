@@ -63,12 +63,12 @@ await test("a built confirmation stamps schema_version / session_level / confirm
   expect([...built.roster].sort()).toEqual(built.roster);
 });
 
-await test("local-subprocess fallback is always present in the pool (it is never PATH-detected)", () => {
+await test("worker-command fallback is always present in the pool (it is never PATH-detected)", () => {
   const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
-  const local = built.provider_pool.find((e) => e.name === "local-subprocess");
-  expect(local, "local-subprocess is always in the confirmed pool").toBeTruthy();
+  const local = built.provider_pool.find((e) => e.name === "worker-command");
+  expect(local, "worker-command is always in the confirmed pool").toBeTruthy();
   // It is the always-available fallback, not part of the discovered roster.
-  expect(!built.roster.includes("local-subprocess"), "local-subprocess is not in the PATH roster").toBeTruthy();
+  expect(!built.roster.includes("worker-command"), "worker-command is not in the PATH roster").toBeTruthy();
 });
 
 // ── cross-tool honor: audit writes, remediate-side reads the same pool ───────
@@ -227,7 +227,7 @@ await test("CE-003: a lockless read never observes a torn file under a concurren
       provider_pool: [
         ...base.provider_pool,
         ...Array.from({ length: i }, (_, k) => ({
-          name: "local-subprocess",
+          name: "worker-command",
           capability_tier: "unknown",
           excluded: false,
           reason: `pad-${k}-${"x".repeat(k * 8)}`,

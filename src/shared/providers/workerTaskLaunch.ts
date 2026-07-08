@@ -12,7 +12,7 @@ export interface WorkerTaskTimeout {
  * shared providers depend on this narrow interface rather than importing either
  * package's full task type. `worker_command` is optional because remediation
  * tasks dispatch through a provider template and omit it; consumers that require
- * it (e.g. LocalSubprocessProvider) guard for its absence explicitly.
+ * it (e.g. WorkerCommandProvider) guard for its absence explicitly.
  */
 export interface WorkerTaskWithCommand extends WorkerTaskTimeout {
   worker_command?: string[];

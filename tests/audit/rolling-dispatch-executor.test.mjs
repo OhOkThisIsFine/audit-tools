@@ -339,7 +339,7 @@ test("TST-8f9c443f: runRollingDispatch post-run invariant — all successfully d
   // all 3 packets complete, pendingIds is empty after run(), status is complete.
   const pool = {
     id: "test-pool",
-    providerName: "local-subprocess",
+    providerName: "worker-command",
     hostModel: null,
     hostConcurrencyLimit: null,
   };

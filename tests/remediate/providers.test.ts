@@ -11,7 +11,7 @@ import { createClaudeCodeProvider } from "../../src/remediate/providers/claudeCo
 import { createOpenCodeProvider } from "../../src/remediate/providers/opencodeProvider.js";
 import {
   SubprocessTemplateProvider,
-  LocalSubprocessProvider,
+  WorkerCommandProvider,
 } from "audit-tools/shared";
 import { quoteForCmd } from "../../src/remediate/utils/commands.js";
 
@@ -234,8 +234,8 @@ describe("resolveFreshSessionProviderName", () => {
       "claude-code",
     );
     expect(resolveFreshSessionProviderName("opencode", {})).toBe("opencode");
-    expect(resolveFreshSessionProviderName("local-subprocess", {})).toBe(
-      "local-subprocess",
+    expect(resolveFreshSessionProviderName("worker-command", {})).toBe(
+      "worker-command",
     );
   });
 
@@ -245,13 +245,13 @@ describe("resolveFreshSessionProviderName", () => {
     ).toBe("claude-code");
   });
 
-  it("defaults to local-subprocess when name is undefined and no config", () => {
+  it("defaults to worker-command when name is undefined and no config", () => {
     expect(resolveFreshSessionProviderName(undefined, {})).toBe(
-      "local-subprocess",
+      "worker-command",
     );
   });
 
-  it("resolves auto to local-subprocess when no capable provider is found", () => {
+  it("resolves auto to worker-command when no capable provider is found", () => {
     const result = resolveFreshSessionProviderName(
       "auto",
       {},
@@ -260,10 +260,10 @@ describe("resolveFreshSessionProviderName", () => {
         commandExists: () => false,
       },
     );
-    expect(result).toBe("local-subprocess");
+    expect(result).toBe("worker-command");
   });
 
-  it("resolves auto to local-subprocess when inside ClaudeCode even if claude is available", () => {
+  it("resolves auto to worker-command when inside ClaudeCode even if claude is available", () => {
     const result = resolveFreshSessionProviderName(
       "auto",
       {},
@@ -272,7 +272,7 @@ describe("resolveFreshSessionProviderName", () => {
         commandExists: (cmd) => cmd === "claude",
       },
     );
-    expect(result).toBe("local-subprocess");
+    expect(result).toBe("worker-command");
   });
 
   it("resolves auto to opencode when running inside an opencode session", () => {
@@ -308,7 +308,7 @@ describe("createRemediationWorkerTask", () => {
       runId: "RUN-1",
       options: { root: "/repo", artifactsDir: "/repo/.audit-tools/remediation" },
       obligationId: "F-001",
-      preferredExecutor: "local-subprocess",
+      preferredExecutor: "worker-command",
       resultPath: "/repo/.audit-tools/remediation/result.json",
     });
 
@@ -508,10 +508,10 @@ describe("provider launch methods", () => {
     });
   });
 
-  it("LocalSubprocessProvider launches task.worker_command with task timeout", async () => {
+  it("WorkerCommandProvider launches task.worker_command with task timeout", async () => {
     await withProviderFiles(async ({ input }) => {
       const calls: any[] = [];
-      const provider = new LocalSubprocessProvider(
+      const provider = new WorkerCommandProvider(
         async (command, args, launchInput) => {
           calls.push({ command, args, launchInput });
           return { accepted: true, exitCode: 0 };
@@ -527,14 +527,14 @@ describe("provider launch methods", () => {
     }, ["node", "worker.js"]);
   });
 
-  it("LocalSubprocessProvider throws MISSING_WORKER_COMMAND_MESSAGE when task has no worker_command", async () => {
+  it("WorkerCommandProvider throws MISSING_WORKER_COMMAND_MESSAGE when task has no worker_command", async () => {
     await withProviderFiles(async ({ input }) => {
-      const provider = new LocalSubprocessProvider(
+      const provider = new WorkerCommandProvider(
         async () => ({ accepted: true, exitCode: 0 }),
       );
 
       await expect(provider.launch(input)).rejects.toThrow(
-        /local-subprocess provider requires task\.worker_command/i,
+        /worker-command provider requires task\.worker_command/i,
       );
     });
   });

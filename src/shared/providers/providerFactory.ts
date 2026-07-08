@@ -10,7 +10,7 @@ import type {
   CodexConfig,
   OpenCodeConfig,
 } from "../types/sessionConfig.js";
-import { LocalSubprocessProvider } from "./localSubprocessProvider.js";
+import { WorkerCommandProvider } from "./workerCommandProvider.js";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
 import { CodexProvider } from "./codexProvider.js";
 import { OpenAiCompatibleProvider } from "./openAiCompatibleProvider.js";
@@ -157,7 +157,7 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
       "Note: when inside a Claude Code session (CLAUDECODE set) `claudeAvailable` " +
       "is forced false, so we never resolve to claude-code — a fresh `claude` " +
       "subprocess cannot be spawned from within one. Such runs fall through to " +
-      "local-subprocess (manual dispatch), matching ClaudeCodeProvider's guard.",
+      "worker-command (manual dispatch), matching ClaudeCodeProvider's guard.",
     predicate: (ctx) => ctx.inVSCode && ctx.hasVSCodeTaskTemplate,
   },
   {
@@ -200,7 +200,7 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
   // PATH-detected `opencode` is OPT-IN only — it is auto-selected solely via the
   // config-gated rung above (hasOpenCodeConfig && opencodeAvailable). Without
   // claude and without configured-opencode, resolution falls through to
-  // local-subprocess rather than launching opencode unprompted (PB-1).
+  // worker-command rather than launching opencode unprompted (PB-1).
   {
     name: "openai-compatible",
     comment:
@@ -225,14 +225,14 @@ function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName 
   for (const rule of PROVIDER_PRIORITY_RULES) {
     if (rule.predicate(context)) return rule.name;
   }
-  return "local-subprocess";
+  return "worker-command";
 }
 
 /**
  * Resolve a concrete provider name. Only the explicit `"auto"` sentinel triggers
  * environment auto-detection; any other requested name (or `sessionConfig.provider`)
  * passes through verbatim, and an entirely unspecified provider defaults to
- * `"local-subprocess"`. Callers that want auto-detection on an unspecified
+ * `"worker-command"`. Callers that want auto-detection on an unspecified
  * provider should pass `"auto"` (see `createFreshSessionProvider`).
  */
 export function resolveFreshSessionProviderName(
@@ -244,7 +244,7 @@ export function resolveFreshSessionProviderName(
   } = {},
 ): ResolvedProviderName {
   const requestedProvider =
-    name ?? sessionConfig.provider ?? "local-subprocess";
+    name ?? sessionConfig.provider ?? "worker-command";
   if (requestedProvider !== "auto") {
     return requestedProvider as ResolvedProviderName;
   }
@@ -263,7 +263,7 @@ export function resolveFreshSessionProviderName(
  * a model id, context window, or tier→model map (an explicit project invariant).
  *
  * The agentic-CLI backends (claude-code / codex / opencode / antigravity /
- * vscode-task / subprocess-template / local-subprocess) take only a rendered
+ * vscode-task / subprocess-template / worker-command) take only a rendered
  * prompt; we have no API-level forced-tool-call or schema-constrained decoding
  * over them, so their structural guarantee is `none` and the emit path degrades to
  * the O3 emit-validate-repair seam. The `openai-compatible` backend is the only one
@@ -351,7 +351,7 @@ export function createFreshSessionProvider(
   deps: FreshSessionProviderDeps,
 ): FreshSessionProvider {
   // Conversation-first callers pass nothing; treat that as a request to
-  // auto-detect rather than silently falling back to local-subprocess.
+  // auto-detect rather than silently falling back to worker-command.
   const effectiveName = name ?? sessionConfig.provider ?? "auto";
   const providerName = resolveFreshSessionProviderName(
     effectiveName,
@@ -359,7 +359,7 @@ export function createFreshSessionProvider(
   );
   // Log the auto-resolution decision (only when auto-detection actually ran;
   // an explicitly named provider is the caller's choice and needs no signal).
-  // local-subprocess means no capable agent provider was detected, so it
+  // worker-command means no capable agent provider was detected, so it
   // carries the manual-dispatch fallback reason; any other resolution names the
   // detected provider. Structured one-line stderr (FINDING-012 convention),
   // attributed to the orchestrator that invoked the shared factory.
@@ -367,7 +367,7 @@ export function createFreshSessionProvider(
   // emitted for machine-parseable, run-correlated observability (FND-OBS-12e8582b).
   if (effectiveName === "auto") {
     const fallbackReason =
-      providerName === "local-subprocess"
+      providerName === "worker-command"
         ? "no capable agent provider detected; agent tasks require manual dispatch — configure claude-code, opencode, or subprocess-template in session-config.json to automate them"
         : "none";
     process.stderr.write(
@@ -403,8 +403,8 @@ function constructProvider(
   deps: FreshSessionProviderDeps,
 ): FreshSessionProvider {
   switch (providerName) {
-    case "local-subprocess":
-      return new LocalSubprocessProvider();
+    case "worker-command":
+      return new WorkerCommandProvider();
     case "subprocess-template":
       if (!sessionConfig.subprocess_template?.command_template?.length) {
         throw new Error(

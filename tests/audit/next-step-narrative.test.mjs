@@ -71,7 +71,7 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
-        { provider: "local-subprocess", analyzers: { typescript: "skip" } },
+        { provider: "worker-command", analyzers: { typescript: "skip" } },
         null,
         2,
       ) + "\n",
@@ -155,7 +155,7 @@ test.concurrent("next-step omits the narrative when synthesis.narrative is disab
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
         {
-          provider: "local-subprocess",
+          provider: "worker-command",
           synthesis: { narrative: false },
           analyzers: { typescript: "skip" },
         },

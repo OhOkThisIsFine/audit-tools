@@ -38,7 +38,7 @@ describe("renderProviderConfirmationPrompt (a — visibility)", () => {
       cost_order: 1,
     },
     {
-      name: "local-subprocess",
+      name: "worker-command",
       capability_tier: "unknown",
       excluded: false,
       cost_order: 2,
@@ -70,7 +70,7 @@ describe("renderProviderConfirmationPrompt (a — visibility)", () => {
 
   test("orders rows ascending by cost_order (cheapest first)", () => {
     const haikuIdx = prompt.indexOf("claude-haiku-4-5");
-    const localIdx = prompt.indexOf("local-subprocess");
+    const localIdx = prompt.indexOf("worker-command");
     expect(haikuIdx).toBeGreaterThan(0);
     expect(haikuIdx).toBeLessThan(localIdx);
   });

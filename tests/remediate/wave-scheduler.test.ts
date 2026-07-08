@@ -623,7 +623,7 @@ describe("F4 inv-7 — F4-owned classification + driver-tier selection", () => {
     // F4's own classifier — no F3 descriptor involved.
     expect(classifyProvider("claude-code").hostClass).toBe("hosted");
     expect(classifyProvider("codex").hostClass).toBe("hosted");
-    expect(classifyProvider("local-subprocess").hostClass).toBe("local");
+    expect(classifyProvider("worker-command").hostClass).toBe("local");
     expect(classifyProvider("antigravity").hostClass).toBe("unknown");
   });
 

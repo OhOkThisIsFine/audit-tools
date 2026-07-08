@@ -11,7 +11,7 @@ picks the highest-priority unsatisfied obligation, runs one bounded unit, persis
   sources), emitting `structure_decomposition.json` and the two non-co-localization findings.
 - `adapters/` — normalize external analyzer output (semgrep / eslint / npm-audit / ast-grep / CodeQL / clippy / rubocop) to shared contracts.
 - `providers/` — thin wiring layer (claude-code, opencode) over the shared `FreshSessionProvider` backends in
-  `audit-tools/shared` (codex, openai-compatible, subprocess-template, vscode-task, antigravity, local-subprocess).
+  `audit-tools/shared` (codex, openai-compatible, subprocess-template, vscode-task, antigravity, worker-command).
 - `reporting/` — synthesis (`audit-findings.json` + `audit-report.md` render) + work-block rendering.
 - `supervisor/` — session config, run ledger, operator handoff.
 - `prompts/` — host-facing prompt rendering.

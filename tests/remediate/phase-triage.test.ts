@@ -594,7 +594,7 @@ describe("runTriagePhase", () => {
   // /bin/sh; root must exist for the spawn cwd, so use TEST_DIR.
   // The reverify-before-retry path only trusts a green tree as "already
   // satisfied" if an implement WORKER actually ran and left a result file (the
-  // no-worker guard — a `local-subprocess` no-op leaves none, and a generic
+  // no-worker guard — a `worker-command` no-op leaves none, and a generic
   // `build && check` would then false-resolve an un-implemented node). Every
   // reconcile test below models a node whose worker DID run (and failed), so it
   // must seed the result file the merge would have written.
@@ -722,7 +722,7 @@ describe("runTriagePhase", () => {
 
   it("does NOT reconcile to resolved_no_change when NO worker result exists, even if a generic targeted_command passes (no-worker guard)", async () => {
     // No-worker guard (2026-07-06): the 2026-07-06 max-sweep run had a
-    // `local-subprocess` provider produce no worker results; the nodes edited
+    // `worker-command` provider produce no worker results; the nodes edited
     // pre-existing files (backlog.md, dispatch.ts…) so the deliverable-existence
     // guard couldn't catch them, and their generic `build && check` verify passed
     // on the green tree → un-implemented nodes false-resolved to

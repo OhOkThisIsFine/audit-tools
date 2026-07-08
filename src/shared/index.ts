@@ -703,7 +703,7 @@ export type {
 
 // Provider constants
 export {
-  LOCAL_SUBPROCESS_PROVIDER_NAME,
+  WORKER_COMMAND_PROVIDER_NAME,
   CODEX_PROVIDER_NAME,
   ANTIGRAVITY_PROVIDER_NAME,
 } from "./providers/constants.js";
@@ -741,9 +741,9 @@ export { makeProviderKeyedFactory } from "./providers/providerKeyedFactory.js";
 // orchestrator's providers/index.ts injects these via the factory deps.
 export { SubprocessTemplateProvider } from "./providers/subprocessTemplateProvider.js";
 export {
-  LocalSubprocessProvider,
+  WorkerCommandProvider,
   MISSING_WORKER_COMMAND_MESSAGE,
-} from "./providers/localSubprocessProvider.js";
+} from "./providers/workerCommandProvider.js";
 export { CodexProvider } from "./providers/codexProvider.js";
 export {
   OpenAiCompatibleProvider,

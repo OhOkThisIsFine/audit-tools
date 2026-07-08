@@ -74,7 +74,7 @@ function defaultCapabilityTier(name: ResolvedProviderName): CapabilityTier {
     case "vscode-task":
     case "antigravity":
       return "capable";
-    case "local-subprocess":
+    case "worker-command":
       return "unknown";
   }
 }
@@ -251,7 +251,7 @@ export function buildProviderConfirmationDisplay(
             .join(", ") || "—";
 
     // Local-subprocess requires explicit addition because it blocks auto-dispatch.
-    const isDefault = p.name !== "local-subprocess";
+    const isDefault = p.name !== "worker-command";
     const defaultCol = isDefault ? "included" : "add explicitly";
     const statusNote = p.reason ? ` *(${p.reason})*` : "";
     return `| ${p.name}${statusNote} | ${tier} | ${quota} | ${defaultCol} |`;
