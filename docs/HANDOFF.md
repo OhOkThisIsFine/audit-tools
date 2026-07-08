@@ -11,11 +11,16 @@
 - **v0.32.35 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
-- **Immediate next:** the free/cheap multi-account "quota-arbitrage" dispatch tier (`docs/backlog.md`
-  → Forward tracks; [[arbitrage-dispatch-tier-design]]) — Phase-0 first slice = `opencode-free` +
-  `vertex-trial` source pools; opens with owner-gated setup calls (opencode `Bearer public` ToS,
-  a GCP $300-trial service account for vertex-trial). Then the remaining env-bound live validations
-  (quota pre-wall pacing, friction escalation, selective-deepening convergence, clippy/rubocop live spawn).
+- **Immediate next: quota-arbitrage tier Phase-0 opencode-free — increment 2 (reactive cost verification).**
+  The tier is in progress ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks). Owner chose
+  the robust A2 design. **Increment 1 (a-priori declared per-source cost → free-first ordering) is SHIPPED to
+  main, unreleased (`6349bdc5`), adversarially reviewed + green.** Increment 2 = read each response's actual
+  reported cost and demote a declared-free pool that starts charging (+ friction event) — loop-core, full
+  adversarial pipeline; seams specced in the memory + backlog. **Do NOT cut the arbitrage release until
+  increment 2 lands** (increment 1 alone = A1, not the chosen A2). opencode-free is live-verified (`Bearer public`,
+  free models, `cost:"0"`); it's a pure-config `sources[]` entry. vertex-trial deferred (needs a GCP $300-trial
+  SA). Then the remaining env-bound live validations (quota pre-wall pacing, friction escalation,
+  selective-deepening convergence, clippy/rubocop live spawn).
 - **Cost↔speed dial residuals — adjudicated 2026-07-08, both deferred (see `docs/backlog.md`, dial bullet):**
   the `/models` concurrency probe is DEFERRED pending a design pass (a standard `/v1/models` exposes no
   concurrency signal; rate-limit headers are the buildable-but-unpinned path); B2 host-reorder is OPEN
