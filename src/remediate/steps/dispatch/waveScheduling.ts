@@ -32,7 +32,7 @@ import {
 import {
   computeDispatchCapacity,
   resolveHostActiveSubagentLimit,
-  readQuotaState,
+  readQuotaStateOrDegrade,
   buildProviderModelKey,
   computeBackoffCooldownMs,
   computeBackoffFailureWeight,
@@ -210,17 +210,9 @@ async function buildHostPoolPreamble(
       ? { context_tokens: hostContextTokens, output_tokens: hostOutputTokens }
       : null;
 
-  let quotaEntries: Record<string, QuotaStateEntry> = {};
-  try {
-    const state = await readQuotaState();
-    quotaEntries = state.entries;
-  } catch (err) {
-    process.stderr.write(
-      `[waveScheduler] readQuotaState failed; degrading to no learned quota entry. ${
-        err instanceof Error ? err.message : String(err)
-      }\n`,
-    );
-  }
+  const quotaEntries: Record<string, QuotaStateEntry> = (
+    await readQuotaStateOrDegrade("waveScheduler")
+  ).entries;
 
   // The proactive quota snapshot (Claude OAuth source, then learned) so the
   // scheduler can throttle/cooldown from live remaining quota — mirrors

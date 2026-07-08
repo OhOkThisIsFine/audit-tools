@@ -1,7 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConcurrencyBucket, ObservedWaveOutcome, QuotaState, QuotaStateEntry } from "./types.js";
 import { withFileLock } from "./fileLock.js";
+import { writeJsonFile } from "../io/json.js";
 
 const MIN_EVIDENCE_WEIGHT = 0.5;
 // A failure at concurrency N is evidence against N and the few levels above it
@@ -13,11 +14,9 @@ const FAILURE_SPREAD_BUCKETS = 4;
 // grow indefinitely with entries that will never be read back.
 export const MAX_BUCKET_LEVEL = 32;
 
-let _stateDir: string | undefined;
 let _statePath: string | undefined;
 
 export function setQuotaStateDir(dir: string): void {
-  _stateDir = dir;
   _statePath = join(dir, "quota-state.json");
 }
 
@@ -58,41 +57,163 @@ function isQuotaState(value: unknown): value is QuotaState {
   return (version === 1 || version === 2) && typeof obj["entries"] === "object";
 }
 
-export async function readQuotaState(): Promise<QuotaState> {
-  const statePath = getQuotaStatePath();
-  try {
-    const raw = await readFile(statePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (isQuotaState(parsed)) {
-      if (parsed.version === 1) {
-        for (const entry of Object.values(parsed.entries)) {
-          entry.consecutive_429_count ??= 0;
-        }
-      }
-      return parsed;
-    }
-    process.stderr.write(
-      `[quota] ignoring invalid quota state at ${statePath}: expected { version: 1|2, entries: object }\n`,
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: 2, entries: {} };
-    }
-    process.stderr.write(
-      `[quota] ignoring unreadable quota state at ${statePath}: ${
-        error instanceof Error ? error.message : String(error)
-      }\n`,
-    );
-  }
+/**
+ * The cold-start quota state. This is the ONLY value that legitimately means
+ * "nothing learned yet" — it must never be manufactured from a read failure.
+ * An empty state carries no `cooldown_until`, no learned limits, and no
+ * concurrency evidence, so silently substituting it for an unreadable file
+ * degrades the engine in the **fail-open** direction (unbounded dispatch).
+ */
+export function emptyQuotaState(): QuotaState {
   return { version: 2, entries: {} };
 }
 
+/**
+ * The quota state file exists but could not be read or is not a valid
+ * {@link QuotaState}. Distinct from "absent" (cold start → {@link emptyQuotaState}).
+ *
+ * Thrown rather than degraded-to-empty for two reasons: a reader that swallows
+ * it dispatches with no throttle at all, and a read-modify-write path that
+ * swallows it overwrites the file with an empty state, destroying every learned
+ * limit and live cooldown. Callers that genuinely want a degrade must opt in
+ * explicitly and say so (see `learnedQuotaSource.probeUsage`, which reports
+ * `degraded`, and the read-only reporting commands).
+ */
+export class QuotaStateUnavailableError extends Error {
+  constructor(
+    readonly statePath: string,
+    /**
+     * `corrupt` — the bytes are there but are not a valid QuotaState. Terminal
+     * for that file: re-reading will fail identically, so a write-path may
+     * quarantine it (see {@link readQuotaStateForUpdate}).
+     * `unreadable` — the file could not be opened (EACCES, EBUSY, EIO). Possibly
+     * transient, and the content may be perfectly good — NEVER destroy it.
+     */
+    readonly kind: "corrupt" | "unreadable",
+    readonly reason: string,
+  ) {
+    super(`Quota state at ${statePath} is unusable (${kind}): ${reason}`);
+    this.name = "QuotaStateUnavailableError";
+  }
+}
+
+export async function readQuotaState(): Promise<QuotaState> {
+  const statePath = getQuotaStatePath();
+  let raw: string;
+  try {
+    raw = await readFile(statePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return emptyQuotaState();
+    }
+    throw new QuotaStateUnavailableError(
+      statePath,
+      "unreadable",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new QuotaStateUnavailableError(
+      statePath,
+      "corrupt",
+      `not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+  if (!isQuotaState(parsed)) {
+    throw new QuotaStateUnavailableError(
+      statePath,
+      "corrupt",
+      "expected { version: 1|2, entries: object }",
+    );
+  }
+  if (parsed.version === 1) {
+    for (const entry of Object.values(parsed.entries)) {
+      entry.consecutive_429_count ??= 0;
+    }
+  }
+  return parsed;
+}
+
+/**
+ * The ONE opt-in degrade for {@link readQuotaState}: return the cold-start state
+ * when the file is unusable, after saying so on stderr. Use only where losing
+ * every cooldown and learned limit is survivable (pool construction, read-only
+ * reporting) — never on a path that would then WRITE the degraded state back.
+ * The degrade is loud by construction so a corrupt file cannot look like a cold
+ * start.
+ */
+export async function readQuotaStateOrDegrade(context: string): Promise<QuotaState> {
+  try {
+    return await readQuotaState();
+  } catch (error) {
+    process.stderr.write(
+      `[quota] ${context}: ${
+        error instanceof Error ? error.message : String(error)
+      }; degrading to no learned quota state (no cooldowns, no learned limits)\n`,
+    );
+    return emptyQuotaState();
+  }
+}
+
+/**
+ * Read quota state for a read-modify-write whose caller ALREADY HOLDS
+ * `quota-state.json.lock`. Every RMW helper in this module goes through it.
+ *
+ * A `corrupt` file is terminal — every future read fails the same way — so
+ * without a repair path the first bad byte would permanently disable cooldown
+ * persistence and limit learning for the life of that file, with nothing but one
+ * stderr line to show for it. So: quarantine the bad bytes aside (evidence is
+ * preserved, never deleted), say so loudly, and continue from cold state, which
+ * the caller's write then re-establishes. Safe to do here precisely because the
+ * lock is held.
+ *
+ * An `unreadable` file (EACCES/EBUSY/EIO) is NOT quarantined and NOT swallowed —
+ * the content may be perfectly good and the failure transient, so the rejection
+ * propagates and the caller leaves the file untouched.
+ */
+export async function readQuotaStateForUpdate(context: string): Promise<QuotaState> {
+  try {
+    return await readQuotaState();
+  } catch (error) {
+    if (!(error instanceof QuotaStateUnavailableError) || error.kind !== "corrupt") {
+      throw error;
+    }
+    const statePath = getQuotaStatePath();
+    const quarantinePath = `${statePath}.corrupt-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")}`;
+    let quarantined = true;
+    try {
+      await rename(statePath, quarantinePath);
+    } catch {
+      // A peer healed it first, or the rename itself is blocked. Either way the
+      // caller's write recreates a valid file; don't fail the run over it.
+      quarantined = false;
+    }
+    process.stderr.write(
+      `[quota] ${context}: ${error.message}; ${
+        quarantined ? `quarantined to ${quarantinePath}` : "could not quarantine it"
+      }, continuing from cold state (learned limits and cooldowns are lost)\n`,
+    );
+    return emptyQuotaState();
+  }
+}
+
+/**
+ * Persist quota state atomically (temp file + rename, via the shared
+ * `writeJsonFile`). Atomicity is load-bearing: `refreshQuotaStateIfNeeded`
+ * reads this file WITHOUT taking `quota-state.json.lock`, so a truncating
+ * in-place write would expose a torn file to a co-located peer. With
+ * rename-over-destination a reader observes either the whole old file or the
+ * whole new one, never a prefix.
+ */
 export async function writeQuotaState(state: QuotaState): Promise<void> {
-  const stateDir = _stateDir;
-  if (!stateDir) throw new Error("Quota state dir not set — call setQuotaStateDir() first.");
-  await mkdir(stateDir, { recursive: true });
   const normalized: QuotaState = { ...state, version: 2 };
-  await writeFile(getQuotaStatePath(), JSON.stringify(normalized, null, 2) + "\n", "utf8");
+  await writeJsonFile(getQuotaStatePath(), normalized);
 }
 
 export function computeMaxSafeConcurrency(
@@ -230,7 +351,8 @@ export function foldOutputRatioObservation(
  * Persist a folded output/input ratio observation for a pool's quota-state entry,
  * under the shared quota-state file lock. Reads the current entry (or a blank one),
  * folds the observation via {@link foldOutputRatioObservation}, and writes back.
- * Degrade-safe: a missing/unreadable state file falls to a blank entry; an
+ * A missing state file is cold start; a CORRUPT one is quarantined and rebuilt
+ * ({@link readQuotaStateForUpdate}); a transient-unreadable one rejects. An
  * observation carrying no ratio signal leaves the file untouched-in-value.
  */
 export async function recordOutputRatioObservation(
@@ -241,7 +363,7 @@ export async function recordOutputRatioObservation(
 ): Promise<void> {
   const lockPath = getQuotaStatePath() + ".lock";
   await withFileLock(lockPath, async () => {
-    const state = await readQuotaState();
+    const state = await readQuotaStateForUpdate("recordOutputRatioObservation");
     const entry = state.entries[providerModelKey] ?? blankEntry();
     const updated = foldOutputRatioObservation(
       entry.output_per_input,
@@ -260,8 +382,9 @@ export async function recordOutputRatioObservation(
  * Persist a folded tokens_per_pct observation for a pool's quota-state entry,
  * under the shared quota-state file lock. Reads the current entry (or a blank
  * one), folds the observation via {@link foldTokensPerPctObservation}, and writes
- * back. Degrade-safe: a missing/unreadable state file falls to a blank entry;
- * an observation that doesn't move the slope leaves the file untouched-in-value.
+ * back. A missing state file is cold start; a CORRUPT one is quarantined and
+ * rebuilt ({@link readQuotaStateForUpdate}); a transient-unreadable one rejects.
+ * An observation that doesn't move the slope leaves the file untouched-in-value.
  */
 export async function recordTokensPerPctObservation(
   providerModelKey: string,
@@ -272,7 +395,7 @@ export async function recordTokensPerPctObservation(
 ): Promise<void> {
   const lockPath = getQuotaStatePath() + ".lock";
   await withFileLock(lockPath, async () => {
-    const state = await readQuotaState();
+    const state = await readQuotaStateForUpdate("recordTokensPerPctObservation");
     const entry = state.entries[providerModelKey] ?? blankEntry();
     const updated = foldTokensPerPctObservation(
       entry.tokens_per_pct,
@@ -329,7 +452,7 @@ export async function clearBucketFailureEvidence(
 ): Promise<void> {
   const lockPath = getQuotaStatePath() + ".lock";
   await withFileLock(lockPath, async () => {
-    const state = await readQuotaState();
+    const state = await readQuotaStateForUpdate("clearBucketFailureEvidence");
     const entry = state.entries[providerModelKey];
     if (!entry) return;
     const bucket = entry.buckets[String(concurrency)];
@@ -346,7 +469,7 @@ async function recordWaveOutcomeUnsafe(
   outcome: ObservedWaveOutcome,
   halfLifeHours: number,
 ): Promise<void> {
-  const state = await readQuotaState();
+  const state = await readQuotaStateForUpdate("recordWaveOutcome");
   const entry = applyDecayToEntry(state.entries[providerModelKey] ?? blankEntry(), halfLifeHours);
 
   if (outcome.outcome === "success") {

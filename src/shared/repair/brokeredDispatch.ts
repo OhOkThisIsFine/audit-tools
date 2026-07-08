@@ -32,7 +32,7 @@ import type { DiscoveredRateLimitsInput } from '../quota/scheduler.js';
 import { scheduleWave, classifyProvider } from '../quota/scheduler.js';
 import { estimateTokensFromBytes, ESTIMATED_PROMPT_OVERHEAD_TOKENS } from '../tokens.js';
 import { resolveContextBudget } from '../tokens.js';
-import { getQuotaStatePath, readQuotaState, writeQuotaState } from '../quota/state.js';
+import { getQuotaStatePath, readQuotaStateForUpdate, writeQuotaState } from '../quota/state.js';
 import { withFileLock } from '../quota/fileLock.js';
 
 /**
@@ -232,7 +232,7 @@ function persistPoolCooldownBestEffort(poolKey: string, cooldownUntil: string): 
     return;
   }
   void withFileLock(lockPath, async () => {
-    const state = await readQuotaState();
+    const state = await readQuotaStateForUpdate("persistPoolCooldown");
     const existing = state.entries[poolKey];
     const entry: QuotaStateEntry = existing ?? {
       updated_at: new Date().toISOString(),

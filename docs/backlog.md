@@ -29,16 +29,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`quota-state.json` torn read fails OPEN → unbounded dispatch (HIGH).** `writeQuotaState`
-  (`src/shared/quota/state.ts`) is a truncating `writeFile` with **no temp-then-rename** (contrast
-  `src/remediate/state/store.ts`, which does it correctly), and `refreshQuotaStateIfNeeded`
-  (`src/shared/dispatch/rollingDispatch.ts`) reads it **without** the `quota-state.json.lock` that every writer
-  takes. A co-located peer's write truncates the file mid-read → `JSON.parse` throws → `readQuotaState` swallows the
-  error and returns `{version:2, entries:{}}`. The engine then sees *no* `cooldown_until`, *no* learned limits, and
-  *no* `concurrencyCap`-adjacent state — i.e. the degrade direction is **fail-open**, not fail-safe. Fix: make
-  `writeQuotaState` atomic (temp + `rename`, the `store.ts` pattern); an empty-state fallback must never silently
-  mean "no throttle". Found by adversarial review of the (reverted) C3-AIMD change; **pre-existing on main.**
-
 - **`recordWaveOutcome` is called with a hardcoded `concurrency: 1` from the rolling engine (HIGH).**
   `src/shared/dispatch/rollingDispatch.ts` passes `{ concurrency: 1, … }` for *every* packet. Consequences in
   `src/shared/quota/state.ts`: on `rate_limited`, failure weight spreads from `concurrency` through

@@ -5,7 +5,7 @@ import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import {
   buildProviderModelKey,
-  readQuotaState,
+  readQuotaStateOrDegrade,
   resolveLimits,
   resolveHostActiveSubagentLimit,
   computeMaxSafeConcurrency,
@@ -45,7 +45,7 @@ export async function cmdQuota(argv: string[]): Promise<void> {
 
   const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });
 
-  const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
+  const quotaState = await readQuotaStateOrDegrade("quota command");
   const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
   const halfLifeHours =
     sessionConfig.quota?.empirical_half_life_hours ??

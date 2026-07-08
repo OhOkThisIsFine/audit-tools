@@ -43,6 +43,7 @@ import {
 import {
   recordWaveOutcome,
   readQuotaState,
+  emptyQuotaState,
   recordTokensPerPctObservation,
 } from "../quota/state.js";
 import { buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "../quota/capacity.js";
@@ -584,17 +585,32 @@ export function createRollingDispatcher<TPacket>(
     }
   }
 
-  // Quota state cache — refreshed before each dispatch pass.
-  let quotaStateCache: QuotaState = { version: 2, entries: {} };
+  // Quota state cache — refreshed before each dispatch pass. The read is
+  // deliberately lock-free: `writeQuotaState` renames a temp file over the
+  // destination, so every reader observes a whole file, never a torn prefix.
+  let quotaStateCache: QuotaState = emptyQuotaState();
   let quotaStateCacheDirty = true;
+  let quotaStateUnavailableWarned = false;
 
   async function refreshQuotaStateIfNeeded(): Promise<void> {
     if (quotaStateCacheDirty) {
       try {
         quotaStateCache = await readQuotaState();
-      } catch {
-        // Non-fatal: fall back to empty state
-        quotaStateCache = { version: 2, entries: {} };
+      } catch (error) {
+        // The file exists but is unusable. Substituting an empty state here
+        // would erase every cooldown and learned limit from the engine's view
+        // — i.e. degrade FAIL-OPEN into unbounded dispatch. Keep the last
+        // state we successfully read (cold start: still empty) and say so.
+        if (!quotaStateUnavailableWarned) {
+          quotaStateUnavailableWarned = true;
+          process.stderr.write(
+            `[rolling-dispatch] ${
+              error instanceof Error ? error.message : String(error)
+            }; retaining last-known quota state (${
+              Object.keys(quotaStateCache.entries).length
+            } entries)\n`,
+          );
+        }
       }
       quotaStateCacheDirty = false;
     }

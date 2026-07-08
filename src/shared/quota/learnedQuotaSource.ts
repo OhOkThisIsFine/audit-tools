@@ -1,4 +1,5 @@
 import type { QuotaProbeResult, QuotaSource, QuotaUsageSnapshot } from "./quotaSource.js";
+import type { QuotaState } from "./types.js";
 import { readQuotaState, computeMaxSafeConcurrency } from "./state.js";
 
 export class LearnedQuotaSource implements QuotaSource {
@@ -17,10 +18,17 @@ export class LearnedQuotaSource implements QuotaSource {
   /**
    * No learned entry yet is `not_applicable`, never `degraded`: the learned
    * source is the reactive fallback, so the absence of history is the normal
-   * cold-start state, not a lost signal.
+   * cold-start state, not a lost signal. An UNUSABLE state file is the opposite
+   * — evidence we had is now unreadable — so it reports `degraded`, never
+   * `not_applicable`.
    */
   async probeUsage(providerModelKey: string): Promise<QuotaProbeResult> {
-    const state = await readQuotaState();
+    let state: QuotaState;
+    try {
+      state = await readQuotaState();
+    } catch {
+      return { snapshot: null, status: "degraded" };
+    }
     const entry = state.entries[providerModelKey];
     if (!entry) return { snapshot: null, status: "not_applicable" };
 

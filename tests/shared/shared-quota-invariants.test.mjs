@@ -148,8 +148,9 @@ test("INV-shared-quota-04: buildEmptyPoolTerminal does not mutate input array", 
 });
 
 // ── INV-shared-quota-05: QuotaState schema version is 1 or 2 ─────────────────
-// readQuotaState must accept version 1 and 2 entries, reject others, and
-// default to { version: 2, entries: {} } on missing or invalid files.
+// readQuotaState must accept version 1 and 2 entries and default to
+// { version: 2, entries: {} } on a MISSING file. An INVALID file is NOT a cold
+// start — it throws QuotaStateUnavailableError (INV-QD-15, quota-state.test.mjs).
 
 test("INV-shared-quota-05: readQuotaState defaults to version:2 empty state when file absent", async () => {
   const { mkdtemp, rm } = await import("node:fs/promises");

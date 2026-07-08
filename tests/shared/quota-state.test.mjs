@@ -1,11 +1,17 @@
 import { test, expect } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const {
   setQuotaStateDir,
+  getQuotaStatePath,
   readQuotaState,
+  readQuotaStateOrDegrade,
+  writeQuotaState,
+  emptyQuotaState,
+  QuotaStateUnavailableError,
   recordWaveOutcome,
   clearBucketFailureEvidence,
   applyDecayToEntry,
@@ -474,5 +480,142 @@ test("recordTokensPerPctObservation persists a per-window slope to quota-state",
     expect(entry, "entry created").toBeTruthy();
     // 2000 tokens / (0.2-0.1)*100 = 10 percent → 200 tokens/pct.
     expect(Math.abs(entry.tokens_per_pct.weekly - 200) < 1e-9).toBeTruthy();
+  });
+});
+
+// ── INV-QD-15: an unusable quota-state file must never masquerade as cold start ──
+//
+// `refreshQuotaStateIfNeeded` reads quota-state.json WITHOUT the writer's lock.
+// The old `writeQuotaState` truncated in place, so a co-located peer could read a
+// prefix; `readQuotaState` swallowed the JSON.parse throw and returned an EMPTY
+// state — no cooldown_until, no learned limits — i.e. the degrade direction was
+// FAIL-OPEN (unbounded dispatch). Two properties close it: writes are atomic
+// (rename-over-destination, so no torn read exists), and an unusable file throws
+// rather than silently becoming `{}`.
+
+const __testDir = dirname(fileURLToPath(import.meta.url));
+const STATE_SRC = resolve(__testDir, "../../src/shared/quota/state.ts");
+
+test("INV-QD-15: writeQuotaState delegates to the shared atomic writer, never a truncating writeFile", async () => {
+  const source = await readFile(STATE_SRC, "utf8");
+  expect(source).toContain("writeJsonFile");
+  // A bare `writeFile(` here reintroduces the in-place truncation the lock-free
+  // reader is exposed to. `readFile` is fine — only the write path must be atomic.
+  expect(/\bwriteFile\s*\(/.test(source)).toBe(false);
+});
+
+test("INV-QD-15: an ABSENT state file is cold start, not an error", async () => {
+  await withTempStateDir(async () => {
+    expect(await readQuotaState()).toEqual(emptyQuotaState());
+  });
+});
+
+test("INV-QD-15: a torn/invalid-JSON state file throws instead of degrading to empty", async () => {
+  await withTempStateDir(async () => {
+    // A truncated prefix — exactly what a torn read of a large state file yields.
+    await writeFile(getQuotaStatePath(), '{"version":2,"entries":{"a/b":{"buck', "utf8");
+    await expect(readQuotaState()).rejects.toThrow(QuotaStateUnavailableError);
+  });
+});
+
+test("INV-QD-15: a well-formed-JSON but wrong-shape state file throws", async () => {
+  await withTempStateDir(async () => {
+    await writeFile(getQuotaStatePath(), '{"version":99,"entries":{}}', "utf8");
+    await expect(readQuotaState()).rejects.toThrow(QuotaStateUnavailableError);
+  });
+});
+
+test("INV-QD-15: readQuotaStateOrDegrade is the ONE opt-in degrade, and it is loud", async () => {
+  await withTempStateDir(async () => {
+    await writeFile(getQuotaStatePath(), "not json at all", "utf8");
+    const written = [];
+    const original = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk) => {
+      written.push(String(chunk));
+      return true;
+    };
+    try {
+      expect(await readQuotaStateOrDegrade("unit test")).toEqual(emptyQuotaState());
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(written.join("")).toContain("unit test");
+  });
+});
+
+test("INV-QD-15: a lock-free reader never observes a torn file while writes are in flight", async () => {
+  await withTempStateDir(async () => {
+    // A payload big enough that a non-atomic write would be observably partial.
+    const entries = {};
+    for (let i = 0; i < 400; i++) {
+      entries[`provider-${i}/model-${i}`] = {
+        updated_at: new Date().toISOString(),
+        buckets: { 1: { success_weight: i, failure_weight: 0 } },
+        cooldown_until: null,
+        last_429_at: null,
+      };
+    }
+    await writeQuotaState({ version: 2, entries });
+
+    let stop = false;
+    const reader = (async () => {
+      // Reads take NO lock — atomicity of the write is the only thing protecting them.
+      while (!stop) {
+        const state = await readQuotaState();
+        expect(Object.keys(state.entries).length).toBe(400);
+      }
+    })();
+    for (let round = 0; round < 25; round++) {
+      await writeQuotaState({ version: 2, entries });
+    }
+    stop = true;
+    await reader;
+  });
+});
+
+test("INV-QD-15: a lock-held RMW quarantines a CORRUPT file, preserves the bytes, and heals", async () => {
+  await withTempStateDir(async (dir) => {
+    const corrupt = '{"version":2,"entries":{"a/b":{"buck';
+    await writeFile(getQuotaStatePath(), corrupt, "utf8");
+
+    const stderrSpy = [];
+    const original = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk) => (stderrSpy.push(String(chunk)), true);
+    try {
+      // Without a repair path a corrupt file is TERMINAL: cooldown persistence and
+      // limit learning stay dead for the life of that file.
+      await recordWaveOutcome(KEY, { concurrency: 2, estimated_tokens: 0, outcome: "success" }, 24);
+    } finally {
+      process.stderr.write = original;
+    }
+
+    // Healed: the live file is valid again and carries the new outcome.
+    const healed = await readQuotaState();
+    expect(healed.entries[KEY].buckets["1"].success_weight).toBe(1.0);
+
+    // Evidence preserved, never deleted.
+    const quarantined = (await readdir(dir)).filter((f) => f.includes(".corrupt-"));
+    expect(quarantined.length).toBe(1);
+    expect(await readFile(join(dir, quarantined[0]), "utf8")).toBe(corrupt);
+
+    // And it said so.
+    expect(stderrSpy.join("")).toContain("quarantined");
+  });
+});
+
+test("INV-QD-15: a transient-UNREADABLE file is never quarantined and never silently emptied", async () => {
+  await withTempStateDir(async (dir) => {
+    // A directory where the state file should be → EISDIR/EPERM on read, not ENOENT.
+    // The bytes of a real state file in this situation may be perfectly good, so the
+    // RMW must reject rather than destroy them.
+    await mkdir(getQuotaStatePath());
+
+    await expect(
+      recordWaveOutcome(KEY, { concurrency: 1, estimated_tokens: 0, outcome: "success" }, 24),
+    ).rejects.toThrow(QuotaStateUnavailableError);
+
+    // Nothing was quarantined; the path is untouched.
+    expect((await readdir(dir)).filter((f) => f.includes(".corrupt-")).length).toBe(0);
+    expect((await stat(getQuotaStatePath())).isDirectory()).toBe(true);
   });
 });

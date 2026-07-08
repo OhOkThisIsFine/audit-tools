@@ -1,6 +1,6 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
+import { writeJsonFile } from "../io/json.js";
 
 // On-disk node-claim registry (A-10). A claim is a soft lease a dispatch loop
 // takes on a node before it starts work, so two concurrent loops driving the
@@ -72,9 +72,13 @@ async function readClaimMap(registryPath: string): Promise<ClaimMap> {
   return out;
 }
 
+/**
+ * Atomic (temp + rename, via the shared `writeJsonFile`). `readClaimMap` degrades
+ * malformed content to `{}` — "no node is claimed" — so a torn registry lets two
+ * dispatch loops claim the same node. Same fail-open class as INV-QD-15.
+ */
 async function writeClaimMap(registryPath: string, claims: ClaimMap): Promise<void> {
-  await mkdir(dirname(registryPath), { recursive: true });
-  await writeFile(registryPath, `${JSON.stringify(claims, null, 2)}\n`, "utf8");
+  await writeJsonFile(registryPath, claims);
 }
 
 /**

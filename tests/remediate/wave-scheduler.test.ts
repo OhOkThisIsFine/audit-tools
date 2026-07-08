@@ -1056,60 +1056,70 @@ describe("normalizeSlotTokens", () => {
 });
 
 // ---------------------------------------------------------------------------
-// scheduleWave logs to stderr when readQuotaState throws
+// scheduleWave logs to stderr when the quota state file is unusable
+//
+// Driven by a REAL corrupt quota-state.json, not a module spy. `waveScheduling`
+// reads through `readQuotaStateOrDegrade`, whose internal `readQuotaState` call
+// no module-namespace spy can intercept — a spy here passes vacuously while the
+// failure path never executes (INV-QD-15).
 // ---------------------------------------------------------------------------
 
-describe("scheduleWave — logs to stderr when readQuotaState throws", () => {
+/** Point the quota state reader at a temp dir holding an unparseable state file. */
+async function withCorruptQuotaState<T>(fn: () => Promise<T>): Promise<T> {
+  const { setQuotaStateDir, getQuotaStatePath } = await import("audit-tools/shared");
+  const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const dir = await mkdtemp(join(tmpdir(), "wave-sched-corrupt-"));
+  setQuotaStateDir(dir);
+  // A truncated prefix — exactly what a torn read of a large state file yields.
+  await writeFile(getQuotaStatePath(), '{"version":2,"entries":{"a/b":{"buck', "utf8");
+  try {
+    return await fn();
+  } finally {
+    // Best-effort: a lock file or a late async write can still be landing in
+    // `dir` on win32 (ENOTEMPTY). Temp-dir cleanup must never become the
+    // test's verdict.
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+describe("scheduleWave — logs to stderr when the quota state file is unusable", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("writes a [waveScheduler] message to stderr and still returns a valid WaveScheduleResult", async () => {
-    // Intercept process.stderr.write to capture output
+  it("writes a diagnostic to stderr and still returns a valid WaveScheduleResult", async () => {
     const written: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(
-      (chunk: unknown, ...args: unknown[]): boolean => {
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: unknown): boolean => {
         written.push(String(chunk));
-        return original(chunk, ...(args as Parameters<typeof original>));
-      },
-    );
-
-    // Force readQuotaState to throw by pointing its state directory at a
-    // path that cannot be read (a directory used as if it were a file).
-    // We use setQuotaStateDir (re-exported from audit-tools/shared) to aim
-    // the state reader at a path that will fail with a non-ENOENT error.
-    // Simpler: supply an invalid path segment so the JSON.parse will throw
-    // inside readQuotaState — but readQuotaState handles that internally.
-    //
-    // The most reliable approach: mock the shared module's readQuotaState
-    // via vi.spyOn on the quota index re-export, which scheduleWave accesses.
-    // Because ESM live bindings make vi.spyOn on a re-export work in vitest.
-    const quotaModule = await import("../../src/remediate/quota/index.js");
-    const readQuotaStateSpy = vi
-      .spyOn(quotaModule, "readQuotaState")
-      .mockRejectedValue(new Error("simulated quota state read failure"));
+        return true;
+      });
 
     let result: WaveScheduleResult | undefined;
     try {
-      result = await scheduleWave({
-        sessionConfig: { quota: { enabled: true } },
-        itemCount: 3,
-        env: {} as any,
-      });
+      result = await withCorruptQuotaState(() =>
+        scheduleWave({
+          sessionConfig: { quota: { enabled: true } },
+          itemCount: 3,
+          env: {} as any,
+        }),
+      );
     } finally {
       stderrSpy.mockRestore();
-      readQuotaStateSpy.mockRestore();
     }
 
     // scheduleWave must not throw — it falls back gracefully
     expect(result).toBeDefined();
     expect(result!.max_concurrent).toBeGreaterThan(0);
 
-    // stderr must have received the diagnostic message
+    // The degrade must be LOUD, and must name both the caller and the cause.
     const stderrOutput = written.join("");
-    expect(stderrOutput).toContain("[waveScheduler] readQuotaState failed");
-    expect(stderrOutput).toContain("simulated quota state read failure");
+    expect(stderrOutput).toContain("waveScheduler");
+    expect(stderrOutput).toContain("not valid JSON");
   });
 });
 
@@ -1482,27 +1492,22 @@ describe("F4 fail-6 [CP-NODE-54]: critical snapshot persists cooldown_until so a
 });
 
 // ---------------------------------------------------------------------------
-// F4 fail-4 (CP-NODE-52) — readQuotaState failure degrades, never crashes.
+// F4 fail-4 (CP-NODE-52) — an unusable quota state degrades, never crashes.
 //
-// A failing readQuotaState (corrupt state, lock contention, I/O error) must NOT
-// propagate out of scheduleWave. The quota-enabled path catches the failure,
-// logs a [waveScheduler] diagnostic to stderr, and degrades to the
-// no-learned-entry default wave — non-fatal. The sibling test above pins the
-// stderr diagnostic; this one pins the NEGATIVE contract: the rejection is
-// swallowed (no throw) AND a usable WaveScheduleResult still comes back.
+// An unusable quota-state.json (corrupt / torn) must NOT propagate out of
+// scheduleWave. The quota-enabled path degrades to the no-learned-entry default
+// wave — non-fatal. The sibling test above pins the stderr diagnostic; this one
+// pins the NEGATIVE contract: no throw AND a usable WaveScheduleResult.
+//
+// Driven by a REAL corrupt file, not a namespace spy — see INV-QD-15.
 // ---------------------------------------------------------------------------
 
-describe("F4 fail-4 [CP-NODE-52]: readQuotaState failure => default wave, non-fatal (no throw)", () => {
+describe("F4 fail-4 [CP-NODE-52]: unusable quota state => default wave, non-fatal (no throw)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("readQuotaState rejecting does not throw out of scheduleWave; a valid default-wave result is returned", async () => {
-    const quotaModule = await import("../../src/remediate/quota/index.js");
-    const readQuotaStateSpy = vi
-      .spyOn(quotaModule, "readQuotaState")
-      .mockRejectedValue(new Error("simulated lock contention / read failure"));
-
+  it("a corrupt quota-state.json does not throw out of scheduleWave; a valid default-wave result is returned", async () => {
     // Silence the expected diagnostic so the test output stays clean; its
     // content is asserted by the sibling stderr test above.
     const stderrSpy = vi
@@ -1512,19 +1517,20 @@ describe("F4 fail-4 [CP-NODE-52]: readQuotaState failure => default wave, non-fa
     let result: WaveScheduleResult | undefined;
     let threw: unknown;
     try {
-      result = await scheduleWave({
-        sessionConfig: { quota: { enabled: true } },
-        itemCount: 4,
-        env: {} as any,
-      });
+      result = await withCorruptQuotaState(() =>
+        scheduleWave({
+          sessionConfig: { quota: { enabled: true } },
+          itemCount: 4,
+          env: {} as any,
+        }),
+      );
     } catch (err) {
       threw = err;
     } finally {
-      readQuotaStateSpy.mockRestore();
       stderrSpy.mockRestore();
     }
 
-    // Non-fatal: the rejection is swallowed inside scheduleWave.
+    // Non-fatal: the failure is degraded inside scheduleWave.
     expect(threw).toBeUndefined();
 
     // It degraded to the no-learned-entry default wave — a usable, valid result.

@@ -28,7 +28,7 @@ import {
   computeDispatchCapacity,
   buildProviderModelKey,
   resolveHostModel,
-  readQuotaState,
+  readQuotaStateOrDegrade,
   resolveHostActiveSubagentLimit,
   lookupDiscoveredLimits,
   mergeDiscoveredLimits,
@@ -131,7 +131,7 @@ export async function buildDispatchPool(params: {
   // per pool below.
   const quotaModelKeySegment = hostModel ?? params.hostModelId ?? null;
   const quotaProviderKey = buildProviderModelKey(quotaProviderName, quotaModelKeySegment);
-  const quotaState = await readQuotaState().catch((): { version: 2; entries: Record<string, never> } => ({ version: 2, entries: {} }));
+  const quotaState = await readQuotaStateOrDegrade("audit dispatch pool build");
   const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
     explicitLimit: hostActiveSubagentLimit,
     sessionConfig,

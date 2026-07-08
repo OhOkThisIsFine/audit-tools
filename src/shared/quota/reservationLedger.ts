@@ -1,6 +1,7 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { writeJsonFile } from "../io/json.js";
 import { withFileLock, STALE_LOCK_MS } from "./fileLock.js";
 import { getQuotaStatePath } from "./state.js";
 
@@ -117,9 +118,15 @@ async function readLedger(ledgerPath: string): Promise<LedgerMap> {
   return out;
 }
 
+/**
+ * Atomic (temp + rename, via the shared `writeJsonFile`). A truncating in-place
+ * write leaves a permanently-torn ledger behind a crash mid-write, and `readLedger`
+ * degrades malformed content to `{}` — i.e. "zero outstanding leases" — so the
+ * failure direction is over-admission. Same fail-open class as the quota-state
+ * torn read (INV-QD-15).
+ */
 async function writeLedger(ledgerPath: string, ledger: LedgerMap): Promise<void> {
-  await mkdir(dirname(ledgerPath), { recursive: true });
-  await writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`, "utf8");
+  await writeJsonFile(ledgerPath, ledger);
 }
 
 /** Sum of non-expired leases for a key. Expired leases (crashed consumers) don't count. */

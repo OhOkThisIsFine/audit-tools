@@ -3,6 +3,7 @@ export {
   resolveLimits,
   classifyProvider,
   readQuotaState,
+  readQuotaStateOrDegrade,
   writeQuotaState,
   computeMaxSafeConcurrency,
   recordWaveOutcome,

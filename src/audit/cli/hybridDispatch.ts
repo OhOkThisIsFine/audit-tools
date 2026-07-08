@@ -23,7 +23,7 @@ import {
   ClaimRegistry,
   buildSourcePools,
   buildQuotaSource,
-  readQuotaState,
+  readQuotaStateOrDegrade,
   type CapacityPool,
   type QuotaStateEntry,
   type SessionConfig,
@@ -60,12 +60,9 @@ export async function buildAuditSourcePools(
 ): Promise<CapacityPool[]> {
   const primaryProviderName =
     (sessionConfig as { provider?: string }).provider ?? "claude-code";
-  let quotaEntries: Record<string, QuotaStateEntry> = {};
-  try {
-    quotaEntries = (await readQuotaState()).entries;
-  } catch {
-    // Non-fatal: a missing/locked quota state degrades to no learned entry.
-  }
+  const quotaEntries: Record<string, QuotaStateEntry> = (
+    await readQuotaStateOrDegrade("audit source-pool build")
+  ).entries;
   const quotaSource = buildQuotaSource({
     halfLifeHours: (sessionConfig as { quota?: { empirical_half_life_hours?: number } }).quota
       ?.empirical_half_life_hours,
