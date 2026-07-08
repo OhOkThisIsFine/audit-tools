@@ -29,6 +29,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **A forward-track design memory outlived a major closure and sent a build in the wrong initial direction
+  (ambiguous-direction, 2026-07-08).** The cost↔speed dial's design (memory
+  [[host-provider-misattribution-nim-codex]] forward-track, written 2026-07-07) defined its throughput axis +
+  free-pool-max in terms of the **AIMD adaptive concurrency ceiling** — which was CLOSED and reverted the SAME
+  window ([[concurrency-is-declared-or-absent-never-learned]]). A lap that trusted the memory built a
+  declared-*rate* throughput axis (v1) before the stale-AIMD dependency was caught and the owner re-steered to
+  auto-derived concurrency. No lasting damage (caught pre-merge, λ=0 default kept it safe), but the lesson
+  generalizes [[spec-degradation-and-doc-staleness]]: **when a forward-track predates a since-landed closure,
+  re-reconcile its premises against current invariants BEFORE building, not after.** A design memory is a
+  point-in-time proposal, not a live spec — the same "spec is right, the design is wrong" rule that killed
+  C3-AIMD applies to a memory that cites a deleted mechanism.
+
+- **`doc-review-resolve.mjs` has no list/help affordance and silently accepts a garbage id (tool-should-decide,
+  2026-07-08).** `node .claude/hooks/doc-review-resolve.mjs --list` (a natural guess for "show me the open
+  items") records the literal string `--list` as a resolved id against the current findings SHA rather than
+  erroring or listing — any non-flag arg is treated as an id. Two small fixes: (1) a `--list`/`--help` flag that
+  prints the open doc-review items (the surface hook already computes them — single-source it); (2) reject an id
+  that doesn't match a known finding id instead of silently recording it. Low-severity (the stray entry is inert
+  and was scrubbed), but it's a foot-gun at exactly the moment an operator is trying to see what's open.
+
+
 - **A lap reported "merged" before its work was on remote `main` → the next lap re-did it (faithful-reporting /
   pipeline-ownership failure, 2026-07-07).** Two laps both did the A1 rename. Root cause, established from git: the
   first lap's rename commit (`7688febe`) was authored 23:24:56, committed 23:25:17, and did not land on remote `main`
@@ -283,30 +304,41 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   Relates [[quota-dispatch-vision]] / [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
   [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
 - **Cost↔speed dispatch dial + free-pool maximization (owner, 2026-07-07).** Generalizes the cost-first router
-  — which is the minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point;
-  lands ON TOP of the kept router, does not replace it. Run through the same adversarial pass as the routing
-  work before committing. Full design in [[host-provider-misattribution-nim-codex]] (forward-track section);
+  — the minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point ON TOP of
+  the kept router (does not replace it). Design of record now [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md);
   extends [[cost-first-routing-design]].
-  - **The dial (decided: cost ↔ throughput/speed, capability as a hard FLOOR).** Pool = (price $/Mtok, effective
-    Mtok/s [rate ∧ concurrency ∧ speed], capability). Capability floor = the existing `capable()` filter
-    (mechanical, per task/lens — a too-weak pool can't take a task at any price). Dial = operating point on the
-    discrete/enumerable frontier among capable pools; λ=0 = today's cheapest-fill (so the current router is the
-    corner, not a thing replaced). Set once at Gate-0 as durable POLICY; the router realizes it against the LIVE
-    frontier (drifts under AIMD/contention) — same static-policy/dynamic-execution split as B2. UI: 1D slider MVP
-    → 2D frontier plot (achievable curve, dominated region greyed) later. It's judgment/policy and low-dimensional
-    → safe to expose, and dodges the per-packet menu's context-tax + livelock the review killed.
-  - **B2 (near-term seed, the crude form of the dial):** keep the cost-first router as the default proposal
-    (liveness guaranteed for weak/headless hosts); the host reorders/excludes pools once at Gate-0 (reuse the
-    shipped interactive `provider_confirmation`), the router honors it live, falls through on a drained preferred
-    pool, and keeps `ClaimRegistry` claim-before-assign for concurrent-IDE safety.
+  - **✅ BUILT on branch `claude/start-lap-command-d1ca1a` (2026-07-08; NOT yet merged to main / released —
+    owner holding release).** 1D dial, λ ∈ [0,1], capability a hard floor. Four commits (88652854 substrate →
+    9dcf3474 Gate-0 capture → 092f729b review hardening → 3abf6f25 concurrency pivot):
+    - **Ordinal-blend admission ordering** (`admissionLoop.ts orderCandidates`): λ=0 = **byte-identical** to the
+      pre-dial cost-first sort (adversarially confirmed); λ>0 blends per-axis ORDINALS within the capable set
+      (total order, no scale-mixing). The dial reorders only — declaredCap/budget/ledger/claim gates untouched.
+    - **Throughput axis = auto-derived declared CONCURRENCY** (`throughputOf` = `declaredCap`, null ⇒ +Infinity).
+      **Superseded** the earlier "effective Mtok/s [rate∧concurrency∧speed]" sketch: that leaned on the deleted
+      AIMD ceiling AND (v1 of this build) on declared TPM/RPM, which muted the dial on the percent-metered host
+      and would have needed a manual rate declaration (owner: *a needed manual flag is a bug signal*, 2026-07-08).
+      Concurrency is already on the pool, auto, honors "concurrency is declared or absent, never learned", and
+      doesn't crown the sequential host (finite subagent limit < an uncapped parallel source).
+    - **Gate-0 capture** = `provider_confirmation` durable policy: `provider-confirmation-input/v1` gains optional
+      `dispatch_bias`; persisted on the shared confirmation (`readConfirmedDispatchBias`); both orchestrators
+      thread it to `computeDispatchAdmission`. Headless auto-completes λ=0. Default 0 everywhere ⇒ zero behavior
+      change until an operator sets it.
+  - **RESIDUAL / next:**
+    - **Fresh adversarial pass on the CONCURRENCY throughput axis.** The independent review (all 7 vectors,
+      λ=0 identity, gates, NaN) covered the *rate*-based v1; the concurrency pivot landed AFTER it. The blend/gates
+      are unchanged so the delta is small, but `throughputOf` + declaredCap now double-dutying as speed-rank AND
+      cap-gate wants its own skeptical pass before this is called done.
+    - **`/models` concurrency probe = the future AUTO refinement** (discovered, still not declared) — feeds
+      `throughputOf` a richer signal where a provider states nothing; must sanity-clamp a probed value before it
+      reaches the rank (poison→over-admit). Ties into the deferred openai-compatible `/models` probe (see W-tracks).
+    - **B2 host-reorder seed** (host reorders/excludes pools once at Gate-0) already has its substrate in the
+      shipped interactive `provider_confirmation`; the reorder wiring is separate from the λ dial and still open.
   - **Free-pool maximization (dial-independent).** Price-0 pools are first-fill at every operating point → free
-    is saturated before any paid pool, automatically — a property of the frontier, not a new mechanism (precondition:
-    each free source is registered as a price-0 pool). "Maxed" = saturated to LIVE sustainable throughput (AIMD
-    ceiling + `declaredCap` floor), NOT flooded — the incident WAS naive free-flood, so safe free-max **depends on
-    C3** (see Open bugs). Gated by the capability floor; $0 pools tie-broken by capability then speed (run in
-    parallel, each to its own ceiling). Real work = **register every free source as a pool** (NIM, opencode-free,
-    kilo, vertex-trial, multi-account) = the arbitrage-tier track [[arbitrage-dispatch-tier-design]] (Phase 0
-    zero-ban-risk free first, Phase 1 multi-account OAuth).
+    is saturated before any paid pool automatically (`costRank` already delivers it once a source is registered).
+    "Maxed" = saturated to the pool's declared sustainable ceiling (`declaredCap` + rate limits + reactive 429
+    floor), NOT flooded. **Correction:** the old note said this "depends on C3-AIMD" — C3-AIMD is CLOSED; the
+    ceiling is now `declaredCap` + reactive backoff, no learned ceiling. Real work = **register every free source
+    as a pool** = the arbitrage-tier track [[arbitrage-dispatch-tier-design]] (Phase 0 zero-ban-risk first).
   - **OPEN (owner call):** whether QUALITY also becomes tradeable vs cost (a true 2D dial, needs a per-task
     quality-worth weighting) — default recorded = 1D cost↔speed + capability floor.
 
