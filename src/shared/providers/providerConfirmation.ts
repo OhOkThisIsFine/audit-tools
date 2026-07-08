@@ -250,7 +250,7 @@ export function buildProviderConfirmationDisplay(
             .filter(Boolean)
             .join(", ") || "—";
 
-    // Local-subprocess requires explicit addition because it blocks auto-dispatch.
+    // worker-command requires explicit addition because it blocks auto-dispatch.
     const isDefault = p.name !== "worker-command";
     const defaultCol = isDefault ? "included" : "add explicitly";
     const statusNote = p.reason ? ` *(${p.reason})*` : "";
