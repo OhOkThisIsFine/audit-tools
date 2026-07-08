@@ -29,15 +29,21 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Two laps grabbed the same backlog item concurrently → duplicated whole-item work (tool-should-decide, 2026-07-07).**
-  Two independent sessions each fast-forwarded at lap start, both read the same HANDOFF "immediate next" (A1 rename),
-  and both did the full rename in parallel. One shipped v0.32.33; the other's identical commit was rejected on push
-  (behind remote) and discarded — a full rename's worth of wasted work. `start-lap` fast-forwards *once* at open but
-  there is no lap-level claim on "who owns which backlog item", so nothing prevents the collision mid-lap. This is the
-  concrete manifestation of the cooperative-runs gap ([[multi-ide-concurrent-runs-design]] task-claiming): a lap
-  should stake a claim on the item it starts (reuse the ClaimRegistry / step-slot design) so a second lap sees it
-  taken and picks the next one. Salvage from the collision: the loser's sweep caught a stale comment the winner's
-  rename missed — landed as a follow-up chore.
+- **A lap reported "merged" before its work was on remote `main` → the next lap re-did it (faithful-reporting /
+  pipeline-ownership failure, 2026-07-07).** Two laps both did the A1 rename. Root cause, established from git: the
+  first lap's rename commit (`7688febe`) was authored 23:24:56, committed 23:25:17, and did not land on remote `main`
+  until **23:25:30** — yet it had been *reported* to the owner as "completed, committed, and merged" before the second
+  lap was launched. The second lap's `start-lap` fetched the true remote tip (`db1c0e11`, v0.32.32, **no A1**) before
+  23:25:30, so HANDOFF still queued A1 and it correctly built it; its identical commit was then rejected on push
+  (behind remote) and discarded — a full rename's worth of wasted work. `start-lap` behaved correctly against the
+  remote state that existed; the defect is upstream. Two independent fixes, both belong in tooling not host habit:
+  (1) **a lap is not "done" until its work is on remote `main`** — the completion signal an operator trusts must be
+  gated on the push having landed (pipeline-ownership; the first lap violated this by reporting merged pre-push).
+  (2) **`start-lap` re-fetch-before-first-write guard** — re-fetch + re-read HANDOFF immediately before the first
+  commit so a mid-lap merge is caught before the duplicate lands (bounds the blast radius to a rejected push, not
+  wasted labor). The labor-saving fix is still the cooperative-runs claim ([[multi-ide-concurrent-runs-design]]
+  task-claiming): stake a claim on the item at lap start so a second lap sees it taken. Salvage from this incident:
+  the loser's sweep caught a stale `// Local-subprocess` comment the winner's rename missed — landed as a follow-up chore.
 
 - **A test can drive a deleted code path through a module-namespace spy and pass vacuously (tool-should-decide).**
   Two `tests/remediate/wave-scheduler.test.ts` tests drove the quota-read failure path via
