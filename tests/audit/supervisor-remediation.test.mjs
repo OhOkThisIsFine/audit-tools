@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const { buildAuditCodeHandoff, writeAuditCodeHandoffArtifacts } = await import("../../src/audit/supervisor/operatorHandoff.ts");
 const { loadRunLedger } = await import("../../src/audit/supervisor/runLedger.ts");
-const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings } = await import("../../src/audit/supervisor/sessionConfig.ts");
+const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings, persistHostProvider } = await import("../../src/audit/supervisor/sessionConfig.ts");
 
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
@@ -350,5 +350,42 @@ test("persistAnalyzerSettings throws a validation error naming the config path w
         return true;
       },
     );
+  });
+});
+
+// ── RMW lock: concurrent persists of different fields must not lose either ────
+
+test("concurrent persistHostProvider + persistAnalyzerSettings do not lose either field (lock serializes RMW)", async () => {
+  await withTempDir("audit-code-session-config-rmw-lock-", async (artifactsDir) => {
+    const configPath = getSessionConfigPath(artifactsDir);
+
+    // Two writers touch DIFFERENT fields concurrently. Without a lock around the
+    // whole read→merge→write, they can each read the same base, then last-writer-
+    // wins clobbers the other's field. With the shared file lock, the critical
+    // sections are serialized, so BOTH fields survive.
+    await Promise.all([
+      persistHostProvider(artifactsDir, "codex"),
+      persistAnalyzerSettings(artifactsDir, { semgrep: "permanent" }),
+    ]);
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted.host_provider).toBe("codex");
+    expect(persisted.analyzers).toEqual({ semgrep: "permanent" });
+  });
+});
+
+test("many concurrent persistAnalyzerSettings writers each land their own key (no lost update)", async () => {
+  await withTempDir("audit-code-session-config-rmw-lock-many-", async (artifactsDir) => {
+    const configPath = getSessionConfigPath(artifactsDir);
+    const ids = ["semgrep", "eslint", "npm_audit"];
+
+    await Promise.all(
+      ids.map((id) => persistAnalyzerSettings(artifactsDir, { [id]: "permanent" })),
+    );
+
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    for (const id of ids) {
+      expect(persisted.analyzers?.[id]).toBe("permanent");
+    }
   });
 });

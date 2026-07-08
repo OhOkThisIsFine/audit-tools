@@ -6,16 +6,75 @@ import {
   isRecord,
   readOptionalJsonFile,
   writeJsonFile,
+  withFileLock,
+  STALE_LOCK_MS,
   formatValidationIssues,
   type ValidationIssue,
 } from "audit-tools/shared";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
 
 const SESSION_CONFIG_FILENAME = "session-config.json";
+const SESSION_CONFIG_LOCK_FILENAME = "session-config.lock";
 const DEFAULT_SESSION_CONFIG: SessionConfig = {};
+
+// Acquire timeout for the shared session-config lock, DERIVED to stay safely
+// below shared fileLock's STALE_LOCK_MS (mirrors the remediate StateStore lock
+// convention) so a fresh-but-held lock times out deterministically before it
+// could be reclaimed as stale. The margin absorbs the write→acquire gap and
+// load drift.
+const LOCK_TIMEOUT_MARGIN_MS = 10_000;
+const SESSION_CONFIG_LOCK_TIMEOUT_MS = STALE_LOCK_MS - LOCK_TIMEOUT_MARGIN_MS;
 
 export function getSessionConfigPath(artifactsDir: string): string {
   return join(artifactsDir, SESSION_CONFIG_FILENAME);
+}
+
+function getSessionConfigLockPath(artifactsDir: string): string {
+  return join(artifactsDir, SESSION_CONFIG_LOCK_FILENAME);
+}
+
+/**
+ * Serialized read→merge→validate→write for `session-config.json`. The entire
+ * critical section runs inside a single held {@link withFileLock} on a sibling
+ * `session-config.lock`, so two concurrent writers can never interleave
+ * read↔write and lose the other's field (last-writer-wins lost update). The
+ * `merge` callback receives the freshly-read base record and returns the merged
+ * result to persist, or `null` to skip the write (idempotent no-op) — the
+ * skip-check therefore happens under the same lock as the read it compares
+ * against. No caller adds backoff/retry of its own; that lives solely in the
+ * shared lock.
+ */
+async function mutateSessionConfigLocked(
+  artifactsDir: string,
+  merge: (base: Record<string, unknown>) => Record<string, unknown> | null,
+): Promise<SessionConfig> {
+  const configPath = getSessionConfigPath(artifactsDir);
+  const lockPath = getSessionConfigLockPath(artifactsDir);
+  let result!: SessionConfig;
+  await withFileLock(
+    lockPath,
+    async () => {
+      const raw = (await readOptionalJsonFile<unknown>(configPath)) ?? {
+        ...DEFAULT_SESSION_CONFIG,
+      };
+      const base = isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG };
+      const merged = merge(base);
+      if (merged === null) {
+        // Idempotent no-op: nothing changed, so no write. The comparison ran
+        // against `base`, which was read inside this same held lock.
+        result = base as SessionConfig;
+        return;
+      }
+      const issues = validateSessionConfig(merged);
+      if (issues.length > 0) {
+        throw new Error(formatConfigValidationIssues(configPath, issues));
+      }
+      await writeJsonFile(configPath, merged);
+      result = merged as SessionConfig;
+    },
+    SESSION_CONFIG_LOCK_TIMEOUT_MS,
+  );
+  return result;
 }
 
 export async function readSessionConfigFile(
@@ -59,20 +118,10 @@ export async function persistAnalyzerSettings(
   artifactsDir: string,
   settings: Record<string, AnalyzerSetting>,
 ): Promise<SessionConfig> {
-  const configPath = getSessionConfigPath(artifactsDir);
-  const raw = (await readOptionalJsonFile<unknown>(configPath)) ?? {
-    ...DEFAULT_SESSION_CONFIG,
-  };
-  const base = isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG };
-  const current = isRecord(base.analyzers) ? base.analyzers : {};
-  const merged = { ...base, analyzers: { ...current, ...settings } };
-
-  const issues = validateSessionConfig(merged);
-  if (issues.length > 0) {
-    throw new Error(formatConfigValidationIssues(configPath, issues));
-  }
-  await writeJsonFile(configPath, merged);
-  return merged as SessionConfig;
+  return mutateSessionConfigLocked(artifactsDir, (base) => {
+    const current = isRecord(base.analyzers) ? base.analyzers : {};
+    return { ...base, analyzers: { ...current, ...settings } };
+  });
 }
 
 /**
@@ -86,24 +135,16 @@ export async function persistHostProvider(
   artifactsDir: string,
   hostProvider: ProviderName,
 ): Promise<SessionConfig> {
-  const configPath = getSessionConfigPath(artifactsDir);
-  const raw = (await readOptionalJsonFile<unknown>(configPath)) ?? {
-    ...DEFAULT_SESSION_CONFIG,
-  };
-  const base = isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG };
-  // Idempotent: an unchanged value is a no-op write. The host identity is stable
-  // for a run, so a bare re-invocation re-passing --host-provider must not rewrite
-  // the shared config file (needless churn + a wider lost-update window against a
-  // concurrent writer on the multi-IDE cooperative path).
-  if (base.host_provider === hostProvider) {
-    return base as SessionConfig;
-  }
-  const merged = { ...base, host_provider: hostProvider };
-
-  const issues = validateSessionConfig(merged);
-  if (issues.length > 0) {
-    throw new Error(formatConfigValidationIssues(configPath, issues));
-  }
-  await writeJsonFile(configPath, merged);
-  return merged as SessionConfig;
+  return mutateSessionConfigLocked(artifactsDir, (base) => {
+    // Idempotent: an unchanged value is a no-op write. The host identity is stable
+    // for a run, so a bare re-invocation re-passing --host-provider must not rewrite
+    // the shared config file (needless churn + a wider lost-update window against a
+    // concurrent writer on the multi-IDE cooperative path). The compare reads `base`
+    // under the same held lock as the potential write, so it cannot race a
+    // concurrent writer that flipped the value between read and write.
+    if (base.host_provider === hostProvider) {
+      return null;
+    }
+    return { ...base, host_provider: hostProvider };
+  });
 }

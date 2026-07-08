@@ -78,13 +78,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   bad config at load. Fix: route remediate's config load through the same validator (or single-source the
   field-validation into `audit-tools/shared` and call it from both). [[enforce-robustness-in-tooling-not-host-discretion]]
 
-- **Session-config RMW helpers are unlocked (B1 review finding #4, minor).** `persistHostProvider` and the
-  pre-existing `persistAnalyzerSettings` (`src/audit/supervisor/sessionConfig.ts`) do read→merge→validate→
-  `writeJsonFile` with no `withFileLock`. `writeJsonFile` is atomic per-write (no torn file), but two concurrent
-  writers can interleave read↔write → last-writer-wins lost update of the other's field. `persistHostProvider` is
-  now idempotent (skips the write when unchanged), which shrinks but doesn't close the window. Harden BOTH helpers
-  with the shared `withFileLock` on the multi-IDE cooperative path. [[multi-ide-concurrent-runs]]
-
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
   recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
   - **Convergence guard keys on the reviewer-supplied counterexample *id string*, not CE content.** Two independent
@@ -107,6 +100,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     coupling) — four such breaks were caught one-CI-cycle-at-a-time across 3 failed publishes. The implement/verify
     (or accept-node) step should run the repo-wide contract/invariant guard suite against the merged tree, not just
     node-local tests. Extends [[worktree-tests-miss-integration-guards]].
+
+- **`validate-artifact` (singular, write-time self-check) skips the cross-artifact gates `next-step` enforces →
+  authoring-agent round-trip (verified 2026-07-08).** The singular `validate-artifact --name X` command
+  (`src/remediate/index.ts` ~L322, surfaced to authoring agents via `contractPipelinePrompts.ts:489`) runs ONLY
+  the per-artifact structural `CONTRACT_PIPELINE_VALIDATORS[name]`; the positive+negative pairing / CE-006
+  negative-scoping cross-gates run only in the PLURAL `validate-artifacts` sweep and at `next-step`. So a
+  shape-valid `test_validator_plan` missing its scoped positive+negative pair self-validates "ok", then fails the
+  gate at next-step → round-trip. Fix = single-source the cross-gate set and run it from the singular command too
+  (load on-disk sibling CP artifacts, substitute the in-flight payload, absent-input-tolerant so a partial
+  pipeline never false-fails). **DESIGN QUESTION before shipping:** making a single-artifact self-check load
+  on-disk siblings + run cross-gates changes its nature — confirm that's intended (vs a lighter shape-only
+  check). This is a contract-pipeline (loop-core) change → route through the adversarial pipeline, not a lone
+  autonomous agent. Extends the CP-NODE contract-validation work.
 
 - **NIM/Codex dispatch fix set — from a real run + adversarial review (2026-07-07).** `audit-code` in a Codex
   host against an external repo, NIM (openai-compatible) backend, Claude quota exhausted → a 13-issue cascade.
