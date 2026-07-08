@@ -8,21 +8,28 @@
 
 ## Live state
 
-- **v0.32.38 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
+- **v0.32.39 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
   roadmap only.
-- **Context-efficiency access-memory track — increment 1 of N SHIPPED (v0.32.38, 2026-07-08).** The
-  piggybacked **prefix-ordering fix (#4)**: `buildPacketPrompt` (`src/audit/cli/dispatch/packetPrompt.ts`)
-  now leads with the static `## Output` schema block as a cache-eligible fixed prefix and trails ALL
-  per-packet volatile content (`## Packet`/`## Files`/graph/large-file/`## Tasks`/`## Final response`, and
-  the two `result_path`/`packet_id` interpolations that had lived in the Output block). This makes the
-  cross-cutting cache-safety guard (`docs/backlog.md` context-efficiency track) real; a tool-enforced
-  regression test pins the ordering + prefix-purity invariant. **Immediate next = the access-memory
-  spine**: declare the `access_memory.json` DAG artifact + the deterministic harvest executor over
-  `AuditResult.file_coverage[]` / `RemediationBlock.touched_files`, then JIT personalized-PageRank
-  continuity scoring feeding packet-selection bias (design-of-record [[access-memory-layer-design]],
-  detail `docs/backlog.md:406`). Loop-core → full adversarial pipeline; build item #3 (token-efficiency
-  eval harness) alongside as the measurement gate.
+- **Context-efficiency access-memory track — increments 1 + 2a SHIPPED; scoring/bias are next.**
+  - **Increment 1 (v0.32.38): piggybacked prefix-ordering fix (#4)** — `buildPacketPrompt`
+    (`src/audit/cli/dispatch/packetPrompt.ts`) leads with the static `## Output` schema as a cache-eligible
+    fixed prefix, trails all per-packet volatile content; tool-enforced regression guard. Made the
+    cross-cutting cache-safety guard real.
+  - **Increment 2a (v0.32.39): the persistence spine** — `access_memory.json`, a first-class per-run audit
+    artifact harvested (deterministically, path-sorted, step-ordinal recency) from the ingested result
+    ledger in `runResultIngestionExecutor`. Shared type in `audit-tools/shared`; pure `deriveAccessMemory`
+    (`src/audit/orchestrator/accessMemory.ts`); DAG edge `access_memory.json → audit_results.jsonl`;
+    `run_id` stripped from the semantic hash. Independently adversarially reviewed (no defect). Nothing
+    consumes it yet.
+  - **Immediate next = increment 2b: JIT continuity scoring + packet-selection bias.** A pure dispatch-time
+    scorer reading `bundle.access_memory` + `graph_bundle` → deterministic personalized PageRank (recency×
+    frequency seed, `edited`>`covered`, power-iteration to a FIXED count, α~0.85) → bias
+    `orderTasksForPacketReview`/`buildReviewPacketsFromPartition` selection (`src/audit/cli/dispatch.ts:261-329`),
+    strictly in the back payload (never the cached prefix). Then **2c** remediate-parity harvest
+    (`RemediationBlock.touched_files` → `edited_count`), **2d** `path::symbol` slicing (#2), and **#3** the
+    token-efficiency eval harness alongside as the measurement gate. Design-of-record
+    [[access-memory-layer-design]]; track detail `docs/backlog.md:406`. Loop-core → full adversarial pipeline.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,
   released v0.32.36).** ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1
   (a-priori declared per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification:
