@@ -8,7 +8,11 @@
 
 ## Live state
 
-- **v0.32.30 published on npm as `latest`.** Latest lap shipped quota-state durability (INV-QD-15) and the
+- **v0.32.32 published on npm as `latest`.** Latest lap shipped **C1 real source-pool budget** (legacy
+  `openai_compatible` block gains a `quota` that converges onto the source pool, off the default floor; shared-consumer
+  robustness — `resolveContextBudget` floors at 0, discovered rung drops an inverted `output ≥ context`; operator quota
+  validated) — see the C1 bullet below. Prior (v0.32.31): bug (4) `selectProvider` reads the live quota entry. Prior
+  (v0.32.30): quota-state durability (INV-QD-15) and the
   **deletion of the concurrency bucket learner** (−862 LOC), which unmasked and fixed INV-QD-16 (a concurrent
   `success` must not cancel a live cooldown) — see the quota bullet below. Prior (v0.32.29): B1 host-identity
   sourcing. Prior (v0.32.28): the NIM/Codex dispatch-fix lean tranche. Prior (v0.32.27): the "everything code-fixable" backlog sweep landed (11 nodes) **plus
