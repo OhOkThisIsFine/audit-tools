@@ -95,6 +95,44 @@ test("buildAuditCodeHandoff quotes suggested command paths and falls back to wor
   expect(handoff.interactive_provider_hint ?? "").toMatch(/For automatic LLM review, configure an interactive provider/i);
 });
 
+// operatorHandoff's suggested/quick_start commands now render via the shared
+// renderPromptCommand (audit-tools/shared) instead of a local hand-rolled
+// quoteShellPath/renderShellCommand pair that only escaped whitespace/quotes.
+// An artifacts dir containing a shell metacharacter must come out quoted, not
+// passed through raw.
+test("buildAuditCodeHandoff quotes suggested/quick_start commands for artifact paths containing shell metacharacters", () => {
+  // A literal (not path.join-built) absolute Windows-style path so the
+  // renderPromptCommand path-token normalization is deterministic across
+  // whatever OS runs this suite (it is plain string manipulation, not a real
+  // filesystem path).
+  const artifactsDir = "C:\\repo\\tmp\\audit & artifacts";
+  const handoff = buildAuditCodeHandoff({
+    root: "repo-root",
+    artifactsDir,
+    state: {
+      status: "blocked",
+      obligations: [{ id: "audit_tasks_completed", state: "blocked" }],
+    },
+    bundle: {},
+    progressSummary: "manual review required",
+    activeReviewRun: {
+      run_id: "run-9",
+      task_path: join(artifactsDir, "runs", "run-9", "task.json"),
+      prompt_path: join(artifactsDir, "runs", "run-9", "prompt.md"),
+      audit_results_path: join(artifactsDir, "runs", "run-9", "run-results.json"),
+      worker_command: ["node", "dist/index.js", "worker-run"],
+    },
+  });
+
+  expect(handoff.suggested_commands.length).toBe(1);
+  expect(handoff.suggested_commands[0]).toContain(
+    `"${artifactsDir.replace(/\\/g, "/")}"`,
+  );
+  expect(handoff.quick_start ?? "").toContain(
+    `"${artifactsDir.replace(/\\/g, "/")}"`,
+  );
+});
+
 test("writeAuditCodeHandoffArtifacts wraps filesystem failures with handoff context", async () => {
   await withTempDir("audit-code-handoff-write-", async (artifactsDir) => {
     const incomingPath = join(artifactsDir, "incoming");

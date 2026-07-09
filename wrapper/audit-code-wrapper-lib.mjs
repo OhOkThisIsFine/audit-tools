@@ -64,14 +64,37 @@ function selfInvocationEnv() {
   };
 }
 
+// Byte-mirrors `quoteForCmd` in src/shared/tooling/exec.ts (see that file's
+// doc comment for the full CVE-2024-27980 rationale: cmd.exe's own line-scan
+// recognizes `& | < > ^` even inside a double-quoted region, so quote-doubling
+// alone is not enough for the `.cmd`/`.bat` shim-wrapping path below; `%`
+// cannot be neutralized this way at all, so it throws instead). This copy
+// exists only because the wrapper runs pre-dist (bootstrap constraint) and
+// cannot import the shared TS source — pinned byte-equal to the shared
+// implementation by tests/shared/wrapper-quote-parity.test.mjs so the two
+// copies cannot drift.
+const CMD_ARGV_METACHARS = /[&|<>^]/u;
+
 function quoteForCmd(arg) {
   if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
+  if (arg.includes('%')) {
+    throw new Error(
+      `quoteForCmd: refusing to quote an argument containing "%" for a ` +
+        `.cmd/.bat shim invocation through cmd.exe — cmd.exe's ` +
+        `percent-expansion cannot be reliably neutralized by caret-escaping ` +
+        `(see CVE-2024-27980 and its documented residual gap). Argument: ` +
+        `${JSON.stringify(arg)}`,
+    );
+  }
+  const needsQuoting = /[\s"]/u.test(arg);
+  const needsMetaEscape = CMD_ARGV_METACHARS.test(arg);
+  if (!needsQuoting && !needsMetaEscape) return arg;
+  const quoted = needsQuoting ? `"${arg.replace(/"/g, '""')}"` : arg;
+  return needsMetaEscape ? quoted.replace(/([&|<>^])/g, '^$1') : quoted;
 }
 
-function resolveSpawn(command, args) {
-  if (!(process.platform === 'win32' && /\.(cmd|bat)$/i.test(command))) {
+function resolveSpawn(command, args, platform = process.platform) {
+  if (!(platform === 'win32' && /\.(cmd|bat)$/i.test(command))) {
     return { command, args };
   }
 
@@ -80,6 +103,11 @@ function resolveSpawn(command, args) {
     args: ['/d', '/s', '/c', [command, ...args].map(quoteForCmd).join(' ')],
   };
 }
+
+// Exported for tests/shared/wrapper-quote-parity.test.mjs only (behavioral
+// drift guard against src/shared/tooling/exec.ts) — not part of the wrapper's
+// CLI surface.
+export { quoteForCmd, resolveSpawn };
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, rejectPromise) => {

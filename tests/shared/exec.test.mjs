@@ -1,5 +1,6 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
+import { CMD_METACHAR_CASES, CMD_PERCENT_CASES } from "./fixtures/cmd-metachar-cases.mjs";
 
 const {
   resolveExecArgv,
@@ -30,6 +31,22 @@ test("quoteForCmd quotes whitespace and escapes quotes", () => {
   expect(quoteForCmd('a"b')).toBe('"a""b"');
 });
 
+// ── CVE-2024-27980-class hardening: cmd.exe metacharacters must not survive
+// unescaped into the `.cmd`/`.bat` shim-wrapping path (`wrapForWindowsBatch`).
+// Table-driven; the nasty-arg set is single-sourced (fixtures/cmd-metachar-cases.mjs)
+// so tests/shared/wrapper-quote-parity.test.mjs exercises the identical table.
+test("quoteForCmd caret-escapes cmd.exe line-scan metacharacters (& | < > ^)", () => {
+  for (const { arg, expected } of CMD_METACHAR_CASES) {
+    expect(quoteForCmd(arg), `quoteForCmd(${JSON.stringify(arg)})`).toBe(expected);
+  }
+});
+
+test("quoteForCmd refuses to quote an argument containing % (unsolvable percent-expansion)", () => {
+  for (const arg of CMD_PERCENT_CASES) {
+    assert.throws(() => quoteForCmd(arg), /refusing to quote.*"%"/i);
+  }
+});
+
 test("shellQuote uses cmd.exe quoting on win32 and POSIX quoting elsewhere", () => {
   expect(shellQuote("plain", "win32")).toBe("plain");
   expect(shellQuote("a b", "win32")).toBe('"a b"');
@@ -44,6 +61,30 @@ test("renderPromptCommand normalizes only path-like Windows command tokens", () 
   expect(renderPromptCommand(["node", "C:\\Path With Spaces\\tool.mjs", "--flag", 'a"b'])).toBe('node "C:/Path With Spaces/tool.mjs" --flag "a\\"b"');
   expect(toPromptPathToken(String.raw`^\d+\w+$`)).toBe(String.raw`^\d+\w+$`);
   expect(renderPromptCommand(["node", String.raw`if (x) console.log("\n")`])).toBe(String.raw`node "if (x) console.log(\"\n\")"`);
+});
+
+// ── hardening: quotePromptCommandArg/renderPromptCommand must quote any
+// shell-sensitive char (not just whitespace/quote) since the rendered string
+// is read by posix sh, PowerShell, and cmd.exe alike, and none of them treat
+// `&`, `%`, `|`, etc. as ordinary text outside quotes.
+test("renderPromptCommand quotes tokens containing shell metacharacters even without whitespace", () => {
+  expect(renderPromptCommand(["echo", "a&b"])).toBe('echo "a&b"');
+  expect(renderPromptCommand(["echo", "%PATH%"])).toBe('echo "%PATH%"');
+  expect(renderPromptCommand(["echo", "a|b"])).toBe('echo "a|b"');
+  expect(renderPromptCommand(["echo", "a;b"])).toBe('echo "a;b"');
+  // Plain path-safe tokens (letters/digits/-_./:\\=@,+) stay unquoted.
+  expect(renderPromptCommand(["node", "--artifacts-dir", "C:/repo/.audit-tools/audit"])).toBe(
+    "node --artifacts-dir C:/repo/.audit-tools/audit",
+  );
+});
+
+test("renderPromptCommand hardening: paths with spaces and metacharacters render as one safely-quoted token", () => {
+  expect(renderPromptCommand(["node", "C:\\Path With Spaces & Stuff\\tool.mjs"])).toBe(
+    'node "C:/Path With Spaces & Stuff/tool.mjs"',
+  );
+  expect(renderPromptCommand(["audit-code", "advance-audit", "--results", "C:\\repo\\audit results 100%.json"])).toBe(
+    'audit-code advance-audit --results "C:/repo/audit results 100%.json"',
+  );
 });
 
 test("coerceJsonObjectArg accepts object or JSON object string and rejects arrays", () => {

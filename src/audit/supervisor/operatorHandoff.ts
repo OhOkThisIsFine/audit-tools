@@ -1,6 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { writeJsonFile, frictionCapturePath } from "audit-tools/shared";
+import {
+  writeJsonFile,
+  frictionCapturePath,
+  renderPromptCommand,
+} from "audit-tools/shared";
 import { type ArtifactBundle, AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type {
   AuditState,
@@ -90,16 +94,6 @@ const INTERACTIVE_PROVIDER_OPTIONS: readonly ProviderName[] = [
   "vscode-task",
   "antigravity",
 ];
-
-function quoteShellPath(filePath: string): string {
-  // The handoff renders a single shell argument, so the snippet only needs
-  // double-quote wrapping plus escaping embedded double quotes.
-  return `"${filePath.replace(/"/g, '\\"')}"`;
-}
-
-function renderShellCommand(argv: string[]): string {
-  return argv.map((item) => quoteShellPath(item)).join(" ");
-}
 
 function buildPendingObligations(state: AuditState): string[] {
   return state.obligations
@@ -192,7 +186,7 @@ function buildSuggestedCommands(
 
   if (activeReviewRun) {
     return [
-      renderShellCommand([
+      renderPromptCommand([
         "audit-code",
         "next-step",
         "--artifacts-dir",
@@ -201,9 +195,13 @@ function buildSuggestedCommands(
     ];
   }
 
-  return suggestedInputs.map(
-    (item) =>
-      `audit-code advance-audit ${item.flag} ${quoteShellPath(item.suggested_path)}`,
+  return suggestedInputs.map((item) =>
+    renderPromptCommand([
+      "audit-code",
+      "advance-audit",
+      item.flag,
+      item.suggested_path,
+    ]),
   );
 }
 
@@ -411,7 +409,7 @@ export function buildAuditCodeHandoff(params: {
 
   // Add quick_start command and file map when blocked for review
   if (params.state.status === BLOCKED_STATUS && params.activeReviewRun) {
-    handoff.quick_start = renderShellCommand([
+    handoff.quick_start = renderPromptCommand([
       "audit-code",
       "next-step",
       "--artifacts-dir",

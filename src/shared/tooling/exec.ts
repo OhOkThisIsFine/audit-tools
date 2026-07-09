@@ -42,8 +42,19 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
 //
 //   • `quoteForCmd`          — for `wrapForWindowsBatch`: each argv token is
 //     embedded into the single-string argument passed to `cmd.exe /d /s /c`.
-//     In this context cmd.exe's own *argv parser* processes the resulting
-//     quoted string, so doubling double-quotes (`"` → `""`) is correct.
+//     This doc used to claim cmd.exe's own *argv parser* alone processed the
+//     resulting quoted string, so quote-doubling (`"` → `""`) was "enough".
+//     That claim was the exact premise behind CVE-2024-27980 (Node.js
+//     improper neutralization of argv when spawning a `.bat`/`.cmd` on
+//     Windows): CreateProcess can't launch a batch file directly, so Windows
+//     routes it through `cmd.exe`, and cmd.exe scans the *entire* `/c` line
+//     for its own metacharacters (`& | < > ^`) as a command-line
+//     interpreter — a scan that runs *before* any argv-parser and is NOT
+//     blocked by a token's surrounding double quotes. So both layers apply:
+//     quote-doubling for the eventual argv split the child sees, *and*
+//     caret-escaping the metacharacters so cmd.exe's own line scan can't
+//     reinterpret them as `&&`/`|`/redirection/etc. `%` is a separate,
+//     effectively unsolved case — see the function doc.
 //     Use this when constructing the argv array for `wrapForWindowsBatch`.
 //
 //   • `quoteForShellInterpreterCmd` — for the opencode launcher
@@ -52,19 +63,49 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
 //     In this context the cmd.exe *command interpreter* sees metacharacters
 //     (`^&|<>%"`) before any argv parser, so caret-escaping them is the correct
 //     strategy.  Use this when building the inline string argument for any
-//     `cmd.exe /c "<full-command-string>"`.
+//     `cmd.exe /c "<full-command-string>"`. Verified while hardening
+//     `quoteForCmd` above: this helper already wraps-then-caret-escapes
+//     `" ^ & | < > %` together (including `%`), which is the standard
+//     shell-interpreter-string mitigation — it is a different threat model
+//     from `quoteForCmd`'s argv-emulation path (the caller here already wants
+//     full shell semantics for the rendered string), so it needed no change.
 //
 // Do NOT mix them up: `quoteForShellInterpreterCmd` is not a substitute for
 // `quoteForCmd` in the batch-wrapping path, and vice versa.
+
+// cmd.exe metacharacters that its own line-scan (not the eventual child's
+// argv parser) recognizes even inside a double-quoted region, for the
+// `quoteForCmd` / `wrapForWindowsBatch` argv-emulation context. `%` is
+// deliberately excluded — see `quoteForCmd`'s doc for why it is rejected
+// instead of escaped.
+const CMD_ARGV_METACHARS = /[&|<>^]/u;
 
 /**
  * Quote a single argv token for embedding into the `cmd.exe /d /s /c "..."`
  * command line used by `wrapForWindowsBatch`.
  *
- * In this context cmd.exe's own argv parser processes the resulting quoted
- * string, which treats doubled double-quotes as a literal `"` — so the
- * correct strategy is to wrap the token in double-quotes and replace every
- * internal `"` with `""`.
+ * Two layers of neutralization apply — both are required; this is the
+ * CVE-2024-27980 lesson (see the block comment above):
+ *
+ *  1. **argv-parser layer**: wrap the token in double-quotes and double any
+ *     embedded `"` — this is what makes the eventual `.cmd`/`.bat` process
+ *     see the intended single argv value (doubled double-quotes are a
+ *     literal `"` under that parser's rules).
+ *  2. **cmd.exe line-scan layer**: caret-escape `& | < > ^` wherever they
+ *     appear (even inside the double-quoted region from step 1) — cmd.exe
+ *     applies its own metacharacter scan to the *entire* `/d /s /c` line
+ *     before the argv-parser layer ever runs, and quotes do not block that
+ *     scan (the root cause of CVE-2024-27980).
+ *
+ * `%` cannot be neutralized this way: cmd.exe's percent-expansion of
+ * `%VAR%` runs at yet another stage that caret-escaping does not reliably
+ * suppress across cmd.exe's quirky invocation-shape-dependent rules (a
+ * documented residual gap in Node core's own upstream fix for the same CVE
+ * class). Rather than emit an escape that looks safe but can still be
+ * defeated, this throws a clear error for any argument containing `%`
+ * destined for a `.cmd`/`.bat` shim — callers must avoid routing a raw `%`
+ * through this path (e.g. resolve/expand it before calling, or avoid the
+ * shim).
  *
  * **Do not use this for shell-interpreter command strings.**  For that context
  * (where the entire command is a shell string interpreted by cmd.exe before any
@@ -72,8 +113,20 @@ const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
  */
 export function quoteForCmd(arg: string): string {
   if (arg.length === 0) return '""';
-  if (!/[\s"]/u.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '""')}"`;
+  if (arg.includes("%")) {
+    throw new Error(
+      `quoteForCmd: refusing to quote an argument containing "%" for a ` +
+        `.cmd/.bat shim invocation through cmd.exe — cmd.exe's ` +
+        `percent-expansion cannot be reliably neutralized by caret-escaping ` +
+        `(see CVE-2024-27980 and its documented residual gap). Argument: ` +
+        `${JSON.stringify(arg)}`,
+    );
+  }
+  const needsQuoting = /[\s"]/u.test(arg);
+  const needsMetaEscape = CMD_ARGV_METACHARS.test(arg);
+  if (!needsQuoting && !needsMetaEscape) return arg;
+  const quoted = needsQuoting ? `"${arg.replace(/"/g, '""')}"` : arg;
+  return needsMetaEscape ? quoted.replace(/([&|<>^])/g, "^$1") : quoted;
 }
 
 /**
@@ -103,12 +156,41 @@ export function toPromptPathToken(value: string): string {
   return isPromptPathToken(value) ? value.replace(/\\/g, "/") : value;
 }
 
+// Tokens matching this charset need no quoting in any of the three dialects
+// `renderPromptCommand` targets (posix sh, PowerShell, cmd.exe). Anything
+// outside it — spaces, quotes, and shell metacharacters such as `& | < > ^ %
+// ; $ ( ) { } * ? ! ~` — is quoted rather than special-cased per dialect: a
+// host-facing rendered command string has no single "current shell" to tailor
+// escaping to, so the conservative allowlist-then-quote approach is the one
+// that can't silently miss a metacharacter for whichever reader executes it.
+const PROMPT_COMMAND_SAFE_CHARS = /^[A-Za-z0-9_\-./:\\=@,+]*$/u;
+
+/**
+ * Quote a single argv token for a *rendered command line* that this tool
+ * hands a host agent to run verbatim — the host may paste it into posix sh,
+ * PowerShell, or cmd.exe, and this function does not know which. Double
+ * quotes protect a token containing a space or shell metacharacter in all
+ * three dialects, provided embedded double quotes are escaped, so: quote
+ * whenever any character falls outside `PROMPT_COMMAND_SAFE_CHARS`, escaping
+ * embedded `"` as `\"`.
+ *
+ * Target: safe to paste into posix sh, PowerShell, and cmd.
+ */
 export function quotePromptCommandArg(value: string): string {
-  return /[\s"]/u.test(value)
-    ? `"${value.replace(/"/g, '\\"')}"`
-    : value;
+  return PROMPT_COMMAND_SAFE_CHARS.test(value)
+    ? value
+    : `"${value.replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * Render an argv array into a single command-line string safe to paste into
+ * posix sh, PowerShell, or cmd.exe — for step prompts and `allowed_commands`
+ * a host agent is told to run verbatim, never for actually spawning a
+ * process (that path is `runTracked`/`resolveExecArgv`, argv-only).
+ * Normalizes path-like Windows tokens to forward slashes first
+ * (`toPromptPathToken`) since `\` is an escape character in some of those
+ * dialects, then quotes each token per `quotePromptCommandArg`.
+ */
 export function renderPromptCommand(argv: readonly string[]): string {
   return argv.map((item) => quotePromptCommandArg(toPromptPathToken(item))).join(" ");
 }
