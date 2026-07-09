@@ -29,6 +29,28 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Lap friction walk — backlog-clearance lap (2026-07-09).** Subagent-driven lap: parallel read-only recon →
+  I own loop-core impl + review, delegate mechanical impl to subagents, an independent adversarial subagent per
+  loop-core change. Shipped INV-WH fix, the loop-core guard + gate, the D-68 fold; assessed D-69; handed off D-66/67.
+  - **(ambiguous-direction) Owner-chosen option premises + backlog framings got falsified by measurement/recon
+    mid-build — recurring pattern.** The guard's owner-picked "mechanical exclude-heavy, per-node" premise assumed
+    the exclude-heavy complement is FAST; measurement showed 92s → impractical per-node, so I loop-core-gated it
+    (surfaced the deviation). D-69's "build tool-enforcement" framing was mostly-already-shipped (friction 3-layer +
+    D-68). D-66/67's "unify the lifecycle" framing was OVERTURNED by recon (full unification is the WRONG endpoint —
+    genuine divergence). Same lesson as the recurring [[spec-degradation-and-doc-staleness]] entries below: a backlog
+    item / a chosen option / a design memory is a point-in-time PROPOSAL; verify its premises against current code AND
+    a real measurement BEFORE committing to the literal instruction. Not yet tool-enforceable; a review-before-build
+    discipline.
+  - **(tool-should-decide) The pre-commit gate silently failed OPEN in every linked worktree.** The staged-snapshot
+    materialization put its scratch index under `join(root,'.git',…)`, but in a LINKED worktree `.git` is a FILE, so
+    every git-with-scratch-index call failed → the ENTIRE gate (typecheck, doc-contract, and the new loop-core check)
+    no-op'd fail-open on any divergent commit. A gate that silently no-ops is worse than no gate (false assurance).
+    FIXED this lap (scratch index → os.tmpdir()). Durable lesson: a tool that fail-opens on infra fault must make the
+    no-op OBSERVABLE, not silent — consider a one-line stderr when the staged-snapshot path bails.
+  - **(inefficient-feeding) None material.** Recon routed through parallel read-only Explore/general subagents
+    returning conclusions + file:line refs; main context received specs + diffs to review, not file dumps. One
+    deliberate full-region read (the `nextStep.ts` fork) for a delicate hand edit. No god-file re-read loop.
+
 - **Lap friction walk — backlog-orchestration lap (2026-07-08).** Orchestrated lap: parallel read-only recon
   agents → serial implement-agent-per-item with adversarial review before each commit. Shipped six backlog code
   items (wrapper passthrough D-61, vi.spyOn barrel guard INV-12, accept-node stray-worktree guard, convergence
