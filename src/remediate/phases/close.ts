@@ -479,15 +479,15 @@ const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
  * RUN-START-DIRTY GUARD on source (2) ONLY: declared surfaces are plan-time
  * DECLARATIONS (write-access grants) / audit evidence — never verified against
  * an actual diff. A declared file that was ALREADY dirty when the run started
- * (`state.run_start_dirty`, captured in `runPlanPhase` before any remediation
- * edit exists) cannot be the run's edit, so it is excluded here — otherwise a
- * resolved item declaring a file the run never actually touched would sweep
- * pre-existing user WIP into the closing commit (the exact over-inclusion class
- * this manifest exists to close). Ground-truth entries from source (1) are
- * NEVER excluded by the snapshot: git proved the run landed those paths, and a
- * tool-merged edit to a file the user ALSO had dirty at run start is a path the
- * tool legitimately owns. A state without `run_start_dirty` (pre-field, or a
- * plan flow that bypasses `runPlanPhase`) means no exclusions.
+ * (`state.run_start_dirty`, captured at the extracted-plan join site before any
+ * remediation edit exists) cannot be the run's edit, so it is excluded here —
+ * otherwise a resolved item declaring a file the run never actually touched
+ * would sweep pre-existing user WIP into the closing commit (the exact
+ * over-inclusion class this manifest exists to close). Ground-truth entries
+ * from source (1) are NEVER excluded by the snapshot: git proved the run
+ * landed those paths, and a tool-merged edit to a file the user ALSO had dirty
+ * at run start is a path the tool legitimately owns. A state without
+ * `run_start_dirty` (pre-field) means no exclusions.
  *
  * Both sources empty is legitimate (e.g. a run that only produced
  * `resolved_no_change` / skipped items) and correctly yields an empty

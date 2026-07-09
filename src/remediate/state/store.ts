@@ -79,9 +79,9 @@ export interface RemediationState {
   /**
    * Repo-relative paths that were ALREADY dirty (changed vs HEAD, or untracked)
    * when this run's plan was created — captured once via `stagedAndUntracked`
-   * in `runPlanPhase` (src/remediate/phases/plan.ts), path-sorted, and never
-   * re-captured on a replan (re-capturing after edits landed would wrongly
-   * classify the run's own hand-applied work as pre-existing dirt).
+   * at the extracted-plan join site (src/remediate/steps/nextStep.ts), path-sorted,
+   * and never re-captured on a replan (re-capturing after edits landed would
+   * wrongly classify the run's own hand-applied work as pre-existing dirt).
    *
    * Consumed by the close phase's `resolveEditSurfaceManifest`: a file that was
    * dirty BEFORE the run started cannot be one of the run's edits, so it is
@@ -91,9 +91,8 @@ export interface RemediationState {
    * (`applied_edit_surface`, from actual worktree cherry-picks) are NEVER
    * excluded by this snapshot — git already proved the run landed those paths.
    *
-   * Absent on states created before this field existed (or on plan flows that
-   * don't pass through `runPlanPhase`): treated as empty — no exclusions,
-   * preserving prior behavior for in-flight runs.
+   * Absent on states created before this field existed: treated as empty — no
+   * exclusions, preserving prior behavior for in-flight runs.
    */
   run_start_dirty?: string[];
 }

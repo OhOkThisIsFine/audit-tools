@@ -25,7 +25,6 @@ import {
   mergeBlocksSharingFiles,
   splitBlocksByContextBudget,
   buildCoverageLedger,
-  pruneBlocksForKeptFindings,
 } from "../../src/remediate/phases/plan.js";
 import { collectStagingFiles, executeClosingAction, runClosePhase, buildRemediationOutcomesReport } from "../../src/remediate/phases/close.js";
 import { groundExtractedFindings, groundAffectedFiles, evidenceCitesRealPath } from "../../src/remediate/phases/grounding.js";
@@ -740,72 +739,6 @@ describe("runClosePhase — INV-remediate-phases-10: ClosingResult always has co
       await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
     );
     expect(outcomes.contract_version).toBe("remediate-code-outcomes/v1alpha1");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// INV-remediate-phases-11: pruneBlocksForKeptFindings — DRY helper correctness
-// (MNT-d1be3b44-2: the three formerly-duplicated block pruning patterns are
-//  now a single helper; this test is the regression guard.)
-// ---------------------------------------------------------------------------
-
-describe("pruneBlocksForKeptFindings — INV-remediate-phases-11: pruning helper contract", () => {
-  function mkFinding(id: string) {
-    return {
-      id,
-      title: id,
-      category: "General",
-      severity: "low" as const,
-      confidence: "low" as const,
-      lens: "correctness",
-      summary: id,
-      affected_files: [],
-      evidence: ["e"],
-    };
-  }
-
-  it("removes dropped finding ids from block items and drops empty blocks", () => {
-    const blocks = [
-      { block_id: "B1", items: ["F1", "F2"], parallel_safe: true },
-      { block_id: "B2", items: ["F3"], parallel_safe: true },
-    ];
-    const keptFindings = [mkFinding("F1")]; // F2 and F3 dropped
-    const result = pruneBlocksForKeptFindings(blocks as any, keptFindings as any);
-    // B1 keeps only F1; B2 is dropped entirely (F3 gone)
-    expect(result).toHaveLength(1);
-    expect(result[0].block_id).toBe("B1");
-    expect(result[0].items).toEqual(["F1"]);
-  });
-
-  it("keeps all blocks when every finding is in kept set", () => {
-    const blocks = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true },
-      { block_id: "B2", items: ["F2"], parallel_safe: true },
-    ];
-    const keptFindings = [mkFinding("F1"), mkFinding("F2")];
-    const result = pruneBlocksForKeptFindings(blocks as any, keptFindings as any);
-    expect(result).toHaveLength(2);
-    expect(result.map((b) => b.block_id).sort()).toEqual(["B1", "B2"]);
-  });
-
-  it("returns empty array when all blocks become empty after pruning", () => {
-    const blocks = [
-      { block_id: "B1", items: ["F1", "F2"], parallel_safe: true },
-    ];
-    const keptFindings: ReturnType<typeof mkFinding>[] = []; // nothing kept
-    const result = pruneBlocksForKeptFindings(blocks as any, keptFindings as any);
-    expect(result).toHaveLength(0);
-  });
-
-  it("handles blocks with undefined items without throwing", () => {
-    const blocks = [
-      { block_id: "B1", items: undefined as any, parallel_safe: true },
-    ];
-    const keptFindings = [mkFinding("F1")];
-    // Must not throw — items treated as empty
-    expect(() => pruneBlocksForKeptFindings(blocks as any, keptFindings as any)).not.toThrow();
-    const result = pruneBlocksForKeptFindings(blocks as any, keptFindings as any);
-    expect(result).toHaveLength(0);
   });
 });
 

@@ -2363,8 +2363,7 @@ async function handlePendingExtractedPlan(
     // Run-start dirty snapshot for the V2 staging manifest, capture-once: the
     // extracted-plan join runs at plan time (before any remediation edit), so
     // the dirty set here is pre-existing user dirt — the close phase excludes
-    // it from DECLARED-surface staging. runPlanPhase captures the same field on
-    // the structured-audit path; whichever join runs first wins.
+    // it from DECLARED-surface staging.
     if (!existing.run_start_dirty) {
       existing = {
         ...existing,

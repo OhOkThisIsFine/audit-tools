@@ -803,7 +803,7 @@ describe("runClosePhase", () => {
 
       const state = makeState({
         closing_plan: { action: "commit", pre_authorized: true },
-        // Captured at plan time (runPlanPhase), before any remediation edit.
+        // Captured at plan-join time (handlePendingExtractedPlan), before any remediation edit.
         run_start_dirty: ["pre-existing-wip.ts"],
         items: {
           F1: {
