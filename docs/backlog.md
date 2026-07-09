@@ -29,6 +29,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **`verify:release`'s packaged smoke leaves `audit-tools-<ver>.tgz` at repo root → blocks the next
+  `release:*:publish` on its own clean-tree guard (2026-07-09).** The smoke packs the tarball into the
+  repo root and doesn't clean it up; `ensureCleanWorktree` then refuses the release until it's
+  hand-deleted — the pipeline fighting itself (bit the v0.32.46 ship, one aborted attempt). Fix in
+  tooling: pack to a temp/scratch dir, or delete the tarball on smoke success, or teach the clean-tree
+  guard to ignore the tool's own `audit-tools-*.tgz` build artifact.
+
 - **`release-and-publish.mjs` aborts a HEALTHY release on a single transient `gh api` fault during the CI wait
   (2026-07-09).** During the v0.32.44 ship, `waitForRunCompletion` (the await-CI-completion poll) threw on ONE
   `gh api ... Bad credentials (HTTP 401)` (a transient token blip ~490s into the wait) and crashed the script —
