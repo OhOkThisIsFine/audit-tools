@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative, dirname, isAbsolute } from "node:path";
 import { spawnSyncHidden } from "audit-tools/shared";
+import { AUDIT_TOOLS_DIRNAME } from "../../../shared/io/auditToolsPaths.js";
 import { runShellCommand } from "../../utils/commands.js";
 import {
   toRepoRelative,
@@ -382,7 +383,7 @@ export function rebaseBranchOntoHead(
 
 /** Worktree path for a remediation block. */
 export function worktreePath(root: string, blockId: string, runId: string): string {
-  return join(root, ".audit-tools", "worktrees", `remediate-${blockId}-${runId}`);
+  return join(root, AUDIT_TOOLS_DIRNAME, "worktrees", `remediate-${blockId}-${runId}`);
 }
 
 export function remediationBranchName(runId: string): string {
@@ -399,7 +400,7 @@ export function remediationBranchName(runId: string): string {
  * cherry-pick → cross-package check → reset sequence through this single lock.
  */
 export function baseBranchLockPath(root: string, runId: string): string {
-  return join(root, ".audit-tools", "remediation", "runs", refSafeSegment(runId, "run"), "base-branch.lock");
+  return join(root, AUDIT_TOOLS_DIRNAME, "remediation", "runs", refSafeSegment(runId, "run"), "base-branch.lock");
 }
 
 /**
@@ -416,7 +417,7 @@ export function baseBranchLockPath(root: string, runId: string): string {
 export function worktreeNodeLockPath(root: string, runId: string, blockId: string): string {
   return join(
     root,
-    ".audit-tools",
+    AUDIT_TOOLS_DIRNAME,
     "remediation",
     "runs",
     refSafeSegment(runId, "run"),

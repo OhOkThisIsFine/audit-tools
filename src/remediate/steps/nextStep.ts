@@ -32,7 +32,18 @@ import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
 import { ClaimRegistry } from "../../shared/quota/claimRegistry.js";
 import { claimWithBackoff, withClaimHeartbeat } from "../../shared/quota/claimLease.js";
-import { nodeClaimsPath, remediationArtifactsDir } from "../../shared/io/auditToolsPaths.js";
+import {
+  AUDIT_FINDINGS_FILENAME,
+  AUDIT_REPORT_FILENAME,
+  auditArtifactsDir,
+  auditFindingsPath,
+  auditReportPath,
+  auditToolsDir,
+  nodeClaimsPath,
+  promotedAuditFindingsPath,
+  promotedAuditReportPath,
+  remediationArtifactsDir,
+} from "../../shared/io/auditToolsPaths.js";
 import { resolveRepoRoot } from "../../shared/io/repoRoot.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { RemediationStep, RemediationDispatchPlan } from "./types.js";
@@ -352,13 +363,14 @@ function defaultInputCandidates(root: string): string[] {
   // both sides of the audit -> remediate pipeline, and feeding it triggers the
   // lossless structured hand-off in the plan phase instead of a lossy LLM
   // re-extraction from the markdown render that sits beside it.
+  const auditDir = auditArtifactsDir(root);
   return [
-    join(root, ".audit-tools", "audit-findings.json"),
-    join(root, ".audit-tools", "audit", "audit-findings.json"),
-    join(root, "audit-findings.json"),
-    join(root, ".audit-tools", "audit-report.md"),
-    join(root, ".audit-tools", "audit", "audit-report.md"),
-    join(root, "audit-report.md"),
+    promotedAuditFindingsPath(auditDir),
+    auditFindingsPath(auditDir),
+    join(root, AUDIT_FINDINGS_FILENAME),
+    promotedAuditReportPath(auditDir),
+    auditReportPath(auditDir),
+    join(root, AUDIT_REPORT_FILENAME),
   ];
 }
 
@@ -2745,12 +2757,12 @@ async function emitAutonomousLeftoverDeliverable(
   });
   // Prefer the canonical `.audit-tools/` location (defaultInputCandidates[0]);
   // fall back to the artifacts dir's parent when artifactsDir is non-standard.
-  const auditToolsDir = join(root, ".audit-tools");
-  const outDir = existsSync(auditToolsDir) ? auditToolsDir : dirname(artifactsDir);
+  const canonicalOutDir = auditToolsDir(root);
+  const outDir = existsSync(canonicalOutDir) ? canonicalOutDir : dirname(artifactsDir);
   await mkdir(outDir, { recursive: true });
   await Promise.all([
-    writeJsonFile(join(outDir, "audit-findings.json"), pair.findings_report),
-    writeTextFile(join(outDir, "audit-report.md"), pair.report_markdown),
+    writeJsonFile(join(outDir, AUDIT_FINDINGS_FILENAME), pair.findings_report),
+    writeTextFile(join(outDir, AUDIT_REPORT_FILENAME), pair.report_markdown),
   ]);
 }
 

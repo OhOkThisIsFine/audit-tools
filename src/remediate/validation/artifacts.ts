@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { readJsonFile } from "audit-tools/shared";
+import { verificationReportPath } from "../../shared/io/auditToolsPaths.js";
 import { StateStore } from "../state/store.js";
 import {
   validateClarificationRequest,
@@ -424,8 +425,8 @@ export async function validateArtifacts(
   }
 
   // Verification report at the root artifacts dir (from FINDING-027).
-  const verificationReportPath = join(root, ".audit-tools", "verification_report.json");
-  const verificationReport = await readJsonForValidation(verificationReportPath, issues);
+  const verificationReportFilePath = verificationReportPath(root);
+  const verificationReport = await readJsonForValidation(verificationReportFilePath, issues);
   if (verificationReport) {
     pushErrorIssues(
       issues,

@@ -12,6 +12,8 @@ import type {
 import {
   buildSharedProviderConfirmation,
   PROVIDER_CONFIRMATION_INPUT_FILENAME,
+  auditArtifactsDir,
+  promotedAuditFindingsPath,
 } from "audit-tools/shared";
 import {
   buildEdgeReasoningPrompt,
@@ -892,14 +894,14 @@ export async function runInProcessAuditDispatch(params: {
 }): Promise<{ dispatched: boolean }> {
   const { root, sessionConfig } = params;
   const timeoutMs = params.timeoutMs ?? sessionConfig.timeout_ms ?? 120_000;
-  const artifactsDir = join(root, ".audit-tools", "audit");
+  const artifactsDir = auditArtifactsDir(root);
 
   // Review results land in one of two places depending on how far the fold gets:
   // the cumulative `audit_results.jsonl` store (run blocks) or the promoted
   // parent `audit-findings.json` machine contract (run completes — which removes
   // the artifacts dir and promotes the synthesized findings). Either is proof.
   const storePath = join(artifactsDir, "audit_results.jsonl");
-  const promotedFindingsPath = join(root, ".audit-tools", "audit-findings.json");
+  const promotedFindingsPath = promotedAuditFindingsPath(artifactsDir);
   const landed = (): boolean => {
     if (existsSync(promotedFindingsPath)) return true;
     if (!existsSync(storePath)) return false;

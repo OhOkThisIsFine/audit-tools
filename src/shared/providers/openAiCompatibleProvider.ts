@@ -7,6 +7,7 @@ import type {
 } from "./types.js";
 import type { OpenAiCompatibleConfig } from "../types/sessionConfig.js";
 import { writeJsonFile } from "../io/json.js";
+import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
 
 export const OPENAI_COMPATIBLE_PROVIDER_NAME = "openai-compatible" as const;
 
@@ -27,7 +28,7 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
  * the live artifacts on merge. Any files[] entry under this dir is skipped — the
  * result still lands via the `result` channel / resultPath.
  */
-const CONTROL_PLANE_DIR = ".audit-tools";
+const CONTROL_PLANE_DIR = AUDIT_TOOLS_DIRNAME;
 
 /** The single-shot worker output contract the model must return. */
 interface WorkerOutput {

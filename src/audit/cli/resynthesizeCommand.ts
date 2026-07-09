@@ -9,20 +9,20 @@ import {
 import {
   AGENT_FEEDBACK_FILENAME,
   AUDIT_FINDINGS_FILENAME,
-  AUDIT_REPORT_FILENAME,
+  auditArtifactsDir,
+  auditToolsDir as resolveAuditToolsDir,
   parseReflectionsNdjson,
+  promotedAuditFindingsPath,
+  promotedAuditReportPath,
   readOptionalTextFile,
 } from "audit-tools/shared";
 import type { AuditFindingsReport } from "audit-tools/shared";
 
-const AUDIT_TOOLS_DIR = ".audit-tools";
-const FINDINGS_FILENAME = AUDIT_FINDINGS_FILENAME;
-const REPORT_FILENAME = AUDIT_REPORT_FILENAME;
-
 export async function cmdResynthesize(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
-  const auditToolsDir = join(root, AUDIT_TOOLS_DIR);
-  const defaultInput = join(auditToolsDir, FINDINGS_FILENAME);
+  const auditToolsDir = resolveAuditToolsDir(root);
+  const artifactsDir = auditArtifactsDir(root);
+  const defaultInput = promotedAuditFindingsPath(artifactsDir);
   // Use the shared flag parser, which rejects a flag-shaped next token so an
   // invocation like `--input --root foo` falls back to the default instead of
   // mis-resolving the input path to "--root" (COR-bc35a171).
@@ -30,7 +30,7 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
 
   if (!existsSync(inputPath)) {
     console.error(
-      `resynthesize: ${FINDINGS_FILENAME} not found at ${inputPath}. ` +
+      `resynthesize: ${AUDIT_FINDINGS_FILENAME} not found at ${inputPath}. ` +
         `Run the full audit first, or supply --input <path>.`,
     );
     process.exitCode = 1;
@@ -53,7 +53,7 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
   // feedback) still exists — e.g. an interrupted run being compiled by hand —
   // carry the Process Feedback section into the re-rendered report.
   const feedbackText = await readOptionalTextFile(
-    join(auditToolsDir, "audit", AGENT_FEEDBACK_FILENAME),
+    join(artifactsDir, AGENT_FEEDBACK_FILENAME),
   );
   const markdown = renderAuditReportMarkdown(normalized, {
     reflections: feedbackText ? parseReflectionsNdjson(feedbackText) : undefined,
@@ -61,8 +61,8 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
 
   await mkdir(auditToolsDir, { recursive: true });
 
-  const outputFindingsPath = join(auditToolsDir, FINDINGS_FILENAME);
-  const outputReportPath = join(auditToolsDir, REPORT_FILENAME);
+  const outputFindingsPath = promotedAuditFindingsPath(artifactsDir);
+  const outputReportPath = promotedAuditReportPath(artifactsDir);
 
   await writeFile(outputFindingsPath, JSON.stringify(normalized, null, 2), "utf8");
   await writeFile(outputReportPath, markdown, "utf8");

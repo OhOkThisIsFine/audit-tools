@@ -36,6 +36,7 @@ export const AUDIT_REPORT_FILENAME = "audit-report.md";
 export const AUDIT_FINDINGS_FILENAME = "audit-findings.json";
 export const REMEDIATION_REPORT_FILENAME = "remediation-report.md";
 export const REMEDIATION_OUTCOMES_FILENAME = "remediation-outcomes.json";
+const VERIFICATION_REPORT_FILENAME = "verification_report.json";
 
 /**
  * `<root>/.audit-tools` (absolute). Refuses to build the tree under a `root`
@@ -161,4 +162,14 @@ export function promotedAuditFindingsPath(artifactsDir: string): string {
  */
 export function outputDirFor(artifactsDir: string): string {
   return dirname(artifactsDir);
+}
+
+/**
+ * `<root>/.audit-tools/verification_report.json` — the closing-phase
+ * verification report (FINDING-027), written at the root artifacts dir
+ * alongside the promoted findings/report/outcomes files rather than under
+ * either orchestrator's working artifacts dir.
+ */
+export function verificationReportPath(root: string): string {
+  return join(auditToolsDir(root), VERIFICATION_REPORT_FILENAME);
 }
