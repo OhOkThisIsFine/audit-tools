@@ -29,7 +29,7 @@ import type { ValidationIssue } from "audit-tools/shared";
 import {
   setQuotaStateDir,
   parseHostModelRoster,
-  PROVIDER_NAMES,
+  assertHostProviderName,
   type ProviderName,
   remediationArtifactsDir,
   resolveRepoRoot,
@@ -68,12 +68,8 @@ try {
  * quota-attribution key — a silently-wrong value would mis-charge fan-out).
  */
 function parseHostProviderOption(value: string): ProviderName {
-  if ((PROVIDER_NAMES as readonly string[]).includes(value)) {
-    return value as ProviderName;
-  }
-  throw new Error(
-    `--host-provider must be one of: ${PROVIDER_NAMES.join(", ")} (got "${value}")`,
-  );
+  assertHostProviderName(value);
+  return value;
 }
 
 const _remediatorPermission = _opencodeJson.agent?.remediator?.permission ?? {};

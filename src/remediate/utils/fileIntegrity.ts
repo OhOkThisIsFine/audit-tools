@@ -1,4 +1,4 @@
-import { hashContent } from "audit-tools/shared";
+import { hashContent, checkFileIntegrityRecords } from "audit-tools/shared";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, isAbsolute, relative, sep } from "node:path";
 import {
@@ -162,50 +162,44 @@ export async function checkAffectedFileIntegrity(
   root: string,
   findings: Finding[],
 ): Promise<AffectedFileIntegrityResult> {
-  const changed: string[] = [];
-  const missing: string[] = [];
-  const ioErrors: string[] = [];
   const checked = new Set<string>();
-
+  const records: { path: string; hash_at_plan_time?: string }[] = [];
   for (const finding of findings) {
     for (const af of finding.affected_files) {
       if (!af.hash_at_plan_time || checked.has(af.path)) continue;
       checked.add(af.path);
-      const absolute = resolveAffectedPath(root, af.path);
-      // Distinguish an absent file (missing) from a file that exists but cannot
-      // be read (io_errors): a non-ENOENT failure is a real I/O error, not a
-      // missing file, so it must not be folded into `missing`.
-      if (!existsSync(absolute)) {
-        missing.push(af.path);
-        continue;
-      }
-      try {
-        const currentHash = await hashAffectedPath(root, af.path);
-        if (!currentHash) {
-          ioErrors.push(af.path);
-          continue;
-        }
-        if (currentHash !== af.hash_at_plan_time) {
-          changed.push(af.path);
-        }
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ENOENT") {
-          missing.push(af.path);
-        } else {
-          reportHashIoError(absolute, err);
-          ioErrors.push(af.path);
-        }
-      }
+      records.push(af);
     }
   }
 
+  const buckets = await checkFileIntegrityRecords({
+    records,
+    getPath: (record) => record.path,
+    getExpectedHash: (record) => record.hash_at_plan_time,
+    resolveAbsolute: (path) => resolveAffectedPath(root, path),
+    // Distinguish an absent file (missing) from a file that exists but cannot
+    // be read (io_errors): a non-ENOENT failure is a real I/O error, not a
+    // missing file, so it must not be folded into `missing`.
+    exists: existsSync,
+    hash: async (absolute, record) => {
+      try {
+        const currentHash = await hashAffectedPath(root, record.path);
+        if (!currentHash) return { kind: "io_error" };
+        return { kind: "ok", hash: currentHash };
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return { kind: "missing" };
+        reportHashIoError(absolute, err);
+        return { kind: "io_error" };
+      }
+    },
+  });
+
   return {
-    changed,
-    missing,
-    io_errors: ioErrors,
-    is_clean:
-      changed.length === 0 && missing.length === 0 && ioErrors.length === 0,
+    changed: buckets.changed,
+    missing: buckets.missing,
+    io_errors: buckets.ioErrors,
+    is_clean: buckets.isClean,
   };
 }
 

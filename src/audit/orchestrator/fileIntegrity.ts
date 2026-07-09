@@ -1,4 +1,4 @@
-import { hashContent } from "audit-tools/shared";
+import { hashContent, checkFileIntegrityRecords } from "audit-tools/shared";
 import { readFile } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
 import { existsSync } from "node:fs";
@@ -21,34 +21,23 @@ export async function checkFileIntegrity(
   manifest: RepoManifest,
   scope?: string[],
 ): Promise<FileIntegrityResult> {
-  const changed: string[] = [];
-  const missing: string[] = [];
-  const ioErrors: string[] = [];
-
   const scopeSet = scope ? new Set(scope) : null;
   const files = scopeSet
     ? manifest.files.filter((f) => scopeSet.has(f.path))
     : manifest.files;
 
-  for (const record of files) {
-    if (!record.hash) continue;
-    const absolute = isAbsolute(record.path)
-      ? record.path
-      : join(root, record.path);
-    if (!existsSync(absolute)) {
-      missing.push(record.path);
-      continue;
-    }
-    try {
-      const currentHash = await hashFile(absolute);
-      if (currentHash !== record.hash) {
-        changed.push(record.path);
-      }
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        missing.push(record.path);
-      } else {
+  const buckets = await checkFileIntegrityRecords({
+    records: files,
+    getPath: (record) => record.path,
+    getExpectedHash: (record) => record.hash,
+    resolveAbsolute: (path) => (isAbsolute(path) ? path : join(root, path)),
+    exists: existsSync,
+    hash: async (absolute, record) => {
+      try {
+        return { kind: "ok", hash: await hashFile(absolute) };
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return { kind: "missing" };
         process.stderr.write(
           JSON.stringify({
             kind: "file_integrity_io_error",
@@ -59,16 +48,15 @@ export async function checkFileIntegrity(
             ts: new Date().toISOString(),
           }) + "\n",
         );
-        ioErrors.push(record.path);
+        return { kind: "io_error" };
       }
-    }
-  }
+    },
+  });
 
   return {
-    changed_files: changed,
-    missing_files: missing,
-    io_errors: ioErrors,
-    is_clean:
-      changed.length === 0 && missing.length === 0 && ioErrors.length === 0,
+    changed_files: buckets.changed,
+    missing_files: buckets.missing,
+    io_errors: buckets.ioErrors,
+    is_clean: buckets.isClean,
   };
 }

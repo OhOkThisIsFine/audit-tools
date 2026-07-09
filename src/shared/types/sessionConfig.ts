@@ -16,6 +16,23 @@ export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export type ResolvedProviderName = Exclude<ProviderName, "auto">;
 
 /**
+ * Validate a `--host-provider` CLI value against {@link PROVIDER_NAMES}, throwing
+ * the same message both orchestrators surface on a typo (host_provider is a
+ * quota-ATTRIBUTION key — a silently-wrong value would mis-charge dispatch fan-out
+ * to the wrong account). Single-sourced so audit's `getHostProvider` and
+ * remediate's `parseHostProviderOption` cannot drift.
+ */
+export function assertHostProviderName(
+  value: string,
+): asserts value is ProviderName {
+  if (!(PROVIDER_NAMES as readonly string[]).includes(value)) {
+    throw new Error(
+      `--host-provider must be one of: ${PROVIDER_NAMES.join(", ")} (got "${value}")`,
+    );
+  }
+}
+
+/**
  * The attended-vs-headless discriminator for dispatch (defect-1). TRUE (default,
  * conversation-first) means an attended conversation host is driving THIS invocation
  * and can fan out subagents — so a configured in-process backend (codex / opencode /
@@ -36,6 +53,31 @@ export function resolveHostDispatchCapability(options: {
 }): boolean {
   if (options.explicit !== undefined) return options.explicit;
   const cfg = options.sessionConfig?.host_can_dispatch_subagents;
+  if (cfg !== undefined) return cfg;
+  const envValue = (options.env ?? process.env)[options.envVarName];
+  if (envValue === "true") return true;
+  if (envValue === "false") return false;
+  return true;
+}
+
+/**
+ * Whether the in-process rolling dispatch engine drives an orchestrator's
+ * dispatch phase. Single-sourced resolution order (identical for both
+ * orchestrators, differing only in the env var name each passes as
+ * `envVarName`): explicit per-invocation value → `sessionConfig.dispatch.rolling_engine`
+ * → the tool-specific env var (`AUDIT_CODE_ROLLING_ENGINE` /
+ * `REMEDIATE_ROLLING_ENGINE`) → default TRUE (the rolling drivers are validated
+ * end-to-end; the legacy host-fanned wave path is the explicit opt-OUT). Mirrors
+ * the {@link resolveHostDispatchCapability} pattern above.
+ */
+export function resolveRollingEngineFlag(options: {
+  explicit?: boolean;
+  sessionConfig?: { dispatch?: { rolling_engine?: boolean } } | null;
+  envVarName: string;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (options.explicit !== undefined) return options.explicit;
+  const cfg = options.sessionConfig?.dispatch?.rolling_engine;
   if (cfg !== undefined) return cfg;
   const envValue = (options.env ?? process.env)[options.envVarName];
   if (envValue === "true") return true;

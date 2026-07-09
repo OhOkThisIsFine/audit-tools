@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -230,13 +230,12 @@ export function resolveRollingEngineEnabled(options: {
   sessionConfig?: SessionConfig | null;
   env?: NodeJS.ProcessEnv;
 }): boolean {
-  if (options.rollingEngine !== undefined) return options.rollingEngine;
-  const cfg = options.sessionConfig?.dispatch?.rolling_engine;
-  if (cfg !== undefined) return cfg;
-  const envValue = (options.env ?? process.env).REMEDIATE_ROLLING_ENGINE;
-  if (envValue === "true") return true;
-  if (envValue === "false") return false;
-  return true;
+  return resolveRollingEngineFlag({
+    explicit: options.rollingEngine,
+    sessionConfig: options.sessionConfig,
+    envVarName: "REMEDIATE_ROLLING_ENGINE",
+    env: options.env,
+  });
 }
 
 /** The host-capability fields supplied explicitly on a single next-step call. */
@@ -1232,22 +1231,8 @@ export async function driveRollingImplementDispatch(
     // Reactive cost verification: a declared-free source pool observed charging has
     // been demoted by the engine; surface it as reviewable friction so the operator
     // reconciles the stale `cost_per_mtok:0` (single step-boundary chokepoint).
-    onCostDrift: ({ poolId, observedCostUsd, declaredCostPerMtok }) => {
-      void captureStepBoundaryFriction(
-        artifactsDir,
-        runId,
-        {
-          eventType: "declared_cost_drift",
-          discriminator: poolId,
-          note:
-            `pool "${poolId}" was declared free (cost_per_mtok=${declaredCostPerMtok}) ` +
-            `but reported cost=${observedCostUsd} — demoted out of free-first ordering; ` +
-            `reconcile the source's declared cost.`,
-          severity: "medium",
-          area: "dispatch/cost",
-        },
-        "remediate-code",
-      );
+    onCostDrift: (info) => {
+      captureCostDriftFriction(artifactsDir, runId, info, "remediate-code");
     },
   });
 

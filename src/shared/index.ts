@@ -270,6 +270,8 @@ export {
   ANALYZER_SETTINGS,
   AnalyzerSettingSchema,
   resolveHostDispatchCapability,
+  resolveRollingEngineFlag,
+  assertHostProviderName,
 } from "./types/sessionConfig.js";
 
 // Contracts
@@ -385,6 +387,15 @@ export {
 // Content hashing: shared SHA-256 primitive (single source; explicit length)
 export type { HashContentOptions } from "./hash.js";
 export { hashContent } from "./hash.js";
+
+// File integrity: the shared classify-and-bucket loop behind audit-code's
+// checkFileIntegrity and remediate-code's checkAffectedFileIntegrity.
+export type {
+  FileIntegrityBuckets,
+  FileIntegrityHashOutcome,
+  FileIntegrityCheckOptions,
+} from "./fileIntegrity.js";
+export { checkFileIntegrityRecords } from "./fileIntegrity.js";
 
 // Single canonical deterministic serializer (INV-CK-2) — the ONE stableStringify.
 export { stableStringify } from "./stableStringify.js";
@@ -590,10 +601,12 @@ export { captureFrictionEvent } from "./friction/captureFrictionEvent.js";
 export type {
   StepBoundaryEventType,
   StepBoundaryFriction,
+  CostDriftInfo,
 } from "./friction/stepBoundaryCapture.js";
 export {
   captureStepBoundaryFriction,
   stepBoundaryEventId,
+  captureCostDriftFriction,
 } from "./friction/stepBoundaryCapture.js";
 
 // O1 end-of-run friction TRIAGE: single-sourced triage step shape, disposition

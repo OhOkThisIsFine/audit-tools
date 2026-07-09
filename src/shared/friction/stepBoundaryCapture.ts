@@ -200,3 +200,43 @@ export async function captureStepBoundaryFriction(
   };
   await captureFrictionEvent(artifactsDir, runId, event, tool);
 }
+
+/** Reactive cost-drift facts routed through {@link captureCostDriftFriction}. */
+export interface CostDriftInfo {
+  poolId: string;
+  observedCostUsd: number;
+  declaredCostPerMtok: number;
+}
+
+/**
+ * Route a reactive cost-drift demotion (a dispatch pool declared free —
+ * `cost_per_mtok:0` — that started reporting a positive cost, so the rolling
+ * engine demoted it out of free-first ordering) through the step-boundary
+ * chokepoint as a `declared_cost_drift` fact. Both orchestrators' rolling
+ * dispatch wiring (`onCostDrift`) is byte-identical apart from the trailing
+ * `source` tool tag; this single-sources the eventType/note/severity/area
+ * template so they cannot drift. Fire-and-forget, like the call sites it
+ * replaces — never awaited by the caller.
+ */
+export function captureCostDriftFriction(
+  artifactsDir: string,
+  runId: string,
+  info: CostDriftInfo,
+  source: FrictionCaptureArtifact["tool"],
+): void {
+  void captureStepBoundaryFriction(
+    artifactsDir,
+    runId,
+    {
+      eventType: "declared_cost_drift",
+      discriminator: info.poolId,
+      note:
+        `pool "${info.poolId}" was declared free (cost_per_mtok=${info.declaredCostPerMtok}) ` +
+        `but reported cost=${info.observedCostUsd} — demoted out of free-first ordering; ` +
+        `reconcile the source's declared cost.`,
+      severity: "medium",
+      area: "dispatch/cost",
+    },
+    source,
+  );
+}

@@ -11,7 +11,7 @@ import {
   auditArtifactsDir,
   resolveRepoRoot,
   resolveHostDispatchCapability as sharedResolveHostDispatchCapability,
-  PROVIDER_NAMES,
+  assertHostProviderName,
   type ProviderName,
   type SessionConfig,
   type HostModelRosterEntry,
@@ -237,12 +237,8 @@ export function getExplicitProvider(argv: string[]): string | undefined {
 export function getHostProvider(argv: string[]): ProviderName | null {
   const value = getFlag(argv, "--host-provider");
   if (value === undefined) return null;
-  if (!(PROVIDER_NAMES as readonly string[]).includes(value)) {
-    throw new Error(
-      `--host-provider must be one of: ${PROVIDER_NAMES.join(", ")} (got "${value}")`,
-    );
-  }
-  return value as ProviderName;
+  assertHostProviderName(value);
+  return value;
 }
 
 export function getHostModel(argv: string[]): string | null {
