@@ -29,6 +29,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Lap friction walk — backlog-orchestration lap (2026-07-08).** Orchestrated lap: parallel read-only recon
+  agents → serial implement-agent-per-item with adversarial review before each commit. Shipped six backlog code
+  items (wrapper passthrough D-61, vi.spyOn barrel guard INV-12, accept-node stray-worktree guard, convergence
+  CE fingerprint, validate-artifact cross-gates, `score-tokens` harness). Three-category walk:
+  - **(ambiguous-direction) A backlog item's suggested FIX was weaker than the ideal one.** D-61 proposed "a
+    parity test (wrapper-reachable ⊇ cli.ts commands)". The enforce-in-tooling ideal is a passthrough-to-dist
+    DEFAULT — dist/cli.js becomes the single source of truth and wrapper/CLI drift is *structurally impossible*,
+    no hand-maintained allowlist. A lap that literally implemented the suggested test would have shipped a
+    weaker guard needing perpetual maintenance. Reinforces [[backlog-item-states-invariant-not-fix-mechanism]]:
+    a backlog item's impl suggestion is a lead, not a verdict — re-derive the ideal fix from the property.
+  - **(tool-should-decide) The multi-agent write path is forced serial by a shared worktree.** Parallel
+    implement agents can't safely edit the same working tree (collision + green-at-every-commit), so recon
+    parallelized but implementation serialized one-item-at-a-time. Agent `isolation:"worktree"` would allow
+    parallel writes but carries its own strand traps ([[no-agent-isolation-worktree-for-dispatch-nodes]], the
+    very bug fixed this lap). No clean tool fix beyond the existing remediate-code dispatch machinery (which
+    already does bounded parallel worktree units + merge) — for ad-hoc dev fan-out, serial-write is correct.
+    Attested, not a new defect.
+  - **(inefficient-feeding) None.** Recon routed through parallel read-only Explore/general agents that returned
+    conclusions + implementation specs (file+line refs), never file dumps; each implement agent read its own
+    scope. Main context received specs and diffs to review, not raw file bodies. No large-file re-read loop.
+
 - **Lap friction walk — arbitrage Phase-0 lap (2026-07-08).** Full three-category walk of the doc-review +
   dial-adjudication + arbitrage-increment-1 lap:
   - **(ambiguous-direction) A forward-track design memory carried two falsified technical premises — SECOND
@@ -81,15 +102,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   task-claiming): stake a claim on the item at lap start so a second lap sees it taken. Salvage from this incident:
   the loser's sweep caught a stale `// Local-subprocess` comment the winner's rename missed — landed as a follow-up chore.
 
-- **A test can drive a deleted code path through a module-namespace spy and pass vacuously (tool-should-decide).**
-  Two `tests/remediate/wave-scheduler.test.ts` tests drove the quota-read failure path via
-  `vi.spyOn(quotaModule, "readQuotaState")` on a *re-export*. When the source switched to an internal call, the spy
-  stopped intercepting: one test failed loudly (good), but the sibling **negative** contract (CP-NODE-52,
-  "the rejection does not throw") kept passing while never executing the failure path. A green negative test that
-  exercises nothing is worse than no test. Both now drive a real corrupt `quota-state.json`. Generalizable guard:
-  a lint/test-invariant that flags `vi.spyOn(<module namespace>, …)` on a re-export barrel — the failure mode is
-  silent and survives the very refactor the test exists to protect. Related: [[worktree-tests-miss-integration-guards]].
-
 - **THREE adversarial reviews in a row found a defect the author's own green suite missed (ambiguous-direction).**
   INV-QD-15's first cut left `tests/remediate/wave-scheduler.test.ts` RED and would have shipped; the bucket
   deletion's first cut promoted a latent `success`-clears-live-cooldown bug (INV-QD-16) to the sole failure mode;
@@ -106,30 +118,12 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
   recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
-  - **Convergence guard keys on the reviewer-supplied counterexample *id string*, not CE content.** Two independent
-    adversarial rounds each labeled their (genuinely distinct) top CE `CE-001`, so the judge↔repair loop read "same CE
-    re-accepted after a repair" and raised a FALSE non-convergence block that escalated to a user decision — while a
-    real, new, accepted defect was being correctly repaired. Fix: key convergence detection on a CE content /
-    violated-obligation fingerprint, or auto-mint unique CE ids; never trust the reviewer's free-text id.
   - **Cross-file contract/invariant regressions escape node-local verify and surface only at ship-time CI.** Per-node
     implement workers verify their OWN targeted tests but don't run the repo-wide guards their refactors break
     (id-glossary INV-family registry, INV-WH raw-spawn, release-contract source-shape, drain-lifecycle analyzer-cache
     coupling) — four such breaks were caught one-CI-cycle-at-a-time across 3 failed publishes. The implement/verify
     (or accept-node) step should run the repo-wide contract/invariant guard suite against the merged tree, not just
     node-local tests. Extends [[worktree-tests-miss-integration-guards]].
-
-- **`validate-artifact` (singular, write-time self-check) skips the cross-artifact gates `next-step` enforces →
-  authoring-agent round-trip (verified 2026-07-08).** The singular `validate-artifact --name X` command
-  (`src/remediate/index.ts` ~L322, surfaced to authoring agents via `contractPipelinePrompts.ts:489`) runs ONLY
-  the per-artifact structural `CONTRACT_PIPELINE_VALIDATORS[name]`; the positive+negative pairing / CE-006
-  negative-scoping cross-gates run only in the PLURAL `validate-artifacts` sweep and at `next-step`. So a
-  shape-valid `test_validator_plan` missing its scoped positive+negative pair self-validates "ok", then fails the
-  gate at next-step → round-trip. Fix = single-source the cross-gate set and run it from the singular command too
-  (load on-disk sibling CP artifacts, substitute the in-flight payload, absent-input-tolerant so a partial
-  pipeline never false-fails). **Design confirmed (owner, 2026-07-08): YES — the singular self-check SHOULD load
-  on-disk siblings + run the cross-gates** (a self-check that says "ok" on something next-step will reject is worse
-  than none; a check that lies is the defect). This is a contract-pipeline (loop-core) change → route through the
-  adversarial pipeline, not a lone autonomous agent. Extends the CP-NODE contract-validation work.
 
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
@@ -193,16 +187,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     number of rounds; the run reaches synthesis on its own. FAIL = orphaned pending `deepening:*` tasks, the
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
-
-- **`isolation:"worktree"` on a dispatch node is host-discretion — should be tool-enforced (traps audit
-  2026-07-08).** The durable trap "never pass `isolation:"worktree"` to the Agent tool when dispatching a
-  remediate/audit implement node" is currently a *host-remembers* rule: the dispatch plan already creates the
-  node's worktree, but nothing stops the host from ALSO passing the Agent tool's own `isolation:"worktree"`,
-  which spawns a second unrelated worktree where the subagent's edits land invisibly → `accept-node`'s
-  cherry-pick sees no diff. Per enforce-in-tooling this latent failure should be made impossible/detected:
-  e.g. `accept-node` fail-loud when the node's designated worktree has no commits (the edits went elsewhere),
-  or the dispatch contract assert the subagent's git toplevel equals the designated worktree root.
-  [[no-agent-isolation-worktree-for-dispatch-nodes]] / [[enforce-robustness-in-tooling-not-host-discretion]]
 
 ## Forward tracks
 
@@ -443,9 +427,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   has NO graph), threaded via `DriveRollingDispatchOptions.continuityScores` → `toNode` → shared `ownershipSubWaves`
   (`OwnershipSchedulerNode.continuity?` = secondary sort key, strictly below file-disjointness, above `block_id`;
   no-op by default). Adversarially reviewed (6 vectors A–F REFUTED). Green (build/check/deadcode/full suite; 1 known
-  hermeticity flake passes alone). **Next agent ships 2d + this together.**
-  Remaining track work: ONLY item (3) token-efficiency eval harness (measurement gate — 2b's bias, 2d's slice guidance,
-  AND the remediate consumer must be MEASURED not asserted). The remediate-consumer gap is now CLOSED.
+  hermeticity flake passes alone).
+  **Item (3) token-efficiency eval harness — SHIPPED (this lap): `score-tokens` CLI + pure `scoreTokens` reducer +
+  per-run `token-usage.jsonl` recording (`extractObservedUsage` on the openai-compatible path,
+  `LaunchFreshSessionResult.observedUsage`, off-admission-path append) + provider-independent prefix-stability
+  (hash of each recorded packet prompt's cache-eligible prefix from `dispatch-plan.json`). Track-don't-gate: exit
+  wired only to a cache-hit-ratio regression vs `--baseline`. "Unmeasured" kept distinct from "measured zero";
+  reader tolerates malformed ledger lines. Design-of-record [[access-memory-layer-design]].
+  **The context-efficiency access-memory track is now COMPLETE — items (1), (2), AND (3) all shipped.**
+  Follow-ups (non-blocking): remediate-side ledger writer (score-audit/score-tokens are audit-first; `observedUsage`
+  already on the shared type); packet `task_ids`/`lens` attribution in the ledger (`DispatchPlanEntry` carries neither).
 
   - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
     *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step

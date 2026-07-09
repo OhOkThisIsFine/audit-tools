@@ -11,8 +11,21 @@
 - **v0.32.42 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
   roadmap only.
-- **Context-efficiency access-memory track — increments 1 + 2a + 2b + 2c + 2d + remediate-consumer SHIPPED (v0.32.42);
-  items (1) AND (2) complete on BOTH orchestrators. Only item (3) remains.**
+- **Context-efficiency access-memory track — COMPLETE. Items (1) + (2) + (3) all shipped; nothing open on the track.**
+  Item (3) token-efficiency eval harness landed this lap (unreleased at time of writing — the six-item
+  backlog-orchestration lap below): `score-tokens` CLI + pure `scoreTokens` reducer + per-run `token-usage.jsonl`
+  recording (`extractObservedUsage` on the openai-compatible path, off-admission-path append) + provider-independent
+  prefix-stability (hash of each recorded packet prompt's cache-eligible prefix). Track-don't-gate (exit wired only
+  to a cache-hit-ratio regression vs `--baseline`). Follow-ups (non-blocking, `docs/backlog.md`): remediate-side
+  ledger writer; packet task_ids/lens attribution.
+- **Backlog-orchestration lap (2026-07-08) — six tool-enforcement fixes shipped (unreleased).** wrapper
+  passthrough-to-dist (D-61 wrapper/CLI drift now structurally impossible); `vi.spyOn` re-export-barrel guard
+  (INV-remediate-tests-12 + the live vacuous conventions-cache spy fixed); accept-node stray-worktree fail-loud
+  (tool-enforces "never Agent isolation:worktree on a dispatch node"); judge-convergence keyed on CE content
+  fingerprint not the reviewer id (kills the false CE-001 stall); `validate-artifact` singular now runs the
+  cross-artifact gates (no more self-validates-ok-then-fails-at-next-step round-trip); `score-tokens` harness (above).
+- **(historical, unchanged below) Context-efficiency access-memory increments 1 + 2a + 2b + 2c + 2d + remediate-consumer
+  (v0.32.42).**
   - **Increment 1 (v0.32.38): prefix-ordering fix (#4)** — `buildPacketPrompt` static `## Output` prefix leads,
     volatile payload trails; tool-enforced guard. Cross-cutting cache-safety guard now real.
   - **Increment 2a (v0.32.39): persistence spine** — `access_memory.json`, first-class per-run audit artifact
@@ -48,14 +61,10 @@
     mass (seed-only — remediate has NO graph), threaded via `DriveRollingDispatchOptions.continuityScores` → `toNode`
     → shared `ownershipSubWaves` (`OwnershipSchedulerNode.continuity?` = secondary sort key below file-disjointness,
     above `block_id`; no-op default). Adversarially reviewed (6 vectors A–F REFUTED).
-  - **Still open on the track (the immediate next item):**
-    - **(B) #3 — token-efficiency eval harness (measure first):** the measurement gate confirming 2b's ordering bias,
-      2d's slice guidance, AND the remediate consumer actually cut tokens *without busting prefix cache*. Cost
-      counterpart to the A2 quality oracle; reads recorded run ledgers/headroom telemetry (post-hoc, allowed), reuses
-      the A2 corpus. The "MEASURE not assert" discipline the track's own cross-cutting guard calls for. **The only
-      remaining track item — recommended next.**
-    Design-of-record [[access-memory-layer-design]]; full track detail `docs/backlog.md:406`. Loop-core → full
-    adversarial pipeline.
+  - **Item (3) token-efficiency eval harness — SHIPPED this lap (`score-tokens`).** The track is now COMPLETE;
+    nothing open. Design-of-record [[access-memory-layer-design]]; the harness measures per-step tokens +
+    cache-hit ratio + prefix-stability post-hoc from recorded ledgers (never a metered API call), the "MEASURE
+    not assert" discipline the track's cross-cutting guard calls for.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,
   released v0.32.36).** ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1
   (a-priori declared per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification:
@@ -88,11 +97,14 @@
   in v0.32.27.** The 10-node `backlog-handoff-max-sweep-2026-07-06` plan fully landed (manual node-by-node recovery
   after the original worktree-wipe/state-desync incident). Durable status/recovery in
   [[remediate-max-sweep-run-2026-07-06]] / [[remediate-worktree-wipe-state-desync]].
-- **Open items** (all in `docs/backlog.md`): the free-pool / quota-arbitrage forward track; the
-  context-efficiency track (items (1)+(2) SHIPPED v0.32.42 — **only item (3) token-efficiency eval harness
-  remains, the recommended next item**); env-bound live validations (quota pre-wall pacing, friction escalation,
-  selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004 residual (claude-code
-  host only — the NIM guided-decoding path shipped).
+- **Open items** (all in `docs/backlog.md`): the context-efficiency track is now CLOSED (all three items shipped).
+  Remaining are the **larger design forward-tracks** (leanFastPath→dial fold D-68; unify the rolling-dispatch
+  lifecycle shell across audit+remediate D-66/67; move per-lap cadence rules to tool-enforcement D-69; free-pool /
+  quota-arbitrage tier); the standing tooling gaps (cross-file contract regressions escape node-local verify;
+  adversarial gate for hand-authored loop-core changes); env-bound live validations (quota pre-wall pacing, friction
+  escalation, selective-deepening convergence, clippy/rubocop live spawn, opencode-free live run); provider-blocked
+  schema CE-004 residual (claude-code host only). **No quick-win code items remain — the next lap is a design-track
+  pick.**
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
