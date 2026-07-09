@@ -1,18 +1,27 @@
 import { randomUUID } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
-import { decideNextStep, findObligation } from "./nextStep.js";
+import { decideNextStep, findObligation, PRIORITY } from "./nextStep.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
 import { EXECUTOR_RUNNERS } from "./executorRunners.js";
-import { nextStepIsDrainableRegen } from "./hostInputPause.js";
+import {
+  nextStepIsDrainableRegen,
+  type HostInputPauseInputs,
+} from "./hostInputPause.js";
 import {
   computeStaleArtifacts,
   emitStalenessRecord,
   isMetadataMigrationStaleness,
 } from "./staleness.js";
 import type { ExecutorRunResult } from "./executorResult.js";
-import { AGENT_FEEDBACK_FILENAME, RunLogger } from "audit-tools/shared";
+import {
+  AGENT_FEEDBACK_FILENAME,
+  RunLogger,
+  advance as advanceObligations,
+  type ObligationDef,
+  type ObligationOutcome,
+} from "audit-tools/shared";
 import type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js";
 
 export type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js";
@@ -26,6 +35,15 @@ export type { AdvanceAuditOptions, AdvanceAuditResult } from "./advanceTypes.js"
  * the deterministic obligation frontier can ever be, so it never trips on a
  * healthy run. Chain-length/index-agnostic: it caps iterations, not a fixed
  * executor index.
+ *
+ * Kept as a LOCAL cap enforced from inside the drain obligations' `execute`
+ * (see `runDrainStep` below) rather than threaded through the shared engine's
+ * `advance(..., { maxTransitions })` — that option THROWS once exceeded, while
+ * this cap has always been a graceful "stop and hand back the last good
+ * result" backstop (the caller simply resumes the drain on its next
+ * `next-step` call). Mirrors the CLI fold's (`nextStepHelpers.ts`) established
+ * precedent of keeping cycle/step-count bookkeeping in the local `Ctx` rather
+ * than in the engine's own transition counter.
  */
 const MAX_DRAIN_STEPS = 64;
 
@@ -237,6 +255,171 @@ function advanceHasRunner(executor: string): boolean {
   return Boolean(EXECUTOR_RUNNERS[executor]);
 }
 
+// ── Shared obligation-engine drain (replaces the hand-rolled while loop) ───────
+//
+// `PRIORITY` (single-sourced in nextStep.ts) is bound to the shared engine's
+// `advance()` exactly as the CLI `next-step` fold already does
+// (`src/audit/cli/nextStepHelpers.ts` → `runDeterministicForNextStep`, the
+// proven engine consumer this mirrors): one `ObligationDef` per PRIORITY id,
+// `derive` a plain state-only lookup off `deriveAuditState` (agnostic to
+// executor kind / pause-worthiness — each layer keeps its own trivial copy of
+// this lookup rather than sharing one across the cli/orchestrator boundary,
+// matching the CLI fold's `deriveObligationState`), `execute` the SAME
+// `runDrainStep` for every id (this layer's dispatch is fully homogeneous: it
+// always re-decides via `decideNextStep` and runs whatever that selects,
+// regardless of which def's `derive` made it actionable — the established
+// precedent for this is `runDeterministicExecutor` in the CLI fold, which
+// re-decides rather than trusting the closed-over id).
+//
+// The engine's own `advance(..., opts.maxTransitions)` throw-on-exceeded
+// backstop is set explicitly to MAX_DRAIN_STEPS + 2 at the call site (never
+// the engine default) so the coupling is self-maintaining: `runDrainStep`
+// enforces the tighter graceful MAX_DRAIN_STEPS cap itself (see the constant's
+// doc comment) and always stops the fold strictly before the engine's throwing
+// counter could trip, no matter what value MAX_DRAIN_STEPS is raised to.
+//
+// Semantics preserved vs the hand-rolled loop (adversarially reviewed):
+//   - zero-dispatch path (nothing actionable on entry): the reconstruction
+//     branch in `advanceAudit` emits the SAME single {kind:"obligation"}
+//     RunLogger event the old unconditional first `runSingleAdvanceStep`
+//     emitted, so the event stream is unchanged;
+//   - the graceful-vs-throwing cap coupling is explicit (above);
+//   - the per-scan derivation cost is memoized back to one full
+//     `deriveAuditState` per fold iteration (see `deriveObligationState`) —
+//     pure memoization, not a behavior change.
+
+/**
+ * Per-call bookkeeping threaded to every drain obligation's `execute`. Mirrors
+ * the CLI fold's `AuditNextStepCtx` refs pattern: mutable state the hand-rolled
+ * `while` loop kept in closures (the running step-count, and the
+ * artifacts/summary accumulators the loop merged after every iteration).
+ */
+interface DrainCtx {
+  options: AdvanceAuditOptions;
+  pauseInputs: HostInputPauseInputs;
+  /** Total steps actually dispatched this `advanceAudit` call (bounds MAX_DRAIN_STEPS). */
+  stepsRun: { value: number };
+  /** First-seen-order-deduplicated artifact list accumulated across the whole drain. */
+  artifactsAcc: { value: string[] };
+  /** Each dispatched step's own `progress_summary`, joined with "\n" at merge time. */
+  summaryAcc: { value: string[] };
+}
+
+type DrainObligation = ObligationDef<ArtifactBundle, DrainCtx, AdvanceAuditResult>;
+type DrainOutcome = ObligationOutcome<ArtifactBundle, AdvanceAuditResult>;
+
+/**
+ * `derive` for one PRIORITY id: the same holistic `deriveAuditState` scan
+ * `decideNextStep` runs, narrowed to this id's own missing/stale/satisfied
+ * state. A pruned/absent obligation (e.g. `friction_capture_current`, which
+ * `deriveAuditState` never emits — see `executorRunners.ts`) is satisfied, so
+ * the scan can never select it — preserving today's "unreachable" behavior.
+ *
+ * MEMOIZED per bundle object identity: `findNextObligation` calls every def's
+ * `derive` on the SAME bundle each scan (one scan per fold iteration), and
+ * `deriveAuditState` runs the full `computeStaleArtifacts` content-hash pass —
+ * without the cache each scan would recompute it |PRIORITY| times (~8-9x the
+ * hand loop's per-iteration derivation count). The cache is a per-`advanceAudit`
+ * -call `WeakMap` created in `advanceAudit` (never module-level, so a caller
+ * that mutates a bundle in place between calls can never observe a stale
+ * entry); bundle identity changes exactly at each `transition`
+ * (`runSingleAdvanceStep` builds a fresh `finalizedBundle`), so the memo
+ * yields exactly one derivation per scanned bundle. Pure memoization — WHAT is
+ * derived is unchanged, and `deriveAuditState` itself is deterministic in the
+ * bundle (no time/randomness inputs).
+ */
+function deriveObligationState(
+  id: string,
+  cache: WeakMap<ArtifactBundle, AuditState>,
+): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
+  return (bundle) => {
+    if (bundle.audit_state?.status === "complete") return "satisfied";
+    let state = cache.get(bundle);
+    if (!state) {
+      state = deriveAuditState(bundle, { emitStaleness: false });
+      cache.set(bundle, state);
+    }
+    const found = state.obligations.find((o) => o.id === id);
+    if (!found) return "satisfied";
+    return found.state === "missing" || found.state === "stale"
+      ? found.state
+      : "satisfied";
+  };
+}
+
+/**
+ * Merge one step's outputs into the running drain accumulators — artifacts
+ * deduplicated in first-seen order, summaries joined with "\n" — exactly
+ * reproducing the hand loop's per-iteration merge, and return the merged
+ * `AdvanceAuditResult`.
+ */
+function mergeDrainStep(
+  result: AdvanceAuditResult,
+  ctx: DrainCtx,
+): AdvanceAuditResult {
+  ctx.artifactsAcc.value = dedupeInOrder([
+    ...ctx.artifactsAcc.value,
+    ...result.artifacts_written,
+  ]);
+  ctx.summaryAcc.value.push(result.progress_summary);
+  return {
+    ...result,
+    artifacts_written: ctx.artifactsAcc.value,
+    progress_summary: ctx.summaryAcc.value.join("\n"),
+  };
+}
+
+/**
+ * Every PRIORITY id's `execute`: dispatch ONE bounded step (`runSingleAdvanceStep`
+ * unconditionally re-decides + runs whatever `decideNextStep` selects from
+ * `bundle` — the identical id the engine's scan just picked, by construction),
+ * merge it into the drain accumulators, then decide `transition` (keep folding)
+ * vs `emit` (hand back to the host) using the SAME single-sourced
+ * `nextStepIsDrainableRegen` predicate the hand loop's `while` condition used —
+ * so a host-input pause (registry-level or the graph-enrichment fold-level
+ * cases) or a natural "nothing left" halts the fold exactly where it did
+ * before. `!result.progress_made` (no obligation selected, or the selected one
+ * has no deterministic runner — a host-delegation dispatch point like
+ * `rolling_dispatch_executor`/`agent`) always emits immediately, mirroring the
+ * hand loop's unconditional first call.
+ */
+async function runDrainStep(
+  bundle: ArtifactBundle,
+  ctx: DrainCtx,
+): Promise<DrainOutcome> {
+  const result = await runSingleAdvanceStep(bundle, ctx.options);
+  const merged = mergeDrainStep(result, ctx);
+  if (!result.progress_made) {
+    return { kind: "emit", step: merged };
+  }
+  ctx.stepsRun.value += 1;
+  if (ctx.stepsRun.value > MAX_DRAIN_STEPS) {
+    // Belt-and-braces cap (see MAX_DRAIN_STEPS doc) — never trips on a healthy
+    // run; stop gracefully and hand back the last good result rather than
+    // throwing, so the host simply resumes the drain on its next call.
+    return { kind: "emit", step: merged };
+  }
+  if (!nextStepIsDrainableRegen(result.updated_bundle, advanceHasRunner, ctx.pauseInputs)) {
+    return { kind: "emit", step: merged };
+  }
+  return { kind: "transition", state: result.updated_bundle };
+}
+
+/**
+ * One `ObligationDef` per PRIORITY id, all sharing `runDrainStep` (see above).
+ * `cache` is the per-call derivation memo threaded into every `derive` — see
+ * `deriveObligationState`.
+ */
+function buildDrainObligations(
+  cache: WeakMap<ArtifactBundle, AuditState>,
+): DrainObligation[] {
+  return PRIORITY.map((id) => ({
+    id,
+    derive: deriveObligationState(id, cache),
+    execute: runDrainStep,
+  }));
+}
+
 /**
  * Advance the audit by ONE bounded step, then SAFELY DRAIN the deterministic
  * regen frontier within the SAME call: run the first bounded step, then keep
@@ -257,48 +440,89 @@ function advanceHasRunner(executor: string): boolean {
  * surfaced by the `graph_enrichment_executor`, which is registered deterministic).
  *
  * A forced `preferredExecutor` still runs EXACTLY ONE step: an explicit executor
- * request is a targeted single action, never a drain trigger.
+ * request is a targeted single action, never a drain trigger — it bypasses the
+ * shared engine entirely (the PRIORITY scan is irrelevant to a forced dispatch),
+ * mirroring how the CLI fold's `runOmittableGate` handlers also dispatch a forced
+ * executor directly rather than routing it through `advance()`.
  */
 export async function advanceAudit(
   bundle: ArtifactBundle,
   options: AdvanceAuditOptions = {},
 ): Promise<AdvanceAuditResult> {
   const forced = Boolean(options.preferredExecutor);
-  let result = await runSingleAdvanceStep(bundle, options);
+  let result: AdvanceAuditResult;
 
-  const pauseInputs = {
-    root: options.root,
-    analyzers: options.analyzers,
-    graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
-  };
-
-  if (!forced) {
-    // Drain the deterministic regen frontier. Each drained step re-derives the
-    // decision + staleness from the accumulated bundle, so the loop is agnostic
-    // to how long the chain is or where in the priority order it sits, and stops
-    // at the first host-input pause (fold-aware, single-sourced predicate).
-    let iterations = 0;
-    while (
-      result.progress_made &&
-      iterations < MAX_DRAIN_STEPS &&
-      nextStepIsDrainableRegen(result.updated_bundle, advanceHasRunner, pauseInputs)
-    ) {
-      const previousArtifacts = result.artifacts_written;
-      const previousSummary = result.progress_summary;
-      const next = await runSingleAdvanceStep(result.updated_bundle, options);
-      // A drained step that made no progress (e.g. a no-runner handoff slipped
-      // past the guard) must not loop forever — stop and keep the prior result's
-      // forward view rather than overwriting it with a no-progress step.
-      if (!next.progress_made) break;
-      // Accumulate the artifacts + summaries so the single returned result
-      // reflects EVERY artifact the drain wrote, deduplicated in first-seen order.
-      next.artifacts_written = dedupeInOrder([
-        ...previousArtifacts,
-        ...next.artifacts_written,
-      ]);
-      next.progress_summary = `${previousSummary}\n${next.progress_summary}`;
-      result = next;
-      iterations += 1;
+  if (forced) {
+    result = await runSingleAdvanceStep(bundle, options);
+  } else {
+    const ctx: DrainCtx = {
+      options,
+      pauseInputs: {
+        root: options.root,
+        analyzers: options.analyzers,
+        graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
+      },
+      stepsRun: { value: 0 },
+      artifactsAcc: { value: [] },
+      summaryAcc: { value: [] },
+    };
+    // Per-call derivation memo (see deriveObligationState) — created fresh here
+    // so no state can leak across advanceAudit calls.
+    const deriveCache = new WeakMap<ArtifactBundle, AuditState>();
+    const outcome = await advanceObligations(
+      { priority: PRIORITY, obligations: buildDrainObligations(deriveCache) },
+      bundle,
+      ctx,
+      // INVARIANT: the local graceful cap (MAX_DRAIN_STEPS, enforced inside
+      // runDrainStep) must always fire strictly before the engine's THROWING
+      // maxTransitions backstop. Deriving the engine bound from the same
+      // constant (+2 headroom: the cap emits on the step whose stepsRun first
+      // exceeds MAX_DRAIN_STEPS, so the engine sees at most MAX_DRAIN_STEPS
+      // transitions) keeps the coupling self-maintaining — raising
+      // MAX_DRAIN_STEPS can never silently convert the graceful stop into an
+      // engine throw.
+      { maxTransitions: MAX_DRAIN_STEPS + 2 },
+    );
+    if (outcome.step) {
+      result = outcome.step;
+    } else {
+      // Every PRIORITY obligation was already satisfied on entry (e.g. a fully
+      // complete bundle, or nothing missing/stale) — no `execute` ever ran, so
+      // `outcome.state` is the untouched input `bundle`. Construct the SAME
+      // "no actionable obligation" result `runSingleAdvanceStep`'s own
+      // defensive branch returns for this case (mirrors the CLI fold's
+      // post-`advance` terminal fallback in `runDeterministicForNextStep`) —
+      // INCLUDING the one `{phase:"advance", kind:"obligation"}` log event the
+      // old unconditional first `runSingleAdvanceStep` call emitted before its
+      // `!selectedExecutor` early-return, so the RunLogger event stream is
+      // unchanged on the zero-dispatch path.
+      const log = options.runLogger ?? RunLogger.disabled();
+      const correlationId = createCorrelationId();
+      const decision = decideNextStep(outcome.state, { emitStaleness: false });
+      log.event({
+        phase: "advance",
+        kind: "obligation",
+        correlationId,
+        obligation: decision.selected_obligation ?? undefined,
+        note: decision.reason,
+      });
+      const state = cloneState(decision.state);
+      state.last_executor =
+        outcome.state.audit_state?.last_executor ?? state.last_executor;
+      state.last_obligation =
+        decision.selected_obligation ??
+        outcome.state.audit_state?.last_obligation ??
+        state.last_obligation;
+      result = {
+        audit_state: state,
+        selected_obligation: decision.selected_obligation,
+        selected_executor: decision.selected_executor,
+        progress_made: false,
+        artifacts_written: ["audit_state.json"],
+        progress_summary: decision.reason,
+        next_likely_step: null,
+        updated_bundle: { ...outcome.state, audit_state: state },
+      };
     }
   }
 

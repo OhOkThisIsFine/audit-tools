@@ -105,6 +105,45 @@ test("default executor branch emits executor_end log event and returns progress_
   }
 });
 
+// ── zero-dispatch path preserves the obligation log event ────────────────────
+
+test("zero-dispatch advanceAudit (complete bundle) still emits exactly one obligation log event", async () => {
+  const logDir = await mkdtemp(join(tmpdir(), "advance-zero-dispatch-"));
+  const logPath = join(logDir, "run.log.jsonl");
+  try {
+    const runLogger = new RunLogger(logPath);
+    // A persisted-complete bundle: every drain obligation derives satisfied, so
+    // the shared engine dispatches NOTHING and advanceAudit takes its
+    // no-actionable-obligation reconstruction branch. The old hand-rolled loop
+    // still ran runSingleAdvanceStep once here, emitting one
+    // {phase:"advance", kind:"obligation"} event — that event must survive.
+    const completeBundle = {
+      audit_state: { status: "complete", blockers: [], obligations: [] },
+    };
+    const result = await advanceAudit(completeBundle, { runLogger });
+
+    expect(result.progress_made).toBe(false);
+    expect(result.selected_executor).toBe(null);
+    expect(result.selected_obligation).toBe(null);
+    expect(result.progress_summary).toMatch(/All known obligations are currently satisfied/);
+    expect(result.artifacts_written).toEqual(["audit_state.json"]);
+
+    const events = (await readFile(logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const obligationEvents = events.filter((e) => e.kind === "obligation");
+    expect(obligationEvents.length, "exactly one obligation event on the zero-dispatch path").toBe(1);
+    expect(obligationEvents[0].phase).toBe("advance");
+    expect(typeof obligationEvents[0].correlationId).toBe("string");
+    expect(obligationEvents[0].obligation, "no obligation selected → field omitted").toBe(undefined);
+    expect(obligationEvents[0].note).toMatch(/All known obligations are currently satisfied/);
+  } finally {
+    await rm(logDir, { recursive: true, force: true });
+  }
+});
+
 // ── formatExecutorFailure preserves error cause chain ────────────────────────
 
 test("formatExecutorFailure preserves error cause chain", async () => {
