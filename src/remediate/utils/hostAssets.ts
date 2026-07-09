@@ -3,7 +3,10 @@ import { dirname } from "node:path";
 
 /**
  * Strip YAML frontmatter from a text file, returning only the body.
- * Single-sourced here; postinstall.mjs imports from the compiled output.
+ * Consumed by `ensureGlobalAssets` (the `remediate-code ensure` CLI command,
+ * src/remediate/index.ts). scripts/remediate/postinstall.mjs has its own
+ * copy in scripts/shared/install-host-assets.mjs — that script runs before
+ * `tsc` has produced dist/, so it cannot import this TS module.
  */
 export function splitFrontmatter(text: string): { body: string } {
   const normalized = text.replace(/\r\n/g, "\n");

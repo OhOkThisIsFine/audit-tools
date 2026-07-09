@@ -1,9 +1,21 @@
 #!/usr/bin/env node
 import { homedir } from "os";
 import { join, dirname } from "path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
+import {
+  readRequiredSource,
+  readOptionalSource,
+  objectValue,
+  splitFrontmatter,
+  resolveSharedOpenCodePermissions,
+  runInstalls,
+  installOpenCodeGlobalConfig,
+  installAntigravityPlugin,
+  finishPostinstall,
+} from "../shared/install-host-assets.mjs";
 
+const TOOL = "remediate-code";
 const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
 const promptSourceFile = join(
@@ -20,53 +32,6 @@ const codexOpenAiAgentSourceFile = join(
   "agents",
   "openai.yaml",
 );
-
-function readRequiredSource(path, label) {
-  if (!existsSync(path)) {
-    console.warn(
-      `remediate-code: ${label} source not found at ${path} - skipping global command install`,
-    );
-    process.exitCode = 0;
-    return null;
-  }
-  return readFileSync(path);
-}
-
-function readOptionalSource(path, label) {
-  if (!existsSync(path)) {
-    console.warn(
-      `remediate-code: ${label} source not found at ${path} - skipping optional install`,
-    );
-    return null;
-  }
-  return readFileSync(path);
-}
-
-// splitFrontmatter, writeGeneratedFile, and objectValue are single-sourced in
-// src/utils/hostAssets.ts. Import them from the compiled output best-effort;
-// fall back to inline definitions so postinstall works even on a fresh checkout
-// where dist/ may not be built yet.
-let _hostAssets = null;
-try {
-  _hostAssets = await import(join(pkgRoot, "dist", "remediate", "utils", "hostAssets.js"));
-} catch {
-  // dist not built yet — inline fallbacks below will be used.
-}
-
-function writeGeneratedFile(path, content) {
-  if (_hostAssets) return _hostAssets.writeGeneratedFile(path, content);
-  const action = existsSync(path) ? "updated" : "installed";
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
-  return action;
-}
-
-function splitFrontmatter(text) {
-  if (_hostAssets) return _hostAssets.splitFrontmatter(text);
-  const normalized = text.replace(/\r\n/g, "\n");
-  const match = normalized.match(/^---\n[\s\S]*?\n---\n?/u);
-  return { body: match ? normalized.slice(match[0].length) : normalized };
-}
 
 const OPENCODE_REMEDIATE_EDIT_PERMISSION = {
   "*": "ask",
@@ -101,32 +66,12 @@ const OPENCODE_REMEDIATE_BASH_PERMISSION = {
   "rm *": "deny",
 };
 
-function objectValue(value) {
-  if (_hostAssets) return _hostAssets.objectValue(value);
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
 // The scoped OpenCode permission merge helpers are single-sourced in
 // audit-tools/shared (global top-level scope vs. remediator agent scope).
-// Resolve them best-effort: on a fresh workspace checkout the shared dist may
-// not be built yet, in which case the OpenCode config deployment below is
+// Resolved best-effort: on a fresh workspace checkout the shared dist may not
+// be built yet, in which case the OpenCode config deployment below is
 // skipped with a warning instead of failing the whole install.
-let sharedOpenCodePermissions = null;
-try {
-  const shared = await import("audit-tools/shared");
-  if (
-    typeof shared.mergeOpenCodeAgentPermissionRule === "function" &&
-    typeof shared.mergeOpenCodeGlobalPermissionRule === "function" &&
-    typeof shared.migrateOpenCodeGlobalExternalDirectory === "function" &&
-    typeof shared.withoutOpenCodeWildcard === "function"
-  ) {
-    sharedOpenCodePermissions = shared;
-  }
-} catch {
-  // Leave null; the OpenCode deployment step reports the skip.
-}
+const sharedOpenCodePermissions = await resolveSharedOpenCodePermissions();
 
 // Remediator agent scope: managed rules win for specific patterns; an
 // existing user wildcard survives (the managed set is passed without "*").
@@ -219,30 +164,21 @@ function mergeOpenCodeGlobalConfig(existing, promptBody) {
   };
 }
 
-function installMergedJson(path, buildMerged) {
-  const existing = existsSync(path) ? readFileSync(path, "utf8") : null;
-  const merged = buildMerged(existing);
-  const action = existing ? "updated" : "installed";
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(merged, null, 2) + "\n", "utf8");
-  return action;
-}
-
-const promptSource = readRequiredSource(promptSourceFile, "prompt");
-const skillSource = readRequiredSource(skillSourceFile, "skill");
+const promptSource = readRequiredSource(promptSourceFile, "prompt", TOOL);
+const skillSource = readRequiredSource(skillSourceFile, "skill", TOOL);
 
 if (!promptSource || !skillSource) {
   process.exit(0);
 }
 
 const postinstallStart = Date.now();
-let succeeded = 0;
-let failed = 0;
+const counts = { succeeded: 0, failed: 0 };
 
 const promptBody = splitFrontmatter(promptSource.toString("utf8")).body;
 const codexOpenAiAgentSource = readOptionalSource(
   codexOpenAiAgentSourceFile,
   "Codex skill UI metadata",
+  TOOL,
 );
 
 const installs = [
@@ -289,24 +225,7 @@ const installs = [
     : []),
 ];
 
-for (const install of installs) {
-  try {
-    const action = writeGeneratedFile(install.path, install.content);
-    console.log(
-      `remediate-code: ${action} global ${install.label} at ${install.path}`,
-    );
-    succeeded++;
-  } catch (err) {
-    console.warn(
-      `remediate-code: could not install global ${install.label} (${err.message})`,
-    );
-    console.warn("  To install manually, copy from:");
-    console.warn(`    ${install.sourcePath}`);
-    console.warn("  to:");
-    console.warn(`    ${install.path}`);
-    failed++;
-  }
-}
+runInstalls(TOOL, installs, counts);
 
 const opencodeGlobalConfig = join(
   homedir(),
@@ -314,74 +233,27 @@ const opencodeGlobalConfig = join(
   "opencode",
   "opencode.json",
 );
-if (!sharedOpenCodePermissions) {
-  // Expected when audit-tools/shared isn't built yet — notably during `npm ci`
-  // in CI, where postinstall runs before the shared build step. This is a SKIP,
-  // not a failure: counting it would trip the `failed > 0` exit-1 guard below and
-  // break `npm ci`. Genuine OpenCode write errors are still counted as failures.
-  console.warn(
-    "remediate-code: audit-tools/shared is unavailable (build the shared workspace first); skipping OpenCode config deployment",
-  );
-} else {
-  try {
-    const action = installMergedJson(opencodeGlobalConfig, (existing) =>
-      mergeOpenCodeGlobalConfig(existing, promptBody),
-    );
-    console.log(
-      `remediate-code: ${action} global OpenCode command in ${opencodeGlobalConfig}`,
-    );
-    succeeded++;
-  } catch (err) {
-    console.warn(
-      `remediate-code: could not install global OpenCode command (${err.message})`,
-    );
-    failed++;
-  }
-}
+installOpenCodeGlobalConfig(
+  {
+    toolName: TOOL,
+    path: opencodeGlobalConfig,
+    sharedOpenCodePermissions,
+    buildMerged: (existing) => mergeOpenCodeGlobalConfig(existing, promptBody),
+    label: "OpenCode command",
+  },
+  counts,
+);
 
 // Install Antigravity plugin (global skill for Gemini IDE / Antigravity Hub)
-const antigravityPluginDir = join(
-  homedir(),
-  ".gemini",
-  "config",
-  "plugins",
-  "remediate-code",
-);
-const antigravityPluginJsonPath = join(antigravityPluginDir, "plugin.json");
-const antigravityPluginSkillPath = join(
-  antigravityPluginDir,
-  "skills",
-  "SKILL.md",
+installAntigravityPlugin(
+  {
+    toolName: TOOL,
+    homeDir: homedir(),
+    pluginName: "remediate-code",
+    pluginVersion: packageVersion,
+    skillSource,
+  },
+  counts,
 );
 
-try {
-  const pluginJsonAction = writeGeneratedFile(
-    antigravityPluginJsonPath,
-    Buffer.from(
-      JSON.stringify(
-        { name: "remediate-code", version: packageVersion },
-        null,
-        2,
-      ) + "\n",
-    ),
-  );
-  console.log(
-    `remediate-code: ${pluginJsonAction} Antigravity plugin manifest at ${antigravityPluginJsonPath}`,
-  );
-
-  const skillAction = writeGeneratedFile(antigravityPluginSkillPath, skillSource);
-  console.log(
-    `remediate-code: ${skillAction} Antigravity plugin skill at ${antigravityPluginSkillPath}`,
-  );
-  succeeded++;
-} catch (err) {
-  console.warn(
-    `remediate-code: could not install Antigravity plugin (${err.message})`,
-  );
-  failed++;
-}
-
-console.log(`remediate-code: postinstall complete — ${succeeded} succeeded, ${failed} failed (${Date.now() - postinstallStart}ms)`);
-if (failed > 0) {
-  process.exitCode = 1;
-}
+finishPostinstall(TOOL, counts, postinstallStart);

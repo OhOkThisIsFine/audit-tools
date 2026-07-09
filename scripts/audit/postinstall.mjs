@@ -1,40 +1,26 @@
 #!/usr/bin/env node
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import {
+  readRequiredSource,
+  readOptionalSource,
+  writeGeneratedFile,
+  objectValue,
+  resolveSharedOpenCodePermissions,
+  runInstalls,
+  installOpenCodeGlobalConfig,
+  installAntigravityPlugin,
+  finishPostinstall,
+} from '../shared/install-host-assets.mjs';
 
+const TOOL = 'audit-code';
 const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
 const promptSourceFile = join(pkgRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
 const skillSourceFile = join(pkgRoot, 'skills', 'audit-code', 'SKILL.md');
 const codexOpenAiAgentSourceFile = join(pkgRoot, 'skills', 'audit-code', 'agents', 'openai.yaml');
-
-function readRequiredSource(path, label) {
-  if (!existsSync(path)) {
-    console.warn(`audit-code: ${label} source not found at ${path} - skipping global command install`);
-    process.exitCode = 0;
-    return null;
-  }
-
-  return readFileSync(path);
-}
-
-function readOptionalSource(path, label) {
-  if (!existsSync(path)) {
-    console.warn(`audit-code: ${label} source not found at ${path} - skipping optional install`);
-    return null;
-  }
-
-  return readFileSync(path);
-}
-
-function writeGeneratedFile(path, content) {
-  const action = existsSync(path) ? 'updated' : 'installed';
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
-  return action;
-}
 
 const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
@@ -80,31 +66,12 @@ const OPENCODE_AUDIT_BASH_PERMISSION = {
   'rm *': 'deny',
 };
 
-function objectValue(value) {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value
-    : {};
-}
-
 // The scoped OpenCode permission merge helpers are single-sourced in
 // audit-tools/shared (global top-level scope vs. auditor agent scope).
-// Resolve them best-effort: on a fresh workspace checkout the shared dist may
-// not be built yet, in which case the OpenCode config deployment below is
+// Resolved best-effort: on a fresh workspace checkout the shared dist may not
+// be built yet, in which case the OpenCode config deployment below is
 // skipped with a warning instead of failing the whole install.
-let sharedOpenCodePermissions = null;
-try {
-  const shared = await import('audit-tools/shared');
-  if (
-    typeof shared.mergeOpenCodeAgentPermissionRule === 'function' &&
-    typeof shared.mergeOpenCodeGlobalPermissionRule === 'function' &&
-    typeof shared.migrateOpenCodeGlobalExternalDirectory === 'function' &&
-    typeof shared.withoutOpenCodeWildcard === 'function'
-  ) {
-    sharedOpenCodePermissions = shared;
-  }
-} catch {
-  // Leave null; the OpenCode deployment step reports the skip.
-}
+const sharedOpenCodePermissions = await resolveSharedOpenCodePermissions();
 
 // Auditor agent scope (read-only agent, parity with the remediator hardening):
 // enumerated audit-code commands stay managed allows/denies, but the bash
@@ -229,27 +196,17 @@ function claudePluginExternalDir() {
   return join(homedir(), '.claude', 'plugins', 'marketplaces', 'claude-plugins-official', 'external_plugins', 'audit-code');
 }
 
-function installMergedJson(path, buildMerged) {
-  const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
-  const merged = buildMerged(existing);
-  const action = existing ? 'updated' : 'installed';
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(merged, null, 2) + '\n', 'utf8');
-  return action;
-}
-
-const promptSource = readRequiredSource(promptSourceFile, 'prompt');
-const skillSource = readRequiredSource(skillSourceFile, 'skill');
+const promptSource = readRequiredSource(promptSourceFile, 'prompt', TOOL);
+const skillSource = readRequiredSource(skillSourceFile, 'skill', TOOL);
 
 if (!promptSource || !skillSource) {
   process.exit(0);
 }
 
-const codexOpenAiAgentSource = readOptionalSource(codexOpenAiAgentSourceFile, 'Codex skill UI metadata');
+const codexOpenAiAgentSource = readOptionalSource(codexOpenAiAgentSourceFile, 'Codex skill UI metadata', TOOL);
 
 const postinstallStart = Date.now();
-let succeeded = 0;
-let failed = 0;
+const counts = { succeeded: 0, failed: 0 };
 
 const installs = [
   {
@@ -282,65 +239,36 @@ const installs = [
     : []),
 ];
 
-for (const install of installs) {
-  try {
-    const action = writeGeneratedFile(install.path, install.content);
-    console.log(`audit-code: ${action} global ${install.label} at ${install.path}`);
-    succeeded++;
-  } catch (err) {
-    console.warn(`audit-code: could not install global ${install.label} (${err.message})`);
-    console.warn(`  To install manually, copy from:`);
-    console.warn(`    ${install.sourcePath}`);
-    console.warn(`  to:`);
-    console.warn(`    ${install.path}`);
-    failed++;
-  }
-}
+runInstalls(TOOL, installs, counts);
 
 // Install OpenCode global command and MCP via merged config
 const opencodeGlobalConfig = join(homedir(), '.config', 'opencode', 'opencode.json');
-if (!sharedOpenCodePermissions) {
-  // Expected when audit-tools/shared isn't built yet — notably during `npm ci`
-  // in CI, where postinstall runs before the shared build step. This is a SKIP,
-  // not a failure: counting it would trip the `failed > 0` exit-1 guard below and
-  // break `npm ci`. Genuine OpenCode write errors are still counted as failures.
-  console.warn(
-    'audit-code: audit-tools/shared is unavailable (build the shared workspace first); skipping OpenCode config deployment',
-  );
-} else {
-  try {
-    const action = installMergedJson(opencodeGlobalConfig, (existing) =>
-      mergeOpenCodeGlobalConfig(existing),
-    );
-    console.log(`audit-code: ${action} global OpenCode config in ${opencodeGlobalConfig}`);
-    succeeded++;
-  } catch (err) {
-    console.warn(`audit-code: could not install global OpenCode config (${err.message})`);
-    console.warn(`  To install manually, add the mcp.auditor and command["audit-code"] entries to:`);
-    console.warn(`    ${opencodeGlobalConfig}`);
-    failed++;
-  }
-}
+installOpenCodeGlobalConfig(
+  {
+    toolName: TOOL,
+    path: opencodeGlobalConfig,
+    sharedOpenCodePermissions,
+    buildMerged: (existing) => mergeOpenCodeGlobalConfig(existing),
+    label: 'OpenCode config',
+    manualInstructions: [
+      `  To install manually, add the mcp.auditor and command["audit-code"] entries to:`,
+      `    ${opencodeGlobalConfig}`,
+    ],
+  },
+  counts,
+);
 
 // Install Antigravity plugin (global skill for Gemini IDE / Antigravity Hub)
-const antigravityPluginDir = join(homedir(), '.gemini', 'config', 'plugins', 'audit-code');
-const antigravityPluginJsonPath = join(antigravityPluginDir, 'plugin.json');
-const antigravityPluginSkillPath = join(antigravityPluginDir, 'skills', 'SKILL.md');
-
-try {
-  const pluginJsonAction = writeGeneratedFile(
-    antigravityPluginJsonPath,
-    Buffer.from(JSON.stringify({ name: 'audit-code', version: '1.0.0' }, null, 2) + '\n'),
-  );
-  console.log(`audit-code: ${pluginJsonAction} Antigravity plugin manifest at ${antigravityPluginJsonPath}`);
-
-  const skillAction = writeGeneratedFile(antigravityPluginSkillPath, skillSource);
-  console.log(`audit-code: ${skillAction} Antigravity plugin skill at ${antigravityPluginSkillPath}`);
-  succeeded++;
-} catch (err) {
-  console.warn(`audit-code: could not install Antigravity plugin (${err.message})`);
-  failed++;
-}
+installAntigravityPlugin(
+  {
+    toolName: TOOL,
+    homeDir: homedir(),
+    pluginName: 'audit-code',
+    pluginVersion: '1.0.0',
+    skillSource,
+  },
+  counts,
+);
 
 // Install Claude Desktop plugin so /audit-code appears in the slash-command menu
 // Claude Desktop reads external plugins from ~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/
@@ -375,14 +303,11 @@ try {
   console.log(`audit-code: ${skillAction} Claude Desktop plugin skill at ${claudePluginSkillPath}`);
 
   console.log(`audit-code: restart Claude Desktop for /audit-code to appear in the slash-command menu`);
-  succeeded++;
+  counts.succeeded++;
 } catch (err) {
   console.warn(`audit-code: could not install Claude Desktop plugin (${err.message})`);
   console.warn(`  Plugin directory: ${claudePluginDir}`);
-  failed++;
+  counts.failed++;
 }
 
-console.log(`audit-code: postinstall complete — ${succeeded} succeeded, ${failed} failed (${Date.now() - postinstallStart}ms)`);
-if (failed > 0) {
-  process.exitCode = 1;
-}
+finishPostinstall(TOOL, counts, postinstallStart);

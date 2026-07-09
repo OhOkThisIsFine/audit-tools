@@ -31,6 +31,7 @@
     "scripts/postinstall.mjs",
     "scripts/audit/postinstall.mjs",
     "scripts/remediate/postinstall.mjs",
+    "scripts/shared/install-host-assets.mjs",
     "opencode.json",
     "README.md",
     "docs/audit-pkg/**"
