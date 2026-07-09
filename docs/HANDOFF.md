@@ -8,28 +8,27 @@
 
 ## Live state
 
-- **v0.32.39 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
+- **v0.32.40 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
   roadmap only.
-- **Context-efficiency access-memory track — increments 1 + 2a SHIPPED; scoring/bias are next.**
-  - **Increment 1 (v0.32.38): piggybacked prefix-ordering fix (#4)** — `buildPacketPrompt`
-    (`src/audit/cli/dispatch/packetPrompt.ts`) leads with the static `## Output` schema as a cache-eligible
-    fixed prefix, trails all per-packet volatile content; tool-enforced regression guard. Made the
-    cross-cutting cache-safety guard real.
-  - **Increment 2a (v0.32.39): the persistence spine** — `access_memory.json`, a first-class per-run audit
-    artifact harvested (deterministically, path-sorted, step-ordinal recency) from the ingested result
-    ledger in `runResultIngestionExecutor`. Shared type in `audit-tools/shared`; pure `deriveAccessMemory`
-    (`src/audit/orchestrator/accessMemory.ts`); DAG edge `access_memory.json → audit_results.jsonl`;
-    `run_id` stripped from the semantic hash. Independently adversarially reviewed (no defect). Nothing
-    consumes it yet.
-  - **Immediate next = increment 2b: JIT continuity scoring + packet-selection bias.** A pure dispatch-time
-    scorer reading `bundle.access_memory` + `graph_bundle` → deterministic personalized PageRank (recency×
-    frequency seed, `edited`>`covered`, power-iteration to a FIXED count, α~0.85) → bias
-    `orderTasksForPacketReview`/`buildReviewPacketsFromPartition` selection (`src/audit/cli/dispatch.ts:261-329`),
-    strictly in the back payload (never the cached prefix). Then **2c** remediate-parity harvest
-    (`RemediationBlock.touched_files` → `edited_count`), **2d** `path::symbol` slicing (#2), and **#3** the
-    token-efficiency eval harness alongside as the measurement gate. Design-of-record
-    [[access-memory-layer-design]]; track detail `docs/backlog.md:406`. Loop-core → full adversarial pipeline.
+- **Context-efficiency access-memory track — increments 1 + 2a + 2b SHIPPED; item (1) is functionally complete on the audit side.**
+  - **Increment 1 (v0.32.38): prefix-ordering fix (#4)** — `buildPacketPrompt` static `## Output` prefix leads,
+    volatile payload trails; tool-enforced guard. Cross-cutting cache-safety guard now real.
+  - **Increment 2a (v0.32.39): persistence spine** — `access_memory.json`, first-class per-run audit artifact
+    harvested from the ingested result ledger (`deriveAccessMemory`, `src/audit/orchestrator/accessMemory.ts`);
+    DAG edge `→ audit_results.jsonl`; `run_id` stripped from hash.
+  - **Increment 2b (v0.32.40): continuity scoring + packet-order bias** — `computeContinuityScores`
+    (`src/audit/orchestrator/continuityScore.ts`): recency×frequency seed → deterministic personalized PageRank
+    (α=0.85, fixed 20 iters) over the dependency graph → biases packet ORDERING (single-sourced
+    `orderReviewPackets`, strictly below priority) at the load-bearing sorts (`buildReviewPacketsFromPartition` +
+    `fitPacketsToTierBudgets`). Cache-safe (order/selection only). Adversarially reviewed; folded fixes: tier-refit
+    re-sort (closed a pre-existing priority-monotonicity break), dropped an inert ordering thread, NaN guard.
+  - **Immediate next = increment 2c: remediate-parity harvest.** Populate `access_memory.edited_count` from
+    `RemediationBlock.touched_files` on the remediate side (the harvest shape + `edited_count`/`EDITED_WEIGHT`
+    slot already exist), so continuity works in both orchestrators ("keep orchestrators in parity"). Then **2d**
+    `path::symbol` slicing (#2) and **#3** the token-efficiency eval harness (the measurement gate — the active
+    bias must be MEASURED not asserted). Design-of-record [[access-memory-layer-design]]; detail `docs/backlog.md:406`.
+    Loop-core → full adversarial pipeline.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,
   released v0.32.36).** ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1
   (a-priori declared per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification:

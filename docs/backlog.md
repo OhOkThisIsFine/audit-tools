@@ -409,12 +409,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   **Increment 2a SHIPPED (v0.32.39, 2026-07-08) — item (1) persistence spine:** `access_memory.json`, a first-class
   per-run audit artifact deterministically harvested from the ingested result ledger (frequency + step-ordinal recency
   + lenses) in `runResultIngestionExecutor`. Shared type `src/shared/types/accessMemory.ts`; pure `deriveAccessMemory`
-  (`src/audit/orchestrator/accessMemory.ts`); DAG edge `access_memory.json → audit_results.jsonl`. Adversarially
-  reviewed, no defect. **Remaining of item (1): increment 2b** = JIT personalized-PageRank continuity scoring
-  (deterministic power-iteration over `graph_bundle` edges, recency×frequency seed, `edited`>`covered`) → bias
-  `orderTasksForPacketReview`/`buildReviewPacketsFromPartition` selection (`dispatch.ts:261-329`), back-payload only;
-  **2c** remediate-parity harvest (`RemediationBlock.touched_files` → `edited_count`). Items (2) `path::symbol`
-  slicing + (3) eval harness still open.
+  (`src/audit/orchestrator/accessMemory.ts`); DAG edge `access_memory.json → audit_results.jsonl`.
+  **Increment 2b SHIPPED (v0.32.40, 2026-07-08) — item (1) scoring + bias:** `computeContinuityScores`
+  (`src/audit/orchestrator/continuityScore.ts`) = deterministic personalized PageRank (α=0.85, fixed 20 iters,
+  recency×frequency seed, `edited`>`covered`) over `graph_bundle` edges → biases packet ORDERING via single-sourced
+  `orderReviewPackets` (strictly below priority) at the load-bearing sorts (`buildReviewPacketsFromPartition` +
+  `fitPacketsToTierBudgets`). Cache-safe. Adversarially reviewed; folded fixes (tier-refit re-sort closing a
+  pre-existing priority-monotonicity break, inert-thread removal, NaN guard). **Item (1) is now functionally complete
+  on the audit side.** Remaining track work: **2c** remediate-parity harvest (`RemediationBlock.touched_files` →
+  `edited_count`; the shape + weight slot already exist); items (2) `path::symbol` slicing + (3) token-efficiency eval
+  harness (measurement gate — the active bias must be MEASURED not asserted) still open.
 
   - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
     *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step
