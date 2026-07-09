@@ -345,6 +345,11 @@ const SPAWN_CALLEES = ["spawnSync", "spawn", "execSync", "execFileSync", "execFi
 function walkFiles(dir) {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // Dot-prefixed dirs are transient test fixtures (e.g. a concurrently-running
+    // remediate test's `tests/remediate/.test-*/` scratch tree it creates and
+    // deletes mid-run) — never real test source. Skipping them keeps the scan off
+    // files that vanish between readdir and readFile under a concurrent `vitest run`.
+    if (entry.isDirectory() && entry.name.startsWith(".")) continue;
     const full = resolve(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...walkFiles(full));
@@ -353,6 +358,18 @@ function walkFiles(dir) {
     }
   }
   return out;
+}
+
+// A file discovered by the walk can still vanish before it is read (a concurrent
+// test tears down its fixture tree mid-scan). A file that no longer exists is not a
+// violation — tolerate the ENOENT and skip it, rethrowing anything else.
+function readFileIfPresent(file) {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    throw err;
+  }
 }
 
 // Does an import statement from the child_process module pull in a spawn/exec name?
@@ -402,7 +419,8 @@ test("INV-WH: no test file imports a raw spawn/exec entry point from node:child_
   const violations = [];
   let scanned = 0;
   for (const file of files) {
-    const source = readFileSync(file, "utf8");
+    const source = readFileIfPresent(file);
+    if (source === null) continue;
     if (!importsRawChildProcessSpawn(source)) continue;
     // A file that fully mocks node:child_process binds the imported spawn symbol
     // to a test double; its real spawns are windowsHide-wrapped separately.

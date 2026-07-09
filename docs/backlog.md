@@ -29,17 +29,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`shared-tests-invariants.test.mjs` INV-WH file-scanner races a concurrent test's in-tree temp fixtures
-  (hermeticity, tool-should-decide, 2026-07-08).** Under a full concurrent `vitest run`, INV-WH (which recursively
-  `readdirSync`→`readFileSync`s every test file to check for raw `child_process` spawns) failed with
-  `ENOENT ... tests/remediate/.test-next-step-resume-gates/repo/src/a.ts` — a `.test-*` fixture dir a *concurrently
-  running* remediate test creates under the tests tree and deletes mid-run, so the scan read a file that vanished
-  between `readdir` and `readFile`. Passes alone (hermeticity, not a regression). Two independent fixes, either
-  suffices: (a) the invariant scanner should skip `.test-*`/dot-prefixed fixture dirs AND tolerate a mid-scan ENOENT
-  (a file that vanishes during the walk isn't a violation); (b) the resume-gates remediate test should write its
-  fixtures to `os.tmpdir()`, never an in-tree `tests/remediate/.test-*` dir (test fixtures under the scanned tree are
-  the hazard). Prefer BOTH — the scanner hardening is the general guard. [[worktree-tests-miss-integration-guards]]
-
 - **Lap friction walk — backlog-orchestration lap (2026-07-08).** Orchestrated lap: parallel read-only recon
   agents → serial implement-agent-per-item with adversarial review before each commit. Shipped six backlog code
   items (wrapper passthrough D-61, vi.spyOn barrel guard INV-12, accept-node stray-worktree guard, convergence

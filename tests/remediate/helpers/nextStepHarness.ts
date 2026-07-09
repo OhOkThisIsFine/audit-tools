@@ -15,6 +15,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSyncHidden as spawnSync } from "../../helpers/spawn.mjs";
 import { dirname, join, isAbsolute } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { StateStore } from "../../../src/remediate/state/store.js";
 import type { RemediationState } from "../../../src/remediate/state/store.js";
@@ -168,7 +169,12 @@ export interface NextStepHarness {
  *   Two files MUST NOT share a name, or their parallel runs will collide.
  */
 export function createNextStepHarness(dirName: string): NextStepHarness {
-  const TEST_DIR = join(TESTS_DIR, dirName);
+  // Root scratch state under the OS temp dir, NOT the in-tree tests directory.
+  // A fixture tree under `tests/` is walked by the INV-WH raw-spawn scanner
+  // (`tests/shared/shared-tests-invariants.test.mjs`); a concurrently-running
+  // next-step test creating/deleting its scratch tree mid-scan raced that walk
+  // into a mid-scan ENOENT. os.tmpdir() keeps the fixtures off the scanned tree.
+  const TEST_DIR = join(tmpdir(), "audit-tools-tests", dirName);
   const REPO_DIR = join(TEST_DIR, "repo");
   const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
 
