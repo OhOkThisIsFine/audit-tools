@@ -129,15 +129,17 @@ test("grounding-single-source/3a: audit-code imports the shared runner + allowli
 });
 
 test("grounding-single-source/3b: remediate-code reads finding.grounding via the shared total function (G1/INV-GND-02)", () => {
-  // The structured-audit plan path and the implement prompt both consult the
-  // shared verify-before-fix predicate so a missing grounding verdict is treated
-  // as ungrounded (never silently trusted).
-  const plan = read(join(REMEDIATE_SRC, "phases", "plan.ts"));
+  // The implement prompt consults the shared verify-before-fix predicate so a
+  // missing grounding verdict is treated as ungrounded (never silently trusted).
+  // This is the enforcement site: the worker is instructed to verify such a
+  // finding against the cited code before applying any fix. (plan.ts's consult
+  // died with the production-dead runPlanPhase document path; the live
+  // extracted-plan join runs deterministic phantom-path grounding of its own —
+  // see groundExtractedFindings + its suites.)
   // dispatch.ts was split into cohesive modules (CP-NODE-7); the implement-prompt
   // grounding-read now lives in the dispatch/implementPrompt.ts module.
   const dispatch = read(join(REMEDIATE_SRC, "steps", "dispatch", "implementPrompt.ts"));
   for (const [label, src] of [
-    ["remediate-code/src/phases/plan.ts", plan],
     ["remediate-code/src/steps/dispatch/implementPrompt.ts", dispatch],
   ]) {
     expect(/findingNeedsVerificationBeforeFix[^]*from\s+["']audit-tools\/shared["']/.test(src), `${label} must import findingNeedsVerificationBeforeFix from shared`).toBeTruthy();
