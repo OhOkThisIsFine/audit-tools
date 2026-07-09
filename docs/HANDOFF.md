@@ -8,10 +8,11 @@
 
 ## Live state
 
-- **v0.32.41 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
+- **v0.32.42 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
   roadmap only.
-- **Context-efficiency access-memory track — increments 1 + 2a + 2b + 2c SHIPPED; item (1) complete on BOTH orchestrators.**
+- **Context-efficiency access-memory track — increments 1 + 2a + 2b + 2c + 2d + remediate-consumer SHIPPED (v0.32.42);
+  items (1) AND (2) complete on BOTH orchestrators. Only item (3) remains.**
   - **Increment 1 (v0.32.38): prefix-ordering fix (#4)** — `buildPacketPrompt` static `## Output` prefix leads,
     volatile payload trails; tool-enforced guard. Cross-cutting cache-safety guard now real.
   - **Increment 2a (v0.32.39): persistence spine** — `access_memory.json`, first-class per-run audit artifact
@@ -29,35 +30,25 @@
     populates `edited_count` from the declared edit surface of RESOLVED items (per-item `item_spec.touched_files`,
     block fallback), writing `.audit-tools/remediation/access_memory.json` from the merge under the state lock.
     Adversarially reviewed; fixes folded (resolved-only not `resolved_no_change`, per-item attribution, crash guard).
-  - **Increment 2d (`path::symbol` slicing) — CODE-COMPLETE, ⚠️ UNRELEASED (owner ran /start-lap with "don't /ship").**
-    Sub-file targeted-read guidance in the isolated-large-file back-payload: the mechanical anchor scanner
-    (`src/audit/orchestrator/fileAnchors.ts`) now assigns each TOP-LEVEL (zero-indent) symbol an approximate body
-    span (`FileAnchor.end_line`, bounded by the next top-level decl, clamped to the file's line count), and
-    `renderAnchorPreview` (`src/audit/cli/dispatch/packetPrompt.ts`) renders it as a `path:START-END` slice with
-    advisory "read the span for your lens, expand if evidence crosses" guidance. Realizes the actual token lever:
-    packets hand PATHS + workers self-read, so the win is cutting god-file re-reads ([[worktree-large-files-reread-loop]]),
-    not packet bytes. **Fail-safe** (advisory; nested/indented bindings deliberately get no span so they neither
-    fragment an enclosing span nor become spurious slices), **cache-safe** (all in the back payload; fixed prefix
-    untouched), **zero schema/validator change** (`total_lines` stays whole-file; citations stay real-file coords —
-    no false-fail on the `coversAffectedSpan`/`total_lines` gate). Adversarially reviewed (6 attack vectors — cache
-    safety, span correctness, top-level heuristic, determinism/churn, mutation ordering, render edge — all REFUTED).
-    Green: `build` + `check` + full audit/shared suite. **Next agent: ship it** (`npm run release:patch:publish`).
-  - **Remediate continuity CONSUMER + scorer single-sourced — CODE-COMPLETE, ⚠️ UNRELEASED (same "don't /ship" lap).**
-    Owner principle: auditor/remediator mirroring is common logic — the consumer should have been shared from the
-    start (as the 2c harvest core already was), not built audit-only. So the scorer was EXTRACTED to
-    `audit-tools/shared`: `computeContinuityScores` + a new single-sourced `continuityMassForPaths` reducer
-    (`src/shared/continuityScore.ts`), plus the two graph primitives it needs (`normalizeGraphPath`,
-    `collectGraphEdges` → `src/shared/graph/graphPaths.ts`); audit re-exports all four so its 28+6 import sites +
-    2b behavior are BYTE-IDENTICAL (guarded green). Remediate consumer: `readRemediationAccessMemory` +
-    `computeBlockContinuityScores` (`src/remediate/state/accessMemory.ts`) reduce the harvested `access_memory.json`
-    to a per-block mass (seed-only — remediate has NO graph → `computeContinuityScores(mem, undefined)`), threaded
-    through `DriveRollingDispatchOptions.continuityScores` → `toNode` → the shared `ownershipSubWaves`, which gains an
-    `OwnershipSchedulerNode.continuity?` secondary sort key strictly BELOW file-disjointness and ABOVE the `block_id`
-    tie-break. No-op by default (audit/first-pass → pure block_id, unchanged). Adversarially reviewed (6 vectors A–F:
-    extraction fidelity, scheduler-sort disjointness/NaN, audit no-double-apply, consumer crash-safety, first-pass
-    timing, churn — all REFUTED). Green (build/check/deadcode/full suite; 1 known `audit-code-completion` hermeticity
-    flake passes alone).
-  - **Still open on the track (surface to owner):**
+  - **Increment 2d (`path::symbol` slicing) — SHIPPED v0.32.42.** Sub-file targeted-read guidance in the
+    isolated-large-file back-payload: the mechanical anchor scanner (`src/audit/orchestrator/fileAnchors.ts`) assigns
+    each TOP-LEVEL (zero-indent) symbol an approximate body span (`FileAnchor.end_line`, bounded by the next top-level
+    decl, clamped to the file's line count); `renderAnchorPreview` (`src/audit/cli/dispatch/packetPrompt.ts`) renders
+    it as a `path:START-END` slice with advisory "read the span for your lens, expand if evidence crosses" guidance.
+    Token lever: packets hand PATHS + workers self-read, so the win is cutting god-file re-reads
+    ([[worktree-large-files-reread-loop]]), not packet bytes. Fail-safe (nested/indented bindings get no span),
+    cache-safe (back-payload only), zero schema/validator change. Adversarially reviewed (6 vectors REFUTED).
+  - **Remediate continuity CONSUMER + scorer single-sourced — SHIPPED v0.32.42.** Owner principle: auditor/remediator
+    mirroring is common logic ([[auditor-remediator-mirroring-is-common-logic]]) — the consumer should have been shared
+    from the start (as the 2c harvest core was), not audit-only. Scorer EXTRACTED to `audit-tools/shared`:
+    `computeContinuityScores` + new single-sourced `continuityMassForPaths` (`src/shared/continuityScore.ts`) + graph
+    primitives `normalizeGraphPath`/`collectGraphEdges` (`src/shared/graph/graphPaths.ts`); audit re-exports all four
+    (28+6 import sites + 2b behaviour byte-identical). Remediate consumer (`readRemediationAccessMemory` +
+    `computeBlockContinuityScores`, `src/remediate/state/accessMemory.ts`) reduces `access_memory.json` to a per-block
+    mass (seed-only — remediate has NO graph), threaded via `DriveRollingDispatchOptions.continuityScores` → `toNode`
+    → shared `ownershipSubWaves` (`OwnershipSchedulerNode.continuity?` = secondary sort key below file-disjointness,
+    above `block_id`; no-op default). Adversarially reviewed (6 vectors A–F REFUTED).
+  - **Still open on the track (the immediate next item):**
     - **(B) #3 — token-efficiency eval harness (measure first):** the measurement gate confirming 2b's ordering bias,
       2d's slice guidance, AND the remediate consumer actually cut tokens *without busting prefix cache*. Cost
       counterpart to the A2 quality oracle; reads recorded run ledgers/headroom telemetry (post-hoc, allowed), reuses
@@ -98,10 +89,10 @@
   after the original worktree-wipe/state-desync incident). Durable status/recovery in
   [[remediate-max-sweep-run-2026-07-06]] / [[remediate-worktree-wipe-state-desync]].
 - **Open items** (all in `docs/backlog.md`): the free-pool / quota-arbitrage forward track; the
-  context-efficiency track (item #1 session access-memory = **the picked next-lap item**, 2026-07-08);
-  env-bound live validations (quota pre-wall pacing, friction escalation, selective-deepening
-  convergence, clippy/rubocop live spawn); provider-blocked schema CE-004 residual (claude-code host
-  only — the NIM guided-decoding path shipped).
+  context-efficiency track (items (1)+(2) SHIPPED v0.32.42 — **only item (3) token-efficiency eval harness
+  remains, the recommended next item**); env-bound live validations (quota pre-wall pacing, friction escalation,
+  selective-deepening convergence, clippy/rubocop live spawn); provider-blocked schema CE-004 residual (claude-code
+  host only — the NIM guided-decoding path shipped).
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
