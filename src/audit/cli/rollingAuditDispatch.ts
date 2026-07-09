@@ -55,6 +55,7 @@ import {
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
 import { createFreshSessionProvider } from "../providers/index.js";
 import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js";
+import { appendTokenUsageLine } from "../io/tokenUsageLedger.js";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 import { artifactNameForId } from "./args.js";
@@ -354,6 +355,11 @@ export function makeAuditProviderPacketDispatcher(params: {
       // that started charging. Absent for providers that report no cost.
       const observedCost =
         launch.observedCostUsd != null ? { observedCostUsd: launch.observedCostUsd } : {};
+      // score-tokens cost counterpart: relay the endpoint-reported token usage
+      // (when the provider surfaced one) the SAME way, so a consumer reading
+      // `RollingDispatchResult.observedUsage` sees it alongside the cost.
+      const observedUsage =
+        launch.observedUsage != null ? { observedUsage: launch.observedUsage } : {};
       // The worker writes its AuditResult[] per the prompt; confirm it landed and
       // parses. Contents are adjudicated by the deterministic merge downstream.
       const result = await readOptionalJsonFile<AuditResult[]>(resultPath);
@@ -377,7 +383,22 @@ export function makeAuditProviderPacketDispatcher(params: {
           ),
         };
       }
-      return { packet, outcome: "success", ...observedCost };
+      // Record the token-usage ledger line NOW — at packet-completion / result-
+      // handling time, never on the dispatch/admission path (INV: no added
+      // admission latency). Every completed packet gets a line, including the
+      // agentic-CLI providers (codex/opencode) that report no structured usage —
+      // their legs are null/null/null/null, distinctly "unmeasured" rather than
+      // silently 0. Best-effort (never fails the packet).
+      await appendTokenUsageLine(params.artifactsDir, params.runId, {
+        packet_id: packet.id,
+        pool_id: slot?.poolId ?? null,
+        input_tokens: launch.observedUsage?.inputTokens ?? null,
+        output_tokens: launch.observedUsage?.outputTokens ?? null,
+        cache_read_tokens: launch.observedUsage?.cacheReadTokens ?? null,
+        cache_creation_tokens: launch.observedUsage?.cacheCreationTokens ?? null,
+        observed_cost_usd: launch.observedCostUsd ?? null,
+      });
+      return { packet, outcome: "success", ...observedCost, ...observedUsage };
     } catch (err) {
       return { packet, outcome: "error", error: err };
     }

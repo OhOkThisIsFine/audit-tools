@@ -56,6 +56,25 @@ export interface LaunchFreshSessionResult {
    * value, so a no-cost backend never triggers a demotion.
    */
   observedCostUsd?: number | null;
+  /**
+   * Endpoint-REPORTED token usage for this request, when the backend returns
+   * structured usage counts on its response (the openai-compatible
+   * chat-completions `usage` object). Read post-hoc from a completed response —
+   * NOT a planning estimate (same allowed-measurement rule as
+   * {@link observedCostUsd}; the "token estimates stay local" policy governs
+   * PLANNING only). Individual fields are each independently optional — a field
+   * the backend omitted stays `undefined` rather than being fabricated as 0.
+   * Absent entirely when the backend reports no usage at all: the agentic-CLI
+   * providers (claude-code / codex / opencode) spawn an external process with no
+   * structured completion body and never populate this, so a consumer can tell
+   * "unmeasured" apart from "measured zero."
+   */
+  observedUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  } | null;
 }
 
 export interface ProviderRateLimits {

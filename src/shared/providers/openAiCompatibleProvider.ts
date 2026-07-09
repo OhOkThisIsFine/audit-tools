@@ -212,6 +212,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
 
     let content: string;
     let observedCostUsd: number | undefined;
+    let observedUsage: NonNullable<LaunchFreshSessionResult["observedUsage"]> | undefined;
     try {
       // Bounded retry with exponential backoff on TRANSIENT failures (network
       // reject, timeout-less 5xx/429/524) — a single lost response or a momentary
@@ -257,7 +258,16 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
         const json = (await res.json()) as {
           choices?: Array<{ message?: { content?: unknown } }>;
           cost?: unknown;
-          usage?: { cost?: unknown; total_cost?: unknown };
+          usage?: {
+            cost?: unknown;
+            total_cost?: unknown;
+            prompt_tokens?: unknown;
+            completion_tokens?: unknown;
+            total_tokens?: unknown;
+            prompt_tokens_details?: { cached_tokens?: unknown };
+            cache_read_input_tokens?: unknown;
+            cache_creation_input_tokens?: unknown;
+          };
         };
         const raw = json.choices?.[0]?.message?.content;
         if (typeof raw !== "string" || raw.trim().length === 0) {
@@ -270,6 +280,11 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
         // finished response — never an estimate. A backend that reports no cost
         // (standard OpenAI) leaves this undefined → no demotion signal downstream.
         observedCostUsd = extractReportedCostUsd(json);
+        // Cost-counterpart measurement (score-tokens harness): capture the
+        // endpoint's OWN reported token usage when present, same post-hoc,
+        // never-an-estimate discipline. A backend with no `usage` object (or an
+        // unrecognized shape) leaves this undefined.
+        observedUsage = extractObservedUsage(json);
         break;
       }
     } finally {
@@ -363,6 +378,7 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
       stdoutPath: input.stdoutPath,
       stderrPath: input.stderrPath,
       ...(observedCostUsd !== undefined ? { observedCostUsd } : {}),
+      ...(observedUsage !== undefined ? { observedUsage } : {}),
     };
   }
 
@@ -501,6 +517,79 @@ export function extractReportedCostUsd(json: {
     if (Number.isFinite(value) && value >= 0) return value;
   }
   return undefined;
+}
+
+/**
+ * Extract the endpoint-REPORTED token usage from a chat-completions response's
+ * `usage` object, tolerating two dialects: the OpenAI shape
+ * (`prompt_tokens`/`completion_tokens`, cached tokens nested under
+ * `prompt_tokens_details.cached_tokens`) and the Anthropic-native shape
+ * (`cache_read_input_tokens`/`cache_creation_input_tokens`, as some gateways
+ * relay it verbatim). Every field is independently optional and tolerant — a
+ * missing, malformed, or negative value is simply omitted, never coerced to 0 or
+ * thrown on. Returns `undefined` when `usage` is absent or carries none of the
+ * recognized fields, so a backend with no usage signal never fabricates a
+ * "measured zero." This is post-hoc measurement of a FINISHED response, not a
+ * planning estimate (mirrors {@link extractReportedCostUsd}).
+ */
+export function extractObservedUsage(json: {
+  usage?: {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    prompt_tokens_details?: { cached_tokens?: unknown };
+    cache_read_input_tokens?: unknown;
+    cache_creation_input_tokens?: unknown;
+  };
+}): {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+} | undefined {
+  const usage = json.usage;
+  if (usage === undefined || usage === null || typeof usage !== "object") return undefined;
+
+  const inputTokens = toFiniteNonNegative(usage.prompt_tokens);
+  const outputTokens = toFiniteNonNegative(usage.completion_tokens);
+  // OpenAI dialect nests cached tokens under prompt_tokens_details; the
+  // Anthropic-native dialect (some gateways relay it verbatim) reports it as a
+  // top-level usage field. Prefer whichever is present; a response never sends
+  // both, but if it did, the OpenAI-nested field wins deterministically.
+  const cacheReadTokens =
+    toFiniteNonNegative(usage.prompt_tokens_details?.cached_tokens) ??
+    toFiniteNonNegative(usage.cache_read_input_tokens);
+  const cacheCreationTokens = toFiniteNonNegative(usage.cache_creation_input_tokens);
+
+  if (
+    inputTokens === undefined &&
+    outputTokens === undefined &&
+    cacheReadTokens === undefined &&
+    cacheCreationTokens === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+    ...(cacheCreationTokens !== undefined ? { cacheCreationTokens } : {}),
+  };
+}
+
+/**
+ * Coerce a candidate to a finite, non-negative number (accepting a numeric
+ * string, since some gateways stringify token counts like they do `cost`).
+ * Anything else — missing, negative, NaN, an object, a boolean — returns
+ * `undefined` so a malformed field is dropped rather than fabricated.
+ */
+function toFiniteNonNegative(value: unknown): number | undefined {
+  const num =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : NaN;
+  return Number.isFinite(num) && num >= 0 ? num : undefined;
 }
 
 /**

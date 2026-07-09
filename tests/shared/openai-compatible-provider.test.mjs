@@ -690,7 +690,7 @@ test("createFreshSessionProvider constructs the openai-compatible provider", () 
 // Reactive cost verification (arbitrage increment 2)
 // ---------------------------------------------------------------------------
 
-const { extractReportedCostUsd } = await import(
+const { extractReportedCostUsd, extractObservedUsage } = await import(
   "../../src/shared/providers/openAiCompatibleProvider.ts"
 );
 
@@ -767,4 +767,94 @@ test("launch omits observedCostUsd when the endpoint reports no cost", async () 
   const res = await provider.launch(input);
   expect(res.accepted).toBe(true);
   expect(res.observedCostUsd).toBeUndefined();
+});
+
+// ---------------------------------------------------------------------------
+// Observed token usage (score-tokens cost counterpart, A2-track item 3)
+// ---------------------------------------------------------------------------
+
+test("extractObservedUsage — reads the OpenAI dialect (prompt/completion tokens, nested cached_tokens)", () => {
+  expect(
+    extractObservedUsage({
+      usage: {
+        prompt_tokens: 1000,
+        completion_tokens: 200,
+        prompt_tokens_details: { cached_tokens: 400 },
+      },
+    }),
+  ).toEqual({ inputTokens: 1000, outputTokens: 200, cacheReadTokens: 400 });
+});
+
+test("extractObservedUsage — reads the Anthropic-native dialect (cache_read/cache_creation_input_tokens)", () => {
+  expect(
+    extractObservedUsage({
+      usage: {
+        prompt_tokens: 500,
+        completion_tokens: 90,
+        cache_read_input_tokens: 100,
+        cache_creation_input_tokens: 20,
+      },
+    }),
+  ).toEqual({ inputTokens: 500, outputTokens: 90, cacheReadTokens: 100, cacheCreationTokens: 20 });
+});
+
+test("extractObservedUsage — a numeric-string usage field is coerced (some gateways stringify like they do cost)", () => {
+  expect(
+    extractObservedUsage({
+      usage: { prompt_tokens: "800", completion_tokens: "150" },
+    }),
+  ).toEqual({ inputTokens: 800, outputTokens: 150 });
+});
+
+test("extractObservedUsage — absent usage / cache fields yields undefined per-field, never fabricated 0", () => {
+  expect(extractObservedUsage({})).toBeUndefined();
+  expect(extractObservedUsage({ usage: {} })).toBeUndefined();
+  // Only prompt_tokens present — the rest simply absent from the returned object.
+  expect(extractObservedUsage({ usage: { prompt_tokens: 10 } })).toEqual({ inputTokens: 10 });
+});
+
+test("extractObservedUsage — malformed usage fields are dropped, not thrown on", () => {
+  expect(
+    extractObservedUsage({
+      usage: {
+        prompt_tokens: "not-a-number",
+        completion_tokens: -5,
+        cache_read_input_tokens: null,
+        prompt_tokens_details: { cached_tokens: NaN },
+      },
+    }),
+  ).toBeUndefined();
+  // usage itself malformed (not an object) — never throws.
+  expect(extractObservedUsage({ usage: "nope" })).toBeUndefined();
+  expect(extractObservedUsage({ usage: null })).toBeUndefined();
+});
+
+test("launch surfaces observedUsage from the response usage field", async () => {
+  const { input } = makeCtx();
+  const body = JSON.stringify({ files: [], result: { ok: true } });
+  const fn = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ message: { content: body } }],
+      usage: { prompt_tokens: 1000, completion_tokens: 200, prompt_tokens_details: { cached_tokens: 400 } },
+    }),
+    text: async () => body,
+  });
+  const provider = new OpenAiCompatibleProvider(minimalConfig, { fetchFn: fn });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(true);
+  expect(res.observedUsage).toEqual({ inputTokens: 1000, outputTokens: 200, cacheReadTokens: 400 });
+});
+
+test("launch omits observedUsage when the endpoint reports no usage (byte-identical to pre-change behavior)", async () => {
+  const { input } = makeCtx();
+  const body = JSON.stringify({ files: [], result: { ok: true } });
+  const provider = new OpenAiCompatibleProvider(minimalConfig, {
+    fetchFn: fakeFetchReturning(body),
+  });
+  const res = await provider.launch(input);
+  expect(res.accepted).toBe(true);
+  expect(res.observedUsage).toBeUndefined();
+  expect("observedUsage" in res).toBe(false);
 });

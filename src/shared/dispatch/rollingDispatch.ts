@@ -88,6 +88,21 @@ export interface RollingDispatchResult<TPacket> {
    * free-first ordering. Absent when the backend reports no cost (most endpoints).
    */
   observedCostUsd?: number | null;
+  /**
+   * Endpoint-REPORTED token usage relayed by the dispatcher from the provider
+   * result (openai-compatible's chat-completions `usage` object), mirroring
+   * {@link observedCostUsd}'s relay path. Consumed post-hoc by the score-tokens
+   * harness (per-run token-usage ledger), never by admission/scheduling. Absent
+   * when the backend reports no usage (the agentic-CLI providers never populate
+   * this) — a consumer distinguishes "unmeasured" from "measured zero" by its
+   * absence, not by treating it as 0.
+   */
+  observedUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  } | null;
   error?: unknown;
   /**
    * The worker ERROR/STATUS channel evidence that classified a `rate_limited`
