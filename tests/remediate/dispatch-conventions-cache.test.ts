@@ -2,7 +2,7 @@
  * Verifies that detectRepoConventions is called at most once per process root
  * across repeated prepareImplementDispatch calls.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -35,9 +35,10 @@ describe("detectRepoConventions cached once per root", () => {
     await rm(tmpRoot2, { recursive: true, force: true });
   });
 
-  it("calling prepareImplementDispatch twice for the same root uses the cache", async () => {
+  it("a second prepareImplementDispatch for the same root reuses the cached conventions instead of recomputing", async () => {
     const dispatchModule = await import("../../src/remediate/steps/dispatch.js");
     const { detectRepoConventionsCache, prepareImplementDispatch } = dispatchModule;
+    const { readFileSync } = await import("node:fs");
 
     // Clear cache to ensure clean state
     detectRepoConventionsCache.clear();
@@ -69,23 +70,32 @@ describe("detectRepoConventions cached once per root", () => {
     const store = new StateStore(artifactsDir);
     await store.saveState(state);
 
-    const sharedModule = await import("audit-tools/shared");
-    const spy = vi.spyOn(sharedModule, "detectRepoConventions");
-
     try {
+      // First dispatch computes the conventions for this root from the real repo
+      // and populates the cache.
       const runId1 = `conv-impl-1-${Date.now()}`;
       await prepareImplementDispatch({ root: tmpRoot, artifactsDir }, runId1);
+      expect(detectRepoConventionsCache.has(tmpRoot)).toBe(true);
+      expect(detectRepoConventionsCache.size).toBe(1);
+
+      // Overwrite the cache entry with a sentinel the real detector would never
+      // produce. If the SECOND dispatch recomputed (a cache miss), it would
+      // replace this and the rendered prompt would carry the real conventions;
+      // if it reuses the cache (the behaviour under test), the sentinel flows
+      // through to the prompt and the entry is left untouched. This exercises
+      // the cache-reuse path directly through observable output — never a spy
+      // on the `audit-tools/shared` re-export barrel, which fails to intercept
+      // the source's bound import and passes vacuously (INV-remediate-tests-12).
+      const sentinel = "# SENTINEL-NO-RECOMPUTE-CONVENTION";
+      detectRepoConventionsCache.set(tmpRoot, sentinel);
 
       const runId2 = `conv-impl-2-${Date.now()}`;
-      await prepareImplementDispatch({ root: tmpRoot, artifactsDir }, runId2);
+      const plan = await prepareImplementDispatch({ root: tmpRoot, artifactsDir }, runId2);
 
-      // detectRepoConventions should have been called at most once for this root
-      const callsForRoot = spy.mock.calls.filter(
-        (call) => call[0] === tmpRoot,
-      ).length;
-      expect(callsForRoot).toBeLessThanOrEqual(1);
+      const promptContent = readFileSync(plan.items[0].prompt_path, "utf8");
+      expect(promptContent).toContain(sentinel);
+      expect(detectRepoConventionsCache.get(tmpRoot)).toBe(sentinel);
     } finally {
-      spy.mockRestore();
       detectRepoConventionsCache.clear();
     }
   });

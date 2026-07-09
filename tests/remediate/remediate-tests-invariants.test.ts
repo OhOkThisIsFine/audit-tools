@@ -11,6 +11,7 @@
  * INV-remediate-tests-09: no vacuous/placeholder tests (expect(true).toBe(true))
  * INV-remediate-tests-10: no cross-file duplicate test bodies for the same behaviour
  * INV-remediate-tests-11: type-safe fixtures — no as-any on tested inputs
+ * INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-export barrel (vacuous-pass guard)
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -413,5 +414,76 @@ describe("INV-remediate-tests-11: no as-any on tested inputs in fixture helpers"
     // The function signature must not end with ': any'
     const hasAnyReturn = /function mkFinding\([^)]*\)\s*:\s*any\b/.test(src);
     expect(hasAnyReturn).toBe(false);
+  });
+});
+
+// ── INV-remediate-tests-12 ─────────────────────────────────────────────────
+
+describe("INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-export barrel", () => {
+  // Spying a symbol on the `audit-tools/shared` barrel namespace object does NOT
+  // intercept a consumer that imported the same symbol directly — the source
+  // holds its own bound reference, so the spy records zero calls and any
+  // assertion over spy.mock.calls passes VACUOUSLY (a green test that exercises
+  // nothing). This bit a cache-reuse test that spied `detectRepoConventions` on
+  // the barrel. Verify behaviour through observable output (real files, cache
+  // state) or a dependency-injection seam instead. Built-in targets (process.*,
+  // console.*) and relative source-module imports (import * as x from "../../src
+  // /…") are a different mechanism and are allowed.
+  const THIS_FILE = "remediate-tests-invariants.test.ts";
+
+  /** Variables bound to the audit-tools/shared barrel as a full namespace object. */
+  function barrelNamespaceVars(src: string): string[] {
+    const names = new Set<string>();
+    // `const NS = await import("audit-tools/shared…")` — a `{`-destructure never
+    // matches (no identifier after `const`), so only namespace bindings are caught.
+    for (const m of src.matchAll(
+      /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+import\(\s*["']audit-tools\/shared/g,
+    )) {
+      names.add(m[1]);
+    }
+    // `import * as NS from "audit-tools/shared…"`
+    for (const m of src.matchAll(
+      /\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']audit-tools\/shared/g,
+    )) {
+      names.add(m[1]);
+    }
+    return [...names];
+  }
+
+  function barrelSpyViolations(src: string): string[] {
+    const nonComment = src
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("//"))
+      .join("\n");
+    return barrelNamespaceVars(nonComment).filter((name) =>
+      new RegExp(`vi\\.spyOn\\(\\s*${name}\\b`).test(nonComment),
+    );
+  }
+
+  it("the detector flags a barrel-namespace spy but not destructures / relative-module spies (non-vacuous self-check)", () => {
+    const bad = [
+      'const sharedModule = await import("audit-tools/shared");',
+      'const spy = vi.spyOn(sharedModule, "detectRepoConventions");',
+    ].join("\n");
+    expect(barrelSpyViolations(bad)).toEqual(["sharedModule"]);
+
+    const clean = [
+      'const { detectRepoConventions } = await import("audit-tools/shared");',
+      'import * as scheduler from "../../src/shared/dispatch/ownershipScheduler.js";',
+      'const s = vi.spyOn(scheduler, "ownershipSubWaves");',
+      'const e = vi.spyOn(process.stderr, "write");',
+    ].join("\n");
+    expect(barrelSpyViolations(clean)).toEqual([]);
+  });
+
+  it("no test file spies on the audit-tools/shared barrel namespace", () => {
+    const violations: string[] = [];
+    for (const file of listTestFiles()) {
+      if (file === THIS_FILE) continue; // self: contains the pattern in self-check samples
+      for (const name of barrelSpyViolations(readTestFile(file))) {
+        violations.push(`${file}: vi.spyOn(${name}, …)`);
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
