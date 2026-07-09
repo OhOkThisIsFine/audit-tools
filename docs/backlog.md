@@ -29,22 +29,34 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`verify:release`'s packaged smoke leaves `audit-tools-<ver>.tgz` at repo root → blocks the next
-  `release:*:publish` on its own clean-tree guard (2026-07-09).** The smoke packs the tarball into the
-  repo root and doesn't clean it up; `ensureCleanWorktree` then refuses the release until it's
-  hand-deleted — the pipeline fighting itself (bit the v0.32.46 ship, one aborted attempt). Fix in
-  tooling: pack to a temp/scratch dir, or delete the tarball on smoke success, or teach the clean-tree
-  guard to ignore the tool's own `audit-tools-*.tgz` build artifact.
+- **`parseAuditFindingsReport` + `deriveBlocksFromTestGraph` (src/remediate/phases/plan.ts) grep to zero
+  production importers post-`runPlanPhase`-deletion (2026-07-09).** Same tested-but-unwired class as
+  runPlanPhase; both are exported + independently unit-tested so knip default-mode passes. NOT deleted in
+  the runPlanPhase pass (out of its verified scope — and note importers ≠ callers: verify no LIVE plan.ts
+  function calls them internally before deleting). Needs its own call-graph-verified pass; delete symbol +
+  orphaned tests if confirmed.
 
-- **`release-and-publish.mjs` aborts a HEALTHY release on a single transient `gh api` fault during the CI wait
-  (2026-07-09).** During the v0.32.44 ship, `waitForRunCompletion` (the await-CI-completion poll) threw on ONE
-  `gh api ... Bad credentials (HTTP 401)` (a transient token blip ~490s into the wait) and crashed the script —
-  even though the bump/commit/push/tag/GitHub-Release had all succeeded and the publish CI run was `in_progress`
-  and went on to publish 0.32.44 fine (verified: npm 0.32.44, run `success`). A transient auth/5xx during the
-  *monitoring* phase must not abort a release that already landed. Fix: in `waitForRunCompletion`, treat a transient
-  `gh api` failure (401/403/5xx/network) as retryable — back off + re-poll (the run status is the ground truth),
-  never `throw` and kill the wait. The release was completed manually (poll run→`success` + npm-verify + bin
-  reinstall); no re-tag needed. [[audit-tools-release-publish-flow]]
+- **Lap friction walk — smokes/release-poll/runPlanPhase lap (2026-07-09, orchestrator + 2×Sonnet + Haiku
+  + free-NIM review lane).** Lean-tier lap, 3 disjoint items via parallel implementers; `llm read` as the
+  standing free adversarial-review lane; orchestrator as accountability gate.
+  - **(ambiguous-direction) A broken probe fixture produced a confidently-wrong env conclusion — twice —
+    before being caught.** Diagnosing the npm-12 postinstall break, the orchestrator's probe package.json
+    was malformed (unescaped quotes), so `npm install` failed silently under `>/dev/null` and every probe
+    variant "proved" scripts were skipped/flags didn't work. Only a verbose re-run exposed EJSONPARSE, and
+    the valid fixture then flipped two earlier conclusions. Probe hygiene: validate the fixture (run the
+    probe once verbose) before trusting any negative result. Same family as verify-premises-before-building.
+  - **(tool-should-decide) Parallel Agent-tool implementers in ONE shared worktree raced on write.** An
+    implementer's finished edits were silently reverted once by a sibling (and `docs/backlog.md` was an
+    overlap surface — two agents + orchestrator all editing it); it re-applied and re-verified, no loss, but
+    attribution was luck. Known gap (recurrence of the 2026-07-08/09 entries): remediate-code's per-node
+    worktrees + claims solve exactly this; for ad-hoc fan-out the fix stays host discipline — disjoint file
+    lists must include DOCS, and doc edits are better done centrally by the orchestrator. Also recurred: the
+    attest-then-commit chain trap (attest must be its own Bash call AFTER staging — gate checks fire on the
+    whole chained call).
+  - **(inefficient-feeding) Free-NIM review lane worked; one payload-size miss.** `llm read` reviews caught
+    a real dropped-assert defect in the smoke diff for zero quota; the ~700-line deletion diff exceeded what
+    the (already-fixed) tool would take and was split (collateral files → NIM; big file reduced to its
+    `git diff -U0` added-lines). No file bodies through main context; recon/impl/verify all in subagents.
 
 - **External shared-logic audit V1–V7 — ALL SHIPPED 2026-07-09** (13-commit subagent-implemented program,
   adversarial review on every loop-core/delicate commit; `git log 5ca5bce2..6145a1a3`). Remaining
@@ -66,15 +78,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   - **(from C1) drain-scan derivation cost watch.** The engine adoption memoizes `deriveAuditState` per
     bundle identity (once per iteration, as before). The standing profiling ledgers are the regression
     watch — compare step timings against pre-`6145a1a3` if a drain slowdown is ever suspected.
-
-- **`runPlanPhase` appears production-dead (found by the V2 adversarial re-review).** The reviewer grepped
-  zero production importers of `runPlanPhase` (`src/remediate/phases/plan.ts`) — all live plan joins route
-  through `handlePendingExtractedPlan` (consistent with [[remediate-extracted-plan-join-architecture]]);
-  only `isAuditFindingsReport`/`applyPlanPipeline`/`buildCoverageLedger` are imported from plan.ts. If
-  confirmed, it's the tested-but-unwired class (CLAUDE.md dead-code section): delete `runPlanPhase` + its
-  orphaned tests (the V2 `run_start_dirty` capture inside it is redundant with the join-site capture —
-  keep the join-site one). Verify with a call-graph pass before deleting; knip default-mode passes because
-  its own tests consume it.
 
 - **Lap friction walk — D-66/67 slice-1 ownership-gate lap (2026-07-09, orchestrator+Haiku/Sonnet+NIM).**
   Full pipeline: 3 parallel recon subagents → design doc → design-level adversarial review (NIM free pass +
@@ -337,6 +340,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   on the operator's own uncommitted WIP there (`bin/llm-worker-tools.mjs` + 4 more; preflight requires
   clean tree) — operator call. Usage note: framing must map output into `llm read`'s
   `{summary,findings[],open_questions[]}` schema; a shape-diverging framing now fails CLEANLY.
+  - **Residual (2026-07-09 lap): very large review-framed payloads (~700-line deletion diff) still fail
+    even post-fix** — clean error after the nudge retry, no crash, but no result either. Workaround that
+    worked: split the payload (review the small collateral-file diff via `llm read`; reduce the big
+    deletion to its ADDED lines via `git diff -U0 | grep '^+'` and review those directly). If it recurs,
+    consider a chunked-review mode in llm-worker-tools rather than host-side splitting.
 
 ## Forward tracks
 
@@ -771,6 +779,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 ## Durable traps (environment / tooling reference)
 
 Standing gotchas worth keeping for any agent (strong or weak):
+
+- **npm 12.0.0 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).**
+  Any child `npm install` of a package with a postinstall (e.g. the audit-tools tarball) silently skips the
+  script and warns `install scripts blocked because they are not covered by allowScripts`. The allowlist is
+  SPEC-keyed per-project (`npm install-scripts approve <pkg>` writes `allowScripts` into the consumer's
+  package.json); the global `.npmrc` `allow-scripts=["audit-tools"]` does NOT cover fresh temp-dir installs,
+  and `--allow-scripts=<name>` on the CLI doesn't either. Working escape hatches: env
+  `npm_config_dangerously_allow_all_scripts=true` (older npm silently ignores it — used by the packaged
+  smokes' hermetic installs) or `npm install-scripts approve <pkg>` post-declare. Also new in npm 12:
+  `npm pack --json` can emit an OBJECT keyed by tarball name instead of an array (smokes now tolerate both).
+  Global `-g` reinstall of audit-tools bins: postinstall may be blocked → run `npm install-scripts approve
+  audit-tools` / re-run postinstall manually and verify `~/.claude/commands/*.md` landed
+  (extends [[audit-code-global-bin-traps]]).
 
 - **Before starting ANY lap in a worktree, sync with remote main — landed work may be missing.** A worktree
   can be branched from a *stale* local main and miss commits that already landed on `audit-tools/main`. This

@@ -8,13 +8,13 @@
 
 ## Live state
 
-- **Current: ~v0.32.46 (D-66/67 slice-1 lap, shipping now; v0.32.45 released prior).** Per-lap shipped
-  detail is NOT narrated here (changelog creep — see `git log` + project memory [[live-status]]); this
-  section is current-state + open-work roadmap only. Authoritative version = `package.json`.
-- **This lap shipped D-66/67 slice-1** (merge-time ownership-gate on long-lived claims, both
-  orchestrators — see the roadmap entry below) and fixed llm-worker-tools' `llm read` JSON-contract
-  break upstream (separate repo, pushed + globally redeployed; its npm publish waits on operator WIP —
-  `docs/backlog.md` → Open bugs).
+- **Current: ~v0.32.47 (release-pipeline-hardening + dead-code lap, shipping now; v0.32.46 released
+  prior).** Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` + project
+  memory [[live-status]]); this section is current-state + open-work roadmap only. Authoritative
+  version = `package.json`.
+- **Local env note:** the box now runs npm 12.0.0 — it blocks dependency install scripts by default
+  and can emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable
+  traps before any manual `npm install -g` / packaged-install work.
 - **Standing state (all in `docs/backlog.md`):** context-efficiency access-memory track COMPLETE (items 1/2/3
   shipped); quota-arbitrage Phase-0 opencode-free CODE-COMPLETE (env-bound live validations remain);
   cost↔speed dial + dispatch admission-control shipped (env-bound / deeper residuals only); session-config
@@ -52,10 +52,12 @@
 
 ## Suggested ordering — everything open, sequenced
 
-**▶ IMMEDIATE NEXT — two small open bugs, then D-66/67 slice-2.** (1) `release-and-publish.mjs`
-transient-`gh api`-fault abort during the CI wait (retryable-poll fix, `docs/backlog.md` → Open bugs
-top entry); (2) `runPlanPhase` production-dead — verify with a call-graph pass, then delete + orphaned
-tests (same section). Both lean-tier mechanical.
+**▶ IMMEDIATE NEXT — D-66/67 slice-2** (shared pause-state reducer with per-orchestrator
+terminal-policy injection; FOCUSED-LAP, delicate — see the D-66/67 roadmap entry below). The prior
+immediate-next bundle all shipped 2026-07-09: release-poll retryable CI-wait, `runPlanPhase`
+call-graph-verified + deleted, smoke tarball-to-temp-dir + npm-12 script-blocking fixes. Optional
+lean warm-up first: `parseAuditFindingsReport`/`deriveBlocksFromTestGraph` dead-code verify
+(`docs/backlog.md` → Open bugs top entry).
 
 **D-66/67 slice-1 (merge-time ownership-gate) SHIPPED 2026-07-09** — commits `86e47077`+`f2a4f91d`,
 full-pipeline lap (design-level + post-impl adversarial reviews, 4 CONFIRMED defects caught+fixed
@@ -69,8 +71,9 @@ staleMs-wide probe window matters. Design-of-record + slice-1 residuals in `docs
 **2026-07-09 external-audit program: SHIPPED in full** — V1–V7 defects + the dedup bundle (Tier B ×13 +
 C1 obligation-engine adoption + C2 host-gate consolidation) landed as a 13-commit adversarially-reviewed
 program; only low-severity documented residuals remain (`docs/backlog.md` → *Open bugs*, "External
-shared-logic audit … residuals"), plus one new lead from review fallout (`runPlanPhase` production-dead —
-verify then delete). Everything else open is env-bound live validation (owner-run) or T6 deferred.
+shared-logic audit … residuals") — the one new lead from review fallout (`runPlanPhase` production-dead)
+was verified and deleted 2026-07-09. Everything else open is env-bound live validation (owner-run) or T6
+deferred.
 
 Rationale: the **loop is the meta-tool**; making it cheaper, convergent, and safe has compounding leverage
 on all downstream work, and is the "redesign before scheduled autonomy" the north star requires

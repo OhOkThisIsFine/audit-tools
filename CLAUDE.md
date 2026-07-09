@@ -207,12 +207,13 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
   time — distinct from knip's separate use as an *acquired product analyzer* audit-code runs against
   repos it audits (`src/audit/extractors/analyzers/candidates.ts`). Default-mode, not the literal
   `--production` zero-non-test-consumers check, because `--production` has real false positives here — it
-  can't trace dispatch-table / re-export-alias / dynamic wiring, so live functions like `runPlanPhase` /
+  can't trace dispatch-table / re-export-alias / dynamic wiring, so live functions like
   `resolveFreshSessionProviderName` flag as unused and it isn't gate-able. The tested-but-unwired class
   (code exercised only by its own tests, never wired into a real call path) is instead worked as a
   periodic **manual audit**: `knip --production` → filter to symbols with zero *grep-detectable*
   production callers (grep finds the dispatch/alias cases knip misses, so a grep-zero is a reliable dead
-  signal) → delete symbol + orphaned tests. Re-run when worthwhile, not on a schedule.
+  signal) → delete symbol + orphaned tests. Re-run when worthwhile, not on a schedule. (`runPlanPhase`
+  was exactly this class — call-graph-verified dead, then deleted with its orphaned helpers + tests.)
 - **Dead-code stays leads-not-verdicts — no "sound" signal (audit-code side).** Deliberately not pursuing a
   sound dead-code detector (entrypoint provenance + dynamic-import tracing) inside the *acquired-product*
   analyzer: true soundness is undecidable in a language-neutral static auditor (dynamic / dispatch /
