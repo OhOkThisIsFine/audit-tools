@@ -138,6 +138,16 @@ export interface GitHistory {
   co_change: CoChangePair[];
   churn: ChurnEntry[];
   authorship: AuthorshipEntry[];
+  /**
+   * Count of in-window commits whose file count exceeded
+   * `maxCoChangeFilesPerCommit` and were therefore SKIPPED for co-change pair
+   * expansion (churn/authorship still counted them — only pairing was
+   * skipped). Optional so existing `GitHistory` literals built by other
+   * callers (e.g. the audit extractor's in-scope filter, the no-root
+   * fallback) remain valid without updating — this field is additive.
+   * Absent/`undefined` means "no commit was skipped" (equivalent to `0`).
+   */
+  skipped_cochange_commits?: number;
 }
 
 export interface MineGitHistoryOptions {
@@ -145,15 +155,36 @@ export interface MineGitHistoryOptions {
   maxCommits?: number;
   /** Minimum shared-commit count for a co-change pair to be reported. */
   minCoChangeCommits?: number;
+  /**
+   * Cap on files touched by a single commit before it is skipped for
+   * co-change pair expansion (bounds the O(files^2) blow-up a single wide
+   * commit — a vendor/format/rename sweep — would otherwise cause). A commit
+   * touching more files than this carries almost no per-pair signal anyway
+   * (any two files it "explains" are also very likely explained by other,
+   * narrower commits), so skipping it loses little while capping cost.
+   */
+  maxCoChangeFilesPerCommit?: number;
 }
 
 const DEFAULT_MAX_COMMITS = 1000;
 const DEFAULT_MIN_CO_CHANGE_COMMITS = 2;
+/**
+ * See `MineGitHistoryOptions.maxCoChangeFilesPerCommit` for rationale. 100 is
+ * generous for ordinary commits (which touch a handful of files) while
+ * cutting off the O(n^2) pair count (100^2 = 10_000 pairs) well before a
+ * repo-wide reformat/vendor-drop commit (which can touch thousands of files,
+ * i.e. millions of pairs) turns co-change mining into a memory/CPU cliff.
+ */
+const DEFAULT_MAX_COCHANGE_FILES_PER_COMMIT = 100;
 
 /**
  * Mine deterministic git-history signals from `root`'s commit log:
  *  - **co_change**: file pairs that changed in the same commit, counted across
  *    history (a temporal-coupling signal), filtered by `minCoChangeCommits`.
+ *    A commit touching more than `maxCoChangeFilesPerCommit` files is SKIPPED
+ *    for pair expansion entirely (churn/authorship still see it) — bounds the
+ *    per-commit O(files^2) cost; `skipped_cochange_commits` on the result
+ *    counts how many commits this affected.
  *  - **churn**: per-file commit-touch frequency.
  *  - **authorship**: per-file distinct-author count (a bus-factor signal).
  *
@@ -172,6 +203,8 @@ export function mineGitHistory(
   const maxCommits = options.maxCommits ?? DEFAULT_MAX_COMMITS;
   const minCoChange =
     options.minCoChangeCommits ?? DEFAULT_MIN_CO_CHANGE_COMMITS;
+  const maxCoChangeFiles =
+    options.maxCoChangeFilesPerCommit ?? DEFAULT_MAX_COCHANGE_FILES_PER_COMMIT;
 
   const result = runTracked(
     [
@@ -198,6 +231,7 @@ export function mineGitHistory(
   const churn = new Map<string, number>();
   const authors = new Map<string, Set<string>>();
   const coChange = new Map<string, number>();
+  let skippedCoChangeCommits = 0;
 
   for (const record of records) {
     // Dedup files within a commit so a rename/edit pair cannot double-count.
@@ -210,6 +244,15 @@ export function mineGitHistory(
         authors.set(file, authorSet);
       }
       if (record.author.length > 0) authorSet.add(record.author);
+    }
+    // Pair expansion is O(files^2); a commit touching more than
+    // maxCoChangeFiles is SKIPPED ENTIRELY for pairing (never a truncated
+    // subset — a biased subset of an oversized commit's files would produce
+    // arbitrary, order-dependent pairs, which is worse than reporting none).
+    // Churn/authorship above are unaffected: every touched file still counts.
+    if (files.length > maxCoChangeFiles) {
+      skippedCoChangeCommits += 1;
+      continue;
     }
     for (let i = 0; i < files.length; i += 1) {
       for (let j = i + 1; j < files.length; j += 1) {
@@ -245,6 +288,9 @@ export function mineGitHistory(
     co_change: coChangeList,
     churn: churnList,
     authorship: authorshipList,
+    ...(skippedCoChangeCommits > 0
+      ? { skipped_cochange_commits: skippedCoChangeCommits }
+      : {}),
   };
 }
 

@@ -297,6 +297,76 @@ test("F6 fail-5: maxCommits bounds the scanned window (older commits outside the
   }
 });
 
+// V6: pair expansion (the nested for/for over a commit's files) is O(files^2)
+// per commit, unbounded by maxCommits (which only bounds *how many* commits
+// are scanned, not how wide any one of them is). A single vendor/format/
+// rename commit touching many files must not explode into O(n^2) co-change
+// pairs — it is SKIPPED for pairing entirely (never a truncated subset, which
+// would bias the signal), while churn/authorship (which are O(files), not
+// O(files^2)) still count every file it touched. The skip is recorded on the
+// result rather than silently dropped.
+test("F6 fail-5b: maxCoChangeFilesPerCommit bounds per-commit pair expansion (wide commit skipped, not truncated)", async () => {
+  const dir = await makeRepo();
+  try {
+    // A "wide" commit touching 5 files — over a cap of 3 — must be skipped
+    // entirely for co-change pairing (not paired on a truncated subset).
+    await commit(
+      dir,
+      { "w1.ts": "1", "w2.ts": "1", "w3.ts": "1", "w4.ts": "1", "w5.ts": "1" },
+      { name: "Author A", email: "a@example.com" },
+    );
+    // A narrow commit touching 2 files (below the cap) must still pair
+    // normally — the cap only skips commits that exceed it.
+    await commit(dir, { "a.ts": "1", "b.ts": "1" }, { name: "Author A", email: "a@example.com" });
+    await commit(dir, { "a.ts": "2", "b.ts": "2" }, { name: "Author A", email: "a@example.com" });
+
+    const history = mineGitHistory(dir, { maxCoChangeFilesPerCommit: 3 });
+
+    // No pair explosion from the wide commit: none of its C(5,2)=10 pairs
+    // appear; co_change is bounded to the narrow commit's single pair.
+    const wideFiles = ["w1.ts", "w2.ts", "w3.ts", "w4.ts", "w5.ts"];
+    for (const f of wideFiles) {
+      expect(
+        history.co_change.some((p) => p.a === f || p.b === f),
+        `wide-commit file ${f} produces no co-change pair once its commit is over the cap`,
+      ).toBe(false);
+    }
+    expect(history.co_change).toEqual([{ a: "a.ts", b: "b.ts", commits: 2 }]);
+
+    // Churn still counts every file the wide (skipped-for-pairing) commit
+    // touched — only pair expansion is bounded, not per-file tallies.
+    for (const f of wideFiles) {
+      expect(
+        history.churn.find((c) => c.path === f),
+        `${f} is still counted in churn despite being skipped for co-change pairing`,
+      ).toEqual({ path: f, commits: 1 });
+    }
+
+    // The truncation is recorded on the result, not silently dropped.
+    expect(
+      history.skipped_cochange_commits,
+      "the over-cap commit is recorded as skipped for co-change pairing",
+    ).toBe(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("mineGitHistory: no over-cap commit => skipped_cochange_commits is absent/zero", async () => {
+  const dir = await makeRepo();
+  try {
+    await commit(dir, { "a.ts": "1", "b.ts": "1" }, { name: "Author A", email: "a@example.com" });
+    await commit(dir, { "a.ts": "2", "b.ts": "2" }, { name: "Author A", email: "a@example.com" });
+    const history = mineGitHistory(dir);
+    expect(
+      history.skipped_cochange_commits ?? 0,
+      "no commit exceeded the cap, so no skip is recorded",
+    ).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("mineGitHistoryArtifact drops out-of-scope and excluded paths", async () => {
   const dir = await makeRepo();
   try {

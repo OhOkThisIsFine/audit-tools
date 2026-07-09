@@ -91,6 +91,9 @@ export function mineGitHistoryArtifact(
     ),
     churn: history.churn.filter((entry) => known(entry.path)),
     authorship: history.authorship.filter((entry) => known(entry.path)),
+    ...(history.skipped_cochange_commits != null
+      ? { skipped_cochange_commits: history.skipped_cochange_commits }
+      : {}),
   };
 }
 
