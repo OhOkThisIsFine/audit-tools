@@ -1083,13 +1083,13 @@ function buildVerificationReport(
     const itemPassed = isResolved && combinedTest.passed;
 
     if (isSkipped) {
-      // Ignored/inappropriate items are excluded from overall_status — they
-      // get a single skipped trace and an overall_status of 'skipped'.
-      // The shared FindingVerificationTrace type only allows "passed"|"failed"
-      // but remediate-code extends this set with "skipped" so the close phase
-      // can exclude settled user decisions from the run verdict. The cast is
-      // intentional: the JSON output uses "skipped" as a discriminant even
-      // though the shared TS type narrows the union.
+      // Ignored/inappropriate items are excluded from the run verdict — they
+      // get a single trace recording the user's settled decision and a
+      // first-class overall_status of "skipped" (see FindingVerificationTrace
+      // doc comment in src/shared/types/contractPipeline/verification.ts).
+      // The trace's own `status` stays "failed" because it did not verify
+      // anything (there is no passing evidence); the finding-level
+      // "skipped" is what excludes it from the report-level verdict below.
       traces.push({
         trace_id: `${item.finding_id}:skipped`,
         kind: "task",
@@ -1100,7 +1100,7 @@ function buildVerificationReport(
       findings.push({
         finding_id: item.finding_id,
         traces,
-        overall_status: "skipped" as unknown as "passed",
+        overall_status: "skipped",
       });
       continue;
     }
@@ -1206,7 +1206,7 @@ function buildVerificationReport(
   const overallPassed =
     combinedTest.passed &&
     findings
-      .filter((f) => (f.overall_status as string) !== "skipped")
+      .filter((f) => f.overall_status !== "skipped")
       .every((f) => f.overall_status === "passed");
 
   // Derive goal_id from the plan if available.

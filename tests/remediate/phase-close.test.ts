@@ -10,6 +10,7 @@ import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
 import { RunLogger } from "audit-tools/shared";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
+import { validateVerificationReport } from "../../src/remediate/validation/contractPipeline.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = join(__dirname, ".test-close-repo");
@@ -905,6 +906,9 @@ describe("runClosePhase", () => {
         (f: { finding_id: string }) => f.finding_id === "F2",
       );
       expect(f2trace.overall_status).toBe("skipped");
+      expect(
+        validateVerificationReport(report).filter((i) => i.severity === "error"),
+      ).toHaveLength(0);
     });
 
     it("overall_status='passed' when resolved items pass but some are deemed_inappropriate", async () => {
@@ -932,6 +936,46 @@ describe("runClosePhase", () => {
         (f: { finding_id: string }) => f.finding_id === "F3",
       );
       expect(f3trace.overall_status).toBe("skipped");
+      expect(
+        validateVerificationReport(report).filter((i) => i.severity === "error"),
+      ).toHaveLength(0);
+    });
+
+    it("overall_status='passed' when ALL items are skipped (ignored/inappropriate) and no resolved items remain", async () => {
+      const state = makeState({
+        closing_plan: { action: "none", pre_authorized: true },
+        items: {
+          F2: {
+            finding_id: "F2",
+            status: "ignored",
+            block_id: "B2",
+            failure_reason: "User chose to ignore",
+          },
+          F3: {
+            finding_id: "F3",
+            status: "deemed_inappropriate",
+            block_id: "B3",
+            failure_reason: "Not applicable to this codebase",
+          },
+        },
+      });
+
+      await runClosePhase(state, BASE_OPTIONS);
+
+      const { readFileSync } = await import("node:fs");
+      const report = JSON.parse(
+        readFileSync(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
+      );
+      // No non-skipped findings to fail the verdict, and the (trivially
+      // passing, empty) combined test suite passed — report-level status
+      // stays the strict "passed"|"failed" (never "skipped" itself).
+      expect(report.overall_status).toBe("passed");
+      expect(
+        report.findings.every((f: { overall_status: string }) => f.overall_status === "skipped"),
+      ).toBe(true);
+      expect(
+        validateVerificationReport(report).filter((i) => i.severity === "error"),
+      ).toHaveLength(0);
     });
   });
 

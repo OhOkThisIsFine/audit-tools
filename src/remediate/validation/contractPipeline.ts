@@ -733,9 +733,11 @@ export function validateVerificationReport(
           requireOneOf(trace.status, ["passed", "failed"], `${path}.findings[${i}].traces[${j}].status`, issues);
         }
       }
-      requireOneOf(finding.overall_status, ["passed", "failed"], `${path}.findings[${i}].overall_status`, issues);
+      requireOneOf(finding.overall_status, ["passed", "failed", "skipped"], `${path}.findings[${i}].overall_status`, issues);
     }
   }
+  // Report-level overall_status stays strict passed|failed — "skipped" is a
+  // per-finding-only outcome (see FindingVerificationTrace doc comment).
   requireOneOf(v.overall_status, ["passed", "failed"], `${path}.overall_status`, issues);
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
