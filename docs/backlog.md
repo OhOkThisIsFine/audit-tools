@@ -29,6 +29,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **`release-and-publish.mjs` aborts a HEALTHY release on a single transient `gh api` fault during the CI wait
+  (2026-07-09).** During the v0.32.44 ship, `waitForRunCompletion` (the await-CI-completion poll) threw on ONE
+  `gh api ... Bad credentials (HTTP 401)` (a transient token blip ~490s into the wait) and crashed the script —
+  even though the bump/commit/push/tag/GitHub-Release had all succeeded and the publish CI run was `in_progress`
+  and went on to publish 0.32.44 fine (verified: npm 0.32.44, run `success`). A transient auth/5xx during the
+  *monitoring* phase must not abort a release that already landed. Fix: in `waitForRunCompletion`, treat a transient
+  `gh api` failure (401/403/5xx/network) as retryable — back off + re-poll (the run status is the ground truth),
+  never `throw` and kill the wait. The release was completed manually (poll run→`success` + npm-verify + bin
+  reinstall); no re-tag needed. [[audit-tools-release-publish-flow]]
+
 - **Lap friction walk — backlog-clearance lap (2026-07-09).** Subagent-driven lap: parallel read-only recon →
   I own loop-core impl + review, delegate mechanical impl to subagents, an independent adversarial subagent per
   loop-core change. Shipped INV-WH fix, the loop-core guard + gate, the D-68 fold; assessed D-69; handed off D-66/67.
