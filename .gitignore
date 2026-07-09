@@ -16,6 +16,7 @@ dist/
 .claude/hooks/*
 !.claude/hooks/session-start.sh
 !.claude/hooks/pre-commit-gate.mjs
+!.claude/hooks/attest-loop-core-review.mjs
 !.claude/hooks/async-typecheck.mjs
 !.claude/hooks/friction-stop-gate.mjs
 !.claude/hooks/doc-review-surface.mjs
@@ -26,6 +27,9 @@ dist/
 !.claude/hooks/doc-review-resolve.test.mjs
 !.claude/hooks/doc-review-resolved.json
 !.claude/skills/
+# Loop-core adversarial-review attestations — local, ephemeral, per-staged-tree-hash
+# state produced by attest-loop-core-review.mjs; never a tracked deliverable.
+.claude/loop-core-review/
 .opencode/
 .vscode/
 .codex/

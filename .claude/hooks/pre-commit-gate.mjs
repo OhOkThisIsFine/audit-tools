@@ -27,9 +27,53 @@
 // restore, git error) — never wedge the session; FAIL-CLOSED on gate results
 // (a real `npm run check` / doc-contract failure blocks the commit).
 import { execSync, spawnSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+
+// ── Loop-core adversarial-review gate ────────────────────────────────────────
+// Hand-authored (non-node) edits to the dispatch / admission / quota / rolling /
+// orchestrator-step substrate carry the highest blast radius and have no
+// automated adversarial-review gate; three author-green defects reached main
+// this way. Block a commit whose STAGED set touches a loop-core path unless a
+// FRESH, staged-tree-hash-bound review attestation exists. This re-declares the
+// canonical pattern list from `src/shared/loopCorePaths.ts` (the .mjs hook can't
+// import the TS module — it runs under plain node, pre-build); a parity test
+// (`tests/shared/loop-core-gate-parity.test.mjs`) pins the two byte-equal so
+// they can never drift. A "/"-terminated pattern is a directory prefix; every
+// other entry is an exact repo-relative path.
+const LOOP_CORE_PATTERNS = [
+  "src/audit/cli/dispatch.ts",
+  "src/audit/cli/dispatch/",
+  "src/audit/cli/rollingAuditDispatch.ts",
+  "src/audit/orchestrator/",
+  "src/remediate/riskSignal.ts",
+  "src/remediate/steps/contractPipeline.ts",
+  "src/remediate/steps/dispatch/",
+  "src/remediate/steps/leanFastPath.ts",
+  "src/remediate/steps/nextStep.ts",
+  "src/remediate/steps/rollingSession.ts",
+  "src/shared/dispatch/",
+  "src/shared/engine/",
+  "src/shared/quota/",
+  "src/shared/rolling/",
+];
+
+// Whether a repo-relative path is in the loop-core set. Mirrors `isLoopCorePath`
+// from src/shared/loopCorePaths.ts: normalize backslashes + leading "./"; a
+// "/"-terminated pattern matches the directory prefix, else exact match.
+function pinsLoopCore(p) {
+  const norm = p.replace(/\\/g, '/').replace(/^\.\//, '');
+  for (const pattern of LOOP_CORE_PATTERNS) {
+    if (pattern.endsWith('/')) {
+      if (norm.startsWith(pattern)) return true;
+    } else if (norm === pattern) {
+      return true;
+    }
+  }
+  return false;
+}
 
 let raw = '';
 for await (const chunk of process.stdin) raw += chunk;
@@ -177,31 +221,89 @@ function runGate() {
   // rendered host assets (opencode.json, .gemini/*).
   const pinsDocContract = (p) =>
     /\.md$/i.test(p) || p === 'opencode.json' || p.startsWith('.gemini/');
-  if (!staged.some(pinsDocContract)) return { blocked: false };
-
-  try {
-    execSync('npm run test:doc-contract', {
-      cwd: root,
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 240_000,
-      windowsHide: true,
-    });
-    return { blocked: false };
-  } catch (err) {
-    const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
-      .trim()
-      .split('\n')
-      .slice(-40)
-      .join('\n');
-    return {
-      blocked: true,
-      message:
-        `pre-commit gate: doc-contract tests FAILED — commit blocked. A staged doc/asset broke a test that ` +
-        `pins its exact content (release-contract / *-doc-sync / host-asset-renderer-drift). ` +
-        `Fix the doc or the test, then retry.\n${tail}`,
-    };
+  if (staged.some(pinsDocContract)) {
+    try {
+      execSync('npm run test:doc-contract', {
+        cwd: root,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 240_000,
+        windowsHide: true,
+      });
+    } catch (err) {
+      const tail = `${err.stdout ?? ''}\n${err.stderr ?? ''}`
+        .trim()
+        .split('\n')
+        .slice(-40)
+        .join('\n');
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: doc-contract tests FAILED — commit blocked. A staged doc/asset broke a test that ` +
+          `pins its exact content (release-contract / *-doc-sync / host-asset-renderer-drift). ` +
+          `Fix the doc or the test, then retry.\n${tail}`,
+      };
+    }
   }
+
+  // 3. Loop-core adversarial-review attestation — only when the STAGED set
+  // touches a loop-core path. Hand-authored loop-core edits must carry a FRESH,
+  // staged-tree-hash-bound review attestation. This enforces attestation
+  // existence + freshness + binding MECHANICALLY; review QUALITY stays a logged,
+  // attributable human step (the honest limit). FAIL-CLOSED on a missing/stale
+  // attestation for loop-core; FAIL-OPEN only on a genuine git write-tree fault.
+  if (staged.some(pinsLoopCore)) {
+    const loopCoreStaged = staged.filter(pinsLoopCore);
+    const wt = git(['write-tree']);
+    if (!wt.ok) return { blocked: false }; // can't bind → don't wedge (infra fail-open)
+    const sha = wt.stdout.trim();
+    const attestPath = join(root, '.claude', 'loop-core-review', sha + '.json');
+    const runHint =
+      `node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> ` +
+      `--checked "<what was adversarially checked>"`;
+    if (!existsSync(attestPath)) {
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: loop-core commit blocked — no adversarial-review attestation for the staged tree.\n` +
+          `The staged set touches loop-core (dispatch/quota/rolling/orchestrator substrate):\n` +
+          loopCoreStaged.map((p) => `  - ${p}`).join('\n') +
+          `\nHand-authored loop-core edits require a FRESH, staged-tree-bound review. Run:\n  ${runHint}\n` +
+          `then retry the commit (the attestation binds to the exact staged tree ${sha.slice(0, 12)}).`,
+      };
+    }
+    let attest;
+    try {
+      attest = JSON.parse(readFileSync(attestPath, 'utf8'));
+    } catch {
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: loop-core commit blocked — the review attestation at ` +
+          `.claude/loop-core-review/${sha}.json is unreadable/corrupt. Re-run:\n  ${runHint}`,
+      };
+    }
+    if (attest?.staged_tree !== sha) {
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: loop-core commit blocked — the review attestation is STALE (binds tree ` +
+          `${String(attest?.staged_tree).slice(0, 12)}, staged tree is ${sha.slice(0, 12)}). ` +
+          `Re-review the current staged snapshot:\n  ${runHint}`,
+      };
+    }
+    if (attest.verdict === 'block' || (attest.verdict === 'concerns' && !attest.override)) {
+      return {
+        blocked: true,
+        message:
+          `pre-commit gate: loop-core commit blocked — the review recorded verdict "${attest.verdict}"` +
+          (attest.checked ? ` (checked: ${attest.checked})` : '') +
+          `. Resolve the concerns and re-attest, or re-run with --override "<reason>" if intentional:\n  ${runHint}`,
+      };
+    }
+  }
+
+  return { blocked: false };
 }
 
 // Does the working tree diverge from the staged index? If not (everything is
@@ -247,7 +349,14 @@ if (!diverges) {
 // deterministic temp-index round-trip (see header). All git-plumbing goes
 // through a SCRATCH index file so the real staged index is never mutated by the
 // capture/checkout steps; the only real-index write is the final restore.
-const scratchIndex = join(root, '.git', `pre-commit-gate-index-${randomBytes(6).toString('hex')}`);
+// Scratch index for the staged-snapshot round-trip. It MUST NOT live under
+// `join(root, '.git', …)`: in a LINKED worktree `.git` is a FILE (a gitdir
+// pointer), so a path "under" it is unwritable and every git-with-scratch-index
+// call fails — silently failing the ENTIRE staged-snapshot gate open (it was a
+// no-op in every linked worktree with a divergent tree). GIT_INDEX_FILE only
+// relocates the index; objects still resolve through the real gitdir via `cwd`,
+// so a temp-dir path is safe and works identically in main and linked worktrees.
+const scratchIndex = join(tmpdir(), `audit-tools-pre-commit-index-${randomBytes(6).toString('hex')}`);
 
 // 1. Capture the current worktree tree and the staged (real-index) tree.
 const worktreeTree = captureWorktreeTree(scratchIndex);
