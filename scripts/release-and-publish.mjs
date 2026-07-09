@@ -28,6 +28,23 @@ const pollIntervalMs = 5_000;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
 const registryTimeoutMs = 2 * 60 * 1000;
 
+// Consecutive-failure budget for `gh api` polls (401/403/5xx/network/timeout, etc.)
+// during the CI-monitoring phase. The run's status on GitHub is ground truth, so a
+// single transient poll fault must never abort a healthy wait — see the 2026-07-09
+// v0.32.44 incident where a mid-wait `Bad credentials (HTTP 401)` blip killed a
+// release that went on to publish cleanly. Back off and re-poll on every failure;
+// only give up after this many CONSECUTIVE failures (any successful poll resets the
+// counter) — by which point the backoff has spanned several minutes and something
+// durable, not transient, is wrong. A definitive API answer (run completed with a
+// failure conclusion) still fails fast, unaffected by this budget.
+const MAX_CONSECUTIVE_POLL_FAILURES = 10;
+const POLL_FAILURE_BACKOFF_STEP_MS = 5_000;
+const POLL_FAILURE_BACKOFF_CAP_MS = 30_000;
+
+function pollFailureBackoffMs(consecutiveFailures) {
+  return Math.min(POLL_FAILURE_BACKOFF_STEP_MS * consecutiveFailures, POLL_FAILURE_BACKOFF_CAP_MS);
+}
+
 if (!allowedBumps.has(bump)) {
   console.error(
     `Unsupported release bump '${bump}'. Expected one of: ${Array.from(allowedBumps).join(", ")}.`,
@@ -309,12 +326,34 @@ async function waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha } = {})
   const startedAt = Date.now();
   let attempt = 0;
   let lastLoggedStatusKey = null;
+  let consecutivePollFailures = 0;
   while (Date.now() < deadline) {
     attempt += 1;
-    const response = runJson("gh", [
-      "api",
-      `repos/${repoSlug}/actions/workflows/publish-package.yml/runs?event=release&per_page=20`,
-    ]);
+    let response;
+    try {
+      response = runJson("gh", [
+        "api",
+        `repos/${repoSlug}/actions/workflows/publish-package.yml/runs?event=release&per_page=20`,
+      ]);
+    } catch (error) {
+      consecutivePollFailures += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(
+        `[release] poll ${attempt} detecting publish run for ${tag} failed transiently ` +
+          `(${consecutivePollFailures}/${MAX_CONSECUTIVE_POLL_FAILURES} consecutive): ${message}`,
+      );
+      if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        throw new Error(
+          `Giving up after ${consecutivePollFailures} consecutive failed polls detecting the publish run for ` +
+            `${tag} (last error: ${message}). This is a monitoring failure, not necessarily a release failure — ` +
+            `the tag and GitHub Release already landed before this wait started. Verify manually: ` +
+            `gh run list --workflow publish-package.yml, or https://github.com/${repoSlug}/actions.`,
+        );
+      }
+      await sleep(pollFailureBackoffMs(consecutivePollFailures));
+      continue;
+    }
+    consecutivePollFailures = 0;
     const match = selectReleaseRun(response.workflow_runs, {
       tag,
       tagPushedAtMs,
@@ -347,14 +386,40 @@ async function waitForReleaseRun(repoSlug, tag, { tagPushedAtMs, headSha } = {})
   );
 }
 
-async function waitForRunCompletion(repoSlug, runId) {
+async function waitForRunCompletion(repoSlug, runId, { packageName, packageVersion } = {}) {
   const deadline = Date.now() + releaseRunTimeoutMs;
   const startedAt = Date.now();
   let attempt = 0;
   let lastLoggedStatusKey = null;
+  let consecutivePollFailures = 0;
   while (Date.now() < deadline) {
     attempt += 1;
-    const runEntry = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${runId}`]);
+    let runEntry;
+    try {
+      runEntry = runJson("gh", ["api", `repos/${repoSlug}/actions/runs/${runId}`]);
+    } catch (error) {
+      consecutivePollFailures += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(
+        `[release] poll ${attempt} for run ${runId} completion failed transiently ` +
+          `(${consecutivePollFailures}/${MAX_CONSECUTIVE_POLL_FAILURES} consecutive): ${message}`,
+      );
+      if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        const verifyHint =
+          packageName && packageVersion
+            ? `npm view ${packageName}@${packageVersion} version`
+            : "npm view <package>@<version> version";
+        throw new Error(
+          `Giving up after ${consecutivePollFailures} consecutive failed polls for publish run ${runId} ` +
+            `(last error: ${message}). This is a monitoring failure, not necessarily a release failure — the ` +
+            `tag/GitHub Release already landed and CI may have completed. Verify manually: ` +
+            `https://github.com/${repoSlug}/actions/runs/${runId} and ${verifyHint}.`,
+        );
+      }
+      await sleep(pollFailureBackoffMs(consecutivePollFailures));
+      continue;
+    }
+    consecutivePollFailures = 0;
     if (runEntry.status === "completed") {
       const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
       if (runEntry.conclusion !== "success") {
@@ -560,7 +625,10 @@ async function main() {
   console.log(`[release] publish run detected: ${runEntry.html_url}`);
 
   const completedRun = await runPhase("await-ci-complete", () =>
-    waitForRunCompletion(repoSlug, runEntry.id),
+    waitForRunCompletion(repoSlug, runEntry.id, {
+      packageName: packageAfter.name,
+      packageVersion: packageAfter.version,
+    }),
   );
   console.log(`[release] publish run completed: ${completedRun.html_url}`);
 
