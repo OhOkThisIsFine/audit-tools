@@ -29,6 +29,33 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Lap friction walk — dead-code + D-66/67 slice-2-assessment lap (2026-07-09, orchestrator + Haiku
+  [call-graph recon] + 2×Sonnet [pause-lifecycle recon] + free-NIM & independent-Sonnet [dual adversarial
+  design review]).** Two deliverables: lean dead-code deletion (`cc0c4f1f`) + slice-2 VERIFIED-CLOSED (docs).
+  - **(ambiguous-direction) The immediate-next item was itself a point-in-time PROPOSAL whose premise
+    didn't survive recon — on a FOCUSED-LAP delicate item, and the design-of-record even said so.** Slice-2
+    ("build a shared pause reducer w/ policy injection") conflated an ALREADY-shared terminal type
+    (`PartialCompletionTerminal`) with an AUDIT-ONLY reducer (`advancePausedState`); 2 recon subagents
+    overturned "build it" into "verified not worth building" (net-negative dead-`pause_count` abstraction).
+    Recurrence of [[spec-degradation-and-doc-staleness]] / verify-premises-before-building — the backlog's
+    own "READ before building, it changes the target" note fired exactly as designed. Notably the two
+    adversarial review lanes DISAGREED (free-NIM: build it; repo-verifying Sonnet: close it) — the intended
+    value of independent lanes; resolved not by trusting a verdict but by the orchestrator reading the
+    capacity-gate code (`rollingDispatch.ts:1113,1129`) to refute NIM's one concrete counter.
+  - **(tool-should-decide) A cheap recon agent's "safe to delete" verdict mislabeled a LIVE symbol as an
+    orphan.** The Haiku call-graph pass called `isAuditFindingsReport` a deletable "helper" of the dead
+    `parseAuditFindingsReport`; it is in fact production-live (`intakeResolver.ts:192,300`, `close.ts:329`).
+    Deleting per the verdict would have broken intake + close. Caught only by the orchestrator's own
+    verification grep (accountability gate). Generalizable: a fast recon pass's dead-code verdict is a LEAD,
+    not a verdict — dead↔live sibling adjacency in one file is exactly what it misses. No clean tool fix
+    beyond the existing "verify deletion boundaries from source before cutting"; noting the recurrence.
+  - **(inefficient-feeding) Free-NIM adversarial lane earned its keep for zero quota; clean division of
+    labor.** Text-only NIM (no repo access) generated real adversarial pressure (a settled-exclusion thrash
+    hypothesis) that a repo-grounded lane + orchestrator then refuted from code NIM couldn't see — NIM =
+    cheap skeptic, Sonnet + orchestrator = verifiers. No file bodies through main context: recon/review all
+    returned conclusions + file:line; the compact design assessment fit NIM's payload with no split needed
+    (unlike the prior lap's 700-line diff).
+
 - **Lap friction walk — smokes/release-poll/runPlanPhase lap (2026-07-09, orchestrator + 2×Sonnet + Haiku
   + free-NIM review lane).** Lean-tier lap, 3 disjoint items via parallel implementers; `llm read` as the
   standing free adversarial-review lane; orchestrator as accountability gate.
@@ -531,7 +558,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     are distributed inside `advance()`) → fold into the slice-2 pause/persist-shape design.
 
 - **Unify the full rolling-dispatch lifecycle shell across audit + remediate (doc-review D-66/D-67/C-7,
-  2026-07-08). Slice-1 SHIPPED (entry above); open = slice-2 shared pause reducer + slice-3 heartbeat.**
+  2026-07-08). Slice-1 SHIPPED (entry above); slice-2 VERIFIED-CLOSED as not-worth-building (2026-07-09,
+  see the slice-2 verdict below); open = slice-3 heartbeat only.**
   Today the genuinely-shared surface is the *admission decision* only
   (`computeDispatchAdmission`, single-sourced in `audit-tools/shared`). Two lifecycle shells around it are
   NOT shared: (a) the pause lifecycle — audit owns `waiting_for_provider`/`pausedState.ts`/`filterNewProviders`;
@@ -569,10 +597,36 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     likely the merge-time ownership-gate CHECK alone — refuse a merge whose lease a peer reclaimed — is the bounded,
     high-value first slice, deliverable WITHOUT the heartbeat machinery). **Recommended staging:** slice-1 =
     merge-time ownership-gate on `acceptNodeWorktree` + audit `mergeAndIngestCommand` (bounded, additive); slice-2 =
-    shared pause reducer w/ policy injection; slice-3 = full heartbeat on long claims (only if a real cooperative
-    run shows the stale-window is insufficient). This is a FOCUSED-LAP track — the most delicate machinery in the
-    repo (pause/claim/quota), a genuine divergence to respect, and the owner's own "redesign before scheduled
-    autonomy" caution applies; do NOT rush it as a tail-end change.
+    ~~shared pause reducer w/ policy injection~~ VERIFIED-CLOSED (verdict below); slice-3 = full heartbeat on long
+    claims (only if a real cooperative run shows the stale-window is insufficient). This is a FOCUSED-LAP track —
+    the most delicate machinery in the repo (pause/claim/quota), a genuine divergence to respect, and the owner's
+    own "redesign before scheduled autonomy" caution applies; do NOT rush it as a tail-end change.
+  - **Slice-2 VERDICT — VERIFIED not worth building as a shared reducer (2026-07-09, full-pipeline lap:
+    2 parallel recon subagents → design assessment → dual adversarial review [free-NIM + independent Sonnet,
+    which DISAGREED] → orchestrator code-verification tiebreak).** The "shared pause-state reducer w/
+    terminal-policy injection" framing conflates TWO layers that recon separated: **(Layer A)**
+    `PartialCompletionTerminal` (`src/shared/quota/capacity.ts:43-69`; 4 reasons, `quota_paused` the only
+    retryable one w/ `earliest_reset_at`) is the terminal OUTPUT and is ALREADY single-sourced — produced by
+    the shared engine `getTerminal()` (`rollingDispatch.ts:1162`) and consumed by BOTH orchestrators
+    (`remediate/state/store.ts`, `remediate/steps/nextStep.ts:4674-4691`; audit's `recordPartialCompletionTerminal`).
+    **(Layer B)** `advancePausedState`/`RollingEngineLifecycleState`/`LIVELOCK_PAUSE_LIMIT=3`
+    (`src/shared/rolling/pausedState.ts:34-176`) is a cross-invocation *waiting_for_provider re-discovery
+    reducer* that is grep-confirmed AUDIT-ONLY; `RemediationState` has no `pause_count`/attempt-counter.
+    A parameterized shared reducer (Option A) would force remediate to GAIN a persistent
+    `waiting_for_provider`/`pause_count` representation it never reads (its policy is `livelockLimit=null`,
+    unbounded-by-design) — dead state manufacturing a symmetry that buys nothing (net-negative abstraction,
+    against the cleanest-endpoint preference). No third behavior-identical shareable logic exists (the
+    settled-exclusion helpers are already shared+importable and remediate correctly doesn't need them; the
+    blocked-step vs `buildQuotaPausedStep` emit shapes differ in kind/content/source). NIM's one concrete
+    counter — "remediate re-dispatches to still-cooling pools → thrash" — is REFUTED: the shared engine
+    gates every dispatch on live pool capacity each pass (`rollingDispatch.ts:1113,1129` `noPoolCanAcceptNow`),
+    so a cooling pool is never dispatched to; remediate needs no settled-exclusion accumulation. NIM's
+    "slice-3 heartbeat needs this persistence" is REFUTED: heartbeat is peer-contention over shared state,
+    orthogonal to quota-pause bounding (Sonnet, vs `spec/multi-ide-concurrent-runs-design.md` OD3).
+    **Durable conclusion: Layer A is the correct shared surface (already shipped); Layer B's livelock-bound +
+    partial-coverage-proceed is audit-specific by nature and correctly forked — the same genuine divergence
+    "full unification is WRONG" already protects.** The `phase:main` layer-2 asymmetry (slice-1 input above)
+    folds into slice-3, not a resurrected slice-2. [[rolling-lifecycle-unify-full-unification-wrong]]
 
 - **Collapse `leanFastPath` into the Dial A/B continuum as its lowest-risk tier (doc-review D-68) — SHIPPED
   2026-07-09.** The standalone `evaluateFastPath` boolean gate — a SECOND classifier that could DISAGREE with

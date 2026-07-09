@@ -52,20 +52,29 @@
 
 ## Suggested ordering — everything open, sequenced
 
-**▶ IMMEDIATE NEXT — D-66/67 slice-2** (shared pause-state reducer with per-orchestrator
-terminal-policy injection; FOCUSED-LAP, delicate — see the D-66/67 roadmap entry below). The prior
-immediate-next bundle all shipped 2026-07-09: release-poll retryable CI-wait, `runPlanPhase`
+**▶ IMMEDIATE NEXT — D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the LONG-lived
+execution claims — `task-claims.json` 20-min lease, remediate node-claims — which today hold a lease
+with no live heartbeat; FOCUSED-LAP, delicate, and **live-run-gated** — only pursue if a real
+cooperative run shows the staleMs-wide probe window from slice-1 actually bites). Fold the `phase:main`
+layer-2 asymmetry (slice-1 input) into its design. See the D-66/67 roadmap entry in `docs/backlog.md`.
+The prior immediate-next bundle all shipped 2026-07-09: release-poll retryable CI-wait, `runPlanPhase`
 call-graph-verified + deleted, smoke tarball-to-temp-dir + npm-12 script-blocking fixes, and the
 `parseAuditFindingsReport`/`deriveBlocksFromTestGraph` dead-code deletion (call-graph-verified;
 `isAuditFindingsReport` confirmed LIVE and kept).
 
+**D-66/67 slice-2 VERIFIED-CLOSED 2026-07-09 (no code — verified not worth building).** Full-pipeline
+assessment lap (2 recon subagents → design assessment → dual adversarial review [free-NIM vs independent
+Sonnet, which disagreed] → orchestrator code-verification tiebreak): the "shared pause reducer" framing
+conflates the ALREADY-shared terminal type (`PartialCompletionTerminal`, Layer A) with an AUDIT-ONLY
+cross-invocation re-discovery reducer (`advancePausedState`/`LIVELOCK_PAUSE_LIMIT`, Layer B). A
+parameterized shared reducer would force remediate to carry a dead `pause_count` under its unbounded
+policy — net-negative. Layer A is the correct shared surface (shipped); Layer B is audit-specific by
+nature and correctly forked. Full verdict + refuted counter-arguments in `docs/backlog.md` → slice-2 VERDICT.
+
 **D-66/67 slice-1 (merge-time ownership-gate) SHIPPED 2026-07-09** — commits `86e47077`+`f2a4f91d`,
 full-pipeline lap (design-level + post-impl adversarial reviews, 4 CONFIRMED defects caught+fixed
-pre-merge). Remaining on the track (FOCUSED-LAP, delicate): **slice-2 = shared pause-state reducer with
-per-orchestrator terminal-policy injection** (+ the newly-discovered `phase:main` layer-2 asymmetry as
-design input), **slice-3 = heartbeat on long claims** only if a real cooperative run shows the
-staleMs-wide probe window matters. Design-of-record + slice-1 residuals in `docs/backlog.md` →
-"Unify the full rolling-dispatch lifecycle shell" + the SHIPPED entry above it;
+pre-merge). Design-of-record + slice-1 residuals in `docs/backlog.md` → "Unify the full rolling-dispatch
+lifecycle shell" + the SHIPPED entry above it;
 [[rolling-lifecycle-unify-full-unification-wrong]] still governs: full unification is the WRONG endpoint.
 
 **2026-07-09 external-audit program: SHIPPED in full** — V1–V7 defects + the dedup bundle (Tier B ×13 +
