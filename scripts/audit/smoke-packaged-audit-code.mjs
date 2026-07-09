@@ -555,6 +555,9 @@ async function main() {
   const installDir = await mkdtemp(
     join(tmpdir(), "audit-code-packed-install-"),
   );
+  const packDir = await mkdtemp(
+    join(tmpdir(), "audit-code-pack-"),
+  );
   let tarballPath;
   let tarballFilename;
 
@@ -579,7 +582,7 @@ async function main() {
     );
     const packed = JSON.parse(
       (
-        await runCommand(platformCommand("npm"), ["pack", "--json"], {
+        await runCommand(platformCommand("npm"), ["pack", "--json", "--pack-destination", packDir], {
           cwd: repoRoot,
           env: createIsolatedNpmEnv(),
           liveOutput: liveCommandOutput,
@@ -589,12 +592,15 @@ async function main() {
         })
       ).stdout,
     );
-    assert.equal(Array.isArray(packed), true);
-    assert.equal(packed.length, 1);
-    assert.equal(typeof packed[0].filename, "string");
-    assertPackagedContract(packed[0]);
-    tarballFilename = packed[0].filename;
-    tarballPath = join(repoRoot, packed[0].filename);
+    // npm pack --json returns either an array (older npm) or object (npm 12+)
+    const packEntries = Array.isArray(packed) ? packed : Object.values(packed);
+    assert.equal(packEntries.length, 1, "npm pack --json must produce exactly one tarball");
+    const packMetadata = packEntries[0];
+    assert.ok(packMetadata, "npm pack --json did not return tarball metadata");
+    assert.equal(typeof packMetadata.filename, "string");
+    assertPackagedContract(packMetadata);
+    tarballFilename = packMetadata.filename;
+    tarballPath = join(packDir, packMetadata.filename);
     process.stderr.write(`[smoke:packaged] elapsed: npm pack — ${Date.now() - stepStart}ms\n`);
 
     stepStart = Date.now();
@@ -1008,6 +1014,7 @@ async function main() {
       await rm(tarballPath, { force: true });
     }
     await rm(installDir, { recursive: true, force: true });
+    await rm(packDir, { recursive: true, force: true });
   }
 }
 

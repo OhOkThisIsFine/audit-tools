@@ -122,12 +122,15 @@ try {
   rmSync(smokeRoot, { recursive: true, force: true });
   process.exit(1);
 }
-if (!Array.isArray(packOutput) || packOutput.length === 0) {
-  console.error("npm pack --json returned empty array — no tarball produced");
+// npm pack --json returns either an array (older npm) or object (npm 12+)
+const packEntries = Array.isArray(packOutput) ? packOutput : Object.values(packOutput);
+const packMetadata = packEntries[0];
+if (packEntries.length !== 1 || !packMetadata || !packMetadata.filename) {
+  console.error("npm pack --json did not return exactly one tarball's metadata");
   rmSync(smokeRoot, { recursive: true, force: true });
   process.exit(1);
 }
-const tarball = join(packDir, packOutput[0].filename);
+const tarball = join(packDir, packMetadata.filename);
 console.log(`  packed: ${tarball} (${Date.now() - packStart}ms)`);
 
 // 2. Install into temp dir
@@ -143,10 +146,17 @@ try {
     env: isolatedNpmEnv(),
   });
   const installStart = Date.now();
+  // npm 12+ blocks dependency install scripts unless approved; the smoke exists
+  // to verify OUR tarball's postinstall, and the install dir is hermetic — allow
+  // scripts explicitly (older npm silently ignores the unknown config).
   const installResult = spawnNpm(["install", "--no-package-lock", tarball], {
     cwd: installDir,
     encoding: "utf8",
-    env: isolatedNpmEnv({ HOME: fakeHome, USERPROFILE: fakeHome }),
+    env: isolatedNpmEnv({
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
+      npm_config_dangerously_allow_all_scripts: "true",
+    }),
   });
 
   if (installResult.status !== 0) {
