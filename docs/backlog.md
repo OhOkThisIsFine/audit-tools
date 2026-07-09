@@ -39,6 +39,69 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   never `throw` and kill the wait. The release was completed manually (poll run→`success` + npm-verify + bin
   reinstall); no re-tag needed. [[audit-tools-release-publish-flow]]
 
+- **Validated defects from the external shared-logic audit (2026-07-09; every claim re-verified vs
+  v0.32.44 with file:line by 4 parallel subagents + main-agent spot-checks; full triage report in the
+  local run artifact `.audit-tools/shared-logic-audit-validation.md` — the entries below are
+  self-sufficient).** Invariants to hold + the confirmed breaks:
+  - **(V1) `verification_report.json` must satisfy its own validator.** `src/remediate/phases/close.ts:1103`
+    writes `overall_status: "skipped" as unknown as "passed"` while the shared contract + validator
+    (`src/shared/types/contractPipeline/verification.ts:37,46`; `src/remediate/validation/contractPipeline.ts:736`)
+    permit only `passed|failed` — so ANY run with an ignored/inappropriate finding emits a report that
+    FAILS its own `validate-artifact` (`src/remediate/validation/artifacts.ts:427-434`). Reproducible
+    self-contradiction. Lead: make `skipped` first-class in type+validator+schema; add the close-phase test.
+  - **(V2) Remediation close must never commit files the run didn't touch.** `collectStagingFiles`
+    (`close.ts:407-416`) sweeps ALL changed-from-HEAD + untracked (excludes only `.audit-tools/`/`.env*`);
+    `closing_plan.pre_authorized` skips the confirmation preview entirely (`close.ts:459`), and even the
+    previewed flow re-collects files at execute time (TOCTOU — files dirtied between preview and staging
+    are swept unseen). No run-start dirty snapshot exists. Enforce-in-tooling: stage a tool-owned
+    edit-surface manifest (worktree cherry-picks / `item_spec.touched_files`), abort-or-confirm on overlap
+    with pre-existing dirt.
+  - **(V3) OpenCode per-agent permission parity.** `scripts/audit/postinstall.mjs:39,47-83,223` still
+    grants the auditor agent bash `{"*":"allow"}` + `external_directory {"*":"allow"}` in the GLOBAL
+    `~/.config/opencode/opencode.json`; remediate's was already hardened to `"*":"ask"` with no
+    external-directory forcing (`scripts/remediate/postinstall.mjs:79-102`). The read-only tool now has
+    broader defaults than the write tool — mirror the hardening to audit.
+  - **(V4) cmd.exe metachar quoting is latent-unsafe (defense-in-depth, not currently reachable).**
+    `quoteForCmd` (`src/shared/tooling/exec.ts:73-77`) + its byte-identical deliberate bootstrap copy
+    (`wrapper/audit-code-wrapper-lib.mjs:67-71`) never escape `&|<>^%` in the `cmd.exe /d /s /c` string
+    built for the npm/npx/pnpm/yarn `.cmd` shims (CVE-2024-27980 class). All CURRENT call sites pass
+    tool-controlled args, and the dynamic dispatch paths already use the safe
+    `quoteForShellInterpreterCmd` — fix so a future dynamic call site can't be wrong. Same lap: harden
+    `quotePromptCommandArg`/`renderPromptCommand` (`exec.ts:106-114`) which DOES interpolate live
+    root/artifacts paths into host continuation commands (owner call: per-shell quoting vs argv arrays
+    in the step contract — argv is the enforce-in-tooling ideal).
+  - **(V5) `.audit-tools` path single-sourcing sweep.** ~10 hardcoded joins outside `auditToolsPaths.ts`:
+    `src/audit/cli/nextStepCommand.ts:895,902`; `src/remediate/steps/nextStep.ts:356-360,2748`;
+    `src/remediate/validation/artifacts.ts:427`; `src/remediate/steps/dispatch/worktreeLifecycle.ts:385,402,419`;
+    `src/audit/cli/resynthesizeCommand.ts:18`; `src/shared/providers/openAiCompatibleProvider.ts:30`
+    (a duplicate constant inside shared itself). Sweep to the helpers + add a guard test banning new
+    string-joins; wrapper hardcodes stay exempt (pre-dist bootstrap constraint).
+  - **(V6) `mineGitHistory` per-commit pair explosion.** `src/shared/git.ts:214-220` caps commits (1000)
+    but not files-per-commit → O(N²) co-change pairs on a vendor/format commit. Cap files-per-commit for
+    pair expansion + record a truncation note (leads-not-verdicts).
+  - **(V7) Dead test: `tests/audit/seam-file-lock-convergence.test.mjs`.** Imports the retired
+    `packages/remediate-code/dist/...` layout → its `skipNoStore` guard ALWAYS trips → tests C1-C3
+    silently no-op in CI (false assurance); header description of StateStore's locking is also stale
+    (it now uses shared `withFileLock`). Rewrite against the single-package layout or delete.
+
+- **Lap friction walk — shared-logic-audit validation lap (2026-07-09).** Assessment lap (no code
+  changes): 4 parallel read-only subagents verified an external agent's shared-extraction catalog +
+  7 findings; verdicts above (V1-V7) + the dedup forward track below.
+  - **(ambiguous-direction) A third-party audit catalog is leads, not verdicts — half its architectural
+    rows were stale or already-adjudicated.** The catalog proposed unifying the rolling lifecycle and
+    hybrid spill (shipped/adjudicated: shared `driveRolling`, `HybridSpillCoordinator`, D-66/67 "full
+    unification is WRONG") and a `FindingAdmissibilityPolicy` merging two different concerns. Feeding it
+    raw to remediate-code would have re-built shipped work and contradicted the design-of-record. Same
+    verify-premises-before-building pattern as [[spec-degradation-and-doc-staleness]], now for EXTERNAL
+    input: catalog rows need validation against current code + design-of-record before remediation intake.
+  - **(tool-should-decide) Claim-staleness grounding has no tool support.** remediate's grounding phase
+    catches phantom PATHS but not stale CLAIMS ("X is duplicated" when X was single-sourced last week) —
+    the paths all exist, the assertion is what's dead. Inherently judgment; handled here by subagent
+    verification. Acceptable as host/subagent work; noting the gap.
+  - **(inefficient-feeding) None.** All recon via 4 parallel subagents returning file:line conclusions;
+    main context received no file dumps; spot-checks were targeted greps.
+
+
 - **Lap friction walk — backlog-clearance lap (2026-07-09).** Subagent-driven lap: parallel read-only recon →
   I own loop-core impl + review, delegate mechanical impl to subagents, an independent adversarial subagent per
   loop-core change. Shipped INV-WH fix, the loop-core guard + gate, the D-68 fold; assessed D-69; handed off D-66/67.
@@ -231,6 +294,51 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
 ## Forward tracks
+
+- **Shared-logic dedup bundle (validated 2026-07-09 — external catalog triaged; per-row verdicts in the
+  local artifact `.audit-tools/shared-logic-audit-validation.md`; entries here are self-sufficient).**
+  Property: single-source drift-prone parallel logic ([[prefer-extraction-over-drift-tests]] /
+  [[auditor-remediator-mirroring-is-common-logic]]).
+  - **Tier B — mechanical dedup sweep (lean tier, one lap or a remediate-code run):** byte-identical
+    `wordSet`/`wordJaccard`/`filePathOverlap`/`primaryPath` (`src/audit/reporting/mergeFindings.ts:14-48`
+    ≡ `src/remediate/dedup/crossLensDedup.ts:8-42` — highest-confidence dup of the pass); `countBy`
+    reimplemented 4× (`audit/reporting/synthesis.ts:100-136`, `remediate/phases/close.ts:190-213`,
+    `shared/reporting/auditDeliverable.ts:23-34`, `remediate/intake.ts:216-257`); token-budget greedy
+    chunk loop 3× (`audit/orchestrator/reviewPackets.ts:209-267`, audit `taskBuilder.ts:~130`,
+    `remediate/phases/plan.ts:473-503` — all already share `estimateTokensFromBytes`, not the loop);
+    flat file-integrity pair (`audit/orchestrator/fileIntegrity.ts` ~74 LOC ≈ remediate
+    `utils/fileIntegrity.ts checkAffectedFileIntegrity` ~90 LOC, comment admits the mirror); rolling-flag
+    resolver ×2 (13 LOC each, `remediate/steps/nextStep.ts:217-229` vs
+    `audit/cli/rollingAuditDispatch.ts:160-172`, differ only in env-var name — parameterize like
+    `resolveHostDispatchCapability` already does); `LockedJsonStore<T>`
+    (`audit/supervisor/sessionConfig.ts` + `remediate/state/store.ts` both derive
+    `LOCK_TIMEOUT_MS = STALE_LOCK_MS − 10_000` with near-verbatim comments); `onCostDrift` friction
+    callback ×2 (~15 LOC, `rollingAuditDispatch.ts:561-577` / `remediate nextStep.ts:1223-1239`);
+    `--host-provider` validator 6-line copy (`audit/cli/args.ts:237-246` / `remediate/index.ts:70-77`);
+    postinstall driver unification (`scripts/audit/postinstall.mjs` 393 LOC ≈
+    `scripts/remediate/postinstall.mjs` 387 LOC — descriptor-driven shared driver; folds V3 + the
+    remediate-only `utils/hostAssets.ts` whose bodies audit inlines byte-identically); deliverable
+    filename constants (folds into V5); audit `supervisor/operatorHandoff.ts:94-102` hand-rolled
+    `renderShellCommand` → shared `renderPromptCommand` (remediate already uses it; folds into V4's
+    hardening); OpenCode provider wrapper 17-LOC byte-dup ×2 → one shared factory; delete remediate
+    `utils/commands.ts` pure-passthrough shim (7 callers → direct shared imports, audit already direct).
+  - **Tier C — architectural (each a focused lap, owner-gated):** (1) **audit adopts the shared
+    obligation engine** — `src/shared/engine/obligationEngine.ts` (`ObligationDef`, `advance()` w/
+    transition/emit/cycle-detection) exists and remediate already drives it (`nextStep.ts:4302-4344`,
+    `advance()` ×2); audit uses only the bare scan + hand-rolls drain/fold/cycle-halt again in
+    `orchestrator/advance.ts` (332 LOC, `MAX_DRAIN_STEPS`). Loop-core → full pipeline. (2) consolidate
+    audit's 6 near-identical host-gate branch handlers (`cli/nextStepHelpers.ts:558-757`, ~400 LOC of one
+    consume→ceiling→emit shape) — the AUDIT-INTERNAL repetition is the bounded win; cross-side `HostGate`
+    needs real design (mechanics genuinely differ: delete-after-consume vs decision-record). (3, marginal)
+    intra-remediate retry-cap helper (5 `attempts >= CAP → escalate` sites).
+  - **Rejected catalog rows (do NOT feed to remediation):** rolling-lifecycle unification as framed
+    (D-66/67 owns the correct bounded slices; full unification adjudicated WRONG), hybrid-spill sharing
+    (shipped — both sides call the same `HybridSpillCoordinator`/`planHybridDispatch`), generic
+    `DispatchPlanner` (admission math already shared; remainders are divergent read-only-vs-git-mutating
+    domains), `FindingAdmissibilityPolicy` (category error: evidence-integrity gate vs auto-apply safety
+    tier), `FreshnessGraph` merge (artifact-DAG vs flat-hash are different abstractions — the real dup is
+    the file-integrity pair in Tier B), cross-orchestrator `ConvergenceController` (caps are not one
+    mechanism), grounding/step-contract/manifesting rows (already unified or remediate-only).
 
 - **Free/cheap multi-account "quota-arbitrage" dispatch tier (9router-inspired) — exploration → build.**
   Fan dispatch across genuinely-free backends + (later) N captured subscription-OAuth accounts, rotating on
