@@ -8,10 +8,10 @@
 
 ## Live state
 
-- **v0.32.40 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
+- **v0.32.41 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
   creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
   roadmap only.
-- **Context-efficiency access-memory track — increments 1 + 2a + 2b SHIPPED; item (1) is functionally complete on the audit side.**
+- **Context-efficiency access-memory track — increments 1 + 2a + 2b + 2c SHIPPED; item (1) complete on BOTH orchestrators.**
   - **Increment 1 (v0.32.38): prefix-ordering fix (#4)** — `buildPacketPrompt` static `## Output` prefix leads,
     volatile payload trails; tool-enforced guard. Cross-cutting cache-safety guard now real.
   - **Increment 2a (v0.32.39): persistence spine** — `access_memory.json`, first-class per-run audit artifact
@@ -23,11 +23,18 @@
     `orderReviewPackets`, strictly below priority) at the load-bearing sorts (`buildReviewPacketsFromPartition` +
     `fitPacketsToTierBudgets`). Cache-safe (order/selection only). Adversarially reviewed; folded fixes: tier-refit
     re-sort (closed a pre-existing priority-monotonicity break), dropped an inert ordering thread, NaN guard.
-  - **Immediate next = increment 2c: remediate-parity harvest.** Populate `access_memory.edited_count` from
-    `RemediationBlock.touched_files` on the remediate side (the harvest shape + `edited_count`/`EDITED_WEIGHT`
-    slot already exist), so continuity works in both orchestrators ("keep orchestrators in parity"). Then **2d**
-    `path::symbol` slicing (#2) and **#3** the token-efficiency eval harness (the measurement gate — the active
-    bias must be MEASURED not asserted). Design-of-record [[access-memory-layer-design]]; detail `docs/backlog.md:406`.
+  - **Increment 2c (v0.32.41): remediate-parity harvest** — the deterministic core is now single-sourced in
+    `audit-tools/shared` (`deriveAccessMemoryFromEvents` over a normalized `AccessTouchEvent` stream); audit is a
+    thin adapter (byte-identical). Remediate `deriveRemediationAccessMemory` (`src/remediate/state/accessMemory.ts`)
+    populates `edited_count` from the declared edit surface of RESOLVED items (per-item `item_spec.touched_files`,
+    block fallback), writing `.audit-tools/remediation/access_memory.json` from the merge under the state lock.
+    Adversarially reviewed; fixes folded (resolved-only not `resolved_no_change`, per-item attribution, crash guard).
+  - **Immediate next = increment 2d: `path::symbol` slicing (#2).** Sub-file packet granularity — when a lens needs
+    one function from a god-file, dispatch a symbol slice (symbol boundaries already exist in the extractors'
+    `unit_manifest`/`surface_manifest`), fail-safe to whole-file, coverage/citation line-spans stay valid, cache-safe
+    (back-payload). Then **#3** the token-efficiency eval harness (the measurement gate — the active bias must be
+    MEASURED not asserted; both a remediate continuity CONSUMER and #3 are still open — nothing reads either
+    orchestrator's `access_memory` yet). Design-of-record [[access-memory-layer-design]]; detail `docs/backlog.md:406`.
     Loop-core → full adversarial pipeline.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,
   released v0.32.36).** ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1

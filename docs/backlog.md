@@ -415,10 +415,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   recency×frequency seed, `edited`>`covered`) over `graph_bundle` edges → biases packet ORDERING via single-sourced
   `orderReviewPackets` (strictly below priority) at the load-bearing sorts (`buildReviewPacketsFromPartition` +
   `fitPacketsToTierBudgets`). Cache-safe. Adversarially reviewed; folded fixes (tier-refit re-sort closing a
-  pre-existing priority-monotonicity break, inert-thread removal, NaN guard). **Item (1) is now functionally complete
-  on the audit side.** Remaining track work: **2c** remediate-parity harvest (`RemediationBlock.touched_files` →
-  `edited_count`; the shape + weight slot already exist); items (2) `path::symbol` slicing + (3) token-efficiency eval
-  harness (measurement gate — the active bias must be MEASURED not asserted) still open.
+  pre-existing priority-monotonicity break, inert-thread removal, NaN guard).
+  **Increment 2c SHIPPED (v0.32.41, 2026-07-08) — item (1) remediate parity:** deterministic harvest core
+  single-sourced in `audit-tools/shared` (`deriveAccessMemoryFromEvents` over a normalized `AccessTouchEvent` stream);
+  audit is a thin adapter (byte-identical). Remediate `deriveRemediationAccessMemory`
+  (`src/remediate/state/accessMemory.ts`) populates `edited_count` from the declared edit surface of RESOLVED items
+  (per-item `item_spec.touched_files`, block fallback) → `.audit-tools/remediation/access_memory.json`, written from
+  the merge under the state lock. Adversarially reviewed (resolved-only not `resolved_no_change`, per-item attribution,
+  crash guard). **Item (1) now complete on BOTH orchestrators.** Remaining track work: items (2) `path::symbol`
+  slicing + (3) token-efficiency eval harness (measurement gate — the active bias must be MEASURED not asserted), plus
+  a remediate-side continuity CONSUMER (nothing reads either orchestrator's `access_memory` yet).
 
   - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
     *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step
@@ -534,6 +540,17 @@ Standing gotchas worth keeping for any agent (strong or weak):
   message, but the ref still updates (`04a7338c..8279d0de  HEAD -> main`, no `! [remote rejected]`). Confirm
   by `git fetch audit-tools main && git rev-parse audit-tools/main` == local HEAD — don't assume the push
   failed on seeing the advisory. Observed 2026-07-08.
+
+- **New remediate test files must import `makeState` from `tests/remediate/test-helpers.ts`, never re-declare it.**
+  `INV-remediate-tests-03` (`tests/remediate/remediate-tests-invariants.test.ts`) fails loudly if any test file
+  declares a standalone `makeState`. Wrap the shared helper (`makeState({ plan: {...}, items: {...} })`) instead.
+  Observed 2026-07-08 (a new `access-memory.test.ts` tripped it).
+
+- **`tests/audit/audit-code-completion.test.mjs` is hermeticity-flaky under concurrent full-suite runs.** It does a
+  full multi-phase audit run with temp dirs and is the slowest audit test (~185s); running it in the SAME `vitest run`
+  invocation as the whole shared area can fail it on temp-dir/timing contention. It **passes alone** — per the CLAUDE.md
+  test-failure protocol that means hermeticity, not a regression. Rerun it in isolation before treating a failure as
+  real. Observed 2026-07-08.
 
 - **Codex CLI is a poor executor for large read-heavy audit packets under a wall-clock budget.** Observed
   2026-07-04: 2 concurrent codex executors ran 5+ min with zero results and 8k+ lines of echoed reasoning.
