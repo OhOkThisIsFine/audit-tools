@@ -422,9 +422,19 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (`src/remediate/state/accessMemory.ts`) populates `edited_count` from the declared edit surface of RESOLVED items
   (per-item `item_spec.touched_files`, block fallback) → `.audit-tools/remediation/access_memory.json`, written from
   the merge under the state lock. Adversarially reviewed (resolved-only not `resolved_no_change`, per-item attribution,
-  crash guard). **Item (1) now complete on BOTH orchestrators.** Remaining track work: items (2) `path::symbol`
-  slicing + (3) token-efficiency eval harness (measurement gate — the active bias must be MEASURED not asserted), plus
-  a remediate-side continuity CONSUMER (nothing reads either orchestrator's `access_memory` yet).
+  crash guard). **Item (1) now complete on BOTH orchestrators.**
+  **Increment 2d (item (2) `path::symbol` slicing) — CODE-COMPLETE, UNRELEASED (owner ran /start-lap "don't /ship"):**
+  the mechanical anchor scanner (`src/audit/orchestrator/fileAnchors.ts`) assigns each TOP-LEVEL (zero-indent) symbol an
+  approximate body span (`FileAnchor.end_line` = up to the next top-level decl, clamped to the file line count);
+  `renderAnchorPreview` (`src/audit/cli/dispatch/packetPrompt.ts`) renders it as a `path:START-END` slice in the
+  isolated-large-file back-payload with advisory "read the span for your lens, expand if evidence crosses" guidance.
+  Design realization: packets hand PATHS + workers self-read, so the token lever is cutting god-file re-reads, not packet
+  bytes — the guidance is the sub-file dispatch. Fail-safe (nested/indented bindings get no span → never fragment an
+  enclosing span nor become spurious slices), cache-safe (back-payload only; fixed prefix untouched), zero schema/validator
+  change (`total_lines` stays whole-file, citations stay real-file coords → no `coversAffectedSpan` false-fail).
+  Adversarially reviewed (6 vectors REFUTED). Green build/check/audit+shared suite. **Next agent ships it.**
+  Remaining track work: item (3) token-efficiency eval harness (measurement gate — 2b's bias AND 2d's slice guidance
+  must be MEASURED not asserted), plus a remediate-side continuity CONSUMER (nothing biases on `access_memory` yet).
 
   - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
     *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step

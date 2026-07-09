@@ -29,19 +29,26 @@
     populates `edited_count` from the declared edit surface of RESOLVED items (per-item `item_spec.touched_files`,
     block fallback), writing `.audit-tools/remediation/access_memory.json` from the merge under the state lock.
     Adversarially reviewed; fixes folded (resolved-only not `resolved_no_change`, per-item attribution, crash guard).
-  - **⚠️ Next-step choice is OPEN — surface to the owner before starting, don't auto-pick.** Three increments have
-    shipped and NOTHING reads either orchestrator's `access_memory` on the measurement side yet, so 2b's ordering bias
-    is *asserted*, not *measured*. Two defensible next moves:
-    - **(A) increment 2d — `path::symbol` slicing (#2):** sub-file packet granularity — when a lens needs one function
-      from a god-file, dispatch a symbol slice (symbol boundaries already exist in the extractors'
-      `unit_manifest`/`surface_manifest`), fail-safe to whole-file, coverage/citation line-spans stay valid, cache-safe
-      (back-payload). Extends the track.
-    - **(B) #3 — token-efficiency eval harness (measure first):** the measurement gate that would confirm 2b's bias
-      actually cuts tokens *without busting prefix cache* before extending further. Cost counterpart to the A2 quality
-      oracle; reads recorded run ledgers/headroom telemetry (post-hoc, allowed), reuses the A2 corpus. This is the
-      "MEASURE not assert" discipline the track's own cross-cutting guard calls for.
-    - Also still open: a **remediate continuity CONSUMER** (remediate now harvests `edited_count` but nothing biases on
-      it; the audit side has its consumer via 2b). Recommendation to put to the owner: **(B) measure before extending.**
+  - **Increment 2d (`path::symbol` slicing) — CODE-COMPLETE, ⚠️ UNRELEASED (owner ran /start-lap with "don't /ship").**
+    Sub-file targeted-read guidance in the isolated-large-file back-payload: the mechanical anchor scanner
+    (`src/audit/orchestrator/fileAnchors.ts`) now assigns each TOP-LEVEL (zero-indent) symbol an approximate body
+    span (`FileAnchor.end_line`, bounded by the next top-level decl, clamped to the file's line count), and
+    `renderAnchorPreview` (`src/audit/cli/dispatch/packetPrompt.ts`) renders it as a `path:START-END` slice with
+    advisory "read the span for your lens, expand if evidence crosses" guidance. Realizes the actual token lever:
+    packets hand PATHS + workers self-read, so the win is cutting god-file re-reads ([[worktree-large-files-reread-loop]]),
+    not packet bytes. **Fail-safe** (advisory; nested/indented bindings deliberately get no span so they neither
+    fragment an enclosing span nor become spurious slices), **cache-safe** (all in the back payload; fixed prefix
+    untouched), **zero schema/validator change** (`total_lines` stays whole-file; citations stay real-file coords —
+    no false-fail on the `coversAffectedSpan`/`total_lines` gate). Adversarially reviewed (6 attack vectors — cache
+    safety, span correctness, top-level heuristic, determinism/churn, mutation ordering, render edge — all REFUTED).
+    Green: `build` + `check` + full audit/shared suite. **Next agent: ship it** (`npm run release:patch:publish`).
+  - **Still open on the track (surface to owner after 2d ships):**
+    - **(B) #3 — token-efficiency eval harness (measure first):** the measurement gate confirming 2b's ordering bias
+      AND 2d's slice guidance actually cut tokens *without busting prefix cache*. Cost counterpart to the A2 quality
+      oracle; reads recorded run ledgers/headroom telemetry (post-hoc, allowed), reuses the A2 corpus. The
+      "MEASURE not assert" discipline the track's own cross-cutting guard calls for. **Recommended next.**
+    - A **remediate continuity CONSUMER** (remediate now harvests `edited_count` but nothing biases on it; the audit
+      side has its consumer via 2b).
     Design-of-record [[access-memory-layer-design]]; full track detail `docs/backlog.md:406`. Loop-core → full
     adversarial pipeline.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,

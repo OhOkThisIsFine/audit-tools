@@ -15,6 +15,17 @@ export interface FileAnchor {
   kind: FileAnchorKind;
   name: string;
   line?: number;
+  /**
+   * Approximate END line of a `symbol`-kind anchor's body (increment 2d,
+   * `path::symbol` slicing). Computed deterministically as the line before the
+   * next top-level declaration boundary (`symbol`/`route` start), clamped to the
+   * file's line count — a lightweight, language-neutral, brace-agnostic extent
+   * (no nesting awareness). Advisory ONLY: it seeds a targeted symbol-span read
+   * so a worker need not re-read a whole god-file, but the worker always
+   * fail-safes to reading more when evidence crosses the span. Present only on
+   * `symbol` anchors that have a `line`; absent everywhere else.
+   */
+  end_line?: number;
   detail?: string;
 }
 
@@ -244,6 +255,41 @@ function collectGraphEdges(graphBundle: GraphBundle | undefined, path: string): 
   );
 }
 
+/**
+ * Assigns an approximate `end_line` span to each TOP-LEVEL `symbol`-kind anchor
+ * (increment 2d, `path::symbol` slicing). A top-level declaration's body runs
+ * from its line to the line before the NEXT top-level declaration, or to the
+ * file end for the last one. Only top-level (zero-indentation) declarations are
+ * boundaries and slice targets — a NESTED binding (an indented `const`/`let`
+ * the flat regex scanner also matches as a `symbol`) must NOT fragment the
+ * enclosing function/class span, and is not itself a useful slice, so it gets no
+ * span. `topLevelDeclLines` is the ascending set of zero-indent symbol/route
+ * declaration lines gathered during the content scan.
+ *
+ * This is a deterministic, content-derived, brace-agnostic heuristic (no nesting
+ * awareness) — advisory guidance the worker fail-safes past, never a hard read
+ * boundary. Mutates the anchors in place; must run on the fully line-sorted list
+ * BEFORE the MAX_ANCHORS cap so a surviving anchor's span is independent of the
+ * cap.
+ */
+function assignSymbolSpans(
+  sorted: FileAnchor[],
+  totalLines: number,
+  topLevelDeclLines: number[],
+): void {
+  const topLevelSet = new Set(topLevelDeclLines);
+  // Ascending — a linear scan finds the first boundary strictly after a line.
+  const boundaries = [...topLevelDeclLines].sort((a, b) => a - b);
+  for (const anchor of sorted) {
+    if (anchor.kind !== "symbol" || !anchor.line || !topLevelSet.has(anchor.line)) {
+      continue;
+    }
+    const nextBoundary = boundaries.find((line) => line > anchor.line!);
+    const end = nextBoundary !== undefined ? nextBoundary - 1 : totalLines;
+    anchor.end_line = Math.max(anchor.line, Math.min(end, totalLines));
+  }
+}
+
 function scanSymbol(
   line: string,
   lineNumber: number,
@@ -299,6 +345,11 @@ export function buildFileAnchorSummary(params: {
   let symbolCount = 0;
   let routeCount = 0;
   let keywordCount = 0;
+  // Zero-indent symbol/route declaration lines — the top-level boundaries that
+  // bound per-symbol slice spans (see assignSymbolSpans). A nested (indented)
+  // binding the flat scanner also matches is deliberately excluded so it neither
+  // fragments an enclosing span nor becomes a spurious slice target.
+  const topLevelDeclLines: number[] = [];
 
   addAnchor(anchors, seen, {
     kind: "boundary",
@@ -321,6 +372,10 @@ export function buildFileAnchorSummary(params: {
     const symbolKind = scanSymbol(line, lineNumber, anchors, seen);
     if (symbolKind === "route") routeCount += 1;
     else if (symbolKind === "symbol") symbolCount += 1;
+    // A zero-indent symbol/route declaration is a top-level slice boundary.
+    if ((symbolKind === "symbol" || symbolKind === "route") && /^\S/.test(line)) {
+      topLevelDeclLines.push(lineNumber);
+    }
     if (scanKeyword(line, lineNumber, anchors, seen)) keywordCount += 1;
   });
 
@@ -350,6 +405,9 @@ export function buildFileAnchorSummary(params: {
       a.kind.localeCompare(b.kind) ||
       a.name.localeCompare(b.name),
   );
+  // Seed per-symbol spans on the full sorted list (before the cap) so a
+  // surviving anchor's span never depends on which anchors the cap dropped.
+  assignSymbolSpans(sorted, params.totalLines, topLevelDeclLines);
   const boundedAnchors = sorted.slice(0, MAX_ANCHORS);
 
   return {

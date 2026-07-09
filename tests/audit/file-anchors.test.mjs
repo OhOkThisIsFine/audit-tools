@@ -4,6 +4,9 @@ import { importSourceModule } from "./helpers/sourceImport.mjs";
 const { buildFileAnchorSummary } = await importSourceModule(
   "src/orchestrator/fileAnchors.ts",
 );
+const { buildLargeFileSection } = await import(
+  "../../src/audit/cli/dispatch/packetPrompt.ts"
+);
 
 test("symbol scan and keyword scan are independent — a line matching both SYMBOL_PATTERNS and KEYWORD_PATTERN produces both a symbol/route anchor and a keyword anchor", () => {
   // The function declaration matches SYMBOL_PATTERNS (function), and the
@@ -45,6 +48,120 @@ test("symbol scan breaks after first SYMBOL_PATTERNS match — only one symbol a
   // Exactly one symbol-class anchor should be produced for this single line.
   expect(symbolLikeAnchors.length, `Expected exactly 1 symbol-class anchor for a single-function line, got ${symbolLikeAnchors.length}: ${JSON.stringify(symbolLikeAnchors.map((a) => a.kind))}`).toBe(1);
   expect(summary.counts.symbols + summary.counts.routes, "symbolCount + routeCount must be exactly 1 for a single matched line").toBe(1);
+});
+
+// ── symbol spans (increment 2d, path::symbol slicing) ─────────────────────────
+
+test("symbol spans: consecutive symbols get [start, next-symbol-start-1]; the last runs to file end", () => {
+  const content = [
+    "function alpha() {", // line 1
+    "  return 1;",         // 2
+    "}",                    // 3
+    "function beta() {",   // 4
+    "  return 2;",         // 5
+    "}",                    // 6
+    "function gamma() {",  // 7
+    "  return 3;",         // 8
+    "}",                    // 9
+  ].join("\n");
+  const summary = buildFileAnchorSummary({
+    path: "src/spans.ts",
+    content,
+    totalLines: 9,
+  });
+  const byName = (name) =>
+    summary.anchors.find((a) => a.kind === "symbol" && a.name === name);
+
+  expect(byName("alpha").line, "alpha starts at line 1").toBe(1);
+  expect(byName("alpha").end_line, "alpha span ends the line before beta (3)").toBe(3);
+  expect(byName("beta").line, "beta starts at line 4").toBe(4);
+  expect(byName("beta").end_line, "beta span ends the line before gamma (6)").toBe(6);
+  expect(byName("gamma").line, "gamma starts at line 7").toBe(7);
+  expect(byName("gamma").end_line, "the last symbol span runs to file end (9)").toBe(9);
+});
+
+test("symbol spans: a lone symbol spans to the file end", () => {
+  const content = ["function solo() {", "  return 1;", "}", "", ""].join("\n");
+  const summary = buildFileAnchorSummary({
+    path: "src/solo.ts",
+    content,
+    totalLines: 5,
+  });
+  const solo = summary.anchors.find((a) => a.kind === "symbol" && a.name === "solo");
+  expect(solo.line, "solo starts at line 1").toBe(1);
+  expect(solo.end_line, "a lone symbol spans to file end (5)").toBe(5);
+});
+
+test("symbol spans: a mid-body keyword anchor does NOT truncate the enclosing symbol span", () => {
+  // The `token` keyword on line 2 produces a keyword anchor, but keyword anchors
+  // are not declaration boundaries — the first symbol's span must still extend to
+  // the line before the next symbol.
+  const content = [
+    "function first() {",     // 1 symbol
+    "  const token = get();", // 2 keyword (mid-body) — must NOT bound the span
+    "  return token;",        // 3
+    "}",                       // 4
+    "function second() {}",   // 5 symbol
+  ].join("\n");
+  const summary = buildFileAnchorSummary({
+    path: "src/kw.ts",
+    content,
+    totalLines: 5,
+  });
+  const first = summary.anchors.find((a) => a.kind === "symbol" && a.name === "first");
+  expect(first.end_line, "first span must reach line 4 (before second), not stop at the keyword line").toBe(4);
+});
+
+test("symbol spans: end_line never exceeds totalLines and is >= the start line", () => {
+  const content = ["function only() {}"].join("\n");
+  const summary = buildFileAnchorSummary({
+    path: "src/clamp.ts",
+    content,
+    totalLines: 1,
+  });
+  const only = summary.anchors.find((a) => a.kind === "symbol" && a.name === "only");
+  expect(only.end_line, "single-line file → span clamps to [1,1]").toBe(1);
+  expect(only.end_line >= only.line, "end_line must be >= start line").toBe(true);
+});
+
+test("symbol spans: only symbol-kind anchors carry end_line (routes/keywords/imports do not)", () => {
+  const content = [
+    "import { x } from './x';", // 1 import
+    "function handler() {}",     // 2 symbol
+    "app.get('/p', handler);",   // 3 route
+    "// TODO revisit",           // 4 keyword
+  ].join("\n");
+  const summary = buildFileAnchorSummary({
+    path: "src/kinds.ts",
+    content,
+    totalLines: 4,
+  });
+  for (const anchor of summary.anchors) {
+    if (anchor.kind !== "symbol") {
+      expect(anchor.end_line, `${anchor.kind} anchor must not carry an end_line`).toBe(undefined);
+    }
+  }
+  const handler = summary.anchors.find((a) => a.kind === "symbol" && a.name === "handler");
+  // The route on line 3 is a declaration boundary → handler's span stops at 2.
+  expect(handler.end_line, "handler span bounded by the route at line 3 → [2,2]").toBe(2);
+});
+
+test("symbol spans reach the worker prompt as a path:START-END targeted read range", () => {
+  const content = [
+    "function alpha() {",
+    "  return 1;",
+    "}",
+    "function beta() {}",
+  ].join("\n");
+  const summary = buildFileAnchorSummary({
+    path: "src/render.ts",
+    content,
+    totalLines: 4,
+  });
+  const section = buildLargeFileSection(true, summary, "run/anchors.json").join("\n");
+  // alpha spans [1,3] → rendered as a range; the guidance names the slice discipline.
+  expect(section.includes("src/render.ts:1-3 [symbol] alpha"), section).toBe(true);
+  expect(section.includes("approximate line span"), "guidance must frame spans as advisory").toBe(true);
 });
 
 // ── MAX_ANCHORS cap ───────────────────────────────────────────────────────────

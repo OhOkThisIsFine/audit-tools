@@ -26,7 +26,16 @@ function renderAnchorPreview(
   anchorPath: string,
 ): string[] {
   const preview = summary.anchors.slice(0, 24).map((anchor) => {
-    const location = anchor.line ? `${summary.path}:${anchor.line}` : summary.path;
+    // A symbol anchor carries an approximate body span (increment 2d) → render
+    // it as a targeted read range `path:START-END` so the worker reads just the
+    // symbol slice instead of the whole god-file. Anchors without a span (or
+    // without a line) fall back to the single-line / path-only form.
+    const location =
+      anchor.line && anchor.end_line && anchor.end_line > anchor.line
+        ? `${summary.path}:${anchor.line}-${anchor.end_line}`
+        : anchor.line
+          ? `${summary.path}:${anchor.line}`
+          : summary.path;
     const detail = anchor.detail ? ` - ${anchor.detail}` : "";
     return `- ${location} [${anchor.kind}] ${anchor.name}${detail}`;
   });
@@ -34,6 +43,10 @@ function renderAnchorPreview(
     "## Large File Review Mode",
     "This packet is intentionally isolated because it covers one large file.",
     "Use targeted reads/searches within this file, guided by the mechanical anchors.",
+    "Symbol anchors carry an approximate line span (path:START-END): read that slice for the",
+    "symbol relevant to your lens rather than the whole file, and expand the range only when",
+    "evidence for a finding crosses the span. The spans are a mechanical starting point, not a",
+    "hard boundary — never miss a real defect to stay inside a slice.",
     "Do not read unrelated files unless a finding cannot be evidenced without a direct boundary check.",
     `Anchor file: ${anchorPath}`,
     `Anchor counts: symbols=${summary.counts.symbols}, routes=${summary.counts.routes}, keywords=${summary.counts.keywords}, graph_edges=${summary.counts.graph_edges}, analyzer_signals=${summary.counts.analyzer_signals}, omitted=${summary.omitted_anchor_count}`,
