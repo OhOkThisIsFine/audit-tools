@@ -8,103 +8,22 @@
 
 ## Live state
 
-- **v0.32.42 published on npm as `latest`.** Per-lap shipped detail is NOT narrated here (changelog
-  creep — see `git log` and project memory [[live-status]]); this section is current-state + open-work
-  roadmap only.
-- **Context-efficiency access-memory track — COMPLETE. Items (1) + (2) + (3) all shipped; nothing open on the track.**
-  Item (3) token-efficiency eval harness landed this lap (unreleased at time of writing — the six-item
-  backlog-orchestration lap below): `score-tokens` CLI + pure `scoreTokens` reducer + per-run `token-usage.jsonl`
-  recording (`extractObservedUsage` on the openai-compatible path, off-admission-path append) + provider-independent
-  prefix-stability (hash of each recorded packet prompt's cache-eligible prefix). Track-don't-gate (exit wired only
-  to a cache-hit-ratio regression vs `--baseline`). Follow-ups (non-blocking, `docs/backlog.md`): remediate-side
-  ledger writer; packet task_ids/lens attribution.
-- **Backlog-orchestration lap (2026-07-08) — six tool-enforcement fixes shipped (unreleased).** wrapper
-  passthrough-to-dist (D-61 wrapper/CLI drift now structurally impossible); `vi.spyOn` re-export-barrel guard
-  (INV-remediate-tests-12 + the live vacuous conventions-cache spy fixed); accept-node stray-worktree fail-loud
-  (tool-enforces "never Agent isolation:worktree on a dispatch node"); judge-convergence keyed on CE content
-  fingerprint not the reviewer id (kills the false CE-001 stall); `validate-artifact` singular now runs the
-  cross-artifact gates (no more self-validates-ok-then-fails-at-next-step round-trip); `score-tokens` harness (above).
-- **(historical, unchanged below) Context-efficiency access-memory increments 1 + 2a + 2b + 2c + 2d + remediate-consumer
-  (v0.32.42).**
-  - **Increment 1 (v0.32.38): prefix-ordering fix (#4)** — `buildPacketPrompt` static `## Output` prefix leads,
-    volatile payload trails; tool-enforced guard. Cross-cutting cache-safety guard now real.
-  - **Increment 2a (v0.32.39): persistence spine** — `access_memory.json`, first-class per-run audit artifact
-    harvested from the ingested result ledger (`deriveAccessMemory`, `src/audit/orchestrator/accessMemory.ts`);
-    DAG edge `→ audit_results.jsonl`; `run_id` stripped from hash.
-  - **Increment 2b (v0.32.40): continuity scoring + packet-order bias** — `computeContinuityScores`
-    (`src/audit/orchestrator/continuityScore.ts`): recency×frequency seed → deterministic personalized PageRank
-    (α=0.85, fixed 20 iters) over the dependency graph → biases packet ORDERING (single-sourced
-    `orderReviewPackets`, strictly below priority) at the load-bearing sorts (`buildReviewPacketsFromPartition` +
-    `fitPacketsToTierBudgets`). Cache-safe (order/selection only). Adversarially reviewed; folded fixes: tier-refit
-    re-sort (closed a pre-existing priority-monotonicity break), dropped an inert ordering thread, NaN guard.
-  - **Increment 2c (v0.32.41): remediate-parity harvest** — the deterministic core is now single-sourced in
-    `audit-tools/shared` (`deriveAccessMemoryFromEvents` over a normalized `AccessTouchEvent` stream); audit is a
-    thin adapter (byte-identical). Remediate `deriveRemediationAccessMemory` (`src/remediate/state/accessMemory.ts`)
-    populates `edited_count` from the declared edit surface of RESOLVED items (per-item `item_spec.touched_files`,
-    block fallback), writing `.audit-tools/remediation/access_memory.json` from the merge under the state lock.
-    Adversarially reviewed; fixes folded (resolved-only not `resolved_no_change`, per-item attribution, crash guard).
-  - **Increment 2d (`path::symbol` slicing) — SHIPPED v0.32.42.** Sub-file targeted-read guidance in the
-    isolated-large-file back-payload: the mechanical anchor scanner (`src/audit/orchestrator/fileAnchors.ts`) assigns
-    each TOP-LEVEL (zero-indent) symbol an approximate body span (`FileAnchor.end_line`, bounded by the next top-level
-    decl, clamped to the file's line count); `renderAnchorPreview` (`src/audit/cli/dispatch/packetPrompt.ts`) renders
-    it as a `path:START-END` slice with advisory "read the span for your lens, expand if evidence crosses" guidance.
-    Token lever: packets hand PATHS + workers self-read, so the win is cutting god-file re-reads
-    ([[worktree-large-files-reread-loop]]), not packet bytes. Fail-safe (nested/indented bindings get no span),
-    cache-safe (back-payload only), zero schema/validator change. Adversarially reviewed (6 vectors REFUTED).
-  - **Remediate continuity CONSUMER + scorer single-sourced — SHIPPED v0.32.42.** Owner principle: auditor/remediator
-    mirroring is common logic ([[auditor-remediator-mirroring-is-common-logic]]) — the consumer should have been shared
-    from the start (as the 2c harvest core was), not audit-only. Scorer EXTRACTED to `audit-tools/shared`:
-    `computeContinuityScores` + new single-sourced `continuityMassForPaths` (`src/shared/continuityScore.ts`) + graph
-    primitives `normalizeGraphPath`/`collectGraphEdges` (`src/shared/graph/graphPaths.ts`); audit re-exports all four
-    (28+6 import sites + 2b behaviour byte-identical). Remediate consumer (`readRemediationAccessMemory` +
-    `computeBlockContinuityScores`, `src/remediate/state/accessMemory.ts`) reduces `access_memory.json` to a per-block
-    mass (seed-only — remediate has NO graph), threaded via `DriveRollingDispatchOptions.continuityScores` → `toNode`
-    → shared `ownershipSubWaves` (`OwnershipSchedulerNode.continuity?` = secondary sort key below file-disjointness,
-    above `block_id`; no-op default). Adversarially reviewed (6 vectors A–F REFUTED).
-  - **Item (3) token-efficiency eval harness — SHIPPED this lap (`score-tokens`).** The track is now COMPLETE;
-    nothing open. Design-of-record [[access-memory-layer-design]]; the harness measures per-step tokens +
-    cache-hit ratio + prefix-stability post-hoc from recorded ledgers (never a metered API call), the "MEASURE
-    not assert" discipline the track's cross-cutting guard calls for.
-- **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,
-  released v0.32.36).** ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1
-  (a-priori declared per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification:
-  demote a declared-free pool that reports cost>0 + `declared_cost_drift` friction, `65ace2c1`) both landed. The
-  only remaining Phase-0 work is **env-bound live validations** (a real opencode-free run confirming declared-free
-  routing + a live lapsed-free demotion + the friction event) — owner runs these. vertex-trial deferred (needs a
-  GCP $300-trial SA). Other standing env-bound validations: quota pre-wall pacing, friction escalation,
-  selective-deepening convergence, clippy/rubocop live spawn.
-- **Session-config validation is now single-sourced across both orchestrators (v0.32.37).** The full field
-  validator `validateSessionConfig` moved to `audit-tools/shared`; remediate's `session-config.json` reads route
-  through a shared `readValidatedSessionConfig` load-boundary helper, so a malformed config fails loud in remediate
-  too (was a silent degrade — the closed parity gap). **Deliberate behavior change:** a remediate run with a
-  technically-invalid config (e.g. `timeout_ms: 0`) now throws at load instead of silently ignoring it — this is
-  remediate conforming to the shared config contract audit has always enforced, not a new contract.
-- **Cost↔speed dial residuals — ALL CLOSED 2026-07-08 (owner):** the `/models` concurrency probe is
-  DROPPED (owner: concurrency is an almost-irrelevant primitive — stop hunting for a concurrency value;
-  use a handed signal if one arrives, never go looking; [[concurrency-is-declared-or-absent-never-learned]]);
-  B2 host-reorder is CLOSED (the shipped provider `exclude`/`include` + `cost_order` IS the capability);
-  dead `buildProviderConfirmationDisplay` (D-71) deleted. Dial itself code-complete + reviewed — nothing open.
-- **Dispatch admission-control — residual (env-bound / deeper, in `docs/backlog.md`):**
-  (a) live validation of a real host+codex+NIM concurrent metered run; (b) deeper *within-turn* simultaneity
-  (the audit hybrid path alternates in-process partition then host review ACROSS turns, not simultaneously
-  within one — a detached background driver is architectural, pursue only if a real run shows the alternation
-  is the bottleneck); (c) durable routing lesson: codex CLI is a poor fit for large read-heavy audit packets.
-  **Also open:** the token-budget ledger path is live-validated only on a metered run (`docs/backlog.md`
-  quota-aware dispatch, env-bound).
+- **Current: ~v0.32.44 (backlog-clearance lap, shipping now).** Per-lap shipped detail is NOT narrated here
+  (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state + open-work
+  roadmap only. Authoritative version = `package.json`.
+- **This lap closed the remaining code-fixable backlog + two of four owner-picked design tracks.** Shipped
+  (detail in `git log` / [[loop-core-enforcement-layer]]): the per-node loop-core cross-file GUARD + shared
+  `LOOP_CORE_PATTERNS` + the pre-commit adversarial GATE (tree-bound attestation); **D-68** leanFastPath folded
+  into the risk dial (parallel `evaluateFastPath` classifier deleted); INV-WH scanner hermeticity fix; and a
+  PRE-EXISTING fail-open fix (the pre-commit gate's scratch index under `.git` failed open in every linked
+  worktree). **D-69** assessed — its substance is already shipped (friction 3-layer enforcement + D-68's
+  risk-tiering); residue is host-inherent / owner-deferred (see `docs/backlog.md`).
+- **Standing state (all in `docs/backlog.md`):** context-efficiency access-memory track COMPLETE (items 1/2/3
+  shipped); quota-arbitrage Phase-0 opencode-free CODE-COMPLETE (env-bound live validations remain);
+  cost↔speed dial + dispatch admission-control shipped (env-bound / deeper residuals only); session-config
+  validation single-sourced (v0.32.37).
 - **⚠️ Stale-worktree trap:** ALWAYS `git fetch audit-tools main && git log HEAD..audit-tools/main` before
-  starting a lap — this worktree branched behind main and had to fast-forward + re-read HANDOFF/backlog.
-- **✅ Max-sweep remediation run COMPLETE (2026-07-06); the HIGH worktree-safety bug it exposed is FIXED + shipped
-  in v0.32.27.** The 10-node `backlog-handoff-max-sweep-2026-07-06` plan fully landed (manual node-by-node recovery
-  after the original worktree-wipe/state-desync incident). Durable status/recovery in
-  [[remediate-max-sweep-run-2026-07-06]] / [[remediate-worktree-wipe-state-desync]].
-- **Open items** (all in `docs/backlog.md`): the context-efficiency track is now CLOSED (all three items shipped).
-  Remaining are the **larger design forward-tracks** (leanFastPath→dial fold D-68; unify the rolling-dispatch
-  lifecycle shell across audit+remediate D-66/67; move per-lap cadence rules to tool-enforcement D-69; free-pool /
-  quota-arbitrage tier); the standing tooling gaps (cross-file contract regressions escape node-local verify;
-  adversarial gate for hand-authored loop-core changes); env-bound live validations (quota pre-wall pacing, friction
-  escalation, selective-deepening convergence, clippy/rubocop live spawn, opencode-free live run); provider-blocked
-  schema CE-004 residual (claude-code host only). **No quick-win code items remain — the next lap is a design-track
-  pick.**
+  starting a lap — a worktree can branch behind main and must fast-forward + re-read HANDOFF/backlog first.
 - the owner runs live/rate-limited/deepening-capable runs routinely and reports back — this doc does not
   carry "needs live validation" reminders for code that's otherwise complete; treat anything below as
   code-complete unless it says otherwise.
@@ -136,10 +55,22 @@
 
 ## Suggested ordering — everything open, sequenced
 
+**▶ IMMEDIATE NEXT — D-66/67 unify the rolling-dispatch lifecycle shell (FOCUSED-LAP track).** The last
+open design forward-track; the 2026-07-09 recon captured the design-of-record in `docs/backlog.md` +
+[[rolling-lifecycle-unify-full-unification-wrong]]. **Read it before building — it overturns the naive
+framing: full unification is the WRONG endpoint** (audit vs remediate pause semantics genuinely diverge).
+Bounded shareable core = a pause-state reducer with the terminal-policy branch injected + a merge-time
+ownership-gate on the long-lived claims; recommended slice-1 = the merge-time ownership-gate alone (no
+heartbeat machinery). It is the most delicate machinery in the repo (pause/claim/quota) — do NOT rush it;
+the owner's "redesign before scheduled autonomy" caution applies. Everything else open is env-bound live
+validation (owner-run) or T6 deferred.
+
 Rationale: the **loop is the meta-tool**; making it cheaper, convergent, and safe has compounding leverage
 on all downstream work, and is the "redesign before scheduled autonomy" the north star requires
 ([[autonomous-pipeline-capstone-spec]]). Loop-infra (T1–T3) is COMPLETE end-to-end — nothing open on
-those tracks. Remaining sequencing: cheap ergonomics (T4) → product/analysis tracks (T5) → deferred (T6).
+those tracks. **This lap (2026-07-09) closed the remaining T5 loop-safety tooling: the per-node loop-core
+cross-file guard, the pre-commit adversarial gate, and the D-68 leanFastPath→dial fold; D-69 assessed as
+already-shipped.** Remaining sequencing: D-66/67 (above) → deferred (T6).
 
 ### T1–T3 — Loop infra — ✅ COMPLETE
 Self-scaling pipeline ([`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md),
