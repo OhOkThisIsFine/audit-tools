@@ -494,6 +494,19 @@ export {
   writeTextFile,
 } from "./io/json.js";
 
+// IO: generic locked JSON store — single-sources the read-under-lock →
+// validate → atomic-write cycle plus the below-stale lock-timeout derivation
+// shared by the audit session-config mutator and the remediate StateStore.
+export type {
+  LockedJsonStore,
+  LockedJsonStoreOptions,
+} from "./io/lockedJsonStore.js";
+export {
+  createLockedJsonStore,
+  SKIP_WRITE,
+  LOCKED_JSON_STORE_TIMEOUT_MS,
+} from "./io/lockedJsonStore.js";
+
 // IO: canonical `.audit-tools/` path layout (single source for both CLIs)
 export {
   auditToolsDir,

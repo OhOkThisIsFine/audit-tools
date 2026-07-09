@@ -1,10 +1,9 @@
-import { readFile, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  isFileMissingError,
-  writeJsonFile,
-  withFileLock,
-  STALE_LOCK_MS,
+  type LockedJsonStore,
+  createLockedJsonStore,
+  LOCKED_JSON_STORE_TIMEOUT_MS,
 } from "audit-tools/shared";
 import type { PartialCompletionTerminal } from "audit-tools/shared";
 import {
@@ -102,15 +101,11 @@ function validateState(value: unknown): string[] {
 
 const STATE_FILENAME = "state.json";
 const LOCK_FILENAME = "state.lock";
-// Acquire timeout for the shared file lock, DERIVED to stay safely below shared
-// fileLock's STALE_LOCK_MS rather than hardcoded — tying them programmatically so
-// the invariant can't silently drift. A fresh-but-held lock then times out
-// deterministically before it could be reclaimed as stale; an equal/greater
-// timeout makes that a load-sensitive boundary race (the lock is written just
-// before the acquire starts, so its stale point precedes the deadline). The margin
-// absorbs the write→acquire gap, loop overhead, and load drift.
-const LOCK_TIMEOUT_MARGIN_MS = 10_000;
-export const LOCK_TIMEOUT_MS = STALE_LOCK_MS - LOCK_TIMEOUT_MARGIN_MS;
+// Acquire timeout for the shared file lock — the STALE_LOCK_MS-minus-margin
+// derivation is single-sourced in the shared locked JSON store (a fresh-but-held
+// lock times out deterministically before it could be reclaimed as stale).
+// Re-exported here because callers and tests pin the store's timeout by name.
+export const LOCK_TIMEOUT_MS = LOCKED_JSON_STORE_TIMEOUT_MS;
 
 function statePath(artifactsDir: string): string {
   return join(artifactsDir, STATE_FILENAME);
@@ -121,11 +116,37 @@ function lockPath(artifactsDir: string): string {
 }
 
 export class StateStore {
+  /**
+   * Thin adapter over the shared locked JSON store: `state.json` guarded by a
+   * sibling `state.lock`. The lock-timeout derivation and the read-under-lock →
+   * atomic-write cycle (shared `writeJsonFile`: temp + atomic rename,
+   * INV-remediate-state-04) are single-sourced there; only the
+   * RemediationState schema validation lives here.
+   */
+  private readonly store: LockedJsonStore<RemediationState | null>;
+
   constructor(
     private artifactsDir: string,
     // correlationId retained for API compatibility; no longer used in lock body
     private readonly _correlationId?: string,
-  ) {}
+  ) {
+    this.store = createLockedJsonStore<RemediationState | null>({
+      path: statePath(artifactsDir),
+      lockPath: lockPath(artifactsDir),
+      parse: (raw) => {
+        if (raw === undefined) {
+          return null;
+        }
+        const errors = validateState(raw);
+        if (errors.length > 0) {
+          throw new Error(
+            `state.json failed schema validation: ${errors.join("; ")}`,
+          );
+        }
+        return raw as RemediationState;
+      },
+    });
+  }
 
   async init(): Promise<void> {
     await mkdir(this.artifactsDir, { recursive: true });
@@ -141,22 +162,7 @@ export class StateStore {
    * that requires TOCTOU safety (INV-remediate-state-02).
    */
   async loadState(): Promise<RemediationState | null> {
-    try {
-      const data = await readFile(statePath(this.artifactsDir), "utf8");
-      const parsed: unknown = JSON.parse(data);
-      const errors = validateState(parsed);
-      if (errors.length > 0) {
-        throw new Error(
-          `state.json failed schema validation: ${errors.join("; ")}`,
-        );
-      }
-      return parsed as RemediationState;
-    } catch (error) {
-      if (isFileMissingError(error)) {
-        return null;
-      }
-      throw error;
-    }
+    return this.store.read();
   }
 
   /**
@@ -168,61 +174,21 @@ export class StateStore {
   async mutate(
     fn: (current: RemediationState | null) => Promise<RemediationState>,
   ): Promise<RemediationState> {
-    await mkdir(this.artifactsDir, { recursive: true });
-    const lock = lockPath(this.artifactsDir);
     let next!: RemediationState;
-    await withFileLock(
-      lock,
-      async () => {
-        // Load inside the lock — no TOCTOU gap between load and save.
-        let current: RemediationState | null = null;
-        try {
-          const data = await readFile(statePath(this.artifactsDir), "utf8");
-          const parsed: unknown = JSON.parse(data);
-          const errors = validateState(parsed);
-          if (errors.length > 0) {
-            throw new Error(
-              `state.json failed schema validation: ${errors.join("; ")}`,
-            );
-          }
-          current = parsed as RemediationState;
-        } catch (err) {
-          if (!isFileMissingError(err)) throw err;
-        }
-        next = await fn(current);
-        await this._writeStateLocked(next);
-      },
-      LOCK_TIMEOUT_MS,
-    );
+    await this.store.mutate(async (current) => {
+      next = await fn(current);
+      return next;
+    });
     return next;
   }
 
   /**
-   * Save state.json unconditionally (no TOCTOU protection). Prefer `mutate`
-   * for transitions; use this only when the caller holds an external guarantee
+   * Save state.json unconditionally (no TOCTOU protection, no read — so a
+   * corrupt on-disk state never blocks recovery). Prefer `mutate` for
+   * transitions; use this only when the caller holds an external guarantee
    * that no concurrent writer exists (e.g. single-agent close phase).
-   * INV-remediate-state-04: the durable write goes through the shared atomic
-   * writer (temp + atomic rename), the single source for atomic JSON writes.
    */
   async saveState(state: RemediationState): Promise<void> {
-    await mkdir(this.artifactsDir, { recursive: true });
-    const lock = lockPath(this.artifactsDir);
-    await withFileLock(
-      lock,
-      async () => {
-        await this._writeStateLocked(state);
-      },
-      LOCK_TIMEOUT_MS,
-    );
-  }
-
-  /**
-   * Persist state.json while the caller already holds the lock. Delegates to the
-   * shared `writeJsonFile` (temp + atomic rename) — the lock-agnostic single
-   * source for atomic JSON writes — so this store carries no inline writer of
-   * its own.
-   */
-  private async _writeStateLocked(state: RemediationState): Promise<void> {
-    await writeJsonFile(statePath(this.artifactsDir), state);
+    await this.store.replace(state);
   }
 }

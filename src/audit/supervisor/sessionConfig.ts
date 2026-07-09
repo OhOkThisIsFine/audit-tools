@@ -1,13 +1,14 @@
 import { join } from "node:path";
 import {
   type AnalyzerSetting,
+  type LockedJsonStore,
   type ProviderName,
   type SessionConfig,
+  createLockedJsonStore,
+  SKIP_WRITE,
   isRecord,
   readOptionalJsonFile,
   writeJsonFile,
-  withFileLock,
-  STALE_LOCK_MS,
   formatValidationIssues,
   type ValidationIssue,
 } from "audit-tools/shared";
@@ -16,14 +17,6 @@ import { validateSessionConfig } from "../validation/sessionConfig.js";
 const SESSION_CONFIG_FILENAME = "session-config.json";
 const SESSION_CONFIG_LOCK_FILENAME = "session-config.lock";
 const DEFAULT_SESSION_CONFIG: SessionConfig = {};
-
-// Acquire timeout for the shared session-config lock, DERIVED to stay safely
-// below shared fileLock's STALE_LOCK_MS (mirrors the remediate StateStore lock
-// convention) so a fresh-but-held lock times out deterministically before it
-// could be reclaimed as stale. The margin absorbs the write→acquire gap and
-// load drift.
-const LOCK_TIMEOUT_MARGIN_MS = 10_000;
-const SESSION_CONFIG_LOCK_TIMEOUT_MS = STALE_LOCK_MS - LOCK_TIMEOUT_MARGIN_MS;
 
 export function getSessionConfigPath(artifactsDir: string): string {
   return join(artifactsDir, SESSION_CONFIG_FILENAME);
@@ -34,44 +27,43 @@ function getSessionConfigLockPath(artifactsDir: string): string {
 }
 
 /**
+ * Thin adapter over the shared locked JSON store: `session-config.json`
+ * guarded by a sibling `session-config.lock`. The below-STALE_LOCK_MS
+ * lock-timeout derivation and the read-under-lock → validate → atomic-write
+ * cycle are single-sourced in the shared store; only the session-config parse
+ * (non-record → default) and validation live here.
+ */
+function sessionConfigStore(
+  artifactsDir: string,
+): LockedJsonStore<Record<string, unknown>> {
+  const configPath = getSessionConfigPath(artifactsDir);
+  return createLockedJsonStore<Record<string, unknown>>({
+    path: configPath,
+    lockPath: getSessionConfigLockPath(artifactsDir),
+    parse: (raw) => (isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG }),
+    validate: (next) =>
+      throwOnConfigErrors(configPath, validateSessionConfig(next)),
+  });
+}
+
+/**
  * Serialized read→merge→validate→write for `session-config.json`. The entire
- * critical section runs inside a single held {@link withFileLock} on a sibling
- * `session-config.lock`, so two concurrent writers can never interleave
- * read↔write and lose the other's field (last-writer-wins lost update). The
- * `merge` callback receives the freshly-read base record and returns the merged
- * result to persist, or `null` to skip the write (idempotent no-op) — the
- * skip-check therefore happens under the same lock as the read it compares
- * against. No caller adds backoff/retry of its own; that lives solely in the
- * shared lock.
+ * critical section runs inside a single held file lock (shared locked JSON
+ * store), so two concurrent writers can never interleave read↔write and lose
+ * the other's field (last-writer-wins lost update). The `merge` callback
+ * receives the freshly-read base record and returns the merged result to
+ * persist, or `null` to skip the write (idempotent no-op) — the skip-check
+ * therefore happens under the same lock as the read it compares against. No
+ * caller adds backoff/retry of its own; that lives solely in the shared lock.
  */
 async function mutateSessionConfigLocked(
   artifactsDir: string,
   merge: (base: Record<string, unknown>) => Record<string, unknown> | null,
 ): Promise<SessionConfig> {
-  const configPath = getSessionConfigPath(artifactsDir);
-  const lockPath = getSessionConfigLockPath(artifactsDir);
-  let result!: SessionConfig;
-  await withFileLock(
-    lockPath,
-    async () => {
-      const raw = (await readOptionalJsonFile<unknown>(configPath)) ?? {
-        ...DEFAULT_SESSION_CONFIG,
-      };
-      const base = isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG };
-      const merged = merge(base);
-      if (merged === null) {
-        // Idempotent no-op: nothing changed, so no write. The comparison ran
-        // against `base`, which was read inside this same held lock.
-        result = base as SessionConfig;
-        return;
-      }
-      throwOnConfigErrors(configPath, validateSessionConfig(merged));
-      await writeJsonFile(configPath, merged);
-      result = merged as SessionConfig;
-    },
-    SESSION_CONFIG_LOCK_TIMEOUT_MS,
+  const result = await sessionConfigStore(artifactsDir).mutate(
+    (base) => merge(base) ?? SKIP_WRITE,
   );
-  return result;
+  return result as SessionConfig;
 }
 
 export async function readSessionConfigFile(
