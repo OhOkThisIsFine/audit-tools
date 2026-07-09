@@ -55,9 +55,9 @@
 **▶ IMMEDIATE NEXT — D-66/67 slice-2** (shared pause-state reducer with per-orchestrator
 terminal-policy injection; FOCUSED-LAP, delicate — see the D-66/67 roadmap entry below). The prior
 immediate-next bundle all shipped 2026-07-09: release-poll retryable CI-wait, `runPlanPhase`
-call-graph-verified + deleted, smoke tarball-to-temp-dir + npm-12 script-blocking fixes. Optional
-lean warm-up first: `parseAuditFindingsReport`/`deriveBlocksFromTestGraph` dead-code verify
-(`docs/backlog.md` → Open bugs top entry).
+call-graph-verified + deleted, smoke tarball-to-temp-dir + npm-12 script-blocking fixes, and the
+`parseAuditFindingsReport`/`deriveBlocksFromTestGraph` dead-code deletion (call-graph-verified;
+`isAuditFindingsReport` confirmed LIVE and kept).
 
 **D-66/67 slice-1 (merge-time ownership-gate) SHIPPED 2026-07-09** — commits `86e47077`+`f2a4f91d`,
 full-pipeline lap (design-level + post-impl adversarial reviews, 4 CONFIRMED defects caught+fixed

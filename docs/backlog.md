@@ -29,13 +29,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **`parseAuditFindingsReport` + `deriveBlocksFromTestGraph` (src/remediate/phases/plan.ts) grep to zero
-  production importers post-`runPlanPhase`-deletion (2026-07-09).** Same tested-but-unwired class as
-  runPlanPhase; both are exported + independently unit-tested so knip default-mode passes. NOT deleted in
-  the runPlanPhase pass (out of its verified scope — and note importers ≠ callers: verify no LIVE plan.ts
-  function calls them internally before deleting). Needs its own call-graph-verified pass; delete symbol +
-  orphaned tests if confirmed.
-
 - **Lap friction walk — smokes/release-poll/runPlanPhase lap (2026-07-09, orchestrator + 2×Sonnet + Haiku
   + free-NIM review lane).** Lean-tier lap, 3 disjoint items via parallel implementers; `llm read` as the
   standing free adversarial-review lane; orchestrator as accountability gate.

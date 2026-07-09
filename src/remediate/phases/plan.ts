@@ -7,7 +7,7 @@ import {
   CoverageLedgerEntry,
 } from "../state/types.js";
 import { isAbsolute, join } from "node:path";
-import type { AuditFindingsReport, FindingTheme } from "audit-tools/shared";
+import type { AuditFindingsReport } from "audit-tools/shared";
 import { isValidAuditFindingsReport } from "audit-tools/shared";
 import { readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
@@ -23,34 +23,6 @@ import {
 import { canonicalizeFilePath } from "../dispatch/ownershipRegistry.js";
 
 /**
- * Parse the auditor's canonical `audit-findings.json` (the machine contract) into
- * remediation findings, work blocks, and synthesis themes. The auditor emits this
- * directly (Phase 6); the remediator consumes it verbatim, so there is no markdown
- * parsing — non-auditor input still flows through the free-form LLM extractor.
- */
-export function parseAuditFindingsReport(report: AuditFindingsReport): {
-  findings: Finding[];
-  blocks: RemediationBlock[];
-  themes: FindingTheme[];
-} {
-  const findings = Array.isArray(report.findings) ? report.findings : [];
-  const blocks: RemediationBlock[] = Array.isArray(report.work_blocks)
-    ? report.work_blocks.map((block) => ({
-        block_id: block.id,
-        items: [...(block.finding_ids ?? [])],
-        dependencies: [...(block.depends_on ?? [])],
-        parallel_safe: (block.depends_on?.length ?? 0) === 0,
-        // touched_files is REQUIRED on the block contract; the meaningful
-        // surface is derived downstream (mergeBlocksSharingFiles / M1-DECOMPOSE)
-        // from the block's findings — seed it empty here.
-        touched_files: [],
-      }))
-    : [];
-  const themes = Array.isArray(report.themes) ? report.themes : [];
-  return { findings, blocks, themes };
-}
-
-/**
  * Whether a parsed JSON value is a valid audit-findings report.
  *
  * INV-remediate-state-07: delegates to the shared validator which enforces
@@ -61,81 +33,6 @@ export function isAuditFindingsReport(
   value: unknown,
 ): value is AuditFindingsReport {
   return isValidAuditFindingsReport(value);
-}
-
-function createBlockId(counter: number): string {
-  return `B-${String(counter).padStart(3, "0")}`;
-}
-
-function assignFindingToBlock(
-  finding: Finding,
-  blockId: string,
-  blocks: RemediationBlock[],
-  fileToBlock: Map<string, string>,
-): void {
-  let block = blocks.find((candidate) => candidate.block_id === blockId);
-  if (!block) {
-    block = { block_id: blockId, items: [], parallel_safe: true, touched_files: [] };
-    blocks.push(block);
-  }
-  block.items.push(finding.id);
-  for (const file of finding.affected_files) {
-    fileToBlock.set(file.path, blockId);
-  }
-}
-
-export function deriveBlocksFromTestGraph(
-  findings: Finding[],
-  testFiles: string[],
-): { blocks: RemediationBlock[]; useful: boolean } {
-  const blocks: RemediationBlock[] = [];
-  const fileToBlock = new Map<string, string>();
-  let blockCounter = 1;
-
-  const sourceToTests = new Map<string, Set<string>>();
-  for (const finding of findings) {
-    for (const af of finding.affected_files) {
-      if (!sourceToTests.has(af.path)) {
-        const sourceParts = af.path.split(/[/\\]/).filter(Boolean);
-        const covering = testFiles.filter((tf) => {
-          const testParts = tf.split(/[/\\]/).filter(Boolean);
-          return sourceParts.some((part) => testParts.includes(part));
-        });
-        sourceToTests.set(af.path, new Set(covering));
-      }
-    }
-  }
-
-  for (const finding of findings) {
-    let assignedBlock: string | null = null;
-
-    for (const af of finding.affected_files) {
-      if (fileToBlock.has(af.path)) {
-        assignedBlock = fileToBlock.get(af.path)!;
-        break;
-      }
-      const testsA = sourceToTests.get(af.path) ?? new Set<string>();
-      for (const [existingFile, existingBlock] of fileToBlock.entries()) {
-        const testsB = sourceToTests.get(existingFile) ?? new Set<string>();
-        const shared = [...testsA].filter((t) => testsB.has(t));
-        if (shared.length > 0) {
-          assignedBlock = existingBlock;
-          break;
-        }
-      }
-      if (assignedBlock) break;
-    }
-
-    if (!assignedBlock) {
-      assignedBlock = createBlockId(blockCounter++);
-    }
-    assignFindingToBlock(finding, assignedBlock, blocks, fileToBlock);
-  }
-
-  return {
-    blocks,
-    useful: blocks.length < findings.length,
-  };
 }
 
 // Block-sizing constants: now single-sourced from audit-tools/shared.

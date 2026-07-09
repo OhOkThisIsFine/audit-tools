@@ -114,60 +114,10 @@ test("validateAuditFindingsReport flags absent findings array as error", () => {
 });
 
 // ── 3. WorkBlock → RemediationBlock mapping ──────────────────────────────────
-// The auditor uses WorkBlock.id; the remediator maps it to RemediationBlock.block_id.
-// Verify the mapping in parseAuditFindingsReport is stable.
-
-const { parseAuditFindingsReport } = await import(
-  "../../remediate-code/src/phases/plan.ts"
-).catch(() => null).then(async (m) => {
-  // remediate-code is a peer package, not a listed dependency of audit-code.
-  // When the direct import fails (package boundary), fall back to undefined and
-  // skip the cross-package mapping assertions — the contract_version identity
-  // test above is still enforced.
-  if (m) return m;
-  return { parseAuditFindingsReport: null };
-});
-
-test("parseAuditFindingsReport maps WorkBlock.id → RemediationBlock.block_id", { skip: !parseAuditFindingsReport }, () => {
-  const payload = buildAuditorPayload();
-  const result = parseAuditFindingsReport(payload);
-
-  expect(result.findings.length, "one finding expected").toBe(1);
-  expect(result.blocks.length, "one block expected").toBe(1);
-
-  const block = result.blocks[0];
-  expect(block.block_id, `block_id should equal WorkBlock.id ("WB-001"), got "${block.block_id}"`).toBe("WB-001");
-  expect(block.items, "block.items should match WorkBlock.finding_ids").toEqual(["SEAM-001"]);
-  expect(block.parallel_safe, "block with empty depends_on should be parallel_safe").toBe(true);
-  expect(block.dependencies, "block with empty depends_on should have no dependencies").toEqual([]);
-});
-
-test("parseAuditFindingsReport propagates depends_on into block.dependencies and clears parallel_safe", { skip: !parseAuditFindingsReport }, () => {
-  const payload = buildAuditorPayload({
-    work_blocks: [
-      {
-        id: "WB-A",
-        finding_ids: ["SEAM-001"],
-        unit_ids: [],
-        owned_files: [],
-        max_severity: "high",
-        rationale: "root",
-        depends_on: [],
-      },
-      {
-        id: "WB-B",
-        finding_ids: [],
-        unit_ids: [],
-        owned_files: [],
-        max_severity: "high",
-        rationale: "dependent",
-        depends_on: ["WB-A"],
-      },
-    ],
-  });
-  const result = parseAuditFindingsReport(payload);
-  const blockB = result.blocks.find((b) => b.block_id === "WB-B");
-  expect(blockB, "WB-B block not found").toBeTruthy();
-  expect(blockB.dependencies).toEqual(["WB-A"]);
-  expect(blockB.parallel_safe).toBe(false);
-});
+// The WorkBlock.id → RemediationBlock.block_id mapping (formerly exercised here
+// via a cross-package import of the remediator's parseAuditFindingsReport) is
+// covered directly in the remediator's own suite. The remediate-code peer-package
+// import never resolved from audit-code (package boundary), so those two mapping
+// assertions were always skipped and carried no coverage — removed. The
+// contract_version identity + validator-acceptance seam above still enforces the
+// cross-module contract.
