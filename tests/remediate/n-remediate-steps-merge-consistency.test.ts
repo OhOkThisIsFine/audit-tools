@@ -172,15 +172,16 @@ describe("N-remediate-steps: mergeImplementResults consistency (OBL-INV-RSD-01/0
       { finding_id: "F-UNKNOWN", status: "resolved", evidence: ["x"] },
     ]);
 
-    // Spy on the prototype write path: exactly one state.json commit for the merge.
-    const writeSpy = vi.spyOn(
-      StateStore.prototype as unknown as { _writeStateLocked: (s: RemediationState) => Promise<void> },
-      "_writeStateLocked",
-    );
+    // Spy on the public write surface: StateStore now delegates all writes to
+    // the shared LockedJsonStore (B3), so the single-commit invariant is
+    // asserted at the two StateStore entry points — exactly one write-bearing
+    // call for the whole merge, no partial second commit on the bad id.
+    const mutateSpy = vi.spyOn(StateStore.prototype, "mutate");
+    const saveSpy = vi.spyOn(StateStore.prototype, "saveState");
 
     await mergeImplementResults(opts(), RUN_ID);
 
-    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(mutateSpy.mock.calls.length + saveSpy.mock.calls.length).toBe(1);
   });
 
   it("resolved (non-no-change) item uses the REMEDIATION_STEP constant + canonical evidence path (RSD-06)", async () => {

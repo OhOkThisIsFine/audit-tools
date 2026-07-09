@@ -506,7 +506,13 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
     writeFileSync(join(GIT_DIR, ".audit-tools", "remediation", "state.json"), "{}");
     writeFileSync(join(GIT_DIR, "src.ts"), "code");
 
-    const files = collectStagingFiles(GIT_DIR);
+    // V2 signature: staging is manifest-scoped; declaring the .audit-tools
+    // paths in the manifest must STILL not stage them (hard exclude wins).
+    const { files } = collectStagingFiles(GIT_DIR, [
+      "src.ts",
+      ".audit-tools/audit/audit-findings.json",
+      ".audit-tools/remediation/state.json",
+    ]);
     expect(files).toContain("src.ts");
     expect(files.some((f) => f.includes(".audit-tools"))).toBe(false);
   });
@@ -517,7 +523,13 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
     writeFileSync(join(GIT_DIR, ".env.production"), "PROD=z");
     writeFileSync(join(GIT_DIR, "src.ts"), "code");
 
-    const files = collectStagingFiles(GIT_DIR);
+    // Declared in the manifest on purpose — the .env* hard exclude must win.
+    const { files } = collectStagingFiles(GIT_DIR, [
+      "src.ts",
+      ".env",
+      ".env.local",
+      ".env.production",
+    ]);
     expect(files).toContain("src.ts");
     expect(files).not.toContain(".env");
     expect(files).not.toContain(".env.local");
@@ -525,8 +537,9 @@ describe("collectStagingFiles — INV-remediate-phases-07: exclusion patterns", 
   });
 
   it("returns empty when nothing is modified", () => {
-    const files = collectStagingFiles(GIT_DIR);
+    const { files, leftover } = collectStagingFiles(GIT_DIR, ["src.ts"]);
     expect(files).toEqual([]);
+    expect(leftover).toEqual([]);
   });
 });
 

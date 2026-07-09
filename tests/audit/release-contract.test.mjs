@@ -284,9 +284,15 @@ test("audit-code postinstall fails non-zero when an install step fails (parity w
   const remediatePostinstall = normalizeLineEndings(
     await readText("scripts/remediate/postinstall.mjs"),
   );
+  // The exit-code guard is single-sourced in the shared install driver (B4);
+  // each tool's postinstall must route completion through it.
   for (const source of [auditPostinstall, remediatePostinstall]) {
-    expect(source, "postinstall must surface failures as a non-zero exit").toMatch(/if \(failed > 0\) \{\s*process\.exitCode = 1;\s*\}/);
+    expect(source, "postinstall must finish through the shared driver that surfaces failures").toMatch(/finishPostinstall\(/);
   }
+  const sharedDriver = normalizeLineEndings(
+    await readText("scripts/shared/install-host-assets.mjs"),
+  );
+  expect(sharedDriver, "shared driver must surface failures as a non-zero exit").toMatch(/if \(counts\.failed > 0\) \{\s*process\.exitCode = 1;\s*\}/);
 });
 
 test("dead-code gate config is single-sourced in knip.json, not split into the npm script", async () => {
