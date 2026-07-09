@@ -486,7 +486,11 @@ ${role.outputSchema}
 
 Before advancing, you can self-check the output against its contract:
 
-\`${loaderCommand(`validate-artifact --name ${role.outputKey} --file ${outputPath}`)}\`
+\`${loaderCommand(
+    `validate-artifact --name ${role.outputKey} --file ${outputPath}${
+      input.repoRoot ? ` --root ${input.repoRoot}` : ""
+    }`,
+  )}\`
 
 A \`status: "ok"\` result means the structure is valid; otherwise fix the reported issues before running next-step.
 

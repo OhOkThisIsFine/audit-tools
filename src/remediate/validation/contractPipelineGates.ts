@@ -35,6 +35,7 @@ import {
   extractSymbolTokens,
   type PairingVerdict,
 } from "../contractPipeline/changeClassification.js";
+import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
 
 // ── DesignSpec structural gates ───────────────────────────────────────────────
 
@@ -1412,6 +1413,100 @@ export function validateDecompositionFileScope(
   }
 
   return issues;
+}
+
+// ── Single-sourced cross-gate SET (MNT — validate-artifact self-check parity) ──
+//
+// The 7 CROSS-artifact gates below (as opposed to the per-artifact structural
+// CONTRACT_PIPELINE_VALIDATORS) are run by BOTH the plural `validate-artifacts`
+// sweep (validation/artifacts.ts) and the singular `validate-artifact --name X`
+// self-check (index.ts). Single-sourcing them here means a self-check can never
+// diverge from what next-step enforces — the trap this closes: a shape-valid
+// `test_validator_plan` missing its scoped positive+negative pair could
+// self-validate "ok" via validate-artifact, then fail at next-step because the
+// cross-gates never ran against it (an authoring round-trip a self-check exists
+// to prevent).
+
+/** Input to {@link evaluateContractPipelineCrossGates}. */
+export interface ContractPipelineCrossGateInputs {
+  /** Every contract-pipeline artifact payload currently known, by name. An
+   *  absent entry means "this artifact is not available" — every gate below
+   *  tolerates that (see the absent-tolerance note on the function itself). */
+  payloads: ReadonlyMap<ContractPipelineArtifactName, unknown>;
+  /** The intake finding-enumeration payload (already read from disk), or
+   *  undefined when absent/not applicable. Passed through to
+   *  validateDigestCoverage verbatim. */
+  findingEnumeration?: unknown;
+  /** Working-tree root, used by validateDecompositionFileScope's git-tree
+   *  enumeration. */
+  root: string;
+}
+
+/**
+ * Evaluate the SAME 7 cross-artifact gates the plural `validate-artifacts`
+ * sweep runs, returning one `ValidationIssue[]` PER gate in a FIXED canonical
+ * order (never a flattened single array — callers that need per-gate issue
+ * counts, e.g. INV-CVG-1's "one issue-string entry per failing gate", rely on
+ * this shape; a caller that just wants everything can `.flat()` the result).
+ *
+ * Absent-input tolerance is guaranteed PER GATE, not by this runner — this
+ * function adds NO extra tolerance logic of its own, it only wires named
+ * payloads to each gate's positional arguments. Every gate below already
+ * early-returns `[]` when its primary payload is missing/malformed:
+ *
+ *   1. validatePairedObligations       — returns [] when obligationLedgerPayload
+ *      is not a record with an `obligations` array (see its own guard, top of
+ *      the function body, above in this file).
+ *   2. validateEvidenceThreaded        — has no single top-level guard; each of
+ *      its 3 checks is individually gated by its own `isRecord(...)` /
+ *      `Array.isArray(...)` condition, so with every payload absent all 3
+ *      checks are skipped and it returns [].
+ *   3. validateDigestCoverage          — returns [] unless sourceType is
+ *      "structured_audit"/"mixed" AND findingEnumerationPayload is a record
+ *      AND is_enumerable !== false AND it has a non-empty findings array.
+ *   4. validateReconciliationDerivation — returns [] when
+ *      seamReconciliationReportPayload is not a record with a `mismatches`
+ *      array (or that array is empty).
+ *   5. validateDesignSpecGates         — returns [] when its first argument is
+ *      not a record (called here with finalizedContracts as that argument).
+ *   6. validateImplementationDAGIntegrity — returns [] when dagPayload is not a
+ *      record with a `nodes` array.
+ *   7. validateDecompositionFileScope  — returns [] when moduleDecompositionPayload
+ *      is not a record with a `modules` array.
+ *
+ * So a partial pipeline (most artifacts absent — e.g. a single-artifact
+ * self-check in an otherwise-empty run) can never false-fail: every gate
+ * lacking its input contributes an empty array, not a fabricated issue.
+ */
+export function evaluateContractPipelineCrossGates(
+  inputs: ContractPipelineCrossGateInputs,
+): ValidationIssue[][] {
+  const { payloads, findingEnumeration, root } = inputs;
+
+  const goalSpec = payloads.get("goal_spec");
+  const sourceType =
+    isRecord(goalSpec) && typeof goalSpec.source_type === "string"
+      ? goalSpec.source_type
+      : undefined;
+  const obligationLedger = payloads.get("obligation_ledger");
+  const testValidatorPlan = payloads.get("test_validator_plan");
+  const finalizedContracts = payloads.get("finalized_module_contracts");
+  const seamReport = payloads.get("seam_reconciliation_report");
+  const assessment = payloads.get("contract_assessment_report");
+  const judge = payloads.get("judge_report");
+  const counterexample = payloads.get("counterexample");
+  const dag = payloads.get("implementation_dag");
+  const moduleDecomposition = payloads.get("module_decomposition");
+
+  return [
+    validatePairedObligations(obligationLedger, testValidatorPlan),
+    validateEvidenceThreaded(assessment, judge, dag),
+    validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
+    validateReconciliationDerivation(seamReport, finalizedContracts),
+    validateDesignSpecGates(finalizedContracts, obligationLedger),
+    validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
+    validateDecompositionFileScope(moduleDecomposition, root),
+  ];
 }
 
 // ── (removed) Downstream-only repair propagation — S2, dropped ─────────────────

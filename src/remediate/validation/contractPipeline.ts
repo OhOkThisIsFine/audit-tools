@@ -307,12 +307,14 @@ export {
   validateReconciliationDerivation,
   validateContractCitationGrounding,
   validateDecompositionFileScope,
+  evaluateContractPipelineCrossGates,
   enumerateRepoTreePaths,
   isInsideGitWorkTree,
   deriveNodeModelTier,
   deriveNodeModelTierFromNode,
   type NodeComplexitySignals,
   type ContractCitationGroundingResult,
+  type ContractPipelineCrossGateInputs,
 } from "./contractPipelineGates.js";
 
 // ── ConceptualDesignCritique ──────────────────────────────────────────────────

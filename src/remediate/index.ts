@@ -12,13 +12,20 @@ import {
 } from "./steps/dispatch.js";
 import { advanceHostRolling, reverifyQuarantinedNode } from "./steps/rollingSession.js";
 import { validateArtifacts } from "./validation/artifacts.js";
-import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
+import {
+  CONTRACT_PIPELINE_VALIDATORS,
+  evaluateContractPipelineCrossGates,
+} from "./validation/contractPipeline.js";
 import {
   CP_ARTIFACT_NAMES,
   isEnvelope,
   stampToolCreatedAt,
+  readContractArtifact,
+  envelopePayload,
   type ContractPipelineArtifactName,
 } from "./contractPipeline/artifactStore.js";
+import { intakePaths } from "./intake.js";
+import type { ValidationIssue } from "audit-tools/shared";
 import {
   setQuotaStateDir,
   parseHostModelRoster,
@@ -30,6 +37,7 @@ import {
   mergeOpenCodeGlobalPermissionRule,
   migrateOpenCodeGlobalExternalDirectory,
   withoutOpenCodeWildcard,
+  readOptionalJsonFile,
 } from "audit-tools/shared";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
@@ -318,6 +326,124 @@ program
     process.exit(result.status === "ok" ? 0 : 1);
   });
 
+export interface ValidateArtifactActionResult {
+  status: "ok" | "error";
+  name?: ContractPipelineArtifactName;
+  issue_count?: number;
+  issues?: ValidationIssue[];
+  message?: string;
+}
+
+/**
+ * The `validate-artifact --name X` self-check's full logic, exported so tests
+ * can call it directly (no dist build / subprocess race). Returns the JSON body
+ * + exit code the CLI action prints/exits with, without doing either itself.
+ *
+ * Beyond the per-artifact structural validator, this ALSO loads the on-disk
+ * sibling contract-pipeline artifacts (under `<artifactsDir>/intake/contract/`)
+ * and runs the SAME cross-artifact gates the plural `validate-artifacts` sweep
+ * and `next-step` enforce (evaluateContractPipelineCrossGates — single-sourced
+ * in validation/contractPipelineGates.ts), substituting the in-flight `name`
+ * payload for its on-disk version so the in-flight edit always wins over a
+ * stale/absent sibling. Without this, a shape-valid artifact missing its
+ * cross-artifact obligations (e.g. a test_validator_plan missing its CE-006
+ * scoped negative) could self-validate "ok" here and only fail later at
+ * next-step — the exact authoring round-trip this closes.
+ */
+export async function runValidateArtifactAction(options: {
+  name: string;
+  file?: string;
+  root: string;
+  artifactsDir: string;
+}): Promise<{ result: ValidateArtifactActionResult; exitCode: number }> {
+  const name = options.name as ContractPipelineArtifactName;
+  const validator = CONTRACT_PIPELINE_VALIDATORS[name];
+  if (!validator) {
+    return {
+      result: {
+        status: "error",
+        message: `Unknown contract-pipeline artifact "${options.name}". Valid names: ${CP_ARTIFACT_NAMES.join(", ")}.`,
+      },
+      exitCode: 2,
+    };
+  }
+  let raw: string;
+  try {
+    raw = options.file
+      ? readFileSync(resolve(options.file), "utf8")
+      : readFileSync(0, "utf8");
+  } catch (err) {
+    return {
+      result: { status: "error", message: `Could not read artifact input: ${(err as Error).message}` },
+      exitCode: 2,
+    };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return {
+      result: { status: "error", message: `Artifact is not valid JSON: ${(err as Error).message}` },
+      exitCode: 2,
+    };
+  }
+  // Unwrap a stored content-hash envelope so the bare payload is validated
+  // against its contract; a plain payload validates as-is. Uses the canonical
+  // isEnvelope predicate so CLI self-check and ingest unwrap identically.
+  const unwrapped = isEnvelope(parsed) ? parsed.payload : parsed;
+  // Stamp the tool-owned `created_at` (host has no clock) so the self-check
+  // matches ingest: a host payload without a timestamp is valid here too (B4).
+  const payload = stampToolCreatedAt(unwrapped, new Date().toISOString());
+  const structuralIssues = validator(payload, name);
+
+  const root = resolve(options.root);
+  const artifactsDir = resolveArtifactsDirOption(options.root, options.artifactsDir);
+
+  let crossGateIssues: ValidationIssue[];
+  try {
+    const payloads = new Map<ContractPipelineArtifactName, unknown>();
+    for (const siblingName of CP_ARTIFACT_NAMES) {
+      const siblingPayload = envelopePayload(await readContractArtifact(artifactsDir, siblingName));
+      if (siblingPayload !== undefined) payloads.set(siblingName, siblingPayload);
+    }
+    // The in-flight payload ALWAYS wins over any stale/absent on-disk copy of
+    // the SAME artifact — this is the write-time self-check for `name`, so its
+    // in-flight content is what must be gated, not a possibly-stale sibling file.
+    payloads.set(name, payload);
+    const findingEnumeration = await readOptionalJsonFile(
+      intakePaths(artifactsDir).findingEnumeration,
+    );
+    crossGateIssues = evaluateContractPipelineCrossGates({
+      payloads,
+      findingEnumeration,
+      root,
+    }).flat();
+  } catch (err) {
+    // readContractArtifact / readOptionalJsonFile throw on a corrupt (malformed-
+    // JSON) sibling envelope — mirror the same JSON-parse-error shape/exit code
+    // the primary --file parse error above uses.
+    return {
+      result: {
+        status: "error",
+        message: `Could not load a sibling contract-pipeline artifact: ${(err as Error).message}`,
+      },
+      exitCode: 2,
+    };
+  }
+
+  const issues = [...structuralIssues, ...crossGateIssues];
+  const errors = issues.filter((issue) => issue.severity === "error");
+  return {
+    result: {
+      status: errors.length === 0 ? "ok" : "error",
+      name,
+      issue_count: issues.length,
+      issues,
+    },
+    exitCode: errors.length === 0 ? 0 : 1,
+  };
+}
+
 program
   .command("validate-artifact")
   .description(
@@ -328,72 +454,16 @@ program
     "Contract-pipeline artifact name (e.g. obligation_ledger, test_validator_plan)",
   )
   .option("--file <path>", "Path to the artifact JSON file (defaults to stdin)")
+  .option("--root <path>", "Repository root", ".")
+  .option(
+    "--artifacts-dir <path>",
+    "Artifacts directory",
+    ".audit-tools/remediation",
+  )
   .action(async (options) => {
-    const name = options.name as ContractPipelineArtifactName;
-    const validator = CONTRACT_PIPELINE_VALIDATORS[name];
-    if (!validator) {
-      console.log(
-        JSON.stringify(
-          {
-            status: "error",
-            message: `Unknown contract-pipeline artifact "${options.name}". Valid names: ${CP_ARTIFACT_NAMES.join(", ")}.`,
-          },
-          null,
-          2,
-        ),
-      );
-      process.exit(2);
-    }
-    let raw: string;
-    try {
-      raw = options.file
-        ? readFileSync(resolve(options.file), "utf8")
-        : readFileSync(0, "utf8");
-    } catch (err) {
-      console.log(
-        JSON.stringify(
-          { status: "error", message: `Could not read artifact input: ${(err as Error).message}` },
-          null,
-          2,
-        ),
-      );
-      process.exit(2);
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      console.log(
-        JSON.stringify(
-          { status: "error", message: `Artifact is not valid JSON: ${(err as Error).message}` },
-          null,
-          2,
-        ),
-      );
-      process.exit(2);
-    }
-    // Unwrap a stored content-hash envelope so the bare payload is validated
-    // against its contract; a plain payload validates as-is. Uses the canonical
-    // isEnvelope predicate so CLI self-check and ingest unwrap identically.
-    const unwrapped = isEnvelope(parsed) ? parsed.payload : parsed;
-    // Stamp the tool-owned `created_at` (host has no clock) so the self-check
-    // matches ingest: a host payload without a timestamp is valid here too (B4).
-    const payload = stampToolCreatedAt(unwrapped, new Date().toISOString());
-    const issues = validator(payload, name);
-    const errors = issues.filter((issue) => issue.severity === "error");
-    console.log(
-      JSON.stringify(
-        {
-          status: errors.length === 0 ? "ok" : "error",
-          name,
-          issue_count: issues.length,
-          issues,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(errors.length === 0 ? 0 : 1);
+    const { result, exitCode } = await runValidateArtifactAction(options);
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(exitCode);
   });
 
 program

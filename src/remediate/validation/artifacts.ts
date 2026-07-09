@@ -24,13 +24,7 @@ import {
 import {
   CONTRACT_PIPELINE_VALIDATORS,
   validateVerificationReport,
-  validateDesignSpecGates,
-  validateImplementationDAGIntegrity,
-  validatePairedObligations,
-  validateEvidenceThreaded,
-  validateDigestCoverage,
-  validateReconciliationDerivation,
-  validateDecompositionFileScope,
+  evaluateContractPipelineCrossGates,
 } from "./contractPipeline.js";
 import {
   CP_ARTIFACT_NAMES,
@@ -407,44 +401,26 @@ export async function validateArtifacts(
     pushErrorIssues(issues, CONTRACT_PIPELINE_VALIDATORS[name](payload, name), `${cpPath}:`);
   }
 
-  // Cross-artifact + decomposition gates. Each validator is individually tolerant
-  // of an absent input (returns [] when its primary payload is missing/malformed),
-  // so an incomplete pipeline never fabricates errors — only present artifacts are
-  // gated. This mirrors evaluateContractObligationsPromotionGate + the finalization
-  // design gate + the DAG-integrity gate that next-step runs.
+  // Cross-artifact + decomposition gates. Single-sourced in
+  // evaluateContractPipelineCrossGates (MNT — validate-artifact self-check
+  // parity): each gate is individually tolerant of an absent input (returns []
+  // when its primary payload is missing/malformed), so an incomplete pipeline
+  // never fabricates errors — only present artifacts are gated. This is the
+  // SAME runner the singular `validate-artifact --name X` self-check uses, so
+  // the two can never diverge.
   if (cpPayloads.size > 0) {
-    const goalSpec = cpPayloads.get("goal_spec");
-    const sourceType =
-      isRecord(goalSpec) && typeof goalSpec.source_type === "string"
-        ? goalSpec.source_type
-        : undefined;
-    const obligationLedger = cpPayloads.get("obligation_ledger");
-    const testValidatorPlan = cpPayloads.get("test_validator_plan");
-    const finalizedContracts = cpPayloads.get("finalized_module_contracts");
-    const seamReport = cpPayloads.get("seam_reconciliation_report");
-    const assessment = cpPayloads.get("contract_assessment_report");
-    const judge = cpPayloads.get("judge_report");
-    const counterexample = cpPayloads.get("counterexample");
-    const dag = cpPayloads.get("implementation_dag");
-    const moduleDecomposition = cpPayloads.get("module_decomposition");
     const findingEnumeration = await readJsonForValidation(
       intakePaths(artifactsDir).findingEnumeration,
       issues,
     );
 
-    pushErrorIssues(issues, validatePairedObligations(obligationLedger, testValidatorPlan));
-    pushErrorIssues(issues, validateEvidenceThreaded(assessment, judge, dag));
-    pushErrorIssues(
-      issues,
-      validateDigestCoverage(sourceType, findingEnumeration, obligationLedger),
-    );
-    pushErrorIssues(issues, validateReconciliationDerivation(seamReport, finalizedContracts));
-    pushErrorIssues(issues, validateDesignSpecGates(finalizedContracts, obligationLedger));
-    pushErrorIssues(
-      issues,
-      validateImplementationDAGIntegrity(dag, obligationLedger, counterexample, judge),
-    );
-    pushErrorIssues(issues, validateDecompositionFileScope(moduleDecomposition, root));
+    for (const gateIssues of evaluateContractPipelineCrossGates({
+      payloads: cpPayloads,
+      findingEnumeration,
+      root,
+    })) {
+      pushErrorIssues(issues, gateIssues);
+    }
   }
 
   // Verification report at the root artifacts dir (from FINDING-027).
