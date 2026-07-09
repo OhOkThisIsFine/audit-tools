@@ -1106,10 +1106,10 @@ test.concurrent("audit-code wrapper bare invocation prints help and exits 0 with
   }
 });
 
-test.concurrent("audit-code wrapper rejects unknown commands with exit 1 and help text", async () => {
+test.concurrent("audit-code wrapper rejects unknown commands with exit 1 and authoritative guidance", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-unknown-cmd-"));
   try {
-    const { child, stdoutRef, stderrRef } = spawnWrapper(["definitely-not-a-command"], {
+    const { child, stderrRef } = spawnWrapper(["definitely-not-a-command"], {
       cwd: tempDir,
     });
     const code = await new Promise((resolve, reject) => {
@@ -1117,11 +1117,34 @@ test.concurrent("audit-code wrapper rejects unknown commands with exit 1 and hel
       child.on("exit", resolve);
     });
     expect(code).toBe(1);
+    // The wrapper forwards every non-special command to the dist CLI, so an
+    // unknown command surfaces dist's authoritative error + available-commands
+    // list (the single source of truth), not a wrapper-local message that can
+    // drift from the real command set.
     expect(stderrRef.value).toMatch(/Unknown command: definitely-not-a-command/);
-    // Usage guidance accompanies the failure.
-    expect(stdoutRef.value.includes("Usage: node audit-code.mjs <command>")).toBeTruthy();
+    expect(stderrRef.value).toMatch(/Available commands:/);
     // The failure path must not create audit state.
     await assert.rejects(() => stat(join(tempDir, ".audit-tools")));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test.concurrent("audit-code wrapper forwards any dist command through the passthrough (no per-command branch)", async () => {
+  // Drift guard: a command that has NO explicit wrapper branch (here `status`,
+  // which was cli.ts-only and historically unreachable through the packaged bin
+  // — the same class of gap as the `cleanup` regression) must still reach the
+  // dist CLI via the passthrough default, never fall through to an
+  // unknown-command failure. This is what makes wrapper/CLI parity structural
+  // rather than a hand-maintained dispatch table.
+  const tempDir = await mkdtemp(join(tmpdir(), "audit-code-passthrough-"));
+  try {
+    const { child, stderrRef } = spawnWrapper(["status"], { cwd: tempDir });
+    await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", resolve);
+    });
+    expect(stderrRef.value).not.toMatch(/Unknown command: status/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

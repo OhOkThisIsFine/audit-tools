@@ -245,21 +245,12 @@ export async function runAuditCodeWrapper({
     return;
   }
 
-  if (argv[0] === 'validate') {
-    await runDistCommand('validate', argv.slice(1));
-    return;
-  }
-
-  if (argv[0] === 'validate-results') {
-    await runDistCommand('validate-results', argv.slice(1));
-    return;
-  }
-
-  if (argv[0] === 'explain-task') {
-    await runDistCommand('explain-task', argv.slice(1));
-    return;
-  }
-
+  // Commands that need special wrapper handling stay explicit:
+  //  - `mcp` runs INLINE (dist/index.js's import side effect would double-start
+  //    the command; only dist/cli.js's runCli export is safe to import here).
+  //  - the artifact-dir-bootstrapping commands pass { ensureArtifactsDir: true }
+  //    because they may be the FIRST call in a fresh repo and must create the
+  //    run directory before dist reads it.
   if (argv[0] === 'mcp') {
     await runDistCommandInline('mcp', argv.slice(1));
     return;
@@ -270,28 +261,8 @@ export async function runAuditCodeWrapper({
     return;
   }
 
-  if (argv[0] === 'prepare-dispatch') {
-    await runDistCommand('prepare-dispatch', argv.slice(1));
-    return;
-  }
-
-  if (argv[0] === 'validate-result') {
-    await runDistCommand('validate-result', argv.slice(1));
-    return;
-  }
-
-  if (argv[0] === 'cleanup') {
-    await runDistCommand('cleanup', argv.slice(1));
-    return;
-  }
-
   if (argv[0] === 'quota') {
     await runDistCommand('quota', argv.slice(1), { ensureArtifactsDir: true });
-    return;
-  }
-
-  if (argv[0] === 'submit-packet') {
-    await runDistCommand('submit-packet', argv.slice(1));
     return;
   }
 
@@ -307,13 +278,18 @@ export async function runAuditCodeWrapper({
 
   // No implicit default command: the audit advances one bounded step per
   // invocation via `next-step` (conversation-first). A bare invocation prints
-  // usage; an unrecognized command fails loudly instead of silently running
-  // something else.
+  // usage.
   if (argv.length === 0) {
     printHelp({ usageName, preferredEntrypoint });
     return;
   }
 
-  printHelp({ usageName, preferredEntrypoint });
-  throw new Error(`Unknown command: ${argv[0]}`);
+  // Every other command is forwarded verbatim to the dist CLI, which is the
+  // SINGLE SOURCE OF TRUTH for the command set. This makes wrapper/CLI drift
+  // structurally impossible: any command `src/audit/cli.ts` handles is reachable
+  // through the packaged bin automatically — no per-command wrapper branch to
+  // forget (the `cleanup` gap that motivated this) — and an unknown command
+  // gets dist's authoritative "Unknown command" + available-commands list
+  // (exit 1), never a wrapper-local list that can fall out of sync.
+  await runDistCommand(argv[0], argv.slice(1));
 }
