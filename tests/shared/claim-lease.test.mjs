@@ -159,6 +159,58 @@ test("claimMany re-grants the SAME pool's own live claims (idempotent re-partiti
   }
 });
 
+test("claimMany re-grant ROTATES the token even though the granted set is unchanged (D-66/67 slice-1 gate load-bearing semantic)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    const path = join(dir, "task-claims.json");
+    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
+    const reg = new CR(path);
+
+    const first = await reg.claimMany(["t1", "t2"], "R1");
+    expect(first.granted.sort()).toEqual(["t1", "t2"]);
+
+    // Same pool re-partitions the SAME nodes — granted set is identical, but the
+    // merge-time ownership gate (compares the ORIGINAL persisted token against
+    // the live claim) depends on this re-grant minting a FRESH token per node,
+    // not reusing the old one: otherwise a peer's re-partition could never be
+    // distinguished from our own still-live claim.
+    const again = await reg.claimMany(["t1", "t2"], "R1");
+    expect(again.granted.sort()).toEqual(["t1", "t2"]);
+    for (const id of ["t1", "t2"]) {
+      expect(again.ownerTokenByNode[id]).not.toBe(first.ownerTokenByNode[id]);
+    }
+
+    // The rotation is real, not cosmetic: the FIRST call's token no longer heartbeats.
+    expect(await reg.heartbeat("t1", first.ownerTokenByNode.t1)).toBe(false);
+    expect(await reg.heartbeat("t1", again.ownerTokenByNode.t1)).toBe(true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("listLiveClaims filters stale records by the registry's own staleMs window (listClaims keeps them)", async () => {
+  const { dir, cleanup } = await tempRegistry();
+  try {
+    let clock = 1_000;
+    const { ClaimRegistry: CR } = await import("../../src/shared/quota/claimRegistry.ts");
+    const reg = new CR(join(dir, "live-claims.json"), () => clock, 10_000);
+
+    const stale = await reg.claim("t-stale", "A");
+    clock = 12_000; // t-stale is now past the 10s window
+    const live = await reg.claim("t-live", "B");
+    expect(stale.acquired && live.acquired).toBe(true);
+
+    const all = await reg.listClaims();
+    expect(Object.keys(all).sort(), "raw snapshot keeps stale records").toEqual(["t-live", "t-stale"]);
+
+    const liveOnly = await reg.listLiveClaims();
+    expect(Object.keys(liveOnly), "live snapshot drops the stale record").toEqual(["t-live"]);
+    expect(liveOnly["t-live"].ownerToken).toBe(live.ownerToken);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("clear removes claims unconditionally (no token) and reports the count", async () => {
   const { dir, cleanup } = await tempRegistry();
   try {

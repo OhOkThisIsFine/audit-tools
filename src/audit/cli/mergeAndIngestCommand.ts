@@ -17,6 +17,7 @@ import {
   type ActiveDispatchState,
   DISPATCH_RESULT_MAP_FILENAME,
   ACTIVE_DISPATCH_FILENAME,
+  AUDIT_TASK_CLAIM_LEASE_MS,
   loadDispatchResultMap,
   entriesByTaskId,
   buildPendingAuditTasks,
@@ -25,6 +26,7 @@ import { addFileLineCountHints } from "./lineIndex.js";
 import { artifactNameForId, isCanonicalResultFilename, getArtifactsDir, getFlag } from "./args.js";
 import { buildWorkerResult } from "./workerResult.js";
 import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
+import { readOwnerTokens } from "./ownerTokens.js";
 
 // Schema pointer files prepare-dispatch copies into task-results/ for optional
 // worker self-validation. They are expected, not stray — skip them when
@@ -252,6 +254,69 @@ export function packetMembersByPacketId(
     byPacket.set(entry.packet_id, members);
   }
   return byPacket;
+}
+
+/** A terminal task excluded from ingest by the ownership gate (`partitionByOwnership`). */
+export interface UnownedTask {
+  task_id: string;
+  reason: string;
+}
+
+/**
+ * OD3 merge-time ownership gate (D-66/67 slice-1, Part A). Splits a terminal
+ * (passing or failing) result set into `owned` (proceeds to ingest/claim-clear
+ * as today) and `unowned` (excluded — a LIVE peer claim under a DIFFERENT
+ * token was observed for a task whose token WE persisted at dispatch time).
+ *
+ * A task with NO persisted token (`ownerTokens[task_id] === undefined` —
+ * recovery paths, results recovered from disk, pre-slice manifests) fails
+ * OPEN: it is treated as owned, exactly the pre-gate behavior.
+ *
+ * Deliberately checks `listLiveClaims()` rather than `heartbeat(task_id,
+ * token)`: an ABSENT-OR-STALE claim is NOT treated as peer possession, only a
+ * LIVE claim held under a DIFFERENT token is. `heartbeat` collapses
+ * "unclaimed" and "claimed by someone else" into the same `false` — but
+ * "unclaimed" is exactly what a terminal task looks like the round AFTER we
+ * ourselves ingested it and cleared its claim (the merge-complete self-heal
+ * path re-lists an already-answered task_id as pending with its ORIGINAL
+ * round's now-orphaned sidecar token still on record). And a STALE
+ * different-token claim is an abandoned one — the next `claim()` would grant
+ * over it — so treating it as a live peer would drop OUR valid result for a
+ * crashed peer's ghost (e.g. A crashes past the lease, B reclaims then also
+ * crashes past the lease, A resurrects and merges: A's result is still the
+ * only live work). Only a claim actively held (non-stale, per the SAME
+ * 20-min task lease the dispatch side claims under) beneath a token that is
+ * NOT ours is unambiguous evidence of a peer's reclaim.
+ *
+ * `registry` is narrowed to `listLiveClaims` alone so callers can inject a
+ * fake in tests without standing up a real file-backed `ClaimRegistry`.
+ */
+export async function partitionByOwnership<T extends { task_id: string }>(
+  items: readonly T[],
+  ownerTokens: Readonly<Record<string, string>>,
+  registry: Pick<ClaimRegistry, "listLiveClaims">,
+): Promise<{ owned: T[]; unowned: UnownedTask[] }> {
+  const owned: T[] = [];
+  const unowned: UnownedTask[] = [];
+  const anyTokenPersisted = items.some((item) => ownerTokens[item.task_id] !== undefined);
+  const claims = anyTokenPersisted ? await registry.listLiveClaims() : {};
+  for (const item of items) {
+    const token = ownerTokens[item.task_id];
+    if (token === undefined) {
+      owned.push(item);
+      continue;
+    }
+    const current = claims[item.task_id];
+    if (current === undefined || current.ownerToken === token) {
+      owned.push(item);
+    } else {
+      unowned.push({
+        task_id: item.task_id,
+        reason: "claim lease reclaimed by a peer since dispatch",
+      });
+    }
+  }
+  return { owned, unowned };
 }
 
 export async function validateAndCollectResults(
@@ -604,7 +669,7 @@ export async function mergeAndIngest(params: {
   }
 
   // Phase 3: validate each task's result and classify into passing/failing/notDispatched.
-  const { passing, failing, notDispatched, recoveredCount } = await validateAndCollectResults(
+  const { passing: allPassing, failing: allFailing, notDispatched, recoveredCount } = await validateAndCollectResults(
     allTasks,
     entryByTaskId,
     fallbackByTaskId,
@@ -614,6 +679,33 @@ export async function mergeAndIngest(params: {
   if (recoveredCount > 0) {
     process.stderr.write(
       `[merge-and-ingest] Recovered ${recoveredCount} result(s) by task_id from packet result files.\n`,
+    );
+  }
+
+  // Phase 3-gate: OD3 merge-time ownership gate (D-66/67 slice-1, Part A). A
+  // terminal task (passing or failing) whose claim is LIVE under a peer's
+  // token since OUR dispatch persisted ours must not be ingested or have its
+  // claim cleared below — it is the peer's now. Runs BEFORE
+  // grounding/duplicate-warn/ingest so excluded results never reach any of
+  // that downstream work. See `partitionByOwnership` for the fail-open (no
+  // persisted token, or claim absent-or-stale) rule. The registry MUST carry
+  // the same 20-min task lease the dispatch side claims under — the default
+  // 30s window would judge liveness against the wrong horizon.
+  const ownerTokens = await readOwnerTokens(runDir);
+  const claimRegistry = new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
+  const passingOwnership = await partitionByOwnership(allPassing, ownerTokens, claimRegistry);
+  const failingOwnership = await partitionByOwnership(allFailing, ownerTokens, claimRegistry);
+  const passing = passingOwnership.owned;
+  const failing = failingOwnership.owned;
+  const unowned = [...passingOwnership.unowned, ...failingOwnership.unowned].sort(
+    (a, b) => a.task_id.localeCompare(b.task_id),
+  );
+  const unownedTasksPath = join(runDir, "unowned-tasks.json");
+  if (unowned.length > 0) {
+    await writeJsonFile(unownedTasksPath, unowned);
+    process.stderr.write(
+      `[merge-and-ingest] Warning: ${unowned.length} task(s) excluded from ingest — claim ` +
+        `reclaimed by a peer since dispatch: ${unowned.map((u) => u.task_id).join(", ")}\n`,
     );
   }
 
@@ -690,12 +782,15 @@ export async function mergeAndIngest(params: {
   // `notDispatched` (budget-capped) is deliberately left claimed/unclaimed as-is:
   // it may be a live peer's in-flight work, never ours to clear here. Cleared
   // unconditionally (no token) since an ingested/terminal result is authoritative.
+  // `passing`/`failing` are already the OWNERSHIP-GATED (owned + tokenless) sets
+  // — an `unowned` task's claim is deliberately excluded here: it is the peer's
+  // claim now, not ours to clear (Part A, D-66/67 slice-1).
   const terminalTaskIds = [
     ...passing.map((r) => r.task_id),
     ...failing.map((f) => f.task_id),
   ];
   if (terminalTaskIds.length > 0) {
-    await new ClaimRegistry(taskClaimsPath(artifactsDir)).clear(terminalTaskIds);
+    await claimRegistry.clear(terminalTaskIds);
   }
 
   const activeDispatchPath = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
@@ -703,10 +798,13 @@ export async function mergeAndIngest(params: {
     const dispatch = await readJsonFile<ActiveDispatchState>(activeDispatchPath);
     if (dispatch.run_id === runId) {
       // "merged" only when this round is fully drained: every dispatched task
-      // accepted AND nothing held back (budget-capped notDispatched > 0 stays
-      // "active" because a follow-up round on the same run-id still has to merge).
+      // accepted AND nothing held back (budget-capped notDispatched > 0, or
+      // peer-reclaimed unowned > 0, stay "active" — a follow-up round on the
+      // same run-id still has to merge the rest).
       dispatch.status =
-        failing.length > 0 || notDispatched.length > 0 ? "active" : "merged";
+        failing.length > 0 || notDispatched.length > 0 || unowned.length > 0
+          ? "active"
+          : "merged";
       await writeJsonFile(activeDispatchPath, dispatch);
     }
   } catch { /* no active dispatch file — skip */ }
@@ -736,18 +834,20 @@ export async function mergeAndIngest(params: {
   }
 
   // "partial" whenever work remains for this run — either genuine dispatched
-  // failures (failing) or tasks held back this round (notDispatched). The exit
-  // code below distinguishes the two: only genuine failures exit non-zero, so a
-  // budget-capped round reports status "partial" but exits 0 (progressing, not an error).
-  const status = failing.length > 0 || notDispatched.length > 0
+  // failures (failing), tasks held back this round (notDispatched), or tasks a
+  // peer reclaimed since our dispatch (unowned). The exit code below
+  // distinguishes the two: only genuine failures exit non-zero, so a
+  // budget-capped or ownership-gated round reports status "partial" but exits
+  // 0 (progressing, not an error).
+  const status = failing.length > 0 || notDispatched.length > 0 || unowned.length > 0
     ? "partial"
     : (result?.progress_made ? "completed" : "no_progress");
   // WorkerResultStatus does not have "partial"; use "blocked" when tasks failed
-  // but progress was also made (passing.length > 0), else "no_progress" for all
-  // failures (COR-48c05a13: was always "no_progress" even when passing.length > 0
-  // and result.progress_made is true).
+  // (or were reclaimed by a peer) but progress was also made (passing.length >
+  // 0), else "no_progress" for all failures (COR-48c05a13: was always
+  // "no_progress" even when passing.length > 0 and result.progress_made is true).
   const workerResultStatus: import("../types/workerResult.js").WorkerResultStatus =
-    failing.length === 0
+    failing.length === 0 && unowned.length === 0
       ? (result?.progress_made ? "completed" : "no_progress")
       : passing.length > 0 || result?.progress_made
         ? "blocked"
@@ -770,10 +870,12 @@ export async function mergeAndIngest(params: {
     accepted_count: passing.length,
     rejected_count: failing.length,
     not_dispatched_count: notDispatched.length,
+    unowned_count: unowned.length,
     spurious_file_count: spuriousFiles.length,
     finding_count: findingCount,
     audit_results_path: auditResultsPath,
     ...(retryDispatchPath ? { retry_dispatch_path: retryDispatchPath } : {}),
+    ...(unowned.length > 0 ? { unowned_tasks_path: unownedTasksPath } : {}),
     ...(result ? {
       selected_executor: workerResult.selected_executor,
       progress_made: workerResult.progress_made,
@@ -785,16 +887,17 @@ export async function mergeAndIngest(params: {
   // Record a completion marker for a fully-merged run so a stray re-invocation
   // replays this summary (above) instead of re-processing — and possibly
   // clobbering — terminal state. Only when this round is fully drained: genuine
-  // failures stay replayable for retry, and budget-capped rounds (notDispatched > 0)
-  // must NOT be marked complete or a follow-up merge on the same run-id would
-  // short-circuit to an idempotent replay and silently drop deferred results.
+  // failures stay replayable for retry, budget-capped rounds (notDispatched > 0)
+  // and ownership-gated rounds (unowned > 0) must NOT be marked complete or a
+  // follow-up merge on the same run-id would short-circuit to an idempotent
+  // replay and silently drop deferred (or peer-reclaimed) results.
   //
   // Selective deepening appends new pending tasks to the SAME run-id; this marker
   // can therefore go stale once those tasks are later dispatched and answered. The
   // replay guard at the top detects that (a pending task with an on-disk result)
   // and re-processes, so a premature marker self-heals instead of stranding the
   // deepening answers behind an idempotent replay (the no-progress loop).
-  if (failing.length === 0 && notDispatched.length === 0) {
+  if (failing.length === 0 && notDispatched.length === 0 && unowned.length === 0) {
     await writeJsonFile(mergeCompletePath, summaryPayload);
   }
 

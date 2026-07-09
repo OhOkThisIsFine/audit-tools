@@ -13,9 +13,13 @@ import { writeJsonFile } from "../io/json.js";
 // literal): a claim whose heartbeat is older than STALE_LOCK_MS is reclaimable,
 // exactly mirroring the lock's own abandoned-holder recovery window. Release and
 // reclaim are token-checked so a live owner that re-heartbeated is never clobbered
-// by a stale-observation racer. The CE-002 accept/merge lifecycle gap is closed
-// separately at the accept/merge layer by A-8 — this module is purely the mutual
-// exclusion primitive.
+// by a stale-observation racer. The CE-002 accept/merge lifecycle gap (a caller
+// landing work for a lease a peer has since reclaimed) is closed at the
+// accept/merge layer, not here — this module is purely the mutual exclusion
+// primitive. On the audit side: `mergeAndIngestCommand.ts`'s `partitionByOwnership`
+// ownership gate, fed by tokens `dispatch.ts` persists via `ownerTokens.ts`
+// (D-66/67 slice-1, Part A). On the remediate side: the `acceptNodeWorktree`
+// ownership gate (D-66/67 slice-1, Part R).
 
 export interface ClaimRecord {
   /** Opaque token minted at claim time; required to release or survive a reclaim. */
@@ -251,6 +255,26 @@ export class ClaimRegistry {
   /** Snapshot of all current claims, keyed by nodeId. Read under the lock. */
   async listClaims(): Promise<ClaimMap> {
     return withFileLock(this.lockPath, async () => readClaimMap(this.registryPath));
+  }
+
+  /**
+   * Snapshot of only the LIVE (non-stale) claims, keyed by nodeId. A stale
+   * record reads as absent — the same staleness rule as `isClaimed`, applied
+   * against THIS registry's configured `staleMs` window — so a consumer probing
+   * for peer possession (e.g. the merge-time ownership gate) never mistakes an
+   * abandoned claim, which the next `claim()` would grant over, for a live
+   * peer's. Read under the lock.
+   */
+  async listLiveClaims(): Promise<ClaimMap> {
+    return withFileLock(this.lockPath, async () => {
+      const claims = await readClaimMap(this.registryPath);
+      const now = this.now();
+      const live: ClaimMap = {};
+      for (const [nodeId, record] of Object.entries(claims)) {
+        if (!this.isStale(record, now)) live[nodeId] = record;
+      }
+      return live;
+    });
   }
 
   /**

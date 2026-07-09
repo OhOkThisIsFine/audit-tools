@@ -19,6 +19,7 @@ import type {
 } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
 import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias } from "audit-tools/shared";
+import { mergeOwnerTokens } from "./ownerTokens.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { writePacketSchemaFiles } from "../io/runArtifacts.js";
@@ -127,8 +128,10 @@ export {
 // claim is held across an OUT-OF-PROCESS host worker run with no live heartbeat,
 // so it must bound a worker's whole runtime; a genuinely-crashed peer's claim is
 // reclaimed after this window. Correctness for the rare legitimate overrun rests
-// on dedup-by-task_id at ingest, not on this value being exact.
-const AUDIT_TASK_CLAIM_LEASE_MS = 20 * 60_000;
+// on dedup-by-task_id at ingest, not on this value being exact. Exported so the
+// merge-side ownership gate (mergeAndIngestCommand.ts) constructs its registry
+// with the SAME lease — liveness must be judged against one window, never two.
+export const AUDIT_TASK_CLAIM_LEASE_MS = 20 * 60_000;
 
 export async function prepareDispatchArtifacts(params: {
   packageRoot: string;
@@ -240,24 +243,44 @@ export async function prepareDispatchArtifacts(params: {
   // here — its result will arrive via the shared ledger, and a crashed peer's
   // claim goes stale (long lease) for reclaim. Claims for tasks we end up NOT
   // emitting (deferred by the top-K budget cap) are released below so peers can
-  // take them. The A-8 hybrid in-process driver already owns a coordinator-
-  // assigned disjoint partition (`tasksOverride`), so it is exempt.
-  const taskClaims = params.tasksOverride
-    ? null
-    : new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
-  const dispatchTasks = taskClaims
-    ? await (async () => {
-        // poolId = runId so THIS run's repeated dispatch re-grants its own
-        // in-flight tasks (idempotent), while a different IDE's run (distinct
-        // runId) is partitioned off. See ClaimRegistry.claimMany.
-        const { granted } = await taskClaims.claimMany(
-          candidateTasks.map((task) => task.task_id),
-          runId,
-        );
-        const grantedSet = new Set(granted);
-        return candidateTasks.filter((task) => grantedSet.has(task.task_id));
-      })()
-    : candidateTasks;
+  // take them. The A-8 hybrid in-process driver (`tasksOverride`) is claimed
+  // here too (D-66/67 slice-1, Part A: uniform ownership-gate coverage) — it is
+  // a DIFFERENT registry from the coordinator's pre-assignment claim on
+  // `runs/audit-node-claims.json` (see hybridDispatch.ts), so this is not a
+  // double-claim hazard, and same-pool re-grant is idempotent-but-token-rotating
+  // even if a peer momentarily held the same task_id here too.
+  const taskClaims = new ClaimRegistry(taskClaimsPath(artifactsDir), undefined, AUDIT_TASK_CLAIM_LEASE_MS);
+  // poolId = runId so THIS run's repeated dispatch re-grants its own in-flight
+  // tasks (idempotent), while a different IDE's run (distinct runId) is
+  // partitioned off. See ClaimRegistry.claimMany.
+  const { granted: grantedTaskIds, ownerTokenByNode } = await taskClaims.claimMany(
+    candidateTasks.map((task) => task.task_id),
+    runId,
+  );
+  const grantedSet = new Set(grantedTaskIds);
+  const dispatchTasks = candidateTasks.filter((task) => grantedSet.has(task.task_id));
+  // A coordinator-assigned override task a live peer holds on task-claims.json is
+  // skipped by the uniform claiming above — surface it (mirror of the merge-side
+  // gate's warn) so the drop is never silent: the driver believed it owned this
+  // partition, and the skipped task's result will arrive via the peer's ledger.
+  if (params.tasksOverride) {
+    const skippedOverride = candidateTasks
+      .map((task) => task.task_id)
+      .filter((taskId) => !grantedSet.has(taskId));
+    if (skippedOverride.length > 0) {
+      process.stderr.write(
+        `[prepare-dispatch] Warning: ${skippedOverride.length} override task(s) skipped — task ` +
+          `claim held live by a peer: ${skippedOverride.join(", ")}\n`,
+      );
+    }
+  }
+  // Part A (D-66/67 slice-1): persist the freshly-minted owner tokens into the
+  // run-scoped sidecar (see ownerTokens.ts for why NOT active-dispatch.json) so
+  // mergeAndIngest's ownership gate can verify each terminal task's claim is
+  // still ours at merge time.
+  if (grantedTaskIds.length > 0) {
+    await mergeOwnerTokens(runDir, ownerTokenByNode);
+  }
 
   const lineIndex = Object.fromEntries(
     dispatchTasks.flatMap((task) =>
@@ -379,7 +402,7 @@ export async function prepareDispatchArtifacts(params: {
   // Release claims we took on tasks that were NOT emitted this round (deferred by
   // the top-K budget cap): holding them would hoard deferred work a peer could
   // otherwise pick up. Only the emitted subset stays claimed (in-flight to us).
-  if (taskClaims) {
+  {
     const emittedTaskIds = new Set(
       emitPackets.flatMap((packet) => packet.task_ids),
     );

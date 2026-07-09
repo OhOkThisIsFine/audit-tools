@@ -31,6 +31,8 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   //   • shared dispatch / admission / rolling / quota / engine substrate
   "src/audit/cli/dispatch.ts",
   "src/audit/cli/dispatch/",
+  "src/audit/cli/mergeAndIngestCommand.ts",
+  "src/audit/cli/ownerTokens.ts",
   "src/audit/cli/rollingAuditDispatch.ts",
   "src/audit/orchestrator/",
   "src/remediate/riskSignal.ts",
