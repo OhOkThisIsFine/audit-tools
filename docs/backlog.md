@@ -29,6 +29,17 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **`shared-tests-invariants.test.mjs` INV-WH file-scanner races a concurrent test's in-tree temp fixtures
+  (hermeticity, tool-should-decide, 2026-07-08).** Under a full concurrent `vitest run`, INV-WH (which recursively
+  `readdirSync`→`readFileSync`s every test file to check for raw `child_process` spawns) failed with
+  `ENOENT ... tests/remediate/.test-next-step-resume-gates/repo/src/a.ts` — a `.test-*` fixture dir a *concurrently
+  running* remediate test creates under the tests tree and deletes mid-run, so the scan read a file that vanished
+  between `readdir` and `readFile`. Passes alone (hermeticity, not a regression). Two independent fixes, either
+  suffices: (a) the invariant scanner should skip `.test-*`/dot-prefixed fixture dirs AND tolerate a mid-scan ENOENT
+  (a file that vanishes during the walk isn't a violation); (b) the resume-gates remediate test should write its
+  fixtures to `os.tmpdir()`, never an in-tree `tests/remediate/.test-*` dir (test fixtures under the scanned tree are
+  the hazard). Prefer BOTH — the scanner hardening is the general guard. [[worktree-tests-miss-integration-guards]]
+
 - **Lap friction walk — backlog-orchestration lap (2026-07-08).** Orchestrated lap: parallel read-only recon
   agents → serial implement-agent-per-item with adversarial review before each commit. Shipped six backlog code
   items (wrapper passthrough D-61, vi.spyOn barrel guard INV-12, accept-node stray-worktree guard, convergence
@@ -558,11 +569,18 @@ Standing gotchas worth keeping for any agent (strong or weak):
   declares a standalone `makeState`. Wrap the shared helper (`makeState({ plan: {...}, items: {...} })`) instead.
   Observed 2026-07-08 (a new `access-memory.test.ts` tripped it).
 
-- **`tests/audit/audit-code-completion.test.mjs` is hermeticity-flaky under concurrent full-suite runs.** It does a
-  full multi-phase audit run with temp dirs and is the slowest audit test (~185s); running it in the SAME `vitest run`
-  invocation as the whole shared area can fail it on temp-dir/timing contention. It **passes alone** — per the CLAUDE.md
-  test-failure protocol that means hermeticity, not a regression. Rerun it in isolation before treating a failure as
-  real. Observed 2026-07-08.
+- **`tests/audit/audit-code-completion.test.mjs` is the heaviest audit integration test (still-slow follow-up).**
+  It drives the full multi-phase audit flow; as of 2026-07-08 it runs the next-step pump loops IN-PROCESS (calls the
+  `cmdNextStep`/`cmdIngestResults`/`cmdForceSynthesis` handlers directly — they take argv and never `process.exit` —
+  instead of spawning ~10 fresh `node` processes), which removed the subprocess overhead (~185-226s → ~105-121s
+  isolated) AND the timeout-flake that forced wasteful isolation reruns. The 4 tests carry an explicit 300s timeout
+  (`HEAVY_AUDIT_TEST_TIMEOUT_MS`) because the residual per-step work still balloons under max full-suite CPU
+  contention and the global 120s default was too tight for THIS test (a false-negative, not a bug). **Open follow-up
+  (make it genuinely fast):** the residual wall is repeated per-step repo extraction/staleness computation — investigate
+  whether extraction needlessly re-runs on every next-step even when the temp repo is unchanged (if so that is a
+  staleness-caching win that helps PRODUCTION too, not just the test); if inherent, consider pre-seeding artifacts to
+  cut pump iterations. The CLI/wrapper subprocess path stays covered by `audit-code-wrapper.test.mjs` + the packaged
+  smokes, so the in-process move lost no coverage.
 
 - **Codex CLI is a poor executor for large read-heavy audit packets under a wall-clock budget.** Observed
   2026-07-04: 2 concurrent codex executors ran 5+ min with zero results and 8k+ lines of echoed reasoning.

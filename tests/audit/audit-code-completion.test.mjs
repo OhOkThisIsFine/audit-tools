@@ -3,17 +3,25 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawnHidden as spawn } from "../helpers/spawn.mjs";
 import { countLines } from "./helpers/countLines.mjs";
 
 // Step contracts normalize host-facing paths to forward slashes (drift-plan R3).
-const { toPromptPathToken } = await import("audit-tools/shared");
+// `currentStepPath` is the single-sourced steps/current-step.json path builder
+// shared by both orchestrators — reused here rather than re-deriving the path.
+const { toPromptPathToken, currentStepPath } = await import("audit-tools/shared");
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..", "..");
-const wrapperPath = join(repoRoot, "audit-code.mjs");
-const distCliPath = join(repoRoot, "dist", "audit", "cli.js");
+// Import the compiled-in-TS command handlers directly (vitest resolves .ts at
+// test time via esbuild, same pattern as score-tokens.test.mjs) rather than
+// spawning a fresh `node` process per call. None of these handlers call
+// process.exit(), so they are safe to invoke in-process with the same argv the
+// wrapper/CLI would have passed — this removes ~10 process-startup + full
+// dist-CLI-reimport overheads per test (the prior ~185-226s file wall was this
+// suite's single biggest source of CI/test-timeout flake; see docs/backlog.md).
+// The CLI/wrapper SUBPROCESS path itself stays covered by
+// tests/audit/audit-code-wrapper.test.mjs + the packaged smokes.
+const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.ts");
+const { cmdIngestResults } = await import("../../src/audit/cli/ingestResultsCommand.ts");
+const { cmdForceSynthesis } = await import("../../src/audit/cli/forceSynthesisCommand.ts");
 
 async function buildSyntheticResults(tasks, root) {
   return Promise.all(tasks.map(async (task) => ({
@@ -34,42 +42,81 @@ async function buildSyntheticResults(tasks, root) {
   })));
 }
 
-function runNode(args, options = {}) {
-  const { CLAUDECODE: _cc, ...cleanEnv } = process.env;
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: options.cwd ?? repoRoot,
-      env: cleanEnv,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-      reject(new Error(stderr || stdout || `child exited with ${code}`));
-    });
-  });
+// Mirror the old spawned-subprocess env: the previous `runNode` stripped
+// CLAUDECODE from the child's env before every spawn. Provider self-spawn-block
+// detection (src/shared/providers/claudeCodeProvider.ts) reads
+// process.env.CLAUDECODE directly, so an in-process call must replicate the
+// same absence around each handler invocation rather than silently inheriting
+// this test process's own CLAUDECODE (set when the suite itself runs inside a
+// Claude Code session) — save + restore so the mutation never leaks past the
+// call, and never leaks across worker-thread-isolated test files.
+async function withEnvParity(fn) {
+  const hadClaudecode = Object.prototype.hasOwnProperty.call(process.env, "CLAUDECODE");
+  const prevClaudecode = process.env.CLAUDECODE;
+  delete process.env.CLAUDECODE;
+  try {
+    return await fn();
+  } finally {
+    if (hadClaudecode) process.env.CLAUDECODE = prevClaudecode;
+  }
 }
 
-function runWrapper(args, options = {}) {
-  return runNode([wrapperPath, ...args], options);
+// Capture console.log output (and silence the non-git-repo warning + the
+// per-derivation staleness JSONL record every handler call emits against a
+// fixture temp dir) around an in-process handler call. cmdIngestResults/
+// cmdForceSynthesis print their JSON result via console.log — NOT
+// process.stdout.write (that idiom, used by tests/audit/score-tokens.test.mjs,
+// only works for handlers that write directly; vitest's own per-test console
+// interception sits between console.log and process.stdout.write, so
+// overriding process.stdout.write here would silently capture nothing).
+// Overriding console.log itself intercepts at the exact call site the
+// handlers use. The staleness record (emitStalenessRecord in
+// src/audit/orchestrator/staleness.ts) writes straight to process.stderr —
+// spawned subprocesses previously swallowed this in an unread child.stderr
+// buffer; in-process it would otherwise flood every test run with dozens of
+// duplicate lines, so it's silenced the same way.
+async function captureConsoleLog(fn) {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  let buffer = "";
+  console.log = (...args) => {
+    buffer += args.map(String).join(" ") + "\n";
+  };
+  console.warn = () => {};
+  process.stderr.write = () => true;
+  try {
+    await fn();
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    process.stderr.write = originalStderrWrite;
+  }
+  return buffer;
 }
 
-// Run a dist CLI command directly (e.g. ingest-results, which is intentionally
-// not a wrapper passthrough — workers must not trigger ingestion).
-function runDistCli(args, options = {}) {
-  return runNode([distCliPath, ...args], options);
+// Call `cmdNextStep` in-process with the same argv the wrapper would have
+// passed, then read the step contract back from steps/current-step.json —
+// cmdNextStep's console.log and its writeCurrentStep() persist the identical
+// object, so reading from disk is a robust, log-noise-free substitute for
+// parsing a spawned child's stdout.
+async function callNextStep(root, artifactsDir, extraArgs = []) {
+  await captureConsoleLog(() =>
+    withEnvParity(() =>
+      cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir, ...extraArgs]),
+    ),
+  );
+  return JSON.parse(await readFile(currentStepPath(artifactsDir), "utf8"));
+}
+
+async function callIngestResults(args) {
+  const stdout = await captureConsoleLog(() => withEnvParity(() => cmdIngestResults(args)));
+  return JSON.parse(stdout);
+}
+
+async function callForceSynthesis(args) {
+  const stdout = await captureConsoleLog(() => withEnvParity(() => cmdForceSynthesis(args)));
+  return JSON.parse(stdout);
 }
 
 async function withTempRepo(fn) {
@@ -79,6 +126,11 @@ async function withTempRepo(fn) {
     await mkdir(join(root, "src", "api"), { recursive: true });
     await mkdir(join(root, "src", "lib"), { recursive: true });
     await mkdir(join(root, "infra"), { recursive: true });
+    // cmdNextStep creates this itself on its first in-process call, but
+    // ingest-results/force-synthesis do not — ensure it exists unconditionally
+    // so every handler is safe to call first (the wrapper used to guarantee
+    // this via its own default-flag + mkdir before dispatching).
+    await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
 
     await writeFile(
       join(root, "package.json"),
@@ -136,11 +188,10 @@ const MAX_PRE_DISPATCH_PAUSES = 8;
 // scope, submit empty design-review findings). Returns the first
 // dispatch-ready step (dispatch_review or single_task_fallback).
 async function advanceToDispatchReady(root) {
-  const incomingDir = join(root, ".audit-tools/audit", "incoming");
+  const artifactsDir = join(root, ".audit-tools/audit");
+  const incomingDir = join(artifactsDir, "incoming");
   for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
-    const step = JSON.parse(
-      (await runWrapper(["next-step"], { cwd: root })).stdout,
-    );
+    const step = await callNextStep(root, artifactsDir);
     if (step.step_kind === "analyzer_install") {
       await mkdir(incomingDir, { recursive: true });
       await writeFile(
@@ -245,10 +296,9 @@ async function disableNarrative(artifactsDir) {
 const MAX_FINALIZE_STEPS = 10;
 
 async function nextStepUntilPresentReport(root, extraArgs = []) {
+  const artifactsDir = join(root, ".audit-tools/audit");
   for (let i = 0; i < MAX_FINALIZE_STEPS; i++) {
-    const step = JSON.parse(
-      (await runWrapper(["next-step", ...extraArgs], { cwd: root })).stdout,
-    );
+    const step = await callNextStep(root, artifactsDir, extraArgs);
     if (step.step_kind === "present_report") {
       // Friction triage pending: the tool materialized the record and set status
       // "ready" so the host can add open_observations. Simulate the host adding
@@ -277,7 +327,18 @@ async function nextStepUntilPresentReport(root, extraArgs = []) {
   );
 }
 
-test("next-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle", async () => {
+// The heaviest audit integration test: it drives the full multi-phase audit
+// flow in-process (no subprocess since the pump-loop rewrite), but each
+// next-step still does genuine per-step repo extraction/staleness work. That is
+// ~25-31s/test in isolation, but balloons under full-suite CPU contention — the
+// global 120s testTimeout is too tight for THIS test under max local
+// concurrency (it produced false timeout flakes → wasteful isolation reruns).
+// A generous per-test timeout reflects that this is a legitimately long
+// integration test, not a masked bug. Making it genuinely fast (the residual
+// per-step re-extraction) is tracked separately in docs/backlog.md.
+const HEAVY_AUDIT_TEST_TIMEOUT_MS = 300_000;
+
+test("next-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     const step = await advanceToDispatchReady(root);
@@ -295,22 +356,14 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
     );
     await disableNarrative(artifactsDir);
 
-    const ingested = JSON.parse(
-      (
-        await runDistCli(
-          [
-            "ingest-results",
-            "--root",
-            root,
-            "--artifacts-dir",
-            artifactsDir,
-            "--results",
-            resultsPath,
-          ],
-          { cwd: root },
-        )
-      ).stdout,
-    );
+    const ingested = await callIngestResults([
+      "--root",
+      root,
+      "--artifacts-dir",
+      artifactsDir,
+      "--results",
+      resultsPath,
+    ]);
     expect(ingested.selected_executor).toBe("result_ingestion_executor");
 
     const presented = await nextStepUntilPresentReport(root);
@@ -336,7 +389,7 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
   });
 });
 
-test("next-step presents the rendered report instead of a run-limit block", async () => {
+test("next-step presents the rendered report instead of a run-limit block", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await advanceToDispatchReady(root);
@@ -352,18 +405,14 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
     );
     // Ingest the results without finishing finalization, leaving the audit a
     // few deterministic runs short of complete with artifacts intact.
-    await runDistCli(
-      [
-        "ingest-results",
-        "--root",
-        root,
-        "--artifacts-dir",
-        artifactsDir,
-        "--results",
-        resultsPath,
-      ],
-      { cwd: root },
-    );
+    await callIngestResults([
+      "--root",
+      root,
+      "--artifacts-dir",
+      artifactsDir,
+      "--results",
+      resultsPath,
+    ]);
 
     const reportPath = join(artifactsDir, "audit-report.md");
     const reportExists = async () =>
@@ -378,9 +427,7 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
     // interim blocked step with no report yet.)
     let presented = null;
     for (let i = 0; i < 15 && !presented; i++) {
-      const step = JSON.parse(
-        (await runWrapper(["next-step"], { cwd: root })).stdout,
-      );
+      const step = await callNextStep(root, artifactsDir);
       if (step.step_kind === "present_report") {
         // Friction triage pending: seed an observation and loop so next call
         // returns status:"complete".
@@ -416,7 +463,7 @@ test("next-step presents the rendered report instead of a run-limit block", asyn
   });
 });
 
-test("force-synthesis strands a wedged task, stamps an operator_forced terminal, and drives synthesis from the partial ledger", async () => {
+test("force-synthesis strands a wedged task, stamps an operator_forced terminal, and drives synthesis from the partial ledger", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await advanceToDispatchReady(root);
@@ -437,19 +484,13 @@ test("force-synthesis strands a wedged task, stamps an operator_forced terminal,
       resultsPath,
       JSON.stringify(await buildSyntheticResults(partial, root), null, 2),
     );
-    await runDistCli(
-      ["ingest-results", "--root", root, "--artifacts-dir", artifactsDir, "--results", resultsPath],
-      { cwd: root },
-    );
+    await callIngestResults([
+      "--root", root, "--artifacts-dir", artifactsDir, "--results", resultsPath,
+    ]);
 
-    const forced = JSON.parse(
-      (
-        await runDistCli(
-          ["force-synthesis", "--root", root, "--artifacts-dir", artifactsDir],
-          { cwd: root },
-        )
-      ).stdout,
-    );
+    const forced = await callForceSynthesis([
+      "--root", root, "--artifacts-dir", artifactsDir,
+    ]);
     expect(forced.selected_executor).toBe("synthesis_executor");
     expect(forced.forced_stranded_task_ids, "the pending task is stranded").toContain(
       pendingTask.task_id,
@@ -475,7 +516,7 @@ test("force-synthesis strands a wedged task, stamps an operator_forced terminal,
   });
 });
 
-test("ingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md", async () => {
+test("ingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await advanceToDispatchReady(root);
@@ -499,22 +540,14 @@ test("ingest-results accepts a directory of batch result files and next-step sti
     );
     await disableNarrative(artifactsDir);
 
-    const ingested = JSON.parse(
-      (
-        await runDistCli(
-          [
-            "ingest-results",
-            "--root",
-            root,
-            "--artifacts-dir",
-            artifactsDir,
-            "--batch-results",
-            batchDir,
-          ],
-          { cwd: root },
-        )
-      ).stdout,
-    );
+    const ingested = await callIngestResults([
+      "--root",
+      root,
+      "--artifacts-dir",
+      artifactsDir,
+      "--batch-results",
+      batchDir,
+    ]);
     expect(ingested.imported_files.length).toBe(2);
 
     const presented = await nextStepUntilPresentReport(root);
