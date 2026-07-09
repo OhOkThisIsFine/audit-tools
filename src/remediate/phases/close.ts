@@ -5,10 +5,11 @@ import {
   listQuarantinedCommits,
   readRemediationBaseBranch,
 } from "../steps/dispatch.js";
-import { dirname, extname, isAbsolute, join } from "node:path";
+import { dirname, extname, isAbsolute, join, relative } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
   AGENT_FEEDBACK_FILENAME,
+  normalizeRepoPath,
   parseReflectionsNdjson,
   readOptionalJsonFile,
   readOptionalTextFile,
@@ -392,6 +393,8 @@ export interface ClosingResult {
   action: ClosingAction;
   status: "success" | "failed" | "skipped";
   commands: ClosingCommandResult[];
+  /** See `ClosingActionPreviewSchema.leftover_files` — same untouched-dirt set, at execute time. */
+  leftover_files?: string[];
 }
 
 function trimOutput(value: unknown): string | undefined {
@@ -428,15 +431,239 @@ function isSuccess(result: ClosingCommandResult): boolean {
   return result.exit_code === 0;
 }
 
-const STAGING_EXCLUDE_PATTERNS = [
-  /^\.audit-tools\//,
-  /^\.env($|\.)/,
-];
+// .env* is an absolute hard-exclude: never stageable under any circumstance
+// (secrets safety net), regardless of manifest or deliverable membership.
+const ENV_EXCLUDE_PATTERN = /^\.env($|\.)/;
+// .audit-tools/ scratch (state.json, locks, per-run steps/results, quarantine
+// refs) is excluded UNLESS the exact path is one of this run's own tool
+// deliverables (see `toolDeliverablePaths`) — those are eligible for staging
+// like any other manifest file.
+const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
 
-export function collectStagingFiles(root: string): string[] {
-  return stagedAndUntracked(root).filter(
-    (f) => !STAGING_EXCLUDE_PATTERNS.some((pattern) => pattern.test(f)),
+/**
+ * The run's authoritative edit-surface manifest — the ONLY files
+ * `collectStagingFiles` may stage (invariant: "remediation close must never
+ * commit files the run didn't touch").
+ *
+ * Two sources, UNION'd (never priority-fallback — see below for why):
+ *
+ * 1. `state.applied_edit_surface` — ground truth. The union of files every
+ *    accepted node ACTUALLY cherry-picked into the main tree, captured
+ *    pre-merge from the node's own git branch diff in `acceptNodeWorktree`
+ *    (never the worker's self-report) and persisted by
+ *    `mergeImplementResultsIntoState` (src/remediate/steps/dispatch/marshal.ts).
+ *    Only populated by the isolated-worktree accept lifecycle (the in-process
+ *    and host-subagent rolling drivers, `accept-node` / `executeNodeInWorktree`).
+ *
+ * 2. Each `resolved` item's DECLARED surface — `item_spec.touched_files`
+ *    unioned with the finding's `affected_files` — for items whose real edit
+ *    was never captured as git ground truth. This is the only option for the
+ *    conversation-first hand-driven flow (`remediate-code
+ *    merge-implement-results` — a FIRST-CLASS dispatch mode, not legacy: the
+ *    host edits directly in the main tree with no per-node worktree/commit to
+ *    diff, so `acceptNodeWorktree` never runs and `applied_edit_surface` is
+ *    never populated for that block).
+ *
+ * Why UNION and not "prefer (1), fall back to (2) only when (1) is entirely
+ * absent": a single run can mix dispatch modes across blocks (one block landed
+ * via worktree-accept, a sibling landed via a conversation-first hand-applied
+ * edit in the same close). Priority-fallback keyed on whether (1) is non-empty
+ * would silently drop the OTHER mode's real edits from the close commit the
+ * moment either mode contributed anything — under-staging the tool's own work,
+ * which is exactly the failure class this manifest exists to prevent, just in
+ * the opposite direction. Only items with `status === "resolved"` (a real
+ * edit, never `resolved_no_change`) contribute to source (2) — a `blocked`
+ * item's partial/reverted edits must never be treated as a legitimate surface.
+ *
+ * RUN-START-DIRTY GUARD on source (2) ONLY: declared surfaces are plan-time
+ * DECLARATIONS (write-access grants) / audit evidence — never verified against
+ * an actual diff. A declared file that was ALREADY dirty when the run started
+ * (`state.run_start_dirty`, captured in `runPlanPhase` before any remediation
+ * edit exists) cannot be the run's edit, so it is excluded here — otherwise a
+ * resolved item declaring a file the run never actually touched would sweep
+ * pre-existing user WIP into the closing commit (the exact over-inclusion class
+ * this manifest exists to close). Ground-truth entries from source (1) are
+ * NEVER excluded by the snapshot: git proved the run landed those paths, and a
+ * tool-merged edit to a file the user ALSO had dirty at run start is a path the
+ * tool legitimately owns. A state without `run_start_dirty` (pre-field, or a
+ * plan flow that bypasses `runPlanPhase`) means no exclusions.
+ *
+ * Both sources empty is legitimate (e.g. a run that only produced
+ * `resolved_no_change` / skipped items) and correctly yields an empty
+ * manifest: nothing but tool deliverables gets staged.
+ *
+ * Membership semantics: entries are compared via the canonical
+ * `normalizeRepoPath` key (forward-slash, `./`-stripped, lowercased — the
+ * repo's single path normalizer), so a declared `./Src/Foo.ts` matches git's
+ * `Src/Foo.ts`. The RETURNED strings keep their original casing; the
+ * normalized form is only ever a comparison key (see `collectStagingFiles`).
+ */
+function resolveEditSurfaceManifest(state: RemediationState): string[] {
+  const files = new Set<string>(state.applied_edit_surface ?? []);
+  const runStartDirtyKeys = new Set(
+    (state.run_start_dirty ?? []).map(normalizeRepoPath),
   );
+  const addUnlessPreexistingDirt = (path: string): void => {
+    if (!runStartDirtyKeys.has(normalizeRepoPath(path))) files.add(path);
+  };
+  const findingsById = new Map(
+    (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
+  );
+  for (const item of Object.values(state.items ?? {})) {
+    if (item.status !== "resolved") continue;
+    for (const f of item.item_spec?.touched_files ?? []) {
+      addUnlessPreexistingDirt(f);
+    }
+    const finding = findingsById.get(item.finding_id);
+    for (const affected of finding?.affected_files ?? []) {
+      addUnlessPreexistingDirt(affected.path);
+    }
+  }
+  return [...files];
+}
+
+/**
+ * Repo-relative paths of the tool-emitted root deliverables `.gitignore`
+ * re-includes for tracking (`!.audit-tools/remediation-report.md`,
+ * `!.audit-tools/remediation-outcomes.json`) — the two files this close phase
+ * itself writes (see the end of `runClosePhase`) that are meant to be
+ * committed. Computed from `options` (never a hardcoded `.audit-tools/…`
+ * literal) so a non-default `--artifacts-dir` resolves correctly.
+ *
+ * Deliberately excludes `verification_report.json` / `remediation-state.
+ * complete.json`: `.gitignore` does NOT re-include those, so they are never
+ * visible to `stagedAndUntracked` (which honours `--exclude-standard`) and
+ * need no carve-out here.
+ *
+ * KNOWN ORDERING NOTE: `runClosePhase` calls `executeClosingAction` (which is
+ * where `collectStagingFiles` actually runs) BEFORE it writes these two
+ * deliverables to disk — their own content describes THIS closing action's
+ * outcome (status/commands), so they cannot exist yet at commit time without
+ * describing a commit that hasn't happened. Carving them out of the exclude
+ * pattern here does not retroactively stage them into the SAME commit; it
+ * means that if they are already dirty for any other reason when
+ * `collectStagingFiles` runs (re-included per `.gitignore`, tracked from a
+ * prior run, hand-edited, etc.), they are correctly treated as legitimate
+ * tool output rather than swept out by the blanket `.audit-tools/` exclude.
+ */
+function toolDeliverablePaths(options: OrchestratorOptions): string[] {
+  const outputDir = dirname(options.artifactsDir);
+  return ["remediation-report.md", "remediation-outcomes.json"].map((name) =>
+    relative(options.root, join(outputDir, name)).replace(/\\/g, "/"),
+  );
+}
+
+/** `collectStagingFiles`'s manifest-scoped result. */
+export interface StagingSelection {
+  /** Manifest (or deliverable) files that are currently dirty — safe to stage. */
+  files: string[];
+  /**
+   * Currently-dirty files that are NEITHER in `manifest` nor a deliverable —
+   * pre-existing/unrelated dirt the run never touched. Never staged; surfaced
+   * so the host/user can see what was deliberately left alone.
+   */
+  leftover: string[];
+}
+
+/**
+ * INVARIANT (V2 fix): remediation close must never commit files the run
+ * didn't touch. This is the single chokepoint both the preview
+ * (`checkClosingPreview`) and the execute path (`executeClosingAction`) stage
+ * through — never a repo-wide `git diff`/`ls-files` sweep.
+ *
+ * Formula: `files = manifest ∩ currently-dirty` (plus `deliverables`, which
+ * are unioned into the effective manifest so they stage like any other
+ * manifest entry — see `toolDeliverablePaths`). Any currently-dirty path
+ * outside that set is `leftover`: reported, never staged, never committed —
+ * committing LESS than a dirty tree is always safe, so a leftover never blocks
+ * or aborts the close (a full-abort-on-unrelated-dirt policy would make the
+ * tool unusable against a routinely-dirty working tree).
+ *
+ * TOCTOU note: this recomputes "currently-dirty" fresh on every call (by
+ * design — a file the user touched between preview and execute must be
+ * re-observed). What it can NEVER do is widen `files` beyond `manifest ∪
+ * deliverables`: a newly-dirtied path outside the manifest can only ever land
+ * in `leftover`, never `files`. `pre_authorized: true` (see
+ * `checkClosingPreview`) only skips the interactive preview step; it does not
+ * — and structurally cannot — enlarge what this function is willing to stage.
+ *
+ * `.env*` is excluded even from an explicit manifest entry (defense-in-depth
+ * against ever committing a secret); `.audit-tools/` scratch is excluded
+ * unless the path is exactly a caller-supplied deliverable.
+ *
+ * Path comparison is TWO-TIER: an exact case-preserving key first
+ * (`repoPathExactKey` — forward-slash, `./`-stripped), then the canonical
+ * lowercased `normalizeRepoPath` key as a fallback ONLY when unambiguous
+ * (exactly one dirty path folds to it). The fold tier is what makes a
+ * declared `./Src/Foo.ts` match git's `src/Foo.ts` on win32; the exact tier +
+ * ambiguity guard is what stops a case-SIBLING pair on a case-sensitive
+ * checkout (`Foo.ts` real, `foo.ts` also real and user-dirty) from sweeping
+ * the user's file in through the fold. The STAGED output is always git's
+ * original-cased path string (never a normalized key — `git add` needs the
+ * real on-disk case), and the exclude regexes are tested against the folded
+ * key so `.ENV` / `.Audit-Tools/` casing games cannot bypass them.
+ *
+ * ACCEPTED RESIDUAL (inherent to declared surfaces): in the conversation-first
+ * flow a declared-but-never-edited file that the USER dirties DURING the run
+ * window (post-plan, pre-close) is indistinguishable from the run's own
+ * hand-applied edit — `run_start_dirty` only fences dirt that predates the
+ * run. Closing it fully requires per-edit git ground truth, which that flow
+ * does not have.
+ */
+export function collectStagingFiles(
+  root: string,
+  manifest: string[],
+  deliverables: string[] = [],
+): StagingSelection {
+  const entries = [...manifest, ...deliverables];
+  // Two-tier membership: EXACT (case-preserving) match first; the lowercased
+  // normalizeRepoPath key only as a fallback, and only when it is UNAMBIGUOUS —
+  // i.e. exactly one currently-dirty path folds to that key. On a
+  // case-sensitive checkout two REAL files can differ only by case
+  // (Foo.ts / foo.ts); a fold-only match would admit the user's case-sibling
+  // of a manifest file into the commit — the exact over-inclusion this
+  // function exists to prevent. An ambiguous fold therefore stages only the
+  // exact-cased match (or none), never both.
+  const exactKeys = new Set(entries.map(repoPathExactKey));
+  const foldedKeys = new Set(entries.map(normalizeRepoPath));
+  const exactDeliverableKeys = new Set(deliverables.map(repoPathExactKey));
+  const foldedDeliverableKeys = new Set(deliverables.map(normalizeRepoPath));
+  const dirty = [...stagedAndUntracked(root)];
+  const foldedDirtyCount = new Map<string, number>();
+  for (const f of dirty) {
+    const k = normalizeRepoPath(f);
+    foldedDirtyCount.set(k, (foldedDirtyCount.get(k) ?? 0) + 1);
+  }
+  const unambiguous = (foldedKey: string): boolean =>
+    (foldedDirtyCount.get(foldedKey) ?? 0) === 1;
+  const files: string[] = [];
+  const leftover: string[] = [];
+  for (const f of dirty) {
+    const exact = repoPathExactKey(f);
+    const folded = normalizeRepoPath(f);
+    if (ENV_EXCLUDE_PATTERN.test(folded)) continue;
+    const isDeliverable =
+      exactDeliverableKeys.has(exact) ||
+      (foldedDeliverableKeys.has(folded) && unambiguous(folded));
+    if (AUDIT_TOOLS_EXCLUDE_PATTERN.test(folded) && !isDeliverable) continue;
+    const inManifest =
+      exactKeys.has(exact) || (foldedKeys.has(folded) && unambiguous(folded));
+    if (inManifest) {
+      files.push(f); // original-cased git path — never a normalized key
+    } else {
+      leftover.push(f);
+    }
+  }
+  return { files: files.sort(), leftover: leftover.sort() };
+}
+
+/**
+ * Case-PRESERVING repo-path comparison key (forward slashes, `./` stripped) —
+ * the exact-match tier of `collectStagingFiles`'s two-tier membership. The
+ * lowercased `normalizeRepoPath` remains the fold-fallback tier.
+ */
+function repoPathExactKey(path: string): string {
+  return path.trim().replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
 /**
@@ -478,13 +705,21 @@ const PREVIEW_ACTIONS = new Set<string>(["commit", "push", "open-pr", "publish"]
 function checkClosingPreview(
   state: RemediationState,
   options: OrchestratorOptions,
-): { files: string[]; commit_message: string } | undefined {
+): { files: string[]; commit_message: string; leftover_files?: string[] } | undefined {
   const closingPlan = state.closing_plan!;
   if (closingPlan.pre_authorized === true) return undefined;
   if (!PREVIEW_ACTIONS.has(closingPlan.action)) return undefined;
-  const files = collectStagingFiles(options.root);
+  const { files, leftover } = collectStagingFiles(
+    options.root,
+    resolveEditSurfaceManifest(state),
+    toolDeliverablePaths(options),
+  );
   const commitMessage = generateCommitMessage(state);
-  return { files, commit_message: commitMessage };
+  return {
+    files,
+    commit_message: commitMessage,
+    ...(leftover.length > 0 ? { leftover_files: leftover } : {}),
+  };
 }
 
 export function executeClosingAction(
@@ -507,9 +742,24 @@ export function executeClosingAction(
     commands.push(result);
     return isSuccess(result);
   };
+  // Populated only on the commit/push/open-pr branch below; threaded into
+  // every return of this function so the caller always sees the same
+  // untouched-user-dirt set the preview (checkClosingPreview) computed.
+  let leftoverFiles: string[] = [];
 
   if (action === "commit" || action === "push" || action === "open-pr") {
-    const files = collectStagingFiles(options.root);
+    // Recomputed here (not reused from the preview) so a file the user
+    // touched between preview and execute is re-observed — but ONLY within
+    // the same manifest ∪ deliverables the preview used, never a wider sweep
+    // (see collectStagingFiles's doc comment: this is the TOCTOU fix, not a
+    // TOCTOU reintroduction).
+    const staging = collectStagingFiles(
+      options.root,
+      resolveEditSurfaceManifest(state),
+      toolDeliverablePaths(options),
+    );
+    leftoverFiles = staging.leftover;
+    const files = staging.files;
     // Nothing to stage → vacuous success: no commit, push, or PR is attempted,
     // so `commands` stays empty and the status is success.
     if (files.length === 0) {
@@ -519,6 +769,7 @@ export function executeClosingAction(
         action,
         status: "success",
         commands: [],
+        ...(leftoverFiles.length > 0 ? { leftover_files: leftoverFiles } : {}),
       };
     }
     const commitMessage = state.closing_plan!.closing_action_preview?.commit_message
@@ -580,6 +831,7 @@ export function executeClosingAction(
     action,
     status: commands.every(isSuccess) ? "success" : "failed",
     commands,
+    ...(leftoverFiles.length > 0 ? { leftover_files: leftoverFiles } : {}),
   };
 }
 
@@ -925,6 +1177,19 @@ function buildRemediationReportMarkdown(
 
   reportContent += `\n## Closing Action\n\nAction: ${state.closing_plan!.action}\n`;
   reportContent += `Status: ${closingResult.status}\n`;
+
+  // V2 staging-manifest fix, finding 3: leftover (untouched user dirt) must be
+  // visible in the HUMAN report too — on a pre_authorized/autonomous run there
+  // is no interactive preview, so this section is the only place the user sees
+  // what the close deliberately did not commit.
+  if (closingResult.leftover_files?.length) {
+    reportContent += `\n## Files Left Untouched (not part of this run's edit surface)\n\n`;
+    reportContent += `${closingResult.leftover_files.length} dirty file(s) were NOT staged or committed because they are outside this run's edit-surface manifest (pre-existing or unrelated changes — yours to keep, commit, or discard):\n\n`;
+    for (const f of closingResult.leftover_files) {
+      reportContent += `- \`${f}\`\n`;
+    }
+  }
+
   if (e2ePassed !== undefined) {
     reportContent += `\n## End-to-End Tests\n\nResult: ${e2ePassed ? "passed" : "failed"}\n`;
   }
@@ -1360,6 +1625,7 @@ export async function runClosePhase(
       action: ClosingAction;
       status: string;
       commands: ClosingCommandResult[];
+      leftover_files?: string[];
     };
     plan_coverage?: OutcomeCoverageLedger;
   } = {
@@ -1378,6 +1644,11 @@ export async function runClosePhase(
       action: state.closing_plan.action,
       status: closingResult.status,
       commands: closingResult.commands,
+      // Untouched-user-dirt set collectStagingFiles left alone (never staged) —
+      // see ClosingResult.leftover_files / ClosingActionPreviewSchema.leftover_files.
+      ...(closingResult.leftover_files?.length
+        ? { leftover_files: closingResult.leftover_files }
+        : {}),
     },
     ...(outcomeCoverage ? { plan_coverage: outcomeCoverage } : {}),
   };

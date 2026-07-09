@@ -1209,3 +1209,75 @@ describe("estimateGroupTokens uses shared constants (N-S04)", () => {
     expect(result).toBe(2200);
   });
 });
+
+// ── V2 staging-manifest fix (finding 1): run-start dirty snapshot ─────────────
+//
+// runPlanPhase must capture the set of files ALREADY dirty at plan time into
+// state.run_start_dirty (path-sorted) — the close phase excludes them from the
+// DECLARED (fallback) staging-manifest sources — and must NEVER re-capture on a
+// replan (state already carrying the field), or the run's own hand-applied
+// edits would be misclassified as pre-existing dirt.
+describe("runPlanPhase — run-start dirty snapshot (V2 finding 1)", () => {
+  let repoRoot: string;
+  let artifactsDir: string;
+
+  beforeEach(async () => {
+    repoRoot = join(testDir, `.test-plan-dirty-${randomUUID()}`);
+    artifactsDir = join(repoRoot, ".audit-tools", "remediation");
+    await mkdir(artifactsDir, { recursive: true });
+    // Isolated git repo: an un-init'd dir inside the audit-tools working tree
+    // would make stagedAndUntracked traverse up to the parent repo and report
+    // ITS dirty files (same hazard the phase-close suite guards against).
+    const { execSyncHidden } = await import("../helpers/spawn.mjs");
+    execSyncHidden("git init", { cwd: repoRoot });
+    execSyncHidden("git config user.email test@test.com", { cwd: repoRoot });
+    execSyncHidden("git config user.name Test", { cwd: repoRoot });
+    await writeFile(join(repoRoot, "committed.txt"), "clean");
+    execSyncHidden("git add . && git commit -m init", { cwd: repoRoot });
+  }, 60_000);
+
+  afterEach(async () => {
+    await rmWithRetry(repoRoot);
+  }, 60_000);
+
+  it("captures the pre-existing dirty files, path-sorted, into state.run_start_dirty", async () => {
+    // Two pre-existing dirty files (one modified-tracked, one untracked),
+    // written BEFORE the plan runs — deliberately out of lexicographic order.
+    await writeFile(join(repoRoot, "z-wip.txt"), "user WIP");
+    await writeFile(join(repoRoot, "committed.txt"), "user modified");
+    const reportPath = await writeReport(repoRoot, "report.json", [
+      mkFinding("F-001", "A finding", { files: ["src/a.ts"] }),
+    ]);
+
+    const state = await runPlanPhase(baseState, {
+      root: repoRoot,
+      artifactsDir,
+      input: reportPath,
+    });
+
+    expect(state.run_start_dirty).toBeDefined();
+    expect(state.run_start_dirty).toContain("z-wip.txt");
+    expect(state.run_start_dirty).toContain("committed.txt");
+    // Path-sorted (deterministic artifact ordering).
+    expect(state.run_start_dirty).toEqual([...state.run_start_dirty!].sort());
+    // The report file itself is untracked dirt too — captured, not special-cased.
+    expect(state.run_start_dirty).toContain("report.json");
+  });
+
+  it("a REPLAN never re-captures: an existing run_start_dirty is preserved verbatim", async () => {
+    const reportPath = await writeReport(repoRoot, "report.json", [
+      mkFinding("F-001", "A finding", { files: ["src/a.ts"] }),
+    ]);
+    // Simulate a replan: the state already carries the run-start snapshot, and
+    // the run's own hand-applied edit is now dirty in the tree. Re-capturing
+    // would wrongly absorb hand-edited.ts into run_start_dirty.
+    await writeFile(join(repoRoot, "hand-edited.ts"), "// the run's own edit");
+
+    const state = await runPlanPhase(
+      { status: "pending" as const, run_start_dirty: ["pre-existing.txt"] },
+      { root: repoRoot, artifactsDir, input: reportPath },
+    );
+
+    expect(state.run_start_dirty).toEqual(["pre-existing.txt"]);
+  });
+});

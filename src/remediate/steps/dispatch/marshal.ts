@@ -617,6 +617,15 @@ async function mergeImplementResultsIntoState(
   // per-worker diff to attribute, so it cannot be checked for cross-block overlap.
   const editedByBlock: BlockEditedFiles[] = [];
 
+  // Union of files every ACCEPTED (tool-verified-and-merged) node this pass
+  // actually cherry-picked into the main tree — the close phase's staging
+  // manifest ground truth (`state.applied_edit_surface`; see
+  // `AcceptNodeWorktreeResult.editedFiles` and `collectStagingFiles` in
+  // src/remediate/phases/close.ts). Populated below, only from
+  // `acceptOutcome.merged === true` (never a worker's self-report), and merged
+  // into `state.applied_edit_surface` after the loop.
+  const appliedEditSurfaceThisPass = new Set<string>();
+
   for (const item of itemsToMerge) {
     if (!existsSync(item.result_path)) {
       // Piece D: a node stranded by a quota_paused terminal has no result file
@@ -723,6 +732,16 @@ async function mergeImplementResultsIntoState(
       !!acceptOutcome &&
       !acceptOutcome.merged &&
       (acceptOutcome.outcome === "error" || acceptOutcome.outcome === "timeout");
+
+    // Accumulate this node's actually-landed files (ground truth: only ever from
+    // a `merged: true` accept, never a worker's self-report — a `notLanded` /
+    // `ancestryLost` re-block below never un-lands a REAL cherry-pick, it only
+    // flips the finding's status; the files stay in this pass's union, which is
+    // harmless — a rolled-back file is no longer dirty, so the close phase's
+    // `manifest ∩ actually-dirty` staging formula naturally excludes it anyway).
+    if (acceptOutcome?.merged && acceptOutcome.editedFiles?.length) {
+      for (const f of acceptOutcome.editedFiles) appliedEditSurfaceThisPass.add(f);
+    }
 
     // M-FRICTION (node_quarantine): a node that committed real edits but hard-failed
     // the tool's verify/scope/merge had its work QUARANTINED under a durable ref and
@@ -1257,6 +1276,20 @@ async function mergeImplementResultsIntoState(
     : moreToImplement
       ? "implementing"
       : "triage";
+
+  // Persist this pass's actually-landed files into the run-wide staging manifest
+  // (state.applied_edit_surface — see its doc comment in state/store.ts and
+  // `collectStagingFiles` in phases/close.ts). Union with whatever prior passes
+  // already recorded (a rolling multi-wave run calls this repeatedly), then
+  // re-sort/de-dup deterministically.
+  if (appliedEditSurfaceThisPass.size > 0) {
+    const combined = new Set([
+      ...(state.applied_edit_surface ?? []),
+      ...appliedEditSurfaceThisPass,
+    ]);
+    state.applied_edit_surface = [...combined].sort();
+  }
+
   // Access-memory parity (context-efficiency increment 2c): harvest which files
   // remediation has edited into `.audit-tools/remediation/access_memory.json` —
   // the remediate analog of audit's covered-file harvest, populating edited_count.

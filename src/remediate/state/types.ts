@@ -165,6 +165,14 @@ export const ClosingActionPreviewSchema = z
     files: z.array(z.string()),
     /** Generated commit message derived from item summaries / finding titles. */
     commit_message: z.string(),
+    /**
+     * Currently-dirty repo-relative paths that are NEITHER in the run's edit
+     * surface manifest nor a tool deliverable — pre-existing/unrelated user
+     * changes `collectStagingFiles` deliberately leaves untouched (never staged,
+     * never committed). Surfaced so the host can tell the user what was left
+     * alone. Absent/omitted when there is nothing to report.
+     */
+    leftover_files: z.array(z.string()).optional(),
   })
   .strict();
 

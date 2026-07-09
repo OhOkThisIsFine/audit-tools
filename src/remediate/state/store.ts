@@ -53,6 +53,49 @@ export interface RemediationState {
    * max-concurrent, context/output token windows, and the model roster / id.
    */
   host_capabilities?: HostCapabilities;
+  /**
+   * Union of repo-relative paths every ACCEPTED node has actually cherry-picked
+   * into the main tree this run (ground truth, path-sorted, de-duplicated).
+   * Populated incrementally by `mergeImplementResultsIntoState`
+   * (src/remediate/steps/dispatch/marshal.ts) from each node's
+   * `AcceptNodeWorktreeResult.editedFiles` (captured pre-merge from the node's
+   * own branch diff in `acceptNodeWorktree` — never the worker's self-report).
+   *
+   * This is the close phase's staging manifest (`collectStagingFiles` in
+   * `src/remediate/phases/close.ts`): the invariant "remediation close must
+   * never commit files the run didn't touch" is enforced by staging exactly
+   * `applied_edit_surface ∩ currently-dirty`, never a repo-wide sweep.
+   *
+   * Absent (or missing entries) for any block landed through a dispatch mode
+   * that never runs the isolated-worktree accept lifecycle — e.g. the
+   * conversation-first hand-driven flow (`remediate-code merge-implement-results`,
+   * a first-class dispatch mode, not legacy: the host edits directly in the main
+   * tree with no per-node worktree/commit to diff). The close phase's manifest
+   * resolution additionally unions in each `resolved` item's declared
+   * `item_spec.touched_files` / finding `affected_files` as a fallback for
+   * exactly the items no accepted node's `editedFiles` covers.
+   */
+  applied_edit_surface?: string[];
+  /**
+   * Repo-relative paths that were ALREADY dirty (changed vs HEAD, or untracked)
+   * when this run's plan was created — captured once via `stagedAndUntracked`
+   * in `runPlanPhase` (src/remediate/phases/plan.ts), path-sorted, and never
+   * re-captured on a replan (re-capturing after edits landed would wrongly
+   * classify the run's own hand-applied work as pre-existing dirt).
+   *
+   * Consumed by the close phase's `resolveEditSurfaceManifest`: a file that was
+   * dirty BEFORE the run started cannot be one of the run's edits, so it is
+   * excluded from the DECLARED (fallback) manifest sources
+   * (`item_spec.touched_files` / finding `affected_files` — plan-time
+   * declarations/write-grants, not verified diffs). Ground-truth entries
+   * (`applied_edit_surface`, from actual worktree cherry-picks) are NEVER
+   * excluded by this snapshot — git already proved the run landed those paths.
+   *
+   * Absent on states created before this field existed (or on plan flows that
+   * don't pass through `runPlanPhase`): treated as empty — no exclusions,
+   * preserving prior behavior for in-flight runs.
+   */
+  run_start_dirty?: string[];
 }
 
 /**

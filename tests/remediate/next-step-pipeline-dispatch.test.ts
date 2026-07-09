@@ -711,6 +711,12 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     const implementingState: RemediationState = makePlanningState({
       status: "implementing",
+      // V2 staging-manifest fields: a force-replan must CARRY these run-lifetime
+      // values verbatim — dropping them would make the capture-once guard
+      // re-snapshot AFTER edits landed (misclassifying the run's own edits as
+      // pre-existing dirt) and lose the git-proven applied surface.
+      run_start_dirty: ["pre-dirty.txt"],
+      applied_edit_surface: ["src/landed.ts"],
       plan: {
         ...makePlanningState().plan!,
         findings: makePlanningState().plan!.findings.map((finding) => ({
@@ -777,6 +783,11 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(
       savedState.plan.findings[0].affected_files[0].hash_at_plan_time,
     ).toMatch(/^[a-f0-9]{64}$/);
+    // Carried verbatim across the force-replan — not dropped, not re-captured
+    // (src/a.ts and src/b.ts are dirty right now; a post-edit re-capture would
+    // have swept them into run_start_dirty).
+    expect(savedState.run_start_dirty).toEqual(["pre-dirty.txt"]);
+    expect(savedState.applied_edit_surface).toEqual(["src/landed.ts"]);
   });
 
   it("planning state with zero pending findings emits zero_documentable_findings (not unhandled_state)", async () => {

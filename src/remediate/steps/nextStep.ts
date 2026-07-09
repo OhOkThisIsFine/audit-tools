@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -1636,6 +1636,18 @@ async function forceReplanFromExistingIntake(
     status: "pending",
     started_at: previous.started_at,
     step_count: previous.step_count,
+    // Carry the run-lifetime staging-manifest fields across a force-replan.
+    // Dropping run_start_dirty here would make handlePendingExtractedPlan's
+    // capture-once guard re-capture AFTER edits have landed, misclassifying
+    // the run's own hand-applied edits as pre-existing dirt (silently
+    // under-staged at close); applied_edit_surface is git-proven ground truth
+    // that must survive replanning for the same reason.
+    ...(previous.run_start_dirty
+      ? { run_start_dirty: previous.run_start_dirty }
+      : {}),
+    ...(previous.applied_edit_surface
+      ? { applied_edit_surface: previous.applied_edit_surface }
+      : {}),
   };
   const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
   if (!extractedPlan) {
@@ -2327,6 +2339,17 @@ async function handlePendingExtractedPlan(
     }
 
     const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
+    // Run-start dirty snapshot for the V2 staging manifest, capture-once: the
+    // extracted-plan join runs at plan time (before any remediation edit), so
+    // the dirty set here is pre-existing user dirt — the close phase excludes
+    // it from DECLARED-surface staging. runPlanPhase captures the same field on
+    // the structured-audit path; whichever join runs first wins.
+    if (!existing.run_start_dirty) {
+      existing = {
+        ...existing,
+        run_start_dirty: [...stagedAndUntracked(root)].sort(),
+      };
+    }
     const reviewDecision = await readOptionalJsonFile<ReviewDecisionRecord>(
       reviewDecisionPath(artifactsDir),
     );

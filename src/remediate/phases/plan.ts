@@ -28,6 +28,7 @@ import {
   writeJsonFile,
   readJsonFile,
   formatValidationIssues,
+  stagedAndUntracked,
   discoverProjectCommands,
   resolveContextBudget,
   estimateTokensFromBytes,
@@ -1151,7 +1152,25 @@ export async function runPlanPhase(
     plan,
   );
 
-  return { ...state, status: "planning", plan, items, plan_coverage: coverage };
+  // Run-start dirty snapshot (V2 staging-manifest fix, finding 1): capture the
+  // files that are ALREADY dirty before any remediation edit exists. The close
+  // phase excludes these from the DECLARED (fallback) staging-manifest sources —
+  // a file dirty before the run started cannot be one of the run's edits, so a
+  // plan-time declaration (item_spec.touched_files / affected_files) can never
+  // sweep pre-existing user WIP into the closing commit. Captured ONCE: a replan
+  // (force-replan after edits landed) must NOT re-capture, or the run's own
+  // hand-applied edits would be misclassified as pre-existing dirt.
+  const runStartDirty =
+    state.run_start_dirty ?? [...stagedAndUntracked(options.root)].sort();
+
+  return {
+    ...state,
+    status: "planning",
+    plan,
+    items,
+    plan_coverage: coverage,
+    run_start_dirty: runStartDirty,
+  };
 }
 
 /**

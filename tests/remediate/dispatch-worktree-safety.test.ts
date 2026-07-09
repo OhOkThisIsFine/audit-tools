@@ -288,6 +288,9 @@ describe("acceptNodeWorktree — captures commit identity (INV-WTS-3/7 ground tr
     expect(res.landedHeadOid).toBe(headOid(repo));
     // The landed commit is an ancestor of the new HEAD (identity check passes).
     expect(gitCommitIsAncestor(repo, res.landedHeadOid!)).toBe(true);
+    // V2: the actually-landed files (ground truth for the close-phase staging
+    // manifest, state.applied_edit_surface) are captured on a real merge.
+    expect(res.editedFiles).toEqual(["src/a.ts"]);
   });
 
   it("a genuine NO-CHANGE node (worker made no edits) captures NO committedOid", async () => {
@@ -309,6 +312,8 @@ describe("acceptNodeWorktree — captures commit identity (INV-WTS-3/7 ground tr
     expect(res.outcome).toBe("success");
     expect(res.merged).toBe(false);
     expect(res.committedOid).toBeUndefined();
+    // V2: no merge landed, so there is nothing to record as an actually-landed file.
+    expect(res.editedFiles).toBeUndefined();
   });
 
   it("STRAY-WORKTREE GUARD: nodeClaimsEdit:true on a zero-commit worktree fails loud", async () => {
@@ -356,7 +361,7 @@ describe("acceptNodeWorktree — captures commit identity (INV-WTS-3/7 ground tr
     expect(res.strayWorktreeSuspected).toBeUndefined();
   });
 
-  it("round-trips committedOid + landedHeadOid through the accept-outcome sidecar", async () => {
+  it("round-trips committedOid + landedHeadOid + editedFiles through the accept-outcome sidecar", async () => {
     const repo = initRepo("wts-sidecar-");
     const artifactsDir = join(repo, ".audit-tools", "remediation");
     await recordNodeAcceptOutcome(artifactsDir, "R", "CP-BLOCK-N-x", {
@@ -365,11 +370,13 @@ describe("acceptNodeWorktree — captures commit identity (INV-WTS-3/7 ground tr
       merged: true,
       committedOid: "a".repeat(40),
       landedHeadOid: "b".repeat(40),
+      editedFiles: ["src/a.ts", "src/b.ts"],
     });
     const { loadNodeAcceptOutcome } = await import("../../src/remediate/steps/dispatch.js");
     const loaded = await loadNodeAcceptOutcome(artifactsDir, "R", "CP-BLOCK-N-x");
     expect(loaded?.committedOid).toBe("a".repeat(40));
     expect(loaded?.landedHeadOid).toBe("b".repeat(40));
+    expect(loaded?.editedFiles).toEqual(["src/a.ts", "src/b.ts"]);
   });
 });
 
@@ -431,6 +438,7 @@ async function mergeInRepo(
     merged: boolean;
     committedOid?: string;
     landedHeadOid?: string;
+    editedFiles?: string[];
   } | null,
 ): Promise<RemediationState> {
   const artifactsDir = join(repo, ".audit-tools", "remediation");
@@ -480,6 +488,28 @@ describe("INV-WTS-3 — marshal reconciles a resolved node by captured-commit an
       { outcome: "success", verifyPassed: true, merged: true, committedOid: landed, landedHeadOid: landed },
     );
     expect(merged.items!["N-x"].status).toBe("resolved");
+  });
+
+  // V2: mergeImplementResults persists the union of every accepted node's
+  // ACTUALLY-landed files into state.applied_edit_surface — the close phase's
+  // staging manifest ground truth (never the worker's self-reported files).
+  it("V2: a merged node's editedFiles are persisted into state.applied_edit_surface", async () => {
+    const repo = initRepo("wts-recon-surface-");
+    const landed = headOid(repo);
+    const merged = await mergeInRepo(
+      repo,
+      "resolved",
+      ["landed: vitest run -> 3 pass"],
+      {
+        outcome: "success",
+        verifyPassed: true,
+        merged: true,
+        committedOid: landed,
+        landedHeadOid: landed,
+        editedFiles: ["src/x.ts"],
+      },
+    );
+    expect(merged.applied_edit_surface).toEqual(["src/x.ts"]);
   });
 
   it("NEGATIVE: merged:true but the landed commit is NOT an ancestor (rolled back) → re-block + quarantine", async () => {

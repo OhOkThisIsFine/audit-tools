@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger, executeClosingAction } from "../../src/remediate/phases/close.js";
 import { remediationBaseBranchPath } from "../../src/remediate/steps/dispatch.js";
 import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -745,6 +745,202 @@ describe("runClosePhase", () => {
     });
   });
 
+  // ── V2 fix: staging must never sweep the repo — manifest-scoped only ──────────
+  describe("manifest-scoped staging (V2 invariant fix)", () => {
+    function committedFilesInLastCommit(): string[] {
+      return execSync("git diff-tree --no-commit-id --name-only -r HEAD", { cwd: REPO_DIR })
+        .toString()
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean);
+    }
+
+    it("stages only the run's applied_edit_surface; unrelated pre-existing dirt is never committed and is reported as leftover", async () => {
+      writeFileSync(join(REPO_DIR, "fixed.ts"), "// the fix");
+      writeFileSync(join(REPO_DIR, "unrelated-dirt.txt"), "pre-existing user WIP the run never touched");
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        applied_edit_surface: ["fixed.ts"],
+        items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      });
+
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+      // pre_authorized skips the preview entirely — confirms it does not widen scope.
+      expect(next.closing_plan?.closing_action_preview).toBeUndefined();
+
+      const committed = committedFilesInLastCommit();
+      expect(committed).toContain("fixed.ts");
+      expect(committed).not.toContain("unrelated-dirt.txt");
+
+      // The pre-existing dirt is still sitting there, untouched.
+      const status = execSync("git status --porcelain", { cwd: REPO_DIR }).toString();
+      expect(status).toContain("unrelated-dirt.txt");
+
+      const jsonReport = JSON.parse(
+        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+      );
+      expect(jsonReport.closing_result.status).toBe("success");
+      expect(jsonReport.closing_result.leftover_files).toContain("unrelated-dirt.txt");
+
+      // Finding 3: leftover is visible in the HUMAN report too (a pre_authorized
+      // run has no interactive preview, so this section is the only surface).
+      const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+      expect(report).toContain("## Files Left Untouched");
+      expect(report).toContain("`unrelated-dirt.txt`");
+    });
+
+    // Finding 1 (adversarial review): declared surface is a plan-time DECLARATION,
+    // not a verified diff. A resolved item declaring a file the run never actually
+    // edited, where that file was ALREADY dirty at run start, must NOT be staged —
+    // the run_start_dirty snapshot excludes it from the fallback manifest.
+    it("declared-but-unedited file that was dirty at RUN START is NOT staged (leftover), even when a resolved item declares it", async () => {
+      // Pre-existing user WIP, dirty since before the run started.
+      writeFileSync(join(REPO_DIR, "pre-existing-wip.ts"), "user WIP, never touched by the run");
+      // The run's genuine hand-applied edit.
+      writeFileSync(join(REPO_DIR, "hand-edited.ts"), "// the real fix");
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        // Captured at plan time (runPlanPhase), before any remediation edit.
+        run_start_dirty: ["pre-existing-wip.ts"],
+        items: {
+          F1: {
+            finding_id: "F1",
+            status: "resolved",
+            block_id: "B1",
+            item_spec: {
+              finding_id: "F1",
+              concrete_change: "fix",
+              // Over-broad declaration: claims BOTH the real edit and the
+              // pre-existing WIP file (which the run never actually edited).
+              touched_files: ["hand-edited.ts", "pre-existing-wip.ts"],
+              tests_to_write: [],
+              not_applicable_steps: [],
+            },
+          },
+        },
+      });
+
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const committed = committedFilesInLastCommit();
+      expect(committed).toContain("hand-edited.ts");
+      expect(committed).not.toContain("pre-existing-wip.ts");
+
+      const jsonReport = JSON.parse(
+        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+      );
+      expect(jsonReport.closing_result.leftover_files).toContain("pre-existing-wip.ts");
+    });
+
+    it("run_start_dirty never excludes GROUND-TRUTH entries: a worktree-merged file also dirty at run start is still staged", async () => {
+      writeFileSync(join(REPO_DIR, "contested.ts"), "// tool-merged edit on a file the user also had dirty");
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        run_start_dirty: ["contested.ts"],
+        // applied_edit_surface = git proved the run cherry-picked this path.
+        applied_edit_surface: ["contested.ts"],
+        items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      });
+
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const committed = committedFilesInLastCommit();
+      expect(committed).toContain("contested.ts");
+    });
+
+    it("TOCTOU: a file dirtied AFTER the preview is computed is never staged, even once pre_authorized flips true", async () => {
+      writeFileSync(join(REPO_DIR, "fixed.ts"), "// the fix");
+      const state = makeState({
+        closing_plan: { action: "commit" }, // not pre_authorized → triggers the preview
+        applied_edit_surface: ["fixed.ts"],
+        items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      });
+
+      const previewState = await runClosePhase(state, BASE_OPTIONS);
+      expect(previewState.status).toBe("closing");
+      expect(previewState.closing_plan!.closing_action_preview!.files).toEqual(["fixed.ts"]);
+      expect(previewState.closing_plan!.closing_action_preview!.leftover_files).toBeUndefined();
+
+      // A file appears between the preview and the host's re-invocation with
+      // pre_authorized: true — the classic TOCTOU window.
+      writeFileSync(join(REPO_DIR, "surprise-dirt.txt"), "appeared between preview and execute");
+
+      const authorizedState = {
+        ...previewState,
+        closing_plan: { ...previewState.closing_plan, pre_authorized: true },
+      };
+      const next = await runClosePhase(authorizedState, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const committed = committedFilesInLastCommit();
+      expect(committed).toContain("fixed.ts");
+      expect(committed).not.toContain("surprise-dirt.txt");
+
+      const status = execSync("git status --porcelain", { cwd: REPO_DIR }).toString();
+      expect(status).toContain("surprise-dirt.txt");
+    });
+
+    it("fallback-flow: no applied_edit_surface (conversation-first hand-driven run) stages via item_spec.touched_files", async () => {
+      writeFileSync(join(REPO_DIR, "hand-edited.ts"), "// edited directly by the host, no worktree accept");
+      writeFileSync(join(REPO_DIR, "unrelated.txt"), "pre-existing dirt");
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        // No applied_edit_surface: this run never went through the isolated-
+        // worktree accept lifecycle (e.g. `remediate-code merge-implement-results`,
+        // the conversation-first hand-driven flow).
+        items: {
+          F1: {
+            finding_id: "F1",
+            status: "resolved",
+            block_id: "B1",
+            item_spec: {
+              finding_id: "F1",
+              concrete_change: "fix",
+              touched_files: ["hand-edited.ts"],
+              tests_to_write: [],
+              not_applicable_steps: [],
+            },
+          },
+        },
+      });
+
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const committed = committedFilesInLastCommit();
+      expect(committed).toContain("hand-edited.ts");
+      expect(committed).not.toContain("unrelated.txt");
+    });
+
+    it("no manifest and no fallback surface (e.g. every item resolved_no_change): stages nothing — all dirty files are leftover", async () => {
+      writeFileSync(join(REPO_DIR, "unrelated.txt"), "pre-existing dirt");
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        items: { F1: { finding_id: "F1", status: "resolved_no_change", block_id: "B1" } },
+      });
+
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const jsonReport = JSON.parse(
+        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+      );
+      expect(jsonReport.closing_result.status).toBe("success");
+      expect(jsonReport.closing_result.commands).toHaveLength(0);
+      expect(jsonReport.closing_result.leftover_files).toContain("unrelated.txt");
+
+      const status = execSync("git status --porcelain", { cwd: REPO_DIR }).toString();
+      expect(status).toContain("unrelated.txt");
+    });
+  });
+
   describe("e2e failure → triage (N-R16)", () => {
     it("transitions to triage when e2e_command exits non-zero (never throws)", async () => {
       const state = makeState({
@@ -1123,28 +1319,109 @@ describe("collectStagingFiles", () => {
     await rm(GIT_DIR, { recursive: true, force: true });
   });
 
-  it("includes modified files but excludes .audit-tools/remediation and .env", () => {
+  // V2 fix: collectStagingFiles now takes the run's manifest explicitly — it
+  // stages `manifest ∩ dirty`, never a repo-wide sweep. Non-manifest dirty
+  // files are reported as `leftover`, never staged.
+  it("stages only manifest files that are dirty; non-manifest dirty files are reported as leftover, never staged", () => {
     writeFileSync(join(GIT_DIR, "initial.txt"), "modified");
     writeFileSync(join(GIT_DIR, "new-file.ts"), "code");
+    writeFileSync(join(GIT_DIR, "pre-existing-dirt.txt"), "not this run's work");
+
+    const { files, leftover } = collectStagingFiles(GIT_DIR, ["initial.txt", "new-file.ts"]);
+    expect(files).toEqual(["initial.txt", "new-file.ts"]);
+    expect(leftover).toEqual(["pre-existing-dirt.txt"]);
+  });
+
+  it("never sweeps the repo: an empty manifest stages nothing, even with dirty files present", () => {
+    writeFileSync(join(GIT_DIR, "initial.txt"), "modified");
+    writeFileSync(join(GIT_DIR, "new-file.ts"), "code");
+
+    const { files, leftover } = collectStagingFiles(GIT_DIR, []);
+    expect(files).toEqual([]);
+    expect(leftover).toEqual(["initial.txt", "new-file.ts"]);
+  });
+
+  it("excludes .audit-tools/ scratch paths even when declared in the manifest", () => {
     mkdirSync(join(GIT_DIR, ".audit-tools/remediation"), { recursive: true });
     writeFileSync(join(GIT_DIR, ".audit-tools/remediation", "state.json"), "{}");
-    mkdirSync(join(GIT_DIR, ".audit-tools/audit"), { recursive: true });
-    writeFileSync(join(GIT_DIR, ".audit-tools/audit", "audit-findings.json"), "{}");
+
+    const { files, leftover } = collectStagingFiles(GIT_DIR, [".audit-tools/remediation/state.json"]);
+    expect(files).toEqual([]);
+    // Hard-excluded paths are dropped outright — never staged, never reported
+    // as leftover either (they were never eligible to stage, manifest or not).
+    expect(leftover).toEqual([]);
+  });
+
+  it("excludes .env / .env.local even when declared in the manifest (secrets safety net)", () => {
     writeFileSync(join(GIT_DIR, ".env"), "SECRET=x");
     writeFileSync(join(GIT_DIR, ".env.local"), "SECRET=y");
 
-    const files = collectStagingFiles(GIT_DIR);
-    expect(files).toContain("initial.txt");
-    expect(files).toContain("new-file.ts");
-    expect(files.some((f) => f.includes(".audit-tools/remediation"))).toBe(false);
-    expect(files.some((f) => f.includes(".audit-tools/audit"))).toBe(false);
-    expect(files).not.toContain(".env");
-    expect(files).not.toContain(".env.local");
+    const { files } = collectStagingFiles(GIT_DIR, [".env", ".env.local"]);
+    expect(files).toEqual([]);
   });
 
-  it("returns empty array when no files changed", () => {
-    const files = collectStagingFiles(GIT_DIR);
+  // Requirement: tool deliverables (remediation-report.md / remediation-outcomes.json,
+  // the two paths .gitignore re-includes for tracking) are always eligible to
+  // stage when dirty — the blanket .audit-tools/ exclude carves them out via the
+  // `deliverables` param, never a hardcoded path literal.
+  it("stages a tool deliverable passed via `deliverables` even though it lives under .audit-tools/, but not a sibling .audit-tools/ path", () => {
+    mkdirSync(join(GIT_DIR, ".audit-tools/remediation"), { recursive: true });
+    writeFileSync(join(GIT_DIR, ".audit-tools", "remediation-report.md"), "# report");
+    writeFileSync(join(GIT_DIR, ".audit-tools/remediation", "state.json"), "{}");
+
+    const { files, leftover } = collectStagingFiles(
+      GIT_DIR,
+      [],
+      [".audit-tools/remediation-report.md"],
+    );
+    expect(files).toEqual([".audit-tools/remediation-report.md"]);
+    expect(leftover).toEqual([]);
+  });
+
+  it("returns empty files and leftover when nothing changed", () => {
+    const { files, leftover } = collectStagingFiles(GIT_DIR, ["initial.txt"]);
     expect(files).toEqual([]);
+    expect(leftover).toEqual([]);
+  });
+
+  // Finding 2 (adversarial review): membership must use the canonical
+  // normalizeRepoPath key (forward-slash, ./-stripped, lowercased — win32
+  // case-insensitive semantics), while the STAGED path keeps git's original
+  // casing (`git add` needs the real on-disk case, not the lowercased key).
+  it("matches a manifest entry differing in case and ./ prefix (normalizeRepoPath key), staging git's ORIGINAL-cased path", () => {
+    mkdirSync(join(GIT_DIR, "Src"), { recursive: true });
+    writeFileSync(join(GIT_DIR, "Src", "Foo.ts"), "code");
+
+    // Declared with a ./ prefix and entirely different casing.
+    const { files, leftover } = collectStagingFiles(GIT_DIR, ["./src/foo.ts"]);
+    expect(files).toEqual(["Src/Foo.ts"]); // original case, never "src/foo.ts"
+    expect(leftover).toEqual([]);
+  });
+
+  it("tests the hard excludes against the NORMALIZED key so casing games cannot bypass them", () => {
+    writeFileSync(join(GIT_DIR, ".ENV"), "SECRET=x");
+
+    const { files, leftover } = collectStagingFiles(GIT_DIR, [".ENV"]);
+    expect(files).toEqual([]);
+    expect(leftover).toEqual([]);
+  });
+
+  // Adversarial-review round 2: on a case-SENSITIVE checkout two real files can
+  // differ only by case. The fold-fallback tier must not admit the user's
+  // case-sibling of a manifest file — exact match wins, ambiguous fold stages
+  // nothing extra. Only constructible on a case-sensitive fs (Linux CI); the
+  // probe skips on win32/mac where the fs collapses the pair.
+  it("does not stage a case-sibling of a manifest file when both exist (ambiguous fold)", () => {
+    writeFileSync(join(GIT_DIR, "CaseA.ts"), "the run's file");
+    writeFileSync(join(GIT_DIR, "casea.ts"), "the user's separate file");
+    const caseSensitive =
+      readdirSync(GIT_DIR).filter((n) => n.toLowerCase() === "casea.ts")
+        .length === 2;
+    if (!caseSensitive) return; // fs collapsed the pair — scenario impossible here
+
+    const { files, leftover } = collectStagingFiles(GIT_DIR, ["CaseA.ts"]);
+    expect(files).toEqual(["CaseA.ts"]); // exact tier only
+    expect(leftover).toEqual(["casea.ts"]); // never admitted via the fold
   });
 });
 

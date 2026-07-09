@@ -158,6 +158,17 @@ export interface AcceptNodeWorktreeResult {
    * every other outcome, including the genuine no-op no-commit case.
    */
   strayWorktreeSuspected?: boolean;
+  /**
+   * Repo-relative paths this node ACTUALLY cherry-picked into the main tree —
+   * captured PRE-merge from the node's own branch diff (`gitEditedFilesForBranch`
+   * against `HEAD...branch`, BEFORE `mergeWorktree`'s cherry-pick; the same probe
+   * reads empty afterward, since the change is then already contained in HEAD).
+   * Present only on `merged:true`. This is the ground truth the close phase's
+   * staging manifest is built from (`state.applied_edit_surface` — see
+   * `mergeImplementResultsIntoState` in marshal.ts and `collectStagingFiles` in
+   * `src/remediate/phases/close.ts`), never the worker's self-reported files.
+   */
+  editedFiles?: string[];
 }
 
 /**
@@ -543,7 +554,16 @@ async function acceptNodeWorktreeLocked(
     // by a prior failed attempt for this node so the recovery report lists only
     // genuinely-unrecovered work.
     clearQuarantinedCommit(root, runId, blockId);
-    return { outcome: "success", verifyPassed, merged, committedOid, landedHeadOid };
+    return {
+      outcome: "success",
+      verifyPassed,
+      merged,
+      committedOid,
+      landedHeadOid,
+      // nodeEditedFiles was captured pre-pick (above) — still valid here, the
+      // pick landed the SAME diff it describes.
+      ...(nodeEditedFiles.available ? { editedFiles: [...nodeEditedFiles.files].sort() } : {}),
+    };
   });
 }
 
@@ -590,6 +610,8 @@ export async function recordNodeAcceptOutcome(
     ...(result.strayWorktreeSuspected !== undefined
       ? { stray_worktree_suspected: result.strayWorktreeSuspected }
       : {}),
+    // Ground truth for the close-phase staging manifest (see AcceptNodeWorktreeResult.editedFiles).
+    ...(result.editedFiles !== undefined ? { edited_files: result.editedFiles } : {}),
   });
 }
 
@@ -607,6 +629,7 @@ export async function loadNodeAcceptOutcome(
     committed_oid?: string;
     landed_head_oid?: string;
     stray_worktree_suspected?: boolean;
+    edited_files?: string[];
   }>(nodeAcceptOutcomePath(artifactsDir, runId, blockId));
   if (!raw) return null;
   return {
@@ -619,6 +642,7 @@ export async function loadNodeAcceptOutcome(
     ...(raw.stray_worktree_suspected !== undefined
       ? { strayWorktreeSuspected: raw.stray_worktree_suspected }
       : {}),
+    ...(raw.edited_files !== undefined ? { editedFiles: raw.edited_files } : {}),
   };
 }
 
