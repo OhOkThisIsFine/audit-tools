@@ -1,158 +1,40 @@
-// A1 — the conservative lean fast path past the contract pipeline.
+// The `low`-risk tier's realization: the lean plan builder + the light adversarial
+// review floor.
 //
 // Most remediation runs route through the heavy contract pipeline
-// (goal_normalization → … → critic → judge → implementation_dag), which exists
-// to reason about DESIGN correctness for complex/coupled changes: module
-// contracts, seam reconciliation, an obligation ledger, and an adversarial
-// critic→judge→repair loop. That is the right machinery for a tangled change —
-// and overkill for a handful of concrete, already-grounded fixes.
+// (goal_normalization → … → critic → judge → implementation_dag), which exists to
+// reason about DESIGN correctness for complex/coupled changes. That is the right
+// machinery for a tangled change — and overkill for a handful of concrete, already-
+// grounded fixes.
 //
-// This module is the gate that decides when a run may skip that loop, plus the
-// builder for the lean `extracted-plan.json` the fast path emits. The gate is
-// deliberately CONSERVATIVE: it fast-paths ONLY when every simplicity signal
-// holds, and defaults to the full pipeline on any doubt. That asymmetry is how
-// the "a subtle change must not skip the safety net" requirement is enforced —
-// a mis-classified complex change costs extra pipeline work, never a skipped
-// design review.
+// The decision of WHEN to skip that loop is NOT made here anymore: it is the
+// self-scaling risk dial. A run takes the lean path IFF its effective risk tier is
+// `low` (`src/remediate/riskSignal.ts` — the intake path/breadth/intent signal folded
+// with the finding-level `findingRiskEvidence`). This module owns only the low tier's
+// two mechanisms: the light adversarial review floor (`interpretLeanLightReviewVerdict`
+// — `adversarialDepthForTier("low") === "light"`) and the lean `extracted-plan.json`
+// builder. Folding the old standalone `evaluateFastPath` boolean into the tier killed a
+// second classifier that could DISAGREE with the risk signal (a grounded 5-finding batch
+// touching `src/shared/quota` was "fast-path eligible" AND risk-tier `high`, and bypassed
+// the pipeline anyway).
 //
-// What the fast path KEEPS (the retained safety net): the produced plan rejoins
-// the normal plan→implement→close machinery — deterministic grounding re-pass,
-// applyPlanPipeline's block derivation + affected-file hash snapshot (integrity
-// check), the implement-phase per-node verify-before-merge, and the tool-owned
-// final whole-repo gate. A fast-pathed fix that breaks something fails its
-// verify and routes to triage; it never silently lands.
+// What the lean path KEEPS (the retained safety net): the produced plan rejoins the
+// normal plan→implement→close machinery — deterministic grounding re-pass,
+// applyPlanPipeline's block derivation + affected-file hash snapshot (integrity check),
+// the implement-phase per-node verify-before-merge, and the tool-owned final whole-repo
+// gate. A lean-pathed fix that breaks something fails its verify and routes to triage; it
+// never silently lands. What it DROPS: only the adversarial contract DESIGN loop +
+// obligation derivation — the work that earns its cost on the coupled/systemic changes the
+// tier has already routed away.
 //
-// What it DROPS: only the adversarial contract design loop + obligation
-// derivation — precisely the work that earns its cost on coupled/systemic
-// changes the gate has already excluded.
-//
-// Pure + deterministic: no IO, no clock, no randomness. The caller supplies the
-// plan id so this stays trivially unit-testable.
+// Pure + deterministic: no IO, no clock, no randomness. The caller supplies the plan id
+// so this stays trivially unit-testable.
 
 import type { Finding } from "audit-tools/shared";
-import { findingIsGrounded, isRecord } from "audit-tools/shared";
-
-/**
- * Max approved findings the lean path will take — "a handful". Above this, the
- * coordination risk of a batch warrants the full pipeline.
- */
-export const MAX_FAST_PATH_FINDINGS = 5;
-
-/**
- * Max DISTINCT affected files across the approved set. A small footprint is the
- * primary structural proxy for "no broad cross-module ripple": a shared-contract
- * change that fans out to its consumers touches many files and trips this cap,
- * routing to the pipeline where seam reconciliation belongs.
- */
-export const MAX_FAST_PATH_FILES = 5;
+import { isRecord } from "audit-tools/shared";
 
 /** Source tag stamped on a lean-fast-path extracted plan (distinguishes it from `contract_pipeline`). */
 export const LEAN_FAST_PATH_SOURCE = "lean_fast_path";
-
-export interface FastPathDecision {
-  /** True only when EVERY simplicity signal holds. */
-  eligible: boolean;
-  /** Human-readable reason the gate fired or declined (logged for observability). */
-  reason: string;
-}
-
-/** Distinct affected-file paths across an approved finding set. */
-export function distinctAffectedFiles(findings: Finding[]): string[] {
-  const paths = new Set<string>();
-  for (const finding of findings) {
-    for (const location of finding.affected_files ?? []) {
-      if (location?.path) {
-        paths.add(location.path);
-      }
-    }
-  }
-  return [...paths];
-}
-
-/**
- * Decide whether an APPROVED, post-filter structured-audit finding set is simple
- * enough for the lean fast path. The caller guarantees the source is structured
- * (this never runs on free-form/document/conversation intake) and that every
- * finding already cleared the review-approval gate + the pre-planning filter
- * (evidence-bearing, deduped, non-phantom-path, checkpoint-kept).
- *
- * Every check is a conservative AND: any failing signal returns ineligible with
- * the reason, so the run takes the full pipeline.
- */
-export function evaluateFastPath(findings: Finding[]): FastPathDecision {
-  if (findings.length === 0) {
-    return { eligible: false, reason: "no approved findings to fast-path" };
-  }
-  if (findings.length > MAX_FAST_PATH_FINDINGS) {
-    return {
-      eligible: false,
-      reason: `${findings.length} findings exceeds the ${MAX_FAST_PATH_FINDINGS}-finding fast-path cap`,
-    };
-  }
-
-  const files = distinctAffectedFiles(findings);
-  if (files.length > MAX_FAST_PATH_FILES) {
-    return {
-      eligible: false,
-      reason: `${files.length} affected files exceeds the ${MAX_FAST_PATH_FILES}-file fast-path cap`,
-    };
-  }
-
-  // Grounding: require the auditor's strong S7 verdict (cited span re-verified
-  // against disk, or an executable anchor confirmed the behavior). This is the
-  // protection that REPLACES the adversarial loop — a fast-pathed finding is
-  // never one the auditor couldn't positively ground.
-  const ungrounded = findings.filter((finding) => !findingIsGrounded(finding));
-  if (ungrounded.length > 0) {
-    return {
-      eligible: false,
-      reason: `not positively grounded: ${ungrounded.map((f) => f.id).join(", ")}`,
-    };
-  }
-
-  // High confidence: a medium/low-confidence finding carries doubt the
-  // adversarial loop exists to resolve. (Note: an ungrounded finding is already
-  // downgraded to low confidence upstream, so this is defense in depth.)
-  const belowHigh = findings.filter((finding) => finding.confidence !== "high");
-  if (belowHigh.length > 0) {
-    return {
-      eligible: false,
-      reason: `below high confidence: ${belowHigh.map((f) => f.id).join(", ")}`,
-    };
-  }
-
-  // No cross-cutting / seam signal. These are the auditor's own markers that a
-  // finding is architecture-level or coupled to others; the small-footprint cap
-  // above is the backstop for a finding the auditor failed to mark.
-  const systemic = findings.filter((finding) => finding.systemic === true);
-  if (systemic.length > 0) {
-    return {
-      eligible: false,
-      reason: `systemic / cross-cutting: ${systemic.map((f) => f.id).join(", ")}`,
-    };
-  }
-  const coupled = findings.filter(
-    (finding) => (finding.related_findings?.length ?? 0) > 0,
-  );
-  if (coupled.length > 0) {
-    return {
-      eligible: false,
-      reason: `coupled to related findings (seam risk): ${coupled.map((f) => f.id).join(", ")}`,
-    };
-  }
-  const architectural = findings.filter((finding) => finding.lens === "architecture");
-  if (architectural.length > 0) {
-    return {
-      eligible: false,
-      reason: `architecture-lens (design-level): ${architectural.map((f) => f.id).join(", ")}`,
-    };
-  }
-
-  return {
-    eligible: true,
-    reason: `${findings.length} grounded high-confidence finding(s) across ${files.length} file(s); none systemic, coupled, or architecture-lens`,
-  };
-}
 
 // ── T1 slice 3b — lean-path light adversarial review ────────────────────────────
 //

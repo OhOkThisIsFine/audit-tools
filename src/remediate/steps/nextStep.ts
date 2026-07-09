@@ -62,9 +62,7 @@ import {
   writePathASeedFromFindings,
 } from "./contractPipeline.js";
 import {
-  evaluateFastPath,
   buildLeanExtractedPlan,
-  distinctAffectedFiles,
   interpretLeanLightReviewVerdict,
   LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
   type LeanLightReviewDisposition,
@@ -93,6 +91,8 @@ import {
   readIntakeRiskSignal,
   writeIntakeRiskSignal,
   escalateRiskSignal,
+  findingRiskEvidence,
+  distinctAffectedFiles,
 } from "../riskSignal.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import {
@@ -2893,21 +2893,37 @@ async function handleReadyIntakeContractPipeline(
         // Persist the filter dispositions so coverage is built over the originals.
         await persistReviewFilterDispositions(artifactsDir, originals, filter);
 
-        // A1 — conservative lean fast path. When the approved set is a handful
-        // of grounded, high-confidence, localized, non-cross-cutting findings,
-        // the run skips the heavy contract DESIGN loop and synthesizes the
-        // extracted plan directly; the plan→implement→close machinery (per-node
-        // verify-before-merge + the final whole-repo gate) is the retained safety
-        // net. Runs only here — on Path A (structured_audit), the only intake
-        // with a pre-existing finding set to judge.
+        // Lean path = the `low` risk tier's realization (D-68 — leanFastPath folded
+        // into the self-scaling dial). A run skips the heavy contract DESIGN loop and
+        // synthesizes the extracted plan directly IFF its effective risk tier is `low`;
+        // the plan→implement→close machinery (per-node verify-before-merge + the final
+        // whole-repo gate) is the retained safety net. Runs only here — on Path A
+        // (structured_audit), the only intake with a pre-existing finding set to judge.
         //
-        // T1 slice 3b — the fast path is NOT zero-scrutiny: an eligible run first
-        // runs a bounded LIGHT adversarial review over the approved findings (the
-        // floor, never off). A clear verdict proceeds to the lean plan; a verdict
-        // that surfaces a real concern escalates the risk signal (evidence the
-        // work is harder than assessed) and routes to the full pipeline below.
-        const fast = evaluateFastPath(gate.approved);
-        if (fast.eligible) {
+        // First fold the APPROVED set's finding-level risk (grounding / confidence /
+        // coupling / systemic / architecture / count — the finding-QUALITY dimension the
+        // intake path/breadth/intent signal doesn't see) INTO the shared risk signal as
+        // escalate-on-evidence. This makes the tier the SINGLE classifier: there is no
+        // separate fast-path boolean that can DISAGREE with it (a grounded handful
+        // touching a risk subsystem stays `high` and takes the full pipeline, instead of
+        // bypassing it as the old parallel `evaluateFastPath` allowed).
+        const findingEvidence = findingRiskEvidence(gate.approved);
+        let riskSignal = await readIntakeRiskSignal(artifactsDir);
+        if (findingEvidence && riskSignal) {
+          const raised = escalateRiskSignal(riskSignal, findingEvidence);
+          // escalateRiskSignal returns the SAME reference when the evidence does not
+          // raise the tier — only persist on an actual change (no byte-identical rewrite).
+          if (raised !== riskSignal) {
+            riskSignal = raised;
+            await writeIntakeRiskSignal(artifactsDir, riskSignal);
+          }
+        }
+        // T1 slice 3b — the lean tier is NOT zero-scrutiny: a `low`-tier run first runs
+        // a bounded LIGHT adversarial review over the approved findings (the floor,
+        // never off — `adversarialDepthForTier("low") === "light"`). A clear verdict
+        // proceeds to the lean plan; a verdict that surfaces a real concern escalates
+        // the risk signal and routes to the full pipeline below.
+        if (gate.approved.length > 0 && riskSignal?.tier === "low") {
           const review = await runLeanLightReviewGate(
             root,
             artifactsDir,
@@ -2920,16 +2936,13 @@ async function handleReadyIntakeContractPipeline(
             // Escalate-on-evidence: raise the signal to at least `medium` so the
             // full pipeline's adversarial depth is `full` (see slice 3a), then
             // fall through to the full pipeline.
-            const current = await readIntakeRiskSignal(artifactsDir);
-            if (current) {
-              await writeIntakeRiskSignal(
-                artifactsDir,
-                escalateRiskSignal(current, {
-                  tier: "medium",
-                  reason: `lean light review surfaced a concern: ${review.concerns.join("; ")}`,
-                }),
-              );
-            }
+            await writeIntakeRiskSignal(
+              artifactsDir,
+              escalateRiskSignal(riskSignal, {
+                tier: "medium",
+                reason: `lean light review surfaced a concern: ${review.concerns.join("; ")}`,
+              }),
+            );
             process.stderr.write(
               `[remediate-code] Lean light review escalated (${review.concerns.join("; ")}); routing to the full contract pipeline.\n`,
             );
@@ -2944,7 +2957,7 @@ async function handleReadyIntakeContractPipeline(
               leanPlan,
             );
             process.stderr.write(
-              `[remediate-code] Lean fast path: ${fast.reason}; light review clear. Routing to plan→implement.\n`,
+              `[remediate-code] Lean fast path (risk tier low): ${riskSignal.rationale.join("; ")}; light review clear. Routing to plan→implement.\n`,
             );
             const planned = await handlePendingExtractedPlan(
               root,

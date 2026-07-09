@@ -1,0 +1,17 @@
+{
+  "schema_version": "audit-code-findings/v1alpha1",
+  "findings": [
+    {
+      "id": "RS-001",
+      "title": "Grounded, high-confidence fix in a risk subsystem",
+      "category": "correctness",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "correctness",
+      "summary": "A concrete, grounded fix — but it lives in the quota substrate.",
+      "affected_files": [{ "path": "src/shared/quota/reservationLedger.ts" }],
+      "evidence": ["src/shared/quota/reservationLedger.ts:1 cited evidence"],
+      "grounding": { "status": "grounded" }
+    }
+  ]
+}

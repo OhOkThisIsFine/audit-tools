@@ -368,12 +368,22 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   claim to admission-math and point here for the unification. [[multi-ide-concurrent-runs-design]] /
   [[dispatch-admission-control-design]]
 
-- **Collapse `leanFastPath` into the Dial A/B continuum as its lowest-risk tier (doc-review D-68,
-  2026-07-08).** `leanFastPath.ts` remains a structurally-forked eligible/ineligible gate (now with a
-  mandatory light-review floor, `interpretLeanLightReviewVerdict`), not a point on the self-scaling dial —
-  which cuts against A6 ("self-scaling pipeline, not forked paths", [[self-scaling-pipeline-not-forked-paths]]).
-  Target end-state: fold it into the dial as the lowest-risk tier rather than keep separate code. Design of
-  record [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md).
+- **Collapse `leanFastPath` into the Dial A/B continuum as its lowest-risk tier (doc-review D-68) — SHIPPED
+  2026-07-09.** The standalone `evaluateFastPath` boolean gate — a SECOND classifier that could DISAGREE with
+  the intake risk tier (a grounded ≤5-finding batch touching `src/shared/quota` was "fast-path eligible" AND
+  risk-tier `high`, and bypassed the pipeline anyway) — is deleted. Its finding-level simplicity signals now
+  fold INTO the tier as escalate-on-evidence (`findingRiskEvidence` in `src/remediate/riskSignal.ts`: systemic /
+  architecture-lens → high; ungrounded / below-high-confidence / coupled / >5 findings / >5 files → medium),
+  and the lean path is taken IFF the effective tier is `low`. One classifier; the lean path is the `low` tier's
+  realization (its light-review floor = `adversarialDepthForTier("low") === "light"`). New-lean ⊆ old-eligible
+  (adversarially confirmed strictly safer — the unsafe direction is closed; a risk-subsystem grounded set now
+  routes to the full pipeline). **Two intended consequences (accepted, both fail-safe):** (1) finding-evidence
+  now persists into the tier, so a finding-quality-ineligible set gets `full`/`fine` downstream dials, not just
+  full-pipeline routing (correct — more findings = more coordination risk); (2) the lean gate reads the intake
+  tier computed over ALL original findings (escalate-only, never lowered), so a declined risky finding can deny
+  the lean path to a clean approved handful — over-restrictive but fail-safe, and fixing it would violate
+  escalate-only or re-diverge routing from the run tier. Design of record
+  [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md). [[self-scaling-pipeline-not-forked-paths]]
 
 - **Move the per-lap cadence rules (risk-tier + friction-walk) from host-habit to tool-enforcement
   (doc-review D-69, 2026-07-08).** "Risk-tier every lap" and "Full friction walk every lap" are both

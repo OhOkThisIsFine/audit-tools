@@ -22,7 +22,8 @@
  *     re-assessment may only RAISE the tier, never lower it.
  */
 
-import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import type { Finding } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, findingIsGrounded } from "audit-tools/shared";
 import { intakePaths } from "./intake.js";
 
 export const INTAKE_RISK_SIGNAL_SCHEMA_VERSION =
@@ -349,6 +350,106 @@ export function decompositionRiskEvidence(
       tier: "medium",
       reason: `decomposition produced ${input.moduleCount} modules — cross-module seams to isolate`,
     };
+  }
+  return undefined;
+}
+
+// ── Finding-level risk (the low-tier / lean-path eligibility, folded into the dial) ──
+//
+// The lean fast path is NOT a second, parallel classifier that can DISAGREE with the
+// risk tier (a grounded 5-finding batch touching `src/shared/quota` used to be
+// "fast-path eligible" AND risk-tier `high` — and bypassed the pipeline anyway). It is
+// now the `low` tier's realization: the finding-level simplicity signals below fold
+// INTO the tier as escalate-on-evidence, so a run takes the lean path IFF the effective
+// tier is `low`. These are the finding-QUALITY / coupling signals the path/breadth/intent
+// intake signal doesn't see; a failing signal raises the tier so the change routes to the
+// full contract pipeline. Fail-closed like every other risk input.
+
+/**
+ * Max findings a `low`-tier (lean) run will take — "a handful". Above this, the
+ * coordination risk of the batch warrants at least `medium` (the full pipeline).
+ */
+export const MAX_FAST_PATH_FINDINGS = 5;
+
+/**
+ * Max DISTINCT affected files across the approved set for a `low`-tier run. A small
+ * footprint is the primary structural proxy for "no broad cross-module ripple".
+ * (Aligned with the intake breadth threshold `DEFAULT_MEDIUM_FILE_COUNT = 6`, so >5
+ * files is `medium` by both the intake signal and this finding-level check.)
+ */
+export const MAX_FAST_PATH_FILES = 5;
+
+/** Distinct affected-file paths across a finding set. */
+export function distinctAffectedFiles(findings: Finding[]): string[] {
+  const paths = new Set<string>();
+  for (const finding of findings) {
+    for (const location of finding.affected_files ?? []) {
+      if (location?.path) {
+        paths.add(location.path);
+      }
+    }
+  }
+  return [...paths];
+}
+
+/**
+ * Derive escalate-on-evidence from the APPROVED finding set's finding-level quality /
+ * coupling signals — the dimension the intake path/breadth/intent signal does not
+ * capture. Any signal that carries design-level doubt raises the tier so the run leaves
+ * the `low` (lean) tier for the full contract pipeline:
+ *   - a `systemic` finding, or an `architecture`-lens finding ⇒ `high` (design-level);
+ *   - an ungrounded finding, a below-high-confidence finding, a finding coupled to
+ *     related findings (seam risk), more than {@link MAX_FAST_PATH_FINDINGS} findings,
+ *     or more than {@link MAX_FAST_PATH_FILES} distinct affected files ⇒ `medium`.
+ * Returns undefined when the set is a clean handful of grounded, high-confidence,
+ * localized, non-coupled fixes (the tier stays `low` ⇒ lean). Pure + deterministic;
+ * the {@link escalateRiskSignal} combinator enforces raise-only. Mirrors
+ * {@link decompositionRiskEvidence}'s shape — evidence, never a direct tier write.
+ */
+export function findingRiskEvidence(
+  findings: Finding[],
+): RiskEscalationEvidence | undefined {
+  const highReasons: string[] = [];
+  const mediumReasons: string[] = [];
+
+  const systemic = findings.filter((f) => f.systemic === true);
+  if (systemic.length > 0) {
+    highReasons.push(`systemic / cross-cutting: ${systemic.map((f) => f.id).join(", ")}`);
+  }
+  const architectural = findings.filter((f) => f.lens === "architecture");
+  if (architectural.length > 0) {
+    highReasons.push(`architecture-lens (design-level): ${architectural.map((f) => f.id).join(", ")}`);
+  }
+
+  if (findings.length > MAX_FAST_PATH_FINDINGS) {
+    mediumReasons.push(
+      `${findings.length} findings exceeds the ${MAX_FAST_PATH_FINDINGS}-finding low-tier cap`,
+    );
+  }
+  const fileCount = distinctAffectedFiles(findings).length;
+  if (fileCount > MAX_FAST_PATH_FILES) {
+    mediumReasons.push(
+      `${fileCount} affected files exceeds the ${MAX_FAST_PATH_FILES}-file low-tier cap`,
+    );
+  }
+  const ungrounded = findings.filter((f) => !findingIsGrounded(f));
+  if (ungrounded.length > 0) {
+    mediumReasons.push(`not positively grounded: ${ungrounded.map((f) => f.id).join(", ")}`);
+  }
+  const belowHigh = findings.filter((f) => f.confidence !== "high");
+  if (belowHigh.length > 0) {
+    mediumReasons.push(`below high confidence: ${belowHigh.map((f) => f.id).join(", ")}`);
+  }
+  const coupled = findings.filter((f) => (f.related_findings?.length ?? 0) > 0);
+  if (coupled.length > 0) {
+    mediumReasons.push(`coupled to related findings (seam risk): ${coupled.map((f) => f.id).join(", ")}`);
+  }
+
+  if (highReasons.length > 0) {
+    return { tier: "high", reason: highReasons.join("; ") };
+  }
+  if (mediumReasons.length > 0) {
+    return { tier: "medium", reason: mediumReasons.join("; ") };
   }
   return undefined;
 }
