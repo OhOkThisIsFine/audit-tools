@@ -338,6 +338,19 @@ export {
   resolveContextBudget,
 } from "./tokens.js";
 
+// Generic reducers: single-sourced "count items by key" (4 prior
+// reimplementations across audit synthesis, the shared deliverable renderer,
+// remediate's outcomes close-out, and remediate's findings digest).
+export { countBy } from "./countBy.js";
+
+// Generic greedy token/size-budget chunker (3 prior reimplementations across
+// audit's review-packet chunker, audit's per-task-block file chunker, and
+// remediate's per-overlap-group finding chunker). ChunkByBudgetOptions is
+// deliberately NOT re-exported here: no call site needs to name the options
+// type explicitly (each just passes an object literal), so barrel-exporting it
+// would be an unconsumed export under the knip dead-code gate.
+export { chunkByBudget } from "./chunkByBudget.js";
+
 // Concurrency: bounded, order-preserving parallel map
 export { mapWithConcurrency } from "./concurrency.js";
 
@@ -357,6 +370,17 @@ export {
   findingIdentityFields,
   findingIdentityKey,
 } from "./findingIdentitySignature.js";
+
+// Finding similarity: the fuzzy (Jaccard title / file-overlap) tier consulted
+// when the exact-match identity signature above does not already collapse two
+// findings. Single source for the auditor's same-lens/cross-lens merge passes
+// and the remediator's cross-lens dedup — both previously carried
+// byte-identical private copies of these four helpers.
+export {
+  wordJaccard,
+  filePathOverlap,
+  primaryPath,
+} from "./findingSimilarity.js";
 
 // Content hashing: shared SHA-256 primitive (single source; explicit length)
 export type { HashContentOptions } from "./hash.js";

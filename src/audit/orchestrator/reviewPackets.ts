@@ -5,7 +5,7 @@ import type {
   ReviewPacket,
 } from "../types/reviewPlanning.js";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { continuityMassForPaths } from "audit-tools/shared";
+import { continuityMassForPaths, chunkByBudget } from "audit-tools/shared";
 import { LENS_ORDER, priorityRank, sortLenses } from "./auditTaskUtils.js";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 import {
@@ -206,64 +206,46 @@ export function orderReviewPackets(
   );
 }
 
+/**
+ * Thin adapter over the shared {@link chunkByBudget} greedy chunker (extracted
+ * alongside chunkByTaskBudget in taskBuilder.ts and splitOversizedOverlapGroup
+ * in remediate's plan.ts — three previously byte-identical loop shapes). The
+ * isolated-large-file fast path and the verbose diagnostics are reproduced via
+ * `isolateAlone`/`onIsolate`/`onBeforeFlush` so behavior — including the
+ * exact stderr wording — is unchanged.
+ */
 function chunkPacketTasks(
   tasks: AuditTask[],
   options: Required<Pick<BuildReviewPacketOptions, "maxTasksPerPacket" | "targetPacketTokens">> &
     Pick<BuildReviewPacketOptions, "lineIndex" | "sizeIndex">,
 ): AuditTask[][] {
-  const chunks: AuditTask[][] = [];
-  let current: AuditTask[] = [];
   const verbose = Boolean(process.env.AUDIT_CODE_VERBOSE);
+  const sortedTasks = tasks.sort(compareTasksForPacket);
 
-  for (const task of tasks.sort(compareTasksForPacket)) {
-    const taskEstimatedTokens = taskContentTokens(task, options.sizeIndex, options.lineIndex);
-    const isolatedLargeFileTask =
+  return chunkByBudget(sortedTasks, {
+    budget: options.targetPacketTokens,
+    maxItems: options.maxTasksPerPacket,
+    costOf: (candidate) => {
+      const uniquePaths = new Set(candidate.flatMap((item) => item.file_paths));
+      return fileGroupContentTokens(uniquePaths, candidate, options.sizeIndex, options.lineIndex);
+    },
+    isolateAlone: (task) =>
       task.file_paths.length === 1 &&
-      taskEstimatedTokens > options.targetPacketTokens;
-    if (isolatedLargeFileTask) {
-      if (current.length > 0) {
-        chunks.push(current);
-        current = [];
-      }
-      if (verbose) {
-        process.stderr.write(
-          `[audit-code:packet-planning] isolated large-file chunk: task="${task.task_id}" file="${task.file_paths[0]}" estimatedTokens=${taskEstimatedTokens} targetPacketTokens=${options.targetPacketTokens}\n`,
-        );
-      }
-      chunks.push([task]);
-      continue;
-    }
-
-    const candidate = [...current, task];
-    const uniquePaths = new Set(candidate.flatMap((item) => item.file_paths));
-    const candidateContentTokens = fileGroupContentTokens(
-      uniquePaths,
-      candidate,
-      options.sizeIndex,
-      options.lineIndex,
-    );
-    const wouldExceedTaskCount =
-      options.maxTasksPerPacket > 0 && current.length > 0 && candidate.length > options.maxTasksPerPacket;
-    const wouldExceedTokens =
-      current.length > 0 && candidateContentTokens > options.targetPacketTokens;
-
-    if (wouldExceedTaskCount || wouldExceedTokens) {
-      if (verbose && wouldExceedTokens) {
-        process.stderr.write(
-          `[audit-code:packet-planning] token-budget split: task="${task.task_id}" file="${task.file_paths[0] ?? ""}" candidateContentTokens=${candidateContentTokens} targetPacketTokens=${options.targetPacketTokens}\n`,
-        );
-      }
-      chunks.push(current);
-      current = [];
-    }
-
-    current.push(task);
-  }
-
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-  return chunks;
+      taskContentTokens(task, options.sizeIndex, options.lineIndex) > options.targetPacketTokens,
+    onIsolate: (task) => {
+      if (!verbose) return;
+      const taskEstimatedTokens = taskContentTokens(task, options.sizeIndex, options.lineIndex);
+      process.stderr.write(
+        `[audit-code:packet-planning] isolated large-file chunk: task="${task.task_id}" file="${task.file_paths[0]}" estimatedTokens=${taskEstimatedTokens} targetPacketTokens=${options.targetPacketTokens}\n`,
+      );
+    },
+    onBeforeFlush: ({ item, wouldExceedBudget, candidateCost }) => {
+      if (!verbose || !wouldExceedBudget) return;
+      process.stderr.write(
+        `[audit-code:packet-planning] token-budget split: task="${item.task_id}" file="${item.file_paths[0] ?? ""}" candidateContentTokens=${candidateCost} targetPacketTokens=${options.targetPacketTokens}\n`,
+      );
+    },
+  });
 }
 
 function directoryOfPath(filePath: string): string {

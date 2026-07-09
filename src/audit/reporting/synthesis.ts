@@ -20,6 +20,7 @@ import {
   AUDITOR_REPORT_MARKER,
   renderProcessFeedbackSection,
   renderFindingBlockLines,
+  countBy,
   type AgentReflection,
 } from "audit-tools/shared";
 import type {
@@ -95,21 +96,6 @@ export interface AuditReportModel {
   work_blocks: WorkBlock[];
   /** Tool-REFUTED findings (S7 tier-2 disproof) excluded from the admitted set. */
   quarantined_findings?: Finding[];
-}
-
-function countBy<T>(
-  items: Iterable<T>,
-  selectKey: (item: T) => string | undefined,
-): Record<string, number> {
-  const breakdown: Record<string, number> = {};
-  for (const item of items) {
-    const key = selectKey(item);
-    if (!key) {
-      continue;
-    }
-    breakdown[key] = (breakdown[key] ?? 0) + 1;
-  }
-  return breakdown;
 }
 
 function severityBreakdown(findings: Finding[]): Record<string, number> {

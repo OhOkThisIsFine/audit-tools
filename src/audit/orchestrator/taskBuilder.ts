@@ -5,6 +5,7 @@ import type {
   Lens,
 } from "../types.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
+import { chunkByBudget } from "audit-tools/shared";
 import { claimFlowReviewBlocks } from "./flowPlanning.js";
 import { isTrivialAuditPath } from "./trivialAudit.js";
 import { LENS_ORDER, priorityRank } from "./auditTaskUtils.js";
@@ -98,9 +99,12 @@ interface TaskBudgetLimits {
 }
 
 // Split a flat list of file paths into review-task-sized chunks, bounded by both
-// an aggregate line budget and a max file count. Hoisted out of
-// `buildChunkedAuditTasks` so it no longer closes over the loop's locals; the
-// line index and limits are passed in explicitly.
+// an aggregate line budget and a max file count. Thin adapter over the shared
+// `chunkByBudget` greedy chunker (extracted alongside chunkPacketTasks in
+// reviewPackets.ts and splitOversizedOverlapGroup in remediate's plan.ts —
+// three previously byte-identical loop shapes); the two trivial-bypass
+// shortcuts (empty input, both budgets disabled) are kept as-is since they are
+// cheap and avoid ever invoking the generic loop for the common unbounded case.
 function chunkByTaskBudget(
   filePaths: string[],
   unitLineIndex: UnitLineIndex,
@@ -114,32 +118,12 @@ function chunkByTaskBudget(
     return [filePaths];
   }
 
-  const chunks: string[][] = [];
-  let current: string[] = [];
-  let currentLines = 0;
-
-  for (const path of filePaths) {
-    const lineCount = unitLineIndex[path] ?? 0;
-    const wouldExceedFiles = maxTaskFiles > 0 && current.length >= maxTaskFiles;
-    const wouldExceedLines =
-      maxTaskLines > 0 &&
-      current.length > 0 &&
-      currentLines + lineCount > maxTaskLines;
-
-    if (wouldExceedFiles || wouldExceedLines) {
-      chunks.push(current);
-      current = [];
-      currentLines = 0;
-    }
-
-    current.push(path);
-    currentLines += lineCount;
-  }
-
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-  return chunks;
+  return chunkByBudget(filePaths, {
+    budget: maxTaskLines > 0 ? maxTaskLines : Number.POSITIVE_INFINITY,
+    maxItems: maxTaskFiles > 0 ? maxTaskFiles : undefined,
+    costOf: (candidate) =>
+      candidate.reduce((sum, path) => sum + (unitLineIndex[path] ?? 0), 0),
+  });
 }
 
 // Emit one or more audit tasks for a scope/lens. Normal-sized files are grouped

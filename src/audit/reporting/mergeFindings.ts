@@ -6,45 +6,10 @@ import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import { severityRank, confidenceRank } from "./findingRanks.js";
+import { wordJaccard, filePathOverlap, primaryPath } from "audit-tools/shared";
 
 function normalizeText(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
-}
-
-function wordSet(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter(Boolean),
-  );
-}
-
-function wordJaccard(a: string, b: string): number {
-  const sa = wordSet(a);
-  const sb = wordSet(b);
-  let intersection = 0;
-  for (const w of sa) {
-    if (sb.has(w)) intersection++;
-  }
-  const union = sa.size + sb.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function filePathOverlap(a: Finding, b: Finding): number {
-  const setA = new Set(a.affected_files.map((f) => f.path));
-  const setB = new Set(b.affected_files.map((f) => f.path));
-  let intersection = 0;
-  for (const path of setA) {
-    if (setB.has(path)) intersection++;
-  }
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function primaryPath(finding: Finding): string {
-  return finding.affected_files[0]?.path ?? "";
 }
 
 /**

@@ -17,20 +17,27 @@ import type {
 } from "../types/finding.js";
 import { AUDIT_FINDINGS_CONTRACT_VERSION } from "../validation/findingsReport.js";
 import { renderFindingBlockLines } from "./findingDisplay.js";
+import { countBy } from "../countBy.js";
 
 const SEVERITY_KEYS: FindingSeverity[] = ["critical", "high", "medium", "low", "info"];
 
+/**
+ * Every severity key is present (zero-filled) even when no finding carries
+ * it — unlike the plain `countBy` result, which only has keys for severities
+ * that actually occur. Insertion order is SEVERITY_KEYS' order: spreading
+ * `counts` over the zero-filled base only overwrites existing keys' values,
+ * it never reorders or appends (severity is a closed enum, so `counts` can
+ * never introduce a key absent from SEVERITY_KEYS).
+ */
 function severityBreakdown(findings: readonly Finding[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const key of SEVERITY_KEYS) out[key] = 0;
-  for (const f of findings) out[f.severity] = (out[f.severity] ?? 0) + 1;
-  return out;
+  const zeroed: Record<string, number> = {};
+  for (const key of SEVERITY_KEYS) zeroed[key] = 0;
+  const counts = countBy(findings, (f) => f.severity);
+  return { ...zeroed, ...counts };
 }
 
 function lensBreakdown(findings: readonly Finding[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const f of findings) out[f.lens] = (out[f.lens] ?? 0) + 1;
-  return out;
+  return countBy(findings, (f) => f.lens);
 }
 
 /**

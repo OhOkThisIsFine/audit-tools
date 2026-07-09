@@ -33,6 +33,7 @@ import {
   estimateTokensFromBytes,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
+  chunkByBudget,
   type SessionConfig,
 } from "audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -470,6 +471,11 @@ export function estimateGroupTokens(
   );
 }
 
+// Thin adapter over the shared `chunkByBudget` greedy chunker (extracted
+// alongside chunkPacketTasks in audit's reviewPackets.ts and chunkByTaskBudget
+// in audit's taskBuilder.ts — three previously byte-identical loop shapes).
+// The already-fits/singleton bypass is kept as a call-site guard since it
+// returns the group unsplit rather than delegating to the generic loop.
 function splitOversizedOverlapGroup(
   group: string[],
   findings: Finding[],
@@ -484,22 +490,10 @@ function splitOversizedOverlapGroup(
     return [group];
   }
 
-  const chunks: string[][] = [];
-  let current: string[] = [];
-  for (const findingId of group) {
-    const candidate = [...current, findingId];
-    if (
-      current.length > 0 &&
-      estimateGroupTokens(candidate, findings, fileByteCounts, root) > contextBudget
-    ) {
-      chunks.push(current);
-      current = [findingId];
-    } else {
-      current = candidate;
-    }
-  }
-  if (current.length > 0) chunks.push(current);
-  return chunks;
+  return chunkByBudget(group, {
+    budget: contextBudget,
+    costOf: (candidate) => estimateGroupTokens(candidate, findings, fileByteCounts, root),
+  });
 }
 
 export function splitBlocksByContextBudget(

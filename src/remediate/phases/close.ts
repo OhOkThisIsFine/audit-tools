@@ -17,6 +17,7 @@ import {
   writeJsonFile,
   writeTextFile,
   RemediationOutcomeStatusSchema,
+  countBy,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -199,17 +200,40 @@ export function buildRemediationOutcomesReport(
   }
   outcomes.sort((a, b) => a.finding_id.localeCompare(b.finding_id));
 
-  const byOutcome = Object.fromEntries(
-    OUTCOME_KEYS.map((key) => [key, 0]),
-  ) as Record<RemediationOutcomeStatus, number>;
+  // Zero-filled so every outcome status appears even when unused (byOutcome),
+  // countBy(...) supplies the actual counts on top. Spreading the zero-filled
+  // base first, then counts, preserves OUTCOME_KEYS insertion order — spread
+  // only overwrites an existing key's value, never reorders or appends
+  // (outcome is a closed enum, so counts can't introduce an unseen key).
+  const byOutcome = {
+    ...(Object.fromEntries(OUTCOME_KEYS.map((key) => [key, 0])) as Record<
+      RemediationOutcomeStatus,
+      number
+    >),
+    ...countBy(outcomes, (entry) => entry.outcome),
+  } as Record<RemediationOutcomeStatus, number>;
+
+  // Group outcomes by lens (preserving first-appearance order), then countBy
+  // outcome status within each group — same per-lens/per-status counts and
+  // insertion order as the original single-pass nested reduce, since
+  // `by_lens` is only ever consumed key-sorted downstream (renderOutcomesSummary).
+  const lensGroups = new Map<string, typeof outcomes>();
+  for (const entry of outcomes) {
+    const group = lensGroups.get(entry.lens);
+    if (group) {
+      group.push(entry);
+    } else {
+      lensGroups.set(entry.lens, [entry]);
+    }
+  }
   const byLens: Record<
     string,
     Partial<Record<RemediationOutcomeStatus, number>>
   > = {};
-  for (const entry of outcomes) {
-    byOutcome[entry.outcome] += 1;
-    const lensBucket = (byLens[entry.lens] ??= {});
-    lensBucket[entry.outcome] = (lensBucket[entry.outcome] ?? 0) + 1;
+  for (const [lens, group] of lensGroups) {
+    byLens[lens] = countBy(group, (entry) => entry.outcome) as Partial<
+      Record<RemediationOutcomeStatus, number>
+    >;
   }
 
   const startedEntries = outcomes

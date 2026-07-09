@@ -9,6 +9,7 @@ import {
   writeJsonFile,
   isRecord,
   severityCompare,
+  countBy,
 } from "audit-tools/shared";
 
 export const INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION =
@@ -217,13 +218,16 @@ export function buildFindingsDigest(report: AuditFindingsReport): FindingsDigest
   const findings: Finding[] = report.findings ?? [];
   const workBlocks: WorkBlock[] = report.work_blocks ?? [];
 
-  const severity_counts: Record<string, number> = {};
-  const lens_counts: Record<string, number> = {};
+  const severity_counts = countBy(findings, (f) => f.severity);
+  const lens_counts = countBy(findings, (f) => f.lens);
+  // NOT converted to countBy: a finding with no affected_files yields pkg ===
+  // "" (split() of the "" fallback always returns a defined, empty first
+  // segment, so the `?? "(root)"` never actually fires) — countBy's
+  // skip-falsy-key contract would silently drop that bucket instead of
+  // counting it under "", changing this digest's output. Kept as a manual
+  // loop to preserve that exact (if likely unintended) original behavior.
   const package_counts: Record<string, number> = {};
-
   for (const f of findings) {
-    severity_counts[f.severity] = (severity_counts[f.severity] ?? 0) + 1;
-    lens_counts[f.lens] = (lens_counts[f.lens] ?? 0) + 1;
     const firstFile = f.affected_files?.[0]?.path ?? "";
     const pkg = firstFile.split(/[\\/]/)[0] ?? "(root)";
     package_counts[pkg] = (package_counts[pkg] ?? 0) + 1;

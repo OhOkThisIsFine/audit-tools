@@ -2,44 +2,15 @@ import {
   severityRank,
   confidenceRank,
   findingIdentityKey,
+  wordJaccard,
+  filePathOverlap,
+  primaryPath,
 } from "audit-tools/shared";
 import type { Finding, RemediationBlock } from "../state/types.js";
 
-function wordSet(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter(Boolean),
-  );
-}
-
-export function wordJaccard(a: string, b: string): number {
-  const sa = wordSet(a);
-  const sb = wordSet(b);
-  let intersection = 0;
-  for (const w of sa) {
-    if (sb.has(w)) intersection++;
-  }
-  const union = sa.size + sb.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function filePathOverlap(a: Finding, b: Finding): number {
-  const setA = new Set(a.affected_files.map((f) => f.path));
-  const setB = new Set(b.affected_files.map((f) => f.path));
-  let intersection = 0;
-  for (const path of setA) {
-    if (setB.has(path)) intersection++;
-  }
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function primaryPath(finding: Finding): string {
-  return finding.affected_files[0]?.path ?? "";
-}
+// Re-exported: tests/remediate/cross-lens-dedup.test.ts imports wordJaccard
+// directly from this module.
+export { wordJaccard };
 
 /**
  * The shared finding-identity signature of a finding, but only when it is
