@@ -69,6 +69,29 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   keep the join-site one). Verify with a call-graph pass before deleting; knip default-mode passes because
   its own tests consume it.
 
+- **Lap friction walk — D-66/67 slice-1 ownership-gate lap (2026-07-09, orchestrator+Haiku/Sonnet+NIM).**
+  Full pipeline: 3 parallel recon subagents → design doc → design-level adversarial review (NIM free pass +
+  independent Sonnet) → 2 parallel disjoint-boundary implementers → central gates → independent post-impl
+  adversarial review → repair rounds via transcript-resume → re-review APPROVE → attested commits.
+  - **(ambiguous-direction) Design-LEVEL adversarial review paid for itself before a line was written.**
+    The pre-implementation review pass found 2 CONFIRMED-BROKEN design decisions (tokens parked on the
+    per-round-rebuilt `active-dispatch.json`; A-8 hybrid never claiming) that post-impl review would have
+    surfaced as expensive rework. Post-impl review STILL found 2 more (staleness-blind partition, legacy-
+    session bricking) the authors' green suites missed — review depth scaling with delicacy, both layers
+    earning keep. Also recurred: the design's own probe choice (heartbeat) was wrong for audit's claim
+    lifecycle (absent-claim ≠ reclaim on the self-heal path) — caught by a REAL breaking test mid-impl;
+    a design doc is a point-in-time proposal even when adversarially reviewed same-day.
+  - **(tool-should-decide) Two tool fixes shipped in-lap instead of host workarounds.** (1) `llm read`'s
+    JSON-contract break → fixed upstream in llm-worker-tools (entry below) rather than "avoid diff
+    payloads". (2) The PreToolUse commit-gate fires on the whole Bash call BEFORE a chained
+    `attest && git commit` executes, so the attestation half hadn't run when the gate checked — minor
+    ergonomic trap, workaround = attest as its own call; a gate that could recognize the attest step in
+    the same chain would remove the trap (low value, noting only).
+  - **(inefficient-feeding) None material.** Recon/design-review/impl/post-review all via subagents
+    returning conclusions or delta reports; NIM took the design pass free; diff bodies never entered main
+    context (only stats + targeted greps + the follow-up fix's hunk view). One llm-read lane burned ~4
+    failed calls before being rerouted to subagents — now fixed at the tool layer.
+
 - **Lap friction walk — shared-logic remediation lap (2026-07-09).** Subagent-implemented 13-commit
   program (V1–V7 + dedup bundle + C1/C2): parallel disjoint-file implementers, central build+test+commit,
   independent adversarial review per loop-core/delicate commit, repair rounds on CONCERNS.
@@ -298,6 +321,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
+- **`llm read` JSON-contract break on review-framed diff payloads — FIXED upstream 2026-07-09; publish
+  pending operator WIP.** Reasoning models (nemotron-550b, deepseek-v4-pro) prefixed chain-of-thought
+  prose to the JSON on larger review-framed diffs → strict-parse crash. Fixed in `C:\Code\llm-worker-tools`
+  commits `01f703c` (response_format json_object + 4xx fallback; balanced-brace tolerant extraction;
+  stern-nudge retry) + `a8d13b3` (nudge retry gets its own fresh timeout window), live-verified against
+  real NIM; deployed globally from a clean-HEAD tarball. Open: npm publish of llm-worker-tools blocked
+  on the operator's own uncommitted WIP there (`bin/llm-worker-tools.mjs` + 4 more; preflight requires
+  clean tree) — operator call. Usage note: framing must map output into `llm read`'s
+  `{summary,findings[],open_questions[]}` schema; a shape-diverging framing now fails CLEANLY.
+
 ## Forward tracks
 
 - **Shared-logic dedup bundle — SHIPPED 2026-07-09 except one marginal item** (same 13-commit program as
@@ -469,8 +502,29 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
     real endpoint is reachable.
 
+- **D-66/67 SLICE-1 — merge-time ownership-gate on the long-lived claims (OD3 layer 2) — SHIPPED
+  2026-07-09.** Commits `86e47077` (remediate: heartbeat probe before the cherry-pick in
+  `acceptNodeWorktree` inside both locks; token threaded from all claiming call sites; contested-only
+  fail-closed guard with ungated legacy fallback; quarantine-ref no-clobber; sidecar merged-regression
+  guard) + `f2a4f91d` (audit: run-scoped `runs/<runId>/owner-tokens.json` token persistence; uniform
+  claiming incl. the A-8 hybrid override path; `partitionByOwnership` on new `listLiveClaims` with the
+  exported 20-min lease; owned-only claim clearing; merge-gate files added to `LOOP_CORE_PATTERNS`).
+  Full-pipeline lap: design-level adversarial review caught 2 CONFIRMED design defects pre-impl
+  (active-dispatch token clobber; hybrid tasks never claimed), post-impl review caught 2 CONFIRMED impl
+  defects (staleness-blind partition + wrong merge-side lease window; legacy claims-less sessions
+  bricked) — all fixed in repair rounds, re-review APPROVE.
+  - **Accepted residual:** the probe window is staleMs-wide, not instantaneous — worst case is a stale
+    LAND a beat before an imminent reclaim, never a double-land (base mutations stay serialized by the
+    per-node + base-branch locks). Slice-3 heartbeat machinery shrinks it if a real cooperative run
+    shows it matters.
+  - **Discovered asymmetry (slice-2 input):** remediate's `phase:main` mutex has OD3 layer-1 only
+    (`withClaimHeartbeat` wraps `advance()`, `nextStep.ts` ~4948), NO layer-2 re-check before persist —
+    unlike audit's `auditStep.ts:216-239` template. Not mechanically mirrorable (remediate's persists
+    are distributed inside `advance()`) → fold into the slice-2 pause/persist-shape design.
+
 - **Unify the full rolling-dispatch lifecycle shell across audit + remediate (doc-review D-66/D-67/C-7,
-  2026-07-08).** Today the genuinely-shared surface is the *admission decision* only
+  2026-07-08). Slice-1 SHIPPED (entry above); open = slice-2 shared pause reducer + slice-3 heartbeat.**
+  Today the genuinely-shared surface is the *admission decision* only
   (`computeDispatchAdmission`, single-sourced in `audit-tools/shared`). Two lifecycle shells around it are
   NOT shared: (a) the pause lifecycle — audit owns `waiting_for_provider`/`pausedState.ts`/`filterNewProviders`;
   remediate has its own separately-implemented `quota_paused` analogue; (b) OD3's heartbeat + merge-time

@@ -8,16 +8,13 @@
 
 ## Live state
 
-- **Current: ~v0.32.44 (backlog-clearance lap, shipping now).** Per-lap shipped detail is NOT narrated here
-  (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state + open-work
-  roadmap only. Authoritative version = `package.json`.
-- **This lap closed the remaining code-fixable backlog + two of four owner-picked design tracks.** Shipped
-  (detail in `git log` / [[loop-core-enforcement-layer]]): the per-node loop-core cross-file GUARD + shared
-  `LOOP_CORE_PATTERNS` + the pre-commit adversarial GATE (tree-bound attestation); **D-68** leanFastPath folded
-  into the risk dial (parallel `evaluateFastPath` classifier deleted); INV-WH scanner hermeticity fix; and a
-  PRE-EXISTING fail-open fix (the pre-commit gate's scratch index under `.git` failed open in every linked
-  worktree). **D-69** assessed — its substance is already shipped (friction 3-layer enforcement + D-68's
-  risk-tiering); residue is host-inherent / owner-deferred (see `docs/backlog.md`).
+- **Current: ~v0.32.46 (D-66/67 slice-1 lap, shipping now; v0.32.45 released prior).** Per-lap shipped
+  detail is NOT narrated here (changelog creep — see `git log` + project memory [[live-status]]); this
+  section is current-state + open-work roadmap only. Authoritative version = `package.json`.
+- **This lap shipped D-66/67 slice-1** (merge-time ownership-gate on long-lived claims, both
+  orchestrators — see the roadmap entry below) and fixed llm-worker-tools' `llm read` JSON-contract
+  break upstream (separate repo, pushed + globally redeployed; its npm publish waits on operator WIP —
+  `docs/backlog.md` → Open bugs).
 - **Standing state (all in `docs/backlog.md`):** context-efficiency access-memory track COMPLETE (items 1/2/3
   shipped); quota-arbitrage Phase-0 opencode-free CODE-COMPLETE (env-bound live validations remain);
   cost↔speed dial + dispatch admission-control shipped (env-bound / deeper residuals only); session-config
@@ -55,14 +52,19 @@
 
 ## Suggested ordering — everything open, sequenced
 
-**▶ IMMEDIATE NEXT — D-66/67 unify the rolling-dispatch lifecycle shell (FOCUSED-LAP track).** The last
-open design forward-track; the 2026-07-09 recon captured the design-of-record in `docs/backlog.md` +
-[[rolling-lifecycle-unify-full-unification-wrong]]. **Read it before building — it overturns the naive
-framing: full unification is the WRONG endpoint** (audit vs remediate pause semantics genuinely diverge).
-Bounded shareable core = a pause-state reducer with the terminal-policy branch injected + a merge-time
-ownership-gate on the long-lived claims; recommended slice-1 = the merge-time ownership-gate alone (no
-heartbeat machinery). It is the most delicate machinery in the repo (pause/claim/quota) — do NOT rush it;
-the owner's "redesign before scheduled autonomy" caution applies.
+**▶ IMMEDIATE NEXT — two small open bugs, then D-66/67 slice-2.** (1) `release-and-publish.mjs`
+transient-`gh api`-fault abort during the CI wait (retryable-poll fix, `docs/backlog.md` → Open bugs
+top entry); (2) `runPlanPhase` production-dead — verify with a call-graph pass, then delete + orphaned
+tests (same section). Both lean-tier mechanical.
+
+**D-66/67 slice-1 (merge-time ownership-gate) SHIPPED 2026-07-09** — commits `86e47077`+`f2a4f91d`,
+full-pipeline lap (design-level + post-impl adversarial reviews, 4 CONFIRMED defects caught+fixed
+pre-merge). Remaining on the track (FOCUSED-LAP, delicate): **slice-2 = shared pause-state reducer with
+per-orchestrator terminal-policy injection** (+ the newly-discovered `phase:main` layer-2 asymmetry as
+design input), **slice-3 = heartbeat on long claims** only if a real cooperative run shows the
+staleMs-wide probe window matters. Design-of-record + slice-1 residuals in `docs/backlog.md` →
+"Unify the full rolling-dispatch lifecycle shell" + the SHIPPED entry above it;
+[[rolling-lifecycle-unify-full-unification-wrong]] still governs: full unification is the WRONG endpoint.
 
 **2026-07-09 external-audit program: SHIPPED in full** — V1–V7 defects + the dedup bundle (Tier B ×13 +
 C1 obligation-engine adoption + C2 host-gate consolidation) landed as a 13-commit adversarially-reviewed
