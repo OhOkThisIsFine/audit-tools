@@ -555,10 +555,95 @@ export async function handleDesignReviewBranch(
   return { action: "continue" };
 }
 
-type SynthesisNarrativeBranchResult =
+// ── Tier C2: consolidated "omittable host gate" engine ─────────────────────────
+//
+// Four of the six host-gate branch handlers below share ONE shape: poll a
+// single `incoming/<file>.json`; if present, apply it via runAuditStep and
+// `continue`; else, if a ceiling/flag says no host turn is owed this pass,
+// `run_omit` (so the deterministic omit executor satisfies the obligation);
+// else `return` the one host step this gate ever emits. `runOmittableGate`
+// below is the single parameterized driver for that shape; each handler is a
+// thin descriptor naming its filename, its apply side effect, and its
+// omission predicate — the actual judgment (which ceiling, which flag, which
+// step) still lives per-gate, just no longer copy-pasted 4×.
+//
+// graph_enrichment and design_review do NOT fit this shape and are
+// intentionally NOT routed through `runOmittableGate` — forcing them in would
+// paper over real differences rather than carry them:
+//   - graph_enrichment polls TWO independent incoming files in sequence, each
+//     gated by its own "is a decision still owed" predicate CHECKED BEFORE
+//     attempting to consume (the opposite order from the shape above, which
+//     always tries to consume first, ceiling-check second). Its stage-1 apply
+//     is `persistAnalyzerSettings` + a value-validation stderr diagnostic, not
+//     a `runAuditStep` dispatch; its "nothing to do" terminal state is named
+//     `fallthrough`, not `run_omit` (same caller-side effect, kept as its own
+//     literal so `handleGraphEnrichmentBranch`'s existing action union — and
+//     the tests asserting `"fallthrough"` — stay untouched).
+//   - design_review polls THREE incoming files: a legacy one handled and
+//     returned on its own first, then two (contract/conceptual) polled
+//     INDEPENDENTLY of each other (both are checked and, if valid, applied —
+//     not first-match-wins) and merged into a single write plus a
+//     per-just-applied-pass snapshot capture; its final decision picks one of
+//     THREE step kinds off TWO independent booleans, not one ceiling check
+//     against one step kind. There is no `run_omit` branch at all — an
+//     unsatisfied pass always returns a host step, never an autonomous omit.
+
+/** The common action shape all four `runOmittableGate`-driven branches return. */
+type OmittableGateAction<TStepKind extends string> =
   | { action: "continue" }
   | { action: "run_omit" }
-  | { action: "return"; result: { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle } };
+  | { action: "return"; result: { kind: TStepKind; state: AuditState; bundle: ArtifactBundle } };
+
+type SynthesisNarrativeBranchResult = OmittableGateAction<"synthesis_narrative">;
+type CharterExtractionBranchResult = OmittableGateAction<"charter_extraction">;
+type CharterClarificationBranchResult = OmittableGateAction<"charter_clarification">;
+type SystemicChallengeBranchResult = OmittableGateAction<"systemic_challenge">;
+
+interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
+  /** The step kind this gate returns when a host turn is owed. */
+  kind: TStepKind;
+  /** Filename under `incoming/` this gate polls. */
+  filename: string;
+  /** Apply the consumed value (the executor dispatch this gate's host turn feeds). */
+  apply: (
+    value: TIncoming,
+    path: string,
+    params: Pick<NextStepParams, "root" | "artifactsDir">,
+  ) => Promise<void>;
+  /**
+   * True when no host turn is owed this pass — the caller should run the
+   * deterministic omit executor instead of surfacing the step. Evaluated only
+   * when nothing was consumed; may itself encode several sequential checks
+   * (charter_clarification and systemic_challenge each fold 2-3 short-circuit
+   * checks into this one predicate — behavior-identical to evaluating them in
+   * sequence, since none of them has a side effect).
+   */
+  shouldOmit: (bundle: ArtifactBundle) => boolean;
+}
+
+/**
+ * Drive one "poll incoming → apply+continue, else omit-or-return" gate — the
+ * shape common to synthesis_narrative, charter_extraction,
+ * charter_clarification, and systemic_challenge. See the section comment
+ * above for the two gates that deviate and are not run through this engine.
+ */
+async function runOmittableGate<TIncoming, TStepKind extends string>(
+  descriptor: OmittableGateDescriptor<TIncoming, TStepKind>,
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<OmittableGateAction<TStepKind>> {
+  const incoming = await tryConsumeIncoming<TIncoming>(params.artifactsDir, descriptor.filename);
+  if (incoming) {
+    await descriptor.apply(incoming.value, incoming.path, params);
+    await unlink(incoming.path).catch(() => {});
+    return { action: "continue" };
+  }
+  if (descriptor.shouldOmit(bundle)) {
+    return { action: "run_omit" };
+  }
+  return { action: "return", result: { kind: descriptor.kind, state, bundle } };
+}
 
 /**
  * Handle the `synthesis_narrative_executor` incoming-artifact polling block.
@@ -577,31 +662,26 @@ export async function handleSynthesisNarrativeBranch(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<SynthesisNarrativeBranchResult> {
-  const narrativeIncoming = await tryConsumeIncoming<SynthesisNarrative>(
-    params.artifactsDir,
-    "synthesis-narrative.json",
+  return runOmittableGate<SynthesisNarrative, "synthesis_narrative">(
+    {
+      kind: "synthesis_narrative",
+      filename: "synthesis-narrative.json",
+      apply: async (_value, path, p) => {
+        await runAuditStep({
+          root: p.root,
+          artifactsDir: p.artifactsDir,
+          preferredExecutor: "synthesis_narrative_executor",
+          narrativeResultsPath: path,
+        });
+      },
+      // Narrative disabled: omit (run the deterministic omit executor below).
+      shouldOmit: () => !params.narrativeEnabled,
+    },
+    params,
+    bundle,
+    state,
   );
-  if (narrativeIncoming) {
-    await runAuditStep({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      preferredExecutor: "synthesis_narrative_executor",
-      narrativeResultsPath: narrativeIncoming.path,
-    });
-    await unlink(narrativeIncoming.path).catch(() => {});
-    return { action: "continue" };
-  }
-  if (params.narrativeEnabled) {
-    return { action: "return", result: { kind: "synthesis_narrative", state, bundle } };
-  }
-  // Narrative disabled: run the deterministic omit executor below.
-  return { action: "run_omit" };
 }
-
-type CharterExtractionBranchResult =
-  | { action: "continue" }
-  | { action: "run_omit" }
-  | { action: "return"; result: { kind: "charter_extraction"; state: AuditState; bundle: ArtifactBundle } };
 
 /**
  * Handle the `charter_extraction_executor` incoming-artifact polling block
@@ -619,32 +699,26 @@ export async function handleCharterExtractionBranch(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<CharterExtractionBranchResult> {
-  const incoming = await tryConsumeIncoming<unknown>(
-    params.artifactsDir,
-    "charter-extraction.json",
+  return runOmittableGate<unknown, "charter_extraction">(
+    {
+      kind: "charter_extraction",
+      filename: "charter-extraction.json",
+      apply: async (_value, path, p) => {
+        await runAuditStep({
+          root: p.root,
+          artifactsDir: p.artifactsDir,
+          preferredExecutor: "charter_extraction_executor",
+          charterSubmissionPath: path,
+        });
+      },
+      // Shallow ceiling (default): omit deterministically, no host turn.
+      shouldOmit: (b) => !ceilingRequestsCharters(resolveCharterCeiling(b.intent_checkpoint)),
+    },
+    params,
+    bundle,
+    state,
   );
-  if (incoming) {
-    await runAuditStep({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      preferredExecutor: "charter_extraction_executor",
-      charterSubmissionPath: incoming.path,
-    });
-    await unlink(incoming.path).catch(() => {});
-    return { action: "continue" };
-  }
-  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
-  if (!ceilingRequestsCharters(ceiling)) {
-    // Shallow ceiling (default): omit deterministically, no host turn.
-    return { action: "run_omit" };
-  }
-  return { action: "return", result: { kind: "charter_extraction", state, bundle } };
 }
-
-type CharterClarificationBranchResult =
-  | { action: "continue" }
-  | { action: "run_omit" }
-  | { action: "return"; result: { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle } };
 
 /**
  * Handle the `charter_clarification_executor` obligation (Phase D triangulation
@@ -665,44 +739,40 @@ export async function handleCharterClarificationBranch(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<CharterClarificationBranchResult> {
-  const incoming = await tryConsumeIncoming<unknown>(
-    params.artifactsDir,
-    "charter-clarification.json",
+  return runOmittableGate<unknown, "charter_clarification">(
+    {
+      kind: "charter_clarification",
+      filename: "charter-clarification.json",
+      apply: async (_value, path, p) => {
+        await runAuditStep({
+          root: p.root,
+          artifactsDir: p.artifactsDir,
+          preferredExecutor: "charter_clarification_executor",
+          clarificationAnswersPath: path,
+        });
+      },
+      shouldOmit: (b) => {
+        const ceiling = resolveCharterCeiling(b.intent_checkpoint);
+        const attention = resolveClarificationAttention(b.intent_checkpoint);
+        // Shallow ceiling or autonomous (zero-attention) mode: assemble the
+        // register deterministically, no host turn (every question banks as
+        // a finding).
+        if (!ceilingRequestsCharters(ceiling) || attention === 0) return true;
+        // The loop must be COMPUTED before we can relay a queue: if no register
+        // exists yet, run the deterministic assembler this turn (it partitions/
+        // ranks/gates/splits from the charter_register), then re-scan.
+        if (!b.charter_clarification) return true;
+        // Register exists: relay the interactive queue only when there is one
+        // to ask.
+        if ((b.charter_clarification.asked?.length ?? 0) === 0) return true;
+        return false;
+      },
+    },
+    params,
+    bundle,
+    state,
   );
-  if (incoming) {
-    await runAuditStep({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      preferredExecutor: "charter_clarification_executor",
-      clarificationAnswersPath: incoming.path,
-    });
-    await unlink(incoming.path).catch(() => {});
-    return { action: "continue" };
-  }
-  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
-  const attention = resolveClarificationAttention(bundle.intent_checkpoint);
-  if (!ceilingRequestsCharters(ceiling) || attention === 0) {
-    // Shallow ceiling or autonomous (zero-attention) mode: assemble the register
-    // deterministically, no host turn (every question banks as a finding).
-    return { action: "run_omit" };
-  }
-  // The loop must be COMPUTED before we can relay a queue: if no register exists
-  // yet, run the deterministic assembler this turn (it partitions/ranks/gates/
-  // splits from the charter_register), then re-scan.
-  if (!bundle.charter_clarification) {
-    return { action: "run_omit" };
-  }
-  // Register exists: relay the interactive queue only when there is one to ask.
-  if ((bundle.charter_clarification.asked?.length ?? 0) === 0) {
-    return { action: "run_omit" };
-  }
-  return { action: "return", result: { kind: "charter_clarification", state, bundle } };
 }
-
-type SystemicChallengeBranchResult =
-  | { action: "continue" }
-  | { action: "run_omit" }
-  | { action: "return"; result: { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle } };
 
 /**
  * Handle the `systemic_challenge_executor` obligation (Phase E — the second-order
@@ -723,38 +793,86 @@ export async function handleSystemicChallengeBranch(
   bundle: ArtifactBundle,
   state: AuditState,
 ): Promise<SystemicChallengeBranchResult> {
-  const incoming = await tryConsumeIncoming<unknown>(
-    params.artifactsDir,
-    "systemic-challenge.json",
+  return runOmittableGate<unknown, "systemic_challenge">(
+    {
+      kind: "systemic_challenge",
+      filename: "systemic-challenge.json",
+      apply: async (_value, path, p) => {
+        await runAuditStep({
+          root: p.root,
+          artifactsDir: p.artifactsDir,
+          preferredExecutor: "systemic_challenge_executor",
+          systemicChallengePath: path,
+        });
+      },
+      shouldOmit: (b) => {
+        // Shallow ceiling (default): omit deterministically, no host turn.
+        if (!ceilingRequestsCharters(resolveCharterCeiling(b.intent_checkpoint))) return true;
+        // The loop must be OPENED before we can dispatch the adversary: if no
+        // register exists yet, run the deterministic executor this turn (it
+        // computes the metrics digest + writes an open register), then re-scan.
+        if (!b.systemic_challenge) return true;
+        // A converged register is already satisfied (never reaches this branch
+        // in practice). An open register → dispatch the next
+        // second-order-adversary round.
+        if (b.systemic_challenge.converged) return true;
+        return false;
+      },
+    },
+    params,
+    bundle,
+    state,
   );
-  if (incoming) {
-    await runAuditStep({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      preferredExecutor: "systemic_challenge_executor",
-      systemicChallengePath: incoming.path,
-    });
-    await unlink(incoming.path).catch(() => {});
-    return { action: "continue" };
-  }
-  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
-  if (!ceilingRequestsCharters(ceiling)) {
-    // Shallow ceiling (default): omit deterministically, no host turn.
-    return { action: "run_omit" };
-  }
-  // The loop must be OPENED before we can dispatch the adversary: if no register
-  // exists yet, run the deterministic executor this turn (it computes the metrics
-  // digest + writes an open register), then re-scan.
-  if (!bundle.systemic_challenge) {
-    return { action: "run_omit" };
-  }
-  // A converged register is already satisfied (never reaches this branch). An open
-  // register → dispatch the next second-order-adversary round.
-  if (bundle.systemic_challenge.converged) {
-    return { action: "run_omit" };
-  }
-  return { action: "return", result: { kind: "systemic_challenge", state, bundle } };
 }
+
+/**
+ * Coverage registry for the 6 audit host-gate branch handlers targeted by the
+ * Tier C2 consolidation. `driven: "generic"` gates are fully parameterized
+ * through `runOmittableGate`; `driven: "custom"` gates keep their own bespoke
+ * body because their shape genuinely deviates from that common one — see the
+ * section comment above `runOmittableGate` for exactly what deviates and why.
+ * Exists so one source of truth enumerates all 6 gate kinds (asserted by a
+ * coverage test) rather than the count being implicit in which functions
+ * happen to exist.
+ */
+export type HostGateKind =
+  | "graph_enrichment"
+  | "design_review"
+  | "synthesis_narrative"
+  | "charter_extraction"
+  | "charter_clarification"
+  | "systemic_challenge";
+
+export const HOST_GATE_DESCRIPTORS: Record<
+  HostGateKind,
+  { driven: "generic" | "custom"; incomingFiles: readonly string[] }
+> = {
+  graph_enrichment: {
+    driven: "custom",
+    incomingFiles: ["analyzer-decisions.json", "edge-reasoning.json"],
+  },
+  design_review: {
+    driven: "custom",
+    incomingFiles: [
+      "design-review-findings.json",
+      "design-review-contract-findings.json",
+      "design-review-conceptual-findings.json",
+    ],
+  },
+  synthesis_narrative: { driven: "generic", incomingFiles: ["synthesis-narrative.json"] },
+  charter_extraction: { driven: "generic", incomingFiles: ["charter-extraction.json"] },
+  charter_clarification: { driven: "generic", incomingFiles: ["charter-clarification.json"] },
+  systemic_challenge: { driven: "generic", incomingFiles: ["systemic-challenge.json"] },
+};
+
+export const HOST_GATE_KINDS: readonly HostGateKind[] = [
+  "graph_enrichment",
+  "design_review",
+  "synthesis_narrative",
+  "charter_extraction",
+  "charter_clarification",
+  "systemic_challenge",
+];
 
 /**
  * Execute one deterministic audit step and record its progress. Throws (with
