@@ -411,14 +411,20 @@ describe("advanceHostRolling", () => {
       prompt_path: join(implDir, `${id}.md`),
       result_path: join(artifactsDir, `${id}.result.json`),
     }));
-    // A resolved result per node → resultOutcome = "success".
+    // A resolved-no-change result per node → resultOutcome = "success", claimsEdit =
+    // false. NOT "resolved" (a real-edit claim) — seedSession's worktrees have zero
+    // commits by default, which is exactly the new stray-worktree guard's trigger
+    // condition for a "resolved" claim; tests that need a genuine real edit add one
+    // to the worktree explicitly (see below) and can override the status locally.
     for (const node of frontier) {
       writeFileSync(
         node.result_path,
         JSON.stringify({
           contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
           phase: "implement",
-          item_results: [{ finding_id: node.block_id, status: "resolved", evidence: ["ok"] }],
+          item_results: [
+            { finding_id: node.block_id, status: "resolved_no_change", evidence: ["ok"] },
+          ],
         }),
       );
     }
@@ -502,5 +508,44 @@ describe("advanceHostRolling", () => {
     expect(rec.merged).toBe(true);
     expect(rec.verify_passed).toBe(true);
     expect(rec.outcome).toBe("success");
+  });
+
+  it("STRAY-WORKTREE GUARD: a node claiming a resolved edit with an untouched worktree rejects loud", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const artifactsDir = seedSession(repo, ["B1"]);
+    // Overwrite the seeded result to claim a REAL edit ("resolved") — but B1's
+    // designated worktree (created by seedSession) has zero commits beyond base,
+    // the classic stray-worktree symptom (isolation:"worktree" spawned a second,
+    // unrelated worktree the subagent actually edited in).
+    writeFileSync(
+      join(artifactsDir, "B1.result.json"),
+      JSON.stringify({
+        contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+        phase: "implement",
+        item_results: [{ finding_id: "B1", status: "resolved", evidence: ["ok"] }],
+      }),
+    );
+
+    await expect(
+      advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" }),
+    ).rejects.toThrow(/stray worktree|isolation:"worktree"/i);
+
+    const sidecar = join(artifactsDir, "runs", RID, "implement", "accept-outcome-B1.json");
+    expect(existsSync(sidecar)).toBe(true);
+    const rec = JSON.parse(readFileSync(sidecar, "utf8"));
+    expect(rec.outcome).toBe("error");
+    expect(rec.merged).toBe(false);
+    expect(rec.stray_worktree_suspected).toBe(true);
+  });
+
+  it("companion: a genuine resolved_no_change node with zero commits does NOT throw", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    // seedSession's default result status is already "resolved_no_change" and the
+    // worktree it creates has no edits — the genuine no-op precondition.
+    const artifactsDir = seedSession(repo, ["B1"]);
+    const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
+    expect(d.kind).toBe("done");
   });
 });

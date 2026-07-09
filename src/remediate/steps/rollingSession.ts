@@ -207,17 +207,26 @@ async function computeAcceptScope(
  * blocked) is treated as "error" so `acceptNodeWorktree` drops its worktree
  * rather than landing speculative edits; the merge then routes it to triage.
  */
-async function resultOutcome(resultPath: string): Promise<"success" | "error"> {
+async function resultOutcome(
+  resultPath: string,
+): Promise<{ outcome: "success" | "error"; claimsEdit: boolean }> {
   const result = await readOptionalJsonFile<ImplementWorkerResult>(resultPath);
-  if (!result || !Array.isArray(result.item_results)) return "error";
+  if (!result || !Array.isArray(result.item_results)) {
+    return { outcome: "error", claimsEdit: false };
+  }
   // A `resolved_no_change` node legitimately resolved its finding without edits;
   // it flows to `acceptNodeWorktree`'s no-commit branch (the merge adjudicates the
   // no-change claim against its evidence). Only an all-blocked result is an error.
-  return result.item_results.some(
+  const outcome = result.item_results.some(
     (r) => r.status === "resolved" || r.status === "resolved_no_change",
   )
     ? "success"
     : "error";
+  // `claimsEdit`: the node's OWN result claims a REAL edit (status "resolved", never
+  // "resolved_no_change") — the stray-worktree guard's trigger condition
+  // (`acceptNodeWorktree`'s `nodeClaimsEdit` param).
+  const claimsEdit = result.item_results.some((r) => r.status === "resolved");
+  return { outcome, claimsEdit };
 }
 
 /**
@@ -372,13 +381,14 @@ export async function advanceHostRolling(opts: {
       // verify auto-passes when state is absent (parity with the in-process driver).
       const state = await new StateStore(opts.artifactsDir).loadState();
       const scope = await computeAcceptScope(opts.artifactsDir, opts.runId);
+      const { outcome: workerOutcome, claimsEdit } = await resultOutcome(node.result_path);
       const accept = await acceptNodeWorktree({
         root: opts.root,
         runId: opts.runId,
         blockId: opts.blockId,
         worktreeRoot: worktreePath(opts.root, opts.blockId, opts.runId),
         branch: worktreeBranchForBlock(opts.blockId, opts.runId),
-        workerOutcome: await resultOutcome(node.result_path),
+        workerOutcome,
         // targetedCommands omitted → acceptNodeWorktree DERIVES verify from the node's
         // actually-touched tests post-commit (correct paths/runner) AND runs the node's
         // own build-free targeted_commands in addition (task_7d35176d).
@@ -389,10 +399,22 @@ export async function advanceHostRolling(opts: {
         // DISTINCT base-branch lock; the outer session lock here still guards the
         // session-state read-modify-write (a different lock path — no double-acquire).
         writePaths: scope.allBlockScopes.find((b) => b.block_id === opts.blockId)?.write_paths ?? [],
+        // Stray-worktree guard trigger (see acceptNode.ts): true only when the node's
+        // OWN result claims a real ("resolved") edit.
+        nodeClaimsEdit: claimsEdit,
       });
       // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
       // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).
+      // Persisted BEFORE the stray-worktree throw below so triage has the diagnostic on
+      // disk even though this accept-node call itself rejects.
       await recordNodeAcceptOutcome(opts.artifactsDir, opts.runId, opts.blockId, accept);
+      if (accept.strayWorktreeSuspected) {
+        throw new Error(
+          accept.diagnostic ??
+            `node ${opts.blockId}: stray worktree suspected — its result claims a ` +
+              `resolved edit but the designated worktree has no commits beyond base.`,
+        );
+      }
       session.accepted.push(opts.blockId);
       // Terminal accept outcome → release this node's claim through the SAME
       // registry the in-process driver shares (token-checked, so only the claim we

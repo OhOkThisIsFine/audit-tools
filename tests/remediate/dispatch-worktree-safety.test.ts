@@ -311,6 +311,51 @@ describe("acceptNodeWorktree — captures commit identity (INV-WTS-3/7 ground tr
     expect(res.committedOid).toBeUndefined();
   });
 
+  it("STRAY-WORKTREE GUARD: nodeClaimsEdit:true on a zero-commit worktree fails loud", async () => {
+    const repo = initRepo("wts-stray-");
+    const wt = worktreePath(repo, "SW1", "R");
+    createWorktree(repo, wt, worktreeBranchForBlock("SW1", "R"));
+    // No file written → nothing to commit — exactly the stray-worktree symptom when
+    // the node's OWN result claims a real ("resolved") edit.
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: "R",
+      blockId: "SW1",
+      worktreeRoot: wt,
+      scope: { allBlockScopes: [] },
+      branch: worktreeBranchForBlock("SW1", "R"),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: [],
+      nodeClaimsEdit: true,
+    });
+    expect(res.outcome).toBe("error");
+    expect(res.merged).toBe(false);
+    expect(res.strayWorktreeSuspected).toBe(true);
+    expect(res.diagnostic).toMatch(/isolation:"worktree"/);
+  });
+
+  it("REGRESSION PIN: the SAME zero-edit fixture with nodeClaimsEdit OMITTED stays the pre-existing benign no-op", async () => {
+    const repo = initRepo("wts-stray-omit-");
+    const wt = worktreePath(repo, "SW2", "R");
+    createWorktree(repo, wt, worktreeBranchForBlock("SW2", "R"));
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: "R",
+      blockId: "SW2",
+      worktreeRoot: wt,
+      scope: { allBlockScopes: [] },
+      branch: worktreeBranchForBlock("SW2", "R"),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: [],
+      // nodeClaimsEdit omitted — must preserve the existing no-op contract.
+    });
+    expect(res.outcome).toBe("success");
+    expect(res.merged).toBe(false);
+    expect(res.strayWorktreeSuspected).toBeUndefined();
+  });
+
   it("round-trips committedOid + landedHeadOid through the accept-outcome sidecar", async () => {
     const repo = initRepo("wts-sidecar-");
     const artifactsDir = join(repo, ".audit-tools", "remediation");

@@ -97,6 +97,16 @@ export interface AcceptNodeWorktreeParams {
    * on a minimal repo with no check script).
    */
   mergedBaseCheckCommand?: string[] | null;
+  /**
+   * True ONLY when the node's OWN result file has an item_results entry with status
+   * "resolved" (never "resolved_no_change") — i.e. the node itself claims a real edit.
+   * Drives the stray-worktree guard below: a claimed edit whose designated worktree
+   * has zero commits beyond base means the Agent tool's own `isolation:"worktree"`
+   * spawned a SECOND unrelated worktree the subagent actually edited in. OMIT to
+   * preserve the existing no-op contract (the benign `resolved_no_change` / lifecycle
+   * unit-test path every other caller relies on today).
+   */
+  nodeClaimsEdit?: boolean;
 }
 
 export interface AcceptNodeWorktreeResult {
@@ -127,6 +137,14 @@ export interface AcceptNodeWorktreeResult {
    * never make it pass, and a rolled-back/clobbered landing fails it.
    */
   landedHeadOid?: string;
+  /**
+   * Set when the accept guard suspects a STRAY worktree: the node's result claimed a
+   * real edit (`nodeClaimsEdit`) but its designated worktree had zero commits beyond
+   * base — the Agent tool's own `isolation:"worktree"` was passed for this node,
+   * spawning a second unrelated worktree the subagent actually edited in. Absent on
+   * every other outcome, including the genuine no-op no-commit case.
+   */
+  strayWorktreeSuspected?: boolean;
 }
 
 /**
@@ -217,6 +235,27 @@ async function acceptNodeWorktreeLocked(
     // evidence). NO committedOid is captured: this is the genuine no-change
     // precondition (INV-WTS-7) — the branch legitimately has no commit of its own.
     removeWorktree(root, wt);
+    if (params.nodeClaimsEdit) {
+      // The node's OWN result claims a real ("resolved") edit, yet its DESIGNATED
+      // worktree has zero commits beyond base — that is impossible for a genuine
+      // no-op and is the classic stray-worktree symptom: the Agent tool's own
+      // `isolation:"worktree"` was passed when dispatching this node, spawning a
+      // SECOND unrelated worktree the subagent actually edited in. Fail loud rather
+      // than silently stranding the real work in that stray tree.
+      return {
+        outcome: "error",
+        verifyPassed,
+        merged,
+        diagnostic:
+          `node ${blockId}'s result reports a resolved (real-edit) finding, but its ` +
+          `designated worktree \`${wt}\` has NO commits beyond base — the Agent ` +
+          `tool's own isolation:"worktree" was passed when dispatching this node, ` +
+          `spawning a SECOND unrelated worktree the subagent edited in. Never pass ` +
+          `isolation:"worktree" to the Agent tool for a remediate implement node — ` +
+          `the dispatch plan already creates the node's own worktree.`,
+        strayWorktreeSuspected: true,
+      };
+    }
     return { outcome: "success", verifyPassed, merged };
   }
 
@@ -484,6 +523,9 @@ export async function recordNodeAcceptOutcome(
     // reconcile trusts over any live branch/path read.
     ...(result.committedOid !== undefined ? { committed_oid: result.committedOid } : {}),
     ...(result.landedHeadOid !== undefined ? { landed_head_oid: result.landedHeadOid } : {}),
+    ...(result.strayWorktreeSuspected !== undefined
+      ? { stray_worktree_suspected: result.strayWorktreeSuspected }
+      : {}),
   });
 }
 
@@ -500,6 +542,7 @@ export async function loadNodeAcceptOutcome(
     diagnostic?: string;
     committed_oid?: string;
     landed_head_oid?: string;
+    stray_worktree_suspected?: boolean;
   }>(nodeAcceptOutcomePath(artifactsDir, runId, blockId));
   if (!raw) return null;
   return {
@@ -509,6 +552,9 @@ export async function loadNodeAcceptOutcome(
     ...(raw.diagnostic !== undefined ? { diagnostic: raw.diagnostic } : {}),
     ...(raw.committed_oid !== undefined ? { committedOid: raw.committed_oid } : {}),
     ...(raw.landed_head_oid !== undefined ? { landedHeadOid: raw.landed_head_oid } : {}),
+    ...(raw.stray_worktree_suspected !== undefined
+      ? { strayWorktreeSuspected: raw.stray_worktree_suspected }
+      : {}),
   };
 }
 

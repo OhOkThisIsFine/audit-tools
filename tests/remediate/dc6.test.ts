@@ -102,14 +102,19 @@ async function seedSession(
     prompt_path: join(implDir, `${id}.md`),
     result_path: join(artifactsDir, `${id}.result.json`),
   }));
-  // A resolved result per node → resultOutcome = "success".
+  // A resolved-no-change result per node → resultOutcome = "success", claimsEdit =
+  // false. NOT "resolved" (a real-edit claim): every node's worktree here is created
+  // with zero commits, which is exactly the new stray-worktree guard's trigger
+  // condition for a "resolved" claim.
   for (const node of frontier) {
     writeFileSync(
       node.result_path,
       JSON.stringify({
         contract_version: REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
         phase: "implement",
-        item_results: [{ finding_id: node.block_id, status: "resolved", evidence: ["ok"] }],
+        item_results: [
+          { finding_id: node.block_id, status: "resolved_no_change", evidence: ["ok"] },
+        ],
       }),
     );
   }
