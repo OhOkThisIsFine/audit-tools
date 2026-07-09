@@ -29,13 +29,21 @@
     populates `edited_count` from the declared edit surface of RESOLVED items (per-item `item_spec.touched_files`,
     block fallback), writing `.audit-tools/remediation/access_memory.json` from the merge under the state lock.
     Adversarially reviewed; fixes folded (resolved-only not `resolved_no_change`, per-item attribution, crash guard).
-  - **Immediate next = increment 2d: `path::symbol` slicing (#2).** Sub-file packet granularity — when a lens needs
-    one function from a god-file, dispatch a symbol slice (symbol boundaries already exist in the extractors'
-    `unit_manifest`/`surface_manifest`), fail-safe to whole-file, coverage/citation line-spans stay valid, cache-safe
-    (back-payload). Then **#3** the token-efficiency eval harness (the measurement gate — the active bias must be
-    MEASURED not asserted; both a remediate continuity CONSUMER and #3 are still open — nothing reads either
-    orchestrator's `access_memory` yet). Design-of-record [[access-memory-layer-design]]; detail `docs/backlog.md:406`.
-    Loop-core → full adversarial pipeline.
+  - **⚠️ Next-step choice is OPEN — surface to the owner before starting, don't auto-pick.** Three increments have
+    shipped and NOTHING reads either orchestrator's `access_memory` on the measurement side yet, so 2b's ordering bias
+    is *asserted*, not *measured*. Two defensible next moves:
+    - **(A) increment 2d — `path::symbol` slicing (#2):** sub-file packet granularity — when a lens needs one function
+      from a god-file, dispatch a symbol slice (symbol boundaries already exist in the extractors'
+      `unit_manifest`/`surface_manifest`), fail-safe to whole-file, coverage/citation line-spans stay valid, cache-safe
+      (back-payload). Extends the track.
+    - **(B) #3 — token-efficiency eval harness (measure first):** the measurement gate that would confirm 2b's bias
+      actually cuts tokens *without busting prefix cache* before extending further. Cost counterpart to the A2 quality
+      oracle; reads recorded run ledgers/headroom telemetry (post-hoc, allowed), reuses the A2 corpus. This is the
+      "MEASURE not assert" discipline the track's own cross-cutting guard calls for.
+    - Also still open: a **remediate continuity CONSUMER** (remediate now harvests `edited_count` but nothing biases on
+      it; the audit side has its consumer via 2b). Recommendation to put to the owner: **(B) measure before extending.**
+    Design-of-record [[access-memory-layer-design]]; full track detail `docs/backlog.md:406`. Loop-core → full
+    adversarial pipeline.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,
   released v0.32.36).** ([[arbitrage-dispatch-tier-design]]; `docs/backlog.md` → Forward tracks.) Increment 1
   (a-priori declared per-source cost → free-first ordering, `6349bdc5`) + increment 2 (reactive cost verification:
