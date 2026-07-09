@@ -31,6 +31,7 @@ import {
   writeContractArtifact,
   type ContractPipelineArtifactName,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
+import { counterexampleFingerprint } from "../../src/remediate/contractPipeline/counterexampleFingerprint.js";
 import {
   validateContractCitationGrounding,
   enumerateRepoTreePaths,
@@ -637,6 +638,121 @@ describe("repair cycle: failing verdict triggers one targeted repair and re-deri
     );
     expect(state.repairs).toHaveLength(4);
     expect(state.repairs[3].accepted_ce_ids).toContain(NEW_CE);
+  });
+
+  it("REPAIRS (not escalates) when two rounds' distinct CEs collide on the same reviewer id (CE-001)", async () => {
+    // Round 1's CE and round 2's CE are genuinely DIFFERENT defects that both
+    // happen to be labeled "CE-001" (the prompt schema's own example id) —
+    // exactly what independent adversarial rounds commonly do. Keying
+    // convergence on the raw id would misread this as "the same CE re-
+    // accepted after a repair" and falsely escalate a real repair in progress.
+    const round1Ce = {
+      id: "CE-001",
+      claim: "Sessions survive refresh.",
+      reproduction_steps: ["Refresh the token."],
+      expected: "Session preserved.",
+      actual: "Session dropped.",
+      violated_obligation_ids: ["O-1"],
+    };
+    const round2Ce = {
+      id: "CE-001",
+      claim: "Cache entries are not invalidated on logout.",
+      reproduction_steps: ["Log out."],
+      expected: "Cache cleared.",
+      actual: "Stale cache entries remain.",
+      violated_obligation_ids: ["O-1"],
+    };
+    expect(round1Ce.claim).not.toBe(round2Ce.claim);
+
+    await writeRawChainThroughJudge({
+      counterexamples: [round2Ce],
+      judge: {
+        ...NEEDS_REPAIR_JUDGE,
+        classifications: [
+          {
+            counterexample_id: "CE-001",
+            classification: "accepted",
+            rationale: "A newly discovered, distinct defect that happens to share round 1's label.",
+          },
+        ],
+      },
+    });
+    await mkdir(contractPipelineDir(ARTIFACTS_DIR), { recursive: true });
+    await writeFile(
+      join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
+        repairs: [
+          {
+            judge_hash: "prior-1",
+            target: "finalized_module_contracts",
+            at: CREATED_AT,
+            accepted_ce_ids: ["CE-001"],
+            addressed_ce_fingerprints: [`fp:${counterexampleFingerprint(round1Ce)}`],
+          },
+        ],
+        dag_regenerations: [],
+      }),
+      "utf8",
+    );
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    expect(step!.status).not.toBe("blocked");
+    const prompt = await promptOf(step!);
+    expect(prompt).toMatch(/Contract Repair/);
+  });
+
+  it("still escalates as a stall when the SAME CE (same id AND content) is re-accepted across rounds", async () => {
+    // Companion to the collision test above: proves the fingerprint does not
+    // suppress all stall detection — a genuine re-occurrence of the identical
+    // CE (same id, same claim, same violated_obligation_ids) still escalates.
+    const repeatedCe = {
+      id: "CE-001",
+      claim: "Sessions survive refresh.",
+      reproduction_steps: ["Refresh the token."],
+      expected: "Session preserved.",
+      actual: "Session dropped.",
+      violated_obligation_ids: ["O-1"],
+    };
+
+    await writeRawChainThroughJudge({
+      counterexamples: [repeatedCe],
+      judge: {
+        ...NEEDS_REPAIR_JUDGE,
+        classifications: [
+          {
+            counterexample_id: "CE-001",
+            classification: "accepted",
+            rationale: "Still unaddressed.",
+          },
+        ],
+      },
+    });
+    await mkdir(contractPipelineDir(ARTIFACTS_DIR), { recursive: true });
+    await writeFile(
+      join(contractPipelineDir(ARTIFACTS_DIR), "repair-state.json"),
+      JSON.stringify({
+        schema_version: "remediate-code-contract-pipeline/repair-state/v1alpha1",
+        repairs: [
+          {
+            judge_hash: "prior-1",
+            target: "finalized_module_contracts",
+            at: CREATED_AT,
+            accepted_ce_ids: ["CE-001"],
+            addressed_ce_fingerprints: [`fp:${counterexampleFingerprint(repeatedCe)}`],
+          },
+        ],
+        dag_regenerations: [],
+      }),
+      "utf8",
+    );
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    expect(step!.status).toBe("blocked");
+    const prompt = await promptOf(step!);
+    expect(prompt).toMatch(/Judge↔Repair Loop Did Not Converge/);
   });
 });
 

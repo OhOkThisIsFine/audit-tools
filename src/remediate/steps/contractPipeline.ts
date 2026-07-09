@@ -36,8 +36,10 @@ import {
   type ImplementationDAG,
   type ObligationLedger,
   type SessionConfig,
+  type CounterexampleReport,
   captureStepBoundaryFriction,
 } from "audit-tools/shared";
+import { counterexampleFingerprint } from "../contractPipeline/counterexampleFingerprint.js";
 import {
   CP_ARTIFACT_NAMES,
   contractArtifactExists,
@@ -195,12 +197,27 @@ interface ContractRepairState {
   /**
    * One entry per judge-ordered repair step emission (keyed by judge hash).
    * `accepted_ce_ids` records the judge-accepted counterexample ids this repair
-   * was dispatched to address — the cumulative union across repairs is the
-   * "already-addressed" set the convergence gate diffs each new judge report
-   * against, so a re-accepted (un-converged) counterexample is detected as a
-   * stall rather than silently re-repaired.
+   * was dispatched to address, for human debugging/display only.
+   * `addressed_ce_fingerprints` is the CONTENT-keyed form the convergence gate
+   * actually diffs against — see `keyOf` in `evaluateJudgeGate`: raw reviewer
+   * ids are not stable cross-round identity (two independent adversarial
+   * rounds commonly both label their top counterexample "CE-001"), so the gate
+   * resolves each accepted id against the live counterexample artifact and
+   * keys on content (violated_obligation_ids + normalized claim) instead,
+   * falling back to raw-id keying only when an id cannot be resolved. The
+   * cumulative union of fingerprints across repairs is the "already-addressed"
+   * set; a re-accepted (un-converged) counterexample is detected as a stall
+   * rather than silently re-repaired. Entries written before this field
+   * existed lack it — they default to `[]` (fail-open: at most one extra
+   * repair round on an in-flight upgrade, never a false stall).
    */
-  repairs: { judge_hash: string; target: string; at: string; accepted_ce_ids?: string[] }[];
+  repairs: {
+    judge_hash: string;
+    target: string;
+    at: string;
+    accepted_ce_ids?: string[];
+    addressed_ce_fingerprints?: string[];
+  }[];
   /**
    * One entry per conceptual-design-critique-driven design repair (keyed by
    * critique hash). `blocking_ids` records the blocking critique-item ids the
@@ -724,6 +741,7 @@ type JudgeGate =
       directive: { target: ExtendedRepairTarget; instruction: string };
       judgeHash: string;
       acceptedCeIds: string[];
+      addressedCeFingerprints: string[];
     };
 
 /** Judge-accepted counterexample ids from a judge report's classifications. */
@@ -772,16 +790,48 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
     : inferRepairDirective(judge);
 
   const acceptedIds = acceptedCeIdsOf(judge);
-  const addressed = new Set(
-    repairState.repairs.flatMap((r) => r.accepted_ce_ids ?? []),
+
+  // Content-fingerprint keying (not raw id): two independent adversarial
+  // rounds may each label their genuinely-distinct top counterexample with
+  // the SAME reviewer id string (e.g. "CE-001", the prompt schema's own
+  // example value). Keying convergence on the raw id would then read "same CE
+  // re-accepted after a repair" and falsely escalate while a real new defect
+  // is being correctly repaired. Resolve each accepted id against the live
+  // counterexample artifact and key on content instead; an id with no
+  // matching counterexample falls back to raw-id keying — today's behavior —
+  // so nothing regresses when content can't be resolved.
+  const cePayload = envelopePayload(
+    await readContractArtifact(artifactsDir, "counterexample"),
+  ) as CounterexampleReport | undefined;
+  const ceById = new Map(
+    (cePayload?.counterexamples ?? []).map((ce) => [ce.id, ce] as const),
   );
-  const newAccepted = acceptedIds.filter((id) => !addressed.has(id));
+  const keyOf = (rawId: string): string => {
+    const ce = ceById.get(rawId);
+    return ce ? `fp:${counterexampleFingerprint(ce)}` : `id:${rawId}`;
+  };
+
+  const addressed = new Set(
+    repairState.repairs.flatMap(
+      (r) =>
+        r.addressed_ce_fingerprints ??
+        (r.accepted_ce_ids ?? []).map((id) => `id:${id}`),
+    ),
+  );
+  const newAccepted = acceptedIds.filter((id) => !addressed.has(keyOf(id)));
+  const newAcceptedFingerprints = newAccepted.map(keyOf);
 
   // Idempotent re-entry: this exact judge report already drove a repair (its hash
   // is recorded). Re-emit the same repair directive; do not re-evaluate convergence
   // (the repair has not yet produced a fresh judge report).
   if (alreadyHandled) {
-    return { kind: "repair", directive, judgeHash, acceptedCeIds: newAccepted };
+    return {
+      kind: "repair",
+      directive,
+      judgeHash,
+      acceptedCeIds: newAccepted,
+      addressedCeFingerprints: newAcceptedFingerprints,
+    };
   }
 
   // Runaway backstop (loud) — the exception path, not the normal terminator.
@@ -796,7 +846,13 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
 
   // Progress: a new accepted counterexample (or the first round) ⇒ repair.
   if (repairState.repairs.length === 0 || newAccepted.length > 0) {
-    return { kind: "repair", directive, judgeHash, acceptedCeIds: newAccepted };
+    return {
+      kind: "repair",
+      directive,
+      judgeHash,
+      acceptedCeIds: newAccepted,
+      addressedCeFingerprints: newAcceptedFingerprints,
+    };
   }
 
   // Stall: a needs_repair verdict whose every accepted counterexample was already
@@ -1968,6 +2024,7 @@ Read conceptual_design_critique.json, decide with the user how to resolve each b
           target: repairTarget,
           at: new Date().toISOString(),
           accepted_ce_ids: gate.acceptedCeIds,
+          addressed_ce_fingerprints: gate.addressedCeFingerprints,
         });
         await writeRepairState(artifactsDir, repairState);
       }
