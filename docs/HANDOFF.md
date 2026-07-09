@@ -62,8 +62,15 @@ framing: full unification is the WRONG endpoint** (audit vs remediate pause sema
 Bounded shareable core = a pause-state reducer with the terminal-policy branch injected + a merge-time
 ownership-gate on the long-lived claims; recommended slice-1 = the merge-time ownership-gate alone (no
 heartbeat machinery). It is the most delicate machinery in the repo (pause/claim/quota) — do NOT rush it;
-the owner's "redesign before scheduled autonomy" caution applies. Everything else open is env-bound live
-validation (owner-run) or T6 deferred.
+the owner's "redesign before scheduled autonomy" caution applies.
+
+**Also open (2026-07-09 external-audit triage):** a validated defect cluster **V1–V7** (verification-report
+contract break, close-phase staging sweep, OpenCode permission parity, quoting hardening, path-sourcing
+sweep, co-change cap, one dead test) in `docs/backlog.md` → *Open bugs* — V1/V3/V6/V7 are lean-tier,
+V2 touches close-phase behavior (full pipeline); plus a **shared-logic dedup bundle** forward track
+(Tier B mechanical sweep + Tier C obligation-engine adoption) in `docs/backlog.md` → *Forward tracks*.
+These are code-fixable and can slot before or alongside D-66/67 at owner preference. Everything else open
+is env-bound live validation (owner-run) or T6 deferred.
 
 Rationale: the **loop is the meta-tool**; making it cheaper, convergent, and safe has compounding leverage
 on all downstream work, and is the "redesign before scheduled autonomy" the north star requires
