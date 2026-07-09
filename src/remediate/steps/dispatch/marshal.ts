@@ -7,6 +7,7 @@ import { fromBlockId } from "../../contractPipeline/idRegistry.js";
 import { readContractArtifact } from "../../contractPipeline/artifactStore.js";
 import { verifyPairingForFinding } from "../../contractPipeline/changeClassification.js";
 import { StateStore, type RemediationState } from "../../state/store.js";
+import { deriveRemediationAccessMemory } from "../../state/accessMemory.js";
 import {
   REMEDIATION_STEP,
   isClarificationCategory,
@@ -1256,6 +1257,20 @@ async function mergeImplementResultsIntoState(
     : moreToImplement
       ? "implementing"
       : "triage";
+  // Access-memory parity (context-efficiency increment 2c): harvest which files
+  // remediation has edited into `.audit-tools/remediation/access_memory.json` —
+  // the remediate analog of audit's covered-file harvest, populating edited_count.
+  // Re-derived deterministically from the merged state (declared surface of
+  // resolved items); written at the artifacts root so a future continuity consumer
+  // finds it without a runId. Under the state lock already. This write precedes the
+  // mutate-callback's own state.json commit, so a crash in that window can leave
+  // access_memory.json one merge ahead of state.json — harmless: it's advisory and
+  // re-derived from the authoritative state on the next merge (self-healing).
+  await writeJsonFile(
+    join(options.artifactsDir, "access_memory.json"),
+    deriveRemediationAccessMemory(state),
+  );
+
   // Single commit: StateStore.mutate writes the returned state once, under the
   // lock it already holds (OBL-INV-RSD-02 / OBL-SEAM-RSD-04). No saveState here.
   return state;

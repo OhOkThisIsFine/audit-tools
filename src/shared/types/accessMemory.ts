@@ -41,7 +41,7 @@ export const AccessMemoryPathRecordSchema = z
     path: z.string(),
     /** How many ingested results covered this path (audit-side frequency). */
     covered_count: z.number().int().min(0),
-    /** How many remediate node results edited this path (parity harvest). */
+    /** How many resolved remediate items declared this path in their edit surface (parity harvest). */
     edited_count: z.number().int().min(0),
     /** Ledger-position (step) ordinal of the most recent touch — recency seed. */
     last_ordinal: z.number().int().min(0),

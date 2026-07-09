@@ -1,5 +1,5 @@
-import type { AccessMemory, AccessMemoryPathRecord } from "audit-tools/shared";
-import { ACCESS_MEMORY_VERSION } from "audit-tools/shared";
+import type { AccessMemory, AccessTouchEvent } from "audit-tools/shared";
+import { deriveAccessMemoryFromEvents } from "audit-tools/shared";
 import type { AuditResult } from "../types.js";
 
 /**
@@ -35,44 +35,24 @@ export function deriveAccessMemory(
   results: AuditResult[],
   options: { runId?: string } = {},
 ): AccessMemory {
-  const byPath = new Map<
-    string,
-    { covered: number; lastOrdinal: number; lenses: Set<string> }
-  >();
-
+  const runId = options.runId ?? results.find((r) => r.run_id)?.run_id;
+  // Each covered file in each ledger result is one covered touch at that result's
+  // ledger ordinal. The shared core owns the deterministic accumulate/sort/serialize;
+  // this adapter only maps AuditResult → the normalized touch stream.
+  const events: AccessTouchEvent[] = [];
   results.forEach((result, ordinal) => {
     for (const coverage of result.file_coverage ?? []) {
-      const path = coverage?.path;
-      if (!path) continue;
-      let record = byPath.get(path);
-      if (!record) {
-        record = { covered: 0, lastOrdinal: 0, lenses: new Set<string>() };
-        byPath.set(path, record);
-      }
-      record.covered += 1;
-      // forEach visits ordinals in increasing order, so the final write is the
-      // maximum (most recent) ordinal that covered this path.
-      record.lastOrdinal = ordinal;
-      if (result.lens) record.lenses.add(result.lens);
+      if (!coverage?.path) continue;
+      events.push({
+        path: coverage.path,
+        edited: false,
+        ordinal,
+        lens: result.lens,
+      });
     }
   });
-
-  const runId = options.runId ?? results.find((r) => r.run_id)?.run_id;
-
-  const paths: AccessMemoryPathRecord[] = [...byPath.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([path, record]) => ({
-      path,
-      covered_count: record.covered,
-      edited_count: 0,
-      last_ordinal: record.lastOrdinal,
-      lenses: [...record.lenses].sort(),
-    }));
-
-  return {
-    version: ACCESS_MEMORY_VERSION,
-    ...(runId ? { run_id: runId } : {}),
-    total_ordinals: results.length,
-    paths,
-  };
+  return deriveAccessMemoryFromEvents(events, {
+    totalOrdinals: results.length,
+    runId,
+  });
 }
