@@ -622,3 +622,81 @@ describe("INV-SOO failure modes", () => {
       .toBe(a);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Increment 2d: continuity bias — a secondary admission key strictly BELOW the
+// file-disjointness structure and ABOVE the block_id tie-break.
+// ---------------------------------------------------------------------------
+
+const nodeC = (
+  block_id: string,
+  write_paths: string[],
+  continuity?: number,
+): OwnershipSchedulerNode => ({
+  block_id,
+  write_paths,
+  ...(continuity !== undefined ? { continuity } : {}),
+});
+
+describe("increment 2d: continuity biases sub-wave admission order", () => {
+  it("higher-continuity file-disjoint nodes admit into the FIRST sub-wave before lower ones", () => {
+    // All three touch distinct files → all disjoint → all fit one sub-wave, but the
+    // WITHIN-wave order reflects continuity desc (then block_id), not block_id alone.
+    const level = [
+      nodeC("B-1", ["src/a.ts"], 0.1),
+      nodeC("B-2", ["src/b.ts"], 0.9),
+      nodeC("B-3", ["src/c.ts"], 0.5),
+    ];
+    const waves = ownershipSubWaves(level);
+    expect(ids(waves)).toEqual([["B-2", "B-3", "B-1"]]);
+  });
+
+  it("continuity outranks block_id: a high-continuity late-id node admits before a low-continuity early-id node", () => {
+    // Same file → serialize into successive sub-waves; the HIGH-continuity node
+    // (B-9) is admitted first despite its lexically-later id.
+    const level = [
+      nodeC("B-1", ["src/x.ts"], 0.0),
+      nodeC("B-9", ["src/x.ts"], 0.8),
+    ];
+    const waves = ownershipSubWaves(level);
+    expect(ids(waves)).toEqual([["B-9"], ["B-1"]]);
+  });
+
+  it("equal continuity falls back to the deterministic block_id tie-break (INV-SOO-08 preserved)", () => {
+    const level = [
+      nodeC("B-3", ["src/a.ts"], 0.5),
+      nodeC("B-1", ["src/b.ts"], 0.5),
+      nodeC("B-2", ["src/c.ts"], 0.5),
+    ];
+    const waves = ownershipSubWaves(level);
+    expect(ids(waves)).toEqual([["B-1", "B-2", "B-3"]]);
+  });
+
+  it("no continuity set on any node ⇒ byte-identical to the pure block_id ordering (no-op default)", () => {
+    const level = [
+      node("B-3", ["src/a.ts"]),
+      node("B-1", ["src/b.ts"]),
+      node("B-2", ["src/c.ts"]),
+    ];
+    const waves = ownershipSubWaves(level);
+    expect(ids(waves)).toEqual([["B-1", "B-2", "B-3"]]);
+  });
+
+  it("continuity NEVER violates same-file disjointness: two same-file nodes serialize regardless of score", () => {
+    // Even with wildly different continuity, same-file nodes never co-batch — the
+    // bias only reorders the greedy consideration, it does not weaken the gate.
+    const level = [
+      nodeC("B-1", ["src/x.ts"], 0.99),
+      nodeC("B-2", ["src/x.ts"], 0.98),
+      nodeC("B-3", ["src/y.ts"], 0.01),
+    ];
+    const waves = ownershipSubWaves(level);
+    // First sub-wave: the highest-continuity x-writer (B-1) plus the disjoint
+    // y-writer (B-3); the other x-writer (B-2) serializes into the next sub-wave.
+    expect(ids(waves)).toEqual([["B-1", "B-3"], ["B-2"]]);
+    // Invariant: never two src/x.ts writers in one sub-wave.
+    for (const w of waves) {
+      expect(w.filter((n) => n.write_paths.includes("src/x.ts")).length).toBeLessThanOrEqual(1);
+    }
+  });
+});

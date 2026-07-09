@@ -5,6 +5,7 @@ import type {
   ReviewPacket,
 } from "../types/reviewPlanning.js";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
+import { continuityMassForPaths } from "audit-tools/shared";
 import { LENS_ORDER, priorityRank, sortLenses } from "./auditTaskUtils.js";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 import {
@@ -134,19 +135,17 @@ function compareTasksForPacket(a: AuditTask, b: AuditTask): number {
 }
 
 /**
- * Sum a packet's member-file continuity scores (rounded to fixed precision so
+ * A packet's continuity mass = the single-sourced {@link continuityMassForPaths}
+ * reducer over its member files (sum of normalized per-file scores, rounded so
  * ULP-level float differences can't reorder packets). Higher = more of the
- * packet's files are connected to already-touched code.
+ * packet's files are connected to already-touched code. Shared with remediate's
+ * per-block reduction so both orchestrators reduce identically.
  */
 function packetContinuityMass(
   packet: ReviewPacket,
   scores: Map<string, number>,
 ): number {
-  let sum = 0;
-  for (const path of packet.file_paths) {
-    sum += scores.get(normalizeGraphPath(path)) ?? 0;
-  }
-  return Math.round(sum * 1e6) / 1e6;
+  return continuityMassForPaths(packet.file_paths, scores);
 }
 
 /**

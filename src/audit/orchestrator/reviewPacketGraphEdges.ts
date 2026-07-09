@@ -1,6 +1,6 @@
 import type { AuditTask } from "../types.js";
-import type { GraphBundle, GraphEdge } from "audit-tools/shared";
-import { isRecord } from "audit-tools/shared";
+import type { GraphEdge } from "audit-tools/shared";
+import { collectGraphEdges } from "audit-tools/shared";
 import { UnionFind } from "./unionFind.js";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 
@@ -8,7 +8,10 @@ import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 // predicate, group-key utilities, and the union-find merge step that derives
 // the initial clustering from shared-file links and filtered graph edges.
 // Imported by reviewPacketGraphClustering and reviewPacketGraph (barrel).
-export { normalizeGraphPath };
+// `collectGraphEdges` is single-sourced in `audit-tools/shared` (the shared
+// continuity scorer needs it too) and re-exported here so this barrel's
+// consumers are unchanged.
+export { normalizeGraphPath, collectGraphEdges };
 
 const PACKET_EXPANSION_MIN_CONFIDENCE = 0.65;
 /**
@@ -18,43 +21,6 @@ const PACKET_EXPANSION_MIN_CONFIDENCE = 0.65;
  */
 export const HIGH_FAN_DEGREE_THRESHOLD = 12;
 const HIGH_FAN_EXPANSION_CONFIDENCE = 0.99;
-
-export function collectGraphEdges(graphBundle?: GraphBundle): GraphEdge[] {
-  if (!graphBundle?.graphs) {
-    return [];
-  }
-  const edges: GraphEdge[] = [];
-  for (const key of ["imports", "calls", "references"]) {
-    const raw = graphBundle.graphs[key];
-    if (!Array.isArray(raw)) {
-      continue;
-    }
-    for (const item of raw) {
-      if (!isRecord(item)) {
-        continue;
-      }
-      if (typeof item.from !== "string" || typeof item.to !== "string") {
-        continue;
-      }
-      const edge: GraphEdge = {
-        from: item.from,
-        to: item.to,
-        kind: typeof item.kind === "string" ? item.kind : undefined,
-      };
-      if (item.direction === "directed" || item.direction === "undirected") {
-        edge.direction = item.direction;
-      }
-      if (typeof item.confidence === "number" && Number.isFinite(item.confidence)) {
-        edge.confidence = Math.min(1, Math.max(0, item.confidence));
-      }
-      if (typeof item.reason === "string" && item.reason.trim().length > 0) {
-        edge.reason = item.reason.trim();
-      }
-      edges.push(edge);
-    }
-  }
-  return edges;
-}
 
 export function graphEdgeConfidence(edge: GraphEdge): number {
   if (typeof edge.confidence === "number" && Number.isFinite(edge.confidence)) {

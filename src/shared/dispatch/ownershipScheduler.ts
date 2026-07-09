@@ -59,6 +59,19 @@ export interface OwnershipSchedulerNode {
    * writer and goes through the normal file-disjointness gating.
    */
   read_only?: boolean;
+  /**
+   * Access-memory CONTINUITY mass for this node (context-efficiency track,
+   * increment 2d): higher ⇒ more of the node's files are connected to code earlier
+   * steps already touched, so admitting it earlier keeps warm files in play (the
+   * god-file-re-read hotspot). Biases sub-wave admission ORDER only — a secondary
+   * key strictly BELOW the file-disjointness structure and ABOVE the `block_id`
+   * tie-break. Absent/0 ⇒ pure `block_id` ordering, byte-identical to pre-2d
+   * (audit never sets it — it orders upstream; remediate sets it from
+   * `computeContinuityScores`). Never affects WHICH nodes are disjoint, only the
+   * greedy consideration order, so INV-SOO disjointness/lost-update guarantees are
+   * untouched.
+   */
+  continuity?: number;
 }
 
 /**
@@ -87,12 +100,24 @@ export function canonicalScopeKeys(
  * is blocked-by every peer writer), so it never batches with another writer
  * (INV-SOO-01 / CE-008). A `read_only` node is the opposite — it writes nothing, so
  * it admits into any sub-wave in full parallel (see the three-case note above).
+ *
+ * Admission consideration order (increment 2d): higher `continuity` first, then the
+ * `block_id` tie-break (INV-SOO-08). Continuity is a SECONDARY key — it reorders the
+ * greedy consideration sequence so warmer (continuity-connected) nodes admit into
+ * earlier sub-waves, but it never changes the disjointness gating itself, so the
+ * lost-update / starved-tail guarantees are unaffected. With no continuity set (all
+ * 0 — audit, and remediate before its first merge) this is byte-identical to the
+ * prior pure `block_id` ordering.
  */
 export function ownershipSubWaves(
   level: OwnershipSchedulerNode[],
   root?: string,
 ): OwnershipSchedulerNode[][] {
-  const ordered = [...level].sort((a, b) => a.block_id.localeCompare(b.block_id));
+  const ordered = [...level].sort(
+    (a, b) =>
+      (b.continuity ?? 0) - (a.continuity ?? 0) ||
+      a.block_id.localeCompare(b.block_id),
+  );
   const scopeOf = new Map<string, Set<string>>();
   for (const n of ordered) scopeOf.set(n.block_id, canonicalScopeKeys(n, root));
 

@@ -42,13 +42,27 @@
     no false-fail on the `coversAffectedSpan`/`total_lines` gate). Adversarially reviewed (6 attack vectors — cache
     safety, span correctness, top-level heuristic, determinism/churn, mutation ordering, render edge — all REFUTED).
     Green: `build` + `check` + full audit/shared suite. **Next agent: ship it** (`npm run release:patch:publish`).
-  - **Still open on the track (surface to owner after 2d ships):**
-    - **(B) #3 — token-efficiency eval harness (measure first):** the measurement gate confirming 2b's ordering bias
-      AND 2d's slice guidance actually cut tokens *without busting prefix cache*. Cost counterpart to the A2 quality
-      oracle; reads recorded run ledgers/headroom telemetry (post-hoc, allowed), reuses the A2 corpus. The
-      "MEASURE not assert" discipline the track's own cross-cutting guard calls for. **Recommended next.**
-    - A **remediate continuity CONSUMER** (remediate now harvests `edited_count` but nothing biases on it; the audit
-      side has its consumer via 2b).
+  - **Remediate continuity CONSUMER + scorer single-sourced — CODE-COMPLETE, ⚠️ UNRELEASED (same "don't /ship" lap).**
+    Owner principle: auditor/remediator mirroring is common logic — the consumer should have been shared from the
+    start (as the 2c harvest core already was), not built audit-only. So the scorer was EXTRACTED to
+    `audit-tools/shared`: `computeContinuityScores` + a new single-sourced `continuityMassForPaths` reducer
+    (`src/shared/continuityScore.ts`), plus the two graph primitives it needs (`normalizeGraphPath`,
+    `collectGraphEdges` → `src/shared/graph/graphPaths.ts`); audit re-exports all four so its 28+6 import sites +
+    2b behavior are BYTE-IDENTICAL (guarded green). Remediate consumer: `readRemediationAccessMemory` +
+    `computeBlockContinuityScores` (`src/remediate/state/accessMemory.ts`) reduce the harvested `access_memory.json`
+    to a per-block mass (seed-only — remediate has NO graph → `computeContinuityScores(mem, undefined)`), threaded
+    through `DriveRollingDispatchOptions.continuityScores` → `toNode` → the shared `ownershipSubWaves`, which gains an
+    `OwnershipSchedulerNode.continuity?` secondary sort key strictly BELOW file-disjointness and ABOVE the `block_id`
+    tie-break. No-op by default (audit/first-pass → pure block_id, unchanged). Adversarially reviewed (6 vectors A–F:
+    extraction fidelity, scheduler-sort disjointness/NaN, audit no-double-apply, consumer crash-safety, first-pass
+    timing, churn — all REFUTED). Green (build/check/deadcode/full suite; 1 known `audit-code-completion` hermeticity
+    flake passes alone).
+  - **Still open on the track (surface to owner):**
+    - **(B) #3 — token-efficiency eval harness (measure first):** the measurement gate confirming 2b's ordering bias,
+      2d's slice guidance, AND the remediate consumer actually cut tokens *without busting prefix cache*. Cost
+      counterpart to the A2 quality oracle; reads recorded run ledgers/headroom telemetry (post-hoc, allowed), reuses
+      the A2 corpus. The "MEASURE not assert" discipline the track's own cross-cutting guard calls for. **The only
+      remaining track item — recommended next.**
     Design-of-record [[access-memory-layer-design]]; full track detail `docs/backlog.md:406`. Loop-core → full
     adversarial pipeline.
 - **Quota-arbitrage tier Phase-0 opencode-free — CODE-COMPLETE (A2 = increment 1 + increment 2, shipped 2026-07-08,

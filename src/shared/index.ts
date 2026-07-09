@@ -68,6 +68,8 @@ export {
 } from "./types/accessMemory.js";
 export type { AccessTouchEvent } from "./accessMemory.js";
 export { deriveAccessMemoryFromEvents } from "./accessMemory.js";
+export { normalizeGraphPath, collectGraphEdges } from "./graph/graphPaths.js";
+export { computeContinuityScores, continuityMassForPaths } from "./continuityScore.js";
 export type {
   FindingSeverity,
   FindingConfidence,

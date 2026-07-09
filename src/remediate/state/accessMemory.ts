@@ -1,6 +1,14 @@
+import { join } from "node:path";
 import type { AccessMemory, AccessTouchEvent } from "audit-tools/shared";
-import { deriveAccessMemoryFromEvents } from "audit-tools/shared";
+import {
+  deriveAccessMemoryFromEvents,
+  readOptionalJsonFile,
+  AccessMemorySchema,
+  computeContinuityScores,
+  continuityMassForPaths,
+} from "audit-tools/shared";
 import type { RemediationState } from "./store.js";
+import type { RemediationBlock } from "./types.js";
 
 /**
  * Remediate-side parity of the audit access-memory harvest (context-efficiency
@@ -61,4 +69,59 @@ export function deriveRemediationAccessMemory(
     totalOrdinals: blocks.length,
     runId: state.plan?.plan_id,
   });
+}
+
+/** Canonical on-disk name of the per-run access-memory record (both orchestrators). */
+const ACCESS_MEMORY_FILENAME = "access_memory.json";
+
+/**
+ * Read the remediation `access_memory.json` (written at the artifacts root by the
+ * merge — see {@link deriveRemediationAccessMemory}) back for the continuity
+ * consumer. Absent (first dispatch pass, before any merge) OR malformed ⇒
+ * `undefined` = no bias, matching the scorer's empty-map contract. Never throws —
+ * a bad record degrades silently rather than failing dispatch (enforce-in-tooling,
+ * crash-safe like the graph/extractor read path).
+ */
+export async function readRemediationAccessMemory(
+  artifactsDir: string,
+): Promise<AccessMemory | undefined> {
+  let raw: unknown;
+  try {
+    raw = await readOptionalJsonFile<unknown>(join(artifactsDir, ACCESS_MEMORY_FILENAME));
+  } catch {
+    return undefined; // unreadable / invalid JSON → no bias
+  }
+  if (raw === undefined) return undefined;
+  const parsed = AccessMemorySchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Remediate-side continuity CONSUMER (context-efficiency track, increment 2d) —
+ * the mirror of audit's `orderReviewPackets` bias. Turns the harvested
+ * `access_memory` into a per-BLOCK continuity mass that biases file-ownership
+ * sub-wave admission (`ownershipSubWaves`, via `OwnershipSchedulerNode.continuity`)
+ * toward blocks whose files earlier waves already touched.
+ *
+ * Remediate has NO dependency graph at dispatch, so the shared scorer runs in its
+ * seed-only mode (`graphBundle: undefined`) — a pure recency×frequency ordering
+ * (edited-weighted), which is the valid weaker signal for a graphless consumer.
+ * Each block's mass is the single-sourced {@link continuityMassForPaths} reducer
+ * over its declared file surface, keyed by `block_id`. Returns an empty map when
+ * there is no signal yet (no/empty access-memory) ⇒ the scheduler falls back to
+ * its pure `block_id` ordering, byte-identical to pre-2d.
+ */
+export function computeBlockContinuityScores(
+  accessMemory: AccessMemory | undefined,
+  blocks: readonly RemediationBlock[],
+  scopeForBlock: (block: RemediationBlock) => readonly string[],
+): Map<string, number> {
+  const scores = computeContinuityScores(accessMemory, undefined);
+  if (scores.size === 0) return new Map();
+  const byBlock = new Map<string, number>();
+  for (const block of blocks) {
+    const mass = continuityMassForPaths(scopeForBlock(block), scores);
+    if (mass > 0) byBlock.set(block.block_id, mass);
+  }
+  return byBlock;
 }

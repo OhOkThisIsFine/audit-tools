@@ -432,9 +432,20 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   bytes — the guidance is the sub-file dispatch. Fail-safe (nested/indented bindings get no span → never fragment an
   enclosing span nor become spurious slices), cache-safe (back-payload only; fixed prefix untouched), zero schema/validator
   change (`total_lines` stays whole-file, citations stay real-file coords → no `coversAffectedSpan` false-fail).
-  Adversarially reviewed (6 vectors REFUTED). Green build/check/audit+shared suite. **Next agent ships it.**
-  Remaining track work: item (3) token-efficiency eval harness (measurement gate — 2b's bias AND 2d's slice guidance
-  must be MEASURED not asserted), plus a remediate-side continuity CONSUMER (nothing biases on `access_memory` yet).
+  Adversarially reviewed (6 vectors REFUTED). Green build/check/audit+shared suite.
+  **Remediate continuity CONSUMER + scorer single-sourced — CODE-COMPLETE, UNRELEASED (same "don't /ship" lap):**
+  owner principle — auditor/remediator mirroring is common logic; the consumer should have been shared from the start
+  (like the 2c harvest core), not audit-only. Scorer EXTRACTED to `audit-tools/shared` (`computeContinuityScores` +
+  new single-sourced `continuityMassForPaths` reducer in `src/shared/continuityScore.ts`; graph primitives
+  `normalizeGraphPath`/`collectGraphEdges` → `src/shared/graph/graphPaths.ts`); audit re-exports all four → 28+6 import
+  sites + 2b behaviour byte-identical. Remediate consumer (`readRemediationAccessMemory` + `computeBlockContinuityScores`,
+  `src/remediate/state/accessMemory.ts`) reduces harvested `access_memory.json` to a per-block mass (seed-only — remediate
+  has NO graph), threaded via `DriveRollingDispatchOptions.continuityScores` → `toNode` → shared `ownershipSubWaves`
+  (`OwnershipSchedulerNode.continuity?` = secondary sort key, strictly below file-disjointness, above `block_id`;
+  no-op by default). Adversarially reviewed (6 vectors A–F REFUTED). Green (build/check/deadcode/full suite; 1 known
+  hermeticity flake passes alone). **Next agent ships 2d + this together.**
+  Remaining track work: ONLY item (3) token-efficiency eval harness (measurement gate — 2b's bias, 2d's slice guidance,
+  AND the remediate consumer must be MEASURED not asserted). The remediate-consumer gap is now CLOSED.
 
   - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
     *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step

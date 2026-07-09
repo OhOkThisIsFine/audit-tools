@@ -1,5 +1,11 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
+import { normalizeGraphPath } from "audit-tools/shared";
+
+// `normalizeGraphPath` is single-sourced in `audit-tools/shared` (the shared
+// continuity scorer needs it too). Re-exported here so all 28 audit import sites
+// that read it from this module are unchanged.
+export { normalizeGraphPath };
 
 const RESOLVABLE_EXTENSIONS = [
   "",
@@ -35,12 +41,6 @@ const RUNTIME_SOURCE_EXTENSION_ALIASES: Record<string, readonly string[]> = {
   ".mjs": [".mts"],
   ".cjs": [".cts"],
 };
-
-export function normalizeGraphPath(path: string): string {
-  return posix
-    .normalize(path.replace(/\\/g, "/"))
-    .replace(/^\.\//, "");
-}
 
 export function graphLookupKey(path: string): string {
   return normalizeGraphPath(path).toLowerCase();

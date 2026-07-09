@@ -11,6 +11,7 @@ import type {
 } from "../state/types.js";
 import { readOptionalJsonFile, readValidatedSessionConfig, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
+import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
 import { groundExtractedFindings } from "../phases/grounding.js";
 import { runTriagePhase } from "../phases/triage.js";
@@ -715,6 +716,15 @@ export interface DriveRollingDispatchOptions {
    * (admitted only solo) by the ownership scheduler.
    */
   scopeForBlock?: (block: RemediationBlock) => string[];
+  /**
+   * Per-block access-memory CONTINUITY mass (context-efficiency track, increment
+   * 2d), keyed by `block_id`. Biases file-ownership sub-wave admission toward blocks
+   * whose files earlier waves already touched — a secondary key strictly below the
+   * disjointness structure, above the `block_id` tie-break. Omit/empty ⇒ no bias
+   * (byte-identical pure `block_id` ordering). Computed by
+   * `computeBlockContinuityScores` from the harvested `access_memory.json`.
+   */
+  continuityScores?: Map<string, number>;
   /** Repo root for canonical path identity (INV-SOO-09). Defaults to cwd. */
   root?: string;
   /**
@@ -813,13 +823,17 @@ export async function driveRollingDispatch(
             ledgerCfg.resolveOutputReservation(poolId),
         }
       : {}),
-    toNode: (b) => ({
-      block_id: b.block_id,
-      write_paths: scopeForBlock(b),
-      ...(b.cofile_parallel_safe !== undefined
-        ? { cofile_parallel_safe: b.cofile_parallel_safe }
-        : {}),
-    }),
+    toNode: (b) => {
+      const continuity = options.continuityScores?.get(b.block_id) ?? 0;
+      return {
+        block_id: b.block_id,
+        write_paths: scopeForBlock(b),
+        ...(b.cofile_parallel_safe !== undefined
+          ? { cofile_parallel_safe: b.cofile_parallel_safe }
+          : {}),
+        ...(continuity > 0 ? { continuity } : {}),
+      };
+    },
     toPacket: (b) => ({
       id: b.block_id,
       payload: { block_id: b.block_id },
@@ -1182,6 +1196,16 @@ export async function driveRollingImplementDispatch(
   const writePathsByBlock = new Map(
     allBlockScopes.map((s) => [s.block_id, s.write_paths]),
   );
+  // Continuity bias (context-efficiency track, increment 2d): load the harvested
+  // access-memory and reduce it to a per-block mass keyed on each block's declared
+  // source surface (`touched_files` — the clean surface the harvest attributes to,
+  // excluding the synthetic result-path in the dispatch write-scope). Absent on the
+  // first pass (no merge yet) ⇒ empty map ⇒ pure block_id sub-wave ordering.
+  const continuityScores = computeBlockContinuityScores(
+    await readRemediationAccessMemory(artifactsDir),
+    levels.flat(),
+    (block) => block.touched_files ?? [],
+  );
   const driven = await driveRollingDispatch(levels, {
     confirmedPools,
     sessionConfig: options.sessionConfig ?? {},
@@ -1190,6 +1214,7 @@ export async function driveRollingImplementDispatch(
     quotaStateDir: artifactsDir,
     root,
     hostSession,
+    continuityScores,
     scopeForBlock: (block) =>
       writePathsByBlock.get(block.block_id) ?? block.touched_files ?? [],
     // Reactive cost verification: a declared-free source pool observed charging has
