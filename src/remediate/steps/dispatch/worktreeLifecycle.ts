@@ -436,6 +436,40 @@ export function quarantineRef(runId: string, blockId: string): string {
 }
 
 /**
+ * Resolve which ref a NEW quarantine write for (runId, blockId, commit) should
+ * target, WITHOUT clobbering an already-preserved DIFFERENT commit sitting at the
+ * primary ref (D-66/67 slice-1 §6, CONFIRMED-BROKEN otherwise). The primary ref is
+ * a plain `git update-ref` force-move keyed only on (runId, blockId): a merge-time
+ * ownership refusal preserves owner A's commit there, and a LATER owner B's
+ * genuine failure for the SAME blockId would otherwise force-overwrite it,
+ * destroying A's preserved work. When the primary ref exists and points at a
+ * DIFFERENT commit, the new commit is written to a suffixed ref instead
+ * (`<primary>-<shortOid>`, content-derived from the NEW commit — so two distinct
+ * later failures never collide with each other either); `reverifyQuarantinedNode`'s
+ * primary (runId, blockId) lookup keeps resolving A's preserved commit unchanged.
+ * A same-commit re-quarantine (idempotent retry of the SAME preserved work) writes
+ * the primary ref directly — never manufactures a needless suffix.
+ */
+function resolveQuarantineWriteRef(
+  root: string,
+  runId: string,
+  blockId: string,
+  commit: string,
+): string {
+  const primary = quarantineRef(runId, blockId);
+  const existing = spawnSyncHidden("git", ["rev-parse", "--verify", "--quiet", primary], {
+    cwd: root,
+    encoding: "utf8",
+    shell: false,
+  });
+  const existingCommit = existing.status === 0 ? (existing.stdout ?? "").trim() : null;
+  if (existingCommit && existingCommit !== commit) {
+    return `${primary}-${commit.slice(0, 8)}`;
+  }
+  return primary;
+}
+
+/**
  * Preserve a failed-but-committed node's work so it can never be lost. A node that
  * committed real edits to its worktree branch but then failed verify / the
  * write-scope gate / the cherry-pick is about to have its worktree removed and (on
@@ -458,7 +492,7 @@ export function quarantineFailedNodeCommit(
   });
   if (rev.status !== 0) return null;
   const commit = (rev.stdout ?? "").trim();
-  const ref = quarantineRef(runId, blockId);
+  const ref = resolveQuarantineWriteRef(root, runId, blockId, commit);
   const upd = spawnSyncHidden("git", ["update-ref", ref, commit], {
     cwd: root,
     encoding: "utf8",
@@ -543,7 +577,7 @@ export function quarantineCommitByOid(
   commitOid: string,
 ): { ref: string; commit: string } | null {
   if (!commitOid) return null;
-  const ref = quarantineRef(runId, blockId);
+  const ref = resolveQuarantineWriteRef(root, runId, blockId, commitOid);
   const upd = spawnSyncHidden("git", ["update-ref", ref, commitOid], {
     cwd: root,
     encoding: "utf8",

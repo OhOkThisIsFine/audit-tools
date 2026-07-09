@@ -7,6 +7,7 @@ import { mergedBaseCheckArgv, mergedGuardSuiteArgv } from "../gateCommands.js";
 import { readJsonFile, writeJsonFile, readOptionalJsonFile } from "audit-tools/shared";
 import type { RemediationBlock } from "../../state/types.js";
 import type { ProviderSlot, RollingDispatchResult } from "audit-tools/shared";
+import type { ClaimRegistry } from "audit-tools/shared";
 import {
   runDir,
   worktreeBranchForBlock,
@@ -120,6 +121,23 @@ export interface AcceptNodeWorktreeParams {
    * unit-test path every other caller relies on today).
    */
   nodeClaimsEdit?: boolean;
+  /**
+   * Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1). When present, the
+   * node's claim lease is HEARTBEAT-CHECKED immediately before the cherry-pick —
+   * the last moment before the irreversible base mutation — using the TEMPLATE the
+   * one existing layer-2 gate established (`src/audit/cli/auditStep.ts:216-239`).
+   * `claimMany`'s same-pool re-grant MINTS A NEW TOKEN, so any peer reclaim/repartition
+   * rotates the token and this node's heartbeat then returns false — supersession is
+   * always detectable. `heartbeat` does not check staleness (only token identity), so
+   * the gate fires ONLY on a real peer reclaim/clear, never on a single-agent run.
+   * OMITTED (test callers, claim-less lifecycle-unit-test flows) ⇒ no gate, the prior
+   * unconditional-land behaviour — every PRODUCTION driver threads it (E1).
+   */
+  ownership?: {
+    registry: ClaimRegistry;
+    nodeId: string;
+    ownerToken: string;
+  };
 }
 
 export interface AcceptNodeWorktreeResult {
@@ -439,6 +457,29 @@ async function acceptNodeWorktreeLocked(
     // scoped clean below must be driven off this pre-merge snapshot.
     const nodeEditedFiles = gitEditedFilesForBranch(root, branch);
 
+    // Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1): the LAST moment
+    // before the irreversible base mutation. A peer that reclaimed this node's
+    // claim lease since dispatch (a stale sweep, a second driver's re-partition —
+    // `claimMany` mints a fresh token on any such re-grant) fails the token-checked
+    // heartbeat; refuse to land work for a lease we can no longer verifiably hold.
+    // Absent `params.ownership` (test callers, claim-less flows) ⇒ no gate.
+    if (params.ownership) {
+      const { registry, nodeId, ownerToken } = params.ownership;
+      const stillOwned = await registry.heartbeat(nodeId, ownerToken);
+      if (!stillOwned) {
+        quarantineFailedNodeCommit(root, branch, runId, blockId);
+        removeWorktree(root, wt);
+        return {
+          outcome: "error",
+          verifyPassed,
+          merged: false,
+          diagnostic:
+            `ownership gate: claim lease for ${blockId} reclaimed by a peer before ` +
+            `merge; refusing to land.`,
+        };
+      }
+    }
+
     // mergeWorktree cherry-picks the verified branch and removes the worktree (on
     // success AND on conflict-abort), so no explicit cleanup is needed afterwards.
     const mergeRes = mergeWorktree(root, wt, branch);
@@ -593,23 +634,36 @@ export async function recordNodeAcceptOutcome(
   blockId: string,
   result: AcceptNodeWorktreeResult,
 ): Promise<void> {
-  await writeJsonFile(nodeAcceptOutcomePath(artifactsDir, runId, blockId), {
-    schema_version: "remediate-code-implement/node-accept-outcome/v1alpha1",
-    block_id: blockId,
-    outcome: result.outcome,
-    verify_passed: result.verifyPassed,
-    merged: result.merged,
-    // Only present on a failure outcome; gives triage the failing command + output.
-    ...(result.diagnostic !== undefined ? { diagnostic: result.diagnostic } : {}),
-    // INV-WTS-3/7: the node's captured commit identity, ground truth the disposition
-    // reconcile trusts over any live branch/path read.
-    ...(result.committedOid !== undefined ? { committed_oid: result.committedOid } : {}),
-    ...(result.landedHeadOid !== undefined ? { landed_head_oid: result.landedHeadOid } : {}),
-    ...(result.strayWorktreeSuspected !== undefined
-      ? { stray_worktree_suspected: result.strayWorktreeSuspected }
-      : {}),
-    // Ground truth for the close-phase staging manifest (see AcceptNodeWorktreeResult.editedFiles).
-    ...(result.editedFiles !== undefined ? { edited_files: result.editedFiles } : {}),
+  const path = nodeAcceptOutcomePath(artifactsDir, runId, blockId);
+  // Regression guard (§8, D-66/67 slice-1 hardening): this write happens OUTSIDE
+  // the per-node worktree lock, so two attempts for the SAME blockId can (in a
+  // starved-process edge) land out of order — a stale `merged:false` clobbering an
+  // already-recorded `merged:true` would make finalization treat a LANDED fix as
+  // blocked. Never let a write regress merged:true -> merged:false for one blockId.
+  // The read+decide+write runs under a sidecar-scoped file lock so two truly-
+  // concurrent writers can't both read stale state and last-write-win past the
+  // guard (mirrors the audit side's mergeOwnerTokens).
+  await withFileLock(`${path}.lock`, async () => {
+    const existing = await loadNodeAcceptOutcome(artifactsDir, runId, blockId);
+    if (existing?.merged === true && result.merged === false) return;
+    await writeJsonFile(path, {
+      schema_version: "remediate-code-implement/node-accept-outcome/v1alpha1",
+      block_id: blockId,
+      outcome: result.outcome,
+      verify_passed: result.verifyPassed,
+      merged: result.merged,
+      // Only present on a failure outcome; gives triage the failing command + output.
+      ...(result.diagnostic !== undefined ? { diagnostic: result.diagnostic } : {}),
+      // INV-WTS-3/7: the node's captured commit identity, ground truth the disposition
+      // reconcile trusts over any live branch/path read.
+      ...(result.committedOid !== undefined ? { committed_oid: result.committedOid } : {}),
+      ...(result.landedHeadOid !== undefined ? { landed_head_oid: result.landedHeadOid } : {}),
+      ...(result.strayWorktreeSuspected !== undefined
+        ? { stray_worktree_suspected: result.strayWorktreeSuspected }
+        : {}),
+      // Ground truth for the close-phase staging manifest (see AcceptNodeWorktreeResult.editedFiles).
+      ...(result.editedFiles !== undefined ? { edited_files: result.editedFiles } : {}),
+    });
   });
 }
 
@@ -694,9 +748,18 @@ export async function executeNodeInWorktree(args: {
   allBlockScopes: Array<{ block_id: string; write_paths: string[] }>;
   /** The node's own targeted_commands, run IN ADDITION to the derived verify (task_7d35176d). */
   additionalVerifyCommands?: string[];
+  /**
+   * Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1), forwarded verbatim
+   * into {@link acceptNodeWorktree}. OMITTED (test callers) ⇒ no gate.
+   */
+  ownership?: {
+    registry: ClaimRegistry;
+    nodeId: string;
+    ownerToken: string;
+  };
   dispatchNode: WorktreeNodeWorker;
 }): Promise<NodeWorktreeExecution> {
-  const { block, slot, root, artifactsDir, runId, resultPath, seedPaths, allBlockScopes, additionalVerifyCommands, dispatchNode } = args;
+  const { block, slot, root, artifactsDir, runId, resultPath, seedPaths, allBlockScopes, additionalVerifyCommands, ownership, dispatchNode } = args;
   const branch = worktreeBranchForBlock(block.block_id, runId);
   const wt = worktreePath(root, block.block_id, runId);
   try {
@@ -734,6 +797,7 @@ export async function executeNodeInWorktree(args: {
       scope: { allBlockScopes },
       // The block's OWN declared write paths (INV-1 new-file inclusion).
       writePaths: allBlockScopes.find((b) => b.block_id === block.block_id)?.write_paths ?? [],
+      ownership,
     });
     await recordNodeAcceptOutcome(artifactsDir, runId, block.block_id, accept);
     return { result, accept };

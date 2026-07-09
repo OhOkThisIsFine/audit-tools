@@ -1184,6 +1184,9 @@ export async function driveRollingImplementDispatch(
       allBlockScopes,
       additionalVerifyCommands: targetedCommandsForBlock(state, block.block_id),
       dispatchNode,
+      // Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1): the SAME lease
+      // this driver just claimed (or re-claimed on a rate_limited re-queue) above.
+      ownership: { registry, nodeId: block.block_id, ownerToken: claimTokens.get(block.block_id)! },
     });
     nodeOutcomes.push({
       block_id: block.block_id,
@@ -1305,6 +1308,17 @@ export async function executeInProcessPartition(params: {
   plan: RemediationDispatchPlan;
   coordinator: HybridSpillCoordinator;
   /**
+   * Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1): the SAME registry
+   * instance `coordinator` claimed `partition` through (the caller constructs
+   * BOTH from one `nodeClaimRegistry(artifactsDir, runId)`, never re-derived here
+   * by path — the coordinator's own `claimRegistry` field is private, so an
+   * independently-reconstructed registry could silently target a different file
+   * than the one that actually holds the claims). Threaded into each node's
+   * {@link AcceptNodeWorktreeParams.ownership} with that node's `ownerToken`.
+   * OMITTED (test callers claiming through an ad-hoc registry path) ⇒ no gate.
+   */
+  registry?: ClaimRegistry;
+  /**
    * Injectable per-node worker (tests). Defaults to the live provider-backed
    * dispatcher, which resolves each node's provider from its slot so the
    * coordinator's per-node pool assignment routes it (cross-provider dispatch).
@@ -1318,7 +1332,7 @@ export async function executeInProcessPartition(params: {
    */
   sourceByPoolId?: Map<string, DispatchableSource>;
 }): Promise<InProcessPartitionResult> {
-  const { root, artifactsDir, runId, sessionConfig, partition, plan, coordinator } = params;
+  const { root, artifactsDir, runId, sessionConfig, partition, plan, coordinator, registry } = params;
   if (partition.length === 0) return { nodes: [] };
 
   const allBlockScopes = blockScopesFromPlan(plan);
@@ -1370,6 +1384,9 @@ export async function executeInProcessPartition(params: {
         allBlockScopes,
         additionalVerifyCommands: state ? targetedCommandsForBlock(state, a.nodeId) : [],
         dispatchNode,
+        // Merge-time ownership gate (OD3 layer 2): the SAME lease the coordinator
+        // claimed `a` under. Omitted when the caller didn't supply a registry.
+        ...(registry ? { ownership: { registry, nodeId: a.nodeId, ownerToken: a.ownerToken } } : {}),
       });
       // Run-once → terminal; free the coordinator claim (token-checked).
       await coordinator.release(a);
@@ -1913,11 +1930,15 @@ async function buildImplementDispatchStep(ctx: {
         // host-subagent pool instead of re-looping on a dead backend.
         const settledPath = nodeSettledPoolsPath(artifactsDir, runId);
         const settled = await readSettledPools(settledPath);
+        // Hoisted so the coordinator's claim registry and the ownership gate's
+        // heartbeat probe are the SAME file-backed instance — never independently
+        // re-derived by path (the coordinator's own `claimRegistry` field is private).
+        const hybridClaimRegistry = nodeClaimRegistry(artifactsDir, runId);
         const partition = await planHybridDispatch({
           frontier,
           pools: confirmedPools,
           sessionConfig: sessionConfigImpl ?? {},
-          claimRegistry: nodeClaimRegistry(artifactsDir, runId),
+          claimRegistry: hybridClaimRegistry,
           readSettled: () => settled,
           onSettle: async (id) => {
             settled.add(id);
@@ -1935,6 +1956,7 @@ async function buildImplementDispatchStep(ctx: {
           partition: partition.inProcess,
           plan,
           coordinator: partition.coordinator,
+          registry: hybridClaimRegistry,
           sourceByPoolId: sourceByPoolId(confirmedPools),
         });
         // DC-4: a backend pool whose node rate-limited is exhausted → settle it

@@ -377,6 +377,24 @@ export async function advanceHostRolling(opts: {
     const registry = nodeClaimRegistry(opts.artifactsDir, opts.runId);
 
     if (!session.accepted.includes(opts.blockId)) {
+      // Contested-node fail-closed guard (OD3 layer 2, D-66/67 slice-1 §5b):
+      // `prepareHostRollingDispatch` never writes `session.claims[block_id]` for a
+      // CONTESTED node (a peer driver already holds its live claim) — this session
+      // was never handed a worktree/prompt for it. An accept-node call for such a
+      // blockId (a stray/duplicate host request) must NEVER silently proceed without
+      // an ownership param — that would ungate exactly the peer-owned case the gate
+      // exists for. Refuse loudly ONLY on that genuinely-contested case. A merely
+      // ABSENT token on a non-contested block is the legacy claims-less session
+      // (persisted before claim-wiring — the `??= {}` above exists precisely so
+      // those never throw): accept it UNGATED, the pre-slice behaviour.
+      if (session.contested?.includes(opts.blockId)) {
+        throw new Error(
+          `Block ${opts.blockId} is contested in run ${opts.runId}'s rolling session ` +
+            `(a peer driver holds its live claim; this session never dispatched it) — ` +
+            `refusing to accept without a verifiable ownership lease.`,
+        );
+      }
+      const ownerToken = session.claims[opts.blockId];
       // State supplies the node's own targeted_commands for the verify (task_7d35176d);
       // verify auto-passes when state is absent (parity with the in-process driver).
       const state = await new StateStore(opts.artifactsDir).loadState();
@@ -402,6 +420,13 @@ export async function advanceHostRolling(opts: {
         // Stray-worktree guard trigger (see acceptNode.ts): true only when the node's
         // OWN result claims a real ("resolved") edit.
         nodeClaimsEdit: claimsEdit,
+        // Merge-time ownership gate (OD3 layer 2): heartbeat the SAME lease this
+        // session claimed the node under, immediately before the cherry-pick.
+        // Omitted for a legacy claims-less session (no token → no gate, pre-slice
+        // behaviour); the genuinely-contested case already threw above.
+        ...(ownerToken
+          ? { ownership: { registry, nodeId: opts.blockId, ownerToken } }
+          : {}),
       });
       // Persist the tool-owned verify/merge outcome so finalization (mergeImplementResults)
       // blocks a node that self-reported resolved but never actually landed (OBL-DS-06).
@@ -420,7 +445,7 @@ export async function advanceHostRolling(opts: {
       // registry the in-process driver shares (token-checked, so only the claim we
       // actually hold is dropped). The node is done; freeing its claim lets a stale
       // re-discovery never re-offer it and keeps the registry a true in-flight view.
-      const ownerToken = session.claims[opts.blockId];
+      // A legacy claims-less session has no token → nothing to release.
       if (ownerToken) {
         await registry.release(opts.blockId, ownerToken);
         delete session.claims[opts.blockId];
@@ -600,6 +625,9 @@ export async function reverifyQuarantinedNode(
     additionalVerifyCommands: state ? targetedCommandsForBlock(state, blockId) : [],
     scope,
     writePaths: scope.allBlockScopes.find((b) => b.block_id === blockId)?.write_paths ?? [],
+    // No `ownership` (D-66/67 slice-1 §4, deliberate): a quarantine re-drive takes NO
+    // claim anywhere — it replays a preserved commit as a fresh operator-triggered
+    // recovery, not a dispatch-loop node — so there is no lease to heartbeat here.
   });
   await recordNodeAcceptOutcome(artifactsDir, runId, blockId, accept);
 

@@ -23,7 +23,11 @@ import {
   worktreePath,
   worktreeBranchForBlock,
 } from "../../src/remediate/steps/dispatch.js";
-import { advanceHostRolling, type RollingSession } from "../../src/remediate/steps/rollingSession.js";
+import {
+  advanceHostRolling,
+  nodeClaimRegistry,
+  type RollingSession,
+} from "../../src/remediate/steps/rollingSession.js";
 import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
 
 const RID = "RID";
@@ -402,7 +406,7 @@ describe("advanceHostRolling", () => {
    * and there is no `slots` / JIT refill. `advanceHostRolling` only accepts + reports
    * wait/done; the pending remainder is re-granted at the next next-step.
    */
-  function seedSession(repo: string, frontierIds: string[]): string {
+  async function seedSession(repo: string, frontierIds: string[]): Promise<string> {
     const artifactsDir = join(repo, ".audit-tools", "remediation");
     const implDir = join(artifactsDir, "runs", RID, "implement");
     mkdirSync(implDir, { recursive: true });
@@ -432,11 +436,22 @@ describe("advanceHostRolling", () => {
     for (const id of frontierIds) {
       createWorktree(repo, worktreePath(repo, id, RID), worktreeBranchForBlock(id, RID));
     }
+    // Real claims through the shared registry (parity with `prepareHostRollingDispatch`)
+    // so the merge-time ownership gate's heartbeat check (D-66/67 slice-1) succeeds
+    // exactly as it would in production — a session with no on-disk claim now fails
+    // closed rather than silently landing (the contested-node guard, §5b).
+    const registry = nodeClaimRegistry(artifactsDir, RID);
+    const claims: Record<string, string> = {};
+    for (const id of frontierIds) {
+      const claim = await registry.claim(id, "host-subagent");
+      if (claim.acquired) claims[id] = claim.ownerToken;
+    }
     const session: RollingSession = {
       run_id: RID,
       frontier,
       dispatched: [...frontierIds],
       accepted: [],
+      claims,
     };
     writeFileSync(join(implDir, "rolling-session.json"), JSON.stringify(session));
     return artifactsDir;
@@ -446,7 +461,7 @@ describe("advanceHostRolling", () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     // 3 granted nodes, all worktrees created upfront. Each accept only accepts + reports.
-    const artifactsDir = seedSession(repo, ["B1", "B2", "B3"]);
+    const artifactsDir = await seedSession(repo, ["B1", "B2", "B3"]);
 
     // B1 finishes → 2 still in flight → wait (never a "dispatch" directive: the whole
     // granted set was already dispatched; the remainder is re-granted next next-step).
@@ -469,7 +484,7 @@ describe("advanceHostRolling", () => {
   it("is idempotent: a re-run for an already-accepted node does not double-accept", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const artifactsDir = seedSession(repo, ["B1"]);
+    const artifactsDir = await seedSession(repo, ["B1"]);
     const first = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
     expect(first.kind).toBe("done");
     // Re-run: no throw, still done, accepted count unchanged (1, not 2).
@@ -481,7 +496,7 @@ describe("advanceHostRolling", () => {
   it("throws for a block id that is not in the frontier", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const artifactsDir = seedSession(repo, ["B1"]);
+    const artifactsDir = await seedSession(repo, ["B1"]);
     await expect(
       advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "ZZZ" }),
     ).rejects.toThrow(/not in the rolling frontier/);
@@ -490,7 +505,7 @@ describe("advanceHostRolling", () => {
   it("records each accepted node's verify/merge outcome to the sidecar mergeImplementResults reads", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const artifactsDir = seedSession(repo, ["B1"]);
+    const artifactsDir = await seedSession(repo, ["B1"]);
     // seedSession created B1's worktree without edits; add a real edit so the accept
     // lifecycle commits → verifies (no targeted cmds → auto-pass) → merges (merged:true).
     const wt = worktreePath(repo, "B1", RID);
@@ -513,7 +528,7 @@ describe("advanceHostRolling", () => {
   it("STRAY-WORKTREE GUARD: a node claiming a resolved edit with an untouched worktree rejects loud", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
-    const artifactsDir = seedSession(repo, ["B1"]);
+    const artifactsDir = await seedSession(repo, ["B1"]);
     // Overwrite the seeded result to claim a REAL edit ("resolved") — but B1's
     // designated worktree (created by seedSession) has zero commits beyond base,
     // the classic stray-worktree symptom (isolation:"worktree" spawned a second,
@@ -544,7 +559,7 @@ describe("advanceHostRolling", () => {
     if (!ok) return;
     // seedSession's default result status is already "resolved_no_change" and the
     // worktree it creates has no edits — the genuine no-op precondition.
-    const artifactsDir = seedSession(repo, ["B1"]);
+    const artifactsDir = await seedSession(repo, ["B1"]);
     const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
     expect(d.kind).toBe("done");
   });
