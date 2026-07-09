@@ -82,3 +82,23 @@ export function mergedBaseCheckArgv(root: string): string[] | null {
   const check = toolOwnedFinalGateCommands(root).find((c) => c.layer === "check");
   return check ? check.argv : null;
 }
+
+/**
+ * The pinned argv for the per-node CROSS-CUTTING invariant/contract guard suite (the
+ * `verify:guards` script = the full vitest suite MINUS the heavy subprocess-spawning
+ * integration/e2e tests). Run in the MAIN checkout AFTER a node's cherry-pick lands,
+ * but ONLY when that node's edits touched a loop-core path (`isLoopCorePath`) — the
+ * bound that keeps the guard off the cheap path. A per-node worktree verify runs only
+ * the node's OWN targeted tests + a merged-base typecheck, so a cross-file
+ * invariant/contract regression (a broken guard test in another area) escapes
+ * node-local verify and surfaces only late at close with a coarse, un-attributable
+ * reblock; running the guard suite here attributes the break to the node that caused
+ * it and rolls it back. Returns `null` when the audit-tools suite is inapplicable
+ * (non-monorepo target) — same scoped-out contract as `mergedBaseCheckArgv` — since
+ * the guard suite is the audit-tools-specific `verify:guards` script (this remediation
+ * run remediates the audit-tools monorepo itself), never fabricated for an arbitrary
+ * target repo.
+ */
+export function mergedGuardSuiteArgv(root: string): string[] | null {
+  return isAuditToolsMonorepo(root) ? ["npm", "run", "verify:guards"] : null;
+}

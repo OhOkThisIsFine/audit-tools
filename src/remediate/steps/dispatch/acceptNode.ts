@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import { spawnSyncHidden } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
+import { isLoopCorePath } from "audit-tools/shared";
 import { runCommand } from "../../utils/commands.js";
-import { mergedBaseCheckArgv } from "../gateCommands.js";
+import { mergedBaseCheckArgv, mergedGuardSuiteArgv } from "../gateCommands.js";
 import { readJsonFile, writeJsonFile, readOptionalJsonFile } from "audit-tools/shared";
 import type { RemediationBlock } from "../../state/types.js";
 import type { ProviderSlot, RollingDispatchResult } from "audit-tools/shared";
@@ -97,6 +98,18 @@ export interface AcceptNodeWorktreeParams {
    * on a minimal repo with no check script).
    */
   mergedBaseCheckCommand?: string[] | null;
+  /**
+   * The cross-cutting invariant/contract GUARD suite command (argv), run in the MAIN
+   * checkout AFTER the merged-base check passes but ONLY when the node's edits touched
+   * a loop-core path (`isLoopCorePath`) — a RED guard rolls the base back to its
+   * captured HEAD OID, exactly like the merged-base check. When omitted, the command is
+   * PINNED — derived from the repo via `mergedGuardSuiteArgv` (the `verify:guards`
+   * script), not a hardcoded string — and skipped (`null`) on a non-monorepo target.
+   * Tests inject a deterministic pass/fail argv (a `t.mock.module` seam is unusable
+   * under tsx/esm). Pass `null` to skip the loop-core guard entirely (legacy lifecycle
+   * unit tests on a minimal repo with no guard script).
+   */
+  mergedGuardCommand?: string[] | null;
   /**
    * True ONLY when the node's OWN result file has an item_results entry with status
    * "resolved" (never "resolved_no_change") — i.e. the node itself claims a real edit.
@@ -409,6 +422,12 @@ async function acceptNodeWorktreeLocked(
     }
     const baseOid = baseHeadBefore.stdout.trim();
 
+    // Capture the node's committed edited files BEFORE the cherry-pick — while the
+    // `HEAD...branch` diff is still meaningful. After the pick the branch's change is
+    // contained in HEAD, so the same probe reads EMPTY; the loop-core guard gate + its
+    // scoped clean below must be driven off this pre-merge snapshot.
+    const nodeEditedFiles = gitEditedFilesForBranch(root, branch);
+
     // mergeWorktree cherry-picks the verified branch and removes the worktree (on
     // success AND on conflict-abort), so no explicit cleanup is needed afterwards.
     const mergeRes = mergeWorktree(root, wt, branch);
@@ -461,6 +480,51 @@ async function acceptNodeWorktreeLocked(
           merged: false,
           diagnostic: `$ ${checkArgv.join(" ")}\n${detail}`,
         };
+      }
+    }
+
+    // Loop-core cross-cutting GUARD (per-node): the merged-base check above catches a
+    // cross-PACKAGE type break, but a cross-FILE invariant/contract regression (a broken
+    // guard test in another area) still escapes the node's own targeted verify. Run the
+    // cross-cutting invariant suite in the MAIN checkout HERE — but ONLY when this node's
+    // edits touched a loop-core path, so the cheap majority of nodes never pay for it. A
+    // RED guard rolls the base back to its captured OID bit-identically, scoped-cleans the
+    // pick's untracked files, quarantines, and fails — never leaving a broken base.
+    const guardEdited = nodeEditedFiles;
+    const touchesLoopCore =
+      guardEdited.available && [...guardEdited.files].some((f) => isLoopCorePath(f));
+    if (touchesLoopCore) {
+      const guardArgv =
+        params.mergedGuardCommand === undefined
+          ? mergedGuardSuiteArgv(root)
+          : params.mergedGuardCommand;
+      if (guardArgv !== null) {
+        const [guardCmd, ...guardArgs] = guardArgv;
+        const res = runCommand(guardCmd, guardArgs, { cwd: root, encoding: "utf8" });
+        const guardFailed = !!res.error || res.status !== 0;
+        if (guardFailed) {
+          const detail = res.error
+            ? res.error.message
+            : [res.stdout ?? "", res.stderr ?? ""].filter(Boolean).join("\n");
+          // Roll the base back to its pre-pick OID, bit-identical.
+          spawnSyncHidden("git", ["reset", "--hard", baseOid], { cwd: root, shell: false });
+          // Scoped clean: remove only the pick / guard-emitted untracked files under the
+          // paths the pick touched — never a blanket `git clean`.
+          if (guardEdited.available && guardEdited.files.size > 0) {
+            spawnSyncHidden(
+              "git",
+              ["clean", "-fdq", "--", ...[...guardEdited.files]],
+              { cwd: root, shell: false },
+            );
+          }
+          quarantineFailedNodeCommit(root, branch, runId, blockId);
+          return {
+            outcome: "error",
+            verifyPassed,
+            merged: false,
+            diagnostic: `$ ${guardArgv.join(" ")}\n${detail}`,
+          };
+        }
       }
     }
 

@@ -118,12 +118,22 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 - **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
   recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
-  - **Cross-file contract/invariant regressions escape node-local verify and surface only at ship-time CI.** Per-node
-    implement workers verify their OWN targeted tests but don't run the repo-wide guards their refactors break
-    (id-glossary INV-family registry, INV-WH raw-spawn, release-contract source-shape, drain-lifecycle analyzer-cache
-    coupling) — four such breaks were caught one-CI-cycle-at-a-time across 3 failed publishes. The implement/verify
-    (or accept-node) step should run the repo-wide contract/invariant guard suite against the merged tree, not just
-    node-local tests. Extends [[worktree-tests-miss-integration-guards]].
+  - **Cross-file contract/invariant regressions escape node-local verify — CLOSED for loop-core nodes (per-node
+    guard shipped).** `acceptNodeWorktree` now runs the cross-cutting invariant/contract guard suite (`verify:guards`
+    = full vitest MINUS the heavy subprocess/e2e tests) in the MAIN checkout after a node's cherry-pick lands, gating
+    + rolling back that node on RED — but ONLY when the node's edits touch a loop-core path (`isLoopCorePath`,
+    single-sourced `src/shared/loopCorePaths.ts`), which bounds cost so the cheap majority of nodes never pay for it.
+    Fires only on audit-tools self-remediation (`isAuditToolsMonorepo`, like the merged-base check). This attributes a
+    cross-file break to the node that caused it (vs the old late, coarse close-time reblock) for the loop-core class
+    where those breaks concentrate. NON-loop-core cross-file breaks still rely on the close-time whole-repo gate
+    (acceptable — the observed escapes were loop-core). Extends [[worktree-tests-miss-integration-guards]].
+    - **Open follow-up (pre-existing, unconfirmed):** the EXISTING merged-base-check's post-merge scoped-`git clean`
+      (`acceptNode.ts`, driven off a post-cherry-pick `gitEditedFilesForBranch` probe) may be inert — a subagent
+      observed the post-merge `HEAD...branch` probe reads empty in a test harness, though `removeWorktree` does not
+      delete the branch so first-principles says it should be non-empty. The new guard sidesteps this by capturing the
+      node's edited files PRE-merge; the merged-base-check was left untouched (couldn't confirm the claim; fixing a
+      working rollback path blind is riskier than the latent untracked-file leak). Investigate: does the post-merge
+      probe actually return files on the real path? If empty, single-source both scoped-cleans off the pre-merge snapshot.
 
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):

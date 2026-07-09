@@ -42,6 +42,7 @@
     "test:doc-contract": "vitest run tests/audit/release-contract.test.mjs tests/audit/file-lock-doc-sync.test.mjs tests/audit/host-asset-renderer-drift.test.mjs",
     "test": "npm run build && vitest run",
     "test:single": "npm run build && vitest run",
+    "verify:guards": "vitest run --exclude \"**/audit-code-completion.test.mjs\" --exclude \"**/audit-code-wrapper.test.mjs\" --exclude \"**/audit/next-step.test.mjs\" --exclude \"**/seam-host-only-next-step.test.mjs\" --exclude \"**/*-e2e.test.*\" --exclude \"**/next-step-implement-dispatch.test.ts\" --exclude \"**/next-step-pipeline-dispatch.test.ts\"",
     "verify:checks": "node scripts/shared/profile-run.mjs verify-checks check:deadcode check:doc-manifest build verify:hosts verify:remediate-hosts smoke:packaged-audit-code smoke:packaged-remediate-code",
     "verify:release": "npm run verify:checks && vitest run",
     "check:deadcode": "knip --no-config-hints",
