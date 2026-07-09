@@ -831,6 +831,7 @@ export {
 export {
   OpenCodeProvider,
   OPENCODE_PROVIDER_NAME,
+  createOpenCodeProvider,
 } from "./providers/opencodeProvider.js";
 
 // Provider auto-resolution + factory (single source of truth for both orchestrators)

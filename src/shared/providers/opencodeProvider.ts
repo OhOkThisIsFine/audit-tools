@@ -70,3 +70,17 @@ export class OpenCodeProvider implements FreshSessionProvider {
     return result;
   }
 }
+
+/**
+ * Construct an {@link OpenCodeProvider}. opencode has no per-orchestrator
+ * delta (no skip-permissions flag, no orchestrator-specific config), so this
+ * factory is single-sourced here rather than duplicated as a thin
+ * construction shim in each of `src/audit/providers/` and
+ * `src/remediate/providers/` (drift-plan E4).
+ */
+export function createOpenCodeProvider(
+  config: OpenCodeConfig = {},
+  launchCommand?: typeof spawnLoggedCommand,
+): OpenCodeProvider {
+  return new OpenCodeProvider(config, launchCommand);
+}

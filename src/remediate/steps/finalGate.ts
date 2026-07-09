@@ -12,9 +12,9 @@
 // INV-RS-10: the final completion gate is a TOOL-OWNED, NON-VACUOUS suite that
 // is INDEPENDENT of any `plan.test_command`. A run can only land green when this
 // suite passes; a vacuous/unset `plan.test_command` can never substitute for it.
-// The suite is executed through the env-scrubbing `runTracked` path
-// (`runCommand`), which strips CLAUDECODE / CLAUDE_CODE_* so the gate runs in a
-// clean environment regardless of the host session.
+// The suite is executed through the env-scrubbing `runTracked`, which strips
+// CLAUDECODE / CLAUDE_CODE_* so the gate runs in a clean environment
+// regardless of the host session.
 //
 // Hard floor (always run, in order — single package, single-flight build — CE-001):
 //   1. npm run build                          (one tsc build for the whole package)
@@ -32,10 +32,9 @@
 // pass instead of being able to strand the run.
 
 import { join } from "node:path";
-import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, runTracked } from "audit-tools/shared";
 import type { RemediationState } from "../state/store.js";
 import { isSkipStatus } from "../state/itemStatus.js";
-import { runCommand } from "../utils/commands.js";
 import {
   isAuditToolsMonorepo,
   toolOwnedFinalGateCommands,
@@ -83,8 +82,8 @@ export type GateRunner = (
 ) => { status: number | null };
 
 /**
- * Run the tool-owned final gate (INV-RS-10). Each command runs through
- * `runCommand` → shared `runTracked`, which scrubs CLAUDECODE / CLAUDE_CODE_*.
+ * Run the tool-owned final gate (INV-RS-10). Each command runs through the
+ * shared `runTracked`, which scrubs CLAUDECODE / CLAUDE_CODE_*.
  * The first failing command short-circuits the floor (a broken build makes the
  * later layers meaningless). A `runner` may be injected for tests. When the
  * audit-tools suite does not apply (non-monorepo target), the gate is
@@ -116,8 +115,8 @@ export async function runToolOwnedFinalGate(
       // Package-scoped unit suites run with cwd at the package (no `npm -w`); the
       // monorepo-root build/check commands run at the repo root.
       const effectiveCwd = packageDir ? join(root, packageDir) : cwd;
-      // runCommand → runTracked strips CLAUDECODE / CLAUDE_CODE_* (INV-RS-10).
-      const result = runCommand(command, args, {
+      // runTracked strips CLAUDECODE / CLAUDE_CODE_* (INV-RS-10).
+      const result = runTracked([command, ...args], {
         cwd: effectiveCwd,
         stdio: ["ignore", "pipe", "pipe"],
       });

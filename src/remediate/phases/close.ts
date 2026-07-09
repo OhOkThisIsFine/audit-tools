@@ -5,6 +5,7 @@ import {
   listQuarantinedCommits,
   readRemediationBaseBranch,
 } from "../steps/dispatch.js";
+import { spawnSync } from "node:child_process";
 import { dirname, extname, isAbsolute, join, relative } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
@@ -31,7 +32,7 @@ import type {
   VerificationTraceEntry,
 } from "audit-tools/shared";
 import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "audit-tools/shared";
-import { runCommand, runShellCommand } from "../utils/commands.js";
+import { runTracked } from "audit-tools/shared";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import type { ClosingAction } from "../state/closingActions.js";
 import type {
@@ -405,7 +406,7 @@ function trimOutput(value: unknown): string | undefined {
 
 function commandResult(
   command: string[],
-  result: ReturnType<typeof runCommand>,
+  result: ReturnType<typeof runTracked>,
 ): ClosingCommandResult {
   return {
     command,
@@ -420,7 +421,7 @@ function runTrackedCommand(
   command: string,
   args: string[],
 ): ClosingCommandResult {
-  const result = runCommand(command, args, {
+  const result = runTracked([command, ...args], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -860,9 +861,13 @@ function runCombinedTestSuite(
     ? state.plan.test_command.join(" ")
     : state.plan.test_command;
   const startedAt = Date.now();
-  const result = runShellCommand(state.plan.test_command, {
+  // Windows-aware: force-hide the console window a windowless parent would
+  // otherwise pop for this shell child (former `runShellCommand` default).
+  const result = spawnSync(state.plan.test_command, {
     cwd: options.root,
     stdio: ["ignore", "pipe", "pipe"],
+    shell: true,
+    windowsHide: true,
   });
   const durationMs = Date.now() - startedAt;
   if (result.status === 0) {
@@ -967,9 +972,13 @@ function runE2eTests(
     return { ran: false, passed: true, output: "" };
   }
   console.log("Running end-to-end tests on combined post-remediation state...");
-  const e2eResult = runShellCommand(state.plan.e2e_command, {
+  // Windows-aware: force-hide the console window a windowless parent would
+  // otherwise pop for this shell child (former `runShellCommand` default).
+  const e2eResult = spawnSync(state.plan.e2e_command, {
     cwd: options.root,
     stdio: ["ignore", "pipe", "pipe"],
+    shell: true,
+    windowsHide: true,
   });
   const e2ePassed = e2eResult.status === 0;
   if (!e2ePassed) {
@@ -1255,7 +1264,7 @@ async function cleanupTempBranchesAndArtifacts(
   runLogger?: RunLogger,
 ): Promise<void> {
   try {
-    const branchResult = runCommand("git", ["branch"], {
+    const branchResult = runTracked(["git", "branch"], {
       cwd: options.root,
       encoding: "utf8",
     });
@@ -1263,7 +1272,7 @@ async function cleanupTempBranchesAndArtifacts(
     for (const branch of branches) {
       const b = branch.replace("*", "").trim();
       if (b.startsWith("remediator-block-")) {
-        runCommand("git", ["branch", "-D", b], { cwd: options.root });
+        runTracked(["git", "branch", "-D", b], { cwd: options.root });
       }
     }
   } catch (error) {

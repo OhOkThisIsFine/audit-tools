@@ -12,8 +12,8 @@ import { createOpenCodeProvider } from "../../src/remediate/providers/opencodePr
 import {
   SubprocessTemplateProvider,
   WorkerCommandProvider,
+  quoteForCmd,
 } from "audit-tools/shared";
-import { quoteForCmd } from "../../src/remediate/utils/commands.js";
 
 function expectedShellQuoted(value: string): string {
   if (process.platform === "win32") {

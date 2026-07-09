@@ -3,7 +3,6 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { runCommand } from "./utils/commands.js";
 import { splitFrontmatter, writeGeneratedFile, objectValue } from "./utils/hostAssets.js";
 import { decideNextStep } from "./steps/nextStep.js";
 import {
@@ -38,6 +37,7 @@ import {
   migrateOpenCodeGlobalExternalDirectory,
   withoutOpenCodeWildcard,
   readOptionalJsonFile,
+  runTracked,
 } from "audit-tools/shared";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
@@ -577,15 +577,15 @@ export function resolveArtifactsDirOption(
 
 export function runValidateCommand(
   deps: {
-    run?: typeof runCommand;
+    run?: typeof runTracked;
     log?: (message: string) => void;
     error?: (message: string) => void;
   } = {},
 ): number {
-  const run = deps.run ?? runCommand;
+  const run = deps.run ?? runTracked;
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
-  const result = run("npx", ["tsc", "--noEmit"], {
+  const result = run(["npx", "tsc", "--noEmit"], {
     cwd: pkgRoot,
     stdio: "inherit",
   });

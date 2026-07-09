@@ -35,6 +35,7 @@ import {
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
   chunkByBudget,
+  runTracked,
   type SessionConfig,
 } from "audit-tools/shared";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -49,7 +50,6 @@ import {
   validateRemediationPlan,
   validateFinding,
 } from "../validation/remediationState.js";
-import { runCommand } from "../utils/commands.js";
 import {
   createLaunchInputForTask,
   createRemediationWorkerTask,
@@ -61,9 +61,8 @@ function enumerateTestFiles(root: string): string[] {
   }
 
   // Try vitest first, then jest, and return the list of test file paths
-  const vitestResult = runCommand(
-    "npx",
-    ["vitest", "--reporter=verbose", "--run", "--passWithNoTests", "list"],
+  const vitestResult = runTracked(
+    ["npx", "vitest", "--reporter=verbose", "--run", "--passWithNoTests", "list"],
     {
       cwd: root,
       encoding: "utf8",
@@ -85,9 +84,8 @@ function enumerateTestFiles(root: string): string[] {
     if (files.length > 0) return files;
   }
 
-  const jestResult = runCommand(
-    "npx",
-    ["jest", "--listTests", "--no-coverage"],
+  const jestResult = runTracked(
+    ["npx", "jest", "--listTests", "--no-coverage"],
     {
       cwd: root,
       encoding: "utf8",
@@ -161,7 +159,7 @@ function tryParseFindingsReport(
 
 interface PlanPhaseDeps {
   enumerateTestFiles?: (root: string) => string[];
-  runCommand?: typeof runCommand;
+  runCommand?: typeof runTracked;
   now?: () => number;
   /** Test seam: replaces the provider-backed free-form extraction worker. */
   extractFindings?: (
@@ -252,7 +250,7 @@ export function deriveBlocksFromTestGraph(
 function collectFileCommits(
   findings: Finding[],
   root: string,
-  commandRunner: typeof runCommand,
+  commandRunner: typeof runTracked,
 ): Map<string, Set<string>> {
   const fileCommits = new Map<string, Set<string>>();
   for (const finding of findings) {
@@ -260,8 +258,7 @@ function collectFileCommits(
       if (fileCommits.has(file.path)) continue;
       try {
         const result = commandRunner(
-          "git",
-          ["log", "--format=%H", "--", file.path],
+          ["git", "log", "--format=%H", "--", file.path],
           { cwd: root, encoding: "utf8" },
         );
         fileCommits.set(
@@ -621,7 +618,7 @@ function deriveFallbackBlocks(
   const fileCommits = collectFileCommits(
     findings,
     options.root,
-    deps.runCommand ?? runCommand,
+    deps.runCommand ?? runTracked,
   );
   const gitBlocks = deriveBlocksFromGitCocommit(findings, fileCommits);
   if (gitBlocks.some((b) => b.items.length > 1)) {

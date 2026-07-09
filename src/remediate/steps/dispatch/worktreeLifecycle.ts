@@ -1,8 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative, dirname, isAbsolute } from "node:path";
 import { spawnSyncHidden } from "audit-tools/shared";
 import { AUDIT_TOOLS_DIRNAME } from "../../../shared/io/auditToolsPaths.js";
-import { runShellCommand } from "../../utils/commands.js";
 import {
   toRepoRelative,
   refSafeSegment,
@@ -181,7 +181,7 @@ export function resetNodeWorktreeAndBranch(
  * `targeted_commands` are opaque host-authored command *strings* (e.g.
  * `npm run build`, `grep -c '/packages/' .gitignore`, anything with pipes,
  * quotes, or redirections), NOT pre-tokenized argv. They are run through the
- * platform shell (`runShellCommand` → `spawnSync(..., { shell: true })`, the
+ * platform shell (`spawnSync(..., { shell: true })`, the
  * same path `close.ts` uses for `test_command`/`e2e_command`) so the shell — not
  * a word-split + `spawnSync(shell:false)` — resolves the verb. That is what
  * makes this OS-agnostic: on win32 `cmd.exe` natively execs `.cmd` shims (npm,
@@ -248,9 +248,14 @@ export function verifyNodeInWorktree(
   }
   const outputs: string[] = [];
   for (const cmd of targetedCommands) {
-    const r = runShellCommand(cmd, {
+    // Windows-aware: force-hide the console window a windowless parent
+    // (node under an IDE/agent) would otherwise pop for this shell child —
+    // same default `runShellCommand` (utils/commands.ts, now retired) applied.
+    const r = spawnSync(cmd, {
       cwd: worktreePath,
       encoding: "utf8",
+      shell: true,
+      windowsHide: true,
     });
     if (r.error) {
       // Shell itself failed to spawn — surface it as a verify failure with the

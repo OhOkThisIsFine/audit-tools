@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { spawnSyncHidden } from "audit-tools/shared";
 import { withFileLock } from "audit-tools/shared";
 import { isLoopCorePath } from "audit-tools/shared";
-import { runCommand } from "../../utils/commands.js";
+import { runTracked } from "audit-tools/shared";
 import { mergedBaseCheckArgv, mergedGuardSuiteArgv } from "../gateCommands.js";
 import { readJsonFile, writeJsonFile, readOptionalJsonFile } from "audit-tools/shared";
 import type { RemediationBlock } from "../../state/types.js";
@@ -463,10 +463,9 @@ async function acceptNodeWorktreeLocked(
       // Paths the just-landed pick touched, so the scoped clean nukes only those
       // (never unrelated untracked state). Resolved BEFORE the check runs.
       const pickedFiles = gitEditedFilesForBranch(root, branch);
-      // argv via runCommand → runTracked scrubs CLAUDECODE / CLAUDE_CODE_* and applies
-      // the shared Windows `.cmd` wrapping — never `shell: true`.
-      const [checkCmd, ...checkArgs] = checkArgv;
-      const check = runCommand(checkCmd, checkArgs, { cwd: root, encoding: "utf8" });
+      // runTracked scrubs CLAUDECODE / CLAUDE_CODE_* and applies the shared
+      // Windows `.cmd` wrapping — never `shell: true`.
+      const check = runTracked(checkArgv, { cwd: root, encoding: "utf8" });
       const checkFailed = !!check.error || check.status !== 0;
       if (checkFailed) {
         const detail = check.error
@@ -510,8 +509,7 @@ async function acceptNodeWorktreeLocked(
           ? mergedGuardSuiteArgv(root)
           : params.mergedGuardCommand;
       if (guardArgv !== null) {
-        const [guardCmd, ...guardArgs] = guardArgv;
-        const res = runCommand(guardCmd, guardArgs, { cwd: root, encoding: "utf8" });
+        const res = runTracked(guardArgv, { cwd: root, encoding: "utf8" });
         const guardFailed = !!res.error || res.status !== 0;
         if (guardFailed) {
           const detail = res.error
