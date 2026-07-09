@@ -367,6 +367,32 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   [`spec/remediation-workflow-design.md`](../spec/remediation-workflow-design.md)) now scope the shared
   claim to admission-math and point here for the unification. [[multi-ide-concurrent-runs-design]] /
   [[dispatch-admission-control-design]]
+  - **Design-of-record from the 2026-07-09 recon (READ before building — it changes the target).**
+    The driver + packet engine are ALREADY unified (both orchestrators run `driveRolling` over
+    `createRollingDispatcher`); only the pause/resume TERMINAL adapter + OD3-on-long-claims are forked.
+    Precise map: audit pause = `RollingEngineLifecycleState` (`src/shared/rolling/pausedState.ts`:
+    `running|waiting_for_provider|terminal`; `advancePausedState` reducer; `LIVELOCK_PAUSE_LIMIT=3`; wired in
+    `rollingAuditDispatch.ts advanceRollingPause`) — INTERNAL, self-advancing, livelock-bounded, partial-coverage-OK.
+    Remediate pause = a `PartialCompletionTerminal{reason:"quota_paused", earliest_reset_at}` variant
+    (`src/shared/quota/capacity.ts`; `nextStep.ts` ~4636; stranded nodes stay pending) — EXTERNAL, unbounded,
+    host-retries-at-reset. **CRITICAL FINDING: full unification is the WRONG endpoint.** The resume SEMANTICS
+    genuinely diverge — audit may bound-and-give-up to partial-coverage synthesis (read-only, safe); remediate must
+    NOT abandon half-applied edit-nodes to "partial coverage" (a correctness hazard). So the livelock-terminal-vs-
+    wait-forever branch MUST stay a per-orchestrator policy injection; `earliest_reset_at`-driven external resume has
+    no audit counterpart. **Shareable core (the actual work, bounded):** (1) a shared pause-state reducer that
+    REPRESENTS both, with the terminal-policy branch injected; (2) a shared `withExecutionClaim` = `withClaimHeartbeat`
+    + the merge-time `registry.heartbeat(token)` ownership-gate (which today exists ONLY inline on the short
+    bundle-mutation mutex, `auditStep.ts`:219), applied to the LONG-lived claims (`task-claims.json` 20-min lease,
+    remediate node-claims 30s) that currently hold a lease with NO heartbeat + NO merge gate. **Architectural gotcha
+    for (2):** the long claims are held across OUT-OF-PROCESS worker runs where the parent isn't looping, so there is
+    no natural beater — adding a heartbeat needs a beating owner during the out-of-process span (non-trivial;
+    likely the merge-time ownership-gate CHECK alone — refuse a merge whose lease a peer reclaimed — is the bounded,
+    high-value first slice, deliverable WITHOUT the heartbeat machinery). **Recommended staging:** slice-1 =
+    merge-time ownership-gate on `acceptNodeWorktree` + audit `mergeAndIngestCommand` (bounded, additive); slice-2 =
+    shared pause reducer w/ policy injection; slice-3 = full heartbeat on long claims (only if a real cooperative
+    run shows the stale-window is insufficient). This is a FOCUSED-LAP track — the most delicate machinery in the
+    repo (pause/claim/quota), a genuine divergence to respect, and the owner's own "redesign before scheduled
+    autonomy" caution applies; do NOT rush it as a tail-end change.
 
 - **Collapse `leanFastPath` into the Dial A/B continuum as its lowest-risk tier (doc-review D-68) — SHIPPED
   2026-07-09.** The standalone `evaluateFastPath` boolean gate — a SECOND classifier that could DISAGREE with
@@ -386,12 +412,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md). [[self-scaling-pipeline-not-forked-paths]]
 
 - **Move the per-lap cadence rules (risk-tier + friction-walk) from host-habit to tool-enforcement
-  (doc-review D-69, 2026-07-08).** "Risk-tier every lap" and "Full friction walk every lap" are both
-  self-labeled *"the host workaround until the self-scaling pipeline makes it the tool's own job"* — i.e.
-  correctness rests on the host *remembering* to risk-tier and run a friction walk, which is the
-  "a needed manual flag is a bug signal" smell applied to a cadence. `CLAUDE.md`'s "Redesign before
-  scheduled autonomy" defers this deliberately; this entry makes the tool-enforcement target an explicit
-  forward-track rather than a rule living only in HANDOFF's cadence section.
+  (doc-review D-69) — LARGELY SHIPPED; residue is host-inherent / owner-deferred (assessed 2026-07-09).**
+  Both halves were investigated this lap and are substantially tool-enforced already; no new mechanism was
+  built because the missing pieces are either host-judgment-inherent or the owner-deferred autonomy redesign,
+  and inventing a fragile gate would itself be the "add a step the host must remember" anti-pattern.
+  - **Friction-walk half — SHIPPED (three enforcement layers, pre-existing).** (1) mechanical auto-capture at
+    10 step boundaries (`src/shared/friction/stepBoundaryCapture.ts`); (2) an in-run BLOCKING per-category
+    close-out — a run cannot present complete until every `FRICTION_CATEGORIES` entry is covered by an
+    observation or an explicit "none" attestation (`src/shared/friction/triage.ts` `decideFrictionTriage`);
+    (3) a session-end Stop-hook backstop (`.claude/hooks/friction-stop-gate.mjs`). The friction walk is NOT a
+    host-remembered habit inside an orchestrator run.
+  - **Risk-tier half — the in-run classifier is now SHIPPED via D-68.** The lap-level "trivial vs loop-core"
+    routing the HANDOFF cadence describes is, WITHIN a run, the self-scaling risk dial — and D-68 (this lap)
+    single-sourced that classification (the lean path is now the `low` tier, no parallel gate). So "the tool
+    risk-tiers itself" is real for any work routed through the orchestrator.
+  - **Genuine residue (accepted, not built):** (a) the LAP-level decision to route an item through the
+    orchestrator vs hand-fix it is still host judgment — its tool-enforced end-state is "route substantive work
+    through the self-scaling orchestrator" (the [[self-scaling-pipeline-not-forked-paths]] north star), not a new
+    gate; (b) a hand-fix lap that never invokes an orchestrator produces no friction artifact, so it is covered
+    only by the Stop-hook backstop (and only if a recent run artifact exists in its 12h window). Closing (b)
+    mechanically (e.g. block session end on any commit-bearing lap lacking a friction walk) would be fragile and
+    over-fire; deferred with `CLAUDE.md`'s "Redesign before scheduled autonomy" rather than force it.
   [[enforce-robustness-in-tooling-not-host-discretion]] / [[self-scaling-pipeline-not-forked-paths]]
 
 - **Context-efficiency track (3 items, GrapeRoot-derived).** Investigated the `codex-cli-compact` /
