@@ -36,7 +36,6 @@ import {
   assertOpenCodeAuditPermissionConfig,
   buildMergedOpenCodeProjectConfig,
   OPENCODE_AUDIT_BASH_PERMISSION,
-  OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
   renderOpenCodePermissionConfig,
 } from "../../wrapper/audit-code-wrapper-opencode.mjs";
 const { isCanonicalResultFilename } = await import("../../src/audit/cli/args.ts");
@@ -180,7 +179,9 @@ function assertOpenCodeAuditPermissions(config) {
   expect(config.permission?.read).toBe("allow");
   expect(config.permission?.glob).toBe("allow");
   expect(config.permission?.grep).toBe("allow");
-  expect(typeof config.permission?.external_directory).toBe("object");
+  // Hardened shape (V3): bash wildcard "ask", no external_directory allow-all.
+  expect(config.permission?.bash?.["*"]).toBe("ask");
+  expect(config.permission?.external_directory?.["*"]).not.toBe("allow");
   expect(config.permission?.edit?.[".audit-code/**"]).toBe("allow");
   expect(config.permission?.edit?.[".audit-tools/**"]).toBe("allow");
   expect(config.permission?.bash?.["audit-code"]).toBe("allow");
@@ -197,7 +198,9 @@ function assertOpenCodeAuditPermissions(config) {
   expect(config.agent?.auditor?.permission?.read).toBe("allow");
   expect(config.agent?.auditor?.permission?.glob).toBe("allow");
   expect(config.agent?.auditor?.permission?.grep).toBe("allow");
-  expect(typeof config.agent?.auditor?.permission?.external_directory).toBe("object");
+  // Hardened shape (V3): bash wildcard "ask", no external_directory allow-all.
+  expect(config.agent?.auditor?.permission?.bash?.["*"]).toBe("ask");
+  expect(config.agent?.auditor?.permission?.external_directory?.["*"]).not.toBe("allow");
   expect(config.agent?.auditor?.permission?.edit?.[".audit-tools/**"]).toBe("allow");
   expect(config.agent?.auditor?.permission?.bash?.["audit-code next-step*"]).toBe("allow");
   expect(config.agent?.auditor?.permission?.bash?.["*audit-code.mjs* merge-and-ingest*"]).toBe("allow");
@@ -1676,11 +1679,10 @@ test.concurrent("OpenCode permission helpers are importable from the dedicated m
     read: "allow",
     glob: "allow",
     grep: "allow",
-    external_directory: { "*": "allow" },
     edit: { ".audit-code/**": "allow", ".audit-tools/**": "allow" },
     bash: {
       // Missing required allow/deny rules entirely
-      "*": "allow",
+      "*": "ask",
     },
   };
   assert.throws(
@@ -1688,23 +1690,41 @@ test.concurrent("OpenCode permission helpers are importable from the dedicated m
     /bash must allow|bash must deny/,
   );
 
+  // assertOpenCodeAuditPermissionConfig pins the hardened shape (V3): a broad
+  // bash wildcard or an external_directory allow-all must throw.
+  const fullBash = { ...OPENCODE_AUDIT_BASH_PERMISSION };
+  assert.throws(
+    () =>
+      assertOpenCodeAuditPermissionConfig(
+        { read: "allow", glob: "allow", grep: "allow", edit: { ".audit-code/**": "allow", ".audit-tools/**": "allow" }, bash: { ...fullBash, "*": "allow" } },
+        "permission",
+      ),
+    /bash must set "\*" to "ask"/,
+  );
+  assert.throws(
+    () =>
+      assertOpenCodeAuditPermissionConfig(
+        { read: "allow", glob: "allow", grep: "allow", external_directory: { "*": "allow" }, edit: { ".audit-code/**": "allow", ".audit-tools/**": "allow" }, bash: fullBash },
+        "permission",
+      ),
+    /external_directory must not allow-all/,
+  );
+
   // buildMergedOpenCodeProjectConfig with an empty existing config preserves
-  // the generated values for read/glob/grep and sets external_directory allow.
+  // the generated values, seeds the hardened bash wildcard, and seeds no
+  // external_directory rule at all.
   const builtFromEmpty = buildMergedOpenCodeProjectConfig({}, "/tmp/repo");
   expect(builtFromEmpty.permission?.read).toBe("allow");
   expect(builtFromEmpty.permission?.glob).toBe("allow");
   expect(builtFromEmpty.permission?.grep).toBe("allow");
-  expect(builtFromEmpty.permission?.external_directory?.["*"]).toBe("allow");
+  expect(builtFromEmpty.permission?.bash?.["*"]).toBe("ask");
+  expect(builtFromEmpty.permission?.external_directory).toBeUndefined();
   expect(builtFromEmpty.agent?.auditor?.permission?.read).toBe("allow");
-
-  // buildMergedOpenCodeProjectConfig produces a config with the required
-  // permission structure even when called with an empty existing config.
-  const built = buildMergedOpenCodeProjectConfig({}, "/tmp/repo");
-  expect(built.permission?.read).toBe("allow");
-  expect(built.permission?.glob).toBe("allow");
-  expect(built.permission?.grep).toBe("allow");
-  expect(built.permission?.external_directory?.["*"]).toBe("allow");
-  expect(built.agent?.auditor?.permission?.read).toBe("allow");
+  expect(builtFromEmpty.agent?.auditor?.permission?.bash?.["*"]).toBe("ask");
+  expect(builtFromEmpty.agent?.auditor?.permission?.external_directory).toBeUndefined();
+  // The freshly built config satisfies the hardened assert at both scopes.
+  assertOpenCodeAuditPermissionConfig(builtFromEmpty.permission, "permission");
+  assertOpenCodeAuditPermissionConfig(builtFromEmpty.agent?.auditor?.permission, "agent.auditor.permission");
 });
 
 test.concurrent("OPENCODE_AUDIT_BASH_PERMISSION includes Select-String", () => {
@@ -1716,37 +1736,61 @@ test.concurrent("renderOpenCodePermissionConfig bash block includes Select-Strin
   expect(config.bash["Select-String *"], "renderOpenCodePermissionConfig() must return a bash block containing 'Select-String *': 'allow'").toBe("allow");
 });
 
-test.concurrent("buildMergedOpenCodeProjectConfig preserves '*': 'allow' on external_directory even when existing config has a more restrictive value", () => {
-  // User had '*': 'ask' on external_directory — managed rule must override to 'allow'
+test.concurrent("buildMergedOpenCodeProjectConfig migrates the managed external_directory allow-all and preserves other user values (V3)", () => {
+  // A pre-hardening tool-managed '*': 'allow' is migrated away entirely.
+  const managedExisting = { permission: { external_directory: { "*": "allow" } } };
+  const mergedManaged = buildMergedOpenCodeProjectConfig(managedExisting, "/tmp/repo");
+  expect(mergedManaged.permission.external_directory, "the historically managed external_directory allow-all must be migrated away").toBeUndefined();
+
+  // A managed allow-all wildcard alongside user-authored specific keys: only
+  // the wildcard is dropped, the user keys survive.
+  const mixedExisting = { permission: { external_directory: { "*": "allow", "C:/somewhere/**": "ask" } } };
+  const mergedMixed = buildMergedOpenCodeProjectConfig(mixedExisting, "/tmp/repo");
+  expect(mergedMixed.permission.external_directory, "user-authored external_directory keys must survive the allow-all migration").toEqual({ "C:/somewhere/**": "ask" });
+
+  // Non-matching user wildcards survive untouched ('ask' / 'deny').
   const askExisting = { permission: { external_directory: { "*": "ask" } } };
   const mergedAsk = buildMergedOpenCodeProjectConfig(askExisting, "/tmp/repo");
-  expect(mergedAsk.permission.external_directory["*"], "managed rule must override user '*': 'ask' to 'allow' on external_directory").toBe("allow");
-
-  // User had '*': 'deny' on external_directory — managed rule must override to 'allow'
+  expect(mergedAsk.permission.external_directory["*"], "user '*': 'ask' on external_directory must survive untouched").toBe("ask");
   const denyExisting = { permission: { external_directory: { "*": "deny" } } };
   const mergedDeny = buildMergedOpenCodeProjectConfig(denyExisting, "/tmp/repo");
-  expect(mergedDeny.permission.external_directory["*"], "managed rule must override user '*': 'deny' to 'allow' on external_directory").toBe("allow");
+  expect(mergedDeny.permission.external_directory["*"], "user '*': 'deny' on external_directory must survive untouched").toBe("deny");
 
-  // Undefined existing external_directory — managed rule must still produce 'allow'
+  // Undefined existing external_directory stays absent — the hardened render
+  // never seeds the key.
   const undefinedExisting = { permission: {} };
   const mergedUndefined = buildMergedOpenCodeProjectConfig(undefinedExisting, "/tmp/repo");
-  expect(mergedUndefined.permission.external_directory["*"], "managed rule must produce 'allow' even when existing external_directory is undefined").toBe("allow");
-});
+  expect(mergedUndefined.permission.external_directory, "no external_directory rule may be seeded on a fresh config").toBeUndefined();
 
-test.concurrent("buildMergedOpenCodeProjectConfig does not let user external_directory override the managed allow rule (parity with edit/bash behavior)", () => {
-  // A user-owned external_directory object with no '*' key still gets '*': 'allow'
+  // A user-owned external_directory object with no '*' key is preserved as-is;
+  // no wildcard is added.
   const noStarExisting = { permission: { external_directory: { "some/path/**": "ask" } } };
   const mergedNoStar = buildMergedOpenCodeProjectConfig(noStarExisting, "/tmp/repo");
-  expect(mergedNoStar.permission.external_directory["*"], "managed rule must add '*': 'allow' even when existing object has no '*' key").toBe("allow");
+  expect(mergedNoStar.permission.external_directory, "a user external_directory without '*' must be preserved without adding a wildcard").toEqual({ "some/path/**": "ask" });
+});
 
-  // Parity with edit: a user '*': 'deny' on edit is preserved for '*' key (managed rules use withoutOpenCodeWildcard for edit)
+test.concurrent("buildMergedOpenCodeProjectConfig migrates a pre-hardening bash allow wildcard to 'ask' and preserves other user wildcards (V3)", () => {
+  // A pre-hardening agent-scope bash '*': 'allow' (the historically managed
+  // broad value) migrates to the generated 'ask' so regeneration converges to
+  // the hardened shape the assert requires.
+  const broadAgentExisting = {
+    agent: { auditor: { permission: { bash: { "*": "allow" } } } },
+  };
+  const mergedBroad = buildMergedOpenCodeProjectConfig(broadAgentExisting, "/tmp/repo");
+  expect(mergedBroad.agent.auditor.permission.bash["*"], "the historically managed agent bash '*': 'allow' must migrate to 'ask'").toBe("ask");
+  expect(mergedBroad.permission.bash["*"], "the top-level bash ceiling must be 'ask' after migration").toBe("ask");
+
+  // A user-authored 'deny' wildcard at agent scope survives untouched (only
+  // the exactly-matching managed 'allow' is migrated).
+  const denyAgentExisting = {
+    agent: { auditor: { permission: { bash: { "*": "deny" } } } },
+  };
+  const mergedDenyAgent = buildMergedOpenCodeProjectConfig(denyAgentExisting, "/tmp/repo");
+  expect(mergedDenyAgent.agent.auditor.permission.bash["*"], "a user agent bash '*': 'deny' must survive untouched").toBe("deny");
+
+  // Parity with edit: a user '*': 'deny' on edit is preserved for '*' key
+  // (managed rules use withoutOpenCodeWildcard for edit).
   const editDenyExisting = { permission: { edit: { "*": "deny" } } };
   const mergedEditDeny = buildMergedOpenCodeProjectConfig(editDenyExisting, "/tmp/repo");
-  // The '*' key on edit comes from the generated permission (OPENCODE_AUDIT_EDIT_PERMISSION has '*': 'ask')
-  // mergeOpenCodeAgentPermissionRule: existing '*' wins over generated '*', but managed rules (without wildcard) override specifics
   expect(mergedEditDeny.permission.edit["*"], "user '*': 'deny' on edit is preserved (agent-scope merge keeps existing wildcard)").toBe("deny");
-  // Same behavior must hold for external_directory: managed OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION includes '*'
-  const extDenyExisting = { permission: { external_directory: { "*": "deny" } } };
-  const mergedExtDeny = buildMergedOpenCodeProjectConfig(extDenyExisting, "/tmp/repo");
-  expect(mergedExtDeny.permission.external_directory["*"], "OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION must override user '*': 'deny' on external_directory").toBe("allow");
 });

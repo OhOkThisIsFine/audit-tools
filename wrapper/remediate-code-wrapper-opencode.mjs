@@ -3,6 +3,7 @@
 // buildMergedOpenCodeProjectConfig throws a clear error in that case.
 let mergeOpenCodeAgentPermissionRule;
 let withoutOpenCodeWildcard;
+let migrateOpenCodeGlobalExternalDirectory;
 let composeOpenCodeBashCeiling;
 export let sharedOpenCodePermissions = false;
 
@@ -10,6 +11,7 @@ try {
   const shared = await import('audit-tools/shared');
   mergeOpenCodeAgentPermissionRule = shared.mergeOpenCodeAgentPermissionRule;
   withoutOpenCodeWildcard = shared.withoutOpenCodeWildcard;
+  migrateOpenCodeGlobalExternalDirectory = shared.migrateOpenCodeGlobalExternalDirectory;
   composeOpenCodeBashCeiling = shared.composeOpenCodeBashCeiling;
   sharedOpenCodePermissions = true;
 } catch {
@@ -21,8 +23,6 @@ export const OPENCODE_REMEDIATE_EDIT_PERMISSION = {
   '.remediate-code/**': 'allow',
   '.audit-tools/**': 'allow',
 };
-
-export const OPENCODE_REMEDIATE_EXTERNAL_DIRECTORY_PERMISSION = { '*': 'allow' };
 
 // Subcommands allowed for both the global bin and the dev wrapper.
 // Adding or removing a subcommand here applies to both invocation forms.
@@ -36,8 +36,10 @@ const REMEDIATE_CODE_ALLOWED_SUBCOMMANDS = [
 ];
 
 function buildRemediateBashPermissions() {
-  /** @type {Record<string, 'allow' | 'deny'>} */
-  const perm = { '*': 'allow' };
+  // Hardened default: the wildcard is 'ask', with the remediate-code
+  // invocations enumerated explicitly below.
+  /** @type {Record<string, 'allow' | 'ask' | 'deny'>} */
+  const perm = { '*': 'ask' };
   // Allow rules: bare bin and each subcommand for both the global bin and wrapper.
   perm['remediate-code'] = 'allow';
   for (const sub of REMEDIATE_CODE_ALLOWED_SUBCOMMANDS) {
@@ -55,16 +57,11 @@ function buildRemediateBashPermissions() {
 
 export const OPENCODE_REMEDIATE_BASH_PERMISSION = buildRemediateBashPermissions();
 
-function renderOpenCodeExternalDirectoryPermission() {
-  return { '*': 'allow' };
-}
-
 export function renderOpenCodePermissionConfig() {
   return {
     read: 'allow',
     glob: 'allow',
     grep: 'allow',
-    external_directory: renderOpenCodeExternalDirectoryPermission(),
     edit: { ...OPENCODE_REMEDIATE_EDIT_PERMISSION },
     bash: { ...OPENCODE_REMEDIATE_BASH_PERMISSION },
   };
@@ -108,12 +105,17 @@ export function assertOpenCodeRemediatePermissionConfig(permissionConfig, label)
       throw new Error(`OpenCode ${label}.${tool} must be allow. Run "remediate-code install --host opencode".`);
     }
   }
+  // Hardened shape: no external_directory allow-all (the tool no longer seeds
+  // the key at all; a leftover broad rule means a stale pre-hardening deploy).
   const externalDirectory = permissionConfig?.external_directory;
-  if (!externalDirectory || typeof externalDirectory !== 'object' || Array.isArray(externalDirectory)) {
-    throw new Error(`OpenCode ${label}.external_directory must set "*" to "allow". Run "remediate-code install --host opencode".`);
-  }
-  if (externalDirectory['*'] !== 'allow') {
-    throw new Error(`OpenCode ${label}.external_directory must set "*" to "allow". Run "remediate-code install --host opencode".`);
+  if (
+    externalDirectory === 'allow' ||
+    (externalDirectory &&
+      typeof externalDirectory === 'object' &&
+      !Array.isArray(externalDirectory) &&
+      externalDirectory['*'] === 'allow')
+  ) {
+    throw new Error(`OpenCode ${label}.external_directory must not allow-all (hardened default seeds no external_directory rule). Run "remediate-code install --host opencode".`);
   }
   const edit = permissionConfig?.edit;
   const bash = permissionConfig?.bash;
@@ -127,6 +129,10 @@ export function assertOpenCodeRemediatePermissionConfig(permissionConfig, label)
   }
   if (!bash || typeof bash !== 'object' || Array.isArray(bash)) {
     throw new Error(`OpenCode ${label}.bash must allow remediate-code commands. Run "remediate-code install --host opencode".`);
+  }
+  // Hardened shape: the bash wildcard is "ask" (broad "allow" was retired).
+  if (bash['*'] !== 'ask') {
+    throw new Error(`OpenCode ${label}.bash must set "*" to "ask" (hardened default; broad "allow" was retired). Run "remediate-code install --host opencode".`);
   }
   for (const pattern of [
     'remediate-code',
@@ -146,30 +152,46 @@ export function assertOpenCodeRemediatePermissionConfig(permissionConfig, label)
   }
 }
 
+// A pre-hardening deploy wrote bash['*']='allow' (the historically managed
+// broad value). Migrate exactly that value away so the generated 'ask' seed
+// wins on regeneration; any other user-authored wildcard survives untouched.
+function withoutManagedBroadBashWildcard(rule) {
+  const existing = objectValue(rule);
+  if (existing['*'] !== 'allow') {
+    return rule;
+  }
+  return withoutOpenCodeWildcard(existing);
+}
+
 function mergePermissionBlock(existingPermission, generatedPermission) {
   const existing = objectValue(existingPermission);
-  return {
+  const merged = {
     ...generatedPermission,
     ...existing,
     read: generatedPermission.read,
     glob: generatedPermission.glob,
     grep: generatedPermission.grep,
-    external_directory: mergeOpenCodeAgentPermissionRule(
-      existing.external_directory,
-      generatedPermission.external_directory,
-      OPENCODE_REMEDIATE_EXTERNAL_DIRECTORY_PERMISSION,
-    ),
     edit: mergeOpenCodeAgentPermissionRule(
       existing.edit,
       generatedPermission.edit,
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_EDIT_PERMISSION),
     ),
     bash: mergeOpenCodeAgentPermissionRule(
-      existing.bash,
+      withoutManagedBroadBashWildcard(existing.bash),
       generatedPermission.bash,
       withoutOpenCodeWildcard(OPENCODE_REMEDIATE_BASH_PERMISSION),
     ),
   };
+  // Hardened default: no external_directory rule is seeded. A leftover
+  // historically managed allow-all is migrated away; any non-matching
+  // user-authored value is preserved untouched.
+  const externalDirectory = migrateOpenCodeGlobalExternalDirectory(existing.external_directory);
+  if (externalDirectory === undefined) {
+    delete merged.external_directory;
+  } else {
+    merged.external_directory = externalDirectory;
+  }
+  return merged;
 }
 
 // Collect every agent's bash rule set from a merged agent map (in stable,

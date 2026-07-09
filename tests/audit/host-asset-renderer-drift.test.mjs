@@ -218,7 +218,15 @@ test("no-drift: committed opencode.json audit permission blocks satisfy the inst
   // those are global npm-installed state.
   expect(config?.command?.["audit-code"], "opencode.json must not define command['audit-code'] (global npm state). Run `audit-code install --host opencode`.").toBeUndefined();
   expect(config?.mcp?.auditor, "opencode.json must not define mcp.auditor (global npm state). Run `audit-code install --host opencode`.").toBeUndefined();
-  // The audit permission blocks must match the installer's permission contract.
+  // The audit permission blocks must match the installer's permission contract
+  // (assertOpenCodeAuditPermissionConfig enforces the hardened shape: bash
+  // wildcard "ask", no external_directory allow-all — V3).
   expect(() => assertOpenCodeAuditPermissionConfig(config?.permission, "permission")).not.toThrow();
   expect(() => assertOpenCodeAuditPermissionConfig(config?.agent?.auditor?.permission, "agent.auditor.permission")).not.toThrow();
+  // Pin the hardened defaults directly so a regression to broad-allow fails
+  // even if the assert helper is ever weakened.
+  expect(config?.permission?.bash?.["*"]).toBe("ask");
+  expect(config?.permission?.external_directory?.["*"]).not.toBe("allow");
+  expect(config?.agent?.auditor?.permission?.bash?.["*"]).toBe("ask");
+  expect(config?.agent?.auditor?.permission?.external_directory?.["*"]).not.toBe("allow");
 });

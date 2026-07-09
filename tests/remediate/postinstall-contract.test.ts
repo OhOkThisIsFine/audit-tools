@@ -183,9 +183,10 @@ describe("postinstall OpenCode permission scopes (CFG-4996560e)", () => {
     // Both deny hygiene sets are present at the top level.
     expect(config.permission.bash["audit-code synthesize*"]).toBe("deny");
     expect(config.permission.bash["rm *"]).toBe("deny");
-    // Agent scopes keep their per-package deployments unchanged.
-    expect(config.agent.auditor.permission.bash["*"]).toBe("allow");
-    expect(config.agent.auditor.permission.external_directory).toEqual({ "*": "allow" });
+    // Agent scopes keep their per-package deployments unchanged — both agents
+    // are hardened: bash wildcard "ask", no external_directory allow-all (V3).
+    expect(config.agent.auditor.permission.bash["*"]).toBe("ask");
+    expect(config.agent.auditor.permission.external_directory).toBeUndefined();
     expect(config.agent.remediator.permission.bash["*"]).toBe("ask");
   });
 });

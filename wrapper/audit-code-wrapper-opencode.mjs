@@ -24,8 +24,6 @@ export const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '.audit-tools/**': 'allow',
 };
 
-export const OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION = { '*': 'allow' };
-
 // Subcommands allowed for both the global bin and the dev wrapper.
 // Adding or removing a subcommand here applies to both invocation forms.
 const AUDIT_CODE_ALLOWED_SUBCOMMANDS = [
@@ -42,8 +40,10 @@ const AUDIT_CODE_WRAPPER_EXTRA_SUBCOMMANDS = ['worker-run*'];
 const AUDIT_CODE_DENIED_SUBCOMMANDS = ['synthesize*', 'cleanup*', 'requeue*', 'ingest-results*'];
 
 function buildAuditBashPermissions() {
-  /** @type {Record<string, 'allow' | 'deny'>} */
-  const perm = { '*': 'allow' };
+  // Hardened default (parity with the remediator): the wildcard is 'ask', with
+  // the audit-code invocations enumerated explicitly below.
+  /** @type {Record<string, 'allow' | 'ask' | 'deny'>} */
+  const perm = { '*': 'ask' };
   // Deny rules for every form of invocation (bin, dist, wrapper).
   for (const sub of AUDIT_CODE_DENIED_SUBCOMMANDS) {
     perm[`audit-code ${sub}`] = 'deny';
@@ -70,20 +70,11 @@ function buildAuditBashPermissions() {
 
 export const OPENCODE_AUDIT_BASH_PERMISSION = buildAuditBashPermissions();
 
-function externalDirectoryPattern(path) {
-  return `${path.replace(/\\/g, '/').replace(/\/+$/u, '')}/**`;
-}
-
-function renderOpenCodeExternalDirectoryPermission() {
-  return { '*': 'allow' };
-}
-
 export function renderOpenCodePermissionConfig() {
   return {
     read: 'allow',
     glob: 'allow',
     grep: 'allow',
-    external_directory: renderOpenCodeExternalDirectoryPermission(),
     edit: { ...OPENCODE_AUDIT_EDIT_PERMISSION },
     bash: { ...OPENCODE_AUDIT_BASH_PERMISSION },
   };
@@ -127,12 +118,17 @@ export function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
       throw new Error(`OpenCode ${label}.${tool} must be allow. Run "audit-code install --host opencode".`);
     }
   }
+  // Hardened shape: no external_directory allow-all (the tool no longer seeds
+  // the key at all; a leftover broad rule means a stale pre-hardening deploy).
   const externalDirectory = permissionConfig?.external_directory;
-  if (!externalDirectory || typeof externalDirectory !== 'object' || Array.isArray(externalDirectory)) {
-    throw new Error(`OpenCode ${label}.external_directory must set "*" to "allow". Run "audit-code install --host opencode".`);
-  }
-  if (externalDirectory['*'] !== 'allow') {
-    throw new Error(`OpenCode ${label}.external_directory must set "*" to "allow". Run "audit-code install --host opencode".`);
+  if (
+    externalDirectory === 'allow' ||
+    (externalDirectory &&
+      typeof externalDirectory === 'object' &&
+      !Array.isArray(externalDirectory) &&
+      externalDirectory['*'] === 'allow')
+  ) {
+    throw new Error(`OpenCode ${label}.external_directory must not allow-all (hardened default seeds no external_directory rule). Run "audit-code install --host opencode".`);
   }
   const edit = permissionConfig?.edit;
   const bash = permissionConfig?.bash;
@@ -146,6 +142,10 @@ export function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
   }
   if (!bash || typeof bash !== 'object' || Array.isArray(bash)) {
     throw new Error(`OpenCode ${label}.bash must allow audit-code commands. Run "audit-code install --host opencode".`);
+  }
+  // Hardened shape: the bash wildcard is "ask" (broad "allow" was retired).
+  if (bash['*'] !== 'ask') {
+    throw new Error(`OpenCode ${label}.bash must set "*" to "ask" (hardened default; broad "allow" was retired). Run "audit-code install --host opencode".`);
   }
   for (const pattern of [
     'audit-code',
@@ -184,30 +184,46 @@ export function assertOpenCodeAuditPermissionConfig(permissionConfig, label) {
   }
 }
 
+// A pre-hardening deploy wrote bash['*']='allow' (the historically managed
+// broad value). Migrate exactly that value away so the generated 'ask' seed
+// wins on regeneration; any other user-authored wildcard survives untouched.
+function withoutManagedBroadBashWildcard(rule) {
+  const existing = objectValue(rule);
+  if (existing['*'] !== 'allow') {
+    return rule;
+  }
+  return withoutOpenCodeWildcard(existing);
+}
+
 function mergePermissionBlock(existingPermission, generatedPermission) {
   const existing = objectValue(existingPermission);
-  return {
+  const merged = {
     ...generatedPermission,
     ...existing,
     read: generatedPermission.read,
     glob: generatedPermission.glob,
     grep: generatedPermission.grep,
-    external_directory: mergeOpenCodeAgentPermissionRule(
-      existing.external_directory,
-      generatedPermission.external_directory,
-      OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
-    ),
     edit: mergeOpenCodeAgentPermissionRule(
       existing.edit,
       generatedPermission.edit,
       withoutOpenCodeWildcard(OPENCODE_AUDIT_EDIT_PERMISSION),
     ),
     bash: mergeOpenCodeAgentPermissionRule(
-      existing.bash,
+      withoutManagedBroadBashWildcard(existing.bash),
       generatedPermission.bash,
       withoutOpenCodeWildcard(OPENCODE_AUDIT_BASH_PERMISSION),
     ),
   };
+  // Hardened default: no external_directory rule is seeded. A leftover
+  // historically managed allow-all is migrated away; any non-matching
+  // user-authored value is preserved untouched.
+  const externalDirectory = migrateOpenCodeGlobalExternalDirectory(existing.external_directory);
+  if (externalDirectory === undefined) {
+    delete merged.external_directory;
+  } else {
+    merged.external_directory = externalDirectory;
+  }
+  return merged;
 }
 
 // Collect every agent's bash rule set from a merged agent map (in stable,

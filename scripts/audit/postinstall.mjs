@@ -36,8 +36,6 @@ function writeGeneratedFile(path, content) {
   return action;
 }
 
-const OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION = { '*': 'allow' };
-
 const OPENCODE_AUDIT_EDIT_PERMISSION = {
   '*': 'ask',
   '.audit-code/**': 'allow',
@@ -45,7 +43,7 @@ const OPENCODE_AUDIT_EDIT_PERMISSION = {
 };
 
 const OPENCODE_AUDIT_BASH_PERMISSION = {
-  '*': 'allow',
+  '*': 'ask',
   'audit-code synthesize*': 'deny',
   'audit-code cleanup*': 'deny',
   'audit-code requeue*': 'deny',
@@ -99,7 +97,8 @@ try {
   if (
     typeof shared.mergeOpenCodeAgentPermissionRule === 'function' &&
     typeof shared.mergeOpenCodeGlobalPermissionRule === 'function' &&
-    typeof shared.migrateOpenCodeGlobalExternalDirectory === 'function'
+    typeof shared.migrateOpenCodeGlobalExternalDirectory === 'function' &&
+    typeof shared.withoutOpenCodeWildcard === 'function'
   ) {
     sharedOpenCodePermissions = shared;
   }
@@ -107,10 +106,13 @@ try {
   // Leave null; the OpenCode deployment step reports the skip.
 }
 
-// Auditor agent scope: broad-allow-with-denylist, unchanged. Managed rules
-// (including the wildcard) always win at this scope.
+// Auditor agent scope (read-only agent, parity with the remediator hardening):
+// enumerated audit-code commands stay managed allows/denies, but the bash
+// wildcard defaults to "ask" (an existing user wildcard survives — the
+// managed set is passed without "*") and no external_directory allow-all is
+// seeded.
 function mergeOpenCodeAgentPermissionConfig(existingPermission, generatedPermission) {
-  const { mergeOpenCodeAgentPermissionRule } = sharedOpenCodePermissions;
+  const { mergeOpenCodeAgentPermissionRule, withoutOpenCodeWildcard } = sharedOpenCodePermissions;
   if (!existingPermission || typeof existingPermission !== 'object' || Array.isArray(existingPermission)) {
     return generatedPermission;
   }
@@ -121,11 +123,6 @@ function mergeOpenCodeAgentPermissionConfig(existingPermission, generatedPermiss
     read: generatedPermission.read,
     glob: generatedPermission.glob,
     grep: generatedPermission.grep,
-    external_directory: mergeOpenCodeAgentPermissionRule(
-      existingPermission.external_directory,
-      generatedPermission.external_directory,
-      OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION,
-    ),
     edit: mergeOpenCodeAgentPermissionRule(
       existingPermission.edit,
       generatedPermission.edit,
@@ -134,7 +131,7 @@ function mergeOpenCodeAgentPermissionConfig(existingPermission, generatedPermiss
     bash: mergeOpenCodeAgentPermissionRule(
       existingPermission.bash,
       generatedPermission.bash,
-      OPENCODE_AUDIT_BASH_PERMISSION,
+      withoutOpenCodeWildcard(OPENCODE_AUDIT_BASH_PERMISSION),
     ),
   };
 }
@@ -184,7 +181,6 @@ function renderOpenCodePermissionConfig() {
     read: 'allow',
     glob: 'allow',
     grep: 'allow',
-    external_directory: { ...OPENCODE_AUDIT_EXTERNAL_DIRECTORY_PERMISSION },
     edit: { ...OPENCODE_AUDIT_EDIT_PERMISSION },
     bash: { ...OPENCODE_AUDIT_BASH_PERMISSION },
   };
@@ -220,7 +216,6 @@ function mergeOpenCodeGlobalConfig(existing) {
         description: 'Read-heavy audit orchestration agent for the /audit-code workflow.',
         permission: {
           ...mergeOpenCodeAgentPermissionConfig(existingAuditor.permission, auditPermission),
-          external_directory: { '*': 'allow' },
           'auditor_*': 'allow',
           question: 'allow',
           task: 'allow',

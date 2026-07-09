@@ -6,9 +6,6 @@
     "read": "allow",
     "glob": "allow",
     "grep": "allow",
-    "external_directory": {
-      "*": "allow"
-    },
     "edit": {
       "*": "ask",
       ".remediate-code/**": "allow",
@@ -18,7 +15,7 @@
       "audit-report.md": "allow"
     },
     "bash": {
-      "*": "allow",
+      "*": "ask",
       "*audit-code.mjs": "allow",
       "*audit-code.mjs* cleanup*": "deny",
       "*audit-code.mjs* ensure*": "allow",
@@ -80,9 +77,6 @@
         "read": "allow",
         "glob": "allow",
         "grep": "allow",
-        "external_directory": {
-          "*": "allow"
-        },
         "edit": {
           "*": "ask",
           ".audit-code/**": "allow",
@@ -91,7 +85,7 @@
           "audit-report.md": "allow"
         },
         "bash": {
-          "*": "allow",
+          "*": "ask",
           "audit-code synthesize*": "deny",
           "*dist*index.js* synthesize*": "deny",
           "*audit-code.mjs* synthesize*": "deny",
@@ -136,9 +130,6 @@
         "read": "allow",
         "glob": "allow",
         "grep": "allow",
-        "external_directory": {
-          "*": "allow"
-        },
         "edit": {
           "*": "ask",
           ".remediate-code/**": "allow",

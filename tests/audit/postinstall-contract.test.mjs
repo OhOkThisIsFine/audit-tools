@@ -189,18 +189,23 @@ test("postinstall leaves non-matching top-level broad rules untouched", async ()
   }
 });
 
-test("postinstall keeps auditor agent broad-allow-with-denylist and is idempotent", async () => {
+test("postinstall hardens auditor agent bash wildcard to ask and seeds no external_directory allow-all, and is idempotent (V3)", async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "audit-code-postinstall-home-"));
   try {
     await runPostinstall(homeDir);
     const configPath = join(homeDir, ".config", "opencode", "opencode.json");
     const first = JSON.parse(await readFile(configPath, "utf8"));
 
-    // Agent scope keeps the broad allow plus the denylist.
-    expect(first.agent?.auditor?.permission?.bash?.["*"]).toBe("allow");
-    expect(first.agent?.auditor?.permission?.external_directory).toEqual({ "*": "allow" });
+    // Agent scope no longer seeds a broad bash wildcard or an
+    // external_directory allow-all (parity with the remediator hardening);
+    // the enumerated audit-code allow/deny entries remain.
+    expect(first.agent?.auditor?.permission?.bash?.["*"]).toBe("ask");
+    expect(first.agent?.auditor?.permission?.external_directory).toBe(undefined);
     expect(first.agent?.auditor?.permission?.bash?.["audit-code synthesize*"]).toBe("deny");
     expect(first.agent?.auditor?.permission?.bash?.["rm *"]).toBe("deny");
+    expect(first.agent?.auditor?.permission?.bash?.["audit-code next-step*"]).toBe("allow");
+    expect(first.agent?.auditor?.permission?.bash?.["audit-code submit-packet*"]).toBe("allow");
+    expect(first.agent?.auditor?.permission?.bash?.["audit-code merge-and-ingest*"]).toBe("allow");
 
     // Re-running is idempotent for both scopes (no duplicate or mutated rules).
     await runPostinstall(homeDir);
