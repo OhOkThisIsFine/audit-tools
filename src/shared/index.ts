@@ -1286,6 +1286,17 @@ export {
   fileExclusionReason,
   EXCLUDED_OVERRIDE_STATUSES,
 } from "./intent/pathScope.js";
+export {
+  crossLensDedupe,
+  absorbFinding,
+  mergeGrounding,
+  mergeAffectedFiles,
+} from "./findings/dedupe.js";
+export type {
+  CrossLensDedupePolicy,
+  CrossLensDedupeResult,
+  AbsorbOptions,
+} from "./findings/dedupe.js";
 
 // File-ownership-disjoint admission scheduling (INV-SOO) + the single-sourced path
 // identity it keys on — shared so BOTH orchestrators split a dependency level into

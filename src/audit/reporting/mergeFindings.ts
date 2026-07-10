@@ -6,7 +6,15 @@ import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import { severityRank, confidenceRank } from "./findingRanks.js";
-import { wordJaccard, filePathOverlap, primaryPath } from "audit-tools/shared";
+import {
+  wordJaccard,
+  filePathOverlap,
+  primaryPath,
+  crossLensDedupe,
+  absorbFinding,
+  mergeGrounding,
+  mergeAffectedFiles,
+} from "audit-tools/shared";
 
 function normalizeText(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -39,64 +47,6 @@ function runtimeSummary(report?: RuntimeValidationReport): string[] {
   return report.results
     .filter((result) => result.status !== "pending")
     .map((result) => `${result.task_id}: ${result.status} — ${result.summary}`);
-}
-
-function mergeAffectedFiles(existing: Finding, incoming: Finding): void {
-  const seen = new Set(
-    existing.affected_files.map(
-      (f) =>
-        `${f.path}:${f.line_start ?? ""}:${f.line_end ?? ""}:${f.symbol ?? ""}`,
-    ),
-  );
-  for (const file of incoming.affected_files) {
-    const key = `${file.path}:${file.line_start ?? ""}:${file.line_end ?? ""}:${file.symbol ?? ""}`;
-    if (!seen.has(key)) {
-      existing.affected_files.push(file);
-      seen.add(key);
-    }
-  }
-  existing.affected_files.sort(
-    (a, b) =>
-      a.path.localeCompare(b.path) || (a.line_start ?? 0) - (b.line_start ?? 0),
-  );
-}
-
-/**
- * Merge two grounding verdicts by precedence: grounded > refuted > ungrounded >
- * absent (S7). Grounded-wins (a verified span/anchor on ANY pass upgrades the
- * survivor — an ungrounded or absent verdict never downgrades it). A refutation
- * (anchor DISPROOF) outranks ungrounded/absent, so a finding refuted on any pass
- * is quarantined UNLESS another pass grounded it (grounded still wins over
- * refuted — B4: "refuted only excludes when nothing grounded it"). Without the
- * grounded-wins rule, merging a same-identity re-emission that carried no matching
- * quote into a verified survivor would falsely quarantine a finding that DID
- * re-verify on another pass.
- */
-function mergeGrounding(
-  existing: Finding["grounding"],
-  incoming: Finding["grounding"],
-): Finding["grounding"] {
-  const rank = (g: Finding["grounding"]): number =>
-    g?.status === "grounded" ? 3 : g?.status === "refuted" ? 2 : g?.status === "ungrounded" ? 1 : 0;
-  const winner = rank(incoming) > rank(existing) ? incoming : existing;
-  // Normalize a grounded winner to the bare verdict (grounded carries no reason),
-  // preserving the prior contract; refuted/ungrounded keep their reason.
-  return winner?.status === "grounded" ? { status: "grounded" } : winner;
-}
-
-function absorbFinding(survivor: Finding, absorbed: Finding): void {
-  mergeAffectedFiles(survivor, absorbed);
-  survivor.evidence = [
-    ...new Set([
-      ...(survivor.evidence ?? []),
-      ...(absorbed.evidence ?? []),
-    ]),
-  ];
-  survivor.systemic = Boolean(survivor.systemic || absorbed.systemic);
-  survivor.grounding = mergeGrounding(survivor.grounding, absorbed.grounding);
-  if (absorbed.summary.length > survivor.summary.length) {
-    survivor.summary = absorbed.summary;
-  }
 }
 
 function lineRangeOverlaps(a: Finding, b: Finding): boolean {
@@ -148,54 +98,7 @@ function deduplicateSameLens(findings: Finding[]): Finding[] {
         const bConf = confidenceRank(b.confidence);
         const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
         const [survivor, absorbed] = keepA ? [a, b] : [b, a];
-        absorbFinding(survivor, absorbed);
-        removed.add(absorbed);
-      }
-    }
-  }
-
-  return findings.filter((f) => !removed.has(f));
-}
-
-function deduplicateCrossLens(findings: Finding[]): Finding[] {
-  const groups = new Map<string, Finding[]>();
-  for (const finding of findings) {
-    const key = primaryPath(finding);
-    const group = groups.get(key);
-    if (group) {
-      group.push(finding);
-    } else {
-      groups.set(key, [finding]);
-    }
-  }
-
-  const removed = new Set<Finding>();
-
-  for (const group of groups.values()) {
-    if (group.length < 2) continue;
-    for (let i = 0; i < group.length; i++) {
-      if (removed.has(group[i])) continue;
-      for (let j = i + 1; j < group.length; j++) {
-        if (removed.has(group[j])) continue;
-        const a = group[i];
-        const b = group[j];
-        if (normalizeText(a.lens) === normalizeText(b.lens)) continue;
-
-        const titleSim = wordJaccard(a.title, b.title);
-        const catMatch =
-          normalizeText(a.category) === normalizeText(b.category);
-        const threshold = catMatch ? 0.4 : 0.5;
-        if (titleSim < threshold) continue;
-        if (filePathOverlap(a, b) < 0.5) continue;
-
-        const aSev = severityRank(a.severity);
-        const bSev = severityRank(b.severity);
-        const aConf = confidenceRank(a.confidence);
-        const bConf = confidenceRank(b.confidence);
-        const keepA =
-          aSev > bSev || (aSev === bSev && aConf >= bConf);
-        const [survivor, absorbed] = keepA ? [a, b] : [b, a];
-        absorbFinding(survivor, absorbed);
+        absorbFinding(survivor, absorbed, { mergeGrounding: true, sortAffectedFiles: true });
         removed.add(absorbed);
       }
     }
@@ -272,7 +175,7 @@ function upsertFinding(merged: Map<string, Finding>, finding: Finding): void {
       ? existing.summary
       : finding.summary;
 
-  mergeAffectedFiles(existing, finding);
+  mergeAffectedFiles(existing, finding, true);
   existing.evidence = [
     ...new Set([
       ...(existing.evidence ?? []),
@@ -340,7 +243,18 @@ export function mergeFindings(
   }
 
   const dedupedSameLens = deduplicateSameLens([...merged.values()]);
-  return deduplicateCrossLens(dedupedSameLens).sort((a, b) => {
+  // Audit's DRAW of the shared cross-lens core: read-only report policy — mutate
+  // survivors in place, grounding-precedence merge, sort files, and a SOFT category
+  // gate (merge cross-category at a higher title threshold). No exact-identity
+  // short-circuit / no break; the mergeMap is unused (a human reads the report).
+  return crossLensDedupe(dedupedSameLens, {
+    categoryGate: "soft",
+    exactIdentityShortCircuit: false,
+    survivorMutation: "mutate",
+    mergeGrounding: true,
+    sortAffectedFiles: true,
+    breakOnAbsorbedSurvivor: false,
+  }).findings.sort((a, b) => {
     const severityDelta = severityRank(b.severity) - severityRank(a.severity);
     if (severityDelta !== 0) return severityDelta;
     const confidenceDelta =
