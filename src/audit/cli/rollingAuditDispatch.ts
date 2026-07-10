@@ -21,11 +21,9 @@
 import { dirname, join } from "node:path";
 import {
   readJsonFile,
-  readOptionalJsonFile,
-  readOptionalTextFile,
   writeJsonFile,
   advancePausedState,
-  detectRateLimitFromChannel,
+  finalizeProviderLaunchResult,
   type SessionConfig,
   type CapacityPool,
   type ProviderSlot,
@@ -46,7 +44,7 @@ import {
   resolveRollingEngineFlag,
   type ResolvedProviderName,
 } from "audit-tools/shared";
-import type { AuditResult, AuditTask } from "../types.js";
+import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import {
@@ -57,7 +55,6 @@ import {
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
 import { createFreshSessionProvider } from "../providers/index.js";
 import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js";
-import { appendTokenUsageLine } from "audit-tools/shared";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 import { artifactNameForId } from "./args.js";
@@ -324,82 +321,18 @@ export function makeAuditProviderPacketDispatcher(params: {
         // shape; backends without schema-constrained decoding ignore this.
         outputSchema: workerResultOutputSchema(),
       });
-      if (!launch.accepted) {
-        return {
-          packet,
-          outcome: "error",
-          error: new Error(
-            launch.error ??
-              `provider ${provider.name} rejected packet ${packet.id}`,
-          ),
-        };
-      }
-      // Channel-isolated session-limit detection (CE-003): only the error/status
-      // channel (stderr) is inspected — the result file is never scanned for limit
-      // strings, so a healthy AuditResult quoting a limit never triggers a re-queue.
-      const stderrText = (await readOptionalTextFile(stderrPath)) ?? "";
-      const limitCheck = detectRateLimitFromChannel("error", stderrText);
-      if (limitCheck.isRateLimited) {
-        // Non-consuming re-queue: the rolling engine drops the provider and puts
-        // this packet back into the pending pool so it retries once the cooldown passes.
-        // Carry the channel/text evidence so a consumer's `recordRateLimit` hook can
-        // feed a channel-isolated host-session source (CE-003) for bounded escalation.
-        return {
-          packet,
-          outcome: "rate_limited",
-          rateLimit: { channel: "error", text: stderrText },
-        };
-      }
-
-      // Reactive cost verification: relay the endpoint-reported cost (when the
-      // provider surfaced one) so `handleResult` can demote a declared-free pool
-      // that started charging. Absent for providers that report no cost.
-      const observedCost =
-        launch.observedCostUsd != null ? { observedCostUsd: launch.observedCostUsd } : {};
-      // score-tokens cost counterpart: relay the endpoint-reported token usage
-      // (when the provider surfaced one) the SAME way, so a consumer reading
-      // `RollingDispatchResult.observedUsage` sees it alongside the cost.
-      const observedUsage =
-        launch.observedUsage != null ? { observedUsage: launch.observedUsage } : {};
-      // The worker writes its AuditResult[] per the prompt; confirm it landed and
-      // parses. Contents are adjudicated by the deterministic merge downstream.
-      const result = await readOptionalJsonFile<AuditResult[]>(resultPath);
-      if (!result) {
-        // Also check stdout for a session-limit message before reporting as error
-        // (some providers write their status to stdout, not stderr).
-        const stdoutText = (await readOptionalTextFile(stdoutPath)) ?? "";
-        const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
-        if (stdoutLimitCheck.isRateLimited) {
-          return {
-            packet,
-            outcome: "rate_limited",
-            rateLimit: { channel: "status", text: stdoutText },
-          };
-        }
-        return {
-          packet,
-          outcome: "error",
-          error: new Error(
-            `worker for packet ${packet.id} wrote no result at ${resultPath}`,
-          ),
-        };
-      }
-      // Record the token-usage ledger line NOW — at packet-completion / result-
-      // handling time, never on the dispatch/admission path (INV: no added
-      // admission latency). Every completed packet gets a line, including the
-      // agentic-CLI providers (codex/opencode) that report no structured usage —
-      // their legs are null/null/null/null, distinctly "unmeasured" rather than
-      // silently 0. Best-effort (never fails the packet).
-      await appendTokenUsageLine(params.artifactsDir, params.runId, {
-        packet_id: packet.id,
-        pool_id: slot?.poolId ?? null,
-        input_tokens: launch.observedUsage?.inputTokens ?? null,
-        output_tokens: launch.observedUsage?.outputTokens ?? null,
-        cache_read_tokens: launch.observedUsage?.cacheReadTokens ?? null,
-        cache_creation_tokens: launch.observedUsage?.cacheCreationTokens ?? null,
-        observed_cost_usd: launch.observedCostUsd ?? null,
+      return await finalizeProviderLaunchResult(launch, {
+        packet,
+        providerName: provider.name,
+        entityLabel: `packet ${packet.id}`,
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: params.artifactsDir,
+        runId: params.runId,
+        packetId: packet.id,
+        poolId: slot?.poolId ?? null,
       });
-      return { packet, outcome: "success", ...observedCost, ...observedUsage };
     } catch (err) {
       return { packet, outcome: "error", error: err };
     }

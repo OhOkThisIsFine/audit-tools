@@ -1,11 +1,8 @@
 import { dirname, join } from "node:path";
 import {
-  readOptionalJsonFile,
-  readOptionalTextFile,
   writeJsonFile,
-  detectRateLimitFromChannel,
   withSourceConfig,
-  appendTokenUsageLine,
+  finalizeProviderLaunchResult,
   type SessionConfig,
   type ProviderSlot,
   type RollingDispatchResult,
@@ -18,7 +15,6 @@ import {
   createLaunchInputForTask,
 } from "../phases/workerTasks.js";
 import type { RemediationBlock } from "../state/types.js";
-import type { ImplementWorkerResult } from "./types.js";
 
 export interface ProviderNodeDispatcherParams {
   root: string;
@@ -130,65 +126,18 @@ export function makeProviderNodeDispatcher(
         // child env there, so the worker is graded on its own state.
         repoRoot: worktreeRoot,
       });
-      if (!launch.accepted) {
-        return {
-          packet,
-          outcome: "error",
-          error: new Error(
-            launch.error ??
-              `provider ${provider.name} rejected node ${block.block_id}`,
-          ),
-        };
-      }
-      // Channel-isolated session-limit detection (CE-003): only the error/status
-      // channel (stderr) is inspected — the result file is never scanned for limit
-      // strings, so a healthy result quoting a limit never triggers a re-queue.
-      const stderrText = (await readOptionalTextFile(stderrPath)) ?? "";
-      const limitCheck = detectRateLimitFromChannel("error", stderrText);
-      if (limitCheck.isRateLimited) {
-        return { packet, outcome: "rate_limited", rateLimit: { channel: "error", text: stderrText } };
-      }
-
-      // Reactive cost verification: relay the endpoint-reported cost (when the
-      // provider surfaced one) so `handleResult` can demote a declared-free pool
-      // that started charging. Absent for providers that report no cost.
-      const observedCost =
-        launch.observedCostUsd != null ? { observedCostUsd: launch.observedCostUsd } : {};
-      // The worker writes its result file per the prompt; confirm it landed and
-      // parses. Contents are adjudicated by the deterministic merge downstream.
-      const result = await readOptionalJsonFile<ImplementWorkerResult>(resultPath);
-      if (!result) {
-        // Also check stdout for a session-limit message before reporting as error
-        // (some providers write their status to stdout, not stderr).
-        const stdoutText = (await readOptionalTextFile(stdoutPath)) ?? "";
-        const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
-        if (stdoutLimitCheck.isRateLimited) {
-          return { packet, outcome: "rate_limited", rateLimit: { channel: "status", text: stdoutText } };
-        }
-        return {
-          packet,
-          outcome: "error",
-          error: new Error(
-            `worker for node ${block.block_id} wrote no result at ${resultPath}`,
-          ),
-        };
-      }
-      // Record the token-usage ledger line NOW — at node-completion / result-
-      // handling time, never on the dispatch/admission path (INV: no added
-      // admission latency), mirroring audit's `makeAuditProviderPacketDispatcher`.
-      // Every completed node gets a line, including the agentic-CLI providers
-      // (claude-code/codex/opencode) that report no structured usage — their legs
-      // are null, distinctly "unmeasured" rather than silently 0. Best-effort.
-      await appendTokenUsageLine(params.artifactsDir, params.runId, {
-        packet_id: block.block_id,
-        pool_id: slot?.poolId ?? null,
-        input_tokens: launch.observedUsage?.inputTokens ?? null,
-        output_tokens: launch.observedUsage?.outputTokens ?? null,
-        cache_read_tokens: launch.observedUsage?.cacheReadTokens ?? null,
-        cache_creation_tokens: launch.observedUsage?.cacheCreationTokens ?? null,
-        observed_cost_usd: launch.observedCostUsd ?? null,
+      return await finalizeProviderLaunchResult(launch, {
+        packet,
+        providerName: provider.name,
+        entityLabel: `node ${block.block_id}`,
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: params.artifactsDir,
+        runId: params.runId,
+        packetId: block.block_id,
+        poolId: slot?.poolId ?? null,
       });
-      return { packet, outcome: "success", ...observedCost };
     } catch (err) {
       return { packet, outcome: "error", error: err };
     }
