@@ -62,9 +62,12 @@
 orchestrator's OWN resumable pause at the wall (`granted===0` OR active `cooldown_until`, closing F1) —
 shared `detectHostDispatchWall`; audit fresh-snapshot `paused_state`/`blocked` (livelock-bounded, terminal
 carries task ids); remediate `partial_completion_terminal{quota_paused}`; leases reconciled on pause. Design-
-+ impl-adversarially reviewed. **Still open (this track):** host-path lease-TTL (wave-length `leaseTtlMs`);
-Increment-B residuals (cooldown pause on the flag-gated rolling/hybrid paths; align in-process `stranded_ids`
-to task ids). Full detail in `docs/backlog.md` → "Host-dispatch path quota enforcement".
++ impl-adversarially reviewed. **Increment-B residuals SHIPPED (2026-07-10):** the hybrid-attended emit
+(`dispatch_implement_rolling`) now walls on cooldown inside `prepareHostRollingDispatch` (pre-claim); the
+in-process livelock terminal expands current-pass stranded packet ids → task ids (the in-process
+`driveRolling*` paths were verified already-cooldown-safe via `scheduleWave` — deliberately not walled).
+**Still open (this track):** host-path lease-TTL (wave-length `leaseTtlMs`). Full detail in
+`docs/backlog.md` → "Host-dispatch path quota enforcement".
 
 **▶ IMMEDIATE NEXT — D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the LONG-lived
 execution claims — `task-claims.json` 20-min lease, remediate node-claims — which today hold a lease
