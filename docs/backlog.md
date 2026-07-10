@@ -78,6 +78,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   comment describing behavior nothing exercised — a seam built "for later" without a consumer is a latent
   false-documentation trap (this lap wired it).
 
+- **Friction-walk (untracked-scope lap, 2026-07-10):** (tool-should-decide) the SessionStart doc-review
+  hook AGAIN reported "19 open items" from the worktree's pre-sync state — all were applied+resolved on
+  main; second occurrence of the lease-TTL-lap finding (hook should reconcile against the fetched remote
+  resolved-state before surfacing), still an open tool fix. (tool-should-decide) the start-lap skill's
+  branch guidance had no case for a lap branch that is a clean ANCESTOR of remote main — it said
+  "don't touch", but an ancestor-verified ff-only is safe and required to start from current code; FIXED
+  this lap in `.claude/skills/start-lap/SKILL.md`. (ambiguous-direction / inefficient-feeding) clean —
+  recon + adversarial review ran as subagents returning file:line conclusions; the async typecheck hook
+  emitted stale mid-edit-sequence errors twice (known documented behavior, no new fix).
+
 - **M-B3 citation gate re-emits the WRONG phase — gate input is `module_decomposition`, repair target is
   `contract_finalization` (2026-07-09).** `evaluatePreCriticCitationGrounding` (src/remediate/steps/contractPipeline.ts
   ~1209) grounds `module_decomposition.file_scope` against the working tree, but on failure the router re-emits

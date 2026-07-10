@@ -22,9 +22,14 @@ git log --oneline HEAD..audit-tools/main # commits on remote not local
 
 - **On `main` and behind** → fast-forward: `git merge --ff-only audit-tools/main`. If ff-only fails
   (local `main` has diverging commits), STOP and surface it — don't force.
-- **On a `remediation/<runId>` or other worktree branch** (branch-strand trap): don't touch it. Note
-  it in the hand-back — committing docs from here strands them off main. The owner may want to switch
-  to main first.
+- **On a lap/worktree branch that is a clean ANCESTOR of `audit-tools/main`** (verify:
+  `git merge-base --is-ancestor HEAD audit-tools/main` + clean tree + empty
+  `git log audit-tools/main..HEAD`) → fast-forward it too: `git merge --ff-only audit-tools/main`.
+  No unique commits = no strand risk, and lap work then starts from current code (ship pushes
+  `HEAD:main` from the lap branch, so it never needs to be `main` itself).
+- **On a `remediation/<runId>` branch, or any branch with unique commits** (branch-strand trap):
+  don't touch it. Note it in the hand-back — committing docs from here strands them off main. The
+  owner may want to switch to main first.
 - **Empty log** → already current, continue.
 
 If the fast-forward pulled new commits, the HANDOFF/backlog you may have already seen are stale —
