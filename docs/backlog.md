@@ -252,11 +252,9 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `mergeAffectedFiles`) — audit `reporting/mergeFindings.ts` + remediate `dedup/crossLensDedup.ts` are now
     thin policy-selecting adapters (categoryGate soft|hard · mutate|clone · exact-identity · grounding · sort
     · break · onMerge). This is the direct payoff of the owner's one-core clarification — the "divergence" was
-    all POLICY on one identical skeleton, NOT a domain fork.
-  - **OPEN (optional tidiness follow-up) — move audit's same-lens pass + identity-key `upsertFinding` into
-    `src/shared/findings/` too.** They already draw the shared `absorbFinding`/`mergeGrounding`/
-    `mergeAffectedFiles` mechanics; relocating the two audit-only functions themselves finishes the "one core"
-    picture. NOT a dedup win (audit-only today, no second consumer) — pure tidiness; do it when convenient.
+    all POLICY on one identical skeleton, NOT a domain fork. Finished the picture by relocating audit's
+    same-lens pass + identity-key upsert (`sameLensDedupe`/`upsertFindingByIdentity`/`findingReEmissionKey`)
+    into `src/shared/findings/` too, and collapsing a duplicate `findingKey` in `systemicChallengeLoop.ts`.
   - **Deliberately NOT built — Tier C (3), intra-remediate retry-cap helper** (5 `attempts >= CAP →
     escalate` sites sharing a shape): marginal — the sites are 2-3 lines each over different state records;
     a generic helper would abstract more than it saves. Revisit only if a 6th cap site appears.
