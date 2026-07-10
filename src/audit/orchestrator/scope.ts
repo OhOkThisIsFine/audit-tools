@@ -1,11 +1,10 @@
-import { changedFiles, gitRefExists, isGitRepo } from "audit-tools/shared";
+import { changedFiles, gitRefExists, isGitRepo, pathMatchesPrefix } from "audit-tools/shared";
 import type { GraphBundle } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { CoverageMatrix } from "../types.js";
 import type { AuditScopeBudget, AuditScopeManifest } from "../types/auditScope.js";
 import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
-import { pathMatchesExclusion } from "./intentScopeDisposition.js";
 import {
   HIGH_FAN_DEGREE_THRESHOLD,
   buildGraphDegreeIndex,
@@ -13,8 +12,6 @@ import {
   graphEdgeConfidence,
   normalizeGraphPath,
 } from "./reviewPacketGraph.js";
-
-export { pathMatchesExclusion } from "./intentScopeDisposition.js";
 
 /** Default cap on in-scope files (seeds + expanded) before expansion stops. */
 export const DEFAULT_SCOPE_MAX_FILES = 200;
@@ -331,7 +328,7 @@ export function applyIntentExclusionsToCoverage(
   for (const file of coverage.files) {
     if (file.audit_status === "excluded") continue;
     if (
-      excludedScope.some((entry) => pathMatchesExclusion(file.path, entry.path))
+      excludedScope.some((entry) => pathMatchesPrefix(file.path, entry.path))
     ) {
       file.required_lenses = [];
       file.completed_lenses = [];

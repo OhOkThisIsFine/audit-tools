@@ -107,4 +107,34 @@ describe("filterFindingsByCheckpoint", () => {
     );
     expect(kept.map((f) => f.id)).toEqual(["A"]);
   });
+
+  // Symmetric with audit's intentScopeDisposition (both consume the shared
+  // fileExclusionReason): a disposition_overrides entry with an excluded status
+  // (excluded/generated/vendor) drops a finding under that path — remediate
+  // previously ignored disposition_overrides entirely.
+  it("drops findings under a disposition_overrides excluded status (symmetric with audit)", () => {
+    const { kept, droppedIds } = filterFindingsByCheckpoint(
+      [
+        finding("A", { files: ["src/a.ts"] }),
+        finding("B", { files: ["vendor/lib/x.ts"] }),
+      ],
+      checkpoint({
+        disposition_overrides: [
+          { path: "vendor", status: "vendor", reason: "third-party" },
+        ],
+      }),
+    );
+    expect(kept.map((f) => f.id)).toEqual(["A"]);
+    expect(droppedIds).toEqual(["B"]);
+  });
+
+  it("keeps a finding under an 'included' disposition_overrides status", () => {
+    const { kept } = filterFindingsByCheckpoint(
+      [finding("A", { files: ["src/a.ts"] })],
+      checkpoint({
+        disposition_overrides: [{ path: "src", status: "included", reason: "kept" }],
+      }),
+    );
+    expect(kept.map((f) => f.id)).toEqual(["A"]);
+  });
 });

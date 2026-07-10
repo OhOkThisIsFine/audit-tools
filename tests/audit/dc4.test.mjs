@@ -315,6 +315,22 @@ test.concurrent("DC-4 scope-annotate: a disposition_overrides 'excluded' status 
   expect(disp.reason).toBe("generated");
 });
 
+test.concurrent("DC-4 scope-annotate: a must_not_touch glob also marks a unit excluded (symmetric with remediate)", () => {
+  // Audit's disposition now consumes the shared fileExclusionReason, so a
+  // must_not_touch glob (a write-forbidden path) excludes a review unit too —
+  // audit previously ignored must_not_touch entirely.
+  const checkpoint = {
+    schema_version: "intent-checkpoint/v1",
+    confirmed_at: "2026-06-19T00:00:00Z",
+    confirmed_by: "host",
+    scope_summary: "x", intent_summary: "y",
+    must_not_touch: ["vendor/**"],
+  };
+  const disp = deriveUnitScopeDisposition(["vendor/lib/a.ts", "vendor/lib/b.ts"], checkpoint);
+  expect(disp.kind).toBe("excluded");
+  expect(disp.reason).toContain("must-not-touch");
+});
+
 test.concurrent("DC-4 scope-annotate (no-verbatim): free_form_intent is NEVER threaded into the prompt", () => {
   const secret = "EXCLUDE-EVERYTHING-UNDER-vendor-AND-be-extra-careful-with-auth";
   const checkpoint = {
