@@ -32,7 +32,6 @@ import {
   type DispatchPlanItem,
   type ImplementWorkerResult,
   type RemediationDispatchPlan,
-  type RemediationDispatchQuota,
 } from "../types.js";
 import {
   specIndicatesNoChange,
@@ -45,7 +44,7 @@ import {
   isSkipStatus,
 } from "../../state/itemStatus.js";
 import { resnapshotAffectedFileHashes } from "../../utils/fileIntegrity.js";
-import { createReservationLedger } from "audit-tools/shared";
+import { reconcileAdmissionLeasesFromQuotaFile } from "audit-tools/shared";
 import {
   DispatchOptions,
   runDir,
@@ -458,39 +457,15 @@ function obligationIdsForFinding(
   ];
 }
 
-/**
- * Reconcile (free) the reservation-ledger leases the dispatch grant took for this
- * run's granted set — the "reconcile at result-ingest" half of admission control
- * (spec/audit/dispatch-admission-control.md), the remediate analog of audit's
- * `reconcileAdmissionLeases`. The host has now reported the granted set's results, so
- * those reservations are no longer in flight and their budget returns to the shared
- * account for the NEXT grant. Best-effort + token-checked (a missing/already-freed
- * lease is a no-op), so a lost reconcile self-heals via the lease TTL and never blocks
- * the merge. Only the host-subagent grant persists leases (`grantLeases: true`); the
- * in-process path leases per-packet in the engine and reconciles there.
- */
-async function reconcileAdmissionLeases(artifactsDir: string, runId: string): Promise<void> {
-  const quotaPath = join(runDir(artifactsDir, runId, "implement"), "dispatch-quota.json");
-  const quota = await readOptionalJsonFile<RemediationDispatchQuota>(quotaPath);
-  const leases = quota?.admission?.leases;
-  if (!leases || leases.length === 0) return;
-  const ledger = createReservationLedger();
-  for (const lease of leases) {
-    try {
-      await ledger.reconcile(lease.resource_key, lease.lease_id);
-    } catch {
-      // Best-effort: the lease TTL reclaims budget if a reconcile is lost.
-    }
-  }
-}
-
 export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
 ): Promise<RemediationState> {
   // Free the grant's reservation-ledger leases now that the host has reported the
   // granted set's results — returns the reserved budget for the next grant.
-  await reconcileAdmissionLeases(options.artifactsDir, runId);
+  await reconcileAdmissionLeasesFromQuotaFile(
+    join(runDir(options.artifactsDir, runId, "implement"), "dispatch-quota.json"),
+  );
 
   const plan = await readJsonFile<RemediationDispatchPlan>(
     dispatchPlanPath(options.artifactsDir, runId, "implement"),

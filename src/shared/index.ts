@@ -1278,6 +1278,7 @@ export type {
   AdmitBatchResult,
   AdmitBatchInput,
 } from "./dispatch/admissionLoop.js";
+export { reconcileAdmissionLeasesFromQuotaFile } from "./dispatch/admissionLeaseReconcile.js";
 
 // File-ownership-disjoint admission scheduling (INV-SOO) + the single-sourced path
 // identity it keys on — shared so BOTH orchestrators split a dependency level into
