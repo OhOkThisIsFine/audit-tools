@@ -17,6 +17,8 @@ import { AuditCodeResponseSchema } from "../../src/audit/contracts/wrapperRespon
 import {
   shouldBuildDistForPaths,
   assertWorkspaceInstalled,
+  hasLeadingFlag,
+  setFlag,
 } from "../../wrapper/audit-code-wrapper-lib.mjs";
 import {
   shouldBuildDistForPaths as shouldBuildDistForPathsDirect,
@@ -1671,6 +1673,50 @@ test.concurrent("build helpers are isolated from install helpers", async () => {
   expect(INSTALL_HOST_DEFINITIONS).toEqual(_INSTALL_HOST_DEFINITIONS);
   expect(getInstallHostKeys("all")).toEqual(_getInstallHostKeys("all"));
   expect(getInstallProfile("opencode")).toEqual(_getInstallProfile("opencode"));
+});
+
+test.concurrent("hasLeadingFlag recognizes an informational flag only before the first command token (CE-007)", () => {
+  // A bare informational flag is a leading flag.
+  expect(hasLeadingFlag(["--version"], "--version")).toBe(true);
+  expect(hasLeadingFlag(["-v"], "-v")).toBe(true);
+  expect(hasLeadingFlag(["--help"], "--help")).toBe(true);
+  // A leading flag is still recognized after OTHER leading flags.
+  expect(hasLeadingFlag(["--verbose", "--version"], "--version")).toBe(true);
+  // A flag AFTER the first non-flag token (the command) is NOT hijacked — it
+  // belongs to the dist CLI. This is the CE-007 regression: `explain-task -v`
+  // must forward `-v`, not print the wrapper version.
+  expect(hasLeadingFlag(["explain-task", "-v"], "-v")).toBe(false);
+  expect(hasLeadingFlag(["explain-task", "--version"], "--version")).toBe(false);
+  expect(hasLeadingFlag(["next-step", "--help"], "--help")).toBe(false);
+  // Absent flag.
+  expect(hasLeadingFlag(["next-step"], "--version")).toBe(false);
+});
+
+test.concurrent("setFlag overwrites an existing flag value and appends when absent (CE-001)", () => {
+  // Overwrite: a user-supplied relative --root is replaced with the resolved
+  // absolute value the wrapper computed, instead of being forwarded raw.
+  const withFlag = ["--root", "."];
+  setFlag(withFlag, "--root", "/abs/root");
+  expect(withFlag).toEqual(["--root", "/abs/root"]);
+  // Append: a missing flag is added.
+  const withoutFlag = ["next-step"];
+  setFlag(withoutFlag, "--artifacts-dir", "/abs/art");
+  expect(withoutFlag).toEqual(["next-step", "--artifacts-dir", "/abs/art"]);
+});
+
+test.concurrent("audit-code wrapper does not hijack a post-command informational flag (CE-007)", async () => {
+  // `explain-task -v` forwards `-v` to the dist CLI rather than printing the
+  // wrapper version. Without a task the dist command exits non-zero, so
+  // runWrapper rejects — the key assertion is that stdout is NOT just the
+  // wrapper's version string (which would prove the wrapper hijacked `-v`).
+  await runWrapper(["explain-task", "-v"]).then(
+    ({ stdout }) => {
+      expect(stdout.trim()).not.toBe(packageVersion);
+    },
+    (error) => {
+      expect(String(error.message).trim()).not.toBe(packageVersion);
+    },
+  );
 });
 
 test.concurrent("OpenCode permission helpers are importable from the dedicated module", () => {

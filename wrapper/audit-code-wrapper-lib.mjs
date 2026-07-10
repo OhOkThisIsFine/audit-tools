@@ -23,10 +23,29 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const distEntry = join(repoRoot, 'dist', 'audit', 'index.js');
 const packageJsonPath = join(repoRoot, 'package.json');
 const promptAssetPath = join(repoRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
-const packageVersion = JSON.parse(await readFile(packageJsonPath, 'utf8')).version;
+
+// Deferred (NOT a top-level await): package.json is only needed by the
+// `--version` branch, and a top-level read would fail EVERY invocation —
+// including `--help` — whenever package.json is unreadable (CE-006).
+async function readPackageVersion() {
+  return JSON.parse(await readFile(packageJsonPath, 'utf8')).version;
+}
 
 function hasFlag(argv, name) {
   return argv.includes(name);
+}
+
+// Informational flags (--help/--version) short-circuit the wrapper only when
+// they appear BEFORE the first non-flag token (the command). A whole-argv scan
+// hijacks post-command tokens that belong to the dist CLI — e.g.
+// `audit-code explain-task -v` printed the wrapper's version instead of
+// forwarding `-v` to the dist command (CE-007).
+function hasLeadingFlag(argv, name) {
+  for (const token of argv) {
+    if (token === name) return true;
+    if (!token.startsWith('-')) return false;
+  }
+  return false;
 }
 
 function getFlag(argv, name) {
@@ -40,6 +59,22 @@ function setDefaultFlag(argv, name, value) {
     argv.push(name, value);
   }
 }
+
+// Overwrite an existing flag's value (or append when absent). setDefaultFlag
+// only fills a MISSING flag, so a user-supplied RELATIVE --root/--artifacts-dir
+// was forwarded raw and then re-resolved against the child's cwd (repoRoot),
+// not the caller's cwd — e.g. `--root .` pointed at the package dir (CE-001).
+// Normalizing to an absolute path here makes the forwarded value cwd-stable.
+function setFlag(argv, name, value) {
+  const index = argv.indexOf(name);
+  if (index < 0) {
+    argv.push(name, value);
+  } else {
+    argv[index + 1] = value;
+  }
+}
+
+export { hasLeadingFlag, setFlag };
 
 function nodeExecutable() {
   return process.execPath;
@@ -193,8 +228,10 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
   const rootValue = resolve(getFlag(commandArgs, '--root') ?? '.');
   const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
 
-  setDefaultFlag(commandArgs, '--root', rootValue);
-  setDefaultFlag(commandArgs, '--artifacts-dir', artifactsDir);
+  // Overwrite (not default) so a user-supplied relative value is normalized to
+  // the caller-cwd-resolved absolute path before it reaches the child (CE-001).
+  setFlag(commandArgs, '--root', rootValue);
+  setFlag(commandArgs, '--artifacts-dir', artifactsDir);
 
   if (ensureArtifactsDir) {
     await mkdir(artifactsDir, { recursive: true });
@@ -206,15 +243,21 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
   });
 }
 
-async function runDistCommandInline(commandName, argv) {
+async function runDistCommandInline(commandName, argv, { ensureArtifactsDir = false } = {}) {
   const commandArgs = [...argv];
   const rootValue = resolve(getFlag(commandArgs, '--root') ?? '.');
   const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
 
-  setDefaultFlag(commandArgs, '--root', rootValue);
-  setDefaultFlag(commandArgs, '--artifacts-dir', artifactsDir);
+  setFlag(commandArgs, '--root', rootValue);
+  setFlag(commandArgs, '--artifacts-dir', artifactsDir);
 
-  await mkdir(artifactsDir, { recursive: true });
+  // Gate the mkdir behind the same ensureArtifactsDir flag as runDistCommand so
+  // "the artifacts directory is created only for designated stateful commands"
+  // holds on this path too (CE-001); mcp is a designated stateful command and
+  // opts in explicitly at its call site.
+  if (ensureArtifactsDir) {
+    await mkdir(artifactsDir, { recursive: true });
+  }
   await ensureBuilt();
 
   // Propagate the invocation hint into this (long-lived) server process so it
@@ -238,13 +281,13 @@ export async function runAuditCodeWrapper({
   argv = process.argv.slice(2),
   preferredEntrypoint
 }) {
-  if (hasFlag(argv, '--help') || hasFlag(argv, '-h')) {
+  if (hasLeadingFlag(argv, '--help') || hasLeadingFlag(argv, '-h')) {
     printHelp({ usageName, preferredEntrypoint });
     return;
   }
 
-  if (hasFlag(argv, '--version') || hasFlag(argv, '-v')) {
-    console.log(packageVersion);
+  if (hasLeadingFlag(argv, '--version') || hasLeadingFlag(argv, '-v')) {
+    console.log(await readPackageVersion());
     return;
   }
 
@@ -280,7 +323,7 @@ export async function runAuditCodeWrapper({
   //    because they may be the FIRST call in a fresh repo and must create the
   //    run directory before dist reads it.
   if (argv[0] === 'mcp') {
-    await runDistCommandInline('mcp', argv.slice(1));
+    await runDistCommandInline('mcp', argv.slice(1), { ensureArtifactsDir: true });
     return;
   }
 
