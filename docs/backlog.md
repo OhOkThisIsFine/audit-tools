@@ -873,11 +873,19 @@ Standing gotchas worth keeping for any agent (strong or weak):
   isolated) AND the timeout-flake that forced wasteful isolation reruns. The 4 tests carry an explicit 300s timeout
   (`HEAVY_AUDIT_TEST_TIMEOUT_MS`) because the residual per-step work still balloons under max full-suite CPU
   contention and the global 120s default was too tight for THIS test (a false-negative, not a bug). **Open follow-up
-  (make it genuinely fast):** the residual wall is repeated per-step repo extraction/staleness computation — investigate
-  whether extraction needlessly re-runs on every next-step even when the temp repo is unchanged (if so that is a
-  staleness-caching win that helps PRODUCTION too, not just the test); if inherent, consider pre-seeding artifacts to
-  cut pump iterations. The CLI/wrapper subprocess path stays covered by `audit-code-wrapper.test.mjs` + the packaged
-  smokes, so the in-process move lost no coverage.
+  (make it genuinely fast) — the "extraction re-runs per-step" premise was INVESTIGATED + REFUTED 2026-07-09
+  (orchestrator + 2 recon subagents [Sonnet trace + Haiku adversarial-refute], source-verified):** production does
+  NOT redundantly re-extract on an unchanged repo. Extractors fire ONLY via executor dispatch for a MISSING/STALE
+  obligation; `repo_manifest` is presence-gated (`state.ts:88-93` — `has(bundle.repo_manifest) ? "satisfied" :
+  "missing"`, never staleness-checked), so `buildRepoManifestFromFs` (`intakeExecutors.ts:174`, its only call site)
+  never re-fires once present; and `computeStaleArtifacts` hashes already-loaded artifact JSON
+  (`getArtifactValue(bundle,…)`, `staleness.ts:19,131`), never re-walking the repo FS (`tooling_manifest.generated_at`
+  is stripped before hashing — `artifactFreshness.ts:25` `normalizeForMetadataHash` — so wall-clock churn can't
+  falsely stale it). **So there is NO production staleness-caching win hiding here.** The heavy test's residual wall
+  is LEGITIMATE one-time-per-phase extraction + analyzer subprocesses spread across the ~10 pump iterations, not a
+  redundant re-run. Remaining lever is TEST-side only: pre-seed artifacts to cut pump iterations (the flow legitimately
+  extracts once per phase). The CLI/wrapper subprocess path stays covered by `audit-code-wrapper.test.mjs` + the
+  packaged smokes, so the in-process move lost no coverage.
 
 - **Codex CLI is a poor executor for large read-heavy audit packets under a wall-clock budget.** Observed
   2026-07-04: 2 concurrent codex executors ran 5+ min with zero results and 8k+ lines of echoed reasoning.
