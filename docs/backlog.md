@@ -280,13 +280,14 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     cross-file break to the node that caused it (vs the old late, coarse close-time reblock) for the loop-core class
     where those breaks concentrate. NON-loop-core cross-file breaks still rely on the close-time whole-repo gate
     (acceptable — the observed escapes were loop-core). Extends [[worktree-tests-miss-integration-guards]].
-    - **Open follow-up (pre-existing, unconfirmed):** the EXISTING merged-base-check's post-merge scoped-`git clean`
-      (`acceptNode.ts`, driven off a post-cherry-pick `gitEditedFilesForBranch` probe) may be inert — a subagent
-      observed the post-merge `HEAD...branch` probe reads empty in a test harness, though `removeWorktree` does not
-      delete the branch so first-principles says it should be non-empty. The new guard sidesteps this by capturing the
-      node's edited files PRE-merge; the merged-base-check was left untouched (couldn't confirm the claim; fixing a
-      working rollback path blind is riskier than the latent untracked-file leak). Investigate: does the post-merge
-      probe actually return files on the real path? If empty, single-source both scoped-cleans off the pre-merge snapshot.
+    - **Post-merge scoped-clean inertness — INVESTIGATED + FIXED 2026-07-09 (commit `833dce4c`).** The merged-base-check
+      rollback's scoped `git clean` was driven off a POST-cherry-pick `gitEditedFilesForBranch` probe (three-dot
+      `HEAD...branch`), which reads EMPTY whenever the pick reproduced an identical SHA (same-second commit+pick →
+      merge-base == branch tip) → the clean was non-deterministically inert → untracked-file leak on rollback.
+      Empirically confirmed (identical-SHA collision reproduced deterministically in-test with pinned author+committer
+      dates). Fix: deleted the redundant post-pick probe; drive the clean off the pre-merge `nodeEditedFiles` snapshot
+      (`acceptNode.ts:458`), single-sourcing it with the already-correct loop-core guard clean. Independent Sonnet
+      adversarial review (no defects); 3 tests added; 105 green across acceptNode-touching suites.
 
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
@@ -730,8 +731,10 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   wired only to a cache-hit-ratio regression vs `--baseline`. "Unmeasured" kept distinct from "measured zero";
   reader tolerates malformed ledger lines. Design-of-record [[access-memory-layer-design]].
   **The context-efficiency access-memory track is now COMPLETE — items (1), (2), AND (3) all shipped.**
-  Follow-ups (non-blocking): remediate-side ledger writer (score-audit/score-tokens are audit-first; `observedUsage`
-  already on the shared type); packet `task_ids`/`lens` attribution in the ledger (`DispatchPlanEntry` carries neither).
+  Follow-up (non-blocking): packet `task_ids`/`lens` attribution in the ledger (`DispatchPlanEntry` carries neither).
+  (Remediate-side ledger writer SHIPPED 2026-07-09, commit `a1a51861`: `tokenUsageLedger` moved to
+  `audit-tools/shared`; remediate's `providerNodeDispatch` appends a per-node line at node-completion →
+  `.audit-tools/remediation/runs/<runId>/token-usage.jsonl`.)
 
   - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
     *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step
