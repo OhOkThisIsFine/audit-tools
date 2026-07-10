@@ -29,6 +29,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Charter-layer defects found + FIXED dogfooding /audit-code (2026-07-10, orchestrator + Opus recon/impl/adversarial agents).**
+  A dogfood audit of this repo surfaced three defects in the conceptual design-review charter layer; all fixed
+  (4 commits on the lap branch, one loop-core-attested + independently adversarially reviewed, validated
+  end-to-end). Durable design → memory [[charter-layer-independence-and-node-selection]].
+  - **(tool-should-decide) Consensus metric was size-hostile → charter review only ever saw test-file dyads.**
+    `src/shared/decompose/consensus.ts` scored a cluster by the mean over all C(n,2) member-pairs (missing ⇒ 0),
+    so only 2-file dyads cleared the bar and a 449-file `.gitignore` blob leaked into contested. Replaced with a
+    size-robust per-source best-fit F1 (precision×recall) + whole-area-community cap + abstain-vs-disagree voting
+    + ≥2-sources-together floor. On this repo consensus went 4 test dyads → 2 real subsystems, blob gone.
+  - **(ambiguous-direction) Single agent authored all charter kinds AND their deltas — author marking own homework.**
+    The design-of-record mandates independently-sourced, never-reconciled views, but one host pass wrote
+    stated/inferred/revealed + the deltas. Split into a charters-only extraction (independent, access-scoped
+    per-kind subagents: revealed=code-only, stated=docs-only) + a NEW `charter_delta` step where an independent
+    miner authors the gaps + goal_graph. The delta is now genuine disagreement, not one narrator's story.
+  - **(tool-should-decide) Prompt advertised "four charters" at a `deep` ceiling that only requests three.**
+    The count string was hardcoded; now tracks the ceiling (True nominatable only at `deepest`).
+  - **Recurrence of [[external-audit-catalogs-are-leads]] / verify-before-building:** the charter step was
+    reviewing test files because the *consensus criterion itself* was the bug — not visible without dogfooding.
+    A live self-audit remains the cheapest way to surface these; the env-bound dispatch/quota watch items below
+    were the original goal of the run and are still unexercised (audit paused at charter phase to fix the tool).
+
 - **M-B3 citation gate re-emits the WRONG phase — gate input is `module_decomposition`, repair target is
   `contract_finalization` (2026-07-09).** `evaluatePreCriticCitationGrounding` (src/remediate/steps/contractPipeline.ts
   ~1209) grounds `module_decomposition.file_scope` against the working tree, but on failure the router re-emits
