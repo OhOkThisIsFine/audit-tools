@@ -21,6 +21,7 @@ import { z } from "zod";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { estimatePacketCost } from "../quota/packetCost.js";
 import type { DispatchCapacityPoolSummary } from "../quota/capacity.js";
+import { TOKEN_BUDGET_COLD_START_SLOTS } from "../quota/scheduler.js";
 import { tierRank } from "./tierRank.js";
 import { deriveCostRank, lookupConfirmedPosition } from "./costRank.js";
 
@@ -57,6 +58,15 @@ export interface AdmissionPool {
   throughputConcurrency: number;
   /** Largest packet cost this pool can fit (context window − output). */
   capacityTokens: number;
+  /**
+   * Cold-start calibration (see WaveSchedule.calibrating): a live snapshot exists but
+   * no real token budget could be derived yet (no absolute count, no learned slope).
+   * When true, {@link admitBatch} caps this pool's GRANT to a bounded calibration batch
+   * (`TOKEN_BUDGET_COLD_START_SLOTS`) so the host-path fan-out cannot grant the whole
+   * frontier before the tokens-per-percent slope is observed — the grant obeys this,
+   * whereas the scheduler's `max_concurrent` clamp (which the host ignores) does not.
+   */
+  calibrating?: boolean;
 }
 
 /**
@@ -117,6 +127,7 @@ export function admissionPoolsFromSummaries(
       sourceConcurrencyCap: pool.concurrency_cap,
     }),
     capacityTokens: pool.resolved_limits.context_tokens,
+    calibrating: pool.calibrating === true,
   }));
 }
 
@@ -325,7 +336,17 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
     let lastReason: AdmissionExplain["reason"] = "budget_exhausted";
     let lastPool = candidates[0]!;
     for (const pool of candidates) {
-      if (pool.declaredCap != null && (countByPool.get(pool.poolId) ?? 0) >= pool.declaredCap) {
+      // Effective in-flight cap = the declared hard cap, TIGHTENED at cold start to a
+      // bounded calibration batch. At cold start no real token budget exists (budget
+      // ⇒ +Infinity), so without this the host grant would fan out the ENTIRE frontier
+      // before the tokens-per-percent slope can be observed — the scheduler's
+      // `max_concurrent` cold-start clamp does NOT reach the grant, which is what the
+      // host actually obeys. Only affects `grantLeases:true` (host path); the in-process
+      // driver returns before admitBatch.
+      const effectiveCap = pool.calibrating
+        ? Math.min(pool.declaredCap ?? TOKEN_BUDGET_COLD_START_SLOTS, TOKEN_BUDGET_COLD_START_SLOTS)
+        : pool.declaredCap;
+      if (effectiveCap != null && (countByPool.get(pool.poolId) ?? 0) >= effectiveCap) {
         lastReason = "cap_reached";
         lastPool = pool;
         continue;

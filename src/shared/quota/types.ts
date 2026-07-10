@@ -123,6 +123,16 @@ export interface WaveSchedule {
   remaining_token_budget?: number | null;
   /** Tokens already in flight against this pool when the wave was sized (0 default). */
   in_flight_tokens?: number;
+  /**
+   * Cold-start calibration: a live snapshot exists but at least one of the pool's
+   * quota windows has no absolute token count and no learned tokens-per-percent
+   * slope yet, so no real token budget can be derived. The scheduler already clamps
+   * `max_concurrent` to a bounded calibration batch here; this flag propagates the
+   * SAME bound to the host-path admission GRANT (which obeys `granted_packet_ids`,
+   * not `max_concurrent`) so wave 1 cannot over-grant the whole frontier before the
+   * slope is observed. Optional so existing constructions stay valid (⇒ not calibrating).
+   */
+  calibrating?: boolean;
 }
 
 export const BackoffStateSchema = z

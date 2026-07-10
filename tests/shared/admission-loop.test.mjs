@@ -28,6 +28,7 @@ function pool(
     capabilityRank = 0,
     throughputConcurrency = Infinity,
     capacityTokens = Infinity,
+    calibrating = false,
   } = {},
 ) {
   return {
@@ -39,6 +40,7 @@ function pool(
     capabilityRank,
     throughputConcurrency,
     capacityTokens,
+    calibrating,
   };
 }
 
@@ -135,6 +137,68 @@ test("grants persist as ledger leases and the artifact shape validates", async (
     explains: res.explains,
   };
   expect(() => DispatchAdmissionSchema.parse(admission)).not.toThrow();
+});
+
+// ── Cold-start calibration clamp (host-path over-grant fix) ──────────────────
+// At cold start a live snapshot exists but no real token budget can be derived yet
+// (budget ⇒ +Infinity), so WITHOUT this clamp the host grant would fan out the whole
+// frontier before the tokens-per-percent slope is observed. `calibrating` caps the
+// grant to a bounded calibration batch — the bound the host ACTUALLY obeys (the
+// scheduler's max_concurrent cold-start clamp never reaches the grant).
+
+const { TOKEN_BUDGET_COLD_START_SLOTS } = await import(
+  "../../src/shared/quota/scheduler.ts"
+);
+
+test("cold start: a calibrating pool with +Infinity budget caps the grant to the calibration batch", async () => {
+  const ledger = await freshLedger();
+  const calibratingHost = pool("host#a/m", { budget: Infinity, calibrating: true });
+  const packets = Array.from({ length: 6 }, (_, i) => pkt(`p${i + 1}`, 100));
+  const res = await admitBatch({ packets, pools: [calibratingHost], ledger });
+  // Bounded to the calibration batch despite infinite budget and no declared cap.
+  expect(res.granted.length).toBe(TOKEN_BUDGET_COLD_START_SLOTS);
+  expect(res.blocked.length).toBe(6 - TOKEN_BUDGET_COLD_START_SLOTS);
+  const ex = res.explains.find((e) => e.packet_id === `p${TOKEN_BUDGET_COLD_START_SLOTS + 1}`);
+  expect(ex.reason).toBe("cap_reached");
+});
+
+test("cold start: a declared cap TIGHTER than the calibration batch still wins (min semantics)", async () => {
+  const ledger = await freshLedger();
+  const cappedCalibrating = pool("codex#a/m", { budget: Infinity, calibrating: true, declaredCap: 1 });
+  const packets = Array.from({ length: 4 }, (_, i) => pkt(`p${i + 1}`, 100));
+  const res = await admitBatch({ packets, pools: [cappedCalibrating], ledger });
+  expect(res.granted.length).toBe(1); // min(declaredCap=1, COLD_START=2)
+});
+
+test("NOT calibrating: an established pool with budget grants the full batch (clamp does not fire)", async () => {
+  const ledger = await freshLedger();
+  const established = pool("host#a/m", { budget: Infinity, calibrating: false });
+  const packets = Array.from({ length: 5 }, (_, i) => pkt(`p${i + 1}`, 100));
+  const res = await admitBatch({ packets, pools: [established], ledger });
+  expect(res.granted.length).toBe(5); // no cold-start clamp once a real budget exists
+  expect(res.blocked.length).toBe(0);
+});
+
+test("cold start: a declared cap LOOSER than the calibration batch loses to it (6 → COLD_START)", async () => {
+  const ledger = await freshLedger();
+  const looseCalibrating = pool("codex#a/m", { budget: Infinity, calibrating: true, declaredCap: 6 });
+  const packets = Array.from({ length: 6 }, (_, i) => pkt(`p${i + 1}`, 100));
+  const res = await admitBatch({ packets, pools: [looseCalibrating], ledger });
+  expect(res.granted.length).toBe(TOKEN_BUDGET_COLD_START_SLOTS); // min(6, 2)
+});
+
+test("mixed pools: a calibrating pool is clamped while a coexisting established pool takes the overflow", async () => {
+  const ledger = await freshLedger();
+  // Calibrating host is cheapest → fills first but is capped at the calibration batch;
+  // the established (real-budget, not calibrating) source is NOT clamped → takes the rest.
+  const calibratingHost = pool("host#a/m", { budget: Infinity, calibrating: true, costRank: 0 });
+  const establishedSource = pool("nim#a/m", { budget: Infinity, calibrating: false, costRank: 1 });
+  const packets = Array.from({ length: 5 }, (_, i) => pkt(`p${i + 1}`, 100));
+  const res = await admitBatch({ packets, pools: [calibratingHost, establishedSource], ledger });
+  const counts = res.granted.reduce((m, g) => ((m[g.pool_id] = (m[g.pool_id] ?? 0) + 1), m), {});
+  expect(counts["host#a/m"]).toBe(TOKEN_BUDGET_COLD_START_SLOTS); // calibrating pool clamped
+  expect(counts["nim#a/m"]).toBe(5 - TOKEN_BUDGET_COLD_START_SLOTS); // established pool takes overflow, unclamped
+  expect(res.granted.length).toBe(5); // nothing dropped — overflow had a home
 });
 
 // ── Cost↔speed dispatch dial (spec/dispatch-cost-speed-dial.md) ──────────────

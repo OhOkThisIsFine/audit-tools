@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { renderTokenBudgetView, scheduleWave } from "audit-tools/shared";
+import { TOKEN_BUDGET_COLD_START_SLOTS } from "../../src/shared/quota/scheduler.ts";
 
 function withQuotaFile(contract, fn) {
   const dir = mkdtempSync(path.join(tmpdir(), "tbv-"));
@@ -131,5 +132,29 @@ test("scheduleWave stamps remaining_token_budget + in_flight_tokens on the sched
   // 5000 budget − 2000 in-flight = 3000 → only 3 slots of 1000 fit.
   expect(schedule.max_concurrent).toBe(3);
   expect(schedule.binding_cap).toBe("token_budget");
+});
+
+test("scheduleWave stamps calibrating=true at cold start (percent-only snapshot, no learned slope)", () => {
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { safety_margin: 1 } },
+    hostModel: null,
+    requestedConcurrency: 10,
+    estimatedSlotTokens: [1000, 1000, 1000, 1000, 1000],
+    inFlightTokens: 0,
+    quotaSourceSnapshot: {
+      remaining_pct: 0.5,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null, // percent-only: no absolute count, no learned slope passed
+      captured_at: new Date().toISOString(),
+      source: "test",
+    },
+  });
+  // No real token budget derivable yet → calibrating, and the flag is stamped so the
+  // host-path admission grant (not just max_concurrent) gets the calibration-batch cap.
+  expect(schedule.calibrating).toBe(true);
+  expect(schedule.remaining_token_budget).toBe(null);
+  expect(schedule.max_concurrent).toBe(TOKEN_BUDGET_COLD_START_SLOTS);
 });
 

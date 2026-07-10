@@ -300,6 +300,13 @@ export const DispatchCapacityPoolSummarySchema = z
      */
     remaining_token_budget: z.number().nullable().optional(),
     in_flight_tokens: z.number().int().min(0).optional(),
+    /**
+     * Cold-start calibration for this pool (see WaveSchedule.calibrating): a live
+     * snapshot exists but no real token budget could be derived yet, so the host-path
+     * admission builder caps the GRANT to a bounded calibration batch (not just the
+     * scheduler's local `max_concurrent`).
+     */
+    calibrating: z.boolean().optional(),
     quota_source_snapshot: QuotaUsageSnapshotSchema.nullable().optional(),
     /** Raw silent-degrade marker for this pool (see CapacityPool.quotaSignalDegraded). */
     quota_signal_degraded: z.boolean().optional(),
@@ -641,6 +648,7 @@ export function summarizeDispatchCapacityPools(
     binding_cap: allocation.schedule.binding_cap ?? "none",
     remaining_token_budget: allocation.schedule.remaining_token_budget ?? null,
     in_flight_tokens: allocation.schedule.in_flight_tokens ?? 0,
+    ...(allocation.schedule.calibrating ? { calibrating: true } : {}),
     quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,
     ...(allocation.quotaSignalDegraded ? { quota_signal_degraded: true } : {}),
     ...(allocation.quotaCoverage ? { quota_coverage: allocation.quotaCoverage } : {}),

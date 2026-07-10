@@ -185,6 +185,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `partial_completion_terminal{earliest_reset_at}`) — neither exists on the host branch today. Do NOT
     unify the two terminals ([[rolling-lifecycle-unify-full-unification-wrong]]). Spec the resumability
     contract before coding; matches the "don't rush pause/claim/quota" caution.
+    - **Cooldown-active over-grant (F1, found by the Increment-A clamp review — a PRE-EXISTING host-path
+      hole B must also close).** When `scheduleWave` is entered with an active `cooldownUntil`, the
+      token-budget block is SKIPPED → `remaining_token_budget` stays null → `AdmissionPool.budget`
+      = `+Infinity` → the host grant fans out the WHOLE frontier during the cooldown, ignoring the
+      scheduler's `max_concurrent:1`. (The *exhausted-window* case is safe: budget=0, not null.) So B's
+      pause trigger is `granted.length===0` **OR an active `cooldown_until`**, not only `budget===0`;
+      Increment A deliberately did not touch it (calibrating stays false during cooldown).
   - **(OPEN — host-path lease TTL).** `finalizeDispatchQuota` mints host-grant leases at the default 30s
     `STALE_LOCK_MS` TTL, but a host subagent wave runs for MINUTES → leases expire mid-wave → ingest
     reconcile no-ops → a ~30s-to-minutes window where a co-located concurrent admitter can double-grant the

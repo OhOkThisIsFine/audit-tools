@@ -24,12 +24,6 @@ export const AuditStateSchema = z
     last_obligation: z.string().optional(),
     blockers: z.array(z.string()).optional(),
     obligations: z.array(AuditObligationSchema),
-    /**
-     * Set when the rolling dispatch engine fires a partial-completion terminal
-     * (empty pool or livelock). Allows synthesis to proceed on partial coverage
-     * without hard-gating on `audit_tasks_completed`.
-     */
-    partial_coverage_terminal: z.boolean().optional(),
   })
   .strict();
 export type AuditState = z.infer<typeof AuditStateSchema>;

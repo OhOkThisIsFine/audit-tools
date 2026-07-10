@@ -623,12 +623,16 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   // number the gate used — never a re-derived one. null when no live snapshot, or
   // cold-start (no absolute/learned budget for any window yet).
   let remainingTokenBudget: number | null = null;
+  // Cold-start calibration flag, hoisted so it can be stamped on the schedule and
+  // propagated to the host-path admission grant (not just the local waveSize clamp).
+  let calibrating = false;
   if (quotaSourceSnapshot && !cooldownUntil) {
-    const { budget, calibrating, exhaustedResetAt } = deriveTokenBudget(
+    const { budget, calibrating: windowCalibrating, exhaustedResetAt } = deriveTokenBudget(
       quotaSourceSnapshot,
       quotaStateEntry?.tokens_per_pct,
     );
     remainingTokenBudget = budget;
+    calibrating = windowCalibrating;
     if (budget === 0) {
       // A genuinely empty window (remaining fraction 0 / absolute count 0):
       // throttle to 1 and persist a cooldown to its reset so a later transiently
@@ -685,6 +689,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     binding_cap: bindingCap,
     remaining_token_budget: remainingTokenBudget,
     in_flight_tokens: inFlightTokens,
+    calibrating,
   };
 }
 
