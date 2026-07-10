@@ -189,7 +189,17 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
 ## Preferences & standing decisions
 
 - **Ideal code over compatibility.** One user, no external consumers → cleanest design, delete deprecated/legacy paths. **Implementation effort/complexity/refactor-size is NOT a cost** — only the eventual endpoint (cleanest/most-efficient/most-robust) matters. Never defer, stage-to-avoid-work, or pick a lighter half-measure because the ideal is "a lot of work" or "a big atomic change." The only thing that gates pace is correctness (green-at-every-commit, no broken/lossy intermediate states) — that's doing it right, not avoiding the work.
-- **Keep orchestrators in parity.** Fix in one usually belongs in both; genuinely shared logic → `audit-tools/shared`.
+- **One core, two draws — there is no auditor-logic vs remediator-logic.** There is ONE shared body of
+  logic; auditing is a *draw* from it (the read-only selection) and remediating is a *draw* from it (the
+  write/apply selection). So when the two sides diverge, the default is **one shared core + per-mode
+  policy/draw**, NOT two forks kept "in parity." A **"domain-forced divergence" is a policy axis of the
+  shared core, almost never a fork justification** — a true *category error* (two genuinely different KINDS
+  of operation) is rare, and "it would become a config-shell with several knobs" is not a reason to fork
+  (a several-knob shared core is the correct endpoint — it's what stops the two from drifting on the
+  skeleton). Legitimately per-mode = only genuinely-different INPUT (a different draw over different
+  artifacts) or the terminal/result-routing adapter, never the algorithm. Fix in one usually belongs in
+  both; single-source the common core in `audit-tools/shared`, each orchestrator a thin policy-selecting
+  adapter. (Realizes "One pipeline, two halves" and the dissolve-the-distinction direction.)
 - **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the doc-review routine enforces.
 - **A needed manual flag is a bug signal.** Fix auto-resolution; don't document the flag.
 - **Resolve toward durable contract.** LLM-vs-deterministic → deterministic; graph/language → language-neutral contract.
