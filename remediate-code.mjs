@@ -36,44 +36,66 @@ function newestMtimeMs(path) {
   return newest;
 }
 
-function shouldBuildDist() {
+export function shouldBuildDist() {
   if (!existsSync(sourceRoot)) {
     return false;
-  }
-  if (!existsSync(tsconfigPath)) {
-    return !existsSync(distEntry);
   }
   if (!existsSync(distEntry)) {
     return true;
   }
-  return statSync(distEntry).mtimeMs < Math.max(
-    newestMtimeMs(sourceRoot),
-    statSync(tsconfigPath).mtimeMs,
-  );
+  // Compare dist freshness against src/ (and tsconfig.json when present). A
+  // missing tsconfig.json must NOT collapse this to an existence-only check: a
+  // dist older than src/ is still stale and must rebuild (CE-003). Previously
+  // the tsconfig-absent branch returned `!existsSync(distEntry)`, so a present
+  // but stale dist was silently used.
+  const newestSourceMs = existsSync(tsconfigPath)
+    ? Math.max(newestMtimeMs(sourceRoot), statSync(tsconfigPath).mtimeMs)
+    : newestMtimeMs(sourceRoot);
+  return statSync(distEntry).mtimeMs < newestSourceMs;
 }
 
-function ensureBuilt() {
-  if (!shouldBuildDist()) return;
-  const result =
-    process.platform === "win32"
-      ? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "npm run build"], {
-          cwd: __dirname,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        })
-      : spawnSync("npm", ["run", "build"], {
-          cwd: __dirname,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        });
+// Default build runner (platform-branched npm run build). Injectable in
+// ensureBuilt so the build-failure control flow is unit-testable without
+// spawning a real build.
+function runNpmBuild() {
+  return process.platform === "win32"
+    ? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "npm run build"], {
+        cwd: __dirname,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+    : spawnSync("npm", ["run", "build"], {
+        cwd: __dirname,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+}
+
+// Returns true when it is safe to proceed to dist forwarding, false when a
+// failed/signaled build has initiated a terminating exit action and the caller
+// MUST stop. The signal branch of applyWrapperExitAction re-raises the signal
+// and schedules a fallback exit but RETURNS control (the fallback can only fire
+// once the event loop is free); without this boolean guard main() would then
+// run its blocking spawnSync and forward the command against a stale/absent
+// dist before the fallback ever fires (CE-002). The exit-code branch terminates
+// synchronously, so it never reaches the `return false`.
+export function ensureBuilt({
+  shouldBuild = shouldBuildDist,
+  runBuild = runNpmBuild,
+  applyExit = applyWrapperExitAction,
+} = {}) {
+  if (!shouldBuild()) return true;
+  const result = runBuild();
   if (result.stdout) process.stderr.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) {
     console.error(`remediate-code: failed to auto-build dist (${result.error.message})`);
   }
   if (result.status !== 0 || result.signal) {
-    applyWrapperExitAction(getWrapperExitAction(result));
+    applyExit(getWrapperExitAction(result));
+    return false;
   }
+  return true;
 }
 
 export function getWrapperExitAction(result, platform = process.platform) {
@@ -119,7 +141,11 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
 
-  ensureBuilt();
+  // A failed/signaled build returns false here; stop rather than forward the
+  // command against a stale/absent dist (CE-002). The exit action is already
+  // in flight (synchronous exit for a nonzero status, pending fallback exit for
+  // a re-raised signal).
+  if (!ensureBuilt()) return;
   if (!existsSync(distEntry)) {
     console.error("remediate-code: dist/remediate/index.js not found. Run: npm run build");
     process.exit(1);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -131,6 +131,109 @@ describe("shouldBuildDist: sourceRoot exists, tsconfigPath absent, dist present"
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("shouldBuildDist: tsconfigPath absent, dist present but STALE (CE-003)", () => {
+  it("rebuilds a dist older than src/ instead of collapsing to an existence-only check", () => {
+    // src/ exists, tsconfig.json absent, dist present but OLDER than src/ →
+    // shouldBuildDist() must return true so ensureBuilt attempts a build (which
+    // fails loudly here because there is no tsconfig). The pre-CE-003 code
+    // returned `!existsSync(distEntry)` on the tsconfig-absent branch, so a
+    // stale-but-present dist was silently used.
+    const tmpDir = mkdtempSync(join(tmpdir(), "remediate-build-test-"));
+    try {
+      const dst = join(tmpDir, "remediate-code.mjs");
+      writeFileSync(dst, readFileSync(WRAPPER, "utf8"), "utf8");
+      const srcDir = join(tmpDir, "src");
+      mkdirSync(srcDir, { recursive: true });
+      const srcFile = join(srcDir, "index.ts");
+      writeFileSync(srcFile, "export const value = 1;\n", "utf8");
+      mkdirSync(join(tmpDir, "dist", "remediate"), { recursive: true });
+      const distFile = join(tmpDir, "dist", "remediate", "index.js");
+      writeFileSync(distFile, "process.exit(0);", "utf8");
+
+      // Age the dist BEFORE src so dist is stale (older than src/).
+      const old = new Date("2026-01-01T00:00:00.000Z");
+      const recent = new Date("2026-06-01T00:00:00.000Z");
+      utimesSync(distFile, old, old);
+      utimesSync(srcFile, recent, recent);
+      utimesSync(srcDir, recent, recent);
+
+      const result = spawnSync(process.execPath, [dst], {
+        cwd: tmpDir,
+        encoding: "utf8",
+      });
+
+      // A build was attempted (and fails loudly with no tsconfig) → non-zero exit
+      // and build output present. This proves the stale dist triggered a rebuild.
+      expect(result.status).not.toBe(0);
+      const combined = (result.stdout ?? "") + (result.stderr ?? "");
+      expect(combined).toMatch(/npm run build|auto-build dist|build/i);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("ensureBuilt: a failed/signaled build halts before dist forwarding (CE-002)", () => {
+  it("returns false and applies the exit action when the build is signaled", async () => {
+    const { ensureBuilt } = await importWrapperModule();
+    const applied: any[] = [];
+    const proceed = ensureBuilt({
+      shouldBuild: () => true,
+      runBuild: () => ({ status: null, signal: "SIGTERM" }),
+      applyExit: (action: unknown) => applied.push(action),
+    });
+    // The signal build must NOT let the caller proceed to dist forwarding, and
+    // an exit action must have been applied (never a silent continue). The
+    // action's exact shape is platform-specific — a re-raised signal on POSIX,
+    // exit code 1 on win32 (see getWrapperExitAction) — so assert only that a
+    // terminating action was applied, not which one.
+    expect(proceed).toBe(false);
+    expect(applied).toHaveLength(1);
+    expect(["signal", "exit"]).toContain(applied[0].type);
+  });
+
+  it("returns false and applies the exit action when the build exits non-zero", async () => {
+    const { ensureBuilt } = await importWrapperModule();
+    const applied: any[] = [];
+    const proceed = ensureBuilt({
+      shouldBuild: () => true,
+      runBuild: () => ({ status: 2, signal: null }),
+      applyExit: (action: unknown) => applied.push(action),
+    });
+    expect(proceed).toBe(false);
+    expect(applied[0]).toMatchObject({ type: "exit", code: 2 });
+  });
+
+  it("returns true and does not run a build when the dist is already fresh", async () => {
+    const { ensureBuilt } = await importWrapperModule();
+    let ran = false;
+    const proceed = ensureBuilt({
+      shouldBuild: () => false,
+      runBuild: () => {
+        ran = true;
+        return { status: 0, signal: null };
+      },
+      applyExit: () => {
+        throw new Error("applyExit must not be called on the no-build path");
+      },
+    });
+    expect(proceed).toBe(true);
+    expect(ran).toBe(false);
+  });
+
+  it("returns true after a successful build so the caller proceeds", async () => {
+    const { ensureBuilt } = await importWrapperModule();
+    const proceed = ensureBuilt({
+      shouldBuild: () => true,
+      runBuild: () => ({ status: 0, signal: null }),
+      applyExit: () => {
+        throw new Error("applyExit must not be called on a successful build");
+      },
+    });
+    expect(proceed).toBe(true);
   });
 });
 
