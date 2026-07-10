@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -2153,6 +2153,41 @@ Then run:
       }) };
     }
 
+    // Increment B — host-path pause-at-wall (parallel dispatch only; the sequential
+    // host above runs every eligible node itself and is not paced by the grant). When
+    // admission granted ZERO nodes, or a cooldown is active (F1: during cooldown
+    // admission over-grants the whole frontier), the host cannot pace safely this turn.
+    // Set the quota-paused terminal so the `partial_terminal` obligation (priority ahead
+    // of `implementing`) emits the resumable `quota_paused` step this same advance; the
+    // ungranted nodes stay PENDING and re-dispatch on resume (never abandoned to partial
+    // coverage — the remediate divergence from audit's read-only bound-and-give-up).
+    const implQuota = await readOptionalJsonFile<{
+      admission?: { granted_packet_ids?: string[] };
+      cooldown_until?: string | null;
+    }>(implQuotaPath);
+    const implWall = detectHostDispatchWall({
+      grantedCount: implQuota?.admission?.granted_packet_ids?.length ?? 0,
+      cooldownUntil: implQuota?.cooldown_until ?? null,
+      now: Date.now(),
+    });
+    if (implWall.atWall) {
+      // Release the leases the grant just reserved — pausing skips the merge that would
+      // reconcile them, so without this they leak until TTL and mis-size the resume grant.
+      await reconcileAdmissionLeasesFromQuotaFile(implQuotaPath);
+      const strandedIds = dispatchPlan.items
+        .map((item) => item.block_id)
+        .filter((id): id is string => typeof id === "string");
+      const paused = await store.loadState();
+      if (paused) {
+        paused.partial_completion_terminal = buildQuotaPausedTerminal(
+          strandedIds,
+          implWall.earliestResetAt,
+        );
+        await store.saveState(paused);
+      }
+      return { kind: "transition", state: paused };
+    }
+
     return { kind: "emit", step: await writeCurrentStep({
       stepKind: "dispatch_implement",
       status: "ready",
@@ -2232,9 +2267,10 @@ async function buildQuotaPausedStep(params: {
 # Remediation paused — provider session limit
 
 Every eligible provider pool hit a host session limit and is paused until its
-stated reset. ${strandedIds.length} node(s) are stranded and remain PENDING —
-their worktrees were preserved, so they will redispatch clean on resume. Nothing
-was blocked or failed; this is a resumable pause.
+stated reset. ${strandedIds.length} node(s) are stranded and remain PENDING; they
+will (re-)dispatch clean on resume (any node already given a worktree keeps it;
+never-dispatched nodes simply re-derive eligibility). Nothing was blocked or
+failed; this is a resumable pause.
 
 ${resetLine}
 

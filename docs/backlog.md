@@ -177,21 +177,27 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     : declaredCap` (inside admitBatch so leases stay in sync; only affects `grantLeases:true` — the
     in-process path returns before admitBatch). Plus audit host path emits the `quota_blind_dispatch` loud
     friction remediate already has (`marshal.ts:404`) when there is NO snapshot at all.
-  - **(OPEN — Increment B, FOCUSED lap) pause-at-wall step producer on the host path.** When admission
-    grants zero at the wall (`granted.length===0 && (cooldown_until || budget===0)`) the host branch must
-    emit each orchestrator's OWN resumable pause step. Re-scoped by review: this is a NEW
-    snapshot→paused-state/terminal producer per orchestrator (audit must synthesize+persist a
-    `RollingEngineLifecycleState`/`paused_state` advancing `pause_count`; remediate must set
-    `partial_completion_terminal{earliest_reset_at}`) — neither exists on the host branch today. Do NOT
-    unify the two terminals ([[rolling-lifecycle-unify-full-unification-wrong]]). Spec the resumability
-    contract before coding; matches the "don't rush pause/claim/quota" caution.
-    - **Cooldown-active over-grant (F1, found by the Increment-A clamp review — a PRE-EXISTING host-path
-      hole B must also close).** When `scheduleWave` is entered with an active `cooldownUntil`, the
-      token-budget block is SKIPPED → `remaining_token_budget` stays null → `AdmissionPool.budget`
-      = `+Infinity` → the host grant fans out the WHOLE frontier during the cooldown, ignoring the
-      scheduler's `max_concurrent:1`. (The *exhausted-window* case is safe: budget=0, not null.) So B's
-      pause trigger is `granted.length===0` **OR an active `cooldown_until`**, not only `budget===0`;
-      Increment A deliberately did not touch it (calibrating stays false during cooldown).
+  - **(Increment B — SHIPPED 2026-07-10, this branch.) pause-at-wall step producer on the host path.**
+    The host branch now emits each orchestrator's OWN resumable pause when admission grants zero OR a
+    cooldown is active. Shared one-core wall predicate `detectHostDispatchWall({grantedCount, cooldownUntil,
+    now})` (`src/shared/dispatch/hostDispatchWall.ts`); trigger closes F1 at the producer without touching
+    the null→+Infinity admission map (correct for the in-process throttle). Audit: fresh-snapshot
+    `advanceHostDispatchPause` (`src/audit/cli/dispatch/pausePersist.ts` — persist helpers EXTRACTED there
+    from `rollingAuditDispatch.ts` so in-process + host share one copy, holding the paused_state⊕terminal
+    XOR invariant) → resumable `blocked` step, `checkLivelockGuard`-bounded to partial-coverage synthesis;
+    terminal carries TASK ids (not packet ids) so `deriveAuditState` routes synthesis. Remediate: host
+    branch sets `partial_completion_terminal{quota_paused, earliest_reset_at}` (block_ids) so the existing
+    `partial_terminal` obligation emits `quota_paused`, nodes stay pending. Both reconcile the reserved
+    leases on pause (C3). Design-adversarially reviewed (v1 spec had an `advancePausedState`-misfit + an
+    empty-stranded-set bug + a lease leak — all fixed pre-code) and impl-adversarially reviewed (the audit
+    task-id routing bug was caught + fixed). Do NOT unify the two terminals
+    ([[rolling-lifecycle-unify-full-unification-wrong]]). Design-of-record: [[quota-onetrack-always-on]].
+    - **Residuals (review-flagged, non-blocking):** (a) the flag-gated rolling (`dispatch_implement_rolling`)
+      + hybrid opt-in branches carry no wall pause — an empty grant there folds to merge (safe), but an F1
+      cooldown over-grant would still fan out; extend the cooldown pause to those paths.
+      (b) The IN-PROCESS producers (`advanceRollingPause`, rolling `getTerminal`) write PACKET ids to
+      `stranded_ids`, same latent packet-vs-task mismatch the host audit fix corrected — pre-existing, low
+      impact (resume rests on pending state, not stranded_ids), but worth aligning to task ids.
   - **(OPEN — host-path lease TTL).** `finalizeDispatchQuota` mints host-grant leases at the default 30s
     `STALE_LOCK_MS` TTL, but a host subagent wave runs for MINUTES → leases expire mid-wave → ingest
     reconcile no-ops → a ~30s-to-minutes window where a co-located concurrent admitter can double-grant the

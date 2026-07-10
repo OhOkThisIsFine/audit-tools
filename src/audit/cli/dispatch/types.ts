@@ -66,6 +66,18 @@ export interface PrepareDispatchResult {
   packet_count: number;
   task_count: number;
   skipped_task_count: number;
+  /**
+   * Present ONLY on the host-dispatch path when admission hit the wall (zero grant or an
+   * active cooldown) — the resumable pause was recorded on `active-dispatch.json` and the
+   * emitter must render a resumable pause step instead of a dispatch step (Increment B).
+   * `livelocked` = the pause hit the coverage bound → a partial-completion terminal was
+   * recorded, so the next next-step routes to synthesis. Absent on a normal grant.
+   */
+  host_pause?: {
+    earliestResetAt: string | null;
+    livelocked: boolean;
+    strandedCount: number;
+  };
   /** Packets GRANTED for dispatch this pass by the admission loop (emergent width). */
   granted_count: number;
   /** Verbatim host in-flight cap (declared env limit, e.g. Codex 6), or null. */

@@ -20,7 +20,6 @@
 
 import { dirname, join } from "node:path";
 import {
-  readJsonFile,
   writeJsonFile,
   advancePausedState,
   finalizeProviderLaunchResult,
@@ -29,7 +28,6 @@ import {
   type ProviderSlot,
   type RollingDispatchPacket,
   type RollingDispatchResult,
-  type PartialCompletionTerminal,
   type RollingEngineLifecycleState,
   type SettledExclusionSet,
   type FreshSessionProvider,
@@ -47,11 +45,13 @@ import {
 import type { AuditTask } from "../types.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
+import { type DispatchPausedState } from "../types/activeDispatch.js";
 import {
-  type ActiveDispatchState,
-  type DispatchPausedState,
-  ACTIVE_DISPATCH_FILENAME,
-} from "../types/activeDispatch.js";
+  readActiveDispatch,
+  persistPausedState,
+  clearPausedState,
+  recordPartialCompletionTerminal,
+} from "./dispatch/pausePersist.js";
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
 import { createFreshSessionProvider } from "../providers/index.js";
 import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js";
@@ -656,60 +656,3 @@ async function advanceRollingPause(params: {
   return pausedState;
 }
 
-/** Read the run's active-dispatch artifact, or null when absent / for another run. */
-async function readActiveDispatch(
-  artifactsDir: string,
-  runId: string,
-): Promise<ActiveDispatchState | null> {
-  const path = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
-  const existing = await readJsonFile<ActiveDispatchState>(path).catch(() => null);
-  return existing && existing.run_id === runId ? existing : null;
-}
-
-/** Persist the resumable paused state onto the active-dispatch artifact. */
-async function persistPausedState(
-  artifactsDir: string,
-  runId: string,
-  pausedState: DispatchPausedState,
-): Promise<void> {
-  const existing = await readActiveDispatch(artifactsDir, runId);
-  if (!existing) return;
-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
-    ...existing,
-    paused_state: pausedState,
-  } satisfies ActiveDispatchState);
-}
-
-/** Clear the paused state (run resumed or went terminal). */
-async function clearPausedState(
-  artifactsDir: string,
-  runId: string,
-): Promise<void> {
-  const existing = await readActiveDispatch(artifactsDir, runId);
-  if (!existing || !existing.paused_state) return;
-  const { paused_state: _dropped, ...rest } = existing;
-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
-    ...rest,
-  } satisfies ActiveDispatchState);
-}
-
-/**
- * Stamp the rolling engine's partial-completion terminal onto the run's
- * active-dispatch artifact. `prepareDispatchArtifacts` already wrote the artifact;
- * this only augments it, leaving every other field intact.
- */
-async function recordPartialCompletionTerminal(
-  artifactsDir: string,
-  runId: string,
-  terminal: PartialCompletionTerminal,
-): Promise<void> {
-  const path = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
-  const existing = await readJsonFile<ActiveDispatchState>(path).catch(
-    () => null,
-  );
-  if (!existing || existing.run_id !== runId) return;
-  await writeJsonFile(path, {
-    ...existing,
-    partial_completion_terminal: terminal,
-  } satisfies ActiveDispatchState);
-}

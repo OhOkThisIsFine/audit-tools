@@ -126,6 +126,48 @@ export async function renderSemanticReviewStep(params: {
   };
   const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
 
+  // Increment B — host-path quota wall. When admission granted zero OR a cooldown is
+  // active, `prepareDispatchArtifacts` recorded the resumable pause on the run's
+  // active-dispatch state; emit a resumable pause step (its own producer, kept separate
+  // from remediate's `quota_paused` terminal per the non-unification decision) instead
+  // of a dispatch step. Re-running next-step re-evaluates admission against a fresh
+  // snapshot — a genuine reset clears the wall and resumes; a livelock has already
+  // recorded the partial-completion terminal, so re-running routes to synthesis.
+  if (dispatch.host_pause) {
+    const { earliestResetAt, livelocked, strandedCount } = dispatch.host_pause;
+    const resetClause = earliestResetAt ? ` (resets at ${earliestResetAt})` : "";
+    return writeCurrentStep({
+      artifactsDir,
+      stepKind: "blocked",
+      status: "ready",
+      runId: activeReviewRun.run_id,
+      allowedCommands: [continueCommand],
+      allowedMcpTools: ["auditor_continue_audit"],
+      progress: {
+        summary: livelocked
+          ? `Provider quota wall persisted past the coverage bound; ${strandedCount} packet(s) left unreviewed — the audit will synthesize on partial coverage.`
+          : `Provider quota wall${resetClause}; ${strandedCount} review packet(s) paused, resumable.`,
+        pending_packets: strandedCount,
+        granted_count: 0,
+      },
+      stopCondition: livelocked
+        ? "Coverage bound reached at the quota wall — run next-step to synthesize the audit on partial coverage."
+        : `Provider quota is at its wall${resetClause}. Wait for the reset, then run next-step to resume — the tool re-grants automatically when capacity returns.`,
+      repoRoot: root,
+      artifactPaths: {
+        dispatch_quota: dispatch.dispatch_quota_path,
+        pending_audit_tasks: activeReviewRun.pending_audit_tasks_path ?? null,
+      },
+      prompt: livelocked
+        ? `The provider session limit stayed at its wall across repeated attempts, so the audit is giving up ` +
+          `on ${strandedCount} unreviewed packet(s) and will synthesize on the coverage it has. Run \`next-step\` to continue to synthesis.`
+        : `The provider session limit is exhausted${resetClause}, so no review packets can be dispatched this ` +
+          `pass. ${strandedCount} packet(s) remain pending. This is a graceful, resumable pause — nothing was ` +
+          `dispatched and no work was lost. Wait for the quota to reset, then run \`next-step\`; the tool ` +
+          `re-checks the live quota and re-grants the pending packets when capacity returns.`,
+    });
+  }
+
   // S-BROKER-WIRING: choose the dispatch DRIVER off the single classification +
   // the live packet frontier / concurrency cap, and render the matching host
   // instruction. Only meaningful when there is a quota (a real fan-out); the

@@ -18,7 +18,8 @@ import type {
   ResolvedProviderName,
 } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile } from "audit-tools/shared";
+import { advanceHostDispatchPause } from "./dispatch/pausePersist.js";
 import { mergeOwnerTokens } from "./ownerTokens.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
@@ -635,6 +636,54 @@ export async function prepareDispatchArtifacts(params: {
   };
   await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
 
+  // Increment B — host-path pause-at-wall. When admission grants ZERO packets, OR a
+  // cooldown is active (F1: during cooldown admission over-grants the whole frontier,
+  // ignoring the throttle), the host cannot safely pace this turn, so emit its OWN
+  // resumable pause instead of a dispatch step. Host path only (grantLeases !== false);
+  // the in-process driver pauses reactively via advanceRollingPause after its drive.
+  let hostPause:
+    | { earliestResetAt: string | null; livelocked: boolean; strandedCount: number }
+    | undefined;
+  if (params.grantLeases !== false) {
+    const wall = detectHostDispatchWall({
+      grantedCount: admission.granted_packet_ids.length,
+      cooldownUntil: dispatchCapacity.cooldown_until ?? null,
+      now: Date.now(),
+    });
+    if (wall.atWall) {
+      // Release the leases the grant just reserved — pausing skips the merge that would
+      // reconcile them, so without this they leak until TTL (over-granted during
+      // cooldown) and mis-size the resume grant (C3).
+      await reconcileAdmissionLeasesFromQuotaFile(dispatchQuotaPath);
+      // Packet ids for the paused_state display; their constituent TASK ids for the
+      // terminal (deriveAuditState routes synthesis by matching task_id — packet ids
+      // there would never unlock synthesis → infinite pause loop).
+      const strandedPacketIds = admissionPackets.map((p) => p.id);
+      const strandedTaskIds = emitPackets.flatMap((p) => p.task_ids);
+      const advance = await advanceHostDispatchPause({
+        artifactsDir,
+        runId,
+        atWall: true,
+        strandedPacketIds,
+        strandedTaskIds,
+      });
+      hostPause = {
+        earliestResetAt: wall.earliestResetAt,
+        livelocked: advance.livelocked,
+        strandedCount: strandedPacketIds.length,
+      };
+    } else {
+      // Wall cleared (or never hit): drop any carried pause so the next pass dispatches.
+      await advanceHostDispatchPause({
+        artifactsDir,
+        runId,
+        atWall: false,
+        strandedPacketIds: [],
+        strandedTaskIds: [],
+      });
+    }
+  }
+
   // FINDING-012: pure-arithmetic fan-out summary the loader can gate on. The width
   // is the GRANTED set size (emergent from budget + any declared cap), not a
   // computed concurrency number.
@@ -652,6 +701,7 @@ export async function prepareDispatchArtifacts(params: {
     packet_count: plan.length,
     task_count: orderedTasks.length,
     skipped_task_count: priorResultTaskIds.size,
+    host_pause: hostPause,
     granted_count: admission.granted_packet_ids.length,
     declared_cap: admission.declared_cap,
     agent_count: fanout.agent_count,

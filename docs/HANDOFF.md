@@ -58,18 +58,15 @@
 
 ## Suggested ordering — everything open, sequenced
 
-**▶ IMMEDIATE NEXT — Quota host-path enforcement, Increment B (pause-at-wall step producer).** FOCUSED,
-delicate lap. When the host-dispatch admission grants zero at the wall (`granted.length===0` OR an
-active `cooldown_until` — F1: cooldown-active leaves budget null→+Infinity, a real host-path hole), the
-host branch must emit each orchestrator's OWN resumable pause step. Re-scoped by the Increment-A review:
-this is a NEW snapshot→paused-state/terminal producer per orchestrator (audit `RollingEngineLifecycleState`
-/`paused_state` advancing `pause_count`; remediate `partial_completion_terminal{earliest_reset_at}`) —
-neither exists on the host branch today. Do NOT unify the two terminals
-([[rolling-lifecycle-unify-full-unification-wrong]]). **Spec the resumability contract before coding**
-(matches the "don't rush pause/claim/quota" caution). Also open: host-path lease-TTL (wave-length
-`leaseTtlMs`). Full detail in `docs/backlog.md` → "Host-dispatch path quota enforcement".
+**Quota host-path enforcement — Increment B SHIPPED (2026-07-10).** The host branch now emits each
+orchestrator's OWN resumable pause at the wall (`granted===0` OR active `cooldown_until`, closing F1) —
+shared `detectHostDispatchWall`; audit fresh-snapshot `paused_state`/`blocked` (livelock-bounded, terminal
+carries task ids); remediate `partial_completion_terminal{quota_paused}`; leases reconciled on pause. Design-
++ impl-adversarially reviewed. **Still open (this track):** host-path lease-TTL (wave-length `leaseTtlMs`);
+Increment-B residuals (cooldown pause on the flag-gated rolling/hybrid paths; align in-process `stranded_ids`
+to task ids). Full detail in `docs/backlog.md` → "Host-dispatch path quota enforcement".
 
-**▷ THEN — D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the LONG-lived
+**▶ IMMEDIATE NEXT — D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the LONG-lived
 execution claims — `task-claims.json` 20-min lease, remediate node-claims — which today hold a lease
 with no live heartbeat; FOCUSED-LAP, delicate, and **live-run-gated** — only pursue if a real
 cooperative run shows the staleMs-wide probe window from slice-1 actually bites). Fold the `phase:main`
