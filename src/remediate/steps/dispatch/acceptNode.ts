@@ -501,9 +501,6 @@ async function acceptNodeWorktreeLocked(
         ? mergedBaseCheckArgv(root)
         : params.mergedBaseCheckCommand;
     if (checkArgv !== null) {
-      // Paths the just-landed pick touched, so the scoped clean nukes only those
-      // (never unrelated untracked state). Resolved BEFORE the check runs.
-      const pickedFiles = gitEditedFilesForBranch(root, branch);
       // runTracked scrubs CLAUDECODE / CLAUDE_CODE_* and applies the shared
       // Windows `.cmd` wrapping — never `shell: true`.
       const check = runTracked(checkArgv, { cwd: root, encoding: "utf8" });
@@ -516,11 +513,16 @@ async function acceptNodeWorktreeLocked(
         spawnSyncHidden("git", ["reset", "--hard", baseOid], { cwd: root, shell: false });
         // Scoped clean: remove only the cherry-pick / check-emitted untracked files
         // under the paths the pick touched — never a blanket `git clean` that could
-        // nuke unrelated untracked state.
-        if (pickedFiles.available && pickedFiles.files.size > 0) {
+        // nuke unrelated untracked state. Driven off the PRE-merge snapshot
+        // (`nodeEditedFiles`, captured at :458), NOT a post-pick re-probe: after the
+        // pick the `HEAD...branch` diff reads EMPTY whenever the pick reproduced an
+        // identical SHA (same-second commit+pick → merge-base == branch tip), which
+        // made a post-pick re-probe non-deterministically inert → an untracked-file
+        // leak on the rollback path. This mirrors the loop-core guard clean below.
+        if (nodeEditedFiles.available && nodeEditedFiles.files.size > 0) {
           spawnSyncHidden(
             "git",
-            ["clean", "-fdq", "--", ...[...pickedFiles.files]],
+            ["clean", "-fdq", "--", ...[...nodeEditedFiles.files]],
             { cwd: root, shell: false },
           );
         }

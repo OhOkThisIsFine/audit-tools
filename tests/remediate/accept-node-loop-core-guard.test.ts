@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -23,6 +23,7 @@ import {
   worktreeBranchForBlock,
   acceptNodeWorktree,
   quarantineRef,
+  gitEditedFilesForBranch,
 } from "../../src/remediate/steps/dispatch.js";
 
 const RM_DIRS: string[] = [];
@@ -144,5 +145,95 @@ describe("acceptNodeWorktree — per-node loop-core cross-file guard", () => {
     expect(res.outcome).toBe("success");
     expect(res.merged).toBe(true);
     expect(refExists(repo, quarantineRef("R", "LCC"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The merged-base-check ROLLBACK scoped-clean must be driven off the PRE-merge
+// snapshot (`nodeEditedFiles`), NOT a post-cherry-pick re-probe. A post-pick
+// `HEAD...branch` diff reads EMPTY whenever the pick reproduced an identical SHA
+// (same-second commit+pick → merge-base == branch tip), which made the old
+// post-pick-probe clean non-deterministically INERT → an untracked-file leak on
+// the rollback path. This mirrors the loop-core guard clean (which was already
+// correct). Fix: single-sourced both cleans off `nodeEditedFiles` (:458).
+// ---------------------------------------------------------------------------
+
+describe("acceptNodeWorktree — merged-base-check rollback clean uses the pre-merge snapshot", () => {
+  // Behavioral: a FAILING merged-base check rolls the base back + quarantines,
+  // exercising the scoped-clean rollback path with the fixed file-list source.
+  it("merged-base-check FAILS → base rolled back bit-identically + quarantined", async () => {
+    const repo = initRepo("mbc-fail-");
+    const base = headOid(repo);
+    // A non-loop-core edit, so ONLY the merged-base check runs (the guard is skipped).
+    nodeWithEdit(repo, "MB", "src/remediate/intake.ts");
+    const res = await acceptNodeWorktree({
+      root: repo,
+      runId: "R",
+      blockId: "MB",
+      worktreeRoot: worktreePath(repo, "MB", "R"),
+      scope: { allBlockScopes: [] },
+      branch: worktreeBranchForBlock("MB", "R"),
+      workerOutcome: "success",
+      targetedCommands: [],
+      writePaths: ["src/"],
+      mergedBaseCheckCommand: ["node", "-e", "process.exit(1)"],
+    });
+    expect(res.outcome).toBe("error");
+    expect(res.merged).toBe(false);
+    // Base rolled back bit-identically to its pre-pick OID (scoped clean ran without
+    // throwing on the pre-merge snapshot).
+    expect(headOid(repo)).toBe(base);
+    expect(refExists(repo, quarantineRef("R", "MB"))).toBe(true);
+  });
+
+  // The hazard itself: prove a post-cherry-pick branch-diff probe reads EMPTY on an
+  // identical-SHA collision, while the PRE-pick probe is non-empty — so a clean
+  // driven off the post-pick probe would be inert exactly when it must not be.
+  it("a post-pick HEAD...branch probe reads EMPTY on an identical-SHA pick (pre-pick is non-empty)", () => {
+    const repo = initRepo("mbc-collision-");
+    const base = headOid(repo);
+    const PIN = "2021-01-01T00:00:00 +0000";
+    const gitPinned = (...a: string[]) =>
+      spawnSyncHidden("git", a, {
+        cwd: repo,
+        encoding: "utf8",
+        shell: false,
+        windowsHide: true,
+        env: { ...process.env, GIT_AUTHOR_DATE: PIN, GIT_COMMITTER_DATE: PIN },
+      });
+    // Node branch: a committed add with PINNED author+committer dates.
+    git(repo, "checkout", "-b", "nb");
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n");
+    git(repo, "add", "src/a.ts");
+    gitPinned("commit", "-m", "node add");
+    const nbTip = headOid(repo);
+    // Detach at base so HEAD == base for the PRE-pick probe.
+    git(repo, "checkout", base);
+    const pre = gitEditedFilesForBranch(repo, "nb");
+    expect(pre.available).toBe(true);
+    expect(pre.available && [...pre.files]).toContain("src/a.ts");
+    // Cherry-pick onto base with the SAME pinned dates → identical SHA (author is
+    // preserved by cherry-pick; committer date pinned) → HEAD == nb tip.
+    gitPinned("cherry-pick", "nb");
+    expect(headOid(repo)).toBe(nbTip); // collision confirmed
+    // The post-pick probe now reads EMPTY — driving a scoped clean off THIS is inert.
+    const post = gitEditedFilesForBranch(repo, "nb");
+    expect(post.available).toBe(true);
+    expect(post.available && post.files.size).toBe(0);
+  });
+
+  // Structural invariant (codebase idiom, cf. dispatch-worktree-safety "SOURCE:"):
+  // after the cherry-pick there is NO branch-diff re-probe — both scoped cleans use
+  // the single pre-merge `nodeEditedFiles` capture.
+  it("SOURCE: no gitEditedFilesForBranch re-probe after the cherry-pick", () => {
+    const src = readFileSync(
+      join(__dirname, "..", "..", "src", "remediate", "steps", "dispatch", "acceptNode.ts"),
+      "utf8",
+    );
+    const mergeCall = "mergeWorktree(root, wt, branch)";
+    const mergeIdx = src.indexOf(mergeCall);
+    expect(mergeIdx).toBeGreaterThan(0);
+    expect(src.slice(mergeIdx + mergeCall.length)).not.toContain("gitEditedFilesForBranch(");
   });
 });
