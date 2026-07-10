@@ -239,7 +239,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 ## Forward tracks
 
 - **Shared-logic dedup bundle — one marginal item still open.**
-  - **Second-pass (2026-07-10) — 5 shipped, 2 rejected.** A scout re-scan surfaced 7 leads; validated as
+  - **Second-pass (2026-07-10) — 5 shipped.** A scout re-scan surfaced 7 leads; validated as
     leads-not-verdicts ([[external-audit-catalogs-are-leads]]). SHIPPED (this branch): shared
     `applyGuidanceFile` (`src/shared/intake/`); `normalizeForMatch`→`normalizeToContentTokens` rename;
     shared `reconcileAdmissionLeasesFromQuotaFile` + `finalizeProviderLaunchResult` (`src/shared/dispatch/`,
@@ -247,26 +247,36 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `src/shared/intent/pathScope.ts` (`pathMatchesPrefix`/`globMatches`/`fileExclusionReason`) with the
     audit/remediate structured-scope field coverage SYMMETRIZED (owner ruling: both honor
     excluded_scope + disposition_overrides + must_not_touch; per-domain unit-vs-finding aggregation stays
-    forked). Two rejected below.
+    forked).
+  - **OPEN — unify finding dedup as a shared parameterized core (reframed 2026-07-10 by the owner's
+    one-core clarification; was wrongly rejected as "domain-forced").** There is no auditor-logic vs
+    remediator-logic — one core, each mode DRAWS from it ([[dissolve-auditor-remediator-distinction]] /
+    [[auditor-remediator-mirroring-is-common-logic]]). The cross-lens/same-lens/merge SKELETON is identical
+    (group-by-primaryPath → skip same-lens → jaccard+overlap → survivor by sev/conf → union evidence); the
+    "divergence" is all POLICY: category-gate (`soft` raise-threshold vs `hard` never-merge-cross-category),
+    survivor identity (`mutate` in-place vs `clone` for the block state machine), merge (grounding-precedence
+    + escalation vs keep-survivor), + a `mergeMap` the core always computes that remediate's
+    `fixupBlocksAfterDedup` consumes and audit ignores. Build a shared
+    `crossLensDedupe(findings, policy) → {kept, mergeMap}` (+ same-lens as a core capability only audit draws)
+    in `src/shared/findings/`; audit `mergeFindings.ts` + remediate `dedup/crossLensDedup.ts` become thin
+    policy-selecting adapters. A several-knob shared core is the CORRECT endpoint (guarantees the two can't
+    drift on the skeleton/thresholds), NOT a config-shell over-abstraction — that reflex was the mis-call.
   - **Deliberately NOT built — Tier C (3), intra-remediate retry-cap helper** (5 `attempts >= CAP →
     escalate` sites sharing a shape): marginal — the sites are 2-3 lines each over different state records;
     a generic helper would abstract more than it saves. Revisit only if a 6th cap site appears.
+  - **Not-actionable but philosophy-consistent (core already shared; remainder is a legit per-mode DRAW,
+    not a fork):** projection-map capture/diff — the core (stable-serialize + leaf-diff + render) is already
+    single-sourced in `src/shared/reReview/projectionDiff.ts`; the residual `compute*Delta` traversals are
+    each mode's draw of its OWN artifacts (audit sync-from-bundle 7 fixed artifacts vs remediate
+    async-from-disk per-artifact dependency map) — genuinely different INPUT, not duplicated logic.
   - **Rejected catalog rows (do NOT feed to remediation):** rolling-lifecycle unification as framed
     (D-66/67 owns the correct bounded slices; full unification adjudicated WRONG), hybrid-spill sharing
     (shipped — both sides call the same `HybridSpillCoordinator`/`planHybridDispatch`), generic
     `DispatchPlanner` (admission math already shared; remainders are divergent read-only-vs-git-mutating
     domains), `FindingAdmissibilityPolicy` (category error: evidence-integrity gate vs auto-apply safety
-    tier), **finding identity/merge/same-lens/cross-lens dedup unification** (2026-07-10: the identity
-    ladder + fuzzy/rank primitives are ALREADY single-sourced in `src/shared`; the residual per-side
-    cross-lens/merge divergence is domain-forced — audit = read-only evidence aggregation with grounding-
-    precedence + cross-category merge; remediate = auto-apply safety with a HARD category gate + clone-not-
-    mutate state + mergeMap — the same `FindingAdmissibilityPolicy` category-error class), **projection-map
-    capture/diff sharing** (2026-07-10: already single-sourced to the correct boundary in
-    `src/shared/reReview/projectionDiff.ts` — stable-serialize + leaf-diff + render all shared; the residual
-    `compute*Delta` are thin adapters over genuinely-different input universes, audit sync-from-bundle vs
-    remediate async-from-disk — a further generic would over-abstract), `FreshnessGraph` merge (artifact-DAG
-    vs flat-hash are different abstractions — the real dup is the file-integrity pair in Tier B),
-    cross-orchestrator `ConvergenceController` (caps are not one mechanism),
+    tier — the admissibility QUESTION differs, distinct from the dedup ALGORITHM above), `FreshnessGraph`
+    merge (artifact-DAG vs flat-hash are different abstractions — the real dup is the file-integrity pair in
+    Tier B), cross-orchestrator `ConvergenceController` (caps are not one mechanism),
     grounding/step-contract/manifesting rows (already unified or remediate-only).
 
 - **Free/cheap multi-account "quota-arbitrage" dispatch tier (9router-inspired) — exploration → build.**
