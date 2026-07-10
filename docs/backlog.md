@@ -29,6 +29,28 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **M-B3 citation gate re-emits the WRONG phase — gate input is `module_decomposition`, repair target is
+  `contract_finalization` (2026-07-09).** `evaluatePreCriticCitationGrounding` (src/remediate/steps/contractPipeline.ts
+  ~1209) grounds `module_decomposition.file_scope` against the working tree, but on failure the router re-emits
+  `contract_finalization` with a "module contract cites…" prompt — re-authoring finalized contracts can never change
+  the decomposition's file_scope, so an ungrounded scope loops forever (hit live on the ARC-0c1762db run: file_scope
+  cited untracked scratch `all_batch1_prompts.json`; unblocked by hand-editing `module_decomposition.input.json`,
+  which ingest re-derives). Fix: route the M-B3 re-emit to a `module_decomposition` repair step (and word the gate
+  error as a decomposition file_scope defect), or ground file_scope at decomposition-ingest so the defect surfaces in
+  the producing phase, not three phases later.
+- **Audit worker scratch lands at the audited repo's root and pollutes the audit itself (2026-07-09).** A prior audit
+  run left `all_batch1_prompts.json`, `batch_1..11.json`, `granted_packets.json`, `*.ps1`, `subagent_*.prompt`,
+  `task_*` etc. untracked at the repo root; the follow-up audit's repo_manifest ingested them and the ARC-0c1762db
+  "767-file behavioral cluster" finding cited that scratch as its representative artifact. Fix in tooling:
+  dispatch/host prompts must direct all worker scratch into a run-scoped dir (e.g. `.audit-tools/audit/scratch/<run>/`),
+  and/or the extractor should skip untracked files (git ls-files is already the citation-grounding source of truth).
+- **`validate-artifact --name judge_report` can never return "ok" for an honest needs_repair verdict (2026-07-09).**
+  The self-check runs the cross-gate `implementation_dag.evidence_threading` (OBL-CO-03 check 2,
+  src/remediate/validation/contractPipelineGates.ts:600), fail-closed when accepted counterexamples exist and no
+  implementation_dag does — but the DAG only exists after judge approval, so the needs_repair path is unsatisfiable at
+  judge-authoring time. Ingest applies only the structural validator so the run proceeds, but the self-check
+  contradicts the step prompt's "fix issues until ok". Fix: scope judge_report validate-artifact to the structural
+  validator (or suppress DAG-dependent cross-gates for artifacts authored before the DAG phase).
 - **Lap friction walk — ledger-writer + acceptNode-inert-clean lap (2026-07-09, orchestrator + Haiku/Sonnet
   recon+review agents; NIM `llm read` DOWN this session).** Two code fixes (parity ledger writer, acceptNode
   inert-clean) + one verified-negative investigation, all reviewed + shipped v0.32.49.
