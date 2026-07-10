@@ -138,9 +138,9 @@ of the same clarification batch and requires user confirmation. A block
 may contain some items that are remediated and others that are declared
 inappropriate without dropping the block as a whole.
 
-Phase 2 output: one `item_spec.json` per item plus a project-level
-`closing_plan.json`. Both are versioned so the rest of the run is
-reproducible.
+Phase 2 output: an `item_spec` per item and a project-level `closing_plan`, both persisted
+inline on `RemediationState` (`state.items[id].item_spec`, `state.closing_plan`) and validated
+against `ItemSpecSchema`/`ClosingPlanSchema` before the next phase may read them.
 
 After Phase 2 exits cleanly, no further user interaction occurs until the
 end-of-run triage window.
