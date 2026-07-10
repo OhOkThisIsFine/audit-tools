@@ -8,14 +8,16 @@
 
 ## Live state
 
-- **Current: v0.32.53.** Since v0.32.49: quota self-monitoring collapsed to one always-on track
-  (`quota.enabled` removed — see `docs/reviews/host-self-quota-silently-disabled-2026-07-09.md`,
-  v0.32.50); three `CP-BLOCK-CP-NODE-{2,4,5}` remediation fixes landed from the
-  `goal-architecture-strategic-findings-2026-07-09` audit run (v0.32.51); 3 new open bugs logged
-  to `docs/backlog.md` → *Open bugs / frictions* (v0.32.52); a test-determinism fix (v0.32.53).
-  Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` + project memory
-  [[live-status]]); this section is current-state + open-work roadmap only. Authoritative version
-  = `package.json`.
+- **Current version = `package.json`** (authoritative). Per-lap shipped detail is NOT narrated here
+  (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state +
+  open-work roadmap only.
+- **Host-path quota enforcement track (started this lap).** The conversation-first host-dispatch path
+  bypassed the tool's reactive quota enforcement; recon + adversarial review found the real gaps.
+  **Increment A SHIPPED:** the cold-start over-grant fix (host grant was unbounded on wave 1 — now
+  clamped to the calibration batch via a per-pool `calibrating` flag through admission) + audit
+  blind-dispatch loud-degrade parity (single-sourced with remediate). **Open:** Increment B
+  (pause-at-wall step producer on the host path) + the host-path lease-TTL fix — see the
+  "Host-dispatch path quota enforcement" entry in `docs/backlog.md`.
 - **Local env note:** the box now runs npm 12.0.0 — it blocks dependency install scripts by default
   and can emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable
   traps before any manual `npm install -g` / packaged-install work.
@@ -56,7 +58,18 @@
 
 ## Suggested ordering — everything open, sequenced
 
-**▶ IMMEDIATE NEXT — D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the LONG-lived
+**▶ IMMEDIATE NEXT — Quota host-path enforcement, Increment B (pause-at-wall step producer).** FOCUSED,
+delicate lap. When the host-dispatch admission grants zero at the wall (`granted.length===0` OR an
+active `cooldown_until` — F1: cooldown-active leaves budget null→+Infinity, a real host-path hole), the
+host branch must emit each orchestrator's OWN resumable pause step. Re-scoped by the Increment-A review:
+this is a NEW snapshot→paused-state/terminal producer per orchestrator (audit `RollingEngineLifecycleState`
+/`paused_state` advancing `pause_count`; remediate `partial_completion_terminal{earliest_reset_at}`) —
+neither exists on the host branch today. Do NOT unify the two terminals
+([[rolling-lifecycle-unify-full-unification-wrong]]). **Spec the resumability contract before coding**
+(matches the "don't rush pause/claim/quota" caution). Also open: host-path lease-TTL (wave-length
+`leaseTtlMs`). Full detail in `docs/backlog.md` → "Host-dispatch path quota enforcement".
+
+**▷ THEN — D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the LONG-lived
 execution claims — `task-claims.json` 20-min lease, remediate node-claims — which today hold a lease
 with no live heartbeat; FOCUSED-LAP, delicate, and **live-run-gated** — only pursue if a real
 cooperative run shows the staleMs-wide probe window from slice-1 actually bites). Fold the `phase:main`
