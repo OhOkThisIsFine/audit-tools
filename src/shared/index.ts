@@ -612,6 +612,7 @@ export {
   stepBoundaryEventId,
   captureCostDriftFriction,
 } from "./friction/stepBoundaryCapture.js";
+export { emitBlindDispatchFrictionIfBlind } from "./friction/blindDispatchFriction.js";
 
 // O1 end-of-run friction TRIAGE: single-sourced triage step shape, disposition
 // vocabulary (keep|discard|annotate), blocking semantics, and the close-out

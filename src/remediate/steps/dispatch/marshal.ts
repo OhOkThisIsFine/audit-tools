@@ -14,7 +14,7 @@ import {
   type RemediationBlock,
 } from "../../state/types.js";
 import type { SessionConfig, HostModelRosterEntry } from "audit-tools/shared";
-import { captureStepBoundaryFriction } from "audit-tools/shared";
+import { captureStepBoundaryFriction, emitBlindDispatchFrictionIfBlind } from "audit-tools/shared";
 import { readConfirmedCostPositions, readConfirmedDispatchBias } from "audit-tools/shared";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -394,44 +394,17 @@ export async function prepareImplementDispatch(
     `[remediate-code] dispatch: implement ${items.length} item(s) ` +
       `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,
   );
-  // Fail loud when self-quota monitoring is blind: no live snapshot means the
-  // Claude /usage (and host-session) source returned nothing — absent config or a
-  // dark credential — so the wave is UNPACED (no token-budget gate, uncapped per
-  // the no-invented-ceiling invariant unless a host concurrency cap was declared).
-  // This is the single visible signal that the fan-out is running without a live
-  // remaining-quota reading; it is both a stderr line and a run-ledger friction
-  // entry so a silently-inert quota subsystem can never look like a healthy run.
-  if (schedule.quota_source_snapshot == null) {
-    const declaredCap = schedule.host_concurrency_limit?.active_subagents ?? null;
-    process.stderr.write(
-      `[remediate-code] WARNING: host self-quota monitoring is BLIND — no live ` +
-        `quota snapshot (no /usage reading: absent quota config or dark credential). ` +
-        `This ${items.length}-item wave is UNPACED` +
-        (declaredCap == null
-          ? ` and UNCAPPED (declare --host-max-concurrent to bound it).`
-          : ` and bounded only by the declared host cap of ${declaredCap}.`) +
-        `\n`,
-    );
-    await captureStepBoundaryFriction(
-      options.artifactsDir,
-      runId,
-      {
-        eventType: "quota_blind_dispatch",
-        discriminator: `implement:${items.length}`,
-        note:
-          `Dispatched a ${items.length}-item implement wave with no live quota ` +
-          `snapshot (self-quota monitoring blind: absent config or dark /usage ` +
-          `credential). Wave unpaced; ` +
-          (declaredCap == null
-            ? `uncapped (no declared host concurrency limit).`
-            : `bounded only by declared host cap ${declaredCap}.`),
-        severity: "high",
-        category: "trap",
-        area: "dispatch/quota",
-      },
-      "remediate-code",
-    );
-  }
+  // Fail loud when self-quota monitoring is blind (no live snapshot ⇒ unpaced wave).
+  // Single-sourced with audit so both orchestrators emit the identical stderr +
+  // run-ledger friction signal — the uncapped-but-LOUD half of the always-on track.
+  await emitBlindDispatchFrictionIfBlind({
+    artifactsDir: options.artifactsDir,
+    runId,
+    schedule,
+    itemCount: items.length,
+    waveKind: "implement",
+    toolName: "remediate-code",
+  });
   // Cost-first routing rung 1: honor the operator-confirmed cost ordering from the
   // shared Gate-0 confirmation (spec/cost-first-routing.md). Best-effort — absent /
   // unreadable / roster-changed confirmation ⇒ costRank falls to real price then tier.

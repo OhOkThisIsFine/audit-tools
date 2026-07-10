@@ -18,7 +18,7 @@ import type {
   ResolvedProviderName,
 } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind } from "audit-tools/shared";
 import { mergeOwnerTokens } from "./ownerTokens.js";
 import type { WorkerTask } from "../types/workerSession.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
@@ -574,6 +574,22 @@ export async function prepareDispatchArtifacts(params: {
     confirmedCostPositions,
     dispatchBias,
   });
+
+  // Fail loud when self-quota monitoring is blind on the host-dispatch path (no live
+  // snapshot ⇒ the fan-out is unpaced). Single-sourced with remediate so both emit the
+  // identical stderr + run-ledger friction — the uncapped-but-LOUD half of the always-on
+  // quota track. Host path only (grantLeases !== false); the in-process driver paces
+  // reactively so a null proactive snapshot is not the same silent hazard there.
+  if (params.grantLeases !== false) {
+    await emitBlindDispatchFrictionIfBlind({
+      artifactsDir,
+      runId,
+      schedule: waveSchedule,
+      itemCount: plan.length,
+      waveKind: "review",
+      toolName: "audit-code",
+    });
+  }
 
   warnings.push(
     ...collectOversizedWarnings(plan, waveSchedule, dispatchPool.tierBudgets),
