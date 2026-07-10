@@ -210,12 +210,29 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     empty-stranded-set bug + a lease leak — all fixed pre-code) and impl-adversarially reviewed (the audit
     task-id routing bug was caught + fixed). Do NOT unify the two terminals
     ([[rolling-lifecycle-unify-full-unification-wrong]]). Design-of-record: [[quota-onetrack-always-on]].
-    - **Residuals (review-flagged, non-blocking):** (a) the flag-gated rolling (`dispatch_implement_rolling`)
-      + hybrid opt-in branches carry no wall pause — an empty grant there folds to merge (safe), but an F1
-      cooldown over-grant would still fan out; extend the cooldown pause to those paths.
-      (b) The IN-PROCESS producers (`advanceRollingPause`, rolling `getTerminal`) write PACKET ids to
-      `stranded_ids`, same latent packet-vs-task mismatch the host audit fix corrected — pre-existing, low
-      impact (resume rests on pending state, not stranded_ids), but worth aligning to task ids.
+    - **Residuals (a) + (b) SHIPPED 2026-07-10 (this branch), corrected scope.** Source verification
+      overturned the note's premise that the in-process rolling paths "would still fan out" a cooldown
+      over-grant: the in-process engine (`driveRolling`) paces via `scheduleWave`, which floors the wave to
+      1 during cooldown and spills off cooldown'd pools (`scheduler.ts` cooldown branch,
+      `rollingDispatch.ts` degraded-pool spill) — so `driveRollingAuditDispatch` +
+      `driveRollingImplementDispatch` are ALREADY cooldown-safe and were correctly left untouched (walling
+      them would inject spurious pauses). The F1 hole only bites where the HOST fans out
+      `admission.granted_packet_ids` blindly. **(a)** The one genuine gap was the remediate hybrid-ATTENDED
+      emit (`dispatch_implement_rolling`, host-subagent driver); the wall now fires INSIDE
+      `prepareHostRollingDispatch` — after admission, before any claim/worktree (a claim held across the
+      pause reads `contested` on resume and strands the node) — gated to the cooldown shape AND a non-empty
+      granted host partition (an empty grant, even under cooldown, has nothing to fan out → flows to the
+      caller's empty-frontier merge fold, matching the reference `dispatch_implement` path whose fold
+      precedes its wall). The caller reconciles leases + records the resumable `quota_paused` terminal.
+      **(b)** `advanceRollingPause`'s livelock terminal now expands the CURRENT pass's stranded PACKET ids to
+      their constituent TASK ids (via the run's `dispatch-result-map.json`, rewritten per pass) so
+      `deriveAuditState` (which matches `stranded_ids` against `task_id`) can unlock synthesis — the current
+      set is always present in this pass's map, avoiding the stale-id miss when an intervening partial
+      completion re-indexes packet ids. Parity with the host path's `advanceHostDispatchPause`
+      `strandedTaskIds`. (Rolling `getTerminal`'s packet-id
+      `stranded_ids` are display/log only — not consumed by a task-id-keyed matcher — so left as-is.) Tests:
+      `tests/audit/dc4.test.mjs` (terminal carries task ids), `tests/remediate/host-rolling-dispatch.test.ts`
+      (cooldown wall pauses pre-claim; empty grant does not wall).
   - **(OPEN — host-path lease TTL).** `finalizeDispatchQuota` mints host-grant leases at the default 30s
     `STALE_LOCK_MS` TTL, but a host subagent wave runs for MINUTES → leases expire mid-wave → ingest
     reconcile no-ops → a ~30s-to-minutes window where a co-located concurrent admitter can double-grant the

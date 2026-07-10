@@ -25,10 +25,16 @@ import {
 } from "../../src/remediate/steps/dispatch.js";
 import {
   advanceHostRolling,
+  prepareHostRollingDispatch,
   nodeClaimRegistry,
+  nodeClaimRegistryPath,
   type RollingSession,
 } from "../../src/remediate/steps/rollingSession.js";
-import { REMEDIATION_WORKER_RESULT_CONTRACT_VERSION } from "../../src/remediate/steps/types.js";
+import {
+  REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+  REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+  type RemediationDispatchPlan,
+} from "../../src/remediate/steps/types.js";
 
 const RID = "RID";
 
@@ -562,5 +568,109 @@ describe("advanceHostRolling", () => {
     const artifactsDir = await seedSession(repo, ["B1"]);
     const d = await advanceHostRolling({ root: repo, artifactsDir, runId: RID, blockId: "B1" });
     expect(d.kind).toBe("done");
+  });
+});
+
+// ===========================================================================
+// prepareHostRollingDispatch — Increment B cooldown wall (residual a).
+// The hybrid ATTENDED host-subagent driver fans out the granted set blindly (unlike
+// the in-process engine it is not paced by scheduleWave), so an F1 cooldown over-grant
+// must PAUSE before any node is claimed — a claim held across the pause reads
+// `contested` on resume and strands the node.
+// ===========================================================================
+
+describe("prepareHostRollingDispatch — Increment B cooldown wall (residual a)", () => {
+  function writeQuota(
+    artifactsDir: string,
+    grantedIds: string[],
+    cooldownUntil: string | null,
+  ): string {
+    const implDir = join(artifactsDir, "runs", RID, "implement");
+    mkdirSync(implDir, { recursive: true });
+    writeFileSync(
+      join(implDir, "dispatch-quota.json"),
+      JSON.stringify({ admission: { granted_packet_ids: grantedIds }, cooldown_until: cooldownUntil }),
+    );
+    return implDir;
+  }
+  function planFor(artifactsDir: string, blockIds: string[]): RemediationDispatchPlan {
+    return {
+      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+      phase: "implement",
+      run_id: RID,
+      repo_root: artifactsDir,
+      artifacts_dir: artifactsDir,
+      items: blockIds.map((id) => ({
+        task_id: `t-${id}`,
+        block_id: id,
+        prompt_path: join(artifactsDir, `${id}.md`),
+        result_path: join(artifactsDir, `${id}.result.json`),
+      })),
+    };
+  }
+  const partitionFor = (blockIds: string[]) =>
+    blockIds.map((id) => ({ block_id: id, ownerToken: `owner-${id}` }));
+
+  it("cooldown over-grant → returns wall (reason cooldown) and claims NO node before pausing", async () => {
+    const artifactsDir = realpathSync(mkdtempSync(join(tmpdir(), "hybrid-wall-")));
+    // The classic F1 over-grant: admission granted the WHOLE frontier while a cooldown
+    // is active (the scheduler left the budget null → admission mapped it to +Infinity).
+    const implDir = writeQuota(artifactsDir, ["N1", "N2"], new Date(Date.now() + 60_000).toISOString());
+    const result = await prepareHostRollingDispatch(
+      { root: artifactsDir, artifactsDir },
+      RID,
+      {},
+      { plan: planFor(artifactsDir, ["N1", "N2"]), partition: partitionFor(["N1", "N2"]) },
+    );
+
+    expect(result.wall, "the cooldown over-grant is walled").toBeTruthy();
+    expect(result.wall!.detected.reason).toBe("cooldown");
+    expect(result.wall!.detected.earliestResetAt, "the reset time is surfaced for resume").toBeTruthy();
+    expect([...result.wall!.strandedBlockIds].sort()).toEqual(["N1", "N2"]);
+    // No session/worktree work happened — the pause returns empty before the claim loop.
+    expect(result.session.frontier).toEqual([]);
+    expect(result.initial).toEqual([]);
+    // CRUCIAL: no node was claimed. A claim persisted across the pause would read
+    // `contested` on resume and strand the node — the exact bug this ordering avoids.
+    const claimsFile = nodeClaimRegistryPath(artifactsDir, RID);
+    if (existsSync(claimsFile)) {
+      const raw = JSON.parse(readFileSync(claimsFile, "utf8"));
+      const claims = raw.claims ?? raw ?? {};
+      expect(Object.keys(claims), "no node claimed before the pause").toHaveLength(0);
+    }
+    expect(implDir).toContain("implement");
+  });
+
+  it("empty grant with NO cooldown does NOT wall — the empty frontier folds to merge (safe)", async () => {
+    const artifactsDir = realpathSync(mkdtempSync(join(tmpdir(), "hybrid-nowall-")));
+    // An empty grant is the SAFE case the residual note calls out — it collapses the
+    // frontier to zero and the caller merges; it must NOT produce a spurious wall.
+    writeQuota(artifactsDir, [], null);
+    const result = await prepareHostRollingDispatch(
+      { root: artifactsDir, artifactsDir },
+      RID,
+      {},
+      { plan: planFor(artifactsDir, ["N1"]), partition: partitionFor(["N1"]) },
+    );
+    expect(result.wall, "an empty grant is not a wall — it folds to merge").toBeUndefined();
+    expect(result.session.frontier, "granted nothing → empty frontier → caller merges").toEqual([]);
+  });
+
+  it("cooldown WITH an empty granted host partition does NOT wall — folds to merge (F2 parity)", async () => {
+    const artifactsDir = realpathSync(mkdtempSync(join(tmpdir(), "hybrid-cool-empty-")));
+    // Active cooldown, but admission granted NOTHING for the host partition (eligible
+    // frontier empty — e.g. every node pending on an un-verified dep, or the whole grant
+    // went to the in-process partition). `detectHostDispatchWall` gives cooldown
+    // precedence, but there is nothing to fan out, so the wall must NOT fire — the run
+    // flows to the caller's empty-frontier merge fold instead of stalling until reset.
+    writeQuota(artifactsDir, [], new Date(Date.now() + 60_000).toISOString());
+    const result = await prepareHostRollingDispatch(
+      { root: artifactsDir, artifactsDir },
+      RID,
+      {},
+      { plan: planFor(artifactsDir, ["N1"]), partition: partitionFor(["N1"]) },
+    );
+    expect(result.wall, "cooldown + empty grant is not a wall — nothing to defer").toBeUndefined();
+    expect(result.session.frontier, "nothing granted → empty frontier → caller merges").toEqual([]);
   });
 });

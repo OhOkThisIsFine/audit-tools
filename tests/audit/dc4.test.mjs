@@ -267,6 +267,18 @@ test.concurrent("DC-4 terminal: the pause promotes to a partial-completion termi
   expect(active.partial_completion_terminal, "a partial-completion terminal is recorded for synthesis").toBeTruthy();
   expect(active.partial_completion_terminal.reason).toBe("livelock_guard");
   expect(!active.paused_state, "no paused state remains once terminal").toBeTruthy();
+
+  // Increment B residual (b): the terminal's stranded_ids must be the constituent TASK
+  // ids — deriveAuditState satisfies `audit_tasks_completed` by matching them against
+  // `task_id`, so the packet ids the in-process engine strands internally would never
+  // unlock synthesis (an infinite pause loop). Every task stranded → all three task ids
+  // (expanded via the run's dispatch-result-map), never the opaque packet ids.
+  const strandedIds = active.partial_completion_terminal.stranded_ids;
+  expect([...strandedIds].sort(), "terminal carries TASK ids, not packet ids").toEqual([
+    "t-a",
+    "t-b",
+    "t-c",
+  ]);
 });
 
 // ───────────────────────────────────────────────────────────────────────────

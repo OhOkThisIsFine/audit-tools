@@ -2003,6 +2003,24 @@ async function buildImplementDispatchStep(ctx: {
       } else {
         rolling = await prepareHostRollingDispatch({ root, artifactsDir }, runId, waveOptsImpl);
       }
+      // Increment B residual (a): the hybrid host-subagent driver hit the cooldown wall
+      // (admission over-granted the throttled set). Reconcile the reserved leases (the
+      // pause skips the merge that would) and set the resumable `quota_paused` terminal
+      // so the `partial_terminal` obligation emits it this same advance; the ungranted
+      // nodes stay PENDING and re-dispatch on resume. The in-process partition (above)
+      // already ran on its own cooldown-safe pool, so its work still lands.
+      if (rolling.wall) {
+        await reconcileAdmissionLeasesFromQuotaFile(rolling.quotaPath);
+        const paused = await store.loadState();
+        if (paused) {
+          paused.partial_completion_terminal = buildQuotaPausedTerminal(
+            rolling.wall.strandedBlockIds,
+            rolling.wall.detected.earliestResetAt,
+          );
+          await store.saveState(paused);
+        }
+        return { kind: "transition", state: paused };
+      }
       // Everything eligible may already be done/skipped — fold straight to merge
       // rather than emitting a dispatch step with zero nodes.
       if (rolling.session.frontier.length === 0) {

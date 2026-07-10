@@ -54,7 +54,7 @@ import {
 } from "./dispatch/pausePersist.js";
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
 import { createFreshSessionProvider } from "../providers/index.js";
-import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js";
+import { prepareDispatchArtifacts, loadDispatchResultMap, type DispatchPlanEntry } from "./dispatch.js";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 import { artifactNameForId } from "./args.js";
@@ -577,6 +577,37 @@ export async function driveRollingAuditDispatch(params: {
  * Returns the live paused state when the run stays paused, or `undefined` when it
  * resumed or went terminal (both clear the paused state on the artifact).
  */
+/**
+ * Expand a set of PACKET ids to their constituent TASK ids via the run's dispatch
+ * result map (one `{packet_id, task_id}` entry per (packet, task), rewritten each pass
+ * over that pass's emitted packets). Callers MUST pass CURRENT-pass packet ids — the
+ * map only covers this pass's packets, and packet ids embed a running ordinal that
+ * re-indexes when the pending set shrinks, so a stale id from an earlier pass would not
+ * be found. The in-process livelock terminal needs TASK ids because `deriveAuditState`
+ * matches the terminal's `stranded_ids` against `task_id`. If the map is missing
+ * (older run) or yields nothing, degrade to the packet ids themselves — no worse than
+ * the prior behaviour, and the livelock guard still terminates.
+ */
+async function packetIdsToTaskIds(
+  artifactsDir: string,
+  runId: string,
+  packetIds: string[],
+): Promise<string[]> {
+  const runDir = join(artifactsDir, "runs", runId);
+  const resultMap = await loadDispatchResultMap(runDir);
+  if (!resultMap) return packetIds;
+  const byPacket = new Map<string, string[]>();
+  for (const entry of resultMap.entries) {
+    const list = byPacket.get(entry.packet_id) ?? [];
+    list.push(entry.task_id);
+    byPacket.set(entry.packet_id, list);
+  }
+  const taskIds = packetIds.flatMap((packetId) => byPacket.get(packetId) ?? []);
+  // A packet maps to ≥1 tasks and two packets never share a task, so de-dupe is
+  // defensive; keep first-seen order (content-derived, stable).
+  return taskIds.length > 0 ? [...new Set(taskIds)] : packetIds;
+}
+
 async function advanceRollingPause(params: {
   artifactsDir: string;
   runId: string;
@@ -638,11 +669,23 @@ async function advanceRollingPause(params: {
   if (next.kind === "terminal") {
     // Livelock: clear the pause and record the partial-completion terminal so the
     // pipeline proceeds to synthesis on partial coverage (the no-indefinite-stall
-    // guard, CE-003/CE-205). The terminal carries the stranded ids it gave up on.
+    // guard, CE-003/CE-205). The terminal's `stranded_ids` are matched against
+    // `task_id` by `deriveAuditState` (to satisfy `audit_tasks_completed`), so they
+    // MUST be TASK ids, not the PACKET ids the in-process engine strands internally —
+    // a packet id never matches, the tasks stay pending, and synthesis never unlocks
+    // (an infinite pause loop, the exact stall this bound exists to end). Expand THIS
+    // pass's stranded packet ids (`strandedIds`), never the pause's frozen first-pause
+    // `next.stranded_node_ids`: an intervening partial completion re-packetizes the
+    // remaining tasks (packet ids embed a running ordinal), so the frozen ids can be
+    // absent from this pass's rewritten dispatch-result-map — a full lookup miss that
+    // degrades to packet ids. The current stranded set IS the still-uncovered tasks and
+    // is guaranteed present in this pass's result map (parity with the host path's
+    // `advanceHostDispatchPause` `strandedTaskIds`, Increment B residual b).
     await clearPausedState(artifactsDir, runId);
+    const strandedTaskIds = await packetIdsToTaskIds(artifactsDir, runId, strandedIds);
     await recordPartialCompletionTerminal(artifactsDir, runId, {
       reason: "livelock_guard",
-      stranded_ids: next.stranded_node_ids,
+      stranded_ids: strandedTaskIds,
     });
     return undefined;
   }

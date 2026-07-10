@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { readOptionalJsonFile, writeJsonFile, withFileLock, spawnSyncHidden } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, withFileLock, spawnSyncHidden, detectHostDispatchWall, type HostDispatchWall } from "audit-tools/shared";
 // Direct module path (not the barrel) per the A-8/A-10 seam: the registry is the
 // SAME mutual-exclusion primitive the in-process driver claims through, so a node
 // dispatched by one driver can never be re-dispatched by the other.
@@ -259,6 +259,15 @@ export async function prepareHostRollingDispatch(
   initial: Array<RollingFrontierNode & { worktree_root: string }>;
   planPath: string;
   quotaPath: string;
+  /**
+   * Set ONLY when admission hit the host-dispatch cooldown wall (Increment B residual
+   * a): the granted set was over-granted during an active cooldown, so this driver
+   * would otherwise fan the throttled set out. Returned BEFORE any node is claimed or
+   * worktree'd (a claim held across the ensuing pause reads `contested` on resume). The
+   * caller reconciles the reserved leases and records the resumable `quota_paused`
+   * terminal; `session`/`initial` are empty in this case.
+   */
+  wall?: { detected: HostDispatchWall; strandedBlockIds: string[] };
 }> {
   const plan =
     hybrid?.plan ??
@@ -280,6 +289,41 @@ export async function prepareHostRollingDispatch(
   // set this step. A missing/empty admission (older state, or a degrade) grants
   // nothing — the frontier folds to zero and the run re-grants on the next next-step.
   const grantedIds = new Set(quota?.admission?.granted_packet_ids ?? []);
+
+  // Increment B residual (a): the host-subagent driver fans out the granted set
+  // BLINDLY — unlike the in-process rolling engine it is NOT paced by `scheduleWave`,
+  // so an F1 cooldown over-grant (admission maps a null budget → the whole frontier)
+  // would fan the throttled set out. Detect the wall HERE — after admission, BEFORE any
+  // node is claimed or worktree'd — because a claim held across the ensuing pause reads
+  // `contested` on resume and strands the node. The caller turns `wall` into the
+  // resumable `quota_paused` terminal.
+  //
+  // Gate on a NON-EMPTY granted host partition, not just the cooldown flag:
+  // `detectHostDispatchWall` gives cooldown precedence over empty-grant, so a cooldown
+  // pass whose eligible frontier is empty (nothing granted, or the whole grant went to
+  // the in-process partition) has nothing to fan out — it must flow to the caller's
+  // empty-frontier merge fold (parity with the reference `dispatch_implement` path,
+  // whose merge fold precedes its wall), never pause a run whose real blocker is an
+  // un-merged upstream until the cooldown reset.
+  const cooldownWall = detectHostDispatchWall({
+    grantedCount: grantedIds.size,
+    cooldownUntil: quota?.cooldown_until ?? null,
+    now: Date.now(),
+  });
+  const strandedBlockIds = plan.items
+    .filter((i): i is DispatchPlanItem & { block_id: string } => typeof i.block_id === "string")
+    .filter((i) => !partitionIds || partitionIds.has(i.block_id))
+    .filter((i) => grantedIds.has(i.block_id))
+    .map((i) => i.block_id);
+  if (cooldownWall.atWall && cooldownWall.reason === "cooldown" && strandedBlockIds.length > 0) {
+    return {
+      session: { run_id: runId, frontier: [], dispatched: [], accepted: [], claims: {}, contested: [] },
+      initial: [],
+      planPath: join(dir, "dispatch-plan.json"),
+      quotaPath,
+      wall: { detected: cooldownWall, strandedBlockIds },
+    };
+  }
 
   const frontier: RollingFrontierNode[] = plan.items
     .filter((i): i is DispatchPlanItem & { block_id: string } => typeof i.block_id === "string")
