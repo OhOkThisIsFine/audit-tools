@@ -1367,3 +1367,4 @@ export {
   DEFAULT_MAX_TRANSITIONS,
 } from "./engine/obligationEngine.js";
 export { LOOP_CORE_PATTERNS, isLoopCorePath } from "./loopCorePaths.js";
+export { applyGuidanceFile } from "./intake/guidanceBootstrap.js";

@@ -812,7 +812,7 @@ export function validateReconciliationDerivation(
     }
     if (typeof mod.validation_boundary === "string") corpusParts.push(mod.validation_boundary);
   }
-  const corpus = normalizeForMatch(corpusParts.join("\n"));
+  const corpus = normalizeToContentTokens(corpusParts.join("\n"));
 
   for (const [i, mismatch] of mismatches.entries()) {
     if (!isRecord(mismatch)) continue;
@@ -854,7 +854,16 @@ export function validateReconciliationDerivation(
   return issues;
 }
 
-function normalizeForMatch(value: string): string {
+/**
+ * Lossy semantic-token normalization: lowercases and collapses every run of
+ * non-alphanumeric characters (punctuation, symbols, whitespace) to a single
+ * space, so a reworded/repunctuated interface still matches by content tokens
+ * (INV-CO-12). Deliberately lossy — NOT the same contract as shared
+ * `normalizeForMatch` (`audit-tools/shared`), which is whitespace-only and
+ * lossless because it backs verbatim quote-and-verify grounding. Kept distinct
+ * (and distinctly named) so the two contracts can never be confused.
+ */
+function normalizeToContentTokens(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
@@ -880,12 +889,12 @@ const DERIVATION_STOPWORDS = new Set([
  * interface left little or no trace — the INV-CO-12 fail-closed property.
  */
 function corpusContainsAgreedInterface(corpus: string, agreed: string): boolean {
-  const tokens = normalizeForMatch(agreed)
+  const tokens = normalizeToContentTokens(agreed)
     .split(" ")
     .filter((t) => t.length >= 4 && !DERIVATION_STOPWORDS.has(t));
   if (tokens.length === 0) {
     // No salient content tokens — fall back to a normalized substring check.
-    const normAgreed = normalizeForMatch(agreed);
+    const normAgreed = normalizeToContentTokens(agreed);
     return normAgreed.length === 0 || corpus.includes(normAgreed);
   }
   const present = tokens.filter((t) => corpus.includes(t)).length;

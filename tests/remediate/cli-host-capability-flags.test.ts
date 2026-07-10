@@ -11,11 +11,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   program,
-  applyGuidanceFile,
   normalizeBooleanFlagArgv,
   resolveArtifactsDirOption,
 } from "../../src/remediate/index.js";
-import { remediationArtifactsDir } from "audit-tools/shared";
+import { applyGuidanceFile, remediationArtifactsDir } from "audit-tools/shared";
 
 const REPO_ROOT = resolve(__dirname, "..", "..");
 
