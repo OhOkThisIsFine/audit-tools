@@ -6,18 +6,19 @@
 ## Problem
 
 The `/remediate-code` contract pipeline (intake → goal_spec → context → decomposition →
-contracts → seam → finalize → critique → test-plan → assessment → counterexample → judge(+repair)
-→ impl-DAG → review → dispatch → triage → close) applies the **same full ceremony to every input
-regardless of size or risk**. Empirically (laps 1–3) that made a one-line log-removal cost roughly
-the same orchestration as a concurrency-correctness change. The prior mitigation — a separate
-`leanFastPath` that *skipped* the whole design ceremony for pre-vetted structured-audit
-findings — was too trusting (remediation routinely re-finds errors in audit conclusions); it has
-since been softened (see Mechanisms, Dial A) to a mandatory light-review floor rather than a
-zero-scrutiny skip. It remains too narrow in scope (document/backlog input still can't reach it),
-and remains a structurally-forked eligible/ineligible gate rather than a point on the Dial A/B
-continuum. The A6 target ("self-scaling pipeline, not forked paths") is to collapse `leanFastPath`
-into the dial as its lowest-risk tier rather than keep it as separate code — tracked as open work
-in `docs/backlog.md`.
+contracts → seam → finalize → critique → obligation-ledger → cyclic-seam-resolution → test-plan
+→ assessment → counterexample → judge(+repair) → impl-DAG → review → dispatch → triage → close)
+applies the **same full ceremony to every input regardless of size or risk**. Empirically
+(laps 1–3) that made a one-line log-removal cost roughly the same orchestration as a
+concurrency-correctness change. The prior mitigation — a separate `leanFastPath` that *skipped*
+the whole design ceremony for pre-vetted structured-audit findings — was too trusting
+(remediation routinely re-finds errors in audit conclusions); it has since been softened (see
+Mechanisms, Dial A) to a mandatory light-review floor rather than a zero-scrutiny skip. It
+remained too narrow in scope (document/backlog input couldn't reach it) and structurally-forked
+(a separate eligible/ineligible gate rather than a point on the Dial A/B continuum). The A6
+target ("self-scaling pipeline, not forked paths") — collapsing `leanFastPath` into the dial as
+its lowest-risk tier rather than keeping it as separate code — shipped (`docs/backlog.md`
+doc-review D-68); see Mechanisms, Dial A/B below for the resulting shape.
 
 ## Two distinct cost drivers (measured)
 
