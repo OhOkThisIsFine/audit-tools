@@ -8,10 +8,14 @@
 
 ## Live state
 
-- **Current: ~v0.32.49 (remediate token-usage ledger writer + acceptNode inert-clean bugfix + a
-  verified-negative extraction investigation; v0.32.48 released prior).** Per-lap shipped detail is NOT
-  narrated here (changelog creep — see `git log` + project memory [[live-status]]); this section is
-  current-state + open-work roadmap only. Authoritative version = `package.json`.
+- **Current: v0.32.53.** Since v0.32.49: quota self-monitoring collapsed to one always-on track
+  (`quota.enabled` removed — see `docs/reviews/host-self-quota-silently-disabled-2026-07-09.md`,
+  v0.32.50); three `CP-BLOCK-CP-NODE-{2,4,5}` remediation fixes landed from the
+  `goal-architecture-strategic-findings-2026-07-09` audit run (v0.32.51); 3 new open bugs logged
+  to `docs/backlog.md` → *Open bugs / frictions* (v0.32.52); a test-determinism fix (v0.32.53).
+  Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` + project memory
+  [[live-status]]); this section is current-state + open-work roadmap only. Authoritative version
+  = `package.json`.
 - **Local env note:** the box now runs npm 12.0.0 — it blocks dependency install scripts by default
   and can emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable
   traps before any manual `npm install -g` / packaged-install work.
