@@ -11,6 +11,7 @@ import {
   claimWithBackoff,
   withClaimHeartbeat,
   CharterSubmissionSchema,
+  CharterDeltaSubmissionSchema,
   ClarificationAnswersSubmissionSchema,
   SystemicChallengeSubmissionSchema,
 } from "audit-tools/shared";
@@ -73,6 +74,7 @@ export interface RunAuditStepOptions {
   externalAnalyzerData?: ExternalAnalyzerResults;
   narrativeResultsPath?: string;
   charterSubmissionPath?: string;
+  charterDeltaSubmissionPath?: string;
   clarificationAnswersPath?: string;
   systemicChallengePath?: string;
   edgeReasoningResultsPath?: string;
@@ -362,6 +364,11 @@ async function executeAdvance(
         await readJsonFile<unknown>(options.charterSubmissionPath),
       )
     : undefined;
+  const charterDeltaSubmission = options.charterDeltaSubmissionPath
+    ? CharterDeltaSubmissionSchema.parse(
+        await readJsonFile<unknown>(options.charterDeltaSubmissionPath),
+      )
+    : undefined;
   const clarificationAnswers = options.clarificationAnswersPath
     ? ClarificationAnswersSubmissionSchema.parse(
         await readJsonFile<unknown>(options.clarificationAnswersPath),
@@ -386,6 +393,7 @@ async function executeAdvance(
     externalAnalyzerResults,
     narrativeResults,
     charterSubmission,
+    charterDeltaSubmission,
     clarificationAnswers,
     systemicChallenge,
     edgeReasoningResults,

@@ -32,6 +32,7 @@ import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
 import { renderCharterExtractionPrompt } from "./charterExtractionPrompt.js";
+import { renderCharterDeltaPrompt } from "./charterDeltaPrompt.js";
 import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
 import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
@@ -481,7 +482,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Write the charter submission (four charters per subsystem + deltas) to the submission path, then run next-step.",
+        "Write the charter families per subsystem to the submission path, then run next-step.",
       repoRoot: root,
       artifactPaths: {
         charter_extraction_submission: submissionPath,
@@ -493,6 +494,40 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       }),
       access: {
         read_paths: [join(artifactsDir, "structure_decomposition.json")],
+        write_paths: [submissionPath],
+      },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "charter_delta") {
+    // Phase C.2 charter delta-mining (conceptual, teleological): an INDEPENDENT
+    // delta-miner reads the assembled charters (authored by a different pass, blind
+    // to the gaps) and mines the pairwise deltas + the goal DAG; the tool routes +
+    // gates them at ingest. Only reached at a deep+ ceiling whose extraction pass
+    // produced ≥1 subsystem (charter_register.deltas_pending).
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const submissionPath = join(artifactsDir, "incoming", "charter-delta.json");
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "charter_delta",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write the mined charter deltas + goal graph to the submission path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        charter_delta_submission: submissionPath,
+      },
+      prompt: renderCharterDeltaPrompt(result.bundle, {
+        submissionPath,
+        continueCommand,
+      }),
+      access: {
+        read_paths: [join(artifactsDir, "charter_register.json")],
         write_paths: [submissionPath],
       },
     });

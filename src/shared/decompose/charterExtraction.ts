@@ -53,23 +53,49 @@ const CharterDeltaInputSchema = z
   })
   .strict();
 
-/** One reviewed subsystem: its consensus `node_id` + the charters/deltas for it. */
+/** One reviewed subsystem's charters (extraction phase — charters only). */
 const CharterSubsystemInputSchema = z
   .object({
     node_id: z.string(),
     charters: z.array(CharterInputSchema),
+  })
+  .strict();
+
+/**
+ * The charter-EXTRACTION submission (Phase C.1): per consensus subsystem, its
+ * charters. Deltas are NOT authored here — an independent delta-miner mines them in
+ * a second pass over the assembled charters, so no author marks its own homework and
+ * `revealed` can be extracted blind to `stated`. Multiple entries sharing a
+ * `node_id` (one per independent per-kind extractor) are merged at assembly.
+ */
+export const CharterSubmissionSchema = z
+  .object({
+    subsystems: z.array(CharterSubsystemInputSchema).default([]),
+  })
+  .strict();
+export type CharterSubmission = z.infer<typeof CharterSubmissionSchema>;
+
+/** One subsystem's mined deltas (delta phase). */
+const CharterDeltaSubsystemInputSchema = z
+  .object({
+    node_id: z.string(),
     deltas: z.array(CharterDeltaInputSchema).default([]),
   })
   .strict();
 
-/** The full host submission consumed at charter-extraction ingest. */
-export const CharterSubmissionSchema = z
+/**
+ * The charter-DELTA submission (Phase C.2): the independent delta-miner's pairwise
+ * gaps across the already-assembled charters, plus the goal DAG it reads off all
+ * subsystems (it is the only pass that sees every merged subsystem, so it owns
+ * `goal_graph`).
+ */
+export const CharterDeltaSubmissionSchema = z
   .object({
-    subsystems: z.array(CharterSubsystemInputSchema).default([]),
+    subsystems: z.array(CharterDeltaSubsystemInputSchema).default([]),
     goal_graph: GoalGraphSchema.optional(),
   })
   .strict();
-export type CharterSubmission = z.infer<typeof CharterSubmissionSchema>;
+export type CharterDeltaSubmission = z.infer<typeof CharterDeltaSubmissionSchema>;
 
 // ── Assembled register (the persisted, gated product) ──────────────────────────
 
@@ -81,13 +107,20 @@ export interface CharterSubsystem {
 }
 
 /**
- * The assembled charter layer: gated per-subsystem charters, the routed+gated
- * deltas across all subsystems, the deltas surfaced as Finding leads, the goal
- * DAG, and a record of everything the gates dropped (surfaced, never silently
- * discarded).
+ * The assembled charter layer (Phase C.1): gated per-subsystem charters + a record
+ * of everything the gates dropped (surfaced, never silently discarded).
  */
 export interface AssembledCharters {
   subsystems: CharterSubsystem[];
+  validation_issues: string[];
+}
+
+/**
+ * The assembled delta layer (Phase C.2): the routed+gated deltas across all
+ * subsystems, the deltas surfaced as Finding leads, the goal DAG, and the gate
+ * drops.
+ */
+export interface AssembledDeltas {
   deltas: CharterDelta[];
   findings: Finding[];
   goal_graph: GoalGraph;
@@ -152,52 +185,60 @@ function weakerConfidence(a: Charter, b: Charter): Charter["confidence"] {
 // ── Assembly ───────────────────────────────────────────────────────────────────
 
 /**
- * Assemble a gated charter register from a validated host submission.
+ * Assemble the gated charters (Phase C.1) from a validated extraction submission.
  *
  * `membersByNode` grounds each submitted subsystem against the Phase-B consensus
  * scaffold: a `node_id` the structure decomposition never surfaced is an invented
  * subsystem → dropped with an issue (the host cannot conjure boundaries the
- * deterministic layer didn't find). Deterministic throughout — same submission +
- * same scaffold always yields the same register.
+ * deterministic layer didn't find). Entries sharing a `node_id` — one per
+ * independent per-kind extractor — are merged before assembly. Deterministic: same
+ * submission + same scaffold always yields the same charters.
  */
-export function assembleCharterRegister(
+export function assembleCharters(
   submission: CharterSubmission,
   membersByNode: Map<string, string[]>,
 ): AssembledCharters {
   const subsystems: CharterSubsystem[] = [];
-  const deltas: CharterDelta[] = [];
-  const findings: Finding[] = [];
   const validation_issues: string[] = [];
 
-  // Stable output order: sort subsystems by node_id (content-derived, never input
-  // order — an incidentally-ordered array churns the artifact hash, cascading
-  // phantom staleness; see the extractor-ordering invariant in CLAUDE.md).
-  const sortedSubsystems = [...submission.subsystems].sort((a, b) =>
-    a.node_id.localeCompare(b.node_id),
+  // Merge input entries sharing a node_id (independent per-kind files each
+  // contribute one kind) into one charter list per subsystem before assembly.
+  const chartersByNode = new Map<string, z.infer<typeof CharterInputSchema>[]>();
+  for (const sub of submission.subsystems) {
+    const list = chartersByNode.get(sub.node_id) ?? [];
+    list.push(...sub.charters);
+    chartersByNode.set(sub.node_id, list);
+  }
+
+  // Stable output order: sort by node_id (content-derived, never input order — an
+  // incidentally-ordered array churns the artifact hash, cascading phantom
+  // staleness; see the extractor-ordering invariant in CLAUDE.md).
+  const sortedNodeIds = [...chartersByNode.keys()].sort((a, b) =>
+    a.localeCompare(b),
   );
 
-  for (const sub of sortedSubsystems) {
-    const members = membersByNode.get(sub.node_id);
+  for (const node_id of sortedNodeIds) {
+    const members = membersByNode.get(node_id);
     if (!members) {
       validation_issues.push(
-        `subsystem "${sub.node_id}" is not a consensus node in the structure decomposition — dropped (charters may only review discovered subsystems)`,
+        `subsystem "${node_id}" is not a consensus node in the structure decomposition — dropped (charters may only review discovered subsystems)`,
       );
       continue;
     }
 
-    // Assign ids + enforce one charter per kind (a dup kind is a submission error;
-    // keep the first, flag the rest).
+    // Assign ids + enforce one charter per kind (a dup kind — including one from a
+    // second per-kind file — is a submission error; keep the first, flag the rest).
     const seenKinds = new Set<CharterKind>();
     const withIds: Charter[] = [];
-    for (const input of sub.charters) {
+    for (const input of chartersByNode.get(node_id)!) {
       if (seenKinds.has(input.kind)) {
         validation_issues.push(
-          `subsystem "${sub.node_id}" has more than one "${input.kind}" charter — kept the first, dropped the rest`,
+          `subsystem "${node_id}" has more than one "${input.kind}" charter — kept the first, dropped the rest`,
         );
         continue;
       }
       seenKinds.add(input.kind);
-      withIds.push({ ...input, charter_id: `${sub.node_id}:${input.kind}` });
+      withIds.push({ ...input, charter_id: `${node_id}:${input.kind}` });
     }
 
     // Phase-A True gate: drop un-falsifiable True nominations (no concrete
@@ -208,16 +249,46 @@ export function assembleCharterRegister(
     }
 
     subsystems.push({
-      node_id: sub.node_id,
+      node_id,
       members,
       charters: [...kept].sort((a, b) => a.charter_id.localeCompare(b.charter_id)),
     });
+  }
 
-    const keptByKind = new Map<CharterKind, Charter>(
-      kept.map((c) => [c.kind, c]),
-    );
+  return { subsystems, validation_issues };
+}
 
-    // Route + gate each submitted delta against the surviving charters.
+/**
+ * Assemble the routed+gated deltas (Phase C.2) from the independent delta-miner's
+ * submission, given the already-assembled charters. The miner never picks routing —
+ * `kind`/`routed_to` derive from the charter pair (the design's fixed table). A
+ * delta whose `node_id` has no assembled charters, or that references a
+ * missing/dropped charter kind, is dropped with an issue.
+ */
+export function assembleDeltas(
+  submission: CharterDeltaSubmission,
+  subsystems: CharterSubsystem[],
+): AssembledDeltas {
+  const deltas: CharterDelta[] = [];
+  const findings: Finding[] = [];
+  const validation_issues: string[] = [];
+  const byNode = new Map(subsystems.map((s) => [s.node_id, s]));
+
+  const sorted = [...submission.subsystems].sort((a, b) =>
+    a.node_id.localeCompare(b.node_id),
+  );
+
+  for (const sub of sorted) {
+    const subsystem = byNode.get(sub.node_id);
+    if (!subsystem) {
+      validation_issues.push(
+        `delta subsystem "${sub.node_id}" has no assembled charters — dropped (deltas may only span reviewed subsystems)`,
+      );
+      continue;
+    }
+    const kept = subsystem.charters;
+    const keptByKind = new Map<CharterKind, Charter>(kept.map((c) => [c.kind, c]));
+
     for (const draft of sub.deltas) {
       const [ka, kb] = canonicalPair(draft.pair);
       if (ka === kb) {
@@ -257,7 +328,13 @@ export function assembleCharterRegister(
       deltas.push(gated);
 
       findings.push(
-        deltaToFinding(gated, sub.node_id, members, route.severity, weakerConfidence(charterA, charterB)),
+        deltaToFinding(
+          gated,
+          sub.node_id,
+          subsystem.members,
+          route.severity,
+          weakerConfidence(charterA, charterB),
+        ),
       );
     }
   }
@@ -266,7 +343,6 @@ export function assembleCharterRegister(
   findings.sort((a, b) => a.id.localeCompare(b.id));
 
   return {
-    subsystems,
     deltas,
     findings,
     goal_graph: submission.goal_graph ?? { nodes: [], edges: [] },

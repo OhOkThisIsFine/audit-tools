@@ -458,25 +458,26 @@ await test("tryConsumeIncoming re-throws non-ENOENT errors", async () => {
 
 // ── HOST_GATE_DESCRIPTORS coverage (Tier C2 consolidation) ────────────────────
 
-await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 6 audit host-gate kinds", () => {
+await test("HOST_GATE_KINDS / HOST_GATE_DESCRIPTORS cover exactly the 7 audit host-gate kinds", () => {
   const expected = [
     "graph_enrichment",
     "design_review",
     "synthesis_narrative",
     "charter_extraction",
+    "charter_delta",
     "charter_clarification",
     "systemic_challenge",
   ];
   expect([...HOST_GATE_KINDS].sort()).toEqual([...expected].sort());
   expect(Object.keys(HOST_GATE_DESCRIPTORS).sort()).toEqual([...expected].sort());
 
-  // The 4 gates driven by the shared runOmittableGate engine vs. the 2 that
+  // The 5 gates driven by the shared runOmittableGate engine vs. the 2 that
   // keep bespoke bodies (graph_enrichment, design_review) because their shape
   // genuinely deviates from the common one.
   const generic = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "generic");
   const custom = expected.filter((k) => HOST_GATE_DESCRIPTORS[k].driven === "custom");
   expect(generic.sort()).toEqual(
-    ["synthesis_narrative", "charter_extraction", "charter_clarification", "systemic_challenge"].sort(),
+    ["synthesis_narrative", "charter_extraction", "charter_delta", "charter_clarification", "systemic_challenge"].sort(),
   );
   expect(custom.sort()).toEqual(["graph_enrichment", "design_review"].sort());
 });

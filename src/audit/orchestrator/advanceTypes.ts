@@ -3,7 +3,7 @@ import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission } from "audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, CharterDeltaSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission } from "audit-tools/shared";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
 
@@ -33,8 +33,10 @@ export interface AdvanceAuditOptions {
   externalAnalyzerResults?: ExternalAnalyzerResults;
   /** Host/provider-supplied synthesis narrative; merged by synthesis_narrative_executor. */
   narrativeResults?: SynthesisNarrative;
-  /** Host-supplied charter-extraction submission (Phase C); assembled by charter_extraction_executor. */
+  /** Host-supplied charter-extraction submission (Phase C.1); assembled by charter_extraction_executor. */
   charterSubmission?: CharterSubmission;
+  /** Host-supplied charter-delta submission (Phase C.2); mined by charter_delta_executor (independent delta-miner). */
+  charterDeltaSubmission?: CharterDeltaSubmission;
   /** Host-supplied charter-clarification answers (Phase D); applied by charter_clarification_executor. */
   clarificationAnswers?: ClarificationAnswersSubmission;
   /** Host-supplied second-order-adversary challenge round (Phase E); folded by systemic_challenge_executor. */

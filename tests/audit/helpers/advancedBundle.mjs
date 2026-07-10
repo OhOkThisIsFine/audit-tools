@@ -111,6 +111,10 @@ const FIXTURE_STAGES = [
   { upTo: "structure_decomposition_current", run: forcedStep("structure_decomposition_executor") },
   { upTo: "intent_checkpoint_current", run: forcedStep("intent_checkpoint_executor", { withRoot: true }) },
   { upTo: "charter_extraction_current", run: forcedStep("charter_extraction_executor") },
+  // Phase C.2 independent delta-miner. host_delegation like charter_extraction: at
+  // the default shallow ceiling the extraction pass omits (no deltas_pending), so a
+  // forced single step settles the register headlessly.
+  { upTo: "charter_delta_current", run: forcedStep("charter_delta_executor") },
   { upTo: "design_review_contract_completed", run: forcedStep("design_review_contract") },
   { upTo: "design_review_conceptual_completed", run: forcedStep("design_review_conceptual") },
   // Phase D charter-clarification triangulation loop + Phase E systemic challenge

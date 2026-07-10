@@ -23,6 +23,7 @@ import {
   runSynthesisNarrativeExecutor,
 } from "./synthesisExecutors.js";
 import { runCharterExtractionExecutor } from "./charterExtractionExecutor.js";
+import { runCharterDeltaExecutor } from "./charterDeltaExecutor.js";
 import { runCharterClarificationExecutor } from "./charterClarificationExecutor.js";
 import { runSystemicChallengeExecutor } from "./systemicChallengeExecutor.js";
 import { runAutoFixExecutor } from "./autoFixExecutor.js";
@@ -113,6 +114,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     runStructureDecompositionExecutor(bundle, options.root),
   charter_extraction_executor: async (bundle, { options }) =>
     runCharterExtractionExecutor(bundle, options.charterSubmission),
+  charter_delta_executor: async (bundle, { options }) =>
+    runCharterDeltaExecutor(bundle, options.charterDeltaSubmission),
   charter_clarification_executor: async (bundle, { options }) =>
     runCharterClarificationExecutor(bundle, options.clarificationAnswers),
   systemic_challenge_executor: async (bundle, { options }) =>

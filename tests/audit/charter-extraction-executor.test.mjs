@@ -112,8 +112,8 @@ describe("runCharterExtractionExecutor — omit path", () => {
   });
 });
 
-describe("runCharterExtractionExecutor — ingest path", () => {
-  test("assembles + gates a submission grounded against the consensus scaffold", () => {
+describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
+  test("assembles + gates charters grounded against the consensus scaffold, deferring deltas", () => {
     const submission = {
       subsystems: [
         {
@@ -122,12 +122,10 @@ describe("runCharterExtractionExecutor — ingest path", () => {
             { kind: "stated", purpose: "exists so callers get audited output", provenance: [], confidence: "high" },
             { kind: "revealed", purpose: "optimizes for fast dispatch over coverage", provenance: [], confidence: "high" },
           ],
-          deltas: [{ pair: ["stated", "revealed"], summary: "code favors speed over the stated coverage goal" }],
         },
         // An invented subsystem must be grounded out.
-        { node_id: "ghost.ts", charters: [], deltas: [] },
+        { node_id: "ghost.ts", charters: [] },
       ],
-      goal_graph: { nodes: [], edges: [] },
     };
     const run = runCharterExtractionExecutor(
       bundleWith({ intent_checkpoint: checkpoint("deep") }),
@@ -136,11 +134,24 @@ describe("runCharterExtractionExecutor — ingest path", () => {
     const reg = run.updated.charter_register;
     expect(reg.status).toBeUndefined();
     expect(reg.subsystems.map((s) => s.node_id)).toEqual(["src/a.ts"]);
-    expect(reg.deltas).toHaveLength(1);
-    expect(reg.deltas[0].kind).toBe("spec_drift");
-    expect(reg.deltas[0].routed_to).toBe("remediator");
-    expect(reg.findings).toHaveLength(1);
-    expect(reg.findings[0].category).toBe("charter_delta:spec_drift");
+    // Charters only: deltas + findings + goal_graph are the INDEPENDENT delta
+    // pass's product, deferred here and flagged deltas_pending.
+    expect(reg.deltas).toHaveLength(0);
+    expect(reg.findings).toHaveLength(0);
+    expect(reg.goal_graph).toEqual({ nodes: [], edges: [] });
+    expect(reg.deltas_pending).toBe(true);
     expect(reg.validation_issues.join()).toContain("not a consensus node");
+  });
+
+  test("no consensus subsystems → deltas_pending false (delta pass self-satisfies)", () => {
+    // ghost.ts is grounded out, so no subsystem survives → nothing to mine.
+    const submission = { subsystems: [{ node_id: "ghost.ts", charters: [] }] };
+    const run = runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      submission,
+    );
+    const reg = run.updated.charter_register;
+    expect(reg.subsystems).toHaveLength(0);
+    expect(reg.deltas_pending).toBe(false);
   });
 });

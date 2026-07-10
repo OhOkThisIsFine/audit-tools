@@ -158,12 +158,16 @@ export { decompose, clustersFromPartitions } from "./decompose/consensus.js";
 // register from a host LLM submission (deterministic enforcement half).
 export type {
   CharterSubmission,
+  CharterDeltaSubmission,
   CharterSubsystem,
   AssembledCharters,
+  AssembledDeltas,
 } from "./decompose/charterExtraction.js";
 export {
   CharterSubmissionSchema,
-  assembleCharterRegister,
+  CharterDeltaSubmissionSchema,
+  assembleCharters,
+  assembleDeltas,
 } from "./decompose/charterExtraction.js";
 // Conceptual design-review charter-clarification loop (Phase D) — the pure
 // triangulation-loop assembler (partition → risk-gate → split-by-attention);

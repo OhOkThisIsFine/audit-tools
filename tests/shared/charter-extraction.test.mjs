@@ -1,8 +1,10 @@
 import { test, expect, describe } from "vitest";
 
 const {
-  assembleCharterRegister,
+  assembleCharters,
+  assembleDeltas,
   CharterSubmissionSchema,
+  CharterDeltaSubmissionSchema,
 } = await import("../../src/shared/decompose/charterExtraction.ts");
 
 /** Minimal charter-input factory (no charter_id — the tool assigns it). */
@@ -24,10 +26,10 @@ function charterInput(overrides = {}) {
 
 const members = new Map([["a.ts", ["a.ts", "b.ts"]]]);
 
-describe("assembleCharterRegister — id assignment + grounding", () => {
+describe("assembleCharters — id assignment + grounding", () => {
   test("assigns charter_id = node_id:kind and joins members from the scaffold", () => {
-    const out = assembleCharterRegister(
-      { subsystems: [{ node_id: "a.ts", charters: [charterInput()], deltas: [] }] },
+    const out = assembleCharters(
+      { subsystems: [{ node_id: "a.ts", charters: [charterInput()] }] },
       members,
     );
     expect(out.subsystems).toHaveLength(1);
@@ -37,8 +39,8 @@ describe("assembleCharterRegister — id assignment + grounding", () => {
   });
 
   test("drops a subsystem whose node_id is not a consensus node (invented boundary)", () => {
-    const out = assembleCharterRegister(
-      { subsystems: [{ node_id: "ghost.ts", charters: [charterInput()], deltas: [] }] },
+    const out = assembleCharters(
+      { subsystems: [{ node_id: "ghost.ts", charters: [charterInput()] }] },
       members,
     );
     expect(out.subsystems).toHaveLength(0);
@@ -46,7 +48,7 @@ describe("assembleCharterRegister — id assignment + grounding", () => {
   });
 
   test("keeps the first of a duplicated charter kind and flags the rest", () => {
-    const out = assembleCharterRegister(
+    const out = assembleCharters(
       {
         subsystems: [
           {
@@ -55,7 +57,6 @@ describe("assembleCharterRegister — id assignment + grounding", () => {
               charterInput({ purpose: "first" }),
               charterInput({ purpose: "second" }),
             ],
-            deltas: [],
           },
         ],
       },
@@ -67,7 +68,7 @@ describe("assembleCharterRegister — id assignment + grounding", () => {
   });
 });
 
-describe("assembleCharterRegister — delta routing table (tool-enforced)", () => {
+describe("assembleDeltas — delta routing table (tool-enforced)", () => {
   function withDelta(pair, charterKinds, confidences = {}) {
     const charters = charterKinds.map((k) =>
       charterInput({
@@ -78,9 +79,13 @@ describe("assembleCharterRegister — delta routing table (tool-enforced)", () =
           : {}),
       }),
     );
-    return assembleCharterRegister(
-      { subsystems: [{ node_id: "a.ts", charters, deltas: [{ pair, summary: "gap" }] }] },
+    const { subsystems } = assembleCharters(
+      { subsystems: [{ node_id: "a.ts", charters }] },
       members,
+    );
+    return assembleDeltas(
+      { subsystems: [{ node_id: "a.ts", deltas: [{ pair, summary: "gap" }] }] },
+      subsystems,
     );
   }
 
@@ -103,7 +108,7 @@ describe("assembleCharterRegister — delta routing table (tool-enforced)", () =
     const out = withDelta(["stated", "true"], ["stated", "true"]);
     expect(out.deltas[0].kind).toBe("wrong_goal");
     expect(out.deltas[0].routed_to).toBe("human");
-    expect(out.deltas[0].severity ?? out.findings[0].severity).toBeDefined();
+    expect(out.findings[0].severity).toBeDefined();
   });
 
   test("a pair with no routing (inferred|revealed) is dropped as a validation issue", () => {
@@ -115,7 +120,7 @@ describe("assembleCharterRegister — delta routing table (tool-enforced)", () =
   test("a delta referencing a dropped/absent charter side is dropped", () => {
     // revealed|true, but the true charter is un-falsifiable → dropped by the gate,
     // so the delta has no true side left.
-    const out = assembleCharterRegister(
+    const { subsystems } = assembleCharters(
       {
         subsystems: [
           {
@@ -124,20 +129,40 @@ describe("assembleCharterRegister — delta routing table (tool-enforced)", () =
               charterInput({ kind: "revealed" }),
               charterInput({ kind: "true", nominated_alternative: "X" }), // missing cost → dropped
             ],
-            deltas: [{ pair: ["revealed", "true"], summary: "gap" }],
           },
         ],
       },
       members,
     );
+    const out = assembleDeltas(
+      {
+        subsystems: [
+          { node_id: "a.ts", deltas: [{ pair: ["revealed", "true"], summary: "gap" }] },
+        ],
+      },
+      subsystems,
+    );
     expect(out.deltas).toHaveLength(0);
     expect(out.validation_issues.join()).toContain("missing/dropped charter");
   });
+
+  test("a delta whose node_id has no assembled charters is dropped", () => {
+    const { subsystems } = assembleCharters(
+      { subsystems: [{ node_id: "a.ts", charters: [charterInput()] }] },
+      members,
+    );
+    const out = assembleDeltas(
+      { subsystems: [{ node_id: "ghost.ts", deltas: [{ pair: ["stated", "revealed"], summary: "gap" }] }] },
+      subsystems,
+    );
+    expect(out.deltas).toHaveLength(0);
+    expect(out.validation_issues.join()).toContain("no assembled charters");
+  });
 });
 
-describe("assembleCharterRegister — low-confidence gate overrides routing", () => {
+describe("assembleDeltas — low-confidence gate overrides routing", () => {
   test("a low-confidence side forces spec_drift off the remediator to the human", () => {
-    const out = assembleCharterRegister(
+    const { subsystems } = assembleCharters(
       {
         subsystems: [
           {
@@ -146,33 +171,36 @@ describe("assembleCharterRegister — low-confidence gate overrides routing", ()
               charterInput({ kind: "stated", confidence: "low" }),
               charterInput({ kind: "revealed", confidence: "high" }),
             ],
-            deltas: [{ pair: ["stated", "revealed"], summary: "gap" }],
           },
         ],
       },
       members,
+    );
+    const out = assembleDeltas(
+      { subsystems: [{ node_id: "a.ts", deltas: [{ pair: ["stated", "revealed"], summary: "gap" }] }] },
+      subsystems,
     );
     expect(out.deltas[0].kind).toBe("spec_drift");
     expect(out.deltas[0].routed_to).toBe("human");
   });
 });
 
-describe("assembleCharterRegister — deltas surface as Finding leads", () => {
-  test("each surviving delta becomes a systemic architecture finding on the members", () => {
-    const out = assembleCharterRegister(
-      {
-        subsystems: [
-          {
-            node_id: "a.ts",
-            charters: [
-              charterInput({ kind: "stated" }),
-              charterInput({ kind: "revealed" }),
-            ],
-            deltas: [{ pair: ["stated", "revealed"], summary: "code drifted from intent" }],
-          },
-        ],
-      },
+describe("assembleDeltas — deltas surface as Finding leads", () => {
+  function findingsFor(charters, delta) {
+    const { subsystems } = assembleCharters(
+      { subsystems: [{ node_id: "a.ts", charters }] },
       members,
+    );
+    return assembleDeltas(
+      { subsystems: [{ node_id: "a.ts", deltas: [delta] }] },
+      subsystems,
+    );
+  }
+
+  test("each surviving delta becomes a systemic architecture finding on the members", () => {
+    const out = findingsFor(
+      [charterInput({ kind: "stated" }), charterInput({ kind: "revealed" })],
+      { pair: ["stated", "revealed"], summary: "code drifted from intent" },
     );
     expect(out.findings).toHaveLength(1);
     const f = out.findings[0];
@@ -185,37 +213,29 @@ describe("assembleCharterRegister — deltas surface as Finding leads", () => {
   });
 
   test("finding confidence is the weaker of the two charter sides", () => {
-    const out = assembleCharterRegister(
-      {
-        subsystems: [
-          {
-            node_id: "a.ts",
-            charters: [
-              charterInput({ kind: "stated", confidence: "medium" }),
-              charterInput({ kind: "revealed", confidence: "high" }),
-            ],
-            deltas: [{ pair: ["stated", "revealed"], summary: "gap" }],
-          },
-        ],
-      },
-      members,
+    const out = findingsFor(
+      [
+        charterInput({ kind: "stated", confidence: "medium" }),
+        charterInput({ kind: "revealed", confidence: "high" }),
+      ],
+      { pair: ["stated", "revealed"], summary: "gap" },
     );
-    // stated is low-confidence? no — medium; revealed high → weaker = medium.
+    // stated medium, revealed high → weaker = medium.
     expect(out.findings[0].confidence).toBe("medium");
   });
 });
 
-describe("assembleCharterRegister — determinism + goal graph", () => {
-  test("subsystems, deltas, and findings are sorted by content-derived key", () => {
+describe("assembleCharters / assembleDeltas — determinism + goal graph", () => {
+  test("subsystems are sorted by content-derived key", () => {
     const twoMembers = new Map([
       ["a.ts", ["a.ts"]],
       ["z.ts", ["z.ts"]],
     ]);
-    const out = assembleCharterRegister(
+    const out = assembleCharters(
       {
         subsystems: [
-          { node_id: "z.ts", charters: [charterInput()], deltas: [] },
-          { node_id: "a.ts", charters: [charterInput()], deltas: [] },
+          { node_id: "z.ts", charters: [charterInput()] },
+          { node_id: "a.ts", charters: [charterInput()] },
         ],
       },
       twoMembers,
@@ -223,9 +243,15 @@ describe("assembleCharterRegister — determinism + goal graph", () => {
     expect(out.subsystems.map((s) => s.node_id)).toEqual(["a.ts", "z.ts"]);
   });
 
-  test("goal_graph defaults to empty when the submission omits it", () => {
-    const out = assembleCharterRegister({ subsystems: [] }, members);
+  test("goal_graph defaults to empty when the delta submission omits it", () => {
+    const out = assembleDeltas({ subsystems: [] }, []);
     expect(out.goal_graph).toEqual({ nodes: [], edges: [] });
+  });
+
+  test("goal_graph passes through from the delta submission", () => {
+    const gg = { nodes: [{ id: "n1", label: "n1" }], edges: [] };
+    const out = assembleDeltas({ subsystems: [], goal_graph: gg }, []);
+    expect(out.goal_graph).toEqual(gg);
   });
 
   test("CharterSubmissionSchema rejects an unknown top-level key (strict)", () => {
@@ -233,10 +259,23 @@ describe("assembleCharterRegister — determinism + goal graph", () => {
     expect(parsed.success).toBe(false);
   });
 
-  test("CharterSubmissionSchema defaults subsystem deltas to []", () => {
+  test("CharterSubmissionSchema is charters-only per subsystem (no deltas key)", () => {
     const parsed = CharterSubmissionSchema.parse({
       subsystems: [{ node_id: "a.ts", charters: [] }],
     });
+    expect(parsed.subsystems[0].charters).toEqual([]);
+    expect("deltas" in parsed.subsystems[0]).toBe(false);
+  });
+
+  test("CharterDeltaSubmissionSchema defaults subsystem deltas to []", () => {
+    const parsed = CharterDeltaSubmissionSchema.parse({
+      subsystems: [{ node_id: "a.ts" }],
+    });
     expect(parsed.subsystems[0].deltas).toEqual([]);
+  });
+
+  test("CharterDeltaSubmissionSchema rejects an unknown top-level key (strict)", () => {
+    const parsed = CharterDeltaSubmissionSchema.safeParse({ subsystems: [], bogus: 1 });
+    expect(parsed.success).toBe(false);
   });
 });

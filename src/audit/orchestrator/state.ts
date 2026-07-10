@@ -237,6 +237,33 @@ export function deriveAuditState(
     ),
   );
 
+  // Phase C.2 conceptual design-review — the INDEPENDENT delta-mining pass. Runs
+  // after charter extraction (it reads the assembled charters) and before the
+  // design-review passes. The base satisfaction is the usual exists+fresh check on
+  // charter_register.json; the extraction pass sets `deltas_pending` whenever it
+  // produced ≥1 subsystem, so this obligation stays unmet until the independent
+  // delta-miner has run (no author marks its own homework). When extraction omitted
+  // (or found no subsystems) `deltas_pending` is never set → this self-satisfies,
+  // never blocking the default (conversation-first) path — mirrors
+  // charter_extraction_current.
+  const charterDeltaBase = staleOrSatisfied(
+    staleArtifacts,
+    ["charter_register.json"],
+    has(bundle.charter_register),
+  );
+  const charterDeltasPending =
+    charterDeltaBase === "satisfied" &&
+    bundle.charter_register?.deltas_pending === true;
+  obligations.push(
+    obligation(
+      "charter_delta_current",
+      charterDeltasPending ? "missing" : charterDeltaBase,
+      charterDeltasPending
+        ? "Charter deltas not yet mined by the independent delta pass before the design-review passes."
+        : undefined,
+    ),
+  );
+
   // Backward-compat: old artifacts only have `reviewed`; new artifacts have
   // contract_reviewed and conceptual_reviewed. Treat both as satisfied when
   // the legacy flag is set and neither new flag is present.

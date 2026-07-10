@@ -2,12 +2,11 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { CharterRegister } from "../types/charterRegister.js";
 import {
-  assembleCharterRegister,
+  assembleCharters,
   type CharterSubmission,
   type Ceiling,
   type IntentCheckpoint,
 } from "audit-tools/shared";
-import { groundDesignFindings } from "audit-tools/shared";
 
 /**
  * Resolve the charter-layer ceiling from the confirmed checkpoint. The ceiling is
@@ -34,7 +33,7 @@ export function ceilingRequestsCharters(ceiling: Ceiling): boolean {
  * Build the `node_id → members` lookup from the Phase-B consensus scaffold. Only
  * CONSENSUS nodes (confident on both robustness scores) are charter-reviewable;
  * contested nodes are hotspots, not subsystems. A submission referencing any other
- * node is grounded out by `assembleCharterRegister`.
+ * node is grounded out by `assembleCharters`.
  */
 function consensusMembers(bundle: ArtifactBundle): Map<string, string[]> {
   const members = new Map<string, string[]>();
@@ -51,10 +50,13 @@ function consensusMembers(bundle: ArtifactBundle): Map<string, string[]> {
  *   register so the obligation is satisfied with no LLM pass. Mirrors the
  *   synthesis-narrative omit — the charter layer is opt-in at a `deep`+ ceiling.
  * - **ingest** (`deep`/`deepest` ceiling + a host submission): validate + assemble
- *   the gated register from the submission (the deterministic enforcement half —
- *   id assignment, routing table, Phase-A gates; `assembleCharterRegister`),
- *   grounding every subsystem against the consensus scaffold and every surfaced
- *   Finding's evidence against disk.
+ *   the gated CHARTERS from the submission (the deterministic enforcement half —
+ *   id assignment, per-kind merge, the Phase-A True gate; `assembleCharters`),
+ *   grounding every subsystem against the consensus scaffold. This pass authors
+ *   charters ONLY — the deltas + goal_graph are mined by the INDEPENDENT
+ *   charter_delta pass (no author marks its own homework), so the register is left
+ *   with empty deltas/findings/goal_graph and `deltas_pending` set whenever it
+ *   produced ≥1 subsystem for the delta-miner to reason over.
  */
 export function runCharterExtractionExecutor(
   bundle: ArtifactBundle,
@@ -85,31 +87,30 @@ export function runCharterExtractionExecutor(
     };
   }
 
-  const assembled = assembleCharterRegister(
-    submission,
-    consensusMembers(bundle),
-  );
-  // Ground each surfaced delta-finding's evidence against disk (the provenance
-  // grounding this pure-assembly module deferred to the ingest — parity with the
-  // design-review findings path).
-  const findings = groundDesignFindings(assembled.findings, bundle.repo_manifest);
+  const assembled = assembleCharters(submission, consensusMembers(bundle));
 
   const register: CharterRegister = {
     generated_at,
     target: "charter",
     ceiling,
     subsystems: assembled.subsystems,
-    goal_graph: assembled.goal_graph,
-    deltas: assembled.deltas,
-    findings,
+    // Deltas + goal_graph are the INDEPENDENT delta-miner's product (Phase C.2);
+    // left empty here and flagged `deltas_pending` so charter_delta_current owes a
+    // turn whenever this pass produced ≥1 subsystem to mine.
+    goal_graph: { nodes: [], edges: [] },
+    deltas: [],
+    findings: [],
     validation_issues: assembled.validation_issues,
+    deltas_pending: assembled.subsystems.length > 0,
   };
   return {
     updated: { ...bundle, charter_register: register },
     artifacts_written: ["charter_register.json"],
     progress_summary:
-      `Charter extraction complete: ${register.subsystems.length} subsystem(s), ` +
-      `${register.deltas.length} routed delta(s) → ${register.findings.length} finding(s)` +
+      `Charter extraction complete: ${register.subsystems.length} subsystem(s)` +
+      (register.deltas_pending
+        ? " awaiting the independent delta-miner"
+        : "") +
       (register.validation_issues.length > 0
         ? `, ${register.validation_issues.length} gate drop(s).`
         : "."),

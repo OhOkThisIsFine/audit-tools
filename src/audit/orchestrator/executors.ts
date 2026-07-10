@@ -65,6 +65,16 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["charter_extraction_current"],
   },
   {
+    // Phase C.2 delta-mining, mirrors charter_extraction. host_delegation: at a
+    // deep+ ceiling that produced ≥1 subsystem (charter_register.deltas_pending)
+    // it emits an LLM step for the INDEPENDENT delta-miner; otherwise the runner
+    // settles the register deterministically (the branch in nextStepHelpers gates
+    // emit vs run, mirroring charter_extraction).
+    id: "charter_delta_executor",
+    kind: "host_delegation",
+    obligation_ids: ["charter_delta_current"],
+  },
+  {
     id: "design_review_contract",
     kind: "host_delegation",
     obligation_ids: ["design_review_contract_completed"],

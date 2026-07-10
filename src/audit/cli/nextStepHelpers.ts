@@ -206,6 +206,7 @@ export type NextStepResult =
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_extraction"; state: AuditState; bundle: ArtifactBundle }
+  | { kind: "charter_delta"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "charter_clarification"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "systemic_challenge"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "confirm_intent"; state: AuditState; bundle: ArtifactBundle }
@@ -557,7 +558,7 @@ export async function handleDesignReviewBranch(
 
 // ── Tier C2: consolidated "omittable host gate" engine ─────────────────────────
 //
-// Four of the six host-gate branch handlers below share ONE shape: poll a
+// Five of the seven host-gate branch handlers below share ONE shape: poll a
 // single `incoming/<file>.json`; if present, apply it via runAuditStep and
 // `continue`; else, if a ceiling/flag says no host turn is owed this pass,
 // `run_omit` (so the deterministic omit executor satisfies the obligation);
@@ -565,7 +566,7 @@ export async function handleDesignReviewBranch(
 // below is the single parameterized driver for that shape; each handler is a
 // thin descriptor naming its filename, its apply side effect, and its
 // omission predicate — the actual judgment (which ceiling, which flag, which
-// step) still lives per-gate, just no longer copy-pasted 4×.
+// step) still lives per-gate, just no longer copy-pasted 5×.
 //
 // graph_enrichment and design_review do NOT fit this shape and are
 // intentionally NOT routed through `runOmittableGate` — forcing them in would
@@ -596,6 +597,7 @@ type OmittableGateAction<TStepKind extends string> =
 
 type SynthesisNarrativeBranchResult = OmittableGateAction<"synthesis_narrative">;
 type CharterExtractionBranchResult = OmittableGateAction<"charter_extraction">;
+type CharterDeltaBranchResult = OmittableGateAction<"charter_delta">;
 type CharterClarificationBranchResult = OmittableGateAction<"charter_clarification">;
 type SystemicChallengeBranchResult = OmittableGateAction<"systemic_challenge">;
 
@@ -721,6 +723,44 @@ export async function handleCharterExtractionBranch(
 }
 
 /**
+ * Handle the `charter_delta_executor` incoming-artifact polling block (Phase C.2 —
+ * the INDEPENDENT delta-miner). Mirrors the charter-extraction branch:
+ *   - a pending `incoming/charter-delta.json` → route+gate it via the preferred
+ *     executor (ingest), then `continue`;
+ *   - otherwise, when the register is NOT `deltas_pending` (extraction omitted, or
+ *     found no subsystems to mine) → `run_omit` (the deterministic executor settles
+ *     the register — no host turn);
+ *   - a `deltas_pending` register with no submission yet → `return` the host step
+ *     that renders the charter-delta prompt for the independent miner.
+ */
+export async function handleCharterDeltaBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<CharterDeltaBranchResult> {
+  return runOmittableGate<unknown, "charter_delta">(
+    {
+      kind: "charter_delta",
+      filename: "charter-delta.json",
+      apply: async (_value, path, p) => {
+        await runAuditStep({
+          root: p.root,
+          artifactsDir: p.artifactsDir,
+          preferredExecutor: "charter_delta_executor",
+          charterDeltaSubmissionPath: path,
+        });
+      },
+      // Nothing to mine (extraction omitted or no subsystems): settle
+      // deterministically, no host turn.
+      shouldOmit: (b) => !(b.charter_register?.deltas_pending === true),
+    },
+    params,
+    bundle,
+    state,
+  );
+}
+
+/**
  * Handle the `charter_clarification_executor` obligation (Phase D triangulation
  * loop). Mirrors the charter-extraction branch, but the loop is DETERMINISTIC — the
  * executor assembles asked/banked from the Phase-C `charter_register` deltas, so the
@@ -826,12 +866,12 @@ export async function handleSystemicChallengeBranch(
 }
 
 /**
- * Coverage registry for the 6 audit host-gate branch handlers targeted by the
+ * Coverage registry for the 7 audit host-gate branch handlers targeted by the
  * Tier C2 consolidation. `driven: "generic"` gates are fully parameterized
  * through `runOmittableGate`; `driven: "custom"` gates keep their own bespoke
  * body because their shape genuinely deviates from that common one — see the
  * section comment above `runOmittableGate` for exactly what deviates and why.
- * Exists so one source of truth enumerates all 6 gate kinds (asserted by a
+ * Exists so one source of truth enumerates all 7 gate kinds (asserted by a
  * coverage test) rather than the count being implicit in which functions
  * happen to exist.
  */
@@ -840,6 +880,7 @@ export type HostGateKind =
   | "design_review"
   | "synthesis_narrative"
   | "charter_extraction"
+  | "charter_delta"
   | "charter_clarification"
   | "systemic_challenge";
 
@@ -861,6 +902,7 @@ export const HOST_GATE_DESCRIPTORS: Record<
   },
   synthesis_narrative: { driven: "generic", incomingFiles: ["synthesis-narrative.json"] },
   charter_extraction: { driven: "generic", incomingFiles: ["charter-extraction.json"] },
+  charter_delta: { driven: "generic", incomingFiles: ["charter-delta.json"] },
   charter_clarification: { driven: "generic", incomingFiles: ["charter-clarification.json"] },
   systemic_challenge: { driven: "generic", incomingFiles: ["systemic-challenge.json"] },
 };
@@ -870,6 +912,7 @@ export const HOST_GATE_KINDS: readonly HostGateKind[] = [
   "design_review",
   "synthesis_narrative",
   "charter_extraction",
+  "charter_delta",
   "charter_clarification",
   "systemic_challenge",
 ];
@@ -1320,6 +1363,26 @@ export function buildAuditObligations(): AuditObligationDef[] {
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const state = deriveAuditState(bundle);
         const branch = await handleCharterExtractionBranch(ctx.params, bundle, state);
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        if (branch.action === "run_omit") {
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+      },
+    },
+    {
+      // Charter delta-mining (Phase C.2): poll the incoming delta submission
+      // (route+gate it), settle deterministically when the register is not
+      // deltas_pending (extraction omitted / no subsystems), or emit the host step
+      // for the INDEPENDENT delta-miner when a deltas_pending register has no
+      // submission yet. Mirrors the charter-extraction branch.
+      id: "charter_delta_current",
+      derive: deriveObligationState("charter_delta_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleCharterDeltaBranch(ctx.params, bundle, state);
         if (branch.action === "return") {
           return { kind: "emit", step: branch.result };
         }

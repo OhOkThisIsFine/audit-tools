@@ -34,6 +34,14 @@ export interface CharterRegister {
    * (conversation-first: the charter layer is opt-in at a `deep`+ ceiling).
    */
   status?: "omitted";
+  /**
+   * true after charters are assembled but before the independent delta-miner has
+   * run; drives charter_delta_current. The charter-extraction pass sets this when
+   * it produces ≥1 subsystem so the independent delta phase is owed a turn; the
+   * delta pass clears it once the deltas + goal_graph are mined (or when there are
+   * no subsystems to mine, in which case it is never set).
+   */
+  deltas_pending?: boolean;
   /** Per confident subsystem: its members + the surviving (gated) charters. */
   subsystems: CharterSubsystem[];
   /** The goal DAG (blast-radius substrate). Empty until the host supplies one. */
