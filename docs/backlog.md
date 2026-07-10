@@ -239,6 +239,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 ## Forward tracks
 
 - **Shared-logic dedup bundle — one marginal item still open.**
+  - **Second-pass (2026-07-10) — 5 shipped, 2 rejected.** A scout re-scan surfaced 7 leads; validated as
+    leads-not-verdicts ([[external-audit-catalogs-are-leads]]). SHIPPED (this branch): shared
+    `applyGuidanceFile` (`src/shared/intake/`); `normalizeForMatch`→`normalizeToContentTokens` rename;
+    shared `reconcileAdmissionLeasesFromQuotaFile` + `finalizeProviderLaunchResult` (`src/shared/dispatch/`,
+    also deleted the dead `RollingDispatchResult.observedUsage` relay); shared intent path-scope authority
+    `src/shared/intent/pathScope.ts` (`pathMatchesPrefix`/`globMatches`/`fileExclusionReason`) with the
+    audit/remediate structured-scope field coverage SYMMETRIZED (owner ruling: both honor
+    excluded_scope + disposition_overrides + must_not_touch; per-domain unit-vs-finding aggregation stays
+    forked). Two rejected below.
   - **Deliberately NOT built — Tier C (3), intra-remediate retry-cap helper** (5 `attempts >= CAP →
     escalate` sites sharing a shape): marginal — the sites are 2-3 lines each over different state records;
     a generic helper would abstract more than it saves. Revisit only if a 6th cap site appears.
@@ -247,9 +256,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     (shipped — both sides call the same `HybridSpillCoordinator`/`planHybridDispatch`), generic
     `DispatchPlanner` (admission math already shared; remainders are divergent read-only-vs-git-mutating
     domains), `FindingAdmissibilityPolicy` (category error: evidence-integrity gate vs auto-apply safety
-    tier), `FreshnessGraph` merge (artifact-DAG vs flat-hash are different abstractions — the real dup is
-    the file-integrity pair in Tier B), cross-orchestrator `ConvergenceController` (caps are not one
-    mechanism), grounding/step-contract/manifesting rows (already unified or remediate-only).
+    tier), **finding identity/merge/same-lens/cross-lens dedup unification** (2026-07-10: the identity
+    ladder + fuzzy/rank primitives are ALREADY single-sourced in `src/shared`; the residual per-side
+    cross-lens/merge divergence is domain-forced — audit = read-only evidence aggregation with grounding-
+    precedence + cross-category merge; remediate = auto-apply safety with a HARD category gate + clone-not-
+    mutate state + mergeMap — the same `FindingAdmissibilityPolicy` category-error class), **projection-map
+    capture/diff sharing** (2026-07-10: already single-sourced to the correct boundary in
+    `src/shared/reReview/projectionDiff.ts` — stable-serialize + leaf-diff + render all shared; the residual
+    `compute*Delta` are thin adapters over genuinely-different input universes, audit sync-from-bundle vs
+    remediate async-from-disk — a further generic would over-abstract), `FreshnessGraph` merge (artifact-DAG
+    vs flat-hash are different abstractions — the real dup is the file-integrity pair in Tier B),
+    cross-orchestrator `ConvergenceController` (caps are not one mechanism),
+    grounding/step-contract/manifesting rows (already unified or remediate-only).
 
 - **Free/cheap multi-account "quota-arbitrage" dispatch tier (9router-inspired) — exploration → build.**
   Fan dispatch across genuinely-free backends + (later) N captured subscription-OAuth accounts, rotating on
