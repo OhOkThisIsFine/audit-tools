@@ -128,6 +128,18 @@ export function incomingDir(artifactsDir: string): string {
 }
 
 /**
+ * `<artifactsDir>/scratch/<runId>` — the run-scoped directory host agents are
+ * directed to use for any working files they improvise while driving a
+ * dispatch (batch lists, helper scripts, notes). Lives under `.audit-tools/`
+ * so it is gitignored and outside the audit intake scope by construction —
+ * scratch dropped at the audited repo's root instead becomes untracked litter
+ * the next audit's manifest walk picks up.
+ */
+export function hostScratchDir(artifactsDir: string, runId: string): string {
+  return join(artifactsDir, "scratch", runId);
+}
+
+/**
  * `<artifactsDir>/audit-report.md` — where synthesis renders the human report
  * and the promote step reads it FROM. Source and write target derive from this
  * one helper so they are byte-identical.

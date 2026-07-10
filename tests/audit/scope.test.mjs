@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import { execFileSyncHidden as execFileSync, spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,7 +14,7 @@ const {
 const {
   buildFileDisposition,
   VCS_IGNORED_REASON,
-  VCS_IGNORED_PER_FILE_LIMIT,
+  UNTRACKED_REASON,
   VCS_IGNORED_MAX_SHARE,
 } = await import("../../src/audit/extractors/disposition.ts");
 
@@ -462,7 +462,7 @@ test("disposition: not a git work tree (exit 128) falls back cleanly and records
   }
 });
 
-test("disposition: at or below VCS_IGNORED_PER_FILE_LIMIT emits per-file records, no aggregates", async (t) => {
+test("disposition: every ignored file keeps a per-file excluded record", async (t) => {
   const root = await makeGitRoot(t, "alpha/\n");
   if (!root) return;
   try {
@@ -477,53 +477,22 @@ test("disposition: at or below VCS_IGNORED_PER_FILE_LIMIT emits per-file records
       expect(item.reason).toBe(VCS_IGNORED_REASON);
     }
     expect(disposition.vcs_ignore.applied).toBe(true);
-    expect(disposition.vcs_ignore.aggregates).toBe(undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("disposition: exactly VCS_IGNORED_PER_FILE_LIMIT ignored files is the per-file boundary (no aggregates)", async (t) => {
-  const root = await makeGitRoot(t, "alpha/\n");
-  if (!root) return;
-  try {
-    // Exactly at the named threshold ("at or below"): per-file records must
-    // still be emitted; aggregation only kicks in strictly above the limit.
-    const ignoredTotal = VCS_IGNORED_PER_FILE_LIMIT;
-    // Enough included files to keep the ignored share under the guard.
-    const includedCount =
-      Math.ceil(ignoredTotal / VCS_IGNORED_MAX_SHARE) - ignoredTotal + 5;
-    const paths = [
-      ...Array.from({ length: ignoredTotal }, (_, i) => `alpha/f${i}.ts`),
-      ...Array.from({ length: includedCount }, (_, i) => `src/s${i}.ts`),
-    ];
-
-    const disposition = buildFileDisposition(manifest(paths), { root });
-
-    expect(disposition.vcs_ignore.applied).toBe(true);
-    expect(disposition.vcs_ignore.ignored_count).toBe(ignoredTotal);
-    expect(disposition.vcs_ignore.aggregates).toBe(undefined);
-    const perFile = disposition.files.filter(
-      (f) => f.reason === VCS_IGNORED_REASON,
-    );
-    expect(perFile.length).toBe(ignoredTotal);
-    expect(perFile.every((f) => f.status === "excluded")).toBe(true);
-    // Non-ignored candidates all remain present and included.
-    expect(disposition.files.filter((f) => f.status === "included").length).toBe(includedCount);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("disposition: above VCS_IGNORED_PER_FILE_LIMIT aggregates by directory prefix; counts sum to total ignored", async (t) => {
+test("disposition: large ignored sets keep per-file records — no record is ever dropped (exclusions stay downstream-effective)", async (t) => {
   const root = await makeGitRoot(t, "alpha/\nbeta/\n");
   if (!root) return;
   try {
-    const alphaCount = Math.ceil(VCS_IGNORED_PER_FILE_LIMIT * 0.75);
-    const betaCount = VCS_IGNORED_PER_FILE_LIMIT - alphaCount + 51;
+    // Downstream consumers (unit builder, coverage matrix, graph path lookup)
+    // treat a MISSING disposition entry as included, so a bounded/aggregated
+    // representation would silently un-exclude exactly the files the rule
+    // matched. Large sets must therefore keep one per-file record each.
+    const alphaCount = 150;
+    const betaCount = 101;
     const ignoredTotal = alphaCount + betaCount;
-    expect(ignoredTotal > VCS_IGNORED_PER_FILE_LIMIT).toBeTruthy();
-
     // Enough included files to keep the ignored share under the guard.
     const includedCount =
       Math.ceil(ignoredTotal / VCS_IGNORED_MAX_SHARE) - ignoredTotal + 5;
@@ -535,18 +504,14 @@ test("disposition: above VCS_IGNORED_PER_FILE_LIMIT aggregates by directory pref
 
     const disposition = buildFileDisposition(manifest(paths), { root });
 
-    // Bounded: no unbounded per-file vcs_ignored records.
-    expect(disposition.files.some((f) => f.reason === VCS_IGNORED_REASON)).toBe(false);
-    expect(disposition.files.length).toBe(includedCount);
+    expect(disposition.files.length).toBe(paths.length);
+    const perFile = disposition.files.filter(
+      (f) => f.reason === VCS_IGNORED_REASON,
+    );
+    expect(perFile.length).toBe(ignoredTotal);
+    expect(perFile.every((f) => f.status === "excluded")).toBe(true);
     expect(disposition.vcs_ignore.applied).toBe(true);
-
-    const aggregates = disposition.vcs_ignore.aggregates;
-    expect(aggregates).toEqual([
-      { prefix: "alpha", count: alphaCount, reason: VCS_IGNORED_REASON },
-      { prefix: "beta", count: betaCount, reason: VCS_IGNORED_REASON },
-    ]);
-    const sum = aggregates.reduce((acc, a) => acc + a.count, 0);
-    expect(sum).toBe(ignoredTotal);
+    expect(disposition.vcs_ignore.ignored_count).toBe(ignoredTotal);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -586,6 +551,184 @@ test("disposition: share guard skips the rule and records share_exceeded", async
     expect(disposition.vcs_ignore.applied).toBe(false);
     expect(disposition.vcs_ignore.guard_branch).toBe("share_exceeded");
     expect(disposition.vcs_ignore.skipped_reason).toMatch(/skipped/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Untracked-aware disposition (batched `git ls-files -z`)
+// ---------------------------------------------------------------------------
+
+test("disposition: untracked scratch is excluded; tracked + gitignored files keep their classifications (single batched ls-files, slash-normalized)", async (t) => {
+  const root = await makeGitRoot(t, "ignored-dir/\n");
+  if (!root) return;
+  try {
+    await mkdir(join(root, "src"), { recursive: true });
+    await mkdir(join(root, "ignored-dir"), { recursive: true });
+    await writeFile(join(root, "src", "app.ts"), "export const x = 1;\n");
+    await writeFile(join(root, "batch_1.json"), "{}\n");
+    await writeFile(join(root, "subagent_a.prompt"), "scratch\n");
+    await writeFile(join(root, "ignored-dir", "cache.js"), "// generated\n");
+    // ls-files reads the index — staging is enough, no commit (or user config) needed.
+    git(root, "add", ".gitignore", "src/app.ts");
+
+    const { calls, spawn: lsFilesSpawn } = countingSpawn();
+    // src\app.ts uses Windows backslash separators on purpose: the tracked-set
+    // lookup must match ls-files' forward-slash output for the same file.
+    const disposition = buildFileDisposition(
+      manifest([
+        ".gitignore",
+        "src\\app.ts",
+        "batch_1.json",
+        "subagent_a.prompt",
+        "ignored-dir/cache.js",
+      ]),
+      { root, lsFilesSpawn },
+    );
+
+    // Exactly one batched ls-files spawn, never per-file.
+    expect(calls.length).toBe(1);
+    expect(calls[0].command).toBe("git");
+    expect(calls[0].args.includes("ls-files")).toBeTruthy();
+    expect(calls[0].args.includes("-z")).toBeTruthy();
+
+    const byPath = new Map(disposition.files.map((f) => [f.path, f]));
+    expect(byPath.get("src\\app.ts").status).toBe("included");
+    expect(byPath.get(".gitignore").status).toBe("included");
+    for (const scratch of ["batch_1.json", "subagent_a.prompt"]) {
+      expect(byPath.get(scratch).status).toBe("excluded");
+      expect(byPath.get(scratch).reason).toBe(UNTRACKED_REASON);
+    }
+    // The gitignored file keeps its more specific vcs_ignored reason (rule order).
+    expect(byPath.get("ignored-dir/cache.js").status).toBe("excluded");
+    expect(byPath.get("ignored-dir/cache.js").reason).toBe(VCS_IGNORED_REASON);
+    expect(disposition.untracked.applied).toBe(true);
+    expect(disposition.untracked.ignored_count).toBe(2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: repository with no tracked files skips the untracked rule (root_untracked)", async (t) => {
+  const root = await makeGitRoot(t);
+  if (!root) return;
+  try {
+    const disposition = buildFileDisposition(
+      manifest(["src/a.ts", "src/b.ts"]),
+      { root },
+    );
+    expect(disposition.files.every((f) => f.status === "included")).toBe(true);
+    expect(disposition.untracked.applied).toBe(false);
+    expect(disposition.untracked.guard_branch).toBe("root_untracked");
+    expect(disposition.untracked.skipped_reason).toMatch(/skipped/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: untracked share guard skips the rule and records share_exceeded", async (t) => {
+  const root = await makeGitRoot(t);
+  if (!root) return;
+  try {
+    // Fake index: only 1 of 20 included candidates tracked → untracked share
+    // 0.95 > VCS_IGNORED_MAX_SHARE, but not every candidate (root_untracked).
+    const lsFilesSpawn = () => ({ status: 0, stdout: "src/f0.ts\0", stderr: "" });
+    const disposition = buildFileDisposition(
+      manifest(Array.from({ length: 20 }, (_, i) => `src/f${i}.ts`)),
+      { root, lsFilesSpawn },
+    );
+    expect(disposition.files.length).toBe(20);
+    expect(disposition.files.some((f) => f.reason === UNTRACKED_REASON)).toBe(false);
+    expect(disposition.untracked.applied).toBe(false);
+    expect(disposition.untracked.guard_branch).toBe("share_exceeded");
+    expect(disposition.untracked.skipped_reason).toMatch(/skipped/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: git absent for ls-files falls back cleanly and records why", () => {
+  const enoentSpawn = () => ({
+    error: Object.assign(new Error("spawn git ENOENT"), { code: "ENOENT" }),
+    status: null,
+    stdout: "",
+    stderr: "",
+  });
+  // Must not throw; both rules fall back independently.
+  const disposition = buildFileDisposition(manifest(["src/a.ts"]), {
+    root: tmpdir(),
+    spawn: enoentSpawn,
+    lsFilesSpawn: enoentSpawn,
+  });
+  expect(disposition.files[0].status).toBe("included");
+  expect(disposition.untracked.applied).toBe(false);
+  expect(disposition.untracked.skipped_reason).toMatch(/skipped/);
+  expect(disposition.untracked.skipped_reason).toMatch(/ENOENT/);
+});
+
+test("disposition: large untracked sets keep per-file records — no record is ever dropped", async (t) => {
+  const root = await makeGitRoot(t);
+  if (!root) return;
+  try {
+    // The motivating bug class at scale (a heavily-littered previous run):
+    // every untracked file must keep a per-file excluded record, because a
+    // missing disposition entry reads as included downstream.
+    const untrackedCount = 251;
+    // Enough tracked files to keep the untracked share under the guard.
+    const trackedCount =
+      Math.ceil(untrackedCount / VCS_IGNORED_MAX_SHARE) - untrackedCount + 5;
+    const tracked = Array.from({ length: trackedCount }, (_, i) => `src/s${i}.ts`);
+    const scratch = Array.from(
+      { length: untrackedCount },
+      (_, i) => `scratch/f${i}.json`,
+    );
+    const lsFilesSpawn = () => ({
+      status: 0,
+      stdout: tracked.map((p) => `${p}\0`).join(""),
+      stderr: "",
+    });
+    const disposition = buildFileDisposition(manifest([...tracked, ...scratch]), {
+      root,
+      lsFilesSpawn,
+    });
+    expect(disposition.files.length).toBe(trackedCount + untrackedCount);
+    const perFile = disposition.files.filter(
+      (f) => f.reason === UNTRACKED_REASON,
+    );
+    expect(perFile.length).toBe(untrackedCount);
+    expect(perFile.every((f) => f.status === "excluded")).toBe(true);
+    expect(disposition.untracked.applied).toBe(true);
+    expect(disposition.untracked.ignored_count).toBe(untrackedCount);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("disposition: tracked files whose on-disk case drifted from the index are NOT excluded as untracked", async (t) => {
+  const root = await makeGitRoot(t);
+  if (!root) return;
+  try {
+    // Case-only drift between the walk (on-disk case) and the index (tracked
+    // case) happens on case-insensitive filesystems (`core.ignorecase`
+    // renames). Membership is case-normalized (normalizeRepoPath) so the file
+    // stays included; only the genuinely-untracked scratch is excluded.
+    const lsFilesSpawn = () => ({
+      status: 0,
+      stdout: "src/Foo.ts\0src/other.ts\0",
+      stderr: "",
+    });
+    const disposition = buildFileDisposition(
+      manifest(["src/foo.ts", "src/other.ts", "batch_1.json"]),
+      { root, lsFilesSpawn },
+    );
+    const byPath = new Map(disposition.files.map((f) => [f.path, f]));
+    expect(byPath.get("src/foo.ts").status).toBe("included");
+    expect(byPath.get("src/other.ts").status).toBe("included");
+    expect(byPath.get("batch_1.json").status).toBe("excluded");
+    expect(byPath.get("batch_1.json").reason).toBe(UNTRACKED_REASON);
+    expect(disposition.untracked.applied).toBe(true);
+    expect(disposition.untracked.ignored_count).toBe(1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

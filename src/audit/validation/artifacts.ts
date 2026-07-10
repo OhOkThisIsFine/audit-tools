@@ -6,7 +6,6 @@ import {
   requireKeys,
 } from "audit-tools/shared";
 import type { AuditUnit } from "../types.js";
-import type { FileDispositionWithVcsIgnore } from "../extractors/disposition.js";
 import type { RuntimeValidationTask } from "../types/runtimeValidation.js";
 
 function pushIssue(
@@ -147,20 +146,11 @@ function validateCoverageMatrixConsistency(bundle: ArtifactBundle, idx: BundleIn
 function validateFileDispositionConsistency(bundle: ArtifactBundle, idx: BundleIndexes, issues: ValidationIssue[]): void {
   if (!bundle.repo_manifest || !bundle.file_disposition) return;
   const dispositionPaths = new Set(idx.fileDispositionEntries.map((f) => f.path));
-  const aggregatePrefixes = new Set(
-    asArray<{ prefix: string }>(
-      (bundle.file_disposition as FileDispositionWithVcsIgnore | undefined)?.vcs_ignore?.aggregates,
-    ).map((a) => a.prefix),
-  );
-  const coveredByAggregate = (path: string): boolean => {
-    if (aggregatePrefixes.size === 0) return false;
-    const posix = path.replace(/\\/g, "/");
-    const slash = posix.indexOf("/");
-    const prefix = slash === -1 ? "." : posix.slice(0, slash);
-    return aggregatePrefixes.has(prefix);
-  };
+  // Every manifest file must keep a per-file record — downstream consumers
+  // treat a missing entry as included, so there is deliberately no aggregated
+  // "covered by prefix" tolerance here.
   for (const path of idx.repoPaths) {
-    if (!dispositionPaths.has(path) && !coveredByAggregate(path)) {
+    if (!dispositionPaths.has(path)) {
       pushIssue(issues, "file_disposition", `Missing disposition entry for ${path}`);
     }
   }

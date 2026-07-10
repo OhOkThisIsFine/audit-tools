@@ -47,3 +47,19 @@ export const DISPATCH_PROMPT_HANDOFF_NOTE =
   "For each subagent, pass its `prompt_path` to the agent tool directly — " +
   "do not read the worker prompt file into this conversation. " +
   "Each worker executes in its own context and writes only to its assigned result path.";
+
+/**
+ * Host instruction emitted in dispatch step prompts: any working files the
+ * host improvises while driving the dispatch (batch lists, generated helper
+ * scripts, notes) go into the run-scoped scratch directory, never the audited
+ * repository's tree. Untracked scratch left at the repo root enters the next
+ * audit's intake walk and findings end up citing the previous run's litter.
+ * Single-sourced so audit-code and remediate-code stay in parity.
+ */
+export function renderHostScratchNote(scratchDirPath: string): string {
+  return (
+    "If you need any working files while driving this dispatch (batch lists, " +
+    `helper scripts, notes), write them under \`${scratchDirPath}\` — ` +
+    "never at the repository root or anywhere else in the repository's tree."
+  );
+}

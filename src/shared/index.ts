@@ -556,6 +556,7 @@ export {
   nodeClaimsPath,
   taskClaimsPath,
   incomingDir,
+  hostScratchDir,
   outputDirFor,
   auditReportPath,
   auditFindingsPath,
@@ -1077,6 +1078,7 @@ export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,
   DISPATCH_PROMPT_HANDOFF_NOTE,
+  renderHostScratchNote,
 } from "./prompts.js";
 
 // Host-asset renderers — every IDE asset derives from the one canonical prompt body.

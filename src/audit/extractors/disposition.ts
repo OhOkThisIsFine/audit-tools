@@ -4,6 +4,7 @@ import type {
   SpawnSyncReturns,
 } from "node:child_process";
 import type { RepoManifest } from "../types.js";
+import { normalizeRepoPath } from "audit-tools/shared";
 import type { FileDisposition, FileDispositionItem, FileDispositionStatus } from "audit-tools/shared";
 import {
   isNodeModulesOrGit,
@@ -123,58 +124,52 @@ function inferDisposition(path: string): FileDispositionItem {
 export const VCS_IGNORED_REASON = "vcs_ignored";
 
 /**
- * At or below this many vcs-ignored files, the disposition carries one
- * per-file record per ignored file. Above it, ignored files are aggregated by
- * directory prefix so file_disposition.json stays bounded regardless of how
- * many files the ignore rules cover.
+ * Explicit out-of-scope reason for files that exist on disk but are absent
+ * from the git index (`git ls-files`). Citation grounding already treats the
+ * tracked set as the source of truth, so untracked scratch left in the audited
+ * tree (worker batch files, generated helper scripts) must never enter the
+ * auditable scope — a finding citing it could never be grounded.
  */
-export const VCS_IGNORED_PER_FILE_LIMIT = 200;
+export const UNTRACKED_REASON = "untracked";
 
 /**
- * Guard threshold: when `git check-ignore` reports more than this share of all
- * candidate files as ignored, the gitignore rule is skipped (guard branch
+ * Guard threshold shared by both scope rules: when a rule would exclude more
+ * than this share of its candidate files, the rule is skipped (guard branch
  * `share_exceeded`) and only the existing targeted exclusions apply. A share
- * of exactly 1.0 means the audit root itself is effectively ignored (guard
- * branch `root_ignored`).
+ * of exactly 1.0 fires the rule's root guard instead (`root_ignored` /
+ * `root_untracked`).
  */
 export const VCS_IGNORED_MAX_SHARE = 0.9;
 
-export type VcsIgnoreGuardBranch = "root_ignored" | "share_exceeded";
-
-/** Bounded directory-prefix aggregate used above VCS_IGNORED_PER_FILE_LIMIT. */
-export interface VcsIgnoredAggregate {
-  /** Top-level directory prefix ("." for root-level files). */
-  prefix: string;
-  /** Number of vcs-ignored files under the prefix. */
-  count: number;
-  reason: typeof VCS_IGNORED_REASON;
-}
+export type ScopeRuleGuardBranch =
+  | "root_ignored"
+  | "share_exceeded"
+  | "root_untracked";
 
 /**
- * Outcome record for the gitignore disposition rule, persisted alongside the
- * per-file records so the scope pre-digest / intent checkpoint can surface
+ * Outcome record for a scope rule (gitignore / untracked), persisted alongside
+ * the per-file records so the scope pre-digest / intent checkpoint can surface
  * skipped-rule and guard decisions.
  */
-export interface VcsIgnoreSummary {
-  /** True when gitignore-based exclusions were applied to the disposition. */
+export interface ScopeRuleSummary {
+  /** True when the rule's exclusions were applied to the disposition. */
   applied: boolean;
-  /** Number of candidate files `git check-ignore` reported as ignored. */
+  /** Number of candidate files the rule matched. */
   ignored_count: number;
-  /** Why the gitignore rule was skipped (clean fallback or guard). */
+  /** Why the rule was skipped (clean fallback or guard). */
   skipped_reason?: string;
   /** Which guard branch fired when a guard skipped the rule. */
-  guard_branch?: VcsIgnoreGuardBranch;
-  /** Directory-prefix aggregates emitted above VCS_IGNORED_PER_FILE_LIMIT. */
-  aggregates?: VcsIgnoredAggregate[];
+  guard_branch?: ScopeRuleGuardBranch;
 }
 
-/** FileDisposition enriched with the gitignore-rule outcome record. */
-export interface FileDispositionWithVcsIgnore extends FileDisposition {
-  vcs_ignore?: VcsIgnoreSummary;
+/** FileDisposition enriched with the per-rule outcome records. */
+export interface FileDispositionWithScopeRules extends FileDisposition {
+  vcs_ignore?: ScopeRuleSummary;
+  untracked?: ScopeRuleSummary;
 }
 
-/** Injection seam for the single batched `git check-ignore` spawn (tests). */
-export type CheckIgnoreSpawn = (
+/** Injection seam for the batched git spawns (tests). */
+export type GitSpawn = (
   command: string,
   args: readonly string[],
   options: SpawnSyncOptionsWithStringEncoding,
@@ -183,12 +178,15 @@ export type CheckIgnoreSpawn = (
 export interface BuildFileDispositionOptions {
   /**
    * Audit root. When provided (and a git work tree), enables the batched
-   * `git check-ignore --stdin` pass that classifies vcs-ignored files
-   * out of scope. Omit for the heuristics-only disposition.
+   * `git check-ignore --stdin` pass that classifies vcs-ignored files out of
+   * scope, followed by the batched `git ls-files` pass that classifies
+   * untracked files out of scope. Omit for the heuristics-only disposition.
    */
   root?: string;
-  /** Test seam: replacement for child_process.spawnSync. */
-  spawn?: CheckIgnoreSpawn;
+  /** Test seam: replacement for child_process.spawnSync on `git check-ignore`. */
+  spawn?: GitSpawn;
+  /** Test seam: replacement for child_process.spawnSync on `git ls-files`. */
+  lsFilesSpawn?: GitSpawn;
 }
 
 function toPosixPath(path: string): string {
@@ -209,7 +207,7 @@ type VcsIgnoreEvaluation =
 function evaluateVcsIgnored(
   root: string,
   candidatePosixPaths: readonly string[],
-  spawn: CheckIgnoreSpawn,
+  spawn: GitSpawn,
 ): VcsIgnoreEvaluation {
   if (candidatePosixPaths.length === 0) {
     return { ok: true, ignored: new Set() };
@@ -253,65 +251,115 @@ function evaluateVcsIgnored(
   };
 }
 
-function topLevelPrefix(posixPath: string): string {
-  const slash = posixPath.indexOf("/");
-  return slash === -1 ? "." : posixPath.slice(0, slash);
-}
+type TrackedFilesEvaluation =
+  | { ok: true; tracked: Set<string> }
+  | { ok: false; reason: string };
 
-function aggregateByPrefix(posixPaths: readonly string[]): VcsIgnoredAggregate[] {
-  const counts = new Map<string, number>();
-  for (const path of posixPaths) {
-    const prefix = topLevelPrefix(path);
-    counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
+/**
+ * Enumerates the repository's tracked paths through ONE batched
+ * `git ls-files -z` invocation (never per-file). Output paths are repo-root
+ * (cwd)-relative posix, matching the manifest's normalized candidate paths.
+ * Anything other than exit 0 (git absent, not a work tree) = clean fallback —
+ * the caller skips the untracked rule. Never throws.
+ */
+function evaluateTrackedFiles(
+  root: string,
+  spawn: GitSpawn,
+): TrackedFilesEvaluation {
+  let result: SpawnSyncReturns<string>;
+  try {
+    result = spawn("git", ["ls-files", "-z"], {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      windowsHide: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `git ls-files spawn failed: ${message}` };
   }
-  return [...counts.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([prefix, count]) => ({ prefix, count, reason: VCS_IGNORED_REASON }));
+  if (result.error) {
+    const code = (result.error as NodeJS.ErrnoException).code;
+    return {
+      ok: false,
+      reason:
+        code === "ENOENT"
+          ? "git executable not found (ENOENT)"
+          : `git ls-files failed to start: ${result.error.message}`,
+    };
+  }
+  if (result.status === 0) {
+    return {
+      ok: true,
+      tracked: new Set(
+        (result.stdout ?? "").split("\0").filter((path) => path.length > 0),
+      ),
+    };
+  }
+  const stderrFirstLine = (result.stderr ?? "").trim().split(/\r?\n/, 1)[0] ?? "";
+  return {
+    ok: false,
+    reason:
+      `git ls-files exited ${result.status ?? "by signal"}` +
+      (stderrFirstLine ? `: ${stderrFirstLine}` : ""),
+  };
 }
 
 /**
- * Build a skipped VcsIgnoreSummary for any guard branch or clean fallback.
- * All three skip return sites share the same shape; centralising here means
+ * Build a skipped ScopeRuleSummary for any guard branch or clean fallback.
+ * Every skip return site shares the same shape; centralising here means
  * future guard additions only need to call this helper.
  */
-function skippedVcsIgnore(
+function skippedRule(
   skipped_reason: string,
   ignored_count = 0,
-  guard_branch?: VcsIgnoreGuardBranch,
-): VcsIgnoreSummary {
+  guard_branch?: ScopeRuleGuardBranch,
+): ScopeRuleSummary {
   return { applied: false, ignored_count, skipped_reason, guard_branch };
 }
 
 /**
- * Applies shared path heuristics to mark files that should be excluded or
- * down-scoped before audit planning begins. When `options.root` is provided,
- * additionally classifies vcs-ignored files out of scope via one batched
- * `git check-ignore --stdin` pass, with clean fallback to the heuristics-only
- * disposition whenever git is unavailable or a safety guard fires.
+ * Applies one scope rule's exclusions: the matched files are re-classified
+ * `excluded` with the rule's reason, keeping one per-file record each. Every
+ * manifest file MUST keep a per-file record — downstream consumers
+ * (unit builder, coverage matrix, graph path lookup) treat a missing
+ * disposition entry as included, so any bounded/aggregated representation
+ * silently un-excludes the very files the rule matched. Only `included` items
+ * are ever re-classified — earlier exclusions win.
  */
-export function buildFileDisposition(
-  repoManifest: RepoManifest,
-  options: BuildFileDispositionOptions = {},
-): FileDispositionWithVcsIgnore {
-  const baseline = repoManifest.files.map((file) => inferDisposition(file.path));
-  if (!options.root) {
-    return { files: baseline };
-  }
+function applyRuleExclusions(params: {
+  items: FileDispositionItem[];
+  /** Normalized form of each item's path, parallel to `items`. */
+  itemPosix: string[];
+  /** Normalized paths of the included items the rule matched. */
+  matchedPosix: string[];
+  reason: typeof VCS_IGNORED_REASON | typeof UNTRACKED_REASON;
+  /** The rule's raw matched count, surfaced as the summary's ignored_count. */
+  matchedCount: number;
+}): { files: FileDispositionItem[]; summary: ScopeRuleSummary } {
+  const { items, itemPosix, matchedPosix, reason, matchedCount } = params;
+  const matchedSet = new Set(matchedPosix);
+  const files = items.map((item, i) =>
+    item.status === "included" && matchedSet.has(itemPosix[i])
+      ? { path: item.path, status: "excluded" as const, reason }
+      : item,
+  );
+  return { files, summary: { applied: true, ignored_count: matchedCount } };
+}
 
-  const candidatePosix = repoManifest.files.map((file) =>
-    toPosixPath(file.path),
-  );
-  const evaluation = evaluateVcsIgnored(
-    options.root,
-    candidatePosix,
-    options.spawn ?? spawnSync,
-  );
+function applyVcsIgnoreRule(
+  baseline: FileDispositionItem[],
+  candidatePosix: string[],
+  root: string,
+  spawn: GitSpawn,
+): { files: FileDispositionItem[]; summary: ScopeRuleSummary } {
+  const evaluation = evaluateVcsIgnored(root, candidatePosix, spawn);
 
   if (!evaluation.ok) {
     // Clean fallback: keep the existing targeted exclusions only.
     return {
       files: baseline,
-      vcs_ignore: skippedVcsIgnore(`gitignore rule skipped: ${evaluation.reason}`),
+      summary: skippedRule(`gitignore rule skipped: ${evaluation.reason}`),
     };
   }
 
@@ -325,7 +373,7 @@ export function buildFileDisposition(
   if (total > 0 && ignoredCount === total) {
     return {
       files: baseline,
-      vcs_ignore: skippedVcsIgnore(
+      summary: skippedRule(
         "gitignore rule skipped: audit root itself is ignored (every candidate file matched ignore rules)",
         ignoredCount,
         "root_ignored",
@@ -338,7 +386,7 @@ export function buildFileDisposition(
   if (total > 0 && ignoredCount / total > VCS_IGNORED_MAX_SHARE) {
     return {
       files: baseline,
-      vcs_ignore: skippedVcsIgnore(
+      summary: skippedRule(
         `gitignore rule skipped: ignored share ${(ignoredCount / total).toFixed(3)} ` +
           `exceeds VCS_IGNORED_MAX_SHARE (${VCS_IGNORED_MAX_SHARE})`,
         ignoredCount,
@@ -359,33 +407,127 @@ export function buildFileDisposition(
     }
   }
 
-  if (newlyIgnoredPosix.length <= VCS_IGNORED_PER_FILE_LIMIT) {
-    const newlyIgnoredSet = new Set(newlyIgnoredPosix);
-    const files = baseline.map((item, i) =>
-      newlyIgnoredSet.has(candidatePosix[i]) && item.status === "included"
-        ? { path: item.path, status: "excluded" as const, reason: VCS_IGNORED_REASON }
-        : item,
-    );
+  return applyRuleExclusions({
+    items: baseline,
+    itemPosix: candidatePosix,
+    matchedPosix: newlyIgnoredPosix,
+    reason: VCS_IGNORED_REASON,
+    matchedCount: ignoredCount,
+  });
+}
+
+/**
+ * Re-classifies still-included files that are absent from the git index
+ * (`git ls-files`) out of scope. Untracked scratch left in the audited tree
+ * (worker batch files, generated helper scripts) otherwise enters the manifest
+ * via the filesystem walk while citation grounding — which treats the tracked
+ * set as the source of truth — can never ground findings against it, so the
+ * next audit's findings end up citing the previous run's litter. Runs after
+ * the gitignore rule (gitignored files keep their more specific reason) and
+ * mirrors its guards: a scope that is entirely or almost entirely untracked
+ * (e.g. a repository with no commits yet) skips the rule rather than emptying
+ * the audit.
+ */
+function applyUntrackedRule(
+  items: FileDispositionItem[],
+  root: string,
+  spawn: GitSpawn,
+): { files: FileDispositionItem[]; summary: ScopeRuleSummary } {
+  const evaluation = evaluateTrackedFiles(root, spawn);
+
+  if (!evaluation.ok) {
     return {
-      files,
-      vcs_ignore: { applied: true, ignored_count: ignoredCount },
+      files: items,
+      summary: skippedRule(`untracked rule skipped: ${evaluation.reason}`),
     };
   }
 
-  // Bounded representation: above the per-file limit, drop per-file records
-  // for vcs-ignored files and emit directory-prefix aggregates instead.
-  const newlyIgnoredSet = new Set(newlyIgnoredPosix);
-  const files = baseline.filter(
-    (item, i) =>
-      !(item.status === "included" && newlyIgnoredSet.has(candidatePosix[i])),
+  // Membership matching mirrors the grounding corpus' policy
+  // (normalizeRepoPath: separator- AND case-normalized) — a case-only drift
+  // between the on-disk walk and the index (case-insensitive filesystems,
+  // `core.ignorecase` renames) must not mark a tracked file untracked.
+  const tracked = new Set([...evaluation.tracked].map(normalizeRepoPath));
+  const itemPosix = items.map((item) => normalizeRepoPath(item.path));
+  const matchedPosix: string[] = [];
+  let candidateCount = 0;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].status !== "included") continue;
+    candidateCount += 1;
+    if (!tracked.has(itemPosix[i])) {
+      matchedPosix.push(itemPosix[i]);
+    }
+  }
+  const matchedCount = matchedPosix.length;
+
+  // Root guard: when EVERY included candidate is untracked the repository has
+  // no tracked files in scope (no commits/index yet) — applying the rule would
+  // empty the audit scope.
+  if (candidateCount > 0 && matchedCount === candidateCount) {
+    return {
+      files: items,
+      summary: skippedRule(
+        "untracked rule skipped: every included candidate is untracked (the repository has no tracked files in the audit scope)",
+        matchedCount,
+        "root_untracked",
+      ),
+    };
+  }
+  if (candidateCount > 0 && matchedCount / candidateCount > VCS_IGNORED_MAX_SHARE) {
+    return {
+      files: items,
+      summary: skippedRule(
+        `untracked rule skipped: untracked share ${(matchedCount / candidateCount).toFixed(3)} ` +
+          `of included candidates exceeds VCS_IGNORED_MAX_SHARE (${VCS_IGNORED_MAX_SHARE})`,
+        matchedCount,
+        "share_exceeded",
+      ),
+    };
+  }
+
+  return applyRuleExclusions({
+    items,
+    itemPosix,
+    matchedPosix,
+    reason: UNTRACKED_REASON,
+    matchedCount,
+  });
+}
+
+/**
+ * Applies shared path heuristics to mark files that should be excluded or
+ * down-scoped before audit planning begins. When `options.root` is provided,
+ * additionally classifies vcs-ignored files out of scope via one batched
+ * `git check-ignore --stdin` pass, then untracked files via one batched
+ * `git ls-files` pass — each with clean fallback to the disposition built so
+ * far whenever git is unavailable or a safety guard fires.
+ */
+export function buildFileDisposition(
+  repoManifest: RepoManifest,
+  options: BuildFileDispositionOptions = {},
+): FileDispositionWithScopeRules {
+  const baseline = repoManifest.files.map((file) => inferDisposition(file.path));
+  if (!options.root) {
+    return { files: baseline };
+  }
+
+  const candidatePosix = repoManifest.files.map((file) =>
+    toPosixPath(file.path),
+  );
+  const vcsStage = applyVcsIgnoreRule(
+    baseline,
+    candidatePosix,
+    options.root,
+    options.spawn ?? spawnSync,
+  );
+  const untrackedStage = applyUntrackedRule(
+    vcsStage.files,
+    options.root,
+    options.lsFilesSpawn ?? spawnSync,
   );
   return {
-    files,
-    vcs_ignore: {
-      applied: true,
-      ignored_count: ignoredCount,
-      aggregates: aggregateByPrefix(newlyIgnoredPosix),
-    },
+    files: untrackedStage.files,
+    vcs_ignore: vcsStage.summary,
+    untracked: untrackedStage.summary,
   };
 }
 

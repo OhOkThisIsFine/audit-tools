@@ -87,12 +87,31 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   which ingest re-derives). Fix: route the M-B3 re-emit to a `module_decomposition` repair step (and word the gate
   error as a decomposition file_scope defect), or ground file_scope at decomposition-ingest so the defect surfaces in
   the producing phase, not three phases later.
-- **Audit worker scratch lands at the audited repo's root and pollutes the audit itself (2026-07-09).** A prior audit
-  run left `all_batch1_prompts.json`, `batch_1..11.json`, `granted_packets.json`, `*.ps1`, `subagent_*.prompt`,
-  `task_*` etc. untracked at the repo root; the follow-up audit's repo_manifest ingested them and the ARC-0c1762db
-  "767-file behavioral cluster" finding cited that scratch as its representative artifact. Fix in tooling:
-  dispatch/host prompts must direct all worker scratch into a run-scoped dir (e.g. `.audit-tools/audit/scratch/<run>/`),
-  and/or the extractor should skip untracked files (git ls-files is already the citation-grounding source of truth).
+- **Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the
+  code site).** The scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`
+  scope rule (one batched `git ls-files -z`; still-included files absent from the index → `excluded/untracked`,
+  guards mirror the gitignore rule) so untracked litter can never enter the auditable scope, plus a
+  single-sourced `renderHostScratchNote`/`hostScratchDir` prompt line directing host scratch into
+  `.audit-tools/<area>/scratch/<run-id>/`. The unsound bounded/aggregate exclusion representation was deleted
+  outright (a missing disposition record reads as *included* downstream, so aggregation silently un-excluded
+  exactly the matched files — per-file records are now mandatory, validator-enforced). Residuals:
+  - (a) **Submodule / nested-repo contents are now excluded as `untracked`** (parent `ls-files` lists only the
+    gitlink). Consistent with citation grounding (which also can't ground them), but a silent scope change for
+    repos with first-party submodules. Ideal fix = `--recurse-submodules` in BOTH the disposition rule and the
+    grounding corpora (`findingGrounding.enumerateTrackedFilePaths`, M-B3 `enumerateRepoTreePaths`) as one
+    atomic change — never one side alone (re-opens the asymmetry).
+  - (b) **`file_disposition` now depends on git index state, which the dependency DAG doesn't track**
+    (`dependencyMap.ts` keys it to `repo_manifest.json` only). An index-only change (committing a
+    previously-untracked file) won't re-stale a persisted disposition until repo_manifest churns.
+    ⬇ Live-run watch: after committing files mid-run-continuity, confirm they enter scope on the next audit.
+  - (c) **Scope-rule guard decisions are invisible at the intent checkpoint** — `computeScopePreDigest` reads
+    only per-file entries; a skipped rule (`root_untracked`/`share_exceeded`/git-absent fallback) never
+    surfaces to the operator despite the summary existing for exactly that purpose.
+  - (d) **Grounding corpora still use `ls-files` without `-z`** (`findingGrounding.ts:108`,
+    `contractPipelineGates.ts` ~1034): non-ASCII tracked paths arrive C-quoted (`core.quotePath`), so citations
+    to such paths fail grounding while the disposition (which uses `-z`) keeps them in scope.
+  - (e) The audit `renderEdgeReasoningStepPrompt` single-agent dispatch carries no scratch-dir note (params
+    lack run context; one bounded agent writing one results file — lowest-risk path, add if it ever litters).
 - **`validate-artifact --name judge_report` can never return "ok" for an honest needs_repair verdict (2026-07-09).**
   The self-check runs the cross-gate `implementation_dag.evidence_threading` (OBL-CO-03 check 2,
   src/remediate/validation/contractPipelineGates.ts:600), fail-closed when accepted counterexamples exist and no

@@ -93,8 +93,10 @@ and the multi-IDE concurrent-admitter model: the second admitter must see the ac
 - NIM: results conform on first emit (schema-repair rounds ~0).
 - opencode-free: fills first (declared free); demotion + `declared_cost_drift` friction if it bills.
 - knip dead-code leads reach the per-file lens (leads-not-verdicts).
-- Known open bug to expect, not a surprise: worker scratch may land at the target repo root (tracked in
-  backlog Open bugs) — clean untracked scratch afterwards.
+- Scratch-pollution fix (shipped 2026-07-10): untracked files are excluded from audit scope by the new
+  `untracked` disposition rule, and dispatch prompts direct host scratch into
+  `.audit-tools/<area>/scratch/<run-id>/` — confirm no worker/host scratch lands at the target repo root,
+  and that the `file_disposition` artifact records the rule outcome (`untracked.applied` / guard branch).
 
 **Fail-signal protocol:** any wedge needing `force-synthesis`, crash at the wall, orphaned `deepening:*`
 tasks, silently-skipped analyzer, or missing friction event → one line under backlog *Open bugs* before
@@ -113,11 +115,12 @@ runnable any time).
 ## Suggested ordering — everything else open, sequenced
 
 **Agent laps (while the validation run is pending / between its sessions) — the open-bugs cluster in
-`docs/backlog.md`** (each lean unless noted): M-B3 citation gate re-emitting the wrong phase; audit
-worker scratch polluting the audited repo root (fixing this BEFORE the validation run improves it);
+`docs/backlog.md`** (each lean unless noted): M-B3 citation gate re-emitting the wrong phase;
 `validate-artifact --name judge_report` unsatisfiable self-check; doc-review auto-apply re-asserting a
 resolved decision after a process restart; critical-flow LLM fallback spec'd-but-unwired (owner call:
-build vs downgrade the norm). Pick by bite-frequency — the first three each burned a live run.
+build vs downgrade the norm). Pick by bite-frequency — the first two each burned a live run. (Audit
+worker scratch polluting the audited repo root: FIXED 2026-07-10 — untracked disposition rule + host
+scratch-dir prompt note; residuals under backlog *Open bugs*.)
 
 **WAITING (gated, not next): D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the
 LONG-lived execution claims — `task-claims.json` 20-min lease, remediate node-claims; FOCUSED-LAP,

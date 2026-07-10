@@ -1,5 +1,7 @@
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
+  renderHostScratchNote,
+  hostScratchDir,
   renderQuotaCoverageNudge,
   renderTokenBudgetView,
   buildFrictionTriageBlock,
@@ -214,6 +216,10 @@ export function renderDispatchReviewPrompt(params: {
     ...(tokenBudgetView ? [tokenBudgetView, ""] : []),
     DISPATCH_PROMPT_HANDOFF_NOTE,
     "",
+    renderHostScratchNote(
+      hostScratchDir(params.artifactsDir, params.activeReviewRun.run_id),
+    ),
+    "",
     "Subagent prompt shape:",
     "",
     '  Read and follow the audit instructions in: <entry.prompt_path>',
@@ -378,6 +384,8 @@ export function renderRollingDispatchPrompt(params: {
     ...dispatchDataLines,
     "",
     DISPATCH_PROMPT_HANDOFF_NOTE,
+    "",
+    renderHostScratchNote(hostScratchDir(params.artifactsDir, params.runId)),
     "",
     "## Result capture (no submit-packet command)",
     "",

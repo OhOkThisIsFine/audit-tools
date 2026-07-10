@@ -76,25 +76,26 @@ test("validateArtifactBundle reports malformed bundle sections and unit invarian
     )).toBeTruthy();
 });
 
-test("validateArtifactBundle treats vcs_ignore aggregate prefixes as disposition coverage", () => {
+test("validateArtifactBundle flags every manifest path without a per-file disposition record", () => {
+  // A missing disposition entry reads as INCLUDED downstream (unit builder,
+  // coverage matrix, graph path lookup), so there is deliberately no
+  // aggregated "covered by prefix" tolerance: every manifest path must carry
+  // its own record, and the scope-rule summaries do not substitute for one.
   const bundle = {
     repo_manifest: {
       files: [
         { path: "src/app.ts" },
         { path: "node_modules/dep/index.js" },
-        { path: "node_modules/dep/lib/util.js" },
         { path: "orphan/missing.ts" },
       ],
     },
     file_disposition: {
-      files: [{ path: "src/app.ts", status: "included" }],
-      vcs_ignore: {
-        applied: true,
-        ignored_count: 2,
-        aggregates: [
-          { prefix: "node_modules", count: 2, reason: "vcs_ignored" },
-        ],
-      },
+      files: [
+        { path: "src/app.ts", status: "included" },
+        { path: "node_modules/dep/index.js", status: "excluded", reason: "vcs_ignored" },
+      ],
+      vcs_ignore: { applied: true, ignored_count: 1 },
+      untracked: { applied: true, ignored_count: 0 },
     },
   };
 
@@ -102,8 +103,6 @@ test("validateArtifactBundle treats vcs_ignore aggregate prefixes as disposition
   const missing = issues.filter((issue) =>
     /missing disposition entry/i.test(issue.message),
   );
-  // Paths under an aggregate prefix are accounted for; genuinely uncovered
-  // paths are still flagged.
   expect(missing.map((issue) => issue.message)).toEqual(["Missing disposition entry for orphan/missing.ts"]);
 });
 

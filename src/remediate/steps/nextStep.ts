@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -2096,6 +2096,8 @@ ${renderQuotaCoverageNudge(rolling.quotaPath, artifactsDir)}
 ${renderTokenBudgetView(rolling.quotaPath)}
 
 ${DISPATCH_PROMPT_HANDOFF_NOTE}
+
+${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
 `,
         allowedCommands: [acceptCmd, rollMerge, rollNext],
         stopCondition:
@@ -2152,6 +2154,8 @@ they are safe to implement now. Work through them ONE AT A TIME, in order: for e
 item, read and follow only its \`prompt_path\`, then move to the next.
 
 ${SHARED_REBUILD_BETWEEN_LEVELS_NOTE}
+
+${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
 
 After all results in this plan exist:
 
@@ -2240,6 +2244,8 @@ ${renderQuotaCoverageNudge(implQuotaPath, artifactsDir)}
 ${renderTokenBudgetView(implQuotaPath)}
 
 ${DISPATCH_PROMPT_HANDOFF_NOTE}
+
+${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
 
 After all results exist:
 
