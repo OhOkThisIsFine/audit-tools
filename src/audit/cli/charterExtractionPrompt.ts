@@ -16,6 +16,11 @@ export function renderCharterExtractionPrompt(
 ): string {
   const consensus = bundle.structure_decomposition?.consensus ?? [];
   const deepest = opts.ceiling.rung === "deepest";
+  // The True charter is only requested at the deepest rung; at deep the ceiling
+  // asks for three (stated/inferred/revealed). Keep the count word in lockstep
+  // with the enumerated kinds below so the prompt never advertises a kind it
+  // then tells the host not to nominate.
+  const charterCountWord = deepest ? "four" : "three";
 
   const subsystemLines = consensus.length
     ? consensus.map((node) => {
@@ -33,11 +38,11 @@ export function renderCharterExtractionPrompt(
     '"is this module correct/clean" but *"what is this subsystem FOR, and does it',
     'serve that purpose as well as a better design could."*',
     "",
-    "For each confident subsystem below, state up to **four charters**, each a",
+    `For each confident subsystem below, state up to **${charterCountWord} charters**, each a`,
     "purpose in **telos terms — never mechanism**. A charter that merely restates",
     'the code ("it manages quota") is useless — the delta against the impl collapses',
     'to zero. State the telos ("exists so N cooperating auditors extract max value',
-    'from finite provider budgets"). The four:',
+    `from finite provider budgets"). The ${charterCountWord}:`,
     "",
     "- **stated** — what the user/docs SAY it is for (cite the doc/comment).",
     "- **inferred** — YOUR model of that intent (where you read between the lines).",

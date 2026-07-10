@@ -6,6 +6,10 @@ const {
   ceilingRequestsCharters,
 } = await import("../../src/audit/orchestrator/charterExtractionExecutor.ts");
 
+const { renderCharterExtractionPrompt } = await import(
+  "../../src/audit/cli/charterExtractionPrompt.ts"
+);
+
 function bundleWith(overrides = {}) {
   return {
     repo_manifest: { files: [{ path: "src/a.ts" }, { path: "src/b.ts" }] },
@@ -59,6 +63,31 @@ describe("resolveCharterCeiling / ceilingRequestsCharters", () => {
       design_review: { conceptual_depth: "deep" },
     };
     expect(resolveCharterCeiling(cp)).toEqual({ rung: "deep" });
+  });
+});
+
+describe("renderCharterExtractionPrompt — ceiling-aware charter count", () => {
+  const opts = (rung) => ({
+    submissionPath: "/tmp/charter-extraction.json",
+    continueCommand: "node audit-code.mjs next-step",
+    ceiling: { rung },
+  });
+
+  test("deep ceiling asks for THREE charters (True is not nominatable)", () => {
+    const prompt = renderCharterExtractionPrompt(bundleWith(), opts("deep"));
+    expect(prompt).toContain("state up to **three charters**");
+    expect(prompt).toContain("). The three:");
+    expect(prompt).not.toContain("four charters");
+    // The True bullet must still say "do not nominate one" at deep.
+    expect(prompt).toContain("do not nominate one");
+  });
+
+  test("deepest ceiling asks for FOUR charters (True nominatable)", () => {
+    const prompt = renderCharterExtractionPrompt(bundleWith(), opts("deepest"));
+    expect(prompt).toContain("state up to **four charters**");
+    expect(prompt).toContain("). The four:");
+    expect(prompt).not.toContain("three charters");
+    expect(prompt).toContain("shining city");
   });
 });
 
