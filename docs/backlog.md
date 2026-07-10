@@ -50,6 +50,24 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     A live self-audit remains the cheapest way to surface these; the env-bound dispatch/quota watch items below
     were the original goal of the run and are still unexercised (audit paused at charter phase to fix the tool).
 
+- **A doc-review auto-apply / hook re-reverted a COMMITTED owner decision during a process restart (2026-07-10, tool-should-decide).**
+  Mid-lap the process restarted; on restart, CLAUDE.md + `project-philosophy.md` came back MODIFIED — the change
+  reverted the DD-1 Own-vs-acquire→CLAUDE.md promotion the owner had explicitly chosen and I had already committed
+  (`f886066e`). `git reflog` showed NO git op caused it (only my own commits) → it was a DIRECT file edit by a hook /
+  the doc-review nightly re-applying its stale PRE-decision proposal. Caught by noticing the unexpected `M` in
+  `git status` before committing; restored the committed (owner-decided) version. **Trap:** after a process
+  restart, `git diff` your instruction files before committing — a background doc-review/hook can silently
+  re-assert a pre-decision version, and the reflog won't show it. **Tool fix (open):** the doc-review auto-apply
+  must not re-propose/re-apply an item whose decision is already recorded resolved (or already committed to the
+  tracked tree) — it should reconcile against HEAD, not a stale branch snapshot. Relates
+  [[enforce-robustness-in-tooling-not-host-discretion]].
+- **Friction-walk (quota-Increment-A lap, 2026-07-10):** the carried-in diagnosis OVERSTATED the gap ("host path has
+  no enforcing loop") — recon + adversarial review refined it to "the admission DECISION is already shared and runs on
+  the host path; only two EDGES are missing, and the cold-start over-grant is the real correctness bug." Recurrence of
+  verify-before-building [[spec-degradation-and-doc-staleness]] (no new tool work — pointer only). Feeding clean
+  (subagent recon returned conclusions+file:line; doc cleanup delegated). One waste: the post-impl reviewer died on a
+  process restart (state lost) → re-ran one review cycle.
+
 - **M-B3 citation gate re-emits the WRONG phase — gate input is `module_decomposition`, repair target is
   `contract_finalization` (2026-07-09).** `evaluatePreCriticCitationGrounding` (src/remediate/steps/contractPipeline.ts
   ~1209) grounds `module_decomposition.file_scope` against the working tree, but on failure the router re-emits
