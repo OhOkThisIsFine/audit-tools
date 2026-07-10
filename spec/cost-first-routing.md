@@ -108,8 +108,10 @@ replacement for it.
   is an external community asset, like `smol-toml`/`yaml`.)
 - **`costRank` and `capabilityRank` are independent.** A change to cost policy is a change to
   one rung of one field; capability routing and the capacity-fit gate are untouched.
-- **Parity.** Audit (`finalizeDispatchQuota`) and remediate (`admissionPoolsFromSchedule`)
-  both derive `costRank` through the one shared `deriveCostRank` — they cannot drift.
+- **Parity.** Audit (`finalizeDispatchQuota`) and remediate (`waveScheduling.ts`, via
+  `schedule.capacity_pools`) both build their `AdmissionPool[]` through the one shared
+  `admissionPoolsFromSummaries`, which internally derives `costRank` via `deriveCostRank` —
+  they cannot drift.
 - **Collision resolution prefers the cheapest priced candidate.**
   `scripts/shared/update-models.mjs`'s `flatten()` visits providers alphabetically, and on a
   cross-provider model-id collision keeps the entry with the lowest blended price (ties broken
