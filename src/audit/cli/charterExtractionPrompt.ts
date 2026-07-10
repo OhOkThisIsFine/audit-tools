@@ -2,13 +2,17 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Ceiling } from "audit-tools/shared";
 
 /**
- * Render the charter-extraction host prompt (Phase C). The host is the LLM that
- * supplies JUDGMENT — the four charter families per confident subsystem, in TELOS
- * terms, plus the pairwise deltas it sees — while the tool supplies ENFORCEMENT
- * (id assignment, the routing table, the Phase-A gates) at ingest. The prompt is
- * grounded in the Phase-B consensus scaffold (the subsystems are discovered, never
- * invented by the host) and carries /init's negative-constraint discipline as the
- * anti-slop filter (design of record spec/conceptual-design-review-design.md).
+ * Render the charter-extraction host prompt (Phase C.1). The host supplies JUDGMENT
+ * (the charter families per confident subsystem, in TELOS terms) while the tool
+ * supplies ENFORCEMENT (id assignment, dedup, the Phase-A True gate) at ingest.
+ *
+ * Independence is a first-class contract here, not host discretion: the prompt
+ * directs the host to author each kind with a SEPARATE, ACCESS-SCOPED subagent
+ * (revealed reads only code, stated reads only docs, each blind to the others), so
+ * the later stated↔revealed delta is genuine disagreement rather than one author's
+ * self-consistent story (design of record §"independently-sourced views … never
+ * reconciled"). The per-kind results merge by `node_id` at ingest (`assembleCharters`).
+ * Deltas are NOT authored here — an independent delta-miner mines them in Phase C.2.
  */
 export function renderCharterExtractionPrompt(
   bundle: ArtifactBundle,
@@ -21,6 +25,9 @@ export function renderCharterExtractionPrompt(
   // with the enumerated kinds below so the prompt never advertises a kind it
   // then tells the host not to nominate.
   const charterCountWord = deepest ? "four" : "three";
+  const kindList = deepest
+    ? "stated, inferred, revealed, true"
+    : "stated, inferred, revealed";
 
   const subsystemLines = consensus.length
     ? consensus.map((node) => {
@@ -63,6 +70,30 @@ export function renderCharterExtractionPrompt(
     "Tag each charter's `confidence`. You author the charters ONLY — an INDEPENDENT",
     "delta-miner reads them in a later pass and mines the gaps between them (no author",
     "marks its own homework), so do NOT emit deltas here.",
+    "",
+    "## Author these INDEPENDENTLY — one blind, access-scoped subagent per kind",
+    "",
+    `Do NOT author the ${charterCountWord} kinds in a single pass. Dispatch one`,
+    `independent subagent per kind (${kindList}), each BLIND to the others' output, so`,
+    "the later stated↔revealed delta is genuine disagreement — not one author's",
+    "self-consistent story. Give each subagent ONLY its scope:",
+    "",
+    "- **stated** subagent — read ONLY docs / specs / READMEs / header comments for the",
+    "  subsystem's files; cite the doc. Do NOT open the implementation to guess intent.",
+    "- **inferred** subagent — reason about intent from the subsystem's shape + docs;",
+    "  your model of what it is FOR, read between the lines.",
+    "- **revealed** subagent — read ONLY the subsystem's CODE; cite code. Do NOT read",
+    "  the docs/READMEs — anchor purely on what the implementation optimizes for.",
+    ...(deepest
+      ? [
+          "- **true** subagent — the shining-city provocation (a concrete alternative +",
+          "  the cost paid unaware); nominate only if certain.",
+        ]
+      : []),
+    "",
+    "Each subagent returns `{ subsystems: [{ node_id, charters: [<its one kind>] }] }`",
+    "for the subsystems below. MERGE the per-kind results into the single submission",
+    "(concatenate the `subsystems` arrays — the tool merges charters by `node_id`).",
     "",
     "## Anti-slop discipline (do NOT emit)",
     "- No **restated-mechanism** charters (the delta collapses to zero).",

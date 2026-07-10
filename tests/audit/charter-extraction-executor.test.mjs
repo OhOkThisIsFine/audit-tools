@@ -82,6 +82,17 @@ describe("renderCharterExtractionPrompt — ceiling-aware charter count", () => 
     expect(prompt).toContain("do not nominate one");
   });
 
+  test("directs INDEPENDENT, access-scoped per-kind subagents (blind authoring)", () => {
+    const prompt = renderCharterExtractionPrompt(bundleWith(), opts("deep"));
+    expect(prompt).toContain("one blind, access-scoped subagent per kind");
+    expect(prompt).toContain("stated, inferred, revealed");
+    // The revealed/stated scope separation is the whole point of independence.
+    expect(prompt).toMatch(/\*\*revealed\*\* subagent.*ONLY the subsystem's CODE/s);
+    expect(prompt).toMatch(/\*\*stated\*\* subagent.*ONLY docs/s);
+    // Deltas are still deferred to the independent miner.
+    expect(prompt).toContain("do NOT emit deltas here");
+  });
+
   test("deepest ceiling asks for FOUR charters (True nominatable)", () => {
     const prompt = renderCharterExtractionPrompt(bundleWith(), opts("deepest"));
     expect(prompt).toContain("state up to **four charters**");
