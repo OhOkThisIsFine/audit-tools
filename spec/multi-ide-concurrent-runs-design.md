@@ -211,11 +211,14 @@ what" — no separate roster.
   interval are a `(taskLeaseMs, heartbeatMs)` pair with `heartbeatMs << taskLeaseMs << (typical task
   duration ceiling)`; concrete values set in slice 2.
 
-  **Open — design target, not the shipped long-lived-claim mechanism.** The heartbeat + revocation
-  protocol above is wired only to the short-lived coordination mutexes (`withClaimHeartbeat` on
-  bundle-mutation and `phase:main`). The long-lived per-task / per-node *execution* claims
-  (`task-claims.json`, remediate's node-claims) intentionally hold a long lease with **no live
-  heartbeat** across the out-of-process worker run, and rest on dedup-by-`task_id` / dedup-by-id at
-  ingest as the correctness backstop for a rare lease overrun; `mergeAndIngestCommand.ts` carries no
-  ownership gate. Extending OD3's heartbeat + merge-time ownership gate onto those long-lived
-  execution claims is tracked as open work in `docs/backlog.md`.
+  **Partially shipped for the long-lived-claim mechanism.** The heartbeat + revocation protocol
+  above is wired only to the short-lived coordination mutexes (`withClaimHeartbeat` on
+  bundle-mutation and `phase:main`) — layer (1), continuous re-validation. For the long-lived
+  per-task / per-node *execution* claims (`task-claims.json`, remediate's node-claims), the
+  merge-time ownership gate — layer (2) — has since shipped: `mergeAndIngestCommand.ts` now
+  gates ingestion through `partitionByOwnership` (`docs/backlog.md` D-66/67 slice-1). What
+  remains open is layer (1) for these long-lived claims: they still hold a long lease with **no
+  live heartbeat** across the out-of-process worker run, resting on dedup-by-`task_id` /
+  dedup-by-id at ingest plus the layer-2 merge-time gate as the correctness backstop for a rare
+  lease overrun. Extending continuous heartbeat re-validation onto those long-lived execution
+  claims (slice-3) is tracked as open work in `docs/backlog.md`.
