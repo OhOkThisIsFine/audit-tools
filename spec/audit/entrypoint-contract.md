@@ -114,7 +114,8 @@ If execution fails, the entrypoint must:
 
 ## Completion contract
 
-The entrypoint may report `complete` only when the completion criteria document is satisfied.
+The entrypoint may report `complete` only when the completion criteria in
+[`audit-goals.md`](audit-goals.md)'s *Completion* section are satisfied.
 
 ## Internal mapping
 

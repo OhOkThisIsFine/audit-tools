@@ -115,13 +115,24 @@ The audit is complete only when all of the following hold:
 - no blocking condition remains active
 
 The audit is not complete if any work remains inside auditable scope, even if it
-is low priority. No partial-success status should be introduced.
+is low priority — with one sanctioned exception: a bounded livelock-safety valve.
+When the rolling dispatcher cannot make progress on the remaining frontier after a
+bounded number of pause/resume cycles (a persistent provider wall or an irreducible
+strand), it may stamp a `partial_completion_terminal` and transition to a completed
+status on partial coverage rather than looping forever. This is safe precisely
+because the audit is read-only; it is a deliberate, recorded terminal
+(`recordPartialCompletionTerminal`), never a silent partial-success. Outside that
+valve, no partial-success status is introduced.
 
 ## Final output and cleanup
 
 - The final authoritative output is repo-root `audit-report.md`.
 - The report must be deterministic and work-block-first.
-- Root-cause clustering is not part of the product.
+- Root-cause clustering is not part of the mandatory deterministic core: the
+  retained deterministic report is work-block-first and does not cluster by root
+  cause. The optional LLM synthesis-narrative provider may add an *additive* themes
+  layer (carrying a root-cause field) on top of the deterministic report when
+  configured; it never replaces, gates, or is required by the deterministic output.
 - Cleanup of audit artifacts is available via the `cleanup` CLI command / pre-run cleanup path
   (`cleanupStaleArtifactsDir`), but is decoupled from the completion transition by design — the
   transition itself never triggers it; it also explicitly skips deletion while a run is

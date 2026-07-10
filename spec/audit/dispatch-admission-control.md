@@ -362,7 +362,9 @@ gates on an absolute token ceiling (see *Host-path admission shape*).
 - A flagless resume by a *different* auditor never sizes against or charges the
   original auditor's quota (the founding bug).
 - Two co-located runs on one account never collectively exceed the account budget
-  (no 429 storm) under a forced-wall test (`AUDIT_TOOLS_LIVE_QUOTA=1`).
+  (no 429 storm) when a metered provider + large target actually exercises the wall.
+  (`AUDIT_TOOLS_LIVE_QUOTA=1` only enables the live-credential test probe in
+  `tests/audit/inv2.test.mjs`; it does not force a production wall.)
 - A wrong (over-large) declared window self-corrects: early actuals / a 429 pull
   admission back down; the run pauses gracefully rather than crashing.
 - The dispatch-quota artifact explains every admission well enough that a human

@@ -147,9 +147,10 @@ don't actually care whether the model read the file — you care whether each cl
 re-checkable. **Reframe: attach the safeguard to claims, not to reading**, and make the verdict the
 tool's re-check, never the model's word. This is the same "green implies correct without trusting
 the worker" spine, applied to the auditor's *inputs* — and it matters *more* for a weak auditor,
-which is the whole any-strength mandate. (In-project proof it's real: the 452-audit shipped
-ARC-1fa005bb / COR-3410f5f6 / DAT-d78de464 as findings that were **not real** — caught only by
-deterministically re-running `madge`/grep/const-compare, never by the read-attestation check.)
+which is the whole any-strength mandate. (The failure class this defends against: an auditor emits
+confident architecture/correctness/data findings that are **not real** — a cited cycle, symbol, or
+constant that doesn't hold — and a read-attestation check passes them, because they are caught only by
+deterministically re-running the anchor (`madge` / grep / const-compare), never by proving the file was read.)
 
 Tier the grounding by claim type:
 - **Defect claims → quote-and-verify (cheapest, ungameable, highest ROI).** Every finding must

@@ -92,7 +92,8 @@ These are nodes from the agreed redesign / self-audit DAGs (full DAGs live in th
 | Id | What it was |
 |---|---|
 | `N-R13` | Redesign: the document phase was dissolved — a pending item that already has an `item_spec` carries forward without re-running document. |
-| `N-R21` / `N-R22` | Redesign: ownership-registry / write-scope dispatch nodes. |
+| `N-R21` | Redesign: circular interface-definition dependency routing — a detected obligation-dependency cycle routes here for resolution (`contractPipelineGates.ts`, `contractPipeline.ts`). |
+| `N-R22` | Redesign: ownership-registry / write-scope dispatch node — gates amended files through the ownership registry (`dispatch/marshal.ts`). |
 | `N-S09` | Redesign: rolling-engine paused-state + livelock guard (the `pausedState` module). |
 | `N-X06` / `N-CE301` | Self-audit plan nodes (counterexample-derived remediation units). |
 

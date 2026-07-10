@@ -11,22 +11,11 @@ This state machine follows [audit-goals.md](audit-goals.md).
 
 ## Obligations
 
-The orchestrator advances through obligations in priority order, at the same
-abstraction level as [orchestration-policy.md](orchestration-policy.md):
-
-1. repair invalid or contradictory state
-2. create missing upstream artifacts (intake, structure, design assessment,
-   structure decomposition, the user gates, charter extraction, design review,
-   charter clarification, and systemic challenge)
-3. generate missing planning artifacts
-4. ingest newly available evidence
-5. refresh coverage and requeue
-6. refresh runtime validation artifacts
-7. refresh synthesis
-8. check completion
-
-This is the abstract policy-category list; for the literal ordered chain of named
-obligations, see the `PRIORITY` chain in `src/audit/orchestrator/nextStep.ts`.
+The orchestrator advances through obligations in priority order. The abstract
+policy-category ordering has one canonical home — the *Priority order* section of
+[orchestration-policy.md](orchestration-policy.md) (which also owns the Selection,
+Stale, Requeue, Failure, and Completion policy). For the literal ordered chain of
+named obligations, see the `PRIORITY` chain in `src/audit/orchestrator/nextStep.ts`.
 
 ## Rules
 

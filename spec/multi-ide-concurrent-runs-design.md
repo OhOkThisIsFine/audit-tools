@@ -1,6 +1,6 @@
 # Multi-agent cooperative runs — design of record
 
-Everything-agnostic. Target (the owner, 2026-07-02): an **arbitrary number of agents / IDEs / providers all
+Everything-agnostic. Target: an **arbitrary number of agents / IDEs / providers all
 contribute to the SAME audit or remediation run**. Start an audit in one IDE; run `/audit-code` in a
 second IDE and it **joins** the same run, taking on appropriate unclaimed tasks. Symmetric peers — no
 primary/secondary — each following the process, feeding off each other's results as they land, never
@@ -41,9 +41,9 @@ the roster.
 ### G1 — Audit holds the coarse lock across execution → serializes peers
 `runAuditStepLocked` used to wrap the WHOLE step — load → `advanceAudit` (**including the executor / LLM
 work**) → persist — in `artifactTreeLockPath`. A second IDE's `next-step` therefore **blocked** on the
-lock and ran strictly after the first. Fixed by splitting the step into three phases (see "Implementation
-slices" below; `runAuditStepLocked` is now only the fallback path for host-delegation/complete/no-runner
-steps, in `src/audit/cli/auditStep.ts`); only the first and third phases take the short lock:
+lock and ran strictly after the first. Fixed by splitting the step into three phases (`runAuditStepLocked`
+is only the fallback path for host-delegation/complete/no-runner steps, in `src/audit/cli/auditStep.ts`);
+only the first and third phases take the short lock:
 
 1. **Claim phase (short lock):** load state, `reclaimStale()`, compute the obligation frontier,
    enumerate claimable units, `claim()` the highest-priority unclaimed one, write THIS agent's
@@ -62,7 +62,7 @@ Add a shared audit `ClaimRegistry` at `.audit-tools/audit/node-claims.json`. Cla
 - **Pooled obligation `audit_tasks`** — each pending task is a claimable node (`nodeId = task_id`). N
   peers claim N distinct tasks → real parallel contribution. Results already append-safe + dedup-by-id.
 - **Serial obligations** (`repo_manifest`, `file_disposition`, structure/graph/design, `synthesis`, …)
-  — rather than one claimable node per obligation, the shipped design (see "Implementation slices" below)
+  — rather than one claimable node per obligation, the design (see *Mechanism* below)
   claims a single shared `bundle-mutation` mutex node for any bundle-mutating step, with the obligation
   name carried only as `poolId` metadata for the "peer is working `<unit>`" cooperative-wait message —
   a single node avoids the "obligation advanced while I waited" mismatch. One peer wins and does it; a
@@ -101,7 +101,7 @@ what" — no separate roster.
 - **The coarse "whole audit step under one lock"** — replaced by the claim/execute/merge split (single
   atomic replace per the atomic-replace-ordering invariant).
 
-## Decisions (settled, the owner 2026-07-02)
+## Decisions (settled)
 
 - **Cooperative, not isolated** — peers contribute to ONE shared run; no primary/secondary.
 - **No TTL/heartbeat as run-liveness** (D2 from the first draft still holds) — a *claim's* heartbeat is a
@@ -110,80 +110,46 @@ what" — no separate roster.
 - **No host/agent label in shared state** (D3 holds) — coordination is about WHAT is claimed, not WHO.
   `agentId` is a claim owner token, not a human/IDE identity.
 
-## Implementation slices (each a green atomic commit)
+## Mechanism
 
-0. **Revert the isolation code** (`runRegistry.ts`, per-run path helpers, index exports, test) — design
-   correction. *(done)*
-1. **Audit lock-split WITH exclusive bundle-mutation claim — ✅ SHIPPED.** In `auditStep.ts`:
-   `classifyStep` probes (short lock) whether the current step runs a deterministic bundle-mutating
-   runner. If so: `claimWithBackoff` the single `bundle-mutation` mutex node in a shared audit
-   `ClaimRegistry` (`.audit-tools/audit/node-claims.json`); re-load fresh under the claim; execute the
-   runner UNLOCKED under `withClaimHeartbeat`; persist under a short lock gated by a merge-time ownership
-   re-validation (`registry.heartbeat` — OD3 layer 2); release in `finally`. A peer that can't win the
-   mutex returns a non-persisting cooperative-wait result (OD1 backoff already exhausted inside
-   `claimWithBackoff`). The host-delegation handoff / complete / no-runner path keeps the original
-   short-lock RMW (`runAuditStepLocked`), no claim. Single-agent behavior identical (always wins its own
-   mutex). **Why one mutex, not `obligation:<id>`:** a single node avoids the "obligation advanced while I
-   waited" mismatch — the winner re-loads and executes whatever is current. **Why coupled to the split:**
-   `writeCoreArtifacts(prune:true)` is a full-bundle replace, so executing outside the lock is only safe
-   because the mutex makes bundle mutation serial (audit's frontier is singular); without it two unlocked
-   executors clobber each other's persist (the wipe trap). Reusable helpers: `claimWithBackoff` /
-   `withClaimHeartbeat` (`src/shared/quota/claimLease.ts`). Tests: `tests/shared/claim-lease.test.mjs`;
-   full shared+audit suite green (3434/0).
-2. **Audit task-POOL claiming — ✅ SHIPPED (mechanism).** In `prepareDispatchArtifacts`
-   (`src/audit/cli/dispatch.ts`): before packetization, `claimMany` the candidate `task_id`s in a shared
-   per-run task-claims registry (`.audit-tools/audit/task-claims.json`, SEPARATE file from the slice-1
-   `node-claims.json` mutex because it uses a long ~20min lease — a claim is held across an
-   out-of-process worker with no live heartbeat); dispatch only the granted (disjoint) subset — a task a
-   live peer holds is omitted. After the top-K `filterPackets`, `clear` the claims on DEFERRED (not-
-   emitted) tasks so peers can take them. At ingest (`mergeAndIngestCommand.ts`, after `runAuditStep`
-   succeeds), `clear` the claims for every TERMINAL task (passing + failing); `notDispatched` is left
-   alone (may be a peer's). Correctness backstop for a rare lease overrun = the existing dedup-by-task_id
-   at ingest. New `ClaimRegistry.claimMany`/`clear` + per-registry configurable `staleMs` (OD3 lease).
-   **Idempotency crux (`poolId = runId`):** `claimMany` re-grants a node already held by the SAME `poolId`
-   and only skips a DIFFERENT live pool's nodes. Dispatch passes `runId` as poolId, so a run's *repeated*
-   `prepare-dispatch` (multiple dispatch calls occur within one run before ingest) re-grants its own
-   in-flight tasks — without this the second call skipped everything and the plan came back empty/`partial`
-   (caught by the wrapper e2e). Two IDEs have distinct `runId`s, so they still partition disjointly.
-   The A-8 hybrid in-process driver (`tasksOverride`) is exempt (owns a coordinator-assigned partition).
-   Tests: `claim-lease.test.mjs` (claimMany disjoint / same-pool re-grant / clear / stale window). **Boundary — deferred to
-   slice 3:** the per-PEER runDir + step-slot orchestration so two peers' *simultaneous* `audit_tasks`
-   next-steps don't collide on shared per-run files (`dispatch-plan.json`, result-map). The claim
-   *partitioning* is done; wiring each peer to its own dispatch run is the per-agent-step-slot work.
-3. **Per-agent step slot — ✅ SHIPPED.** The real gap was NOT the step JSON (every `next-step` prints
-   the full contract to STDOUT — per-invocation-safe) but the PROMPT FILE: the host reads it from a file
-   via the returned `prompt_path`, so a concurrent clobber of the shared `steps/current-prompt.md` would
-   make one peer read another's prompt (→ run the other's disjoint tasks). Fix in `stepContractWriter.ts`:
-   a per-PROCESS `processAgentId()` (one `next-step` process = one id = one `steps/<agentId>/` slot);
-   `writeStepContract` writes the prompt+JSON there and returns `prompt_path`/`current_*` pointing at it,
-   so the host (which already uses the returned `prompt_path`) is concurrency-safe with NO host/SKILL
-   change. A shared `steps/current-*` "latest" copy is ALSO written (single-agent back-compat + the
-   ~55 helper-based tests + human debug; last-writer-wins, nothing correctness-critical reads it).
-   Best-effort TTL GC prunes stale `steps/<id>/` slots. `currentStepPath`/`currentPromptPath` gained an
-   optional `agentId` (default = shared path, back-compat). Also **closed the slice-2 boundary**: audit's
-   dispatch `runId` is already per-invocation (ms-precision `buildRunId`), so concurrent peers' per-run
-   files (`runs/<runId>/dispatch-plan.json`, result-map, pending-audit-tasks) already auto-isolate — no
-   extra work needed. Tests: `step-contract-writer.test.mjs` (per-agent slot + shared mirror).
-4. **Remediate phase mutex + default join — ✅ SHIPPED.** In `decideNextStepLoop` (`nextStep.ts`) a
-   single `phase:main` mutex (repo-level remediation `nodeClaimsPath`, `poolId = stateRunId`) wraps the
-   MAIN advance via `claimWithBackoff` + `withClaimHeartbeat`, released in `finally`; a peer that can't win
-   returns a non-persisting `phase_busy` cooperative-wait step (new step kind). State is re-loaded fresh
-   under the mutex (safe: for an established run the pre-intake gates are no-ops). This serializes the
-   SERIAL phases (planning/triage/close) so two peers never clobber `state.json`, but does NOT serialize
-   the heavy implement work — that runs out-of-process via the per-run implement `node-claims` (a distinct
-   file under `runs/<runId>/implement/`), so each peer emits its dispatch and claims disjoint nodes during
-   its mutex turn, then runs them in parallel. Mirrors audit slice 1. Implement was already cooperative;
-   the per-agent step slot came free with the shared slice-3 writer, so a second `remediate-code next-step`
-   now joins by default. Tests: `phase-mutex-cooperative.test.ts` (phase_busy on contention + no state
-   advance; normal advance when free).
-5. **Durable trap rewritten — ✅ SHIPPED.** [[concurrent-nextstep-staleness-cascade-wipe]] is resolved:
-   audit `runAuditStep` AND `merge-and-ingest` (via the `result_ingestion_executor` runner) both acquire
-   the `bundle-mutation` mutex and execute outside the coarse lock with reload + ownership re-validation;
-   remediate serializes the MAIN advance on `phase:main`. Concurrent runners can no longer interleave a
-   destructive stale-sweep — the "one sequential call at a time" rule is superseded (residual: an external
-   linter reformat of `intent_checkpoint.json` still causes re-derive churn, not data loss).
+How the three gaps close, as durable design (the shared substrate above supplies every primitive):
 
-## Decisions on the open questions (settled, the owner 2026-07-02)
+- **Audit lock-split with an exclusive bundle-mutation claim.** A bundle-mutating step claims a single
+  `bundle-mutation` mutex node in a shared audit `ClaimRegistry` (`.audit-tools/audit/node-claims.json`),
+  re-loads fresh under the claim, executes the runner **unlocked** under a heartbeat, then persists under a
+  short lock gated by a merge-time ownership re-validation (OD3 layer 2), releasing in `finally`. A peer
+  that can't win the mutex returns a non-persisting cooperative-wait result; the host-delegation / complete
+  / no-runner path keeps the plain short-lock RMW with no claim. **Why one mutex, not `obligation:<id>`:**
+  a single node avoids the "obligation advanced while I waited" mismatch — the winner re-loads and executes
+  whatever is current. **Why coupled to the split:** `writeCoreArtifacts(prune:true)` is a full-bundle
+  replace, so unlocked execution is only safe because the mutex serializes bundle mutation (audit's
+  frontier is singular); without it two unlocked executors clobber each other's persist (the wipe trap).
+- **Audit task-pool claiming.** Before packetization, `claimMany` the candidate `task_id`s in a **separate**
+  per-run task-claims registry (`.audit-tools/audit/task-claims.json`) — separate from the bundle mutex
+  because it uses a long lease held across an out-of-process worker with **no live heartbeat**; dispatch
+  only the granted disjoint subset, clear deferred (not-emitted) claims so peers can take them, and clear
+  every terminal task's claim at ingest. The rare lease-overrun backstop is the existing dedup-by-`task_id`
+  at ingest. **Idempotency crux (`poolId = runId`):** `claimMany` re-grants a node already held by the
+  same pool and skips only a *different* live pool's nodes, so a run's repeated `prepare-dispatch` re-grants
+  its own in-flight tasks while two IDEs (distinct `runId`s) still partition disjointly. The hybrid
+  in-process driver (a coordinator-assigned partition) is exempt.
+- **Per-agent step slot.** The contended surface is the prompt FILE, not the step JSON (which each
+  invocation prints to stdout): the host reads the prompt via the returned `prompt_path`, so a per-process
+  `agentId` scopes it to a `steps/<agentId>/` slot and the host is concurrency-safe with no host/skill
+  change. A shared `steps/current-*` "latest" mirror stays for single-agent back-compat and debug
+  (last-writer-wins; nothing correctness-critical reads it). Audit's per-invocation `runId` already
+  auto-isolates the other per-run dispatch files.
+- **Remediate phase mutex + default join.** A single `phase:main` mutex wraps the main advance; a peer
+  that can't win returns a non-persisting `phase_busy` cooperative-wait step. This serializes only the
+  serial phases (plan / triage / close) so two peers never clobber `state.json`; the heavy implement work
+  stays cooperative out-of-process via the per-run implement node-claims, so peers claim disjoint nodes and
+  run them in parallel. A plain second `next-step` therefore joins by default.
+
+This resolves [[concurrent-nextstep-staleness-cascade-wipe]]: concurrent runners can no longer interleave a
+destructive stale-sweep, so the old "one sequential call at a time" rule is superseded (residual: an
+external linter reformat of `intent_checkpoint.json` still causes re-derive churn, not data loss).
+
+## Decisions on the open questions (settled)
 
 - **OD1 — Cooperative-wait = bounded backoff THEN hand back.** A peer whose only frontier work is a
   held serial obligation does a few short **in-process bounded waits of increasing duration**

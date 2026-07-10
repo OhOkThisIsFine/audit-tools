@@ -139,9 +139,9 @@ peers, no primary/secondary. Needs per-run state namespaces + task-claim locking
   mechanical run-safety + curated default set + per-run consent, NOT a maintained allowlist.
 - **Two-tier dependency policy.** Import vetted pure-JS libs for correctness-sensitive parsing/schema/lock
   (`smol-toml`, `yaml`); own only tiny domain bits; wrap parsers so malformed input degrades to empty.
-*(home: Own-vs-acquire → `docs/backlog.md` (open track) + `docs/backlog-remediation-design.md` (F5) — not
-yet promoted into `CLAUDE.md`; Two-tier dependency policy → `CLAUDE.md` → Preferences; memory:
-deterministic-analyzers-own-vs-acquire)*
+*(home: Own-vs-acquire → `CLAUDE.md` → Preferences (promoted), with the open live-spawn track in
+`docs/backlog.md` + the F5 module contract in `docs/backlog-remediation-design.md`; Two-tier dependency
+policy → `CLAUDE.md` → Preferences; memory: deterministic-analyzers-own-vs-acquire)*
 
 ## A11. Quota & token policy (product behavior)
 

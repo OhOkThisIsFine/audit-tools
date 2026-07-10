@@ -61,32 +61,14 @@ execution claims — `task-claims.json` 20-min lease, remediate node-claims — 
 with no live heartbeat; FOCUSED-LAP, delicate, and **live-run-gated** — only pursue if a real
 cooperative run shows the staleMs-wide probe window from slice-1 actually bites). Fold the `phase:main`
 layer-2 asymmetry (slice-1 input) into its design. See the D-66/67 roadmap entry in `docs/backlog.md`.
-The prior immediate-next bundle all shipped 2026-07-09: release-poll retryable CI-wait, `runPlanPhase`
-call-graph-verified + deleted, smoke tarball-to-temp-dir + npm-12 script-blocking fixes, and the
-`parseAuditFindingsReport`/`deriveBlocksFromTestGraph` dead-code deletion (call-graph-verified;
-`isAuditFindingsReport` confirmed LIVE and kept).
 
-**D-66/67 slice-2 VERIFIED-CLOSED 2026-07-09 (no code — verified not worth building).** Full-pipeline
-assessment lap (2 recon subagents → design assessment → dual adversarial review [free-NIM vs independent
-Sonnet, which disagreed] → orchestrator code-verification tiebreak): the "shared pause reducer" framing
-conflates the ALREADY-shared terminal type (`PartialCompletionTerminal`, Layer A) with an AUDIT-ONLY
-cross-invocation re-discovery reducer (`advancePausedState`/`LIVELOCK_PAUSE_LIMIT`, Layer B). A
-parameterized shared reducer would force remediate to carry a dead `pause_count` under its unbounded
-policy — net-negative. Layer A is the correct shared surface (shipped); Layer B is audit-specific by
-nature and correctly forked. Full verdict + refuted counter-arguments in `docs/backlog.md` → slice-2 VERDICT.
+**D-66/67 slice-1 SHIPPED, slice-2 VERIFIED-CLOSED (not worth building).** Design-of-record + residuals in
+`docs/backlog.md` → "Unify the full rolling-dispatch lifecycle shell"; [[rolling-lifecycle-unify-full-unification-wrong]]
+still governs (full unification is the WRONG endpoint). Only slice-3 (above) remains open.
 
-**D-66/67 slice-1 (merge-time ownership-gate) SHIPPED 2026-07-09** — commits `86e47077`+`f2a4f91d`,
-full-pipeline lap (design-level + post-impl adversarial reviews, 4 CONFIRMED defects caught+fixed
-pre-merge). Design-of-record + slice-1 residuals in `docs/backlog.md` → "Unify the full rolling-dispatch
-lifecycle shell" + the SHIPPED entry above it;
-[[rolling-lifecycle-unify-full-unification-wrong]] still governs: full unification is the WRONG endpoint.
-
-**2026-07-09 external-audit program: SHIPPED in full** — V1–V7 defects + the dedup bundle (Tier B ×13 +
-C1 obligation-engine adoption + C2 host-gate consolidation) landed as a 13-commit adversarially-reviewed
-program; only low-severity documented residuals remain (`docs/backlog.md` → *Open bugs*, "External
-shared-logic audit … residuals") — the one new lead from review fallout (`runPlanPhase` production-dead)
-was verified and deleted 2026-07-09. Everything else open is env-bound live validation (owner-run) or T6
-deferred.
+**External-audit program SHIPPED in full** (V1–V7 + dedup bundle); only low-severity documented residuals
+remain (`docs/backlog.md` → *Open bugs*, "External shared-logic audit … residuals"). Everything else open
+is env-bound live validation (owner-run) or T6 deferred.
 
 Rationale: the **loop is the meta-tool**; making it cheaper, convergent, and safe has compounding leverage
 on all downstream work, and is the "redesign before scheduled autonomy" the north star requires
@@ -108,33 +90,21 @@ remains env-bound (T6-class). Detail in `docs/backlog.md`.
 
 ### T5 — Product / analysis forward tracks
 Each item's full spec lives in `docs/backlog.md` (Forward tracks / Open bugs) — pointers only here:
--1. **Conceptual + systemic-adversarial design review — ✅ COMPLETE (all five phases).** ONE build
-   ([[conceptual-design-review-design]]; design of record
-   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md)): Phase A (data-model
-   spine), B (overlay-and-delta operator), C (charter extraction + charter-aware conceptual prompt, LLM), D
-   (charter-delta clarification/triangulation loop, obligation `charter_clarification_current`), E (systemic
-   improvement-seeking challenge loop, obligation `systemic_challenge_current`, true-lens seam) all landed.
-   Durable design in `docs/backlog.md` → "Systemic reviewers must be pushed adversarially" forward track.
-0. **Multi-provider routing rethink outcome (2026-07-05).** Verdict: core is sound + ahead of field, no big
-   simplification, AI-SDK swap dropped. (a) `scheduleWave` quota-off **drift bug** — ✅ SHIPPED. (b) `rollingEngine.ts`
-   **dead module** — ✅ DELETED (~268 LOC). (c) **models.dev static-metadata resolver**: W1 real context window — ✅
-   SHIPPED; **W2 real price → `costRank`** + Gate-0 cost-aware confirmation — ✅ SHIPPED, now an **interactive
-   `provider_confirmation` step** (host-prompt visibility + operator reorder + host-roster-at-Gate-0 all shipped; design
-   of record [`spec/cost-first-routing.md`](../spec/cost-first-routing.md)); **collision-price preference ((provider,model)
-   keying in `modelStatics` + snapshot generator) SHIPPED.** *([[provider-routing-offload-b-to-ai-sdk]])*
+-1. **Conceptual + systemic-adversarial design review — ✅ COMPLETE (all five phases).** Design of record
+   [`spec/conceptual-design-review-design.md`](../spec/conceptual-design-review-design.md);
+   [[conceptual-design-review-design]]. Nothing open.
+0. **Multi-provider routing rethink — ✅ COMPLETE.** Core sound; AI-SDK swap dropped; cost-first routing +
+   Gate-0 confirmation all shipped. Design of record [`spec/cost-first-routing.md`](../spec/cost-first-routing.md);
+   [[provider-routing-offload-b-to-ai-sdk]]. Nothing open.
 1. **Deterministic analyzers — own-vs-acquire acquisition engine.** Open: clippy/rubocop live spawn
    unvalidated (no Rust/Ruby repo here). *([[deterministic-analyzers-own-vs-acquire]])*
-2. **Schema-enforced generation — CE-004 residual.** The openai-compatible/NIM guided-decoding path is **SHIPPED**
-   (`outputSchema` plumbed + set at dispatch); only the always-on claude-code host stays repair-floor (no
-   API-level constraint endpoint — genuinely provider-blocked, not a defect).
-3. **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1).** Design of record:
-   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md) (**concurrency is
-   not a computed quantity** — admit on budget headroom; the only explicit cap is a declared env hard-limit
-   e.g. Codex 6). [[dispatch-admission-control-design]]. Everything shipped: commits 1 + 2a + 2b-AUDIT +
-   2b-REMEDIATE + driver-unification + commit 3 (founding capability-inheritance bug) + **defect-1 (attended
-   host demotes backend to source → host + codex + NIM concurrent; sub-2 least-loaded pool balancing; sub-3
-   single-shot NIM output-contract + read-heavy file routing)**. Residual is env-bound live validation +
-   deeper within-turn simultaneity (both in `docs/backlog.md` → dispatch admission-control rework).
+2. **Schema-enforced generation — CE-004 residual.** Guided-decoding path SHIPPED; open residual = the
+   always-on claude-code host stays repair-floor (no API-level constraint endpoint — provider-blocked, not a
+   defect). Detail in `docs/backlog.md`.
+3. **Dispatch admission-control rework — ✅ COMPLETE (founding bug + defect-1).** Design of record
+   [`spec/audit/dispatch-admission-control.md`](../spec/audit/dispatch-admission-control.md);
+   [[dispatch-admission-control-design]]. Open residual = env-bound live validation + deeper within-turn
+   simultaneity (both in `docs/backlog.md` → dispatch admission-control rework).
 
 ### T6 — Deferred / waiting (user-owned or low priority)
 - A2 finding-quality oracle (needs a hand-labeled corpus); A7 release-time manual GUI checklist

@@ -102,10 +102,10 @@ input is Markdown, free-form, or conversational.
   LLM extraction otherwise (including `audit-report.md`), emitting the same
   `finding.schema.json` shape in either case.
 - If the input already carries block assignments (as `audit-findings.json`
-  does), adopt them. Otherwise, compute blocks using a deterministic hierarchy:
-  1. **Test Graph:** If supported, group findings that trigger overlapping test suites.
-  2. **Git Co-commit:** Group affected files historically modified together (Jaccard similarity > 0.5).
-  3. **File Overlap:** Group findings that touch the exact same files.
+  does), adopt them. Otherwise, compute blocks deterministically by **File
+  Overlap**: findings that touch the exact same files group into one block.
+  (Richer co-location signals — grouping by overlapping test suites, or by git
+  co-commit history — are documented future enrichment, not yet built.)
 - Compute parallel-safety per block (default true unless dependencies are found).
 - Detect project type and candidate closing actions (git remote, package
   metadata, release scripts) for confirmation in Phase 2.
@@ -126,7 +126,7 @@ The LLM also confirms the project-level closing action selected by Phase 1
 or proposes an alternative, including the `custom` escape hatch for
 user-supplied commands.
 
-**Dependency Inference:** If the LLM tags any item with the `public_contract` ambiguity, the orchestrator strips the `parallel_safe: true` flag from its block, forcing it to run sequentially to avoid breaking implicit dependencies.
+**Dependency ambiguity:** `public_contract` is one of the recognized ambiguity kinds. When the LLM flags an item with it, that ambiguity is surfaced in the clarification batch below for user resolution. (Automatic `parallel_safe` stripping from the tag alone is not currently wired — parallel-safety is computed deterministically at plan time, and dependencies that surface are resolved through triage.)
 
 All ambiguities across all items are batched into a single
 `clarification_request.json` and surfaced to the user at once. Remediation
@@ -152,7 +152,7 @@ a block is parallel-safe, blocks may run in isolated worktrees. Sequential
 execution is the default.
 
 **Deterministic Merge & Fallback:**
-Parallel worktrees must be merged back into the main branch in the exact order they were originally dispatched. Before merging, the worktree is rebased onto the current `HEAD` and tests are run. If tests fail, the worktree is discarded and the block is pushed to a sorted sequential fallback queue (e.g., `public_contract` blocks first) to be re-run safely.
+Parallel worktrees must be merged back into the main branch in the exact order they were originally dispatched. Before merging, the worktree is rebased onto the current `HEAD` and tests are run. If tests fail, the node is quarantined and re-entered into the end-of-run triage window (retry vs. block) rather than merged — there is no category-sorted sequential fallback queue.
 
 Within a block, each item runs through:
 

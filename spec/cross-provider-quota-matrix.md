@@ -21,7 +21,7 @@ this matrix's.
 | Backend | Best signal | Endpoint / source | Token source | Confidence |
 |---|---|---|---|---|
 | **Claude** (shipped) | proactive GET | `api.anthropic.com/api/oauth/usage` | `~/.claude/.credentials.json` | HIGH (live-confirmed) |
-| **Codex** (ChatGPT OAuth) | **proactive GET** | `chatgpt.com/backend-api/wham/usage` | `~/.codex/auth.json` | HIGH (LIVE-confirmed 2026-06-17 — 200, shape matches) |
+| **Codex** (ChatGPT OAuth) | **proactive GET** | `chatgpt.com/backend-api/wham/usage` | `~/.codex/auth.json` | HIGH (live-confirmed — 200, shape matches) |
 | **OpenCode** | **federates** (no own quota) | per-provider, via its stored tokens | `~/.local/share/opencode/auth.json` | HIGH |
 | **Antigravity** (Gemini) | proactive POST (med) / dated-error (high) | `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels` (or LS over localhost) | `%APPDATA%/Antigravity/User/globalStorage/state.vscdb` | MED proactive / HIGH reactive |
 | **Gemini CLI** (OAuth/Code-Assist) | **proactive POST** | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` → `buckets[].{remainingFraction,resetTime}` | `~/.gemini/oauth_creds.json` | HIGH shape — but individual tiers **deprecated on gemini-cli 2026-06-18**; Std/Ent only (see §6) |
@@ -98,7 +98,7 @@ primary_window (5h), secondary_window (weekly) }, credits, additional_rate_limit
 Each window (`RateLimitWindowSnapshot`): `{ used_percent (0–100), limit_window_seconds,
 reset_after_seconds, reset_at (unix sec) }`. (Codex-API-key auth instead → `{base}/api/codex/usage`.)
 
-**✓ LIVE-CONFIRMED 2026-06-17** (the owner OK'd; `CodexQuotaSource` production path + raw probe): real 200,
+**✓ LIVE-CONFIRMED** (`CodexQuotaSource` production path + raw probe): real 200,
 top-level keys `[user_id, account_id, email, plan_type, rate_limit, code_review_rate_limit,
 additional_rate_limits, credits, spend_control, rate_limit_reached_type, promo, referral_beacon,
 rate_limit_reset_credits]`; `rate_limit.{primary,secondary}_window` carried `used_percent / reset_at /
@@ -106,9 +106,9 @@ reset_after_seconds / limit_window_seconds` exactly as parsed; most-constraining
 (`secondary used_percent:100` → `remaining_pct:0`, `reset_at` Jun 19). The mapping is validated against reality.
 
 **Local tier (no call):** `~/.codex/auth.json tokens.id_token` (JWT) → claim
-`https://api.openai.com/auth.chatgpt_plan_type` (= "plus" here) + `chatgpt_account_id`,
-`chatgpt_subscription_active_until`. (NOTE on this machine: `active_until` is `2026-06-11`,
-already past — confirm wham/usage still authorizes when running it live.)
+`https://api.openai.com/auth.chatgpt_plan_type` (= "plus") + `chatgpt_account_id`,
+`chatgpt_subscription_active_until`. (Caveat: `active_until` can be past a stored token's date —
+confirm wham/usage still authorizes when running it live.)
 
 **Mapping:** per window `remaining_pct = 1 − used_percent/100`, `reset_at = window.reset_at`
 (or `now + reset_after_seconds`). Emit two snapshots (5h + weekly), keyed by
@@ -208,9 +208,9 @@ Settings→Models bar is a documented-unreliable oracle (shows 100% while limite
 discuss.ai.google.dev/t/40576 (no proactive header), /t/134004 (dated error), /t/125971 (bar unreliable);
 `ink1ing/anti-api` (ToS prohibition).
 
-**Antigravity CLI is the unified migration target (2026-06-17) + community has already solved its quota.**
+**Antigravity CLI is the unified migration target + community has already solved its quota.**
 Google is folding gemini-cli's individual tiers AND the IDE consumers into **Antigravity CLI** (`agy`,
-`google-antigravity/antigravity-cli`) by 2026-06-18. Antigravity uses the SAME dual-limit shape as
+`google-antigravity/antigravity-cli`). Antigravity uses the SAME dual-limit shape as
 Codex/Claude (5h rolling + weekly hard-cap, per-model). Multiple community tools already poll its quota
 proactively — **`skainguyen1412/antigravity-usage`** (its README states a "Dual-Fetch": local Antigravity
 **Language Server** first, then the Google **Cloud Code API** fallback — i.e. exactly the two routes above),
@@ -243,14 +243,13 @@ GET https://api.github.com/copilot_internal/user
 = DPAPI/`safeStorage`-encrypted inside `state.vscdb`** — not plaintext-extractable. Fallbacks:
 the **Copilot CLI** `~/.copilot/config.json` (plaintext `gho_/ghu_` when keychain unavailable;
 `COPILOT_HOME` override) or **`gh` CLI** hosts file. The gh config dir is **OS-specific**:
-`%AppData%\GitHub CLI` on Windows, `~/.config/gh` on macOS/Linux, `$GH_CONFIG_DIR` override — the code now
-resolves this via `resolveGhHostsPath` (was hardcoded to `~/.config/gh`, an OS-portability bug fixed
-2026-06-17).
+`%AppData%\GitHub CLI` on Windows, `~/.config/gh` on macOS/Linux, `$GH_CONFIG_DIR` override — the code
+resolves this via `resolveGhHostsPath` (not a hardcoded `~/.config/gh`, which was an OS-portability bug).
 
-**Live-confirm 2026-06-17 — PENDING (no file-reachable token here).** On this machine: no Copilot CLI
-(`~/.copilot` absent); `gh` is authed but stores its token in the **OS keyring** (`hosts.yml` has none) **and
-the gh token lacks `copilot` scope** (`gist, read:org, repo, workflow`). So `CopilotQuotaSource` correctly
-degraded to null (degrade path ✓). The response-shape mapping stays fixture-tested only — re-confirm where a
+**Live-confirm — PENDING where no file-reachable token exists.** When there is no Copilot CLI
+(`~/.copilot` absent) and `gh` stores its token in the **OS keyring** (`hosts.yml` has none) with a token
+lacking `copilot` scope (`gist, read:org, repo, workflow`), `CopilotQuotaSource` correctly
+degrades to null (degrade path ✓). The response-shape mapping stays fixture-tested only — re-confirm where a
 Copilot token is file-reachable: `GH_COPILOT_TOKEN`/`GH_TOKEN` env, the Copilot CLI config, or `gh` with
 file/insecure storage. (The keyring itself is out of scope for a read-only probe.)
 
@@ -296,7 +295,7 @@ GitHub Docs billing/usage + copilot-cli config-dir; community #178117 (stability
 
 ---
 
-## 5. NVIDIA NIM (NVIDIA Inference Microservices) — research 2026-06-17
+## 5. NVIDIA NIM (NVIDIA Inference Microservices)
 
 OpenAI-compatible across both modes (drop-in `base_url` + Bearer key), so it slots into the
 pool model exactly like the matrix's other OpenAI-compatible providers. **No proactive quota
@@ -395,10 +394,10 @@ proactive quota source.
   secret (env/config only; never log). **Flagged unverified:** no programmatic credit-balance API
   was found in any NVIDIA doc or forum thread — asserting its nonexistence is a *negative* finding
   from absence-in-docs, not a positive confirmation from NVIDIA that one will never exist.
-- **Community cross-check (2026-06-17 — "did anyone else solve it?"): NO.** The negative finding is
-  now corroborated by users actively asking for it and getting no answer: forum *"Cannot find the
-  amount of credits left on NIM API"* (t/337051) and *"Usage tracking in nvidia nim api"* (t/367730,
-  Apr 2026 — *"no way to monitor total token consumption, per-model usage, or usage over time"*). The
+- **Community cross-check ("did anyone else solve it?"): NO.** The negative finding is
+  corroborated by users actively asking for it and getting no answer: forum *"Cannot find the
+  amount of credits left on NIM API"* (t/337051) and *"Usage tracking in nvidia nim api"* (t/367730 —
+  *"no way to monitor total token consumption, per-model usage, or usage over time"*). The
   **NGC** Python SDK only exposes **storage** quota (per-ACE), not inference/credits. No third-party
   tool polls a proactive NIM usage endpoint (GitHub "NIM monitor" hits are all GPU/Prometheus infra
   exporters). LiteLLM **does** confirm NIM returns a `Retry-After` on its upstream 429 (issue #21553)
@@ -406,7 +405,7 @@ proactive quota source.
 
 ---
 
-## 6. Gemini CLI (Google, `google-gemini/gemini-cli`) — research 2026-06-17 — proactive POST (HIGH shape) — individual tiers DEPRECATED 2026-06-18
+## 6. Gemini CLI (Google, `google-gemini/gemini-cli`) — proactive POST (HIGH shape) — individual tiers DEPRECATED 2026-06-18
 
 Same `cloudcode-pa` family as §3 Antigravity, but a CLEANER signal: gemini-cli's OAuth/Code-Assist
 tier calls a purpose-built quota RPC (vs Antigravity's model-list scrape), and its token is a plain
@@ -431,7 +430,7 @@ POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota
 `reset_at` = that bucket's `resetTime`; `requests_remaining` = parse(`remainingAmount`). Free cap
 documented 60 rpm + 1,000 model-req/day. Refresh (host-owned, on 401): `oauth2.googleapis.com/token`.
 
-**Community-confirmed (2026-06-17):** `/usage` IS backed by `retrieveUserQuota` (gemini-cli issue
+**Community-confirmed:** `/usage` IS backed by `retrieveUserQuota` (gemini-cli issue
 #27363). **Important parse caveat from that bug:** when a bucket is at 100% the API **OMITS
 `remainingAmount`** and returns `remainingFraction: 1` alone — gemini-cli's own parser gates on
 `bucket.remainingAmount` truthy and so breaks at full quota. Our mapping keys on `remainingFraction`
@@ -440,7 +439,7 @@ documented 60 rpm + 1,000 model-req/day. Refresh (host-owned, on 401): `oauth2.g
 **Degrade:** retrieveUserQuota → `loadCodeAssist` tier+cap only (no live remaining) → 429
 `RESOURCE_EXHAUSTED` + `RetryInfo.retryDelay`. API-key/Vertex tiers: reactive from the start.
 
-**⛔ DEPRECATION (VERIFIED 2026-06-17 against Google's primary source):** *"Starting June 18, 2026,
+**⛔ DEPRECATION (verified against Google's primary source):** *"Starting June 18, 2026,
 Gemini Code Assist IDE extensions will stop serving requests for the Gemini Code Assist for
 individuals, Google AI Pro, and Google AI Ultra tiers."* — both IDE extensions AND the Gemini CLI are
 affected; Standard/Enterprise subscriptions are unaffected; consumers are migrated to the **Antigravity

@@ -41,7 +41,7 @@ Two constraints shape this:
   an earlier dial sketch ranked speed against an AIMD adaptive concurrency ceiling, which was built,
   adversarially reviewed, and reverted. There is no learned ceiling, and we do not add a measured
   tokens/sec signal (the same class of learned dispatch signal C3-AIMD burned on).
-- *A needed manual flag is a bug signal* (the owner, 2026-07-08): the operator must **not** have to
+- *A needed manual flag is a bug signal*: the operator must **not** have to
   hand-declare a per-pool rate to get correct speed routing. So the throughput signal must come from
   what is already known auto-magically, never from a new operator field.
 

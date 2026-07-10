@@ -14,7 +14,7 @@ or to catch it failing. Pick a run config from this matrix; watch the items it l
 | Run config | Items it exercises (watch their ⬇ lines) |
 |---|---|
 | **Any** live audit, any provider | Selective-deepening convergence · knip `files`/`dependencies` dead-code leads |
-| **Metered provider + LARGE target**, ideally `AUDIT_TOOLS_LIVE_QUOTA=1` (forces the wall) | Quota-aware dispatch · M-QUOTA friction escalation · pre-wall pacing · retryable resume |
+| **Metered provider + LARGE target** — this is what exercises the wall (`AUDIT_TOOLS_LIVE_QUOTA=1` only enables the live-credential test probe in `tests/audit/inv2.test.mjs`, it does not force a production wall) | Quota-aware dispatch · M-QUOTA friction escalation · pre-wall pacing · retryable resume |
 | **Codex backend** (`--provider codex`; Codex CLI is a nested-agent host) | Y-dispatcher driver selection · cross-provider quota (Codex live endpoint) |
 | **openai-compatible / NIM backend** (`RUN_NIM_E2E=1` for the gated e2e) | openai-compatible dispatch pool · CE-004 emit-time-constraint build opportunity |
 | **Rust or Ruby target repo** | clippy (cargo) + rubocop (bundle) live spawn |
@@ -72,80 +72,12 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   judge-authoring time. Ingest applies only the structural validator so the run proceeds, but the self-check
   contradicts the step prompt's "fix issues until ok". Fix: scope judge_report validate-artifact to the structural
   validator (or suppress DAG-dependent cross-gates for artifacts authored before the DAG phase).
-- **Lap friction walk — ledger-writer + acceptNode-inert-clean lap (2026-07-09, orchestrator + Haiku/Sonnet
-  recon+review agents; NIM `llm read` DOWN this session).** Two code fixes (parity ledger writer, acceptNode
-  inert-clean) + one verified-negative investigation, all reviewed + shipped v0.32.49.
-  - **(ambiguous-direction) The HANDOFF immediate-next was live-run-gated → unbuildable this lap, and a
-    backlog premise was falsified by recon.** D-66/67 slice-3 is explicitly "only pursue if a real cooperative
-    run shows the stale window bites" — no such run available, so the lap picked actionable non-immediate-next
-    items. The chosen extraction-perf investigation then REFUTED its own backlog premise ("extraction re-runs
-    per next-step") — recurrence of [[spec-degradation-and-doc-staleness]] (verify before building; caught
-    cheaply for zero risk). Separately, a host misread: I interpreted the owner's mid-lap *pause* (interrupting
-    a commit to flag that quota had reset) as a *rejection of that commit's content*, and surfaced it as a
-    "you rejected this" fork — the owner corrected it. A pause/interrupt is not a content-veto; don't infer one.
-  - **(tool-should-decide) The free adversarial-review lane (NIM `llm read`) was DOWN (connection error ×2) →
-    fell back to paid subagents; and a session-limit wall killed all 3 in-flight agents mid-run, one MID-EDIT.**
-    The MEMORY.md compaction agent died between edits — recovery was manual integrity verification (bullet count
-    + section + dup check; file was valid, partially trimmed). Recurrence of the "session-limit death leaves
-    mid-edit WIP with no per-agent ledger" trap: remediate-code's per-node worktrees + claims solve it for
-    dispatch nodes, but ad-hoc Agent fan-out (recon/review/compaction) has no such ledger — attribution stays
-    host judgment. NIM being down also means the "route review to free NIM" quota-saving plan silently
-    degrades to paid subagents with no automatic signal; a health-probe-then-route would remove the guesswork.
-  - **(inefficient-feeding) Near-clean — one wasted `llm read` round-trip before rerouting.** All recon/review
-    returned conclusions + file:line (no file dumps in main context); the two code diffs went to reviewers via
-    `git diff`, never pasted into main context. The one waste: two `llm read` attempts on the Track-1 review
-    payload before the connection failure was diagnosed and I rerouted to a Haiku subagent (the NIM-down signal
-    wasn't obvious on the first failure). Delegating MEMORY.md compaction was the right call but the wall ate it,
-    so it saved little net.
-
-- **Lap friction walk — dead-code + D-66/67 slice-2-assessment lap (2026-07-09, orchestrator + Haiku
-  [call-graph recon] + 2×Sonnet [pause-lifecycle recon] + free-NIM & independent-Sonnet [dual adversarial
-  design review]).** Two deliverables: lean dead-code deletion (`cc0c4f1f`) + slice-2 VERIFIED-CLOSED (docs).
-  - **(ambiguous-direction) The immediate-next item was itself a point-in-time PROPOSAL whose premise
-    didn't survive recon — on a FOCUSED-LAP delicate item, and the design-of-record even said so.** Slice-2
-    ("build a shared pause reducer w/ policy injection") conflated an ALREADY-shared terminal type
-    (`PartialCompletionTerminal`) with an AUDIT-ONLY reducer (`advancePausedState`); 2 recon subagents
-    overturned "build it" into "verified not worth building" (net-negative dead-`pause_count` abstraction).
-    Recurrence of [[spec-degradation-and-doc-staleness]] / verify-premises-before-building — the backlog's
-    own "READ before building, it changes the target" note fired exactly as designed. Notably the two
-    adversarial review lanes DISAGREED (free-NIM: build it; repo-verifying Sonnet: close it) — the intended
-    value of independent lanes; resolved not by trusting a verdict but by the orchestrator reading the
-    capacity-gate code (`rollingDispatch.ts:1113,1129`) to refute NIM's one concrete counter.
-  - **(tool-should-decide) A cheap recon agent's "safe to delete" verdict mislabeled a LIVE symbol as an
-    orphan.** The Haiku call-graph pass called `isAuditFindingsReport` a deletable "helper" of the dead
-    `parseAuditFindingsReport`; it is in fact production-live (`intakeResolver.ts:192,300`, `close.ts:329`).
-    Deleting per the verdict would have broken intake + close. Caught only by the orchestrator's own
-    verification grep (accountability gate). Generalizable: a fast recon pass's dead-code verdict is a LEAD,
-    not a verdict — dead↔live sibling adjacency in one file is exactly what it misses. No clean tool fix
-    beyond the existing "verify deletion boundaries from source before cutting"; noting the recurrence.
-  - **(inefficient-feeding) Free-NIM adversarial lane earned its keep for zero quota; clean division of
-    labor.** Text-only NIM (no repo access) generated real adversarial pressure (a settled-exclusion thrash
-    hypothesis) that a repo-grounded lane + orchestrator then refuted from code NIM couldn't see — NIM =
-    cheap skeptic, Sonnet + orchestrator = verifiers. No file bodies through main context: recon/review all
-    returned conclusions + file:line; the compact design assessment fit NIM's payload with no split needed
-    (unlike the prior lap's 700-line diff).
-
-- **Lap friction walk — smokes/release-poll/runPlanPhase lap (2026-07-09, orchestrator + 2×Sonnet + Haiku
-  + free-NIM review lane).** Lean-tier lap, 3 disjoint items via parallel implementers; `llm read` as the
-  standing free adversarial-review lane; orchestrator as accountability gate.
-  - **(ambiguous-direction) A broken probe fixture produced a confidently-wrong env conclusion — twice —
-    before being caught.** Diagnosing the npm-12 postinstall break, the orchestrator's probe package.json
-    was malformed (unescaped quotes), so `npm install` failed silently under `>/dev/null` and every probe
-    variant "proved" scripts were skipped/flags didn't work. Only a verbose re-run exposed EJSONPARSE, and
-    the valid fixture then flipped two earlier conclusions. Probe hygiene: validate the fixture (run the
-    probe once verbose) before trusting any negative result. Same family as verify-premises-before-building.
-  - **(tool-should-decide) Parallel Agent-tool implementers in ONE shared worktree raced on write.** An
-    implementer's finished edits were silently reverted once by a sibling (and `docs/backlog.md` was an
-    overlap surface — two agents + orchestrator all editing it); it re-applied and re-verified, no loss, but
-    attribution was luck. Known gap (recurrence of the 2026-07-08/09 entries): remediate-code's per-node
-    worktrees + claims solve exactly this; for ad-hoc fan-out the fix stays host discipline — disjoint file
-    lists must include DOCS, and doc edits are better done centrally by the orchestrator. Also recurred: the
-    attest-then-commit chain trap (attest must be its own Bash call AFTER staging — gate checks fire on the
-    whole chained call).
-  - **(inefficient-feeding) Free-NIM review lane worked; one payload-size miss.** `llm read` reviews caught
-    a real dropped-assert defect in the smoke diff for zero quota; the ~700-line deletion diff exceeded what
-    the (already-fixed) tool would take and was split (collateral files → NIM; big file reduced to its
-    `git diff -U0` added-lines). No file bodies through main context; recon/impl/verify all in subagents.
+- **Friction-walk lesson (ledger-writer / acceptNode-inert-clean lap):** `[[spec-degradation-and-doc-staleness]]`
+  (verify premises before building; a pause/interrupt is not a content-veto) — see memory. Open tool slivers:
+  (a) NIM `llm read` going down silently degrades the "route review to free NIM" plan to paid subagents with no
+  signal — a health-probe-then-route would remove the guesswork; (b) ad-hoc Agent fan-out (recon/review/
+  compaction) still has no per-agent ledger for a session-limit mid-edit death, unlike remediate-code's per-node
+  worktrees + claims.
 
 - **External shared-logic audit V1–V7 residuals** (each deliberate, low-severity, documented at the code
   site):
@@ -164,175 +96,26 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     lacks. Documented at `collectStagingFiles`. ⬇ Live-run watch (conversation-first run on a dirty repo):
     `leftover_files` in the report must list untouched dirt; nothing outside the run's surface committed.
 
-- **Lap friction walk — D-66/67 slice-1 ownership-gate lap (2026-07-09, orchestrator+Haiku/Sonnet+NIM).**
-  Full pipeline: 3 parallel recon subagents → design doc → design-level adversarial review (NIM free pass +
-  independent Sonnet) → 2 parallel disjoint-boundary implementers → central gates → independent post-impl
-  adversarial review → repair rounds via transcript-resume → re-review APPROVE → attested commits.
-  - **(ambiguous-direction) Design-LEVEL adversarial review paid for itself before a line was written.**
-    The pre-implementation review pass found 2 CONFIRMED-BROKEN design decisions (tokens parked on the
-    per-round-rebuilt `active-dispatch.json`; A-8 hybrid never claiming) that post-impl review would have
-    surfaced as expensive rework. Post-impl review STILL found 2 more (staleness-blind partition, legacy-
-    session bricking) the authors' green suites missed — review depth scaling with delicacy, both layers
-    earning keep. Also recurred: the design's own probe choice (heartbeat) was wrong for audit's claim
-    lifecycle (absent-claim ≠ reclaim on the self-heal path) — caught by a REAL breaking test mid-impl;
-    a design doc is a point-in-time proposal even when adversarially reviewed same-day.
-  - **(tool-should-decide) Two tool fixes shipped in-lap instead of host workarounds.** (1) `llm read`'s
-    JSON-contract break → fixed upstream in llm-worker-tools (entry below) rather than "avoid diff
-    payloads". (2) The PreToolUse commit-gate fires on the whole Bash call BEFORE a chained
-    `attest && git commit` executes, so the attestation half hadn't run when the gate checked — minor
-    ergonomic trap, workaround = attest as its own call; a gate that could recognize the attest step in
-    the same chain would remove the trap (low value, noting only).
-  - **(inefficient-feeding) None material.** Recon/design-review/impl/post-review all via subagents
-    returning conclusions or delta reports; NIM took the design pass free; diff bodies never entered main
-    context (only stats + targeted greps + the follow-up fix's hunk view). One llm-read lane burned ~4
-    failed calls before being rerouted to subagents — now fixed at the tool layer.
+- **Friction-walk lesson (D-66/67 slice-1 ownership-gate lap):** design-level adversarial review pays for
+  itself before a line is written, and review depth should scale with delicacy
+  (`[[delegate-adversarial-phases-to-separate-agent]]`) — see memory. Open tool sliver (low value): the
+  PreToolUse commit-gate fires on the whole Bash call before a chained `attest && git commit` runs, so the
+  attestation half hasn't executed when the gate checks (workaround = attest as its own call); a gate that
+  recognized the attest step in the same chain would remove the trap.
 
-- **Lap friction walk — shared-logic remediation lap (2026-07-09).** Subagent-implemented 13-commit
-  program (V1–V7 + dedup bundle + C1/C2): parallel disjoint-file implementers, central build+test+commit,
-  independent adversarial review per loop-core/delicate commit, repair rounds on CONCERNS.
-  - **(ambiguous-direction) Adversarial review caught real defects the author pass + green targeted suites
-    missed — in BOTH delicate items.** V2 round-1: the declared-surface fallback reopened the exact
-    over-inclusion defect being fixed; round-2: force-replan dropped the snapshot (the capture-once test
-    coverage sat on a production-dead path) + case-fold sibling admission. C1: a reachable zero-dispatch
-    log-event drop the implementer's "byte-identical" claim missed, + an 8-9× per-scan derivation
-    regression. Four defects, zero caught by the authors' own passing tests.
-    [[delegate-adversarial-phases-to-separate-agent]] keeps earning its keep; review depth should scale
-    with delicacy (both got full-vector prompts, and both needed them).
-  - **(tool-should-decide) Session-limit terminations mid-edit leave multi-file WIP with no tool-level
-    ledger of per-agent intent.** Three concurrent implementers died mid-edit on a quota wall; recovery
-    worked via transcript-resume + `git status` triage, but attribution of half-done hunks to owners was
-    manual. The remediate-code dispatch machinery already solves this (per-node worktrees + claims) — for
-    ad-hoc Agent-tool fan-out it remains host judgment. Also: remote main moved mid-lap → rebase conflict
-    on the backlog (the re-fetch-before-first-write guard, hit live again).
-  - **(inefficient-feeding) None.** Implementers edited directly and returned compact delta reports;
-    reviewers returned verdicts; builds/tests batched centrally; no file bodies through main context.
+- **Friction-walk lesson (shared-logic-audit validation lap):** an external audit catalog is leads, not
+  verdicts — validate its rows against current code + design-of-record before remediation intake
+  (`[[external-audit-catalogs-are-leads]]` / `[[spec-degradation-and-doc-staleness]]`) — see memory. Open
+  tool gap: remediate's grounding phase catches phantom PATHS but not stale CLAIMS ("X is duplicated" when X
+  was single-sourced) — no tool support for claim-staleness (inherently judgment; handled by subagent
+  verification today).
 
-- **Lap friction walk — shared-logic-audit validation lap (2026-07-09).** Assessment lap (no code
-  changes): 4 parallel read-only subagents verified an external agent's shared-extraction catalog +
-  7 findings; verdicts above (V1-V7) + the dedup forward track below.
-  - **(ambiguous-direction) A third-party audit catalog is leads, not verdicts — half its architectural
-    rows were stale or already-adjudicated.** The catalog proposed unifying the rolling lifecycle and
-    hybrid spill (shipped/adjudicated: shared `driveRolling`, `HybridSpillCoordinator`, D-66/67 "full
-    unification is WRONG") and a `FindingAdmissibilityPolicy` merging two different concerns. Feeding it
-    raw to remediate-code would have re-built shipped work and contradicted the design-of-record. Same
-    verify-premises-before-building pattern as [[spec-degradation-and-doc-staleness]], now for EXTERNAL
-    input: catalog rows need validation against current code + design-of-record before remediation intake.
-  - **(tool-should-decide) Claim-staleness grounding has no tool support.** remediate's grounding phase
-    catches phantom PATHS but not stale CLAIMS ("X is duplicated" when X was single-sourced last week) —
-    the paths all exist, the assertion is what's dead. Inherently judgment; handled here by subagent
-    verification. Acceptable as host/subagent work; noting the gap.
-  - **(inefficient-feeding) None.** All recon via 4 parallel subagents returning file:line conclusions;
-    main context received no file dumps; spot-checks were targeted greps.
-
-
-- **Lap friction walk — backlog-clearance lap (2026-07-09).** Subagent-driven lap: parallel read-only recon →
-  I own loop-core impl + review, delegate mechanical impl to subagents, an independent adversarial subagent per
-  loop-core change. Shipped INV-WH fix, the loop-core guard + gate, the D-68 fold; assessed D-69; handed off D-66/67.
-  - **(ambiguous-direction) Owner-chosen option premises + backlog framings got falsified by measurement/recon
-    mid-build — recurring pattern.** The guard's owner-picked "mechanical exclude-heavy, per-node" premise assumed
-    the exclude-heavy complement is FAST; measurement showed 92s → impractical per-node, so I loop-core-gated it
-    (surfaced the deviation). D-69's "build tool-enforcement" framing was mostly-already-shipped (friction 3-layer +
-    D-68). D-66/67's "unify the lifecycle" framing was OVERTURNED by recon (full unification is the WRONG endpoint —
-    genuine divergence). Same lesson as the recurring [[spec-degradation-and-doc-staleness]] entries below: a backlog
-    item / a chosen option / a design memory is a point-in-time PROPOSAL; verify its premises against current code AND
-    a real measurement BEFORE committing to the literal instruction. Not yet tool-enforceable; a review-before-build
-    discipline.
-  - **(tool-should-decide) The pre-commit gate silently failed OPEN in every linked worktree.** The staged-snapshot
-    materialization put its scratch index under `join(root,'.git',…)`, but in a LINKED worktree `.git` is a FILE, so
-    every git-with-scratch-index call failed → the ENTIRE gate (typecheck, doc-contract, and the new loop-core check)
-    no-op'd fail-open on any divergent commit. A gate that silently no-ops is worse than no gate (false assurance).
-    FIXED this lap (scratch index → os.tmpdir()). Durable lesson: a tool that fail-opens on infra fault must make the
-    no-op OBSERVABLE, not silent — consider a one-line stderr when the staged-snapshot path bails.
-  - **(inefficient-feeding) None material.** Recon routed through parallel read-only Explore/general subagents
-    returning conclusions + file:line refs; main context received specs + diffs to review, not file dumps. One
-    deliberate full-region read (the `nextStep.ts` fork) for a delicate hand edit. No god-file re-read loop.
-
-- **Lap friction walk — backlog-orchestration lap (2026-07-08).** Orchestrated lap: parallel read-only recon
-  agents → serial implement-agent-per-item with adversarial review before each commit. Shipped six backlog code
-  items (wrapper passthrough D-61, vi.spyOn barrel guard INV-12, accept-node stray-worktree guard, convergence
-  CE fingerprint, validate-artifact cross-gates, `score-tokens` harness). Three-category walk:
-  - **(ambiguous-direction) A backlog item's suggested FIX was weaker than the ideal one.** D-61 proposed "a
-    parity test (wrapper-reachable ⊇ cli.ts commands)". The enforce-in-tooling ideal is a passthrough-to-dist
-    DEFAULT — dist/cli.js becomes the single source of truth and wrapper/CLI drift is *structurally impossible*,
-    no hand-maintained allowlist. A lap that literally implemented the suggested test would have shipped a
-    weaker guard needing perpetual maintenance. Reinforces [[backlog-item-states-invariant-not-fix-mechanism]]:
-    a backlog item's impl suggestion is a lead, not a verdict — re-derive the ideal fix from the property.
-  - **(tool-should-decide) The multi-agent write path is forced serial by a shared worktree.** Parallel
-    implement agents can't safely edit the same working tree (collision + green-at-every-commit), so recon
-    parallelized but implementation serialized one-item-at-a-time. Agent `isolation:"worktree"` would allow
-    parallel writes but carries its own strand traps ([[no-agent-isolation-worktree-for-dispatch-nodes]], the
-    very bug fixed this lap). No clean tool fix beyond the existing remediate-code dispatch machinery (which
-    already does bounded parallel worktree units + merge) — for ad-hoc dev fan-out, serial-write is correct.
-    Attested, not a new defect.
-  - **(inefficient-feeding) None.** Recon routed through parallel read-only Explore/general agents that returned
-    conclusions + implementation specs (file+line refs), never file dumps; each implement agent read its own
-    scope. Main context received specs and diffs to review, not raw file bodies. No large-file re-read loop.
-
-- **Lap friction walk — arbitrage Phase-0 lap (2026-07-08).** Full three-category walk of the doc-review +
-  dial-adjudication + arbitrage-increment-1 lap:
-  - **(ambiguous-direction) A forward-track design memory carried two falsified technical premises — SECOND
-    instance of the pattern below.** [[arbitrage-dispatch-tier-design]] (written 2026-07-07) asserted (a)
-    "`deriveCostRank` prices free pools ~0 once registered" — FALSE (a non-models.dev model id falls to the
-    *worst* unknown-price band, the opposite of free-first), and (b) opencode-free is `Bearer public` zero-auth —
-    which needed live verification (the docs describe a paid API-key tier; the free-model path *does* work with
-    `Bearer public`, confirmed by probing). A lap trusting the memory would have shipped a config example that
-    ranks *last* + assumed an unverified endpoint. Verifying before building (live probe + seam map) caught both.
-    This is the exact recurrence of the entry immediately below — a design memory's technical premises must be
-    re-verified against current code AND live endpoints BEFORE building, not assumed. That the same pattern
-    recurred within one day is the signal it isn't yet tool-enforced; the durable fix is still
-    [[spec-degradation-and-doc-staleness]] (a memory is a point-in-time proposal, not a live spec).
-  - **(tool-should-decide) The wrapper dispatch table can silently drift from `cli.ts`'s command set (D-61).**
-    `audit-code cleanup` was documented + fully implemented in `src/audit/cli.ts` but had no case in
-    `wrapper/audit-code-wrapper-lib.mjs`, so the packaged bin answered `Unknown command: cleanup` for a
-    long-standing gap. Fixed + added a reachability test for `cleanup` specifically — but the GENERAL guard is
-    missing: nothing asserts the wrapper dispatch table covers `cli.ts`'s command set (or the documented
-    commands). A parity test (wrapper-reachable ⊇ cli.ts commands) would enforce it and catch the next drift.
-    [[enforce-robustness-in-tooling-not-host-discretion]]
-  - **(inefficient-feeding) None this lap** — recon was routed through Explore/`llm`-style subagents (the seam
-    map, the adversarial review) so the main context received conclusions, not file dumps; no large-file
-    re-read loop. Category attested clean.
-
-- **A forward-track design memory outlived a major closure and sent a build in the wrong initial direction
-  (ambiguous-direction, 2026-07-08).** The cost↔speed dial's design (memory
-  [[host-provider-misattribution-nim-codex]] forward-track, written 2026-07-07) defined its throughput axis +
-  free-pool-max in terms of the **AIMD adaptive concurrency ceiling** — which was CLOSED and reverted the SAME
-  window ([[concurrency-is-declared-or-absent-never-learned]]). A lap that trusted the memory built a
-  declared-*rate* throughput axis (v1) before the stale-AIMD dependency was caught and the owner re-steered to
-  auto-derived concurrency. No lasting damage (caught pre-merge, λ=0 default kept it safe), but the lesson
-  generalizes [[spec-degradation-and-doc-staleness]]: **when a forward-track predates a since-landed closure,
-  re-reconcile its premises against current invariants BEFORE building, not after.** A design memory is a
-  point-in-time proposal, not a live spec — the same "spec is right, the design is wrong" rule that killed
-  C3-AIMD applies to a memory that cites a deleted mechanism.
-
-- **A lap reported "merged" before its work was on remote `main` → the next lap re-did it (faithful-reporting /
-  pipeline-ownership failure, 2026-07-07).** Two laps both did the A1 rename. Root cause, established from git: the
-  first lap's rename commit (`7688febe`) was authored 23:24:56, committed 23:25:17, and did not land on remote `main`
-  until **23:25:30** — yet it had been *reported* to the owner as "completed, committed, and merged" before the second
-  lap was launched. The second lap's `start-lap` fetched the true remote tip (`db1c0e11`, v0.32.32, **no A1**) before
-  23:25:30, so HANDOFF still queued A1 and it correctly built it; its identical commit was then rejected on push
-  (behind remote) and discarded — a full rename's worth of wasted work. `start-lap` behaved correctly against the
-  remote state that existed; the defect is upstream. Two independent fixes, both belong in tooling not host habit:
-  (1) **a lap is not "done" until its work is on remote `main`** — the completion signal an operator trusts must be
-  gated on the push having landed (pipeline-ownership; the first lap violated this by reporting merged pre-push).
-  (2) **`start-lap` re-fetch-before-first-write guard** — re-fetch + re-read HANDOFF immediately before the first
-  commit so a mid-lap merge is caught before the duplicate lands (bounds the blast radius to a rejected push, not
-  wasted labor). The labor-saving fix is still the cooperative-runs claim ([[multi-ide-concurrent-runs-design]]
-  task-claiming): stake a claim on the item at lap start so a second lap sees it taken. Salvage from this incident:
-  the loser's sweep caught a stale `// Local-subprocess` comment the winner's rename missed — landed as a follow-up chore.
-
-- **THREE adversarial reviews in a row found a defect the author's own green suite missed (ambiguous-direction).**
-  INV-QD-15's first cut left `tests/remediate/wave-scheduler.test.ts` RED and would have shipped; the bucket
-  deletion's first cut promoted a latent `success`-clears-live-cooldown bug (INV-QD-16) to the sole failure mode;
-  and the v0.32.31 bug-(4) fix's first cut DROPPED the `pool.quotaStateEntry` snapshot entirely (green suite +
-  the new regression all passed), but an independent reviewer showed the snapshot is load-bearing in the
-  transient-read window — a prior-run cooldown would be lost to proactive spill on a Windows EBUSY read flake.
-  Corrected to `live ?? snapshot` order (keep the fallback). All three caught only by an independent reviewer agent,
-  never the author pass. This is [[delegate-adversarial-phases-to-separate-agent]] earning its keep — but it is
-  still a *host habit*, not a tool obligation. The remediate contract pipeline already runs adversarial rounds;
-  the same gate should exist for hand-authored (non-node) changes to loop-core modules. A related, generalizable
-  cause on the bug-(4) case: the backlog item stated the *fix-mechanism* ("prefer live") but not the *invariant*
-  (don't lose a prior-run cooldown to a transient IO flake), so the mechanism read as "drop the snapshot" — the
-  [[backlog-item-states-invariant-not-fix-mechanism]] failure mode, in the wild.
+- **Friction-walk lesson (backlog-clearance lap):** a backlog item / chosen option / design memory is a
+  point-in-time proposal — verify its premises against current code AND a real measurement before building
+  (`[[spec-degradation-and-doc-staleness]]`) — see memory. Open tool sliver: the pre-commit gate that
+  silently failed-open in linked worktrees is FIXED (scratch index → `os.tmpdir()`), but the durable
+  improvement — make a fail-open on infra fault OBSERVABLE (a one-line stderr when the staged-snapshot path
+  bails) rather than silent — is not yet done.
 
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
@@ -370,12 +153,58 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   multi-worker run — cold-start calibration slope + the resume path especially want a live check.
   Relates to [[claude-usage-endpoint-body-shape]] / [[claude-quota-credential-resolution]] /
   [[cross-provider-quota-matrix]] / [[quota-dispatch-vision]].
-  - **⬇ Live-run watch** (metered provider + large target; `AUDIT_TOOLS_LIVE_QUOTA=1` to force it): at the
+  - **⬇ Live-run watch** (a metered provider + large target is the exerciser — the run itself hits the
+    wall; `AUDIT_TOOLS_LIVE_QUOTA=1` only enables the live-credential test probe, it does not force a
+    production wall): at the
     rate wall the run must **pause gracefully, not crash**, and leave every in-flight worktree intact; on
     resume it continues from the pause with no lost/redone work. Early on, the tokens-per-percent slope
     should *learn* (dispatch pacing adjusts after the first window reading) rather than stay at the
     cold-start default. FAIL = crash/stall at the wall, discarded worktrees, or a resume that re-does or
     drops packets.
+
+- **Host-dispatch path quota enforcement — the conversation-first path bypasses the reactive engine.**
+  The admission *decision* (`computeDispatchAdmission`) is shared and already runs on the host path
+  (`grantLeases:true` → `granted_packet_ids` is the pacing width). But the enforcement/observation EDGES
+  only run on the in-process/provider path. Recon + adversarial design review (2026-07-10) established
+  the real gaps (design-of-record in memory [[quota-onetrack-always-on]] + [[quota-dispatch-vision]]):
+  - **(SHIPPING — Increment A, cold-start grant clamp + audit blind-dispatch parity).** The correctness
+    core: at cold-start (live snapshot, no learned `tokens_per_pct` yet) `deriveTokenBudget` returns
+    `budget=null, calibrating=true`, `remaining_token_budget` stays null → `admissionPoolsFromSummaries`
+    maps null→`+Infinity` → admission grants the ENTIRE frontier. The calibration clamp existed only on
+    the scheduler's `waveSize` (which the host does NOT obey — it obeys `granted_packet_ids`), so wave 1
+    ran UNPACED even with a healthy snapshot. Fix: thread a per-pool `calibrating` flag to `admitBatch` so
+    the effective host-grant count cap = `calibrating ? min(declaredCap ?? ∞, TOKEN_BUDGET_COLD_START_SLOTS)
+    : declaredCap` (inside admitBatch so leases stay in sync; only affects `grantLeases:true` — the
+    in-process path returns before admitBatch). Plus audit host path emits the `quota_blind_dispatch` loud
+    friction remediate already has (`marshal.ts:404`) when there is NO snapshot at all.
+  - **(OPEN — Increment B, FOCUSED lap) pause-at-wall step producer on the host path.** When admission
+    grants zero at the wall (`granted.length===0 && (cooldown_until || budget===0)`) the host branch must
+    emit each orchestrator's OWN resumable pause step. Re-scoped by review: this is a NEW
+    snapshot→paused-state/terminal producer per orchestrator (audit must synthesize+persist a
+    `RollingEngineLifecycleState`/`paused_state` advancing `pause_count`; remediate must set
+    `partial_completion_terminal{earliest_reset_at}`) — neither exists on the host branch today. Do NOT
+    unify the two terminals ([[rolling-lifecycle-unify-full-unification-wrong]]). Spec the resumability
+    contract before coding; matches the "don't rush pause/claim/quota" caution.
+  - **(OPEN — host-path lease TTL).** `finalizeDispatchQuota` mints host-grant leases at the default 30s
+    `STALE_LOCK_MS` TTL, but a host subagent wave runs for MINUTES → leases expire mid-wave → ingest
+    reconcile no-ops → a ~30s-to-minutes window where a co-located concurrent admitter can double-grant the
+    same account ([[multi-ide-concurrent-runs]]). Fix: pass a wave-length `leaseTtlMs` on the host path, or
+    document the lease as reconcile-only bookkeeping + add a concurrent-admitter test. (Stale-lease
+    *accumulation* was refuted — they self-clear.)
+  - **(DROPPED — reactive host-report channel).** Having the host report Agent-tool subagent 429/quota
+    deaths back to `recordLimit` was considered and DROPPED: it safe-degrades to nothing in the common case
+    (the host cannot serialize harness-level subagent deaths), i.e. the exact host-discretion latent-failure
+    [[enforce-robustness-in-tooling-not-host-discretion]] bans. The proactive `/usage` backbone + Increment B
+    pause cover correctness. Reconsider only as zero-correctness telemetry with a test proving proactive
+    wall-safety with the channel entirely absent.
+
+- **Critical-flow LLM fallback is spec'd but not wired (doc-review DD-14 #3).** `spec/audit/audit-goals.md`
+  says "LLM fallback is allowed only when [the deterministic confidence] check fails." The deterministic
+  side is real (`criticalFlows.fallback_required` in `src/audit/extractors/flows.ts`), but its only consumer
+  (`structureExecutors.ts:173`) merely appends an informational sentence to a progress string — no executor,
+  dispatch, or worker prompt triggers an actual LLM critical-flow-finding pass on the flag. Either build the
+  wiring (an LLM critical-flow pass gated on `fallback_required`) or, if judged not worth it, downgrade the
+  norm to a spec-only target. The norm is a valid design intent; the gap is the unbuilt consumer.
 
 - **Friction detection — M-QUOTA escalation chain: live validation env-bound.** The
   `recordLimit → escalate → strand → quota_escalation friction` chain is unit-tested end-to-end on both
@@ -396,20 +225,9 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
-- **`llm read` JSON-contract break on review-framed diff payloads — FIXED upstream 2026-07-09; publish
-  pending operator WIP.** Reasoning models (nemotron-550b, deepseek-v4-pro) prefixed chain-of-thought
-  prose to the JSON on larger review-framed diffs → strict-parse crash. Fixed in `C:\Code\llm-worker-tools`
-  commits `01f703c` (response_format json_object + 4xx fallback; balanced-brace tolerant extraction;
-  stern-nudge retry) + `a8d13b3` (nudge retry gets its own fresh timeout window), live-verified against
-  real NIM; deployed globally from a clean-HEAD tarball. Open: npm publish of llm-worker-tools blocked
-  on the operator's own uncommitted WIP there (`bin/llm-worker-tools.mjs` + 4 more; preflight requires
-  clean tree) — operator call. Usage note: framing must map output into `llm read`'s
-  `{summary,findings[],open_questions[]}` schema; a shape-diverging framing now fails CLEANLY.
-  - **Residual (2026-07-09 lap): very large review-framed payloads (~700-line deletion diff) still fail
-    even post-fix** — clean error after the nudge retry, no crash, but no result either. Workaround that
-    worked: split the payload (review the small collateral-file diff via `llm read`; reduce the big
-    deletion to its ADDED lines via `git diff -U0 | grep '^+'` and review those directly). If it recurs,
-    consider a chunked-review mode in llm-worker-tools rather than host-side splitting.
+- **`llm read` very large review-framed payloads still fail post-fix.** A ~700-line review-framed diff
+  still fails after the upstream JSON-contract fix (clean error, no result) — workaround: split the
+  payload; if it recurs, add a chunked-review mode in llm-worker-tools rather than host-side splitting.
 
 ## Forward tracks
 
@@ -680,7 +498,10 @@ Standing gotchas worth keeping for any agent (strong or weak):
   main**, plus built 2b blind to a pinned design section it lacked — then had to `git reset --hard
   audit-tools/main` + cherry-pick + reconcile. First action of every lap:
   `rtk git fetch audit-tools main && git log --oneline HEAD..audit-tools/main` — if that lists commits,
-  rebase/reset onto main BEFORE writing code. (Strengthens [[audit-tools-worktree-traps]].)
+  rebase/reset onto main BEFORE writing code. (Strengthens [[audit-tools-worktree-traps]].) **Mitigation
+  (not a hard gate):** `.claude/skills/start-lap/SKILL.md` operationalizes this sync-first step as an
+  agent instruction — it is agent-instruction-driven, so it reduces the risk but does not mechanically
+  enforce the fast-forward the way a git gate would.
 
 - **Background long-running command piped through `tail` hides interim progress.** Running a long command
   in the background as `cmd 2>&1 | tail -N` (e.g. `npm run release:patch:publish 2>&1 | tail -40`) makes the
