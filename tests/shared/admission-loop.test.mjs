@@ -332,6 +332,75 @@ test("dial: spill still walks the blended (speed) order when the faster pool's c
   expect(counts["slower#a/m"]).toBe(1); // overflow spills to the slower pool
 });
 
+// ── Host-grant lease TTL (host-path lease-TTL fix) ───────────────────────────
+// A host subagent wave runs for MINUTES; a lease minted at the ledger's 30s
+// STALE_LOCK_MS default expires mid-wave. Expired leases stop counting toward
+// BOTH the pool budget and the declared-cap in-flight count (admitBatch seeds
+// the count from the pruned snapshot), so a concurrent co-located admitter
+// would see the account free and double-grant it. Host grants therefore carry
+// the wave-envelope DISPATCH_LEASE_TTL_MS.
+
+const { computeDispatchAdmission } = await import(
+  "../../src/shared/dispatch/admissionLoop.ts"
+);
+const { DISPATCH_LEASE_TTL_MS } = await import(
+  "../../src/shared/quota/reservationLedger.ts"
+);
+const { STALE_LOCK_MS } = await import("../../src/shared/quota/fileLock.ts");
+
+async function ledgerAt(clock) {
+  const dir = await mkdtemp(join(tmpdir(), "admission-ttl-"));
+  const path = join(dir, "reservations.json");
+  return { path, ledger: new ReservationLedger(path, clock) };
+}
+
+test("host grant mints wave-envelope leases (DISPATCH_LEASE_TTL_MS), not the 30s ledger default", async () => {
+  const t0 = 1_000_000;
+  const { ledger } = await ledgerAt(() => t0);
+  await computeDispatchAdmission({
+    packets: [{ id: "p1", inputTokens: 100, complexity: 0.5 }],
+    pools: [pool("host#a/m")],
+    outputCap: 100,
+    grantLeases: true,
+    ledger,
+  });
+  const leases = Object.values(await ledger.snapshot()).flat();
+  expect(leases.length).toBe(1);
+  expect(leases[0].expiresAt).toBe(t0 + DISPATCH_LEASE_TTL_MS);
+  expect(DISPATCH_LEASE_TTL_MS).toBeGreaterThan(STALE_LOCK_MS);
+});
+
+test("a concurrent admitter arriving past the 30s default still sees the wave's cap consumed (no double-grant)", async () => {
+  const t0 = 1_000_000;
+  let now = t0;
+  const { path } = await ledgerAt(() => now);
+  const cappedPool = () => pool("host#a/m", { declaredCap: 1 });
+  const admitOnce = (id) =>
+    computeDispatchAdmission({
+      packets: [{ id, inputTokens: 100, complexity: 0.5 }],
+      pools: [cappedPool()],
+      outputCap: 100,
+      grantLeases: true,
+      // Each admitter is its own process in production — fresh ledger instance,
+      // same shared file.
+      ledger: new ReservationLedger(path, () => now),
+    });
+
+  const first = await admitOnce("p1");
+  expect(first.granted_packet_ids).toEqual(["p1"]);
+
+  // Mid-wave, after the OLD default TTL would have expired the lease.
+  now = t0 + STALE_LOCK_MS + 1;
+  const second = await admitOnce("p2");
+  expect(second.granted_packet_ids).toEqual([]); // cap still held by the live wave lease
+  expect(second.explains[0].reason).toBe("cap_reached");
+
+  // Past the wave envelope the orphan lease self-clears (crash recovery intact).
+  now = t0 + DISPATCH_LEASE_TTL_MS + 1;
+  const third = await admitOnce("p3");
+  expect(third.granted_packet_ids).toEqual(["p3"]);
+});
+
 // deriveThroughputConcurrency — the pool-class-aware derivation itself (the R-1 fix).
 test("deriveThroughputConcurrency: source uncapped ⇒ +Inf, source capped ⇒ cap, host ⇒ subagents (default 1)", async () => {
   const { deriveThroughputConcurrency } = await import("../../src/shared/dispatch/admissionLoop.ts");

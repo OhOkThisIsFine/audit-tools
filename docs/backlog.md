@@ -68,6 +68,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (subagent recon returned conclusions+file:line; doc cleanup delegated). One waste: the post-impl reviewer died on a
   process restart (state lost) → re-ran one review cycle.
 
+- **Friction-walk (lease-TTL lap, 2026-07-10):** (tool-should-decide) the SessionStart doc-review hook
+  reported "19 open items" from the worktree's PRE-SYNC state — all 19 were already applied+resolved on
+  main; the hook should reconcile against the fetched remote resolved-state (or flag "worktree behind main —
+  list may be stale") before surfacing. (ambiguous-direction) HANDOFF's ▶ IMMEDIATE NEXT pointed at a
+  live-run-GATED item (D-66/67 slice-3), so the actual next actionable had to be inferred from track prose —
+  fixed this lap by keeping gated items out of the ▶ slot. Feeding was clean (recon + adversarial review as
+  subagents returning file:line conclusions). Also: the dormant half-built `leaseTtlMs` seam carried a doc
+  comment describing behavior nothing exercised — a seam built "for later" without a consumer is a latent
+  false-documentation trap (this lap wired it).
+
 - **M-B3 citation gate re-emits the WRONG phase — gate input is `module_decomposition`, repair target is
   `contract_finalization` (2026-07-09).** `evaluatePreCriticCitationGrounding` (src/remediate/steps/contractPipeline.ts
   ~1209) grounds `module_decomposition.file_scope` against the working tree, but on failure the router re-emits
@@ -180,71 +190,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     cold-start default. FAIL = crash/stall at the wall, discarded worktrees, or a resume that re-does or
     drops packets.
 
-- **Host-dispatch path quota enforcement — the conversation-first path bypasses the reactive engine.**
-  The admission *decision* (`computeDispatchAdmission`) is shared and already runs on the host path
-  (`grantLeases:true` → `granted_packet_ids` is the pacing width). But the enforcement/observation EDGES
-  only run on the in-process/provider path. Recon + adversarial design review (2026-07-10) established
-  the real gaps (design-of-record in memory [[quota-onetrack-always-on]] + [[quota-dispatch-vision]]):
-  - **(SHIPPING — Increment A, cold-start grant clamp + audit blind-dispatch parity).** The correctness
-    core: at cold-start (live snapshot, no learned `tokens_per_pct` yet) `deriveTokenBudget` returns
-    `budget=null, calibrating=true`, `remaining_token_budget` stays null → `admissionPoolsFromSummaries`
-    maps null→`+Infinity` → admission grants the ENTIRE frontier. The calibration clamp existed only on
-    the scheduler's `waveSize` (which the host does NOT obey — it obeys `granted_packet_ids`), so wave 1
-    ran UNPACED even with a healthy snapshot. Fix: thread a per-pool `calibrating` flag to `admitBatch` so
-    the effective host-grant count cap = `calibrating ? min(declaredCap ?? ∞, TOKEN_BUDGET_COLD_START_SLOTS)
-    : declaredCap` (inside admitBatch so leases stay in sync; only affects `grantLeases:true` — the
-    in-process path returns before admitBatch). Plus audit host path emits the `quota_blind_dispatch` loud
-    friction remediate already has (`marshal.ts:404`) when there is NO snapshot at all.
-  - **(Increment B — SHIPPED 2026-07-10, this branch.) pause-at-wall step producer on the host path.**
-    The host branch now emits each orchestrator's OWN resumable pause when admission grants zero OR a
-    cooldown is active. Shared one-core wall predicate `detectHostDispatchWall({grantedCount, cooldownUntil,
-    now})` (`src/shared/dispatch/hostDispatchWall.ts`); trigger closes F1 at the producer without touching
-    the null→+Infinity admission map (correct for the in-process throttle). Audit: fresh-snapshot
-    `advanceHostDispatchPause` (`src/audit/cli/dispatch/pausePersist.ts` — persist helpers EXTRACTED there
-    from `rollingAuditDispatch.ts` so in-process + host share one copy, holding the paused_state⊕terminal
-    XOR invariant) → resumable `blocked` step, `checkLivelockGuard`-bounded to partial-coverage synthesis;
-    terminal carries TASK ids (not packet ids) so `deriveAuditState` routes synthesis. Remediate: host
-    branch sets `partial_completion_terminal{quota_paused, earliest_reset_at}` (block_ids) so the existing
-    `partial_terminal` obligation emits `quota_paused`, nodes stay pending. Both reconcile the reserved
-    leases on pause (C3). Design-adversarially reviewed (v1 spec had an `advancePausedState`-misfit + an
-    empty-stranded-set bug + a lease leak — all fixed pre-code) and impl-adversarially reviewed (the audit
-    task-id routing bug was caught + fixed). Do NOT unify the two terminals
-    ([[rolling-lifecycle-unify-full-unification-wrong]]). Design-of-record: [[quota-onetrack-always-on]].
-    - **Residuals (a) + (b) SHIPPED 2026-07-10 (this branch), corrected scope.** Source verification
-      overturned the note's premise that the in-process rolling paths "would still fan out" a cooldown
-      over-grant: the in-process engine (`driveRolling`) paces via `scheduleWave`, which floors the wave to
-      1 during cooldown and spills off cooldown'd pools (`scheduler.ts` cooldown branch,
-      `rollingDispatch.ts` degraded-pool spill) — so `driveRollingAuditDispatch` +
-      `driveRollingImplementDispatch` are ALREADY cooldown-safe and were correctly left untouched (walling
-      them would inject spurious pauses). The F1 hole only bites where the HOST fans out
-      `admission.granted_packet_ids` blindly. **(a)** The one genuine gap was the remediate hybrid-ATTENDED
-      emit (`dispatch_implement_rolling`, host-subagent driver); the wall now fires INSIDE
-      `prepareHostRollingDispatch` — after admission, before any claim/worktree (a claim held across the
-      pause reads `contested` on resume and strands the node) — gated to the cooldown shape AND a non-empty
-      granted host partition (an empty grant, even under cooldown, has nothing to fan out → flows to the
-      caller's empty-frontier merge fold, matching the reference `dispatch_implement` path whose fold
-      precedes its wall). The caller reconciles leases + records the resumable `quota_paused` terminal.
-      **(b)** `advanceRollingPause`'s livelock terminal now expands the CURRENT pass's stranded PACKET ids to
-      their constituent TASK ids (via the run's `dispatch-result-map.json`, rewritten per pass) so
-      `deriveAuditState` (which matches `stranded_ids` against `task_id`) can unlock synthesis — the current
-      set is always present in this pass's map, avoiding the stale-id miss when an intervening partial
-      completion re-indexes packet ids. Parity with the host path's `advanceHostDispatchPause`
-      `strandedTaskIds`. (Rolling `getTerminal`'s packet-id
-      `stranded_ids` are display/log only — not consumed by a task-id-keyed matcher — so left as-is.) Tests:
-      `tests/audit/dc4.test.mjs` (terminal carries task ids), `tests/remediate/host-rolling-dispatch.test.ts`
-      (cooldown wall pauses pre-claim; empty grant does not wall).
-  - **(OPEN — host-path lease TTL).** `finalizeDispatchQuota` mints host-grant leases at the default 30s
-    `STALE_LOCK_MS` TTL, but a host subagent wave runs for MINUTES → leases expire mid-wave → ingest
-    reconcile no-ops → a ~30s-to-minutes window where a co-located concurrent admitter can double-grant the
-    same account ([[multi-ide-concurrent-runs]]). Fix: pass a wave-length `leaseTtlMs` on the host path, or
-    document the lease as reconcile-only bookkeeping + add a concurrent-admitter test. (Stale-lease
-    *accumulation* was refuted — they self-clear.)
-  - **(DROPPED — reactive host-report channel).** Having the host report Agent-tool subagent 429/quota
-    deaths back to `recordLimit` was considered and DROPPED: it safe-degrades to nothing in the common case
-    (the host cannot serialize harness-level subagent deaths), i.e. the exact host-discretion latent-failure
-    [[enforce-robustness-in-tooling-not-host-discretion]] bans. The proactive `/usage` backbone + Increment B
-    pause cover correctness. Reconsider only as zero-correctness telemetry with a test proving proactive
-    wall-safety with the channel entirely absent.
+- **Rolling-engine ledger-blocked retry spins at 50ms during a crash-orphan lease wedge (2026-07-10,
+  efficiency follow-up from the lease-TTL fix; adversarial-review finding).** With `DISPATCH_LEASE_TTL_MS`
+  (20 min, `src/shared/quota/reservationLedger.ts`), a crashed sibling's orphan lease can block an
+  in-process run's packet for up to the TTL — correct (waits, never double-grants), but the run loop's
+  pending retry tick (`rollingDispatch.ts` ~1109-1122, 50ms) then hammers `admitAgainstLedger` →
+  `withFileLock` read-modify-write per pending packet (~24k lock cycles worst case). Fix direction:
+  backoff on ledger-blocked retries, or heartbeat-renewed short leases (the ClaimRegistry pattern,
+  `auditStep.ts:96`) restoring ~30s crash recovery. Efficiency-only; folds naturally into D-66/67 slice-3
+  (heartbeat-on-long-claims) if that opens.
 
 - **Critical-flow LLM fallback is spec'd but not wired (doc-review DD-14 #3).** `spec/audit/audit-goals.md`
   says "LLM fallback is allowed only when [the deterministic confidence] check fails." The deterministic

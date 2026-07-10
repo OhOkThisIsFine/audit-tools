@@ -35,6 +35,18 @@ import { getQuotaStatePath } from "./state.js";
 // stops counting toward outstanding and the reservation returns automatically,
 // exactly mirroring the file lock's own abandoned-holder recovery.
 
+/**
+ * Lease TTL for a live LLM dispatch — a host-subagent wave grant or an in-process
+ * packet run. Real dispatches run MINUTES, not the seconds-scale `STALE_LOCK_MS`
+ * default: an expired lease stops counting toward both the pool budget AND the
+ * declared-cap in-flight COUNT (`admitBatch` seeds the count from the pruned
+ * snapshot), so a mid-flight expiry hands a concurrent co-located admitter a
+ * double-grant window on the same account. Normal completion reconciles the lease
+ * long before this TTL; it only bounds how long a CRASHED consumer's orphan lease
+ * can depress headroom (20 min — the task-claims execution-lease envelope).
+ */
+export const DISPATCH_LEASE_TTL_MS = 20 * 60_000;
+
 export interface ReservationLease {
   /** Opaque token minted at admit; required to reconcile (free) the reservation. */
   leaseId: string;

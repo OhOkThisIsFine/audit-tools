@@ -49,6 +49,7 @@ import { buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "../quota/capac
 import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { detectRateLimitError, computeCooldownUntil } from "../quota/errorParsing.js";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
+import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { tierRank } from "./tierRank.js";
 
 // ---------------------------------------------------------------------------
@@ -764,6 +765,10 @@ export function createRollingDispatcher<TPacket>(
       cost,
       budget,
       poolId: slot.poolId,
+      // The lease guards a live LLM call (minutes); the ledger's seconds-scale
+      // default would expire it mid-flight and hand a concurrent admitter a
+      // double-grant window. `handleResult` reconciles it on completion.
+      leaseTtlMs: DISPATCH_LEASE_TTL_MS,
     });
     if (decision.admitted && decision.leaseId !== null) {
       return { status: "admitted", lease: { leaseId: decision.leaseId, resourceKey } };

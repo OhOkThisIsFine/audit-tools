@@ -11,13 +11,12 @@
 - **Current version = `package.json`** (authoritative). Per-lap shipped detail is NOT narrated here
   (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
-- **Host-path quota enforcement track (started this lap).** The conversation-first host-dispatch path
-  bypassed the tool's reactive quota enforcement; recon + adversarial review found the real gaps.
-  **Increment A SHIPPED:** the cold-start over-grant fix (host grant was unbounded on wave 1 — now
-  clamped to the calibration batch via a per-pool `calibrating` flag through admission) + audit
-  blind-dispatch loud-degrade parity (single-sourced with remediate). **Open:** Increment B
-  (pause-at-wall step producer on the host path) + the host-path lease-TTL fix — see the
-  "Host-dispatch path quota enforcement" entry in `docs/backlog.md`.
+- **Host-path quota enforcement track — ✅ COMPLETE (2026-07-10).** Increment A (cold-start grant clamp +
+  blind-dispatch loud-degrade parity), Increment B + residuals (pause-at-wall producers), and the
+  lease-TTL fix (`DISPATCH_LEASE_TTL_MS` wave-envelope leases at both grant sites — the 30s default
+  expired mid-wave and opened a concurrent-admitter double-grant window) are all shipped. Design-of-record
+  in memory [[quota-onetrack-always-on]] / [[host-path-quota-enforcement]]. One efficiency follow-up in
+  `docs/backlog.md` (ledger-blocked 50ms retry spin during a crash-orphan wedge).
 - **Local env note:** the box now runs npm 12.0.0 — it blocks dependency install scripts by default
   and can emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable
   traps before any manual `npm install -g` / packaged-install work.
@@ -58,22 +57,18 @@
 
 ## Suggested ordering — everything open, sequenced
 
-**Quota host-path enforcement — Increment B SHIPPED (2026-07-10).** The host branch now emits each
-orchestrator's OWN resumable pause at the wall (`granted===0` OR active `cooldown_until`, closing F1) —
-shared `detectHostDispatchWall`; audit fresh-snapshot `paused_state`/`blocked` (livelock-bounded, terminal
-carries task ids); remediate `partial_completion_terminal{quota_paused}`; leases reconciled on pause. Design-
-+ impl-adversarially reviewed. **Increment-B residuals SHIPPED (2026-07-10):** the hybrid-attended emit
-(`dispatch_implement_rolling`) now walls on cooldown inside `prepareHostRollingDispatch` (pre-claim); the
-in-process livelock terminal expands current-pass stranded packet ids → task ids (the in-process
-`driveRolling*` paths were verified already-cooldown-safe via `scheduleWave` — deliberately not walled).
-**Still open (this track):** host-path lease-TTL (wave-length `leaseTtlMs`). Full detail in
-`docs/backlog.md` → "Host-dispatch path quota enforcement".
+**▶ IMMEDIATE NEXT — the open-bugs cluster in `docs/backlog.md`** (each lean unless noted): M-B3
+citation gate re-emitting the wrong phase; audit worker scratch polluting the audited repo root;
+`validate-artifact --name judge_report` unsatisfiable self-check; doc-review auto-apply re-asserting a
+resolved decision after a process restart; critical-flow LLM fallback spec'd-but-unwired (owner call:
+build vs downgrade the norm). Pick by bite-frequency — the first three each burned a live run.
 
-**▶ IMMEDIATE NEXT — D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the LONG-lived
-execution claims — `task-claims.json` 20-min lease, remediate node-claims — which today hold a lease
-with no live heartbeat; FOCUSED-LAP, delicate, and **live-run-gated** — only pursue if a real
-cooperative run shows the staleMs-wide probe window from slice-1 actually bites). Fold the `phase:main`
-layer-2 asymmetry (slice-1 input) into its design. See the D-66/67 roadmap entry in `docs/backlog.md`.
+**WAITING (gated, not next): D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the
+LONG-lived execution claims — `task-claims.json` 20-min lease, remediate node-claims; FOCUSED-LAP,
+delicate, **live-run-gated** — only pursue if a real cooperative run shows the staleMs-wide probe window
+from slice-1 actually bites). Fold the `phase:main` layer-2 asymmetry (slice-1 input) into its design;
+the lease-TTL lap's ledger-spin follow-up (backlog → Open bugs) also folds in here. See the D-66/67
+roadmap entry in `docs/backlog.md`.
 
 **D-66/67 slice-1 SHIPPED, slice-2 VERIFIED-CLOSED (not worth building).** Design-of-record + residuals in
 `docs/backlog.md` → "Unify the full rolling-dispatch lifecycle shell"; [[rolling-lifecycle-unify-full-unification-wrong]]

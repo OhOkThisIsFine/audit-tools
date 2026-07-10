@@ -994,6 +994,7 @@ export {
   ReservationLedger,
   getReservationLedgerPath,
   createReservationLedger,
+  DISPATCH_LEASE_TTL_MS,
 } from "./quota/reservationLedger.js";
 export type {
   OutputReservationInput,

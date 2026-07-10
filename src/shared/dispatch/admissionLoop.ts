@@ -19,6 +19,7 @@
 
 import { z } from "zod";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
+import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { estimatePacketCost } from "../quota/packetCost.js";
 import type { DispatchCapacityPoolSummary } from "../quota/capacity.js";
 import { TOKEN_BUDGET_COLD_START_SLOTS } from "../quota/scheduler.js";
@@ -205,6 +206,13 @@ export interface AdmitBatchInput {
    * intended extension point for cost/capability routing policy).
    */
   capable?: (pool: AdmissionPool, packet: AdmissionCandidate) => boolean;
+  /**
+   * Lease lifetime for this batch's grants; defaults to the ledger's own TTL
+   * (`STALE_LOCK_MS`). Grants that outlive a state mutation — a host-subagent
+   * wave, an in-process packet run — must pass a dispatch-length TTL
+   * ({@link DISPATCH_LEASE_TTL_MS}) or the lease expires mid-flight and a
+   * concurrent admitter double-grants the account (budget AND cap-count axes).
+   */
   leaseTtlMs?: number;
   /**
    * Cost↔speed dispatch bias (λ) ∈ [0, 1] — the operator-set operating point on the
@@ -438,6 +446,11 @@ export async function computeDispatchAdmission(input: {
     packets: candidates,
     pools: input.pools,
     ledger: input.ledger,
+    // Host-wave grants live for the WAVE (minutes of subagent work before
+    // ingest reconciles them), not the ledger's seconds-scale default — an
+    // expired lease frees both budget and the declared-cap count to a
+    // concurrent co-located admitter mid-wave (the host-path lease-TTL fix).
+    leaseTtlMs: DISPATCH_LEASE_TTL_MS,
     ...(input.capable ? { capable: input.capable } : {}),
     ...(input.dispatchBias != null ? { dispatchBias: input.dispatchBias } : {}),
   });
