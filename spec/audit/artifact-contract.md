@@ -14,7 +14,7 @@ Artifacts are the continuity layer for the single-entrypoint audit engine. They 
 ## Source of truth
 
 The canonical, machine-readable artifact registry is `ARTIFACT_DEFINITIONS` in
-`src/audit/io/artifacts.ts` — 36 entries, each declaring a filename, a phase
+`src/audit/io/artifacts.ts` — 37 entries, each declaring a filename, a phase
 (`intake` / `analysis` / `execution` / `reporting` / `supervisor`), and typed
 read/write functions (JSON, NDJSON, or plain text). This document is the
 declarative reference; that table is authoritative. For exact upstream
