@@ -47,8 +47,9 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `scripts/release-and-publish.mjs` runs a fast local pre-tag gate (`npm run check` only — the full `verify:release`
   already ran in this skill's preflight and runs again authoritatively in CI), bumps, tags `vX.Y.Z`, pushes, creates
   the GitHub Release (triggers OIDC trusted-publishing `publish-package.yml`). That workflow runs the gate as
-  parallel jobs — `gate` (`verify:checks`: check + deadcode + doc-manifest + build + host verifies + both
-  `smoke:*`) plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job (`needs: [gate, test]`)
+  parallel jobs — `gate` (`verify:checks`: deadcode + doc-manifest + build [subsumes typecheck] + host
+  verifies + both `smoke:*`) plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job
+  (`needs: [gate, test]`)
   uploads. The release script then waits for the whole run + npm propagation. **Trusted publishing is
   configured + working** — no tokens, no local bootstrap.
 - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.
