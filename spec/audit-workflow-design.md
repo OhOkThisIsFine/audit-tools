@@ -18,6 +18,8 @@ provider_confirmation       [user gate]
   → intent_checkpoint       [user gate]
   → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling]
   → design_review × 2       [parallel host_delegation: contract + conceptual]
+  → charter_clarification   [host_delegation loop, gated by ceiling+attention — Phase D]
+  → systemic_challenge      [host_delegation loop, gated by ceiling — Phase E]
   → planning
   → rolling_dispatch        [quota + capability-routed, ingestion folded in]
   → synthesis
@@ -59,7 +61,7 @@ broader coverage).
 
 ## Batch deterministic block
 
-Steps 2–8 (auto_fix → syntax_resolved → external_analyzers → structure_artifacts
+The deterministic obligations (auto_fix → syntax_resolved → external_analyzers → structure_artifacts
 → graph_enrichment → design_assessment → structure_decomposition) run in a single next-step call. The orchestrator advances
 through all pending deterministic obligations before returning. No separate
 roundtrip per step. Execution halts at the first host_delegation obligation or
