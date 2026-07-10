@@ -29,6 +29,32 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Lap friction walk — ledger-writer + acceptNode-inert-clean lap (2026-07-09, orchestrator + Haiku/Sonnet
+  recon+review agents; NIM `llm read` DOWN this session).** Two code fixes (parity ledger writer, acceptNode
+  inert-clean) + one verified-negative investigation, all reviewed + shipped v0.32.49.
+  - **(ambiguous-direction) The HANDOFF immediate-next was live-run-gated → unbuildable this lap, and a
+    backlog premise was falsified by recon.** D-66/67 slice-3 is explicitly "only pursue if a real cooperative
+    run shows the stale window bites" — no such run available, so the lap picked actionable non-immediate-next
+    items. The chosen extraction-perf investigation then REFUTED its own backlog premise ("extraction re-runs
+    per next-step") — recurrence of [[spec-degradation-and-doc-staleness]] (verify before building; caught
+    cheaply for zero risk). Separately, a host misread: I interpreted the owner's mid-lap *pause* (interrupting
+    a commit to flag that quota had reset) as a *rejection of that commit's content*, and surfaced it as a
+    "you rejected this" fork — the owner corrected it. A pause/interrupt is not a content-veto; don't infer one.
+  - **(tool-should-decide) The free adversarial-review lane (NIM `llm read`) was DOWN (connection error ×2) →
+    fell back to paid subagents; and a session-limit wall killed all 3 in-flight agents mid-run, one MID-EDIT.**
+    The MEMORY.md compaction agent died between edits — recovery was manual integrity verification (bullet count
+    + section + dup check; file was valid, partially trimmed). Recurrence of the "session-limit death leaves
+    mid-edit WIP with no per-agent ledger" trap: remediate-code's per-node worktrees + claims solve it for
+    dispatch nodes, but ad-hoc Agent fan-out (recon/review/compaction) has no such ledger — attribution stays
+    host judgment. NIM being down also means the "route review to free NIM" quota-saving plan silently
+    degrades to paid subagents with no automatic signal; a health-probe-then-route would remove the guesswork.
+  - **(inefficient-feeding) Near-clean — one wasted `llm read` round-trip before rerouting.** All recon/review
+    returned conclusions + file:line (no file dumps in main context); the two code diffs went to reviewers via
+    `git diff`, never pasted into main context. The one waste: two `llm read` attempts on the Track-1 review
+    payload before the connection failure was diagnosed and I rerouted to a Haiku subagent (the NIM-down signal
+    wasn't obvious on the first failure). Delegating MEMORY.md compaction was the right call but the wall ate it,
+    so it saved little net.
+
 - **Lap friction walk — dead-code + D-66/67 slice-2-assessment lap (2026-07-09, orchestrator + Haiku
   [call-graph recon] + 2×Sonnet [pause-lifecycle recon] + free-NIM & independent-Sonnet [dual adversarial
   design review]).** Two deliverables: lean dead-code deletion (`cc0c4f1f`) + slice-2 VERIFIED-CLOSED (docs).

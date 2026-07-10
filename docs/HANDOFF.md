@@ -8,10 +8,10 @@
 
 ## Live state
 
-- **Current: ~v0.32.47 (release-pipeline-hardening + dead-code lap, shipping now; v0.32.46 released
-  prior).** Per-lap shipped detail is NOT narrated here (changelog creep — see `git log` + project
-  memory [[live-status]]); this section is current-state + open-work roadmap only. Authoritative
-  version = `package.json`.
+- **Current: ~v0.32.49 (remediate token-usage ledger writer + acceptNode inert-clean bugfix + a
+  verified-negative extraction investigation; v0.32.48 released prior).** Per-lap shipped detail is NOT
+  narrated here (changelog creep — see `git log` + project memory [[live-status]]); this section is
+  current-state + open-work roadmap only. Authoritative version = `package.json`.
 - **Local env note:** the box now runs npm 12.0.0 — it blocks dependency install scripts by default
   and can emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable
   traps before any manual `npm install -g` / packaged-install work.
