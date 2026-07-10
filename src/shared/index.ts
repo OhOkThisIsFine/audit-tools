@@ -713,6 +713,16 @@ export {
   writeStepContract,
 } from "./io/stepContractWriter.js";
 
+// Per-run token-usage ledger (the RECORDING half of score-tokens). Single-sourced
+// here so audit + remediate write the identical path + record shape.
+export type { TokenUsageLedgerLine } from "./io/tokenUsageLedger.js";
+export {
+  TOKEN_USAGE_LEDGER_FILENAME,
+  tokenUsageRunDir,
+  tokenUsageLedgerPath,
+  appendTokenUsageLine,
+} from "./io/tokenUsageLedger.js";
+
 // Validation
 export type { ValidationSeverity, ValidationIssue } from "./validation/basic.js";
 export {

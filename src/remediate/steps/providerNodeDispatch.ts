@@ -5,6 +5,7 @@ import {
   writeJsonFile,
   detectRateLimitFromChannel,
   withSourceConfig,
+  appendTokenUsageLine,
   type SessionConfig,
   type ProviderSlot,
   type RollingDispatchResult,
@@ -172,6 +173,21 @@ export function makeProviderNodeDispatcher(
           ),
         };
       }
+      // Record the token-usage ledger line NOW — at node-completion / result-
+      // handling time, never on the dispatch/admission path (INV: no added
+      // admission latency), mirroring audit's `makeAuditProviderPacketDispatcher`.
+      // Every completed node gets a line, including the agentic-CLI providers
+      // (claude-code/codex/opencode) that report no structured usage — their legs
+      // are null, distinctly "unmeasured" rather than silently 0. Best-effort.
+      await appendTokenUsageLine(params.artifactsDir, params.runId, {
+        packet_id: block.block_id,
+        pool_id: slot?.poolId ?? null,
+        input_tokens: launch.observedUsage?.inputTokens ?? null,
+        output_tokens: launch.observedUsage?.outputTokens ?? null,
+        cache_read_tokens: launch.observedUsage?.cacheReadTokens ?? null,
+        cache_creation_tokens: launch.observedUsage?.cacheCreationTokens ?? null,
+        observed_cost_usd: launch.observedCostUsd ?? null,
+      });
       return { packet, outcome: "success", ...observedCost };
     } catch (err) {
       return { packet, outcome: "error", error: err };

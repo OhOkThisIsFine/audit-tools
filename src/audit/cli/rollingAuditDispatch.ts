@@ -57,7 +57,7 @@ import {
 import { runRollingDispatch } from "../orchestrator/rollingDispatch.js";
 import { createFreshSessionProvider } from "../providers/index.js";
 import { prepareDispatchArtifacts, type DispatchPlanEntry } from "./dispatch.js";
-import { appendTokenUsageLine } from "../io/tokenUsageLedger.js";
+import { appendTokenUsageLine } from "audit-tools/shared";
 import { mergeAndIngest, type MergeAndIngestResult } from "./mergeAndIngestCommand.js";
 import { packageRoot } from "./paths.js";
 import { artifactNameForId } from "./args.js";

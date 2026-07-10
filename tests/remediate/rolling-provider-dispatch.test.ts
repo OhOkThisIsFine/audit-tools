@@ -15,10 +15,12 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  readFileSync,
   existsSync,
   realpathSync,
 } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { tokenUsageLedgerPath } from "audit-tools/shared";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import {
   createWorktree,
@@ -231,6 +233,109 @@ describe("G1: makeProviderNodeDispatcher", () => {
     expect(captured!.resultPath).toBe(resultPath);
     // A task.json was written for the provider to read.
     expect(existsSync(join(artifactsDir, "B1.task.json"))).toBe(true);
+  });
+
+  it("records a token-usage ledger line at runs/<run-id>/ relaying the provider's observedUsage + cost", async () => {
+    const artifactsDir = mkdtempSync(join(tmpdir(), "roll-pd-tok-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "roll-pd-tok-wt-"));
+    const promptPath = join(artifactsDir, "implement-B1.md");
+    writeFileSync(promptPath, "# node prompt\n");
+    const resultPath = join(artifactsDir, "implement-B1.result.json");
+
+    const stub: FreshSessionProvider = {
+      name: "stub",
+      async launch(input) {
+        await writeFile(input.resultPath, dummyResult("F1"), "utf8");
+        return {
+          accepted: true,
+          observedUsage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 10,
+            cacheCreationTokens: 5,
+          },
+          observedCostUsd: 0.0123,
+        };
+      },
+    };
+
+    const dispatch = makeProviderNodeDispatcher({
+      root: artifactsDir,
+      artifactsDir,
+      runId: "RID",
+      sessionConfig: null,
+      promptPathByBlock: new Map([["B1", promptPath]]),
+      createProvider: () => stub,
+    });
+
+    const res = await dispatch({
+      block: block("B1", ["F1"]),
+      slot: SLOT,
+      worktreeRoot,
+      resultPath,
+    });
+    expect(res.outcome).toBe("success");
+
+    const ledger = tokenUsageLedgerPath(artifactsDir, "RID");
+    expect(existsSync(ledger)).toBe(true);
+    const lines = readFileSync(ledger, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(1);
+    const rec = JSON.parse(lines[0]);
+    expect(rec.packet_id).toBe("B1");
+    expect(rec.pool_id).toBe("p/0");
+    expect(rec.input_tokens).toBe(100);
+    expect(rec.output_tokens).toBe(50);
+    expect(rec.cache_read_tokens).toBe(10);
+    expect(rec.cache_creation_tokens).toBe(5);
+    expect(rec.observed_cost_usd).toBe(0.0123);
+    expect(typeof rec.timestamp).toBe("string");
+  });
+
+  it("appends a null-legs ledger line for a provider that reports no usage (unmeasured, not silently 0)", async () => {
+    const artifactsDir = mkdtempSync(join(tmpdir(), "roll-pd-tok0-"));
+    const worktreeRoot = mkdtempSync(join(tmpdir(), "roll-pd-tok0-wt-"));
+    const promptPath = join(artifactsDir, "implement-B1.md");
+    writeFileSync(promptPath, "# node prompt\n");
+    const resultPath = join(artifactsDir, "implement-B1.result.json");
+
+    // An agentic-CLI provider (claude-code/codex/opencode) reports no structured
+    // usage — the line must still be written with null legs, distinctly unmeasured.
+    const stub: FreshSessionProvider = {
+      name: "stub",
+      async launch(input) {
+        await writeFile(input.resultPath, dummyResult("F1"), "utf8");
+        return { accepted: true };
+      },
+    };
+
+    const dispatch = makeProviderNodeDispatcher({
+      root: artifactsDir,
+      artifactsDir,
+      runId: "RID",
+      sessionConfig: null,
+      promptPathByBlock: new Map([["B1", promptPath]]),
+      createProvider: () => stub,
+    });
+
+    const res = await dispatch({
+      block: block("B1", ["F1"]),
+      slot: SLOT,
+      worktreeRoot,
+      resultPath,
+    });
+    expect(res.outcome).toBe("success");
+
+    const lines = readFileSync(tokenUsageLedgerPath(artifactsDir, "RID"), "utf8")
+      .trim()
+      .split("\n");
+    expect(lines).toHaveLength(1);
+    const rec = JSON.parse(lines[0]);
+    expect(rec.packet_id).toBe("B1");
+    expect(rec.input_tokens).toBeNull();
+    expect(rec.output_tokens).toBeNull();
+    expect(rec.cache_read_tokens).toBeNull();
+    expect(rec.cache_creation_tokens).toBeNull();
+    expect(rec.observed_cost_usd).toBeNull();
   });
 
   it("resolves the provider the SLOT selected (per-pool spill routing), not a fixed config provider", async () => {

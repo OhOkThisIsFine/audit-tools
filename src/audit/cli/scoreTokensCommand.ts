@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import { readOptionalTextFile, readJsonFile, writeJsonFile, writeTextFile } from "audit-tools/shared";
+import {
+  readOptionalTextFile,
+  readJsonFile,
+  writeJsonFile,
+  writeTextFile,
+  TOKEN_USAGE_LEDGER_FILENAME,
+} from "audit-tools/shared";
 import {
   scoreTokens,
   cacheHitRatioRegressed,
@@ -8,7 +14,6 @@ import {
   type TokenUsageEntry,
   type TokenScorecard,
 } from "../reporting/scoreTokens.js";
-import { TOKEN_USAGE_LEDGER_FILENAME } from "../io/tokenUsageLedger.js";
 import { getArtifactsDir, getFlag } from "./args.js";
 
 /**

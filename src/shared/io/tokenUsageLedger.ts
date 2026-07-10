@@ -2,16 +2,17 @@
  * Per-run token-usage ledger — the RECORDING half of the score-tokens track
  * (context-efficiency track item 3, the cost counterpart to the A-2 quality
  * oracle `score-audit`). One line is appended per COMPLETED dispatch packet, in
- * the SAME `.audit-tools/audit/runs/<run-id>/` directory `dispatch-quota.json`
+ * the SAME `.audit-tools/<area>/runs/<run-id>/` directory `dispatch-quota.json`
  * already lives in, so a `score-tokens` run keyed by run-id finds it beside the
  * quota/corpus artifacts the same way `score-audit` finds `corpus/<run-id>.labels.json`.
  *
- * Single-sourced here so the path and the append shape can't drift between the
- * (currently sole) writer — `makeAuditProviderPacketDispatcher` in
- * `rollingAuditDispatch.ts`, invoked at PACKET-COMPLETION time (after the
- * provider's launch resolves and the result file is confirmed) — and any future
- * reader/writer. Never called from the admission/scheduling path: appending here
- * adds no latency to `selectProvider` / `scheduleWave` / the reservation ledger.
+ * Single-sourced in `audit-tools/shared` so the path and the append shape can't
+ * drift between BOTH writers — audit's `makeAuditProviderPacketDispatcher`
+ * (`rollingAuditDispatch.ts`) and remediate's `makeProviderNodeDispatcher`
+ * (`providerNodeDispatch.ts`) — each invoked at PACKET/NODE-COMPLETION time
+ * (after the provider's launch resolves and the result file is confirmed) — and
+ * any future reader. Never called from the admission/scheduling path: appending
+ * here adds no latency to `selectProvider` / `scheduleWave` / the reservation ledger.
  *
  * Best-effort by design: a ledger write failure must never fail the packet it is
  * recording (mirrors the provider's own best-effort stdout/stderr appenders).
