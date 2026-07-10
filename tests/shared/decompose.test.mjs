@@ -199,16 +199,23 @@ describe("decompose — consensus vs contested", () => {
       { id: "directory", family: "intent", partitions: [split] },
     ];
     const result = decompose(sources, "structure", { agreementThreshold: 0.3 });
-    // a,b agreed by 1/3 sources → below the confident bar → contested.
+    // Only call_import has a grouping opinion; co_change + directory split a,b into
+    // singletons → they ABSTAIN. A single signalling source is not "several agree",
+    // so the cluster is contested (below the ≥2-sources-together floor).
     const all = [...result.consensus, ...result.contested];
     expect(all).toHaveLength(1);
     expect(result.consensus).toEqual([]);
     expect(result.contested[0].contested).toBe(true);
-    expect(result.contested[0].agreed_across_source).toBeLessThan(0.6);
   });
 
-  it("behavior-agreed but scale-unstable boundary is contested", () => {
-    // Two behavior sources place a,b together, but only in half their scales.
+  it("a cluster both sources hold together at its natural scale is consensus", () => {
+    // Two behavior sources place a,b together at one resolution, apart at another.
+    // Under the size-robust metric a source votes together when it holds the cluster
+    // at its BEST resolution (max-over-scales); scale-instability is recorded as an
+    // informational stable_across_scale, not a gate. (The old two-axis metric marked
+    // this contested; coarse-gullibility is now handled by the community-size cap,
+    // not by requiring cross-scale stability — which would re-introduce the very
+    // size-hostility this metric fixes.)
     const together = new Map([
       ["a", "a"],
       ["b", "a"],
@@ -222,11 +229,90 @@ describe("decompose — consensus vs contested", () => {
       { id: "co_change", family: "behavior", partitions: [together, apart] },
     ];
     const result = decompose(sources, "structure", { agreementThreshold: 0.5 });
-    const all = [...result.consensus, ...result.contested];
-    expect(all).toHaveLength(1);
-    // agreed = 0.5 (each source co-locates in 1/2 its partitions) but stable = 0.5.
-    expect(result.contested[0].stable_across_scale).toBeCloseTo(0.5, 5);
+    expect(result.consensus).toHaveLength(1);
+    // Both sources vote together (2/2) → consensus; fit holds in 1 of 2 behavior
+    // scales per source → stable_across_scale = 0.5 (informational).
+    expect(result.consensus[0].agreed_across_source).toBe(1);
+    expect(result.consensus[0].stable_across_scale).toBeCloseTo(0.5, 5);
+    expect(result.consensus[0].contested).toBe(false);
+  });
+
+  it("disagreeing sources (members grouped apart) vote no, not abstain", () => {
+    // {a,b,c,d}: call_import holds all four together (votes yes), but co_change and
+    // directory each group them into DIFFERENT pairs — they have an opinion
+    // (topHit 2) so they vote NO (no majority community), they do NOT abstain. Only
+    // 1 of 3 signalling sources votes together → below the ≥2 floor → contested.
+    const allFour = new Map([
+      ["a", "g"], ["b", "g"], ["c", "g"], ["d", "g"],
+    ]);
+    const pairsAB = new Map([
+      ["a", "x"], ["b", "x"], ["c", "y"], ["d", "y"],
+    ]);
+    const pairsAC = new Map([
+      ["a", "p"], ["c", "p"], ["b", "q"], ["d", "q"],
+    ]);
+    const sources = [
+      { id: "call_import", family: "behavior", partitions: [allFour] },
+      { id: "co_change", family: "behavior", partitions: [pairsAB] },
+      { id: "directory", family: "intent", partitions: [pairsAC] },
+    ];
+    const result = decompose(sources, "structure", { agreementThreshold: 0.3 });
+    expect(result.consensus).toEqual([]);
+    expect(result.contested).toHaveLength(1);
     expect(result.contested[0].contested).toBe(true);
+  });
+
+  it("size-robust: a real N-file subsystem is consensus even with loose internal pairs", () => {
+    // Oracle for the fix: a 6-file subsystem where the directory + a coarse behavior
+    // view hold all 6 together, while a finer behavior view splits it into two
+    // 3-cliques. The OLD mean-over-all-pairs score collapsed below 0.6 on the cross-
+    // clique pairs and dumped this to contested (the bug). The size-robust metric
+    // credits the natural-resolution community → consensus.
+    const all6 = new Map([
+      ["m1", "g"], ["m2", "g"], ["m3", "g"],
+      ["m4", "g"], ["m5", "g"], ["m6", "g"],
+    ]);
+    const twoCliques = new Map([
+      ["m1", "x"], ["m2", "x"], ["m3", "x"],
+      ["m4", "y"], ["m5", "y"], ["m6", "y"],
+    ]);
+    const sources = [
+      { id: "directory", family: "intent", partitions: [all6] },
+      { id: "call_import", family: "behavior", partitions: [all6, twoCliques] },
+      { id: "co_change", family: "behavior", partitions: [all6, twoCliques] },
+    ];
+    const result = decompose(sources, "structure", { agreementThreshold: 0.5 });
+    expect(result.consensus).toHaveLength(1);
+    expect(result.consensus[0].members).toHaveLength(6);
+  });
+
+  it("size-robust: an oversized transitive blob is dropped, never promoted", () => {
+    // Oracle negative: a 40-file transitive chain that no source holds a majority of
+    // in one small community (each source scatters it). It must NOT be consensus, and
+    // as an oversized non-consensus artifact it is dropped entirely (not even
+    // contested noise) — the .gitignore-mega-cluster class.
+    // Two shifted pairings chain all 40 via union-find but leave every community a
+    // size-2 pair — so no single community holds a majority of the blob.
+    const chainA = new Map(); // pairs (0,1),(2,3),…,(38,39)
+    for (let i = 0; i < 40; i++) chainA.set(`f${i}`, `a${Math.floor(i / 2)}`);
+    const chainB = new Map(); // pairs (1,2),(3,4),…,(37,38); f0 and f39 singletons
+    chainB.set("f0", "b0");
+    chainB.set("f39", "b39");
+    for (let i = 1; i < 39; i += 2) {
+      chainB.set(`f${i}`, `bpair${i}`);
+      chainB.set(`f${i + 1}`, `bpair${i}`);
+    }
+    const sources = [
+      { id: "call_import", family: "behavior", partitions: [chainA] },
+      { id: "co_change", family: "behavior", partitions: [chainB] },
+    ];
+    const result = decompose(sources, "structure", {
+      agreementThreshold: 0.5,
+      maxCommunityFraction: 0.2, // cap = max(50, 8) = 50; blob 40 < 50 but no comm holds a majority
+    });
+    // No community holds a majority of the 40-node blob → no source votes together →
+    // dropped. Nothing promoted; the blob does not appear as consensus.
+    expect(result.consensus).toEqual([]);
   });
 
   it("no sources → empty result", () => {

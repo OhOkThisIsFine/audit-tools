@@ -6,13 +6,16 @@
 // Feed several INDEPENDENTLY-SOURCED views of a target; where they AGREE you have
 // a node (a real subsystem boundary), where they DISAGREE you have a finding and a
 // hotspot. The views are NEVER reconciled into one truth — the disagreement is the
-// product. A node carries TWO orthogonal robustness scores (design §"Granularity
-// resolves across scale"):
-//   - agreed_across_source: how many independent sources co-locate its members.
-//   - stable_across_scale:  how many resolution levels (within the behavior graphs'
-//                           modularity sweep) keep its members together.
-// High on BOTH = a confident subsystem (consensus). Low on EITHER = contested
-// (routed to more adversarial review; the contested status is itself a finding).
+// product. A node carries two robustness scores:
+//   - agreed_across_source: the fraction of the SIGNALLING sources (those that can
+//                           speak to the cluster) that place most of its members in
+//                           a single right-sized community (best-fit F1 ≥ bar).
+//   - stable_across_scale:  the fraction of behavior resolution levels at which that
+//                           same best-fit holds — how scale-robust the cohesion is.
+// A cluster is consensus when a MAJORITY of its signalling sources vote together;
+// low agreement = contested (a hotspot, itself a finding). The score is size-robust:
+// it measures how well the cluster FITS a community (precision × recall), skipping
+// whole-area buckets, so real N-file subsystems surface — not only 2-file dyads.
 //
 // PURE + DETERMINISTIC + language-neutral: operates only on abstract partitions of
 // string node ids, so the SAME primitive runs at the structure layer (this phase)
@@ -46,11 +49,11 @@ export interface DecomposedNode {
   node_id: string;
   /** Member node ids, lexically sorted. */
   members: string[];
-  /** Fraction of sources co-locating the members, in [0,1]. */
+  /** Fraction of signalling sources that best-fit the members together, in [0,1]. */
   agreed_across_source: number;
-  /** Fraction of behavior resolution levels co-locating the members, in [0,1]. */
+  /** Fraction of behavior resolution levels at which the best-fit holds, in [0,1]. */
   stable_across_scale: number;
-  /** True when low on EITHER score (below the confident bar). */
+  /** True when source agreement is below the consensus majority. */
   contested: boolean;
 }
 
@@ -69,14 +72,39 @@ export interface DecomposeOptions {
    */
   agreementThreshold?: number;
   /**
-   * The "confident" bar: a node is consensus only when BOTH scores meet it.
+   * Per-source best-fit F1 bar. A source "votes together" for a cluster when it
+   * places (most of) the cluster inside a single right-sized community with F1
+   * (precision × recall of cluster-vs-community) at or above this bar.
    */
-  confidentThreshold?: number;
-  /** Resolutions count implied by the caller; unused here (kept for symmetry). */
+  fitThreshold?: number;
+  /**
+   * Fraction of the *signalling* sources that must vote together for a cluster to
+   * be consensus. A source "signals" on a cluster when it contains ≥2 of its
+   * members (a source that can't speak to the cluster does not dilute the vote).
+   */
+  sourceMajority?: number;
+  /**
+   * A community larger than this fraction of the node universe is a whole-area
+   * bucket (directory-depth-1 "src", a coarse-Louvain blob), not cohesion
+   * evidence, and is skipped when scoring fit. This is what stops the metric from
+   * being gullible to coarse partitions.
+   */
+  maxCommunityFraction?: number;
 }
 
 const DEFAULT_AGREEMENT_THRESHOLD = 0.5;
-const DEFAULT_CONFIDENT_THRESHOLD = 0.6;
+const DEFAULT_FIT_THRESHOLD = 0.5;
+const DEFAULT_SOURCE_MAJORITY = 0.5;
+const DEFAULT_MAX_COMMUNITY_FRACTION = 0.2;
+/** Cap floor so the community-size gate doesn't collapse on tiny (test) universes. */
+const MIN_COMMUNITY_CAP = 50;
+/**
+ * Consensus needs SEVERAL independently-sourced views to agree (design of record
+ * §"The one operator"). At least this many sources must vote the cluster together —
+ * a boundary only ONE source draws is not consensus, even if every other source
+ * abstains (has no opinion on those files).
+ */
+const MIN_TOGETHER_SOURCES = 2;
 
 /** Canonical unordered-pair key (`minmax`, a text-safe unit separator that
  * cannot appear in a node id) so (u,v) and (v,u) collide. */
@@ -204,11 +232,14 @@ export function decompose(
 ): DecomposeResult {
   const agreementThreshold =
     options.agreementThreshold ?? DEFAULT_AGREEMENT_THRESHOLD;
-  const confidentThreshold =
-    options.confidentThreshold ?? DEFAULT_CONFIDENT_THRESHOLD;
+  const fitThreshold = options.fitThreshold ?? DEFAULT_FIT_THRESHOLD;
+  const sourceMajority = options.sourceMajority ?? DEFAULT_SOURCE_MAJORITY;
+  const maxCommunityFraction =
+    options.maxCommunityFraction ?? DEFAULT_MAX_COMMUNITY_FRACTION;
 
-  // agreed-across-source: mean over sources of each source's within-family
-  // co-location fraction. Accumulate one source at a time to bound memory.
+  // Candidate formation (unchanged): a per-PAIR co-association over sources, used
+  // ONLY to decide which files join the same candidate cluster. Scoring below does
+  // NOT use this pair mean — the old size-hostile mean-over-all-pairs is gone.
   const agreedSum = new Map<string, number>();
   const activeSources = sources.filter((s) => s.partitions.length > 0);
   for (const source of activeSources) {
@@ -218,21 +249,9 @@ export function decompose(
     }
   }
   const numSources = activeSources.length;
-
-  // stable-across-scale: co-location fraction pooled over ALL behavior partitions
-  // (every resolution level of every behavior source).
-  const behaviorPartitions = activeSources
-    .filter((s) => s.family === "behavior")
-    .flatMap((s) => s.partitions);
-  const { counts: stableCounts, total: behaviorTotal } =
-    coMembershipCounts(behaviorPartitions);
-
   const agreedOf = (key: string): number =>
     numSources === 0 ? 0 : (agreedSum.get(key) ?? 0) / numSources;
-  const stableOf = (key: string): number =>
-    behaviorTotal === 0 ? 0 : (stableCounts.get(key) ?? 0) / behaviorTotal;
 
-  // Union strongly-agreed pairs into candidate nodes.
   const uf = new UnionFind();
   for (const key of agreedSum.keys()) {
     if (agreedOf(key) + 1e-12 >= agreementThreshold) {
@@ -243,38 +262,120 @@ export function decompose(
     }
   }
 
+  // Scoring — size-robust cohesion (design of record §"REVISION after adversarial
+  // review"). A cluster is a real subsystem when a MAJORITY of the sources that can
+  // speak to it each place (most of) its members inside a SINGLE, RIGHT-SIZED
+  // community. Per source we take the best-fit F1 (precision × recall of
+  // cluster-vs-community) at that source's most favourable resolution. A community
+  // larger than maxCommunityFraction of the universe is a whole-area bucket
+  // (directory-depth-1 "src", a coarse-Louvain blob), NOT cohesion evidence, so it
+  // is skipped — this is what keeps the metric from being gullible to coarse
+  // partitions the way a coverage-only score would be. The old mean-over-all-pairs
+  // was monotonically hostile to size (only 2-file dyads could clear it).
+  const universe = new Set<string>();
+  const perSource = activeSources.map((source) => {
+    const partitions = source.partitions.map((map) => {
+      const commSize = new Map<string, number>();
+      for (const [node, comm] of map) {
+        universe.add(node);
+        commSize.set(comm, (commSize.get(comm) ?? 0) + 1);
+      }
+      return { map, commSize };
+    });
+    return { family: source.family, partitions };
+  });
+  const maxCommSize = Math.max(
+    MIN_COMMUNITY_CAP,
+    Math.floor(maxCommunityFraction * universe.size),
+  );
+
+  // Per (source-partition, cluster): the best-fit F1 against a single right-sized
+  // community, and topHit = the largest single-community overlap (the source's raw
+  // "grouping opinion" on the cluster, ignoring the cap/majority gates).
+  const fitInPartition = (
+    memberSet: Set<string>,
+    entry: { map: Partition; commSize: Map<string, number> },
+  ): { f1: number; topHit: number } => {
+    const tally = new Map<string, number>();
+    for (const node of memberSet) {
+      const comm = entry.map.get(node);
+      if (comm !== undefined) tally.set(comm, (tally.get(comm) ?? 0) + 1);
+    }
+    let f1 = 0;
+    let topHit = 0;
+    for (const [comm, hit] of tally) {
+      if (hit > topHit) topHit = hit;
+      // The community must hold a STRICT MAJORITY of the cluster to count as
+      // "holding it together" — otherwise a source that splits the members into
+      // singletons would score a spurious F1 (a lone member gives precision 1,
+      // recall 1/n) and vote together for a cluster it actually tore apart.
+      if (hit * 2 <= memberSet.size) continue;
+      const size = entry.commSize.get(comm)!;
+      if (size > maxCommSize) continue; // whole-area bucket — not cohesion
+      const recall = hit / memberSet.size;
+      const precision = hit / size;
+      const val =
+        precision + recall === 0
+          ? 0
+          : (2 * precision * recall) / (precision + recall);
+      if (val > f1) f1 = val;
+    }
+    return { f1, topHit };
+  };
+
   const consensus: DecomposedNode[] = [];
   const contested: DecomposedNode[] = [];
   for (const members of uf.groups().values()) {
     if (members.length < 2) continue;
-    // Node scores = mean over all internal member-pairs (missing pair ⇒ 0), so a
-    // loosely-agreed component is penalized on both axes.
-    let agreedAcc = 0;
-    let stableAcc = 0;
-    let pairs = 0;
-    for (let i = 0; i < members.length; i++) {
-      for (let j = i + 1; j < members.length; j++) {
-        const key = pairKey(members[i]!, members[j]!);
-        agreedAcc += agreedOf(key);
-        stableAcc += stableOf(key);
-        pairs += 1;
+    const memberSet = new Set(members);
+    let signalCount = 0;
+    let togetherCount = 0;
+    let behaviorPartitionsSeen = 0;
+    let behaviorPartitionsFit = 0;
+    for (const src of perSource) {
+      let bestF1 = 0;
+      let sourceTopHit = 0;
+      for (const entry of src.partitions) {
+        const { f1, topHit } = fitInPartition(memberSet, entry);
+        if (f1 > bestF1) bestF1 = f1;
+        if (topHit > sourceTopHit) sourceTopHit = topHit;
+        if (src.family === "behavior") {
+          behaviorPartitionsSeen += 1;
+          if (f1 + 1e-12 >= fitThreshold) behaviorPartitionsFit += 1;
+        }
       }
+      // A source ABSTAINS (excluded from the vote) when it never groups ≥2 of the
+      // cluster's members together — it has no opinion on this cluster, so counting
+      // it as a "no" would dilute genuine agreement among the sources that DO model
+      // these files. A source that groups members into *different* communities has
+      // an opinion (topHit ≥ 2) and correctly votes "no" when no majority holds.
+      if (sourceTopHit < 2) continue;
+      signalCount += 1;
+      if (bestF1 + 1e-12 >= fitThreshold) togetherCount += 1;
     }
-    const agreed = pairs === 0 ? 0 : agreedAcc / pairs;
-    const stable = pairs === 0 ? 0 : stableAcc / pairs;
-    const isContested = !(
-      agreed + 1e-12 >= confidentThreshold &&
-      stable + 1e-12 >= confidentThreshold
-    );
+    const sourceAgreement = signalCount === 0 ? 0 : togetherCount / signalCount;
+    const stableAcrossScale =
+      behaviorPartitionsSeen === 0
+        ? 0
+        : behaviorPartitionsFit / behaviorPartitionsSeen;
+    const isConsensus =
+      togetherCount >= MIN_TOGETHER_SOURCES &&
+      sourceAgreement + 1e-12 >= sourceMajority;
+    // Drop pure union-find artifacts: a cluster no source holds together, or an
+    // oversized non-consensus component (a transitive blob like the 449-file
+    // .gitignore mega-cluster), is noise — neither a subsystem nor a useful hotspot.
+    if (!isConsensus && (togetherCount === 0 || members.length > maxCommSize)) {
+      continue;
+    }
     const node: DecomposedNode = {
       node_id: members[0]!,
       members,
-      agreed_across_source: round(agreed),
-      stable_across_scale: round(stable),
-      contested: isContested,
+      agreed_across_source: round(sourceAgreement),
+      stable_across_scale: round(stableAcrossScale),
+      contested: !isConsensus,
     };
-    if (isContested) contested.push(node);
-    else consensus.push(node);
+    if (isConsensus) consensus.push(node);
+    else contested.push(node);
   }
 
   const byId = (a: DecomposedNode, b: DecomposedNode) =>
