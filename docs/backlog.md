@@ -126,9 +126,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     the (already-fixed) tool would take and was split (collateral files → NIM; big file reduced to its
     `git diff -U0` added-lines). No file bodies through main context; recon/impl/verify all in subagents.
 
-- **External shared-logic audit V1–V7 — ALL SHIPPED 2026-07-09** (13-commit subagent-implemented program,
-  adversarial review on every loop-core/delicate commit; `git log 5ca5bce2..6145a1a3`). Remaining
-  residuals only (each deliberate, low-severity, documented at the code site):
+- **External shared-logic audit V1–V7 residuals** (each deliberate, low-severity, documented at the code
+  site):
   - **(from V3) postinstall agent-scope legacy-wildcard migration gap.** Both postinstall scripts preserve
     an EXISTING legacy agent-scope bash `'*':'allow'` in an already-deployed
     `~/.config/opencode/opencode.json` on upgrade (the wrapper/install path DOES migrate it → `'ask'`;
@@ -143,9 +142,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `run_start_dirty` fences only pre-run dirt; full closure needs per-edit git ground truth that flow
     lacks. Documented at `collectStagingFiles`. ⬇ Live-run watch (conversation-first run on a dirty repo):
     `leftover_files` in the report must list untouched dirt; nothing outside the run's surface committed.
-  - **(from C1) drain-scan derivation cost watch.** The engine adoption memoizes `deriveAuditState` per
-    bundle identity (once per iteration, as before). The standing profiling ledgers are the regression
-    watch — compare step timings against pre-`6145a1a3` if a drain slowdown is ever suspected.
 
 - **Lap friction walk — D-66/67 slice-1 ownership-gate lap (2026-07-09, orchestrator+Haiku/Sonnet+NIM).**
   Full pipeline: 3 parallel recon subagents → design doc → design-level adversarial review (NIM free pass +
@@ -317,26 +313,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (don't lose a prior-run cooldown to a transient IO flake), so the mechanism read as "drop the snapshot" — the
   [[backlog-item-states-invariant-not-fix-mechanism]] failure mode, in the wild.
 
-- **Meta-frictions from the v0.32.27 code-fixable sweep (fix in tooling).** Four tool gaps surfaced driving +
-  recovering that run (full detail in its friction record `.audit-tools/remediation/friction/backlog-code-fixable-sweep-2026-07-06.json`):
-  - **Cross-file contract/invariant regressions escape node-local verify — CLOSED for loop-core nodes (per-node
-    guard shipped).** `acceptNodeWorktree` now runs the cross-cutting invariant/contract guard suite (`verify:guards`
-    = full vitest MINUS the heavy subprocess/e2e tests) in the MAIN checkout after a node's cherry-pick lands, gating
-    + rolling back that node on RED — but ONLY when the node's edits touch a loop-core path (`isLoopCorePath`,
-    single-sourced `src/shared/loopCorePaths.ts`), which bounds cost so the cheap majority of nodes never pay for it.
-    Fires only on audit-tools self-remediation (`isAuditToolsMonorepo`, like the merged-base check). This attributes a
-    cross-file break to the node that caused it (vs the old late, coarse close-time reblock) for the loop-core class
-    where those breaks concentrate. NON-loop-core cross-file breaks still rely on the close-time whole-repo gate
-    (acceptable — the observed escapes were loop-core). Extends [[worktree-tests-miss-integration-guards]].
-    - **Post-merge scoped-clean inertness — INVESTIGATED + FIXED 2026-07-09 (commit `833dce4c`).** The merged-base-check
-      rollback's scoped `git clean` was driven off a POST-cherry-pick `gitEditedFilesForBranch` probe (three-dot
-      `HEAD...branch`), which reads EMPTY whenever the pick reproduced an identical SHA (same-second commit+pick →
-      merge-base == branch tip) → the clean was non-deterministically inert → untracked-file leak on rollback.
-      Empirically confirmed (identical-SHA collision reproduced deterministically in-test with pinned author+committer
-      dates). Fix: deleted the redundant post-pick probe; drive the clean off the pre-merge `nodeEditedFiles` snapshot
-      (`acceptNode.ts:458`), single-sourcing it with the already-correct loop-core guard clean. Independent Sonnet
-      adversarial review (no defects); 3 tests added; 105 green across acceptNode-touching suites.
-
 - **Top gate optimization lead (measured 2026-07-06, was the "vitest collect" item).** First profiled
   numbers (win32, Node 26 local; CI Linux will differ but the shape holds):
   - **`verify:checks` gate = 95.8s, of which `smoke:packaged-audit-code` alone is 70.2s (73%).**
@@ -355,9 +331,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     possibly splitting the few 100s+ integration files across more shards. Only pursue collect/pool changes
     with per-file verification (many tests mutate fs / spawn subprocesses → isolation-off risks bleed).
 
-- **Dispatch admission-control rework — residual (env-bound / deeper, not blocking).** Shipped in full
-  (commits 1/2a/2b-AUDIT/2b-REMEDIATE/driver-unification/commit-3/defect-1 — see `docs/HANDOFF.md` T5-3 /
-  `git log` for what landed). Design of record
+- **Dispatch admission-control rework — residual (env-bound / deeper, not blocking).** Shipped; see
+  `docs/HANDOFF.md` T5-3 for what landed. Design of record
   [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md);
   [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]].
   - (a) **live validation** of the real host+codex+NIM concurrent run — a metered multi-pool run confirming
@@ -417,12 +392,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
-- **Shared-logic dedup bundle — SHIPPED 2026-07-09 except one marginal item** (same 13-commit program as
-  V1–V7 above). Tier B (all 13 extractions: findingSimilarity, countBy, chunkByBudget, fileIntegrity core,
-  rolling-flag resolver, cost-drift friction, host-provider assert, LockedJsonStore, postinstall driver,
-  hostAssets fold, deliverable constants, shared prompt-command renderer, OpenCode factory + commands-shim
-  deletion) and Tier C (1) obligation-engine adoption + (2) host-gate consolidation are ALL landed with
-  per-commit adversarial review where loop-core.
+- **Shared-logic dedup bundle — one marginal item still open.**
   - **Deliberately NOT built — Tier C (3), intra-remediate retry-cap helper** (5 `attempts >= CAP →
     escalate` sites sharing a shape): marginal — the sites are 2-3 lines each over different state records;
     a generic helper would abstract more than it saves. Revisit only if a 6th cap site appears.
@@ -474,43 +444,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     - **vertex-trial → deferred** (needs operator's GCP $300-trial SA JSON).
     - **Remaining Phase-0 = env-bound live validations only** (no more code): a real opencode-free run confirming
       declared-free routing + a live lapsed-free demotion + the `declared_cost_drift` friction event end-to-end.
-- **Cost↔speed dispatch dial + free-pool maximization (owner, 2026-07-07).** Generalizes the cost-first router
-  — the minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point ON TOP of
-  the kept router (does not replace it). Design of record now [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md);
-  extends [[cost-first-routing-design]].
-  - **✅ SHIPPED v0.32.34 (2026-07-08).** 1D dial, λ ∈ [0,1], capability a hard floor. Seven commits
-    (substrate → Gate-0 capture → review hardening → concurrency pivot → R-1 fix + builder unification):
-    - **Ordinal-blend admission ordering** (`admissionLoop.ts orderCandidates`): λ=0 = **byte-identical** to the
-      pre-dial cost-first sort (adversarially confirmed); λ>0 blends per-axis ORDINALS within the capable set
-      (total order, no scale-mixing). The dial reorders only — declaredCap/budget/ledger/claim gates untouched.
-    - **Throughput axis = auto-derived declared CONCURRENCY** (`throughputOf` = `declaredCap`, null ⇒ +Infinity).
-      **Superseded** the earlier "effective Mtok/s [rate∧concurrency∧speed]" sketch: that leaned on the deleted
-      AIMD ceiling AND (v1 of this build) on declared TPM/RPM, which muted the dial on the percent-metered host
-      and would have needed a manual rate declaration (owner: *a needed manual flag is a bug signal*, 2026-07-08).
-      Concurrency is already on the pool, auto, honors "concurrency is declared or absent, never learned", and
-      doesn't crown the sequential host (finite subagent limit < an uncapped parallel source).
-    - **Gate-0 capture** = `provider_confirmation` durable policy: `provider-confirmation-input/v1` gains optional
-      `dispatch_bias`; persisted on the shared confirmation (`readConfirmedDispatchBias`); both orchestrators
-      thread it to `computeDispatchAdmission`. Headless auto-completes λ=0. Default 0 everywhere ⇒ zero behavior
-      change until an operator sets it.
-  - **✅ Adversarial pass on the concurrency axis DONE (2026-07-08) — found + fixed R-1.** The pass caught that
-    `throughputOf = declaredCap (null⇒+Inf)` had RELOCATED R-1, not fixed it: the default zero-declaration
-    claude-code host resolves `declaredCap=null` → crowned fastest AND monopolized the wave at λ=1 (null
-    budget/cap). Root: `declaredCap==null` means opposite speeds on the host vs a source. Fixed (`a1bcc6a0`) by
-    deriving throughput **pool-class-aware** (`deriveThroughputConcurrency`: source uncapped⇒+Inf, host
-    unspecified⇒1-sequential) via an auto `is_conversation_host` discriminator — no manual declaration. **Also
-    unified (owner steer):** the two near-duplicate AdmissionPool build maps DELETED → one shared
-    `admissionPoolsFromSummaries`, so audit/remediate can't drift. Regression + non-vacuous ordering tests added.
-  - **RESIDUAL / next — ALL CLOSED (owner, 2026-07-08):**
-    - **`/models` concurrency probe — DROPPED (not deferred).** Owner ruled concurrency an almost-irrelevant
-      primitive and banned *hunting* for a concurrency value: use a handed signal if one arrives, otherwise stop
-      looking. No probe/discovery mechanism is to be built. The already-built consumer plumbing
-      (`positiveIntCapOrNull` `src/shared/quota/apiPool.ts` → `concurrency_cap` → `deriveThroughputConcurrency`
-      `src/shared/dispatch/admissionLoop.ts`) stays harmlessly ready for a *handed* signal.
-      [[concurrency-is-declared-or-absent-never-learned]]
-    - **B2 host-reorder seed — CLOSED.** The shipped provider-level `exclude`/`include` + `cost_order` on the
-      versioned `provider_confirmation` contract (`src/shared/types/providerConfirmation.ts`) IS the host-reorder
-      capability. No pool-keyed reorder field wanted.
+- **Cost↔speed dispatch dial + free-pool maximization.** Generalizes the cost-first router — the
+  minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point ON TOP of
+  the kept router (does not replace it). Shipped: 1D dial (λ ∈ [0,1], capability a hard floor),
+  pool-class-aware throughput derivation (`deriveThroughputConcurrency`), and the shared
+  `admissionPoolsFromSummaries` builder. Design of record
+  [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md); extends
+  [[cost-first-routing-design]].
   - **Free-pool maximization (dial-independent).** Price-0 pools are first-fill at every operating point → free
     is saturated before any paid pool automatically (`costRank` already delivers it once a source is registered).
     "Maxed" = saturated to the pool's declared sustainable ceiling (`declaredCap` + rate limits + reactive 429
@@ -586,29 +526,22 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
     real endpoint is reachable.
 
-- **D-66/67 SLICE-1 — merge-time ownership-gate on the long-lived claims (OD3 layer 2) — SHIPPED
-  2026-07-09.** Commits `86e47077` (remediate: heartbeat probe before the cherry-pick in
-  `acceptNodeWorktree` inside both locks; token threaded from all claiming call sites; contested-only
-  fail-closed guard with ungated legacy fallback; quarantine-ref no-clobber; sidecar merged-regression
-  guard) + `f2a4f91d` (audit: run-scoped `runs/<runId>/owner-tokens.json` token persistence; uniform
-  claiming incl. the A-8 hybrid override path; `partitionByOwnership` on new `listLiveClaims` with the
-  exported 20-min lease; owned-only claim clearing; merge-gate files added to `LOOP_CORE_PATTERNS`).
-  Full-pipeline lap: design-level adversarial review caught 2 CONFIRMED design defects pre-impl
-  (active-dispatch token clobber; hybrid tasks never claimed), post-impl review caught 2 CONFIRMED impl
-  defects (staleness-blind partition + wrong merge-side lease window; legacy claims-less sessions
-  bricked) — all fixed in repair rounds, re-review APPROVE.
+- **D-66/67 SLICE-1 — merge-time ownership-gate on the long-lived claims (OD3 layer 2).** Shipped;
+  design-of-record + residuals below.
   - **Accepted residual:** the probe window is staleMs-wide, not instantaneous — worst case is a stale
     LAND a beat before an imminent reclaim, never a double-land (base mutations stay serialized by the
     per-node + base-branch locks). Slice-3 heartbeat machinery shrinks it if a real cooperative run
     shows it matters.
-  - **Discovered asymmetry (slice-2 input):** remediate's `phase:main` mutex has OD3 layer-1 only
-    (`withClaimHeartbeat` wraps `advance()`, `nextStep.ts` ~4948), NO layer-2 re-check before persist —
-    unlike audit's `auditStep.ts:216-239` template. Not mechanically mirrorable (remediate's persists
-    are distributed inside `advance()`) → fold into the slice-2 pause/persist-shape design.
+  - **Discovered asymmetry:** remediate's `phase:main` mutex has OD3 layer-1 only (`withClaimHeartbeat`
+    wraps `advance()`, `nextStep.ts` ~4948), NO layer-2 re-check before persist — unlike audit's
+    `auditStep.ts:216-239` template. Not mechanically mirrorable (remediate's persists are distributed
+    inside `advance()`); tracked as a still-open correctness gap for slice-3 to fold in.
 
-- **Unify the full rolling-dispatch lifecycle shell across audit + remediate (doc-review D-66/D-67/C-7,
-  2026-07-08). Slice-1 SHIPPED (entry above); slice-2 VERIFIED-CLOSED as not-worth-building (2026-07-09,
-  see the slice-2 verdict below); open = slice-3 heartbeat only.**
+- **Unify the full rolling-dispatch lifecycle shell across audit + remediate (doc-review D-66/D-67/C-7).
+  Slice-1 SHIPPED (entry above); slice-2 VERIFIED not worth building as a shared reducer — Layer A
+  (`PartialCompletionTerminal`) is already the correct shared surface; Layer B
+  (`advancePausedState`/`LIVELOCK_PAUSE_LIMIT`) is audit-only by nature and correctly forked
+  ([[rolling-lifecycle-unify-full-unification-wrong]]); open = slice-3 heartbeat only.**
   Today the genuinely-shared surface is the *admission decision* only
   (`computeDispatchAdmission`, single-sourced in `audit-tools/shared`). Two lifecycle shells around it are
   NOT shared: (a) the pause lifecycle — audit owns `waiting_for_provider`/`pausedState.ts`/`filterNewProviders`;
@@ -616,15 +549,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   ownership-gate revocation protocol — wired only to the short-lived coordination mutexes
   (`withClaimHeartbeat` on bundle-mutation / `phase:main`), NOT the long-lived per-task/per-node execution
   claims (`task-claims.json`, remediate node-claims), which hold a long lease with no live heartbeat and
-  rest on dedup-by-id at ingest; `mergeAndIngestCommand.ts` has no ownership gate. Owner decision
-  (2026-07-08): the full lifecycle-shell sharing + OD3-on-long-claims is still-intended future work, not
-  abandoned — this tracks it. Design-of-record specs
+  rest on dedup-by-id at ingest as the correctness backstop alongside the now-shipped slice-1 merge-time
+  gate. The full lifecycle-shell sharing + OD3-heartbeat-on-long-claims is still-intended future work
+  (slice-3), not abandoned. Design-of-record specs
   ([`spec/multi-ide-concurrent-runs-design.md`](../spec/multi-ide-concurrent-runs-design.md) OD3;
   [`spec/audit-workflow-design.md`](../spec/audit-workflow-design.md);
   [`spec/remediation-workflow-design.md`](../spec/remediation-workflow-design.md)) now scope the shared
   claim to admission-math and point here for the unification. [[multi-ide-concurrent-runs-design]] /
   [[dispatch-admission-control-design]]
-  - **Design-of-record from the 2026-07-09 recon (READ before building — it changes the target).**
+  - **Design-of-record (READ before building slice-3 — it changes the target).**
     The driver + packet engine are ALREADY unified (both orchestrators run `driveRolling` over
     `createRollingDispatcher`); only the pause/resume TERMINAL adapter + OD3-on-long-claims are forked.
     Precise map: audit pause = `RollingEngineLifecycleState` (`src/shared/rolling/pausedState.ts`:
@@ -636,79 +569,24 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     genuinely diverge — audit may bound-and-give-up to partial-coverage synthesis (read-only, safe); remediate must
     NOT abandon half-applied edit-nodes to "partial coverage" (a correctness hazard). So the livelock-terminal-vs-
     wait-forever branch MUST stay a per-orchestrator policy injection; `earliest_reset_at`-driven external resume has
-    no audit counterpart. **Shareable core (the actual work, bounded):** (1) a shared pause-state reducer that
-    REPRESENTS both, with the terminal-policy branch injected; (2) a shared `withExecutionClaim` = `withClaimHeartbeat`
-    + the merge-time `registry.heartbeat(token)` ownership-gate (which today exists ONLY inline on the short
-    bundle-mutation mutex, `auditStep.ts`:219), applied to the LONG-lived claims (`task-claims.json` 20-min lease,
-    remediate node-claims 30s) that currently hold a lease with NO heartbeat + NO merge gate. **Architectural gotcha
-    for (2):** the long claims are held across OUT-OF-PROCESS worker runs where the parent isn't looping, so there is
-    no natural beater — adding a heartbeat needs a beating owner during the out-of-process span (non-trivial;
-    likely the merge-time ownership-gate CHECK alone — refuse a merge whose lease a peer reclaimed — is the bounded,
-    high-value first slice, deliverable WITHOUT the heartbeat machinery). **Recommended staging:** slice-1 =
-    merge-time ownership-gate on `acceptNodeWorktree` + audit `mergeAndIngestCommand` (bounded, additive); slice-2 =
-    ~~shared pause reducer w/ policy injection~~ VERIFIED-CLOSED (verdict below); slice-3 = full heartbeat on long
-    claims (only if a real cooperative run shows the stale-window is insufficient). This is a FOCUSED-LAP track —
-    the most delicate machinery in the repo (pause/claim/quota), a genuine divergence to respect, and the owner's
-    own "redesign before scheduled autonomy" caution applies; do NOT rush it as a tail-end change.
-  - **Slice-2 VERDICT — VERIFIED not worth building as a shared reducer (2026-07-09, full-pipeline lap:
-    2 parallel recon subagents → design assessment → dual adversarial review [free-NIM + independent Sonnet,
-    which DISAGREED] → orchestrator code-verification tiebreak).** The "shared pause-state reducer w/
-    terminal-policy injection" framing conflates TWO layers that recon separated: **(Layer A)**
-    `PartialCompletionTerminal` (`src/shared/quota/capacity.ts:43-69`; 4 reasons, `quota_paused` the only
-    retryable one w/ `earliest_reset_at`) is the terminal OUTPUT and is ALREADY single-sourced — produced by
-    the shared engine `getTerminal()` (`rollingDispatch.ts:1162`) and consumed by BOTH orchestrators
-    (`remediate/state/store.ts`, `remediate/steps/nextStep.ts:4674-4691`; audit's `recordPartialCompletionTerminal`).
-    **(Layer B)** `advancePausedState`/`RollingEngineLifecycleState`/`LIVELOCK_PAUSE_LIMIT=3`
-    (`src/shared/rolling/pausedState.ts:34-176`) is a cross-invocation *waiting_for_provider re-discovery
-    reducer* that is grep-confirmed AUDIT-ONLY; `RemediationState` has no `pause_count`/attempt-counter.
-    A parameterized shared reducer (Option A) would force remediate to GAIN a persistent
-    `waiting_for_provider`/`pause_count` representation it never reads (its policy is `livelockLimit=null`,
-    unbounded-by-design) — dead state manufacturing a symmetry that buys nothing (net-negative abstraction,
-    against the cleanest-endpoint preference). No third behavior-identical shareable logic exists (the
-    settled-exclusion helpers are already shared+importable and remediate correctly doesn't need them; the
-    blocked-step vs `buildQuotaPausedStep` emit shapes differ in kind/content/source). NIM's one concrete
-    counter — "remediate re-dispatches to still-cooling pools → thrash" — is REFUTED: the shared engine
-    gates every dispatch on live pool capacity each pass (`rollingDispatch.ts:1113,1129` `noPoolCanAcceptNow`),
-    so a cooling pool is never dispatched to; remediate needs no settled-exclusion accumulation. NIM's
-    "slice-3 heartbeat needs this persistence" is REFUTED: heartbeat is peer-contention over shared state,
-    orthogonal to quota-pause bounding (Sonnet, vs `spec/multi-ide-concurrent-runs-design.md` OD3).
-    **Durable conclusion: Layer A is the correct shared surface (already shipped); Layer B's livelock-bound +
-    partial-coverage-proceed is audit-specific by nature and correctly forked — the same genuine divergence
-    "full unification is WRONG" already protects.** The `phase:main` layer-2 asymmetry (slice-1 input above)
-    folds into slice-3, not a resurrected slice-2. [[rolling-lifecycle-unify-full-unification-wrong]]
-
-- **Collapse `leanFastPath` into the Dial A/B continuum as its lowest-risk tier (doc-review D-68) — SHIPPED
-  2026-07-09.** The standalone `evaluateFastPath` boolean gate — a SECOND classifier that could DISAGREE with
-  the intake risk tier (a grounded ≤5-finding batch touching `src/shared/quota` was "fast-path eligible" AND
-  risk-tier `high`, and bypassed the pipeline anyway) — is deleted. Its finding-level simplicity signals now
-  fold INTO the tier as escalate-on-evidence (`findingRiskEvidence` in `src/remediate/riskSignal.ts`: systemic /
-  architecture-lens → high; ungrounded / below-high-confidence / coupled / >5 findings / >5 files → medium),
-  and the lean path is taken IFF the effective tier is `low`. One classifier; the lean path is the `low` tier's
-  realization (its light-review floor = `adversarialDepthForTier("low") === "light"`). New-lean ⊆ old-eligible
-  (adversarially confirmed strictly safer — the unsafe direction is closed; a risk-subsystem grounded set now
-  routes to the full pipeline). **Two intended consequences (accepted, both fail-safe):** (1) finding-evidence
-  now persists into the tier, so a finding-quality-ineligible set gets `full`/`fine` downstream dials, not just
-  full-pipeline routing (correct — more findings = more coordination risk); (2) the lean gate reads the intake
-  tier computed over ALL original findings (escalate-only, never lowered), so a declined risky finding can deny
-  the lean path to a clean approved handful — over-restrictive but fail-safe, and fixing it would violate
-  escalate-only or re-diverge routing from the run tier. Design of record
-  [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md). [[self-scaling-pipeline-not-forked-paths]]
+    no audit counterpart. **Shareable core for slice-3 (the actual work, bounded):** a shared
+    `withExecutionClaim` = `withClaimHeartbeat` + the merge-time `registry.heartbeat(token)` ownership-gate
+    (which today exists ONLY inline on the short bundle-mutation mutex, `auditStep.ts`:219), applied to the
+    LONG-lived claims (`task-claims.json` 20-min lease, remediate node-claims 30s) that currently hold a
+    lease with NO heartbeat. **Architectural gotcha:** the long claims are held across OUT-OF-PROCESS worker
+    runs where the parent isn't looping, so there is no natural beater — adding a heartbeat needs a beating
+    owner during the out-of-process span (non-trivial). This is a FOCUSED-LAP track — the most delicate
+    machinery in the repo (pause/claim/quota), a genuine divergence to respect, and the owner's own
+    "redesign before scheduled autonomy" caution applies; do NOT rush it as a tail-end change.
 
 - **Move the per-lap cadence rules (risk-tier + friction-walk) from host-habit to tool-enforcement
-  (doc-review D-69) — LARGELY SHIPPED; residue is host-inherent / owner-deferred (assessed 2026-07-09).**
-  Both halves were investigated this lap and are substantially tool-enforced already; no new mechanism was
-  built because the missing pieces are either host-judgment-inherent or the owner-deferred autonomy redesign,
-  and inventing a fragile gate would itself be the "add a step the host must remember" anti-pattern.
-  - **Friction-walk half — SHIPPED (three enforcement layers, pre-existing).** (1) mechanical auto-capture at
-    10 step boundaries (`src/shared/friction/stepBoundaryCapture.ts`); (2) an in-run BLOCKING per-category
-    close-out — a run cannot present complete until every `FRICTION_CATEGORIES` entry is covered by an
-    observation or an explicit "none" attestation (`src/shared/friction/triage.ts` `decideFrictionTriage`);
-    (3) a session-end Stop-hook backstop (`.claude/hooks/friction-stop-gate.mjs`). The friction walk is NOT a
-    host-remembered habit inside an orchestrator run.
-  - **Risk-tier half — the in-run classifier is now SHIPPED via D-68.** The lap-level "trivial vs loop-core"
-    routing the HANDOFF cadence describes is, WITHIN a run, the self-scaling risk dial — and D-68 (this lap)
-    single-sourced that classification (the lean path is now the `low` tier, no parallel gate). So "the tool
-    risk-tiers itself" is real for any work routed through the orchestrator.
+  (doc-review D-68/D-69).** Both halves are tool-enforced: the risk-tier half via the `leanFastPath` →
+  Dial A/B continuum fold (the standalone `evaluateFastPath` boolean gate is deleted; finding-level
+  simplicity signals fold INTO the risk tier as escalate-on-evidence via `findingRiskEvidence` in
+  `src/remediate/riskSignal.ts`, and the lean path is taken IFF the effective tier is `low` — design of
+  record [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md),
+  [[self-scaling-pipeline-not-forked-paths]]); the friction-walk half via mechanical step-boundary
+  capture + an in-run blocking per-category close-out + a session-end Stop-hook backstop.
   - **Genuine residue (accepted, not built):** (a) the LAP-level decision to route an item through the
     orchestrator vs hand-fix it is still host judgment — its tool-enforced end-state is "route substantive work
     through the self-scaling orchestrator" (the [[self-scaling-pipeline-not-forked-paths]] north star), not a new
@@ -718,123 +596,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     over-fire; deferred with `CLAUDE.md`'s "Redesign before scheduled autonomy" rather than force it.
   [[enforce-robustness-in-tooling-not-host-discretion]] / [[self-scaling-pipeline-not-forked-paths]]
 
-- **Context-efficiency track (3 items, GrapeRoot-derived).** Investigated the `codex-cli-compact` /
-  GrapeRoot context engine (2026-07-06); its open techniques map to three adaptable builds. GrapeRoot's
-  core engine is closed and its benchmarks are vendor-reported — we take the *ideas*, not the code.
-  **CROSS-CUTTING GUARD for all three: never break provider prefix caching.** Every change below MUST
-  preserve the stable-prefix invariant already stated in
-  [`spec/audit-workflow-design.md`](../spec/audit-workflow-design.md) §Prompt caching — *shared context
-  (schema / instructions / repo metadata) at the FRONT = cache-eligible fixed prefix; agent-specific,
-  turn-varying payload at the BACK*. GrapeRoot re-ranks `recommended_files` every turn, which is exactly
-  the prefix-churning move that busts prompt caching — the anti-pattern to avoid. Any dynamic/session
-  signal we add lives in the per-packet back payload and must never mutate or reorder the fixed prefix.
-  A change that saves selection tokens but busts cache-hit can cost more than it saves; item (3) is the
-  regression guard that makes that measurable.
-  **Increment 1 SHIPPED (v0.32.38, 2026-07-08) — the piggybacked prefix-ordering fix (#4):** `buildPacketPrompt`
-  (`src/audit/cli/dispatch/packetPrompt.ts`) now leads with the de-interpolated static `## Output` schema block as
-  the cache-eligible fixed prefix and trails ALL per-packet volatile content; a tool-enforced test pins the ordering
-  + prefix-purity invariant. This makes the cross-cutting guard real for the rest of the track.
-  **Increment 2a SHIPPED (v0.32.39, 2026-07-08) — item (1) persistence spine:** `access_memory.json`, a first-class
-  per-run audit artifact deterministically harvested from the ingested result ledger (frequency + step-ordinal recency
-  + lenses) in `runResultIngestionExecutor`. Shared type `src/shared/types/accessMemory.ts`; pure `deriveAccessMemory`
-  (`src/audit/orchestrator/accessMemory.ts`); DAG edge `access_memory.json → audit_results.jsonl`.
-  **Increment 2b SHIPPED (v0.32.40, 2026-07-08) — item (1) scoring + bias:** `computeContinuityScores`
-  (`src/audit/orchestrator/continuityScore.ts`) = deterministic personalized PageRank (α=0.85, fixed 20 iters,
-  recency×frequency seed, `edited`>`covered`) over `graph_bundle` edges → biases packet ORDERING via single-sourced
-  `orderReviewPackets` (strictly below priority) at the load-bearing sorts (`buildReviewPacketsFromPartition` +
-  `fitPacketsToTierBudgets`). Cache-safe. Adversarially reviewed; folded fixes (tier-refit re-sort closing a
-  pre-existing priority-monotonicity break, inert-thread removal, NaN guard).
-  **Increment 2c SHIPPED (v0.32.41, 2026-07-08) — item (1) remediate parity:** deterministic harvest core
-  single-sourced in `audit-tools/shared` (`deriveAccessMemoryFromEvents` over a normalized `AccessTouchEvent` stream);
-  audit is a thin adapter (byte-identical). Remediate `deriveRemediationAccessMemory`
-  (`src/remediate/state/accessMemory.ts`) populates `edited_count` from the declared edit surface of RESOLVED items
-  (per-item `item_spec.touched_files`, block fallback) → `.audit-tools/remediation/access_memory.json`, written from
-  the merge under the state lock. Adversarially reviewed (resolved-only not `resolved_no_change`, per-item attribution,
-  crash guard). **Item (1) now complete on BOTH orchestrators.**
-  **Increment 2d (item (2) `path::symbol` slicing) — CODE-COMPLETE, UNRELEASED (owner ran /start-lap "don't /ship"):**
-  the mechanical anchor scanner (`src/audit/orchestrator/fileAnchors.ts`) assigns each TOP-LEVEL (zero-indent) symbol an
-  approximate body span (`FileAnchor.end_line` = up to the next top-level decl, clamped to the file line count);
-  `renderAnchorPreview` (`src/audit/cli/dispatch/packetPrompt.ts`) renders it as a `path:START-END` slice in the
-  isolated-large-file back-payload with advisory "read the span for your lens, expand if evidence crosses" guidance.
-  Design realization: packets hand PATHS + workers self-read, so the token lever is cutting god-file re-reads, not packet
-  bytes — the guidance is the sub-file dispatch. Fail-safe (nested/indented bindings get no span → never fragment an
-  enclosing span nor become spurious slices), cache-safe (back-payload only; fixed prefix untouched), zero schema/validator
-  change (`total_lines` stays whole-file, citations stay real-file coords → no `coversAffectedSpan` false-fail).
-  Adversarially reviewed (6 vectors REFUTED). Green build/check/audit+shared suite.
-  **Remediate continuity CONSUMER + scorer single-sourced — CODE-COMPLETE, UNRELEASED (same "don't /ship" lap):**
-  owner principle — auditor/remediator mirroring is common logic; the consumer should have been shared from the start
-  (like the 2c harvest core), not audit-only. Scorer EXTRACTED to `audit-tools/shared` (`computeContinuityScores` +
-  new single-sourced `continuityMassForPaths` reducer in `src/shared/continuityScore.ts`; graph primitives
-  `normalizeGraphPath`/`collectGraphEdges` → `src/shared/graph/graphPaths.ts`); audit re-exports all four → 28+6 import
-  sites + 2b behaviour byte-identical. Remediate consumer (`readRemediationAccessMemory` + `computeBlockContinuityScores`,
-  `src/remediate/state/accessMemory.ts`) reduces harvested `access_memory.json` to a per-block mass (seed-only — remediate
-  has NO graph), threaded via `DriveRollingDispatchOptions.continuityScores` → `toNode` → shared `ownershipSubWaves`
-  (`OwnershipSchedulerNode.continuity?` = secondary sort key, strictly below file-disjointness, above `block_id`;
-  no-op by default). Adversarially reviewed (6 vectors A–F REFUTED). Green (build/check/deadcode/full suite; 1 known
-  hermeticity flake passes alone).
-  **Item (3) token-efficiency eval harness — SHIPPED (this lap): `score-tokens` CLI + pure `scoreTokens` reducer +
-  per-run `token-usage.jsonl` recording (`extractObservedUsage` on the openai-compatible path,
-  `LaunchFreshSessionResult.observedUsage`, off-admission-path append) + provider-independent prefix-stability
-  (hash of each recorded packet prompt's cache-eligible prefix from `dispatch-plan.json`). Track-don't-gate: exit
-  wired only to a cache-hit-ratio regression vs `--baseline`. "Unmeasured" kept distinct from "measured zero";
-  reader tolerates malformed ledger lines. Design-of-record [[access-memory-layer-design]].
-  **The context-efficiency access-memory track is now COMPLETE — items (1), (2), AND (3) all shipped.**
-  Follow-up (non-blocking): packet `task_ids`/`lens` attribution in the ledger (`DispatchPlanEntry` carries neither).
-  (Remediate-side ledger writer SHIPPED 2026-07-09, commit `a1a51861`: `tokenUsageLedger` moved to
-  `audit-tools/shared`; remediate's `providerNodeDispatch` appends a per-node line at node-completion →
-  `.audit-tools/remediation/runs/<runId>/token-usage.jsonl`.)
-
-  - **(1) Session/run access-memory layer — bias packet composition toward already-touched code.**
-    *Highest value.* We build the STATIC graph (`graph_bundle.json`) but keep no persisted cross-step
-    record of what earlier steps actually read/edited/covered, so later packets re-include (and workers
-    re-read) the same god-files cold every step — our known waste hotspot ([[worktree-large-files-reread-loop]]:
-    large files re-read 15–21×/session). Build a persisted per-run access-memory that biases later
-    packet selection + staleness prioritization toward continuity (files/symbols earlier steps touched
-    are likelier relevant and cheaper to re-include). Invariants:
-    - **Derive from existing result artifacts, not a new hook.** The signal is already latent —
-      `AuditResult.file_coverage[]` records what each task covered; remediate node results record touched
-      files. Harvest deterministically from what the tool already sees; do not add a host-side capture step
-      (enforce-in-tooling, not host discretion).
-    - **Cache-safe placement (the guard above).** The access-memory influence changes only *which*
-      files/symbols the per-packet back payload includes — it MUST NOT reorder or re-weight anything in the
-      fixed shared prefix. Confine all volatility to the back.
-    - **Deterministic, content-derived order (no temporal churn).** Access is inherently temporal, but the
-      persisted record MUST serialize path-sorted with per-path counters/flags as *values* — never an
-      access-ordered array — or it churns the artifact content hash every step and cascades phantom
-      staleness down the DAG (the standing "extractors emit stable, content-derived array order" invariant;
-      cf. [[staleness-churn-repo-manifest-file-order]]).
-    - **DAG-tracked artifact, not ad-hoc freshness.** The access-memory record is a first-class
-      `.audit-tools` artifact on the explicit dependency map (`spec/audit/dependency-map.md`), so staleness
-      propagates deterministically — never an ad-hoc per-step freshness check.
-
-  - **(2) Symbol-addressable reads (`path::symbol`) — sub-file packet granularity.** *Smaller optimization.*
-    When a lens needs one function from a god-file, dispatch a symbol slice, not the whole file, shrinking
-    packet bytes. Symbol boundaries already exist deterministically in the extractors
-    (`unit_manifest.json` / `surface_manifest.json`), so this enriches shared artifacts, not per-language
-    forks. Invariants:
-    - **Fail-safe to whole-file** when a symbol boundary is unavailable or ambiguous — never drop context to
-      chase a slice.
-    - **Coverage/citation semantics must stay valid.** `AuditResult.file_coverage[].total_lines` must match
-      actual line counts (schema gate); define partial-read coverage as the symbol's line span (not the
-      whole file) so the gate doesn't false-fail, and carry symbol-slice citations back to real file line
-      ranges so the source-grounded citation gate (M-B3) still resolves.
-    - **Cache-safe by construction** — slices are back-payload; the prefix is untouched.
-
-  - **(3) Token-efficiency eval harness — measure, don't assert, context savings.** *Real gap.* We assert
-    "budget context before LLM dispatch" but never measure per-step token cost, so a regression (or a
-    caching-buster from items 1/2) is invisible. Build the COST counterpart to the A2 quality oracle
-    (`score-audit`): a repeatable benchmark over a fixed prompt corpus × complexity levels reporting real
-    input/output tokens **and prefix cache-hit ratio** per step, so cost and quality are the two measured
-    axes (GrapeRoot benchmarks both). Invariants:
-    - **Must surface cache-hit ratio / prefix stability explicitly** — this is what makes the cross-cutting
-      caching guard enforceable: a change that cuts selection tokens but busts the cached prefix shows up as
-      a cache-hit regression, not a phantom win.
-    - **Measure from recorded run ledgers / headroom telemetry, not metered API calls.** Reading *actual*
-      provider-reported usage of a completed run is post-hoc measurement (allowed); it does NOT violate
-      "token estimates stay local and deterministic — never API-call token counting in planning/dispatch"
-      (that rule governs planning, not after-the-fact benchmarking). Keep the boundary clean:
-      `estimateTokensFromBytes` for planning; ledger/telemetry reads for the benchmark.
-    - **Reuse the A2 corpus infrastructure** where possible so cost+quality run off one labeled corpus.
+- **Context-efficiency access-memory track (items 1-3) shipped; non-blocking follow-up open:** packet `task_ids`/`lens` attribution missing from the token-usage ledger (`DispatchPlanEntry` carries neither).
 
 ## Deferred / waiting
 
@@ -917,26 +679,12 @@ Standing gotchas worth keeping for any agent (strong or weak):
   declares a standalone `makeState`. Wrap the shared helper (`makeState({ plan: {...}, items: {...} })`) instead.
   Observed 2026-07-08 (a new `access-memory.test.ts` tripped it).
 
-- **`tests/audit/audit-code-completion.test.mjs` is the heaviest audit integration test (still-slow follow-up).**
-  It drives the full multi-phase audit flow; as of 2026-07-08 it runs the next-step pump loops IN-PROCESS (calls the
-  `cmdNextStep`/`cmdIngestResults`/`cmdForceSynthesis` handlers directly — they take argv and never `process.exit` —
-  instead of spawning ~10 fresh `node` processes), which removed the subprocess overhead (~185-226s → ~105-121s
-  isolated) AND the timeout-flake that forced wasteful isolation reruns. The 4 tests carry an explicit 300s timeout
-  (`HEAVY_AUDIT_TEST_TIMEOUT_MS`) because the residual per-step work still balloons under max full-suite CPU
-  contention and the global 120s default was too tight for THIS test (a false-negative, not a bug). **Open follow-up
-  (make it genuinely fast) — the "extraction re-runs per-step" premise was INVESTIGATED + REFUTED 2026-07-09
-  (orchestrator + 2 recon subagents [Sonnet trace + Haiku adversarial-refute], source-verified):** production does
-  NOT redundantly re-extract on an unchanged repo. Extractors fire ONLY via executor dispatch for a MISSING/STALE
-  obligation; `repo_manifest` is presence-gated (`state.ts:88-93` — `has(bundle.repo_manifest) ? "satisfied" :
-  "missing"`, never staleness-checked), so `buildRepoManifestFromFs` (`intakeExecutors.ts:174`, its only call site)
-  never re-fires once present; and `computeStaleArtifacts` hashes already-loaded artifact JSON
-  (`getArtifactValue(bundle,…)`, `staleness.ts:19,131`), never re-walking the repo FS (`tooling_manifest.generated_at`
-  is stripped before hashing — `artifactFreshness.ts:25` `normalizeForMetadataHash` — so wall-clock churn can't
-  falsely stale it). **So there is NO production staleness-caching win hiding here.** The heavy test's residual wall
-  is LEGITIMATE one-time-per-phase extraction + analyzer subprocesses spread across the ~10 pump iterations, not a
-  redundant re-run. Remaining lever is TEST-side only: pre-seed artifacts to cut pump iterations (the flow legitimately
-  extracts once per phase). The CLI/wrapper subprocess path stays covered by `audit-code-wrapper.test.mjs` + the
-  packaged smokes, so the in-process move lost no coverage.
+- **`tests/audit/audit-code-completion.test.mjs` is the heaviest audit integration test.** It drives the
+  full multi-phase audit flow in-process (not subprocess-spawned) with an explicit 300s timeout
+  (`HEAVY_AUDIT_TEST_TIMEOUT_MS`) for CPU-contended runs. Confirmed: production does not redundantly
+  re-extract on an unchanged repo (extractors are presence-gated, not staleness-checked) — the wall is
+  legitimate one-time-per-phase extraction, not a caching bug. Remaining lever (test-side only): pre-seed
+  artifacts to cut pump iterations.
 
 - **Codex CLI is a poor executor for large read-heavy audit packets under a wall-clock budget.** Observed
   2026-07-04: 2 concurrent codex executors ran 5+ min with zero results and 8k+ lines of echoed reasoning.
