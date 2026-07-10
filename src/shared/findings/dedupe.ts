@@ -251,3 +251,120 @@ export function crossLensDedupe(
     mergeMap,
   };
 }
+
+/**
+ * File-independent finding identity for exact re-emission collapse: the same logical
+ * finding (normalized lens + category + title) re-emitted across files / units /
+ * passes shares one key. Distinct from `findingIdentityKey` (the 3-tier structural-
+ * anchor ladder) — this is the coarse lens|category|title exact key the identity
+ * upsert collapses on. Cross-file merging happens ONLY on this exact equality; the
+ * fuzzy same/cross-lens passes stay grouped by primary path so distinct problems in
+ * different units never collapse on mere similarity.
+ */
+export function findingReEmissionKey(finding: Finding): string {
+  return [
+    normalizeText(finding.lens),
+    normalizeText(finding.category),
+    normalizeText(finding.title),
+  ].join("|");
+}
+
+function lineRangeOverlaps(a: Finding, b: Finding): boolean {
+  const aFile = a.affected_files[0];
+  const bFile = b.affected_files[0];
+  if (!aFile || !bFile) return false;
+  if (aFile.path !== bFile.path) return false;
+  const aStart = aFile.line_start ?? 0;
+  const aEnd = aFile.line_end ?? aStart;
+  const bStart = bFile.line_start ?? 0;
+  const bEnd = bFile.line_end ?? bStart;
+  if (aEnd === 0 && bEnd === 0) return true;
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
+/**
+ * Same-lens dedup: within each (lens, primary-path) group, collapse fuzzily-similar
+ * findings (title Jaccard with a category-lowered threshold, plus line-range OR file
+ * overlap), the higher sev/conf survivor absorbing the loser in place with grounding-
+ * precedence + sorted files. A core capability only audit currently draws (remediate
+ * consumes findings the auditor already collapsed), single-sourced here so the whole
+ * finding-dedup family lives in one place.
+ */
+export function sameLensDedupe(findings: Finding[]): Finding[] {
+  const groups = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const key = `${normalizeText(finding.lens)}:${primaryPath(finding)}`;
+    const group = groups.get(key);
+    if (group) group.push(finding);
+    else groups.set(key, [finding]);
+  }
+
+  const removed = new Set<Finding>();
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      if (removed.has(group[i])) continue;
+      for (let j = i + 1; j < group.length; j++) {
+        if (removed.has(group[j])) continue;
+        const a = group[i];
+        const b = group[j];
+
+        const titleSim = wordJaccard(a.title, b.title);
+        const catMatch = normalizeText(a.category) === normalizeText(b.category);
+        const threshold = catMatch ? 0.35 : 0.45;
+        if (titleSim < threshold) continue;
+        if (!lineRangeOverlaps(a, b) && filePathOverlap(a, b) < 0.5) continue;
+
+        const aSev = severityRank(a.severity);
+        const bSev = severityRank(b.severity);
+        const aConf = confidenceRank(a.confidence);
+        const bConf = confidenceRank(b.confidence);
+        const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
+        const [survivor, absorbed] = keepA ? [a, b] : [b, a];
+        absorbFinding(survivor, absorbed, { mergeGrounding: true, sortAffectedFiles: true });
+        removed.add(absorbed);
+      }
+    }
+  }
+
+  return findings.filter((f) => !removed.has(f));
+}
+
+/**
+ * Insert a finding into an identity-keyed map, or absorb it into the existing finding
+ * of the same re-emission identity (`findingReEmissionKey`): affected_files + evidence
+ * union, severity / confidence ESCALATE to the maximum rank seen, `systemic` ORs,
+ * impact / likelihood backfill, longest summary wins. (Audit's exact re-emission
+ * collapse — remediate has no identity-key merge today.)
+ */
+export function upsertFindingByIdentity(merged: Map<string, Finding>, finding: Finding): void {
+  const key = findingReEmissionKey(finding);
+  const existing = merged.get(key);
+  if (!existing) {
+    merged.set(key, {
+      ...finding,
+      affected_files: [...finding.affected_files],
+      evidence: [...(finding.evidence ?? [])],
+    });
+    return;
+  }
+
+  if (severityRank(finding.severity) > severityRank(existing.severity)) {
+    existing.severity = finding.severity;
+  }
+  if (confidenceRank(finding.confidence) > confidenceRank(existing.confidence)) {
+    existing.confidence = finding.confidence;
+  }
+  existing.systemic = Boolean(existing.systemic || finding.systemic);
+  existing.grounding = mergeGrounding(existing.grounding, finding.grounding);
+  existing.impact = existing.impact ?? finding.impact;
+  existing.likelihood = existing.likelihood ?? finding.likelihood;
+  existing.summary =
+    existing.summary.length >= finding.summary.length ? existing.summary : finding.summary;
+
+  mergeAffectedFiles(existing, finding, true);
+  existing.evidence = [
+    ...new Set([...(existing.evidence ?? []), ...(finding.evidence ?? [])]),
+  ];
+}

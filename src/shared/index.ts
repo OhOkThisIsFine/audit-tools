@@ -1291,6 +1291,9 @@ export {
   absorbFinding,
   mergeGrounding,
   mergeAffectedFiles,
+  sameLensDedupe,
+  upsertFindingByIdentity,
+  findingReEmissionKey,
 } from "./findings/dedupe.js";
 export type {
   CrossLensDedupePolicy,

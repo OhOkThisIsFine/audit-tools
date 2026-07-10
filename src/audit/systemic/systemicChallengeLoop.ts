@@ -23,15 +23,9 @@
 
 import type { Finding } from "../types.js";
 import type { GoalGraph } from "audit-tools/shared";
-import { groundDesignFindings } from "audit-tools/shared";
+import { groundDesignFindings, findingReEmissionKey } from "audit-tools/shared";
 import { goalBlastRadius } from "../clarification/blastRadius.js";
 import { DEFAULT_RISK_GATE_THRESHOLDS } from "../clarification/riskGate.js";
-
-/** File-independent finding identity (lens + category + title), lower-cased. */
-function findingKey(finding: Finding): string {
-  const norm = (v: string | undefined): string => (v ?? "").trim().toLowerCase();
-  return [norm(finding.lens), norm(finding.category), norm(finding.title)].join("|");
-}
 
 /**
  * Resolve the blast radius of an improvement finding over the goal DAG. A finding
@@ -94,7 +88,7 @@ export function foldChallengeRound(params: {
   const grounded = groundDesignFindings(params.submitted, params.repoManifest);
 
   const byKey = new Map<string, Finding>();
-  for (const finding of params.prior) byKey.set(findingKey(finding), finding);
+  for (const finding of params.prior) byKey.set(findingReEmissionKey(finding), finding);
 
   const new_finding_ids: string[] = [];
   for (const finding of grounded) {
@@ -111,7 +105,7 @@ export function foldChallengeRound(params: {
       lens: finding.lens,
       blast_radius: resolveBlastRadius(finding, params.goalGraph, goalNodeOf),
     };
-    const key = findingKey(enriched);
+    const key = findingReEmissionKey(enriched);
     if (!byKey.has(key)) {
       new_finding_ids.push(enriched.id);
     }
