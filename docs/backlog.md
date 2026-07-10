@@ -239,7 +239,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 ## Forward tracks
 
 - **Shared-logic dedup bundle — one marginal item still open.**
-  - **Second-pass (2026-07-10) — 5 shipped.** A scout re-scan surfaced 7 leads; validated as
+  - **Second-pass (2026-07-10) — 6 shipped.** A scout re-scan surfaced 7 leads; validated as
     leads-not-verdicts ([[external-audit-catalogs-are-leads]]). SHIPPED (this branch): shared
     `applyGuidanceFile` (`src/shared/intake/`); `normalizeForMatch`→`normalizeToContentTokens` rename;
     shared `reconcileAdmissionLeasesFromQuotaFile` + `finalizeProviderLaunchResult` (`src/shared/dispatch/`,
@@ -247,20 +247,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     `src/shared/intent/pathScope.ts` (`pathMatchesPrefix`/`globMatches`/`fileExclusionReason`) with the
     audit/remediate structured-scope field coverage SYMMETRIZED (owner ruling: both honor
     excluded_scope + disposition_overrides + must_not_touch; per-domain unit-vs-finding aggregation stays
-    forked).
-  - **OPEN — unify finding dedup as a shared parameterized core (reframed 2026-07-10 by the owner's
-    one-core clarification; was wrongly rejected as "domain-forced").** There is no auditor-logic vs
-    remediator-logic — one core, each mode DRAWS from it ([[dissolve-auditor-remediator-distinction]] /
-    [[auditor-remediator-mirroring-is-common-logic]]). The cross-lens/same-lens/merge SKELETON is identical
-    (group-by-primaryPath → skip same-lens → jaccard+overlap → survivor by sev/conf → union evidence); the
-    "divergence" is all POLICY: category-gate (`soft` raise-threshold vs `hard` never-merge-cross-category),
-    survivor identity (`mutate` in-place vs `clone` for the block state machine), merge (grounding-precedence
-    + escalation vs keep-survivor), + a `mergeMap` the core always computes that remediate's
-    `fixupBlocksAfterDedup` consumes and audit ignores. Build a shared
-    `crossLensDedupe(findings, policy) → {kept, mergeMap}` (+ same-lens as a core capability only audit draws)
-    in `src/shared/findings/`; audit `mergeFindings.ts` + remediate `dedup/crossLensDedup.ts` become thin
-    policy-selecting adapters. A several-knob shared core is the CORRECT endpoint (guarantees the two can't
-    drift on the skeleton/thresholds), NOT a config-shell over-abstraction — that reflex was the mis-call.
+    forked); **shared cross-lens dedup core** `src/shared/findings/dedupe.ts`
+    (`crossLensDedupe(findings, policy) → {kept, mergeMap}` + shared `absorbFinding`/`mergeGrounding`/
+    `mergeAffectedFiles`) — audit `reporting/mergeFindings.ts` + remediate `dedup/crossLensDedup.ts` are now
+    thin policy-selecting adapters (categoryGate soft|hard · mutate|clone · exact-identity · grounding · sort
+    · break · onMerge). This is the direct payoff of the owner's one-core clarification — the "divergence" was
+    all POLICY on one identical skeleton, NOT a domain fork.
+  - **OPEN (optional tidiness follow-up) — move audit's same-lens pass + identity-key `upsertFinding` into
+    `src/shared/findings/` too.** They already draw the shared `absorbFinding`/`mergeGrounding`/
+    `mergeAffectedFiles` mechanics; relocating the two audit-only functions themselves finishes the "one core"
+    picture. NOT a dedup win (audit-only today, no second consumer) — pure tidiness; do it when convenient.
   - **Deliberately NOT built — Tier C (3), intra-remediate retry-cap helper** (5 `attempts >= CAP →
     escalate` sites sharing a shape): marginal — the sites are 2-3 lines each over different state records;
     a generic helper would abstract more than it saves. Revisit only if a 6th cap site appears.
