@@ -55,8 +55,24 @@ jobs:
     # version (the code was already exercised by this suite on the pre-bump commit),
     # and publish-package.yml runs the authoritative sharded suite for the actual
     # release. Re-running the 8-job matrix here would be a pure duplicate. Mirrors
-    # the same guard on ci.yml's `checks` job.
-    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: v') }}"
+    # the same guard on ci.yml's `checks` job. The predicate is version-digit-anchored
+    # (GitHub expressions have no regex): it matches only `release: v<digit>...` — the
+    # exact bump-commit format emitted by scripts/release-and-publish.mjs
+    # (`release: vX.Y.Z`) — so a non-bump message that merely shares the prefix
+    # (e.g. `release: verify hosts...`) does NOT skip the suite (CE-004). Keep this
+    # predicate identical to the one on ci.yml's `checks` job.
+    if: >-
+      ${{ github.event_name != 'push'
+          || !(startsWith(github.event.head_commit.message, 'release: v0')
+            || startsWith(github.event.head_commit.message, 'release: v1')
+            || startsWith(github.event.head_commit.message, 'release: v2')
+            || startsWith(github.event.head_commit.message, 'release: v3')
+            || startsWith(github.event.head_commit.message, 'release: v4')
+            || startsWith(github.event.head_commit.message, 'release: v5')
+            || startsWith(github.event.head_commit.message, 'release: v6')
+            || startsWith(github.event.head_commit.message, 'release: v7')
+            || startsWith(github.event.head_commit.message, 'release: v8')
+            || startsWith(github.event.head_commit.message, 'release: v9')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:

@@ -57,9 +57,25 @@ jobs:
   # The release-time authoritative gate still lives in publish-package.yml.
   # This `checks` job carries a release-bump skip guard: the `release: vX.Y.Z`
   # commit's authoritative gate runs on Linux in publish-package.yml, so re-running
-  # it here is a pure duplicate.
+  # it here is a pure duplicate. The predicate is version-digit-anchored (GitHub
+  # expressions have no regex): it matches only `release: v<digit>...` — the exact
+  # bump-commit format emitted by scripts/release-and-publish.mjs (`release: vX.Y.Z`)
+  # — so a non-bump message that merely shares the prefix (e.g. `release: verify
+  # hosts...`) does NOT skip CI (CE-004). Keep this predicate identical to the one
+  # in audit-code-test-suite.yml.
   checks:
-    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: v') }}"
+    if: >-
+      ${{ github.event_name != 'push'
+          || !(startsWith(github.event.head_commit.message, 'release: v0')
+            || startsWith(github.event.head_commit.message, 'release: v1')
+            || startsWith(github.event.head_commit.message, 'release: v2')
+            || startsWith(github.event.head_commit.message, 'release: v3')
+            || startsWith(github.event.head_commit.message, 'release: v4')
+            || startsWith(github.event.head_commit.message, 'release: v5')
+            || startsWith(github.event.head_commit.message, 'release: v6')
+            || startsWith(github.event.head_commit.message, 'release: v7')
+            || startsWith(github.event.head_commit.message, 'release: v8')
+            || startsWith(github.event.head_commit.message, 'release: v9')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
