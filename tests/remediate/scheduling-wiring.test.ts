@@ -24,7 +24,7 @@ const pool: CapacityPool = {
   hostModel: null,
   hostConcurrencyLimit: { active_subagents: 8, source: "session_config" },
 };
-const session: SessionConfig = { quota: { enabled: false } };
+const session: SessionConfig = { quota: {} };
 
 function block(
   id: string,
@@ -103,3 +103,4 @@ describe("A5 scheduling wiring: cofile_parallel_safe threads into the scheduler 
     expect(b2).toEqual({ block_id: "B-2", write_paths: ["src/b.ts"] });
   });
 });
+

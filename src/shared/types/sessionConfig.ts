@@ -339,7 +339,11 @@ export interface QuotaModelLimits {
 }
 
 export interface QuotaConfig {
-  enabled?: boolean;
+  // No `enabled` toggle: quota self-monitoring is not switchable. Dispatch ALWAYS
+  // consults the quota source (Claude /usage + host-session). "Can't find quota"
+  // (absent config / dark credential) is a degraded-optimistic state — uncapped
+  // per the no-invented-ceiling invariant, and surfaced loudly at the dispatch
+  // site — never a configured off-switch.
   safety_margin?: number;
   default_context_tokens?: number;
   reserved_output_tokens?: number;

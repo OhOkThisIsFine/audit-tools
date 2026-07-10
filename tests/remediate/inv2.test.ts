@@ -73,7 +73,7 @@ describe("INV-2 silent-degrade marker (shared contract)", () => {
 
     const capacity = computeDispatchCapacity({
       pools: [pool],
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       pendingItemTokens: [10_000, 10_000],
     });
     const [summary] = summarizeDispatchCapacityPools(capacity);
@@ -93,7 +93,7 @@ describe("INV-2 silent-degrade marker (shared contract)", () => {
     };
     const capacity = computeDispatchCapacity({
       pools: [pool],
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       pendingItemTokens: [1_000],
     });
     const [summary] = summarizeDispatchCapacityPools(capacity);
@@ -138,7 +138,7 @@ describe("INV-2 discovered-window slot-rise (32k floor escape)", () => {
       quotaSourceSnapshot: null,
     };
     const sessionConfig = {
-      quota: { enabled: true, safety_margin: 1.0, input_tokens_per_minute: 1_000_000 },
+      quota: { safety_margin: 1.0, input_tokens_per_minute: 1_000_000 },
     };
     const pendingItemTokens = new Array(12).fill(30_000);
 
@@ -170,7 +170,7 @@ describe("INV-2 buildConfirmedPools wiring (hermetic)", () => {
     // isolated learned state has no entry → every probe is not_applicable, so no
     // pool should be FALSELY marked degraded.
     const pools = await buildConfirmedPools({
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       hostContextTokens: 200_000,
       hostOutputTokens: 32_000,
     });
@@ -186,9 +186,10 @@ describe("INV-2 buildConfirmedPools wiring (hermetic)", () => {
     // The discovered window flows through to the resolved limits.
     const capacity = computeDispatchCapacity({
       pools,
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       pendingItemTokens: [10_000],
     });
     expect(capacity.primary.schedule.resolved_limits.context_tokens).toBe(200_000);
   });
 });
+

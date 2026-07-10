@@ -18,7 +18,7 @@ const POOL = {
   hostModel: null,
   hostConcurrencyLimit: { active_subagents: 16, source: "session_config" },
 };
-const SESSION = { quota: { enabled: false } };
+const SESSION = { quota: {} };
 
 /**
  * A dispatchPacket that records peak concurrency. A short yield lets every packet in a
@@ -195,3 +195,4 @@ describe("driveRolling — unified in-process rolling driver", () => {
     expect(run.allResults).toHaveLength(3);
   });
 });
+

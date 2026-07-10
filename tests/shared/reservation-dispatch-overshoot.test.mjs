@@ -32,7 +32,7 @@ function makePool(id = "pool-shared") {
 // Quota disabled → slot scheduling never throttles, so the reservation ledger is
 // the SOLE admission gate under test (isolates the new behaviour).
 function unlimitedSession() {
-  return { quota: { enabled: false } };
+  return { quota: {} };
 }
 
 function makePacket(id, estimatedTokens) {
@@ -175,3 +175,4 @@ test("no ledger configured → dispatch is unchanged (additive path is inert)", 
   // With no ledger and unlimited quota, all three dispatch concurrently.
   expect(meter.peak).toBe(3000);
 });
+

@@ -39,14 +39,14 @@ function makePool(id, overrides = {}) {
 
 // Session config with quota disabled (unlimited headroom)
 function unlimitedSession() {
-  return { quota: { enabled: false } };
+  return { quota: {} };
 }
 
 // Session config with quota management active — required to exercise the
 // proactive cross-pool spill ordering (INV-QD-14), which is inert when quota is
 // disabled (selection then stays pure capability order).
 function enabledSession() {
-  return { quota: { enabled: true, safety_margin: 1.0 } };
+  return { quota: { safety_margin: 1.0 } };
 }
 
 async function setupTmpQuotaDir() {
@@ -115,9 +115,7 @@ test("selectProvider — a single pool nominally at RPM=0 still yields a slot (s
     discoveredLimits: { requests_per_minute: 0 },
   });
   const session = {
-    quota: {
-      enabled: true,
-      safety_margin: 1.0,
+    quota: { safety_margin: 1.0,
       models: { "test-model": { requests_per_minute: 0 } },
     },
   };
@@ -1000,3 +998,4 @@ test("scorePacketComplexity — returns packet.complexity field", () => {
   const packet = makePacket("p1", { complexity: 0.75 });
   expect(scorePacketComplexity(packet)).toBe(0.75);
 });
+

@@ -562,30 +562,13 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     return Math.min(waveSize, hostConcurrencyLimit.active_subagents);
   };
 
-  if (quota.enabled === false) {
-    const waveSize = Math.max(
-      1,
-      applyHostConcurrencyLimit(requestedConcurrency),
-    );
-    const limits: ResolvedLimits = {
-      context_tokens: quota.default_context_tokens ?? DEFAULT_CONTEXT_TOKENS,
-      output_tokens: quota.reserved_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
-      requests_per_minute: null,
-      input_tokens_per_minute: null,
-      output_tokens_per_minute: null,
-    };
-    return {
-      max_concurrent: waveSize,
-      estimated_wave_tokens: slotsSorted ? sumTopN(slotsSorted, waveSize) : waveSize * avgTokens,
-      cooldown_until: null,
-      confidence: "high",
-      source: "default",
-      resolved_limits: limits,
-      host_concurrency_limit: hostConcurrencyLimit,
-      model: hostModel,
-      binding_cap: waveSize < requestedConcurrency ? "host_concurrency" : "none",
-    };
-  }
+  // No naive/off short-circuit: there is ONE scheduling track. Quota is not
+  // switchable, so this always runs the proactive path below. When the quota
+  // source yields no live snapshot the token-budget gate simply does not fire and
+  // concurrency stays governed by real signals only (RPM/TPM, a declared cap, the
+  // host-reported ceiling) — never an invented default. A fully blind wave stays
+  // uncapped by design (concurrency-is-declared-or-absent-never-learned) and is
+  // surfaced loudly at the dispatch site instead.
 
   const safetyMargin = quota.safety_margin ?? DEFAULT_SAFETY_MARGIN;
 

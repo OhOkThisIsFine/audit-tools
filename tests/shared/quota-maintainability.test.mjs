@@ -69,9 +69,7 @@ test("MNT-56e100e0: converging allocation preserves exploratory binding cap on n
       }),
     ],
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0,
+      quota: { safety_margin: 1.0,
       },
     },
     // Many large items so TPM fires on the exploratory pass (3000 TPM / 2000 per
@@ -105,7 +103,7 @@ test("MNT-56e100e0: multi-pool: second pool receives items not consumed by the f
 test("MNT-bf201bf7: an exhausted window throttles scheduleWave to 1", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: true } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 10,
     quotaSourceSnapshot: {
@@ -119,7 +117,7 @@ test("MNT-bf201bf7: an exhausted window throttles scheduleWave to 1", () => {
 test("MNT-bf201bf7: a cold-start window admits only a small calibration batch", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: true } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 8,
     quotaStateEntry: null, // no learned slope
@@ -135,7 +133,7 @@ test("MNT-bf201bf7: a cold-start window admits only a small calibration batch", 
 test("MNT-bf201bf7: a healthy learned window does not reduce scheduleWave", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: true, safety_margin: 1.0 } },
+    sessionConfig: { quota: { safety_margin: 1.0 } },
     hostModel: null,
     requestedConcurrency: 4,
     quotaStateEntry: {
@@ -164,7 +162,7 @@ test("MNT-bf201bf7: exhausted snapshot with reset_at sets cooldown_until", () =>
   const resetAt = new Date(Date.now() + 60_000).toISOString();
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: true } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 10,
     quotaSourceSnapshot: {
@@ -183,7 +181,7 @@ test("MNT-bf201bf7: quota snapshot skipped when cooldown already active", () => 
   const futureExpiry = new Date(Date.now() + 120_000).toISOString();
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: true } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 5,
     quotaStateEntry: {
@@ -201,3 +199,4 @@ test("MNT-bf201bf7: quota snapshot skipped when cooldown already active", () => 
   expect(schedule.binding_cap).toBe("cooldown");
   expect(schedule.cooldown_until).toBe(futureExpiry);
 });
+

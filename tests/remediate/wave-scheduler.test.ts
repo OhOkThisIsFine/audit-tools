@@ -155,14 +155,21 @@ describe("scheduleWave", () => {
     expect(capped.binding_cap).toBe("host_concurrency");
   });
 
-  it("defaults to 5 when no limit is known", async () => {
+  it("stays uncapped (item count) when blind — no invented ceiling", async () => {
+    // One track, no invented default: with no live quota snapshot, no RPM/TPM,
+    // and no declared host cap, the wave is NOT clamped to a made-up default —
+    // it stays at the item count (concurrency-is-declared-or-absent-never-learned).
+    // The dispatch site (marshal.ts) surfaces this blind wave loudly instead.
     const result = await scheduleWave({
       sessionConfig: null,
       itemCount: 20,
       env: {} as any,
     });
-    expect(result.max_concurrent).toBe(5);
+    expect(result.max_concurrent).toBe(20);
     expect(result.host_concurrency_limit).toBeNull();
+    // Blind ⇒ no live snapshot: this is exactly the precondition the dispatch-site
+    // fail-loud (marshal.ts) keys on to warn that the wave is unpaced.
+    expect(result.quota_source_snapshot ?? null).toBeNull();
   });
 
   it("max_concurrent never exceeds item count", async () => {
@@ -230,7 +237,7 @@ describe("scheduleWave", () => {
 
   it("roster handshake (quota enabled): one capacity pool per rank, most capable first", async () => {
     const result = await scheduleWave({
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       itemCount: 12,
       estimatedSlotTokens: Array.from({ length: 12 }, () => 500),
       hostModels: [
@@ -253,14 +260,14 @@ describe("scheduleWave", () => {
 
   it("opaque --host-model-id keys quota as provider/<id>; absent → provider/*", async () => {
     const withId = await scheduleWave({
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       itemCount: 2,
       hostModelId: "opaque-x",
       env: {} as any,
     });
     expect(withId.capacity_pools?.[0].pool_id).toMatch(/\/opaque-x$/);
     const withoutId = await scheduleWave({
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       itemCount: 2,
       env: {} as any,
     });
@@ -269,7 +276,7 @@ describe("scheduleWave", () => {
 
   it("per-rank model_id keys each roster pool independently", async () => {
     const result = await scheduleWave({
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       itemCount: 8,
       estimatedSlotTokens: Array.from({ length: 8 }, () => 500),
       hostModels: [
@@ -437,7 +444,7 @@ describe("buildDispatchQuota — backoff state from learned quota entry", () => 
 describe("scheduleWave — quota-enabled path", () => {
   it("forwards estimatedSlotTokens to the quota scheduler and returns a usable schedule", async () => {
     const result = await scheduleWave({
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       itemCount: 3,
       estimatedSlotTokens: [1000, 2000, 3000],
       env: {} as any,
@@ -483,13 +490,13 @@ describe("scheduleWave — host capability handshake (N8)", () => {
 
   it("lifts resolved_limits above the floor on the quota-enabled path", async () => {
     const floor = await scheduleWave({
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       itemCount: 3,
       estimatedSlotTokens: [1000, 2000, 3000],
       env: {} as any,
     });
     const discovered = await scheduleWave({
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       itemCount: 3,
       estimatedSlotTokens: [1000, 2000, 3000],
       hostContextTokens: 200_000,
@@ -715,7 +722,7 @@ describe("createBrokeredRepairDispatch — broker()", () => {
     const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const decision = broker.broker({
       providerName: "openai-compatible",
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       hostModel: null,
       slots: [slot("n1", 500)],
       quotaStateEntry: makeQuotaStateEntry({ cooldown_until: future }),
@@ -738,7 +745,7 @@ describe("F4 inv-5 — critical snapshot throttles to 1 and persists cooldown (C
     const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const args = {
       providerName: "openai-compatible" as const,
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       hostModel: null,
       // Several cheap slots so, absent throttling, the wave would size > 1.
       slots: Array.from({ length: 6 }, (_, i) => slot(`n${i}`, 500)),
@@ -1095,7 +1102,7 @@ describe("scheduleWave — logs to stderr when the quota state file is unusable"
     try {
       result = await withCorruptQuotaState(() =>
         scheduleWave({
-          sessionConfig: { quota: { enabled: true } },
+          sessionConfig: { quota: {} },
           itemCount: 3,
           env: {} as any,
         }),
@@ -1333,7 +1340,7 @@ describe("F4 inv-9 [CP-NODE-47]: success/rate_limited outcome via recordWaveOutc
       // ignored the entry.)
       const throttled = sharedScheduleWave({
         providerName: "claude-code",
-        sessionConfig: { quota: { enabled: true } } as any,
+        sessionConfig: { quota: {} } as any,
         hostModel: null,
         requestedConcurrency: 8,
         quotaStateEntry: rlEntry,
@@ -1372,7 +1379,7 @@ describe("F4 inv-6 [CP-NODE-44]: future cooldown_until => max_concurrent=1, bind
     // not from a slot/budget cap.
     const decision = broker.broker({
       providerName: "openai-compatible",
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       hostModel: null,
       slots: Array.from({ length: 8 }, (_, i) => slot(`n${i}`, 500)),
       quotaStateEntry: makeQuotaStateEntry({ cooldown_until: future }),
@@ -1394,7 +1401,7 @@ describe("F4 inv-6 [CP-NODE-44]: future cooldown_until => max_concurrent=1, bind
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const decision = broker.broker({
       providerName: "openai-compatible",
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       hostModel: null,
       slots: Array.from({ length: 8 }, (_, i) => slot(`n${i}`, 500)),
       quotaStateEntry: makeQuotaStateEntry({ cooldown_until: past }),
@@ -1429,7 +1436,7 @@ describe("F4 fail-6 [CP-NODE-54]: critical snapshot persists cooldown_until so a
     const CAPABLE_CEILING = 8; // well above the cold-start floor (3)
     const args = {
       providerName: "openai-compatible" as const,
-      sessionConfig: { quota: { enabled: true } } as any,
+      sessionConfig: { quota: {} } as any,
       hostModel: null,
       // Enough cheap slots that, absent the cooldown, the capable ceiling would
       // size a wide wave — so a stay-at-1 result can only come from the cooldown.
@@ -1507,7 +1514,7 @@ describe("F4 fail-4 [CP-NODE-52]: unusable quota state => default wave, non-fata
     try {
       result = await withCorruptQuotaState(() =>
         scheduleWave({
-          sessionConfig: { quota: { enabled: true } },
+          sessionConfig: { quota: {} },
           itemCount: 4,
           env: {} as any,
         }),
@@ -1528,3 +1535,4 @@ describe("F4 fail-4 [CP-NODE-52]: unusable quota state => default wave, non-fata
     expect(result!.resolved_limits).toBeDefined();
   });
 });
+

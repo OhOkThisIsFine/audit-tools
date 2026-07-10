@@ -125,7 +125,7 @@ test("INV-shared-core-02: rollingDispatch derives pool rank from pool.rank, not 
     complexity: 0.9,
   };
 
-  const session = { quota: { enabled: false } };
+  const session = { quota: {} };
   // small-pool first in array — if ranking used provider name (same), order would decide.
   const slot = selectProvider(highComplexityPacket, [smallPool, deepPool], tracker, {}, session);
   expect(slot !== null, "expected a pool to be selected").toBeTruthy();
@@ -800,3 +800,4 @@ test("INV-shared-core-11: spawnLoggedCommand spawns the command unwrapped", asyn
   expect(calls[0].command, "command must reach spawn unwrapped").toBe("my-cli");
   expect(calls[0].args, "args must reach spawn unwrapped").toEqual(["--arg"]);
 });
+

@@ -369,7 +369,7 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible", quota: { enabled: false } },
+    sessionConfig: { provider: "openai-compatible", quota: {} },
     timeoutMs: 1000,
     dispatchPacket: stranding,
     ingest: ingestStub,
@@ -479,7 +479,7 @@ test("A8a: a same-packet account wall escalates through the retained host-sessio
     root: artifactsDir,
     artifactsDir,
     activeReviewRun: activeReviewRun(artifactsDir, runDir),
-    sessionConfig: { provider: "openai-compatible", quota: { enabled: false } },
+    sessionConfig: { provider: "openai-compatible", quota: {} },
     timeoutMs: 1000,
     tasksOverride: oneTask,
     poolsOverride: pools,
@@ -536,3 +536,4 @@ test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) wh
   expect(result.ingest, "no usable ingest result is recorded (no-progress pass)").toBe(null);
   expect(result.packet_count, "the packets were still dispatched").toBe(3);
 });
+

@@ -11,7 +11,6 @@ import type {
   CapacityPool,
 } from "audit-tools/shared";
 import { computeDispatchAdmission, createReservationLedger, admissionPoolsFromSummaries } from "audit-tools/shared";
-import { scheduleWave as computePoolWaveSchedule } from "audit-tools/shared";
 import {
   buildQuotaSource,
   HostSessionQuotaSource,
@@ -46,8 +45,6 @@ export {
 // ---------------------------------------------------------------------------
 
 export type { HostConcurrencyLimit };
-
-const DEFAULT_WAVE_SIZE = 5;
 
 export interface ScheduleWaveInput {
   hostMaxConcurrent?: number | null;
@@ -96,28 +93,6 @@ export function resolveHostConcurrencyLimit(options: {
     sessionConfig: options.sessionConfig ?? {},
     env: options.env,
   });
-}
-
-function _capacityPoolSummary(
-  poolId: string,
-  slots: number,
-  schedule: WaveSchedule,
-): DispatchCapacityPoolSummary {
-  return {
-    pool_id: poolId,
-    slots,
-    model: schedule.model,
-    confidence: schedule.confidence,
-    source: schedule.source,
-    resolved_limits: schedule.resolved_limits,
-    host_concurrency_limit: schedule.host_concurrency_limit,
-    // The quota-off path builds the single primary conversation-host pool (no backend source).
-    is_conversation_host: true,
-    cooldown_until: schedule.cooldown_until,
-    estimated_wave_tokens: schedule.estimated_wave_tokens,
-    binding_cap: schedule.binding_cap ?? "none",
-    quota_source_snapshot: schedule.quota_source_snapshot ?? null,
-  };
 }
 
 /**
@@ -264,71 +239,12 @@ async function buildHostPoolPreamble(
 
 export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveScheduleResult> {
   const sessionConfig = input.sessionConfig ?? {};
-  const providerName = input.providerName ?? (sessionConfig as { provider?: ResolvedProviderName }).provider ?? "claude-code";
-  const hostModel = input.hostModel ?? (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota?.host_model ?? null;
-  // Quota-key identity: resolved model name, else the host's opaque id, else
-  // null → `provider/*`. Per-roster-rank `model_id` overrides per pool below.
-  const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
-  const roster = input.hostModels?.length
-    ? sortRosterMostCapableFirst(input.hostModels)
-    : null;
 
-  const hostLimit = resolveHostConcurrencyLimit({
-    hostMaxConcurrent: input.hostMaxConcurrent,
-    sessionConfig,
-    env: input.env,
-  });
-
-  // The capability handshake: the host reported its dispatch model's real
-  // context/output window this session (the roster's most capable entry under
-  // the multi-rank handshake). Carried into the pool's discoveredLimits so the
-  // shared discovered_capability rung sizes the budget to the real window
-  // instead of the conservative 32k floor. RPM/TPM stay null and fill from the
-  // learned quota state.
-  const hostContextTokens = input.hostContextTokens ?? roster?.[0]?.context_tokens ?? null;
-  const hostOutputTokens = input.hostOutputTokens ?? roster?.[0]?.output_tokens ?? null;
-
-  const quota = (sessionConfig as { quota?: { enabled?: boolean } }).quota;
-  if (!quota || quota.enabled === false) {
-    const cap = hostLimit?.active_subagents ?? DEFAULT_WAVE_SIZE;
-    const waveSize = Math.max(1, Math.min(cap, input.itemCount));
-    // Single-source the quota-off schedule math (wave-token formula + confidence +
-    // source) through the shared scheduler so the two orchestrators can't drift —
-    // remediate previously re-implemented it with a flat average + confidence:"low",
-    // disagreeing with shared's sumTopN + "high". The wave is already capped to
-    // `waveSize`, so shared (`requestedConcurrency: waveSize`, no quota) returns it
-    // verbatim. Only the roster-honoring window and the DEFAULT_WAVE_SIZE-aware
-    // binding_cap are remediate-specific and layered back on top.
-    const base = computePoolWaveSchedule({
-      providerName,
-      sessionConfig,
-      hostModel,
-      requestedConcurrency: waveSize,
-      estimatedSlotTokens: input.estimatedSlotTokens,
-      hostConcurrencyLimit: hostLimit,
-    });
-    const schedule: WaveScheduleResult = {
-      ...base,
-      resolved_limits: {
-        // Honor a host-reported window even with quota disabled; fall back to the
-        // shared scheduler's default only when nothing was discovered.
-        context_tokens: hostContextTokens ?? base.resolved_limits.context_tokens,
-        output_tokens: hostOutputTokens ?? base.resolved_limits.output_tokens,
-        requests_per_minute: null,
-        input_tokens_per_minute: null,
-        output_tokens_per_minute: null,
-      },
-      host_concurrency_limit: hostLimit,
-      // hostLimit-gated: a DEFAULT_WAVE_SIZE cap below itemCount is NOT a host
-      // concurrency bind (there is no host limit), so it stays "none".
-      binding_cap: hostLimit && waveSize < input.itemCount ? "host_concurrency" : "none",
-    };
-    return {
-      ...schedule,
-      capacity_pools: [_capacityPoolSummary(buildProviderModelKey(providerName, quotaModelKeySegment), waveSize, schedule)],
-    };
-  }
-
+  // ONE scheduling track: always build the host pool preamble and let the shared
+  // capacity/admission compute concurrency from live quota + real signals. There
+  // is no naive/quota-off branch — quota self-monitoring is not switchable. When
+  // the quota source is blind (no live snapshot) the wave stays governed by real
+  // signals only and is surfaced loudly at the dispatch site (marshal.ts).
   const preamble = await buildHostPoolPreamble({
     sessionConfig: input.sessionConfig,
     providerName: input.providerName,

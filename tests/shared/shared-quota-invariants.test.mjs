@@ -325,7 +325,7 @@ test("INV-shared-quota-09: scheduleWave with quota disabled still respects max_c
   const { scheduleWave } = await import("../../src/shared/quota/scheduler.ts");
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 1,
     quotaStateEntry: null,
@@ -547,13 +547,13 @@ test("INV-shared-quota-14: INV-QD-02 — total_slots >= 1 across pool/quota conf
     // Cooldown-throttled pool via a near-exhausted quota snapshot.
     {
       pools: [pool("a", { quotaSourceSnapshot: { remaining_pct: 0.0, reset_at: null } })],
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       pendingItemTokens: [5000, 5000, 5000],
     },
     // Tight RPM cap.
     {
       pools: [pool("a", { discoveredLimits: { requests_per_minute: 1 } })],
-      sessionConfig: { quota: { enabled: true, safety_margin: 1.0 } },
+      sessionConfig: { quota: { safety_margin: 1.0 } },
       pendingItemTokens: new Array(10).fill(1000),
     },
     // Empty pending layout — still >= 1.
@@ -574,3 +574,4 @@ test("INV-shared-quota-14: INV-QD-02 — total_slots >= 1 across pool/quota conf
     expect(capacity.total_slots >= 1, `total_slots must be >= 1, got ${capacity.total_slots} for ${JSON.stringify(cfg.pendingItemTokens.length)} items`).toBeTruthy();
   }
 });
+

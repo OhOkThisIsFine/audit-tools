@@ -291,7 +291,7 @@ test("inv-7: learned quotaStateEntry + handshake quotaSourceSnapshot fold into O
   };
   const capacity = computeDispatchCapacity({
     pools: [pool],
-    sessionConfig: { quota: { enabled: true } },
+    sessionConfig: { quota: {} },
     pendingItemTokens: new Array(12).fill(4000),
   });
   // One folded capacity for the one provider+model pool.
@@ -316,7 +316,7 @@ test("inv-8: computeDispatchCapacity always returns >= 1 slot, even when the han
   };
   const capacity = computeDispatchCapacity({
     pools: [pool],
-    sessionConfig: { quota: { enabled: true } },
+    sessionConfig: { quota: {} },
     pendingItemTokens: new Array(8).fill(5000),
   });
   expect(capacity.total_slots >= 1, `folded capacity must floor at 1 slot, got ${capacity.total_slots}`).toBeTruthy();
@@ -330,3 +330,4 @@ test("fail-6: a provider with no resolvable token degrades to null (no fetch)", 
   expect(await noToken.queryCurrentUsage("copilot/*")).toBe(null);
   expect(fetchImpl.calls.length, "no token → no live probe").toBe(0);
 });
+

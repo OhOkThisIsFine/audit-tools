@@ -112,7 +112,7 @@ test("renderTokenBudgetView: multi-window snapshot renders a per-window breakdow
 test("scheduleWave stamps remaining_token_budget + in_flight_tokens on the schedule", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: true, safety_margin: 1 } },
+    sessionConfig: { quota: { safety_margin: 1 } },
     hostModel: null,
     requestedConcurrency: 10,
     estimatedSlotTokens: [1000, 1000, 1000, 1000, 1000],
@@ -132,3 +132,4 @@ test("scheduleWave stamps remaining_token_budget + in_flight_tokens on the sched
   expect(schedule.max_concurrent).toBe(3);
   expect(schedule.binding_cap).toBe("token_budget");
 });
+

@@ -33,7 +33,7 @@ test("buildProviderModelKey includes model when provided", () => {
 test("scheduleWave returns requestedConcurrency when quota is disabled", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 22,
   });
@@ -99,7 +99,7 @@ test("scheduleWave per-slot TPM allows more slots when they fit budget", () => {
 test("scheduleWave estimated_wave_tokens uses actual slot sums", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 3,
     estimatedSlotTokens: [5000, 3000, 1000],
@@ -150,7 +150,7 @@ test("scheduleWave caps wave size by host active subagent limit", () => {
 test("scheduleWave applies host active subagent limit even when quota is disabled", () => {
   const schedule = scheduleWave({
     providerName: "worker-command",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 36,
     hostConcurrencyLimit: {
@@ -511,7 +511,7 @@ test("scheduleWave reports binding_cap='cooldown' during an active cooldown", ()
 test("scheduleWave reports binding_cap='host_concurrency' when the host limit binds", () => {
   const schedule = scheduleWave({
     providerName: "worker-command",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 36,
     hostConcurrencyLimit: {
@@ -565,7 +565,7 @@ test("F4 inv-3: a reported host limit binds; with no handshake signal nothing in
 test("scheduleWave reports binding_cap='none' when nothing reduces the requested wave", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 4,
   });
@@ -593,3 +593,4 @@ test("a quotaStateEntry NEVER caps the wave — concurrency is declared or absen
   expect(schedule.max_concurrent).toBe(22);
   expect(schedule.binding_cap).toBe("none");
 });
+

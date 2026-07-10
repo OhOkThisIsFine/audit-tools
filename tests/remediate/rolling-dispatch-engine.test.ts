@@ -134,7 +134,7 @@ describe("single shared tier-rank authority", () => {
 describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
   it("buildConfirmedPools produces one quota-keyed pool per roster rank", async () => {
     const pools = await buildConfirmedPools({
-      sessionConfig: { provider: "claude-code", quota: { enabled: true } },
+      sessionConfig: { provider: "claude-code", quota: {} },
       hostModels: [
         { rank: "small", context_tokens: 32_000, output_tokens: 4_096 },
         { rank: "deep", context_tokens: 200_000, output_tokens: 8_192 },
@@ -150,13 +150,13 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
 
   it("computeDispatchCapacity over the confirmed pools sizes slots from the window, not a fixed flag", async () => {
     const pools = await buildConfirmedPools({
-      sessionConfig: { provider: "claude-code", quota: { enabled: true } },
+      sessionConfig: { provider: "claude-code", quota: {} },
       hostContextTokens: 200_000,
       hostOutputTokens: 8_192,
     });
     const cap = computeDispatchCapacity({
       pools,
-      sessionConfig: { quota: { enabled: true } },
+      sessionConfig: { quota: {} },
       // Two small packets — the slot count is bounded by quota math over the
       // discovered window, not by any host concurrency flag.
       pendingItemTokens: [1000, 1000],
@@ -169,7 +169,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const pools = await buildConfirmedPools({
       sessionConfig: {
         provider: "claude-code",
-        quota: { enabled: true },
+        quota: {},
         openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
       },
     });
@@ -188,7 +188,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const pools = await buildConfirmedPools({
       sessionConfig: {
         provider: "openai-compatible",
-        quota: { enabled: true },
+        quota: {},
         openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
       },
     });
@@ -200,7 +200,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const pools = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
-        quota: { enabled: true },
+        quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
       demotePrimaryInProcess: true,
@@ -220,7 +220,7 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     const pools = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
-        quota: { enabled: true },
+        quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
     });
@@ -242,7 +242,7 @@ describe("INV-ROLL-02: rolling dispatch fills a freed slot on completion", () =>
       hostModel: null,
       hostConcurrencyLimit: { active_subagents: 2, source: "session_config" },
     };
-    const session: SessionConfig = { quota: { enabled: false } };
+    const session: SessionConfig = { quota: {} };
     const order: string[] = [];
     const dispatcher = createRollingDispatcher<{ id: string }>({
       confirmedPools: [pool],
@@ -470,7 +470,7 @@ describe("fail-3: empty-pool stranding (no surviving pool)", () => {
       hostModel: null,
       hostConcurrencyLimit: { active_subagents: 1, source: "session_config" },
     };
-    const session: SessionConfig = { quota: { enabled: false } };
+    const session: SessionConfig = { quota: {} };
     const dispatcher = createRollingDispatcher<{ id: string }>({
       confirmedPools: [pool],
       sessionConfig: session,
@@ -570,3 +570,4 @@ describe("fail-5: host-wave fallback retained as opt-out; rolling engine default
     ).toBe(false);
   });
 });
+

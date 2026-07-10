@@ -122,7 +122,7 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
     // A run whose STORED session config pins the ORIGINAL auditor's provider (codex).
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ provider: "codex", quota: { enabled: true } }),
+      JSON.stringify({ provider: "codex", quota: {} }),
       "utf8",
     );
 
@@ -199,3 +199,4 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
     expect(cont).toContain("--host-can-dispatch-subagents");
   });
 });
+

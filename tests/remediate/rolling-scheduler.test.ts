@@ -387,7 +387,7 @@ describe("driveRollingDispatch: shared rebuild between levels + single-flight (C
       hostModel: null,
     } as CapacityPool,
   ];
-  const sessionConfig: SessionConfig = { quota: { enabled: false } } as SessionConfig;
+  const sessionConfig: SessionConfig = { quota: {} } as SessionConfig;
 
   it("interposes exactly one shared rebuild between two dependency levels", async () => {
     const levels = [[block("A", ["FA"])], [block("B", ["FB"], ["A"])]];
@@ -773,3 +773,4 @@ describe("atomic-replace: wave-batch shim removed", () => {
     expect(typesSrc).toContain("implement_rolling_sequential");
   });
 });
+

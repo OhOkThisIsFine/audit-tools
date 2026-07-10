@@ -143,7 +143,7 @@ test("a discovered capability window lifts the resolved context above the 32k fl
     ...overrides,
   });
   const sessionConfig = {
-    quota: { enabled: true, safety_margin: 1.0, input_tokens_per_minute: 1_000_000 },
+    quota: { safety_margin: 1.0, input_tokens_per_minute: 1_000_000 },
   };
   // A TPM budget tight enough that the per-item context window decides the wave.
   const pendingItemTokens = new Array(12).fill(30_000);
@@ -314,7 +314,7 @@ test("a pool carries the RAW per-pool signals and the degrade marker — no pre-
 
   const capacity = computeDispatchCapacity({
     pools: [pool],
-    sessionConfig: { quota: { enabled: true } },
+    sessionConfig: { quota: {} },
     pendingItemTokens: new Array(4).fill(10_000),
   });
   const [summary] = summarizeDispatchCapacityPools(capacity);
@@ -366,3 +366,4 @@ test(
     }
   },
 );
+

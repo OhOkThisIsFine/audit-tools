@@ -5,9 +5,7 @@ const { scheduleWave } = await import("../../src/shared/quota/scheduler.ts");
 // A minimal session-config that keeps quota enabled.
 function baseSessionConfig(overrides = {}) {
   return {
-    quota: {
-      enabled: true,
-      safety_margin: 0.8,
+    quota: { safety_margin: 0.8,
       ...overrides,
     },
   };
@@ -22,9 +20,7 @@ test("rpm cap: scheduleWave respects requests_per_minute limit", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0, // no safety shrinkage so cap is exact
+      quota: { safety_margin: 1.0, // no safety shrinkage so cap is exact
         models: {
           "test/model": { requests_per_minute: 4 },
         },
@@ -45,9 +41,7 @@ test("tpm cap: scheduleWave respects input_tokens_per_minute limit", () => {
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0,
+      quota: { safety_margin: 1.0,
         models: {
           "test/model": { input_tokens_per_minute: 5000 },
         },
@@ -92,7 +86,7 @@ test("no invented cap: scheduleWave leaves the wave uncapped with no learned/hos
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: { enabled: true, safety_margin: 0.8 },
+      quota: { safety_margin: 0.8 },
     },
     hostModel: null,
     requestedConcurrency: 20,
@@ -107,7 +101,7 @@ test("no invented cap: an unconfigured local provider is also uncapped", () => {
   const schedule = scheduleWave({
     providerName: "worker-command",
     sessionConfig: {
-      quota: { enabled: true, safety_margin: 0.8 },
+      quota: { safety_margin: 0.8 },
     },
     hostModel: null,
     requestedConcurrency: 20,
@@ -143,9 +137,7 @@ test("discovered capability: explicit per-model config still wins over discovery
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 0.8,
+      quota: { safety_margin: 0.8,
         models: { "test/model": { context_tokens: 128_000, output_tokens: 8_192 } },
       },
     },
@@ -186,9 +178,7 @@ test("host_concurrency cap: a tighter host ceiling overrides a looser quota cap 
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0,
+      quota: { safety_margin: 1.0,
         models: { "test/model": { requests_per_minute: 8 } },
       },
     },
@@ -206,9 +196,7 @@ test("host_concurrency cap: a looser host ceiling does NOT override a tighter qu
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0,
+      quota: { safety_margin: 1.0,
         models: { "test/model": { requests_per_minute: 3 } },
       },
     },
@@ -226,9 +214,7 @@ test("cooldown cap: an active cooldown throttles to one slot and short-circuits 
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: {
-      quota: {
-        enabled: true,
-        safety_margin: 1.0,
+      quota: { safety_margin: 1.0,
         models: { "test/model": { requests_per_minute: 50 } },
       },
     },
@@ -245,7 +231,7 @@ test("cooldown cap: an active cooldown throttles to one slot and short-circuits 
 test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'", () => {
   const capped = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 6,
     quotaStateEntry: null,
@@ -256,7 +242,7 @@ test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'"
 
   const uncapped = scheduleWave({
     providerName: "claude-code",
-    sessionConfig: { quota: { enabled: false } },
+    sessionConfig: { quota: {} },
     hostModel: null,
     requestedConcurrency: 6,
     quotaStateEntry: null,
@@ -265,3 +251,4 @@ test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'"
   expect(uncapped.max_concurrent).toBe(6);
   expect(uncapped.binding_cap).toBe("none");
 });
+

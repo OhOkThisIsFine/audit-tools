@@ -176,7 +176,7 @@ describe("INV-SOO-03/05: real concurrent in-flight through the rolling driver", 
     hostModel: null,
     hostConcurrencyLimit: { active_subagents: 8, source: "session_config" },
   };
-  const session: SessionConfig = { quota: { enabled: false } };
+  const session: SessionConfig = { quota: {} };
   const block = (id: string, files: string[]): RemediationBlock => ({
     block_id: id,
     items: [id],
@@ -464,7 +464,7 @@ describe("M-B2 (integration): two barrel-only-sharing nodes complete merged with
     hostModel: null,
     hostConcurrencyLimit: { active_subagents: 8, source: "session_config" },
   };
-  const session: SessionConfig = { quota: { enabled: false } };
+  const session: SessionConfig = { quota: {} };
   const BARREL = "src/shared/index.ts";
   const block = (id: string, files: string[]): RemediationBlock => ({
     block_id: id,
@@ -700,3 +700,4 @@ describe("increment 2d: continuity biases sub-wave admission order", () => {
     }
   });
 });
+

@@ -517,22 +517,19 @@ export function selectProvider<TPacket>(
   const evaluated = sorted.map((pool) => ({ pool, schedule: scheduleForPool(pool) }));
 
   // Proactive cross-pool spill (INV-QD-14): healthy pools first, then degraded,
-  // each group keeping the capability order above (a stable partition). When
-  // quota management is disabled the subsystem is inert — selection stays pure
-  // capability order.
-  const quotaManaged = sessionConfig.quota?.enabled !== false;
+  // each group keeping the capability order above (a stable partition). Quota
+  // management is not switchable (one track, always-on), so this ordering always
+  // applies — there is no inert "quota disabled" mode.
   // A cost-demoted pool (declared free but observed charging) is treated as
   // degraded so it spills behind healthy pools — the routing half of reactive cost
   // verification. Folded in here (not into `isPoolQuotaDegraded`, which is a pure
   // function of live quota signals) because the demotion set is dispatch-run state.
   const isDegraded = (e: { pool: CapacityPool; schedule: WaveSchedule }): boolean =>
     isPoolQuotaDegraded(e.pool, e.schedule) || costDemotedPoolIds.has(e.pool.id);
-  const ordered = quotaManaged
-    ? [
-        ...evaluated.filter((e) => !isDegraded(e)),
-        ...evaluated.filter((e) => isDegraded(e)),
-      ]
-    : evaluated;
+  const ordered = [
+    ...evaluated.filter((e) => !isDegraded(e)),
+    ...evaluated.filter((e) => isDegraded(e)),
+  ];
 
   for (const { pool, schedule } of ordered) {
     if (schedule.max_concurrent > 0) {

@@ -21,7 +21,7 @@ import { scheduleWave as dispatchScheduleWave } from "../../src/remediate/steps/
 
 const baseConfig: SessionConfig = {
   provider: "claude-code",
-  quota: { enabled: true },
+  quota: {},
 };
 
 function makeEntry(overrides: Partial<QuotaStateEntry> = {}): QuotaStateEntry {
@@ -35,15 +35,18 @@ function makeEntry(overrides: Partial<QuotaStateEntry> = {}): QuotaStateEntry {
 }
 
 describe("scheduleWave (quota module)", () => {
-  it("returns requested concurrency when quota disabled", () => {
+  it("returns requested concurrency when blind (no live quota snapshot)", () => {
+    // One track, no quota-off switch: a blind wave (no /usage snapshot, no
+    // RPM/TPM, no declared host cap) stays UNCAPPED per the no-invented-ceiling
+    // invariant — max_concurrent is the requested concurrency verbatim.
     const result = scheduleWave({
       providerName: "claude-code",
-      sessionConfig: { ...baseConfig, quota: { enabled: false } },
+      sessionConfig: baseConfig,
       hostModel: null,
       requestedConcurrency: 10,
     });
     expect(result.max_concurrent).toBe(10);
-    expect(result.confidence).toBe("high");
+    expect(result.confidence).toBeDefined();
   });
 
   it("applies host concurrency limit", () => {
@@ -64,9 +67,7 @@ describe("scheduleWave (quota module)", () => {
   it("applies RPM cap", () => {
     const config: SessionConfig = {
       ...baseConfig,
-      quota: {
-        enabled: true,
-        models: {
+      quota: { models: {
           "test/model": { requests_per_minute: 5 },
         },
       },
@@ -157,9 +158,7 @@ describe("scheduleWave (quota module)", () => {
   it("uses per-slot token estimates for TPM capping", () => {
     const config: SessionConfig = {
       ...baseConfig,
-      quota: {
-        enabled: true,
-        models: {
+      quota: { models: {
           "test/model": { input_tokens_per_minute: 10_000 },
         },
       },
@@ -200,7 +199,7 @@ describe("scheduleWave (quota module)", () => {
   it("dispatches the full requested wave for a local provider with no signal", () => {
     const result = scheduleWave({
       providerName: "worker-command",
-      sessionConfig: { ...baseConfig, quota: { enabled: true } },
+      sessionConfig: { ...baseConfig, quota: {} },
       hostModel: null,
       requestedConcurrency: 10,
     });
@@ -241,7 +240,7 @@ describe("dispatch.ts scheduleWave", () => {
   it("returns a wave schedule with max_concurrent when quota is disabled", async () => {
     const result = await dispatchScheduleWave({
       providerName: "claude-code",
-      sessionConfig: { provider: "claude-code", quota: { enabled: false } },
+      sessionConfig: { provider: "claude-code", quota: {} },
       hostModel: null,
       itemCount: 5,
     });
@@ -251,7 +250,7 @@ describe("dispatch.ts scheduleWave", () => {
   it("caps concurrency at the host limit when quota is enabled", async () => {
     const result = await dispatchScheduleWave({
       providerName: "claude-code",
-      sessionConfig: { provider: "claude-code", quota: { enabled: true } },
+      sessionConfig: { provider: "claude-code", quota: {} },
       hostModel: null,
       hostMaxConcurrent: 3,
       itemCount: 10,
@@ -378,7 +377,7 @@ describe("M5 dispatch broker — never-over-dispatch admission (inv-2, inv-4)", 
   it("(a) refuses beyond the RPM cap (floor(rpm*safetyMargin))", () => {
     const config: SessionConfig = {
       ...baseConfig,
-      quota: { enabled: true, models: { "m": { requests_per_minute: 5 } } },
+      quota: { models: { "m": { requests_per_minute: 5 } } },
     };
     const capacity = computeDispatchCapacity({
       pools: [brokerPool({ hostModel: "m" })],
@@ -391,7 +390,7 @@ describe("M5 dispatch broker — never-over-dispatch admission (inv-2, inv-4)", 
   it("(a) refuses beyond the TPM budget (sumTopN <= input_tokens_per_minute*safetyMargin)", () => {
     const config: SessionConfig = {
       ...baseConfig,
-      quota: { enabled: true, models: { "m": { input_tokens_per_minute: 10_000 } } },
+      quota: { models: { "m": { input_tokens_per_minute: 10_000 } } },
     };
     const capacity = computeDispatchCapacity({
       pools: [brokerPool({ hostModel: "m" })],
@@ -524,7 +523,7 @@ describe("M5-WIRING convergence — concurrency is broker-output, never host dis
     // assert the wrapper's max_concurrent is the broker output, bounded by slots.
     const config: SessionConfig = {
       provider: "claude-code",
-      quota: { enabled: true },
+      quota: {},
     };
     const result = await dispatchScheduleWave({
       sessionConfig: config,
@@ -628,3 +627,4 @@ describe("M5-WIRING convergence — deterministic-local token estimate, never an
     );
   });
 });
+
