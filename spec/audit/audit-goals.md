@@ -133,8 +133,10 @@ valve, no partial-success status is introduced.
   cause. The optional LLM synthesis-narrative provider may add an *additive* themes
   layer (carrying a root-cause field) on top of the deterministic report when
   configured; it never replaces, gates, or is required by the deterministic output.
-- Cleanup of audit artifacts is available via the `cleanup` CLI command / pre-run cleanup path
-  (`cleanupStaleArtifactsDir`), but is decoupled from the completion transition by design — the
-  transition itself never triggers it; it also explicitly skips deletion while a run is
-  `active`/`blocked`, so artifacts persist through incomplete or blocked runs rather than staying
-  minimal.
+- On completion, `promoteFinalAuditReport` copies the final report/findings to the repo root and
+  then deletes the now-superseded working artifacts dir — so cleanup IS part of the completion
+  transition, folded into promotion rather than routed through `cleanupStaleArtifactsDir`. A
+  separate mechanism, `cleanupStaleArtifactsDir` (the `cleanup` CLI command and the pre-run sweep
+  in `advance-audit`), clears a *stale* artifacts dir left by a prior `complete`/`not_started` run
+  before a fresh run starts; it explicitly skips deletion while a run is `active`/`blocked`, so an
+  in-progress or blocked run's artifacts are never swept mid-flight.
