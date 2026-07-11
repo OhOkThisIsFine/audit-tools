@@ -124,8 +124,9 @@ tax conversation-first context and, per the routing rethink, risks livelock).
   with an optional **`dispatch_bias`** ∈ [0,1], **default 0** (cost-first — backward compatible; an
   operator who says nothing gets today's behavior exactly).
 - The deterministic executor persists it onto the shared confirmation artifact next to the confirmed
-  cost order; it is read back at dispatch by the same `readConfirmedCostPositions` path (extended to
-  also return the bias) and threaded into both build sites → `admitBatch`.
+  cost order; it is read back at dispatch by the sibling `readConfirmedDispatchBias` function
+  (alongside `readConfirmedCostPositions`, which resolves the cost-order rung) and threaded into
+  both build sites → `admitBatch`.
 - **Headless** (`advanceAudit`, no CLI host) auto-completes with `dispatch_bias = 0`, so nothing
   blocks and the default is the safe cost-first corner.
 - **Static policy, dynamic execution.** Gate-0 fixes the *policy* (λ); the router *realizes* it
