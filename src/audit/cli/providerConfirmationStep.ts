@@ -1,4 +1,4 @@
-import type { ConfirmedPoolEntry } from "audit-tools/shared";
+import type { ConfirmedPoolEntry, SourcePoolDisplayEntry } from "audit-tools/shared";
 import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "audit-tools/shared";
 
 /**
@@ -18,6 +18,15 @@ import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "audit-tools/shared";
 export function renderProviderConfirmationPrompt(opts: {
   /** The tool's suggested pool, already annotated with model_id/price/cost_order. */
   providerPool: ConfirmedPoolEntry[];
+  /**
+   * Every configured `sessionConfig.sources[]` pool (backlog follow-up a) —
+   * display-only, derived by `deriveSourcePoolDisplay`. These are NOT part of
+   * `providerPool` / its `cost_order` sequence, but `collectDispatchableSources`
+   * (apiPool.ts) folds every one of them into dispatch, so they must be visible
+   * here or the operator is confirming an ordering that omits pools that WILL
+   * route. Omit/empty when no `sources[]` are configured.
+   */
+  sourcePools?: SourcePoolDisplayEntry[];
   /** Absolute path the host writes its operator input to. */
   inputPath: string;
   /** The exact command to re-invoke once the input is written. */
@@ -26,6 +35,7 @@ export function renderProviderConfirmationPrompt(opts: {
   const sorted = [...opts.providerPool].sort(
     (a, b) => (a.cost_order ?? Number.MAX_SAFE_INTEGER) - (b.cost_order ?? Number.MAX_SAFE_INTEGER),
   );
+  const sourcePools = opts.sourcePools ?? [];
 
   const priceCell = (entry: ConfirmedPoolEntry): string => {
     if (entry.blended_price_usd_per_mtok == null) {
@@ -45,6 +55,23 @@ export function renderProviderConfirmationPrompt(opts: {
     return `| ${order} | ${entry.name} | ${model} | ${priceCell(entry)} | ${entry.capability_tier} | ${statusCell(entry)} |`;
   });
 
+  const sourcePriceCell = (entry: SourcePoolDisplayEntry): string => {
+    if (entry.declared_cost_per_mtok !== undefined) {
+      return `$${entry.declared_cost_per_mtok.toFixed(2)} (declared)`;
+    }
+    if (entry.blended_price_usd_per_mtok == null) {
+      return entry.model ? "price unknown" : "resolved at dispatch";
+    }
+    return `$${entry.blended_price_usd_per_mtok.toFixed(2)}`;
+  };
+  const sourceRows = sourcePools.map(
+    (entry) =>
+      `| ${entry.id} | ${entry.provider} | ${entry.model ?? "—"} | ${sourcePriceCell(entry)} |`,
+  );
+
+  const hasLegacyOpenAiCompatible = sorted.some((e) => e.name === "openai-compatible");
+  const hasCodex = sorted.some((e) => e.name === "codex");
+
   return [
     "# Confirm Provider Cost Ordering (Gate-0)",
     "",
@@ -63,7 +90,43 @@ export function renderProviderConfirmationPrompt(opts: {
     "  (e.g. a CLI backend); it is ordered by capability tier for now.",
     "- A host-native provider (the agent you are) has no model row until you report",
     "  your roster below — do that so your own tiers are priced + ordered here too.",
+    ...(hasLegacyOpenAiCompatible
+      ? [
+          "- **`openai_compatible` has no cost override**: this legacy block has no",
+          "  `cost_per_mtok` field, so it prices at the models.dev list price for its",
+          "  model — a genuinely free/discounted endpoint (e.g. a free NIM deployment)",
+          "  will price WRONG here. To declare its real cost, move it to a `sources[]`",
+          "  entry instead (`{ provider: \"openai-compatible\", base_url, model,",
+          '  cost_per_mtok }` — set `0` for free) — see the table below.',
+        ]
+      : []),
+    ...(hasCodex
+      ? [
+          '- **codex shows "resolved at dispatch"**: its model/effort roster is not',
+          "  enumerable here from the legacy `codex` block (single `model` field, no",
+          "  roster). To pin + price specific codex models/efforts at this gate, add",
+          '  them as `sources[]` entries (`{ provider: "codex", model, parameters:',
+          '  { extra_args: [...] } }`, one per model/effort) — see the table below.',
+        ]
+      : []),
     "",
+    ...(sourceRows.length > 0
+      ? [
+          "## Configured `sources[]` pools (also route)",
+          "",
+          "Every entry below is folded into dispatch alongside the pool above",
+          "(`collectDispatchableSources`) — this is what actually routes, not just",
+          "the legacy/host/CLI entries in the table above.",
+          "",
+          "| Source id | Provider | Model | $/Mtok |",
+          "|-----------|----------|-------|--------|",
+          ...sourceRows,
+          "",
+          "- **`$/Mtok`** marked `(declared)` is the operator's own `cost_per_mtok`",
+          "  on that source — authoritative over the models.dev catalog price.",
+          "",
+        ]
+      : []),
     "## What to do",
     "",
     "Ask the user whether the suggested ordering is right (a single, brief round).",

@@ -20,6 +20,9 @@ const { runProviderConfirmationAutoComplete } = await import(
 const { readConfirmedCostPositions, readSharedProviderConfirmation } = await import(
   "../../src/shared/providers/sharedProviderConfirmation.ts"
 );
+const { deriveSourcePoolDisplay } = await import(
+  "../../src/shared/providers/providerConfirmation.ts"
+);
 
 describe("renderProviderConfirmationPrompt (a — visibility)", () => {
   const pool = [
@@ -73,6 +76,99 @@ describe("renderProviderConfirmationPrompt (a — visibility)", () => {
     const localIdx = prompt.indexOf("worker-command");
     expect(haikuIdx).toBeGreaterThan(0);
     expect(haikuIdx).toBeLessThan(localIdx);
+  });
+
+  test("does not render the sources[] table when no sourcePools are passed", () => {
+    expect(prompt).not.toMatch(/Configured `sources\[\]` pools/);
+  });
+
+  test("does not render the (c) codex note when codex is absent from the pool", () => {
+    expect(prompt).not.toMatch(/codex shows/);
+  });
+});
+
+describe("renderProviderConfirmationPrompt — sources[] pools + advisory notes (backlog a/b/c)", () => {
+  test("(a) every sources[] pool renders in its own table, alongside the legacy/host/CLI pool", () => {
+    const sessionConfig = {
+      sources: [
+        {
+          id: "opencode-free",
+          provider: "opencode",
+          model: "free-model",
+          cost_per_mtok: 0,
+        },
+      ],
+    };
+    const sourcePools = deriveSourcePoolDisplay(sessionConfig);
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "claude-code", capability_tier: "frontier", excluded: false, cost_order: 0 },
+      ],
+      sourcePools,
+      inputPath: "/repo/.audit-tools/provider-confirmation.input.json",
+      continueCommand: "audit-code next-step --root /repo",
+    });
+
+    expect(prompt).toMatch(/Configured `sources\[\]` pools/);
+    expect(prompt).toMatch(/opencode-free/);
+    expect(prompt).toMatch(/free-model/);
+    expect(prompt).toMatch(/\$0\.00 \(declared\)/);
+  });
+
+  test("(b) legacy openai_compatible pool gets an advisory note about the missing cost override", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        {
+          name: "openai-compatible",
+          capability_tier: "capable",
+          excluded: false,
+          model_id: "nemotron-ultra",
+          blended_price_usd_per_mtok: 1.0,
+          cost_order: 0,
+        },
+      ],
+      inputPath: "/repo/.audit-tools/provider-confirmation.input.json",
+      continueCommand: "audit-code next-step --root /repo",
+    });
+
+    expect(prompt).toMatch(/no cost override/);
+    expect(prompt).toMatch(/cost_per_mtok/);
+  });
+
+  test("(c) codex in the pool gets a note that a pinned sources[] roster is available", () => {
+    const prompt = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "codex", capability_tier: "capable", excluded: false, cost_order: 0 },
+      ],
+      inputPath: "/repo/.audit-tools/provider-confirmation.input.json",
+      continueCommand: "audit-code next-step --root /repo",
+    });
+
+    expect(prompt).toMatch(/codex shows/);
+    expect(prompt).toMatch(/model\/effort roster/);
+    expect(prompt).toMatch(/extra_args/);
+  });
+});
+
+describe("deriveSourcePoolDisplay (backlog a — data derivation)", () => {
+  test("empty/absent sources[] yields an empty list", () => {
+    expect(deriveSourcePoolDisplay({})).toEqual([]);
+  });
+
+  test("a declared cost_per_mtok is authoritative and skips the models.dev lookup", () => {
+    const [entry] = deriveSourcePoolDisplay({
+      sources: [{ provider: "opencode", model: "free-model", cost_per_mtok: 0 }],
+    });
+    expect(entry.declared_cost_per_mtok).toBe(0);
+    expect(entry.blended_price_usd_per_mtok).toBeUndefined();
+    expect(entry.id).toBe("opencode:free-model");
+  });
+
+  test("an explicit id wins over the derived default", () => {
+    const [entry] = deriveSourcePoolDisplay({
+      sources: [{ id: "my-pool", provider: "codex", model: "gpt-5-codex" }],
+    });
+    expect(entry.id).toBe("my-pool");
   });
 });
 

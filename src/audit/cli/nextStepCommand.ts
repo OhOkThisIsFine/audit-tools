@@ -10,6 +10,7 @@ import type {
 import {
   applyGuidanceFile,
   buildSharedProviderConfirmation,
+  deriveSourcePoolDisplay,
   PROVIDER_CONFIRMATION_INPUT_FILENAME,
   auditArtifactsDir,
   promotedAuditFindingsPath,
@@ -631,6 +632,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       },
       prompt: renderProviderConfirmationPrompt({
         providerPool: suggested.provider_pool,
+        sourcePools: deriveSourcePoolDisplay(sessionConfig),
         inputPath,
         continueCommand,
       }),

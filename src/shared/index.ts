@@ -867,6 +867,7 @@ export type {
   CapabilityTier,
   DiscoveredProvider,
   ConfirmedProviderPool,
+  SourcePoolDisplayEntry,
 } from "./providers/providerConfirmation.js";
 export {
   discoverProviders,
@@ -875,6 +876,7 @@ export {
   representativeModelId,
   annotateConfirmedPoolCost,
   annotateConfirmedPool,
+  deriveSourcePoolDisplay,
 } from "./providers/providerConfirmation.js";
 export {
   commandExists,

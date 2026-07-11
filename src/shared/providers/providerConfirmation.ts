@@ -1,4 +1,8 @@
-import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import type {
+  DispatchableSource,
+  ResolvedProviderName,
+  SessionConfig,
+} from "../types/sessionConfig.js";
 import type { FreshSessionProvider, ProviderRateLimits } from "./types.js";
 import {
   resolveFreshSessionProviderName,
@@ -370,4 +374,74 @@ export function applyProviderConfirmationSelections(
     excluded: exclude,
     addedUndetected: undetectedNormalized,
   };
+}
+
+// ---------------------------------------------------------------------------
+// sources[] roster display (Gate-0 backlog follow-up a)
+// ---------------------------------------------------------------------------
+
+/**
+ * Display-only view of one `sessionConfig.sources[]` pool for the Gate-0 roster.
+ *
+ * Backlog gap (a): `discoverProviders`/`buildSharedProviderConfirmation` only ever
+ * looked at PATH-probed CLIs + the legacy `openai_compatible` block, so an explicit
+ * `sources[]` pool (e.g. an opencode-free endpoint) never appeared at Gate-0 even
+ * though `collectDispatchableSources` (apiPool.ts) folds EVERY `sources[]` entry
+ * into what actually dispatches — the operator was confirming an ordering that
+ * omitted pools that WILL route. This type/derivation is display-only: it never
+ * round-trips through `ConfirmedPoolEntry` / the persisted `SharedProviderConfirmation`,
+ * so it can't perturb the existing cost_order/dispatch contract.
+ */
+export interface SourcePoolDisplayEntry {
+  /**
+   * Same id convention the dispatch side uses (explicit `id`, else
+   * `${provider}:${model ?? endpoint ?? "default"}`) — display-only, not a
+   * guaranteed exact match of the dispatch-side pool key.
+   */
+  id: string;
+  provider: DispatchableSource["provider"];
+  model?: string;
+  /**
+   * Operator-declared `cost_per_mtok` on this source. Authoritative over the
+   * models.dev catalog price when present (mirrors the dispatch-side authority
+   * rule on `DispatchableSource.cost_per_mtok` — see sessionConfig.ts).
+   */
+  declared_cost_per_mtok?: number;
+  /**
+   * models.dev blended price, computed only when the source has no declared cost
+   * and a model id is known; `null` when the dataset can't price it.
+   */
+  blended_price_usd_per_mtok?: number | null;
+}
+
+/**
+ * Derive the Gate-0 display view of every configured `sessionConfig.sources[]`
+ * entry (backlog follow-up a). Read-only and additive: mirrors the same
+ * `sessionConfig.sources` array `collectDispatchableSources` (apiPool.ts) folds
+ * into dispatch, so what the operator sees at Gate-0 includes every pool that will
+ * actually route. Order is preserved from the operator-authored config array
+ * (content-derived, stable — never re-sorted by iteration/readdir order).
+ */
+export function deriveSourcePoolDisplay(
+  sessionConfig: SessionConfig,
+): SourcePoolDisplayEntry[] {
+  const sources = sessionConfig.sources ?? [];
+  return sources.map((source) => {
+    const id =
+      source.id ?? `${source.provider}:${source.model ?? source.endpoint ?? "default"}`;
+    const entry: SourcePoolDisplayEntry = {
+      id,
+      provider: source.provider,
+      ...(source.model ? { model: source.model } : {}),
+      ...(source.cost_per_mtok !== undefined
+        ? { declared_cost_per_mtok: source.cost_per_mtok }
+        : {}),
+    };
+    if (source.cost_per_mtok === undefined) {
+      entry.blended_price_usd_per_mtok = source.model
+        ? (resolveModelPrice(source.model) ?? null)
+        : null;
+    }
+    return entry;
+  });
 }
