@@ -699,12 +699,41 @@ export async function mergeAndIngest(params: {
   // more accurate than per-packet early-warning at submit time).
   warnOnDuplicateFindings(passing);
 
-  // FND-OBS-48c05a13: log notDispatched task IDs early (before ingestion) so
-  // operators can trace which tasks were budget-capped and re-enter dispatch on
-  // the next round, even if ingestion later throws.
+  // FND-OBS-48c05a13 (+ 2026-07-11 dogfooding): log notDispatched task IDs early
+  // (before ingestion) so operators can trace them and re-enter dispatch next
+  // round, even if ingestion later throws. Report the REAL hold reason from the
+  // persisted admission `explains` (per packet, already in dispatch-quota.json)
+  // instead of a blanket "(budget-capped)" — that mislabel sent a live
+  // investigation toward a nonexistent budget coupling when the true cause was a
+  // planning deferral. Tasks with NO admission explain were never submitted to
+  // admission (top-K / peer-claim / pool-split deferral), NOT quota-capped.
   if (notDispatched.length > 0) {
+    let reasonSuffix = " (re-enter dispatch next round)";
+    try {
+      const dq = await readJsonFile<{
+        admission?: { explains?: Array<{ reason?: string; admitted?: boolean }> };
+      }>(join(runDir, "dispatch-quota.json"));
+      const blocked = (dq.admission?.explains ?? []).filter((e) => e.admitted === false);
+      if (blocked.length > 0) {
+        const byReason = new Map<string, number>();
+        for (const e of blocked) {
+          const r = e.reason ?? "unknown";
+          byReason.set(r, (byReason.get(r) ?? 0) + 1);
+        }
+        const summary = [...byReason.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([r, n]) => `${n} ${r}`)
+          .join(", ");
+        reasonSuffix =
+          ` — admission blocked ${blocked.length} packet(s) this round (${summary}); any task` +
+          ` absent from the admission set was deferred by planning (top-K / peer-claim / pool-split), not quota-capped`;
+      }
+    } catch {
+      // No dispatch-quota.json (e.g. a host-only round) → no admission decision to
+      // attribute; do not assert a quota reason.
+    }
     process.stderr.write(
-      `[merge-and-ingest] ${notDispatched.length} task(s) not dispatched this round (budget-capped): ${notDispatched.join(", ")}\n`,
+      `[merge-and-ingest] ${notDispatched.length} task(s) not dispatched this round${reasonSuffix}: ${notDispatched.join(", ")}\n`,
     );
   }
 

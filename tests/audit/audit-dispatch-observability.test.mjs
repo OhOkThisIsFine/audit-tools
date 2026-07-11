@@ -305,8 +305,85 @@ test("FND-OBS-48c05a13: mergeAndIngestCommand logs notDispatched task IDs to std
     );
     expect(notDispatchedLine, "expected stderr log of notDispatched task IDs containing 'task-obs-b'").toBeTruthy();
     expect(notDispatchedLine).toMatch(/1 task\(s\) not dispatched/);
+    // 2026-07-11 dogfooding: with no dispatch-quota.json (host-only round) the log
+    // must NOT assert a quota reason it cannot attribute.
+    expect(notDispatchedLine).not.toContain("budget-capped");
   });
 });
+
+test("2026-07-11 dogfooding: notDispatched log reports the REAL admission reason from explains, not a blanket (budget-capped)", async () => {
+  await withTempDir(async (artifactsDir) => {
+      const runId = "run-not-dispatched-reason";
+      const runDir = join(artifactsDir, "runs", runId);
+      const taskResultsDir = join(runDir, "task-results");
+      await mkdir(taskResultsDir, { recursive: true });
+
+      const workerTask = {
+        obligation_id: "audit_tasks_completed",
+        repo_root: artifactsDir,
+        result_path: join(runDir, "worker-result.json"),
+      };
+      await writeFile(join(runDir, "task.json"), JSON.stringify(workerTask), "utf8");
+
+      const taskA = {
+        task_id: "task-r-a", unit_id: "src/a.ts", pass_id: "pass-1", lens: "correctness",
+        file_paths: ["src/a.ts"], rationale: "test", priority: "medium", file_line_counts: { "src/a.ts": 10 },
+      };
+      const taskB = {
+        task_id: "task-r-b", unit_id: "src/b.ts", pass_id: "pass-2", lens: "security",
+        file_paths: ["src/b.ts"], rationale: "test", priority: "medium", file_line_counts: { "src/b.ts": 10 },
+      };
+      await writeFile(join(runDir, "pending-audit-tasks.json"), JSON.stringify([taskA, taskB]), "utf8");
+
+      await writeFile(
+        join(runDir, DISPATCH_RESULT_MAP_FILENAME),
+        JSON.stringify({
+          contract_version: "audit-code-dispatch-results/v1alpha1",
+          run_id: runId,
+          entries: [{ packet_id: "packet-1", task_id: taskA.task_id, result_path: join(taskResultsDir, `${taskA.task_id}.json`) }],
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(taskResultsDir, `${taskA.task_id}.json`),
+        JSON.stringify({ task_id: taskA.task_id, unit_id: taskA.unit_id, pass_id: taskA.pass_id, lens: taskA.lens, file_coverage: [{ path: "src/a.ts", total_lines: 10 }], findings: [] }),
+        "utf8",
+      );
+
+      // A dispatch-quota.json whose admission explains record the REAL reason task-r-b's
+      // packet was held (cap_reached), so the log attributes it instead of guessing budget.
+      await writeJsonFile(join(runDir, "dispatch-quota.json"), {
+        admission: {
+          granted_packet_ids: ["packet-1"],
+          declared_cap: 1,
+          leases: [],
+          explains: [
+            { packet_id: "packet-1", pool_id: "host", resource_key: null, admitted: true, reason: "admitted", cost: 1 },
+            { packet_id: "packet-2", pool_id: "host", resource_key: null, admitted: false, reason: "cap_reached", cost: 1 },
+          ],
+        },
+      });
+
+      await writeJsonFile(join(artifactsDir, "repo_manifest.json"), {
+        contract_version: "audit-tools/repo-manifest/v1",
+        repository: { name: "test", root: artifactsDir },
+        generated_at: new Date().toISOString(), files: [], file_count: 0, total_size_bytes: 0,
+      });
+
+      const stderrLines = [];
+      await withCapturedStderr(async (lines) => {
+        try {
+          await cmdMergeAndIngest(["--run-id", runId, "--artifacts-dir", artifactsDir]);
+        } catch { /* only care about the notDispatched log */ }
+        stderrLines.push(...lines);
+      });
+
+      const line = stderrLines.find((l) => l.includes("[merge-and-ingest]") && l.includes("not dispatched") && l.includes("task-r-b"));
+      expect(line, "expected notDispatched log for task-r-b").toBeTruthy();
+      expect(line).toContain("cap_reached");
+      expect(line).not.toContain("budget-capped");
+    });
+  });
 
 // ── FND-OBS-bf5c7331: merge-results.mjs structured JSON summary ──────────────
 
