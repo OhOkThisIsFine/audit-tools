@@ -321,9 +321,11 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "Write the JSON array of contract-review findings to:",
       "",
       `  ${contractResultsPath}`,
-      "",
-      `Then run: ${continueCommand}`,
-      "",
+      // NO advance command in this packet: it is written to a file and DISPATCHED
+      // TO A SUBAGENT (see the enclosing dispatchPrompt). A worker that runs
+      // `next-step` becomes a SECOND driver of the orchestrator while the host is
+      // still mid-parallel-dispatch (the conceptual perspectives run concurrently).
+      // The advance belongs solely to the host's dispatchPrompt below.
       ...(contractReReview ? ["", contractReReview] : []),
     ].join("\n");
 

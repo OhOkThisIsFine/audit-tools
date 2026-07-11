@@ -150,6 +150,16 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
       continue;
     }
     if (step.step_kind === "design_review_parallel") {
+      // Regression (double-driver): the dispatched contract-review WORKER packet
+      // must NOT carry the orchestrator advance command — a worker that runs
+      // `next-step` becomes a SECOND driver while the host is mid-parallel-dispatch.
+      // The advance belongs solely to the host step prompt. (Discriminate on the
+      // instruction phrasing, not the bare "next-step" token, which also appears
+      // inside the temp-repo path the packet legitimately prints.)
+      const workerPacket = await readFile(step.artifact_paths.contract_prompt, "utf8");
+      expect(workerPacket).not.toContain("Then run:");
+      const hostPrompt = await readFile(step.prompt_path, "utf8");
+      expect(hostPrompt).toContain("both been written, run:");
       await mkdir(incomingDir, { recursive: true });
       await writeFile(
         join(incomingDir, "design-review-contract-findings.json"),
