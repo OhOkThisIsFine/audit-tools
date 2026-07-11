@@ -30,9 +30,12 @@ provider_confirmation        [user gate — shared with audit; session-level]
       → per-module contract drafting   [parallel]
       → seam reconciliation            [deterministic detect + LLM resolve]
       → contract finalization          [parallel]
+      → critique                       [conceptual design critique]
       → obligation ledger              [largely deterministic]
+      → cyclic seam resolution         [breaks circular interface-definition obligations]
       → test/validator plan
       → deterministic design gates
+      → assessment                     [contract assessment: invariants/boundaries/obligations]
       → critic → judge → repair        [bounded]
       → implementation DAG             [metadata-enriched promotion]
   → rolling_dispatch         [quota-routed, worktree-isolated, per-node
@@ -184,14 +187,20 @@ the conflicts between them. The design phase is:
    may be adversarially checked (propose → attack → accept) before adoption.
 4. **Contract finalization** — parallel: each module agent receives the
    reconciliation report and finalizes its contract.
-5. **Obligation ledger** — a first-class phase in `CONTRACT_PIPELINE_PHASE_ORDER`,
+5. **Critique** — conceptual design critique of the finalized contracts (the
+   philosophy/alternatives/better-directions lens, distinct from the mechanical
+   contract-assessment phase below).
+6. **Obligation ledger** — a first-class phase in `CONTRACT_PIPELINE_PHASE_ORDER`,
    derived largely deterministically from finalized contracts: each invariant →
    verification obligation, each seam interface → test obligation.
-6. **Test/validator plan** — a distinct phase converting ledger obligations into
+7. **Cyclic seam resolution** — its own phase in `CONTRACT_PIPELINE_PHASE_ORDER`,
+   breaking circular interface-definition obligations surfaced by the ledger
+   (distinct from the deterministic *check* for the same condition below).
+8. **Test/validator plan** — a distinct phase converting ledger obligations into
    concrete test specs, validators, and schemas *before any code is written*. A
    worker may flag a planned test as inapplicable only against the ledger, never
    on rationale alone.
-7. **Deterministic design gates** — mechanical checks before adversarial review:
+9. **Deterministic design gates** — mechanical checks before adversarial review:
    - every module has inputs/outputs
    - every side effect has an owner
    - every invariant has a verification obligation
@@ -200,10 +209,12 @@ the conflicts between them. The design phase is:
    - no raw/untrusted data crosses a trust boundary unvalidated
    - **no circular interface-definition obligations** (two nodes each needing to
      define an interface the other depends on — caught before implementation)
-8. **Critic → judge → repair** — bounded, archived, hash-tracked; attacks the
-   negotiated contracts. When the judge omits `repair_directive`, the target is
-   inferred from the failing classifications rather than defaulting to a fixed
-   artifact.
+10. **Assessment** — contract assessment (invariants/boundaries/obligations),
+    a required input to both the critic and the judge below.
+11. **Critic → judge → repair** — bounded, archived, hash-tracked; attacks the
+    negotiated contracts. When the judge omits `repair_directive`, the target is
+    inferred from the failing classifications rather than defaulting to a fixed
+    artifact.
 
 Parallel-friendly phases (2, 4; plus critique alongside assessment where inputs
 allow) dispatch as parallel agents in one step, not sequential next-step
