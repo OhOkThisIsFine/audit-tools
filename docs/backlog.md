@@ -29,27 +29,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Charter-layer defects found + FIXED dogfooding /audit-code (2026-07-10, orchestrator + Opus recon/impl/adversarial agents).**
-  A dogfood audit of this repo surfaced three defects in the conceptual design-review charter layer; all fixed
-  (4 commits on the lap branch, one loop-core-attested + independently adversarially reviewed, validated
-  end-to-end). Durable design → memory [[charter-layer-independence-and-node-selection]].
-  - **(tool-should-decide) Consensus metric was size-hostile → charter review only ever saw test-file dyads.**
-    `src/shared/decompose/consensus.ts` scored a cluster by the mean over all C(n,2) member-pairs (missing ⇒ 0),
-    so only 2-file dyads cleared the bar and a 449-file `.gitignore` blob leaked into contested. Replaced with a
-    size-robust per-source best-fit F1 (precision×recall) + whole-area-community cap + abstain-vs-disagree voting
-    + ≥2-sources-together floor. On this repo consensus went 4 test dyads → 2 real subsystems, blob gone.
-  - **(ambiguous-direction) Single agent authored all charter kinds AND their deltas — author marking own homework.**
-    The design-of-record mandates independently-sourced, never-reconciled views, but one host pass wrote
-    stated/inferred/revealed + the deltas. Split into a charters-only extraction (independent, access-scoped
-    per-kind subagents: revealed=code-only, stated=docs-only) + a NEW `charter_delta` step where an independent
-    miner authors the gaps + goal_graph. The delta is now genuine disagreement, not one narrator's story.
-  - **(tool-should-decide) Prompt advertised "four charters" at a `deep` ceiling that only requests three.**
-    The count string was hardcoded; now tracks the ceiling (True nominatable only at `deepest`).
-  - **Recurrence of [[external-audit-catalogs-are-leads]] / verify-before-building:** the charter step was
-    reviewing test files because the *consensus criterion itself* was the bug — not visible without dogfooding.
-    A live self-audit remains the cheapest way to surface these; the env-bound dispatch/quota watch items below
-    were the original goal of the run and are still unexercised (audit paused at charter phase to fix the tool).
-
 - **A doc-review auto-apply / hook re-reverted a COMMITTED owner decision during a process restart (2026-07-10, tool-should-decide).**
   Mid-lap the process restarted; on restart, CLAUDE.md + `project-philosophy.md` came back MODIFIED — the change
   reverted the DD-1 Own-vs-acquire→CLAUDE.md promotion the owner had explicitly chosen and I had already committed
@@ -61,32 +40,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   must not re-propose/re-apply an item whose decision is already recorded resolved (or already committed to the
   tracked tree) — it should reconcile against HEAD, not a stale branch snapshot. Relates
   [[enforce-robustness-in-tooling-not-host-discretion]].
-- **Friction-walk (quota-Increment-A lap, 2026-07-10):** the carried-in diagnosis OVERSTATED the gap ("host path has
-  no enforcing loop") — recon + adversarial review refined it to "the admission DECISION is already shared and runs on
-  the host path; only two EDGES are missing, and the cold-start over-grant is the real correctness bug." Recurrence of
-  verify-before-building [[spec-degradation-and-doc-staleness]] (no new tool work — pointer only). Feeding clean
-  (subagent recon returned conclusions+file:line; doc cleanup delegated). One waste: the post-impl reviewer died on a
-  process restart (state lost) → re-ran one review cycle.
-
-- **Friction-walk (lease-TTL lap, 2026-07-10):** (tool-should-decide) the SessionStart doc-review hook
-  reported "19 open items" from the worktree's PRE-SYNC state — all 19 were already applied+resolved on
-  main; the hook should reconcile against the fetched remote resolved-state (or flag "worktree behind main —
-  list may be stale") before surfacing. (ambiguous-direction) HANDOFF's ▶ IMMEDIATE NEXT pointed at a
-  live-run-GATED item (D-66/67 slice-3), so the actual next actionable had to be inferred from track prose —
-  fixed this lap by keeping gated items out of the ▶ slot. Feeding was clean (recon + adversarial review as
-  subagents returning file:line conclusions). Also: the dormant half-built `leaseTtlMs` seam carried a doc
-  comment describing behavior nothing exercised — a seam built "for later" without a consumer is a latent
-  false-documentation trap (this lap wired it).
-
-- **Friction-walk (untracked-scope lap, 2026-07-10):** (tool-should-decide) the SessionStart doc-review
-  hook AGAIN reported "19 open items" from the worktree's pre-sync state — all were applied+resolved on
-  main; second occurrence of the lease-TTL-lap finding (hook should reconcile against the fetched remote
-  resolved-state before surfacing), still an open tool fix. (tool-should-decide) the start-lap skill's
-  branch guidance had no case for a lap branch that is a clean ANCESTOR of remote main — it said
-  "don't touch", but an ancestor-verified ff-only is safe and required to start from current code; FIXED
-  this lap in `.claude/skills/start-lap/SKILL.md`. (ambiguous-direction / inefficient-feeding) clean —
-  recon + adversarial review ran as subagents returning file:line conclusions; the async typecheck hook
-  emitted stale mid-edit-sequence errors twice (known documented behavior, no new fix).
+- **Friction-walk lesson (lease-TTL / untracked-scope laps, recurring):** the SessionStart doc-review hook's
+  clear-on-apply ledger (`doc-review-resolved.json`) is local-only — a worktree branched before a resolution
+  commit lands on main re-surfaces already-resolved items from stale state (hit twice). Open tool fix: the
+  hook should reconcile against the fetched remote's resolved-state (or flag "worktree behind main — list may
+  be stale") before surfacing.
 
 - **M-B3 citation gate re-emits the WRONG phase — gate input is `module_decomposition`, repair target is
   `contract_finalization` (2026-07-09).** `evaluatePreCriticCitationGrounding` (src/remediate/steps/contractPipeline.ts
@@ -511,7 +469,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 - **Gated live e2es** skip without creds: `RUN_PROVIDER_MATRIX_E2E=1`, `RUN_NIM_E2E=1`,
   `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_AUTONOMY_E2E=1`.
 - **Provider `queryLimits`** deferred — revisit if a provider gains a real proactive rate-limit endpoint.
-- **Doc-manifest scope for non-`docs/` host assets (doc-review D-45(a), owner call).** `.github/prompts/audit-code.prompt.md`, `.agent/skills/audit-code/SKILL.md`, and ~15 other un-manifested `*.md` outside `docs/` are not covered by `check-doc-manifest.mjs` (it scopes to `docs/**`). Now that a renderer drift guard pins the two audit host assets, the only residual is whether these should be *formally* listed in `doc-review-guidelines.md`'s routing table — a low-value owner judgment call, not code work.
 - **Narrow staleness on prose-heavy artifacts via bounded semantic judgment.** Prose-heavy fields feed
   downstream LLM prompts; a cosmetic edit forces wasteful re-emit. The narrowing = bounded judgment on
   meaning change, fail-safe to re-derive. Efficiency-only; defer until re-emit churn is measured.
