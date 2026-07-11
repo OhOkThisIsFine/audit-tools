@@ -7,7 +7,7 @@ This document defines the bounded executable steps available to the orchestrator
 ## Source of truth
 
 The canonical, machine-readable registry is `EXECUTOR_REGISTRY` in
-`src/audit/orchestrator/executors.ts` — 25 entries, each declaring an `id`, a
+`src/audit/orchestrator/executors.ts` — 26 entries, each declaring an `id`, a
 `kind` (`deterministic` runs inline; `host_delegation` pauses the pipeline and
 asks the active LLM/host agent to do the work), and the `obligation_ids` it
 satisfies. `nextStep.ts`'s priority chain (see `CLAUDE.md` → audit-code
