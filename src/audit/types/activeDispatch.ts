@@ -57,6 +57,14 @@ export interface ActiveDispatchState {
    * never both.
    */
   paused_state?: DispatchPausedState;
+  /**
+   * Set once the interactive provider/admission confirmation recommendation
+   * (`DispatchFanout.confirmation_recommended`) has been surfaced for this
+   * run_id (Bug 8 / Slice A4). The operator confirms the roster/ordering once
+   * per run; subsequent grants of the SAME run must not re-recommend it. A
+   * fresh run (new run_id, or no prior state) confirms again.
+   */
+  confirmation_shown?: boolean;
 }
 
 export interface DispatchResultMapEntry {

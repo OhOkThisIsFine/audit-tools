@@ -619,6 +619,27 @@ export async function prepareDispatchArtifacts(params: {
     priorActiveDispatch?.run_id === runId
       ? priorActiveDispatch.paused_state
       : undefined;
+  // Bug 8 / Slice A4: the interactive confirmation recommendation fires once
+  // per run, not once per pass. `confirmation_shown` only carries forward for
+  // the SAME run_id — a fresh run (new run_id, or no prior state) recommends
+  // again. Computed here (ahead of `computeDispatchFanout` below) so the
+  // carried flag can be persisted on this pass's `activeDispatch` write in the
+  // same round-trip, rather than reopening the file a second time.
+  const carriedConfirmationShown =
+    priorActiveDispatch?.run_id === runId
+      ? (priorActiveDispatch.confirmation_shown ?? false)
+      : false;
+  // FINDING-012: pure-arithmetic fan-out summary the loader can gate on. The
+  // width is the GRANTED set size (emergent from budget + any declared cap),
+  // not a computed concurrency number.
+  const fanout = computeDispatchFanout({
+    agentCount: plan.length,
+    grantedCount: admission.granted_packet_ids.length,
+    declaredCap: admission.declared_cap,
+    confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
+    confirmationAlreadyShown: carriedConfirmationShown,
+  });
+  const confirmationShown = carriedConfirmationShown || fanout.confirmation_recommended;
   const activeDispatch: ActiveDispatchState = {
     run_id: runId,
     created_at: new Date().toISOString(),
@@ -633,6 +654,7 @@ export async function prepareDispatchArtifacts(params: {
         }
       : {}),
     ...(carriedPausedState ? { paused_state: carriedPausedState } : {}),
+    ...(confirmationShown ? { confirmation_shown: true } : {}),
   };
   await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
 
@@ -683,16 +705,6 @@ export async function prepareDispatchArtifacts(params: {
       });
     }
   }
-
-  // FINDING-012: pure-arithmetic fan-out summary the loader can gate on. The width
-  // is the GRANTED set size (emergent from budget + any declared cap), not a
-  // computed concurrency number.
-  const fanout = computeDispatchFanout({
-    agentCount: plan.length,
-    grantedCount: admission.granted_packet_ids.length,
-    declaredCap: admission.declared_cap,
-    confirmThreshold: sessionConfig.dispatch?.confirm_threshold,
-  });
 
   return {
     run_id: runId,

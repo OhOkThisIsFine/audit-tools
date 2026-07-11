@@ -281,6 +281,61 @@ await test("FINDING-012: confirmation_recommended flips when agent_count exceeds
   expect(at.confirmation_recommended).toBe(false);
 });
 
+// ── Bug 8 / Slice A4: confirm-once-per-run ───────────────────────────────────
+
+await test("Bug 8: confirmation_recommended fires on the first grant, is suppressed on a repeat grant of the SAME run, and fires again on a fresh run", async (t) => {
+  const tasks = multiPacketTasks(); // 3 packets, agent_count stays 3 across passes below
+  const { artifactsDir } = await makeArtifactsDir(tasks);
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+  const sessionConfig = { dispatch: { confirm_threshold: 2 } }; // 3 > 2 → arithmetic is true every pass
+
+  // Pass 1 (first grant of run "test-run"): arithmetic says true, nothing
+  // carried yet → recommended, and confirmation_shown is persisted.
+  const pass1 = await run(artifactsDir, sessionConfig);
+  expect(pass1.agent_count).toBe(3);
+  expect(pass1.confirmation_recommended).toBe(true);
+  const activeAfterPass1 = await readActiveDispatch(artifactsDir);
+  expect(activeAfterPass1.confirmation_shown).toBe(true);
+
+  // Pass 2 (same run_id "test-run", same shape — no packets accepted, so
+  // agent_count is still 3 and the raw arithmetic is still true): the prior
+  // confirmation_shown must suppress the recommendation.
+  const pass2 = await run(artifactsDir, sessionConfig);
+  expect(pass2.agent_count).toBe(3);
+  expect(pass2.confirmation_recommended, "steady-state repeat grant must not re-recommend").toBe(false);
+  const activeAfterPass2 = await readActiveDispatch(artifactsDir);
+  expect(activeAfterPass2.confirmation_shown).toBe(true);
+
+  // A NEW run_id (fresh ActiveDispatchState, even under the same artifacts
+  // dir) has no carried confirmation_shown → recommends again. Distinct
+  // task_ids from pass 1/2 (task-claims.json is shared across runs in the
+  // SAME artifacts dir, keyed by task_id) so this run's claim isn't skipped
+  // as "held live by a peer" (the still-live pass-1/2 claims on t-a/t-b/t-c).
+  const freshRunId = "test-run-fresh";
+  const freshTasks = tasks.map((task) => ({
+    ...task,
+    task_id: `${task.task_id}-fresh`,
+    unit_id: `${task.unit_id}-fresh`,
+  }));
+  const freshRunDir = join(artifactsDir, "runs", freshRunId);
+  await mkdir(freshRunDir, { recursive: true });
+  await writeFile(
+    join(freshRunDir, "pending-audit-tasks.json"),
+    JSON.stringify(freshTasks),
+    "utf8",
+  );
+  const pass3 = await prepareDispatchArtifacts({
+    packageRoot,
+    runId: freshRunId,
+    artifactsDir,
+    root: artifactsDir,
+    sessionConfig,
+    hostModel: null,
+  });
+  expect(pass3.agent_count).toBe(3);
+  expect(pass3.confirmation_recommended, "a fresh run confirms again").toBe(true);
+});
+
 // ── FINDING-013: top-K coverage budget ──────────────────────────────────────
 
 await test("FINDING-013: max_packets caps emitted packets and records deferred ids", async (t) => {

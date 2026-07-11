@@ -148,12 +148,21 @@ export function computeDispatchFanout(params: {
   /** Verbatim host in-flight cap (declared env limit), or null when none. */
   declaredCap: number | null;
   confirmThreshold?: number;
+  /**
+   * True when the interactive confirmation recommendation has already been
+   * surfaced once this run (carried from `ActiveDispatchState.confirmation_shown`
+   * for the SAME run_id). Suppresses re-recommending on steady-state repeat
+   * grants (Bug 8 / Slice A4) — the operator confirmed the roster/ordering
+   * once; a fresh run (no carried flag) still recommends on its first grant.
+   */
+  confirmationAlreadyShown?: boolean;
 }): DispatchFanout {
   const agentCount = params.agentCount;
   const grantedCount = params.grantedCount;
   const confirmThreshold =
     params.confirmThreshold ?? DEFAULT_DISPATCH_CONFIRM_THRESHOLD;
-  const confirmationRecommended = agentCount > confirmThreshold;
+  const confirmationRecommended =
+    !params.confirmationAlreadyShown && agentCount > confirmThreshold;
   // No computed concurrency number: the summary reports the granted set (the
   // admission width this pass) and, when present, the verbatim in-flight cap.
   const capNote = params.declaredCap != null ? `, ≤${params.declaredCap} in flight` : "";
