@@ -29,6 +29,15 @@
  *   degraded. Inert when quota management is disabled (selection stays pure
  *   capability order). This is what makes the real-time quota sources actually
  *   redistribute load instead of merely throttling a single chosen pool.
+ * - Credit exhaustion (Slice A2, backlog HIGH 2026-07-11): a `credit_exhausted`
+ *   result (out of prepaid usage credits, detected via
+ *   `detectCreditExhaustionFromChannel` — architecturally distinct from a 429:
+ *   NO reset timer) permanently drops the pool into `exhaustedPoolIds` and
+ *   RE-QUEUES the packet, exactly like the transient-429 re-route above, EXCEPT
+ *   it records the quota outcome as `error` (never `rate_limited`) so no
+ *   persisted backoff `cooldown_until` is ever set — the exclusion is a
+ *   permanent-for-this-run, in-memory demotion, never a timed retry. `onCreditExhausted`
+ *   is the consumer's friction-emission seam (mirrors `onCostDrift`).
  */
 
 import type { SessionConfig } from "../types/sessionConfig.js";
@@ -78,7 +87,7 @@ export interface RollingDispatchPacket<TPacket> {
 /** Outcome of dispatching a single packet. */
 export interface RollingDispatchResult<TPacket> {
   packet: RollingDispatchPacket<TPacket>;
-  outcome: "success" | "rate_limited" | "timeout" | "error";
+  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted";
   /** Actual tokens consumed, if the provider reports it. */
   actualTokens?: number;
   /**
@@ -113,6 +122,18 @@ export interface RollingDispatchResult<TPacket> {
      * cooldown-and-retry behaviour).
      */
     reset_at?: string;
+  };
+  /**
+   * The worker ERROR/STATUS channel evidence that classified a `credit_exhausted`
+   * outcome (out of prepaid usage credits — no reset time, unlike `rateLimit`
+   * above). Carried so the consumer's `onCreditExhausted` hook can surface it as
+   * reviewable friction naming the raw matched text. Absent on non-
+   * credit_exhausted outcomes.
+   */
+  creditExhaustion?: {
+    channel: WorkerOutputChannel;
+    text: string;
+    rawMatch: string | null;
   };
 }
 
@@ -214,6 +235,17 @@ export interface RollingDispatchConfig<TPacket> {
     observedCostUsd: number;
     declaredCostPerMtok: number;
   }) => void;
+  /**
+   * Credit exhaustion (out-of-prepaid-usage-credits — no reset timer, unlike a
+   * 429): invoked EVERY time a `credit_exhausted` result lands, after the engine
+   * has already permanently excluded the pool from this run's admissible set
+   * (`exhaustedPoolIds`, monotonic — never a timed cooldown). The consumer's seam
+   * to surface it as reviewable friction (the consumer owns `artifactsDir`/
+   * `runId`, which the packet-agnostic engine does not). Best-effort — a
+   * throwing hook never aborts dispatch. Omit to leave the exclusion silent (no
+   * friction emitted, exclusion still happens).
+   */
+  onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
   /**
    * Shared cost-demotion set for reactive cost verification. When a driver runs
    * several dispatchers over one logical run (`driveRolling` creates one per
@@ -551,6 +583,7 @@ export function createRollingDispatcher<TPacket>(
     dispatchPacket,
     onResult,
     onCostDrift,
+    onCreditExhausted,
     costDemotedPoolIds: injectedCostDemotedPoolIds,
     isPacketEscalated,
     recordRateLimit,
@@ -816,9 +849,16 @@ export function createRollingDispatcher<TPacket>(
     // outcome under it so the reactive backoff state lands on the same entry
     // scheduling reads.
     const providerModelKey = providerSlot.poolId;
+    // credit_exhausted records as a plain 'error' outcome — NOT 'rate_limited' —
+    // so recordWaveOutcomeUnsafe never applies the exponential-backoff
+    // cooldown_until a rate_limited outcome would (state.ts:412-430). That
+    // cooldown is a TIMED reset; credit exhaustion has none. The permanent-for-
+    // the-run exclusion lives entirely in the in-memory exhaustedPoolIds set
+    // below, never in the persisted quota-state cooldown.
     const quotaOutcome = result.outcome === "success" ? "success"
       : result.outcome === "rate_limited" ? "rate_limited"
       : result.outcome === "error" ? "error"
+      : result.outcome === "credit_exhausted" ? "error"
       : "timeout" as const;
 
     try {
@@ -908,6 +948,51 @@ export function createRollingDispatcher<TPacket>(
           JSON.stringify({
             ts: new Date().toISOString(),
             kind: "rolling_dispatch_requeue_rate_limited",
+            packet_id: packet.id,
+            exhausted_pool_id: providerSlot.poolId,
+          }) + "\n",
+        );
+      } catch {
+        // Observability must never abort a run.
+      }
+      return;
+    }
+
+    // Credit exhaustion (backlog HIGH, 2026-07-11 live run): an out-of-prepaid-
+    // usage-credits condition has NO reset time — unlike a transient 429, an
+    // operator must add credits before the pool can ever serve again. Unlike the
+    // rate_limited branch above, there is no reset-time / host-session-escalation
+    // split to consider: EVERY credit_exhausted result permanently excludes the
+    // pool from this run's admissible set (monotonic exhaustedPoolIds — no timed
+    // cooldown, ever) and re-queues the packet so a surviving pool absorbs it. If
+    // this was the last admissible pool, the run degrades to the SAME empty_pool /
+    // quota_paused stranding path a bare 429 exhaustion hits (INV-QD-07) — it
+    // pauses/strands gracefully rather than re-killing every packet on the dead pool.
+    if (result.outcome === "credit_exhausted") {
+      // Fire the hook only the FIRST time a given pool goes credit-exhausted
+      // (concurrent in-flight packets against the same pool would otherwise each
+      // re-fire it) — matches the "once per pool" contract onCreditExhausted
+      // documents, so a downstream consumer need not rely on friction-dedup.
+      const firstForPool = !state.exhaustedPoolIds.has(providerSlot.poolId);
+      state.exhaustedPoolIds.add(providerSlot.poolId);
+      if (firstForPool) {
+        try {
+          onCreditExhausted?.({
+            poolId: providerSlot.poolId,
+            rawMatch: result.creditExhaustion?.rawMatch ?? null,
+          });
+        } catch {
+          // Best-effort: a throwing friction hook must never abort dispatch.
+        }
+      }
+      if (!state.completedIds.has(packet.id) && !state.pendingQueue.some((q) => q.id === packet.id)) {
+        state.pendingQueue.unshift(packet);
+      }
+      try {
+        process.stderr.write(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            kind: "rolling_dispatch_requeue_credit_exhausted",
             packet_id: packet.id,
             exhausted_pool_id: providerSlot.poolId,
           }) + "\n",

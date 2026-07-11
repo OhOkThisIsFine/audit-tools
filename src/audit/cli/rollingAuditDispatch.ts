@@ -37,6 +37,7 @@ import {
   sourceByPoolId,
   captureStepBoundaryFriction,
   captureCostDriftFriction,
+  captureCreditExhaustionFriction,
   resolveHostProviderName,
   resolveConversationHostProvider,
   resolveRollingEngineFlag,
@@ -494,6 +495,14 @@ export async function driveRollingAuditDispatch(params: {
       // step-boundary chokepoint with this run's artifactsDir/runId, like escalation).
       onCostDrift: (info) => {
         captureCostDriftFriction(artifactsDir, runId, info, "audit-code");
+      },
+      // Credit exhaustion: a pool out of prepaid usage credits (no reset timer,
+      // distinct from a rate limit) has already been permanently excluded from
+      // this run's admissible set by the engine; surface it as reviewable
+      // friction so the operator knows to top up credits (single step-boundary
+      // chokepoint, like the cost-drift hook above).
+      onCreditExhausted: (info) => {
+        captureCreditExhaustionFriction(artifactsDir, runId, info, "audit-code");
       },
     },
     dispatchPacket,

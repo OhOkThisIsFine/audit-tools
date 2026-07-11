@@ -153,6 +153,14 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
     observedCostUsd: number;
     declaredCostPerMtok: number;
   }) => void;
+  /**
+   * Credit exhaustion (no-reset-timer degrade, distinct from a rate limit):
+   * invoked once per pool the first time a `credit_exhausted` result lands. The
+   * engine has already permanently excluded the pool from this run by the time
+   * this fires. Forwarded to the engine; the consumer wires it to friction
+   * emission. Omit to leave the exclusion silent.
+   */
+  onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
   /** Engine escalation hooks (host-session rate-limit accrual + strand-not-requeue read). */
   recordRateLimit?: (packet: RollingDispatchPacket<TPayload>, result: RollingDispatchResult<TPayload>) => void;
   isPacketEscalated?: (packetId: string) => boolean;
@@ -261,6 +269,7 @@ export async function driveRolling<TItem, TPayload>(
           ? { resolveOutputReservation: config.resolveOutputReservation }
           : {}),
         ...(config.onCostDrift ? { onCostDrift: config.onCostDrift } : {}),
+        ...(config.onCreditExhausted ? { onCreditExhausted: config.onCreditExhausted } : {}),
         costDemotedPoolIds,
         onResult: (result) => {
           out.allResults.push(result);

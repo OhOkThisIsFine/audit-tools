@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -753,6 +753,14 @@ export interface DriveRollingDispatchOptions {
     observedCostUsd: number;
     declaredCostPerMtok: number;
   }) => void;
+  /**
+   * Credit exhaustion (out-of-prepaid-usage-credits — no reset timer, unlike a
+   * 429): invoked once per pool when a `credit_exhausted` result lands, after
+   * the shared driver has already permanently excluded the pool from this run.
+   * Forwarded to the shared driver; the caller wires it to friction. Omit to
+   * leave the exclusion silent.
+   */
+  onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
 }
 
 export interface DriveRollingDispatchResult {
@@ -852,6 +860,7 @@ export async function driveRollingDispatch(
       options.dispatchNode(blockById.get(packet.payload.block_id)!, slot),
     ...(options.root !== undefined ? { root: options.root } : {}),
     ...(options.onCostDrift ? { onCostDrift: options.onCostDrift } : {}),
+    ...(options.onCreditExhausted ? { onCreditExhausted: options.onCreditExhausted } : {}),
     // Single-flight (CE-001) is enforced by the unified driver.
     rebuildBetweenLevels: options.rebuildSharedBetweenLevels,
     // Host-session escalation: feed recordLimit (write) at the rate_limited observation
@@ -1192,10 +1201,11 @@ export async function driveRollingImplementDispatch(
       verify_passed: accept.verifyPassed,
       merged: accept.merged,
     });
-    // Release the claim ONLY on a terminal accept. A `rate_limited` worker re-queues
-    // (still owned work — keep the claim so a peer can't grab it mid-retry); success /
-    // error / timeout is terminal → free it through the shared registry (token-checked).
-    if (result.outcome !== "rate_limited") {
+    // Release the claim ONLY on a terminal accept. A `rate_limited` or
+    // `credit_exhausted` worker re-queues (still owned work — keep the claim so
+    // a peer can't grab it mid-retry); success / error / timeout is terminal →
+    // free it through the shared registry (token-checked).
+    if (result.outcome !== "rate_limited" && result.outcome !== "credit_exhausted") {
       await releaseNodeClaim(registry, claimTokens, block.block_id);
     }
     return result;
@@ -1233,6 +1243,13 @@ export async function driveRollingImplementDispatch(
     // reconciles the stale `cost_per_mtok:0` (single step-boundary chokepoint).
     onCostDrift: (info) => {
       captureCostDriftFriction(artifactsDir, runId, info, "remediate-code");
+    },
+    // Credit exhaustion: a pool out of prepaid usage credits (no reset timer,
+    // distinct from a rate limit) has already been permanently excluded from
+    // this run's admissible set by the engine; surface it as reviewable
+    // friction so the operator knows to top up credits.
+    onCreditExhausted: (info) => {
+      captureCreditExhaustionFriction(artifactsDir, runId, info, "remediate-code");
     },
   });
 
@@ -1957,29 +1974,37 @@ async function buildImplementDispatchStep(ctx: {
           registry: hybridClaimRegistry,
           sourceByPoolId: sourceByPoolId(confirmedPools),
         });
-        // DC-4: a backend pool whose node rate-limited is exhausted → settle it
-        // (cross-cycle) so the next cycle routes its share to the host pool.
-        const rateLimited = new Set(
-          inProcessOutcome.nodes.filter((n) => n.outcome === "rate_limited").map((n) => n.block_id),
+        // DC-4: a backend pool whose node rate-limited OR credit-exhausted is
+        // exhausted → settle it (cross-cycle) so the next cycle routes its share
+        // to the host pool. credit_exhausted MUST settle here too: this partition
+        // spans multiple cycles, each with its own fresh in-process dispatcher (a
+        // fresh in-memory exhaustedPoolIds), so without settling here a
+        // credit-exhausted pool (no reset timer, unlike rate_limited) would be
+        // RE-OFFERED next cycle and re-die on the same dead pool.
+        const rateLimitedOrCreditExhausted = new Set(
+          inProcessOutcome.nodes
+            .filter((n) => n.outcome === "rate_limited" || n.outcome === "credit_exhausted")
+            .map((n) => n.block_id),
         );
         const exhaustedPools = new Set(
-          partition.inProcess.filter((a) => rateLimited.has(a.nodeId)).map((a) => a.poolId),
+          partition.inProcess.filter((a) => rateLimitedOrCreditExhausted.has(a.nodeId)).map((a) => a.poolId),
         );
         for (const poolId of exhaustedPools) {
           await partition.coordinator.settlePool(poolId);
         }
-        // Surface each rate-limited node as reviewable friction (not just the
-        // settle side-effect above). The shared step-boundary chokepoint dedupes
-        // on {eventType, runId, discriminator}, so a chronically-exhausted backend
-        // pool re-hitting the same block_id across cycles collapses to one record.
-        for (const blockId of rateLimited) {
+        // Surface each rate-limited/credit-exhausted node as reviewable friction
+        // (not just the settle side-effect above). The shared step-boundary
+        // chokepoint dedupes on {eventType, runId, discriminator}, so a
+        // chronically-exhausted backend pool re-hitting the same block_id across
+        // cycles collapses to one record.
+        for (const blockId of rateLimitedOrCreditExhausted) {
           void captureStepBoundaryFriction(
             artifactsDir,
             runId,
             {
               eventType: "quota_escalation",
               discriminator: blockId,
-              note: "A-8 hybrid in-process node rate-limited; its backend pool was settled for this run.",
+              note: "A-8 hybrid in-process node rate-limited or credit-exhausted; its backend pool was settled for this run.",
               severity: "high",
               category: "trap",
               area: "dispatch/quota",

@@ -1,4 +1,4 @@
-import { detectRateLimitFromChannel } from "../quota/errorParsing.js";
+import { detectRateLimitFromChannel, detectCreditExhaustionFromChannel } from "../quota/errorParsing.js";
 import { appendTokenUsageLine } from "../io/tokenUsageLedger.js";
 import { readOptionalJsonFile, readOptionalTextFile } from "../io/json.js";
 import type { LaunchFreshSessionResult } from "../providers/types.js";
@@ -69,6 +69,21 @@ export async function finalizeProviderLaunchResult<TPacket>(
   // (stderr) is inspected — the result file is never scanned for limit strings, so a
   // healthy result quoting a limit never triggers a re-queue.
   const stderrText = (await readOptionalTextFile(ctx.stderrPath)) ?? "";
+
+  // Credit exhaustion (out of prepaid usage credits) is checked FIRST and is
+  // architecturally distinct from a rate limit: it carries no reset time, so a
+  // positive match here must never fall through to the resettable rate_limited
+  // path below. Same channel isolation (CE-003) applies — only stderr, never the
+  // consumed result file.
+  const creditCheck = detectCreditExhaustionFromChannel("error", stderrText);
+  if (creditCheck.isCreditExhausted) {
+    return {
+      packet,
+      outcome: "credit_exhausted",
+      creditExhaustion: { channel: "error", text: stderrText, rawMatch: creditCheck.rawMatch },
+    };
+  }
+
   const limitCheck = detectRateLimitFromChannel("error", stderrText);
   if (limitCheck.isRateLimited) {
     // Non-consuming re-queue: the rolling engine drops the provider and puts this
@@ -90,9 +105,17 @@ export async function finalizeProviderLaunchResult<TPacket>(
   // Contents are adjudicated by the deterministic merge downstream.
   const result = await readOptionalJsonFile<unknown>(ctx.resultPath);
   if (!result) {
-    // Also check stdout for a session-limit message before reporting as error (some
-    // providers write their status to stdout, not stderr).
+    // Also check stdout for a session-limit / credit-exhaustion message before
+    // reporting as error (some providers write their status to stdout, not stderr).
     const stdoutText = (await readOptionalTextFile(ctx.stdoutPath)) ?? "";
+    const stdoutCreditCheck = detectCreditExhaustionFromChannel("status", stdoutText);
+    if (stdoutCreditCheck.isCreditExhausted) {
+      return {
+        packet,
+        outcome: "credit_exhausted",
+        creditExhaustion: { channel: "status", text: stdoutText, rawMatch: stdoutCreditCheck.rawMatch },
+      };
+    }
     const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
     if (stdoutLimitCheck.isRateLimited) {
       return {

@@ -26,6 +26,34 @@ const USAGE_LIMIT_PATTERNS = [
 
 const ALL_RATE_LIMIT_PATTERNS = [...RATE_LIMIT_PATTERNS, ...USAGE_LIMIT_PATTERNS];
 
+// Credit exhaustion (the account/API key has run out of PREPAID usage credits,
+// e.g. Anthropic's "Your credit balance is too low" or OpenAI-compatible
+// `insufficient_quota`) is architecturally distinct from a rate limit: it
+// carries NO reset time — the condition does not clear on a timer, only when an
+// operator adds credits. Patterns are deliberately exact vendor wording so an
+// ordinary resettable 429 / "quota exceeded" (RATE_LIMIT_PATTERNS, which DOES
+// reset) is never misclassified as unrecoverable, and vice versa. The
+// `exceeded your current quota` phrase gap is BOUNDED (no wildcard span across a
+// resettable clause), and `RESET_INDICATOR_PATTERN` below is a hard veto on any
+// free-text match whose message self-describes as resettable — because
+// permanently sinking a pool that would have recovered is worse than the bug
+// this fixes (adversarial-review finding, 2026-07-11).
+const CREDIT_EXHAUSTION_PATTERNS = [
+  /credit balance is too low/i,
+  /\bout of (?:usage )?credits\b/i,
+  /\binsufficient credits\b/i,
+  /\bno credits? remaining\b/i,
+  /\bpurchase (?:more )?credits\b/i,
+  /exceeded your current quota,? please check your plan and billing details/i,
+];
+
+// A message that says it RESETS / is transient is a rate limit, never permanent
+// credit exhaustion — veto any free-text credit match when these appear. (The
+// structured `insufficient_quota` JSON code is exempt: it is an unambiguous
+// vendor billing signal, trusted even if the surrounding prose mentions retry.)
+const RESET_INDICATOR_PATTERN =
+  /\b(?:resets?|resetting|retry|retry[- ]after|temporar(?:y|ily)|transient|per[- ]?(?:minute|second|hour|day)|try again|rate[- ]?limit)\b/i;
+
 function tryParseJson(text: string): Record<string, unknown> | null {
   const jsonStart = text.indexOf("{");
   if (jsonStart === -1) return null;
@@ -83,6 +111,82 @@ function detectFromJson(text: string): RateLimitDetectionResult | null {
     retryAfterMs: extractRetryAfterMs(obj),
     rawMatch: `json:${status === 429 ? "status=429" : `type=${type ?? errorType}`}`,
   };
+}
+
+/** Detection result for the non-resettable credit-exhaustion error class. */
+export interface CreditExhaustionDetectionResult {
+  isCreditExhausted: boolean;
+  rawMatch: string | null;
+}
+
+// OpenAI-compatible endpoints (OpenAI itself, and NIM/vLLM/LM Studio proxies
+// that mirror the shape) report billing-hard-limit exhaustion with the
+// structured `error.type`/`error.code === "insufficient_quota"` — a precise,
+// vendor-defined signal distinct from `rate_limit_error`/status 429.
+function detectCreditExhaustionFromJson(
+  text: string,
+): CreditExhaustionDetectionResult | null {
+  const obj = tryParseJson(text);
+  if (!obj) return null;
+
+  const errorObj = obj["error"] as Record<string, unknown> | undefined;
+  const errorType = errorObj?.["type"] as string | undefined;
+  const errorCode = errorObj?.["code"] as string | undefined;
+
+  const isCreditExhausted =
+    errorType === "insufficient_quota" || errorCode === "insufficient_quota";
+
+  if (!isCreditExhausted) return null;
+
+  return {
+    isCreditExhausted: true,
+    rawMatch: `json:type=${errorType ?? errorCode}`,
+  };
+}
+
+/**
+ * Detect a non-resettable credit-exhaustion condition (out of prepaid usage
+ * credits) — distinct from {@link detectRateLimitError}: a positive result here
+ * carries no retry-after/reset semantics, ever. A caller must exclude the pool
+ * from the admissible set for the remainder of the run rather than apply a
+ * timed cooldown.
+ */
+export function detectCreditExhaustionError(
+  text: string,
+): CreditExhaustionDetectionResult {
+  const jsonResult = detectCreditExhaustionFromJson(text);
+  if (jsonResult) return jsonResult;
+
+  // A message that self-describes as resettable/transient is a rate limit, not
+  // permanent credit exhaustion — never sink such a pool for the whole run.
+  if (RESET_INDICATOR_PATTERN.test(text)) {
+    return { isCreditExhausted: false, rawMatch: null };
+  }
+
+  for (const pattern of CREDIT_EXHAUSTION_PATTERNS) {
+    const match = pattern.exec(text);
+    if (match) {
+      return { isCreditExhausted: true, rawMatch: match[0] };
+    }
+  }
+
+  return { isCreditExhausted: false, rawMatch: null };
+}
+
+/**
+ * Channel-isolated credit-exhaustion detection (CE-003, mirrors
+ * {@link detectRateLimitFromChannel}): only the worker's `error`/`status`
+ * channel is inspected, never the consumed `result` channel, so a healthy
+ * AuditResult that merely quotes a credit-exhaustion string can never trip it.
+ */
+export function detectCreditExhaustionFromChannel(
+  channel: WorkerOutputChannel,
+  text: string,
+): CreditExhaustionDetectionResult {
+  if (channel === "result") {
+    return { isCreditExhausted: false, rawMatch: null };
+  }
+  return detectCreditExhaustionError(text);
 }
 
 function extractResetsInMs(text: string): number | null {

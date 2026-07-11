@@ -55,6 +55,12 @@ import type { FrictionCategory } from "./frictionRecord.js";
  *                           tier); the tool demoted it out of free-first and the
  *                           operator should reconcile the declared cost
  *                           (discriminator: the pool id).
+ *  - `credit_exhausted`    — a dispatch pool reported a non-resettable
+ *                           out-of-prepaid-usage-credits condition (distinct from
+ *                           a rate limit, which resets); the tool permanently
+ *                           excluded it from this run's admissible set and the
+ *                           operator should top up credits (discriminator: the
+ *                           pool id).
  */
 export type StepBoundaryEventType =
   | "phase_reemit"
@@ -67,6 +73,7 @@ export type StepBoundaryEventType =
   | "coverage_total_lines_mismatch"
   | "node_quarantine"
   | "declared_cost_drift"
+  | "credit_exhausted"
   | (string & {});
 
 /**
@@ -100,6 +107,9 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // A declared-free pool that started charging is a stale operator config the tool
   // surfaced and demoted around — the operator must reconcile the declared cost.
   declared_cost_drift: "tool_should_decide",
+  // A credit-exhausted pool needs an operator action (top up credits) before it
+  // can ever serve again — same "operator must reconcile" shape as a cost drift.
+  credit_exhausted: "tool_should_decide",
 };
 
 /**
@@ -236,6 +246,47 @@ export function captureCostDriftFriction(
         `reconcile the source's declared cost.`,
       severity: "medium",
       area: "dispatch/cost",
+    },
+    source,
+  );
+}
+
+/** Credit-exhaustion facts routed through {@link captureCreditExhaustionFriction}. */
+export interface CreditExhaustionInfo {
+  poolId: string;
+  rawMatch: string | null;
+}
+
+/**
+ * Route a credit-exhaustion exclusion (a dispatch pool reported a non-
+ * resettable out-of-prepaid-usage-credits condition — distinct from a rate
+ * limit, which resets — and the rolling engine permanently excluded it from
+ * this run's admissible set) through the step-boundary chokepoint as a
+ * `credit_exhausted` fact. Both orchestrators' rolling dispatch wiring
+ * (`onCreditExhausted`) is byte-identical apart from the trailing `source` tool
+ * tag; this single-sources the eventType/note/severity/area template so they
+ * cannot drift. Fire-and-forget, like {@link captureCostDriftFriction} — never
+ * awaited by the caller.
+ */
+export function captureCreditExhaustionFriction(
+  artifactsDir: string,
+  runId: string,
+  info: CreditExhaustionInfo,
+  source: FrictionCaptureArtifact["tool"],
+): void {
+  void captureStepBoundaryFriction(
+    artifactsDir,
+    runId,
+    {
+      eventType: "credit_exhausted",
+      discriminator: info.poolId,
+      note:
+        `pool "${info.poolId}" is out of prepaid usage credits` +
+        (info.rawMatch ? ` (matched: "${info.rawMatch}")` : "") +
+        ` — excluded from this run's admissible set for the remainder of the run ` +
+        `(no reset timer); top up credits to restore it.`,
+      severity: "high",
+      area: "dispatch/quota",
     },
     source,
   );

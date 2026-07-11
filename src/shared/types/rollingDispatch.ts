@@ -44,7 +44,7 @@ export interface RollingDispatchEnginePacket<TPacket = unknown> {
 /** Outcome returned after each packet completes. */
 export interface RollingDispatchEngineResult<TPacket = unknown> {
   packet: RollingDispatchEnginePacket<TPacket>;
-  outcome: "success" | "rate_limited" | "timeout" | "error";
+  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted";
   actualTokens?: number;
   error?: unknown;
   /**
@@ -54,6 +54,12 @@ export interface RollingDispatchEngineResult<TPacket = unknown> {
    * outcomes.
    */
   rateLimit?: { channel: "error" | "status" | "result"; text: string };
+  /**
+   * Worker ERROR/STATUS channel evidence that classified a `credit_exhausted`
+   * outcome (out of prepaid usage credits — no reset timer, unlike `rateLimit`
+   * above). Absent on non-credit_exhausted outcomes.
+   */
+  creditExhaustion?: { channel: "error" | "status" | "result"; text: string; rawMatch: string | null };
 }
 
 /**
@@ -105,4 +111,12 @@ export interface RollingDispatchEngineContract<TPacket = unknown> {
     observedCostUsd: number;
     declaredCostPerMtok: number;
   }) => void;
+  /**
+   * Credit exhaustion (out-of-prepaid-usage-credits — no reset timer, unlike a
+   * 429): invoked every time a `credit_exhausted` result lands, after the engine
+   * has already permanently excluded the pool from this run's admissible set.
+   * The consumer wires it to friction emission. Optional — omit to leave the
+   * exclusion silent (no friction, exclusion still happens).
+   */
+  onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
 }

@@ -498,6 +498,162 @@ test("createRollingDispatcher — when every pool exhausts, the packet is strand
 });
 
 // ---------------------------------------------------------------------------
+// Credit exhaustion (Slice A2 / backlog HIGH 2026-07-11) — a deep-tier model OUT
+// OF USAGE CREDITS is distinct from a 429/rate_limited: no reset timer. The
+// engine must exclude the pool from the admissible set for the REST OF THE RUN
+// (never a timed cooldown) and let surviving pools absorb the work, recording a
+// friction event via onCreditExhausted — never re-kill every packet on it.
+// ---------------------------------------------------------------------------
+
+test("createRollingDispatcher — credit_exhausted result permanently excludes the pool and re-queues the packet to a surviving pool", async () => {
+  await setupTmpQuotaDir();
+  const attemptsByPool = { "pool-a": 0, "pool-b": 0 };
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      attemptsByPool[slot.poolId] = (attemptsByPool[slot.poolId] ?? 0) + 1;
+      if (slot.poolId === "pool-a") {
+        return {
+          packet,
+          outcome: "credit_exhausted",
+          creditExhaustion: { channel: "error", text: "credit balance is too low", rawMatch: "credit balance is too low" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+
+  dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
+  const results = await dispatcher.run();
+
+  // Both packets eventually SUCCEED on the surviving pool — never stranded, the
+  // run degrades to pool-b rather than dying.
+  expect(results.length, "both packets complete after re-route").toBe(2);
+  expect(results.every((r) => r.outcome === "success"), "all final outcomes success").toBeTruthy();
+
+  // pool-a died exactly once (never re-killed on it again) then every
+  // subsequent packet routed straight to the surviving pool-b.
+  expect(attemptsByPool["pool-a"]).toBe(1);
+  expect(attemptsByPool["pool-b"] >= 2, "both packets land on the surviving pool-b").toBeTruthy();
+
+  expect(dispatcher.getTerminal()).toBe(null);
+  const state = dispatcher.getState();
+  expect(state.exhaustedPoolIds.has("pool-a"), "credit-exhausted pool is permanently excluded").toBeTruthy();
+  // No timer-reset pause was recorded — this is NOT the resettable rate_limited
+  // pause path (pausedPoolResetAt), it is the monotonic permanent exclusion.
+  expect(state.pausedPoolResetAt.has("pool-a"), "never a timed cooldown for credit exhaustion").toBe(false);
+});
+
+test("createRollingDispatcher — credit_exhausted is classified distinctly from rate_limited (does not consume the reset-pause path)", async () => {
+  await setupTmpQuotaDir();
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("only-pool"), makePool("backup-pool")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      if (slot.poolId === "only-pool") {
+        return { packet, outcome: "credit_exhausted", creditExhaustion: { channel: "error", text: "out of usage credits", rawMatch: "out of usage credits" } };
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+  dispatcher.enqueue([makePacket("p1")]);
+  await dispatcher.run();
+  const state = dispatcher.getState();
+  // Permanently excluded (like a bare unresettable 429), never a resettable pause.
+  expect(state.exhaustedPoolIds.has("only-pool")).toBeTruthy();
+  expect(state.pausedPoolResetAt.has("only-pool")).toBe(false);
+});
+
+test("createRollingDispatcher — when every pool credit-exhausts, the packet is stranded and surfaced via getTerminal (graceful degrade, not a crash)", async () => {
+  await setupTmpQuotaDir();
+  let attempts = 0;
+  const onResultCalls = [];
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("only-pool")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => {
+      attempts++;
+      return { packet, outcome: "credit_exhausted", creditExhaustion: { channel: "error", text: "insufficient credits", rawMatch: "insufficient credits" } };
+    },
+    onResult: (r) => onResultCalls.push(r.packet.id),
+  });
+
+  dispatcher.enqueue([makePacket("p1")]);
+  // run() must RESOLVE gracefully (never hang / reject / throw) even though the
+  // sole pool is permanently dead — this is the graceful-degrade requirement:
+  // the run pauses/strands, it does not crash.
+  const results = await dispatcher.run();
+
+  expect(results.length, "stranded packet produces no completion result").toBe(0);
+  expect(onResultCalls.length).toBe(0);
+
+  const terminal = dispatcher.getTerminal();
+  expect(terminal !== null, "stranded packet must surface a terminal").toBeTruthy();
+  expect(terminal.reason).toBe("empty_pool");
+  expect(terminal.stranded_ids).toEqual(["p1"]);
+
+  // The pool died exactly once — never re-killed on retry.
+  expect(attempts).toBe(1);
+  expect(dispatcher.getState().exhaustedPoolIds.has("only-pool")).toBeTruthy();
+});
+
+test("createRollingDispatcher — fires onCreditExhausted with poolId + rawMatch, and records the wave outcome as 'error' (never a rate_limited backoff cooldown)", async () => {
+  const dir = await setupTmpQuotaDir();
+  const { readQuotaState } = await import("../../src/shared/quota/state.ts");
+
+  const exhaustions = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("dead-pool"), makePool("live-pool")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      if (slot.poolId === "dead-pool") {
+        return {
+          packet,
+          outcome: "credit_exhausted",
+          creditExhaustion: { channel: "error", text: "no credits remaining", rawMatch: "no credits remaining" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+    onCreditExhausted: (info) => exhaustions.push(info),
+  });
+
+  dispatcher.enqueue([makePacket("p1")]);
+  await dispatcher.run();
+
+  expect(exhaustions.length, "onCreditExhausted fires once for the dead pool").toBe(1);
+  expect(exhaustions[0]).toEqual({ poolId: "dead-pool", rawMatch: "no credits remaining" });
+
+  // recordWaveOutcome was told 'error' (not 'rate_limited'), so the persisted
+  // quota-state entry for the dead pool carries NO backoff cooldown_until — the
+  // permanent-for-run exclusion lives only in the in-memory exhaustedPoolIds
+  // set, never as a timed cooldown a future run could wait out and re-hit.
+  const state = await readQuotaState();
+  const entry = state.entries["dead-pool"];
+  expect(entry?.cooldown_until ?? null, "no timed cooldown persisted for credit exhaustion").toBe(null);
+});
+
+test("createRollingDispatcher — onCreditExhausted is NOT fired for a plain rate_limited result (classes stay disjoint at the engine)", async () => {
+  await setupTmpQuotaDir();
+  const exhaustions = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      if (slot.poolId === "pool-a") return { packet, outcome: "rate_limited" };
+      return { packet, outcome: "success" };
+    },
+    onCreditExhausted: (info) => exhaustions.push(info),
+  });
+  dispatcher.enqueue([makePacket("p1")]);
+  await dispatcher.run();
+  expect(exhaustions.length).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
 // Piece D — quota-death = retryable pause + pool-pause + quota_paused terminal
 // ---------------------------------------------------------------------------
 
