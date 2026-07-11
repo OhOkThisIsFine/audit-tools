@@ -29,8 +29,9 @@ the roster.
   the exact mutual-exclusion needed for cross-IDE task claiming.
 - **Remediate already joins cooperatively.** Two rolling drivers (host-subagent + in-process provider)
   claim *disjoint* nodes through one shared `ClaimRegistry` and work in parallel; a node one holds returns
-  `{acquired:false}` to the other (`src/remediate/steps/rollingSession.ts`, `dispatch.ts`
-  `driveRollingImplementDispatch`). This IS the multi-peer-on-one-run model — generalize it to *cross-IDE*
+  `{acquired:false}` to the other (`src/remediate/steps/rollingSession.ts`, `nextStep.ts`'s
+  `driveRollingImplementDispatch`, dispatched/accepted via the `dispatch/` helpers). This IS the
+  multi-peer-on-one-run model — generalize it to *cross-IDE*
   peers and to audit.
 - **Audit task pool + append-safe results already exist.** `audit_tasks[]` is a pool of independently
   dispatchable tasks; `audit_results.jsonl` is append-only; merge dedups by `task_id`
@@ -45,8 +46,9 @@ lock and ran strictly after the first. Fixed by splitting the step into three ph
 is only the fallback path for host-delegation/complete/no-runner steps, in `src/audit/cli/auditStep.ts`);
 only the first and third phases take the short lock:
 
-1. **Claim phase (short lock):** load state, `reclaimStale()`, compute the obligation frontier,
-   enumerate claimable units, `claim()` the highest-priority unclaimed one, write THIS agent's
+1. **Claim phase (short lock):** load state, compute the obligation frontier,
+   enumerate claimable units, `claim()` the highest-priority unclaimed one (granting over any stale
+   existing lease inline, no separate reclaim call), write THIS agent's
    step/prompt, release the lock. If nothing is claimable → write a **cooperative-wait** step and stop.
 2. **Execute phase (NO lock):** the executor / dispatch / LLM work runs here — where peers overlap in
    time. The claim is heartbeated so a long unit isn't reclaimed.
