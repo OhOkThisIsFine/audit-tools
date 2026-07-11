@@ -552,7 +552,26 @@ export function buildFrictionTriageBlock(triage: FrictionTriageDecision): string
     (triage.free_form_notes ? " Already recorded." : "") +
     "\n";
 
-  return `\n## Run friction triage (BLOCKING close-out)\n\nWrite to the friction record at:\n\`${triage.recordPath}\`${pendingSection}${categorySection}${freeFormSection}\nCall next-step again after writing.\n`;
+  // Slice A2b, mechanism B — belt-and-suspenders for the TIER-2 broad
+  // quota-suspicious pre-filter (`detectQuotaSuspicious` in
+  // `errorParsing.ts`): the filter only ever sees WORKER ERROR/STATUS channel
+  // text, so a quota/limit/billing-shaped message the HOST itself observes
+  // (e.g. quoted inside a conversational reply, or from a channel the filter
+  // never scans) would otherwise leave no trace. Always rendered — independent
+  // of category coverage state — because it names a standing host obligation,
+  // not a per-run gap.
+  const quotaHarvestSection =
+    `\n### Quota/billing messages the tool did NOT auto-classify (standing obligation)\n\n` +
+    `If you encounter any quota/limit/billing-related provider message that was NOT already ` +
+    `auto-captured as \`credit_exhausted\` or \`quota_unclassified\` friction, record it ` +
+    `as a \`tool_should_decide\` \`open_observations[]\` entry (or in \`free_form_notes\`) ` +
+    `so the pattern set in \`errorParsing.ts\` can be improved. Keep the exact wording of the ` +
+    `error phrasing (that is what lets a new precise pattern be authored) — but you MUST ` +
+    `REDACT any secret value first: replace any API key, token, Bearer credential, password, ` +
+    `or key=value / \`?key=…\` secret with \`[REDACTED]\`. The pattern is authored from the ` +
+    `message SHAPE, never from a live credential — a friction record may be shared or committed.\n`;
+
+  return `\n## Run friction triage (BLOCKING close-out)\n\nWrite to the friction record at:\n\`${triage.recordPath}\`${pendingSection}${categorySection}${quotaHarvestSection}${freeFormSection}\nCall next-step again after writing.\n`;
 }
 
 /**

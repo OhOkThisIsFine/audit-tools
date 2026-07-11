@@ -1,4 +1,4 @@
-import { detectRateLimitFromChannel, detectCreditExhaustionFromChannel } from "../quota/errorParsing.js";
+import { detectRateLimitFromChannel, detectCreditExhaustionFromChannel, detectQuotaSuspicious } from "../quota/errorParsing.js";
 import { appendTokenUsageLine } from "../io/tokenUsageLedger.js";
 import { readOptionalJsonFile, readOptionalTextFile } from "../io/json.js";
 import type { LaunchFreshSessionResult } from "../providers/types.js";
@@ -39,12 +39,16 @@ export interface ProviderLaunchFinalizeContext<TPacket> {
  *
  * In order:
  *  1. not-accepted → error;
- *  2. channel-isolated session-limit detection on stderr (CE-003) → non-consuming
- *     rate_limited re-queue (the result file is never scanned for limit strings);
+ *  2. channel-isolated credit-exhaustion (TIER 1) then session-limit (TIER 1)
+ *     detection on stderr (CE-003) → credit_exhausted / non-consuming
+ *     rate_limited re-queue (the result file is never scanned for these strings);
  *  3. relay the endpoint-reported cost (when present) so `handleResult` can demote a
  *     declared-free pool that started charging;
  *  4. confirm the worker's result file landed + parses — if missing, check stdout for
- *     a session-limit message (some providers report status there) before erroring;
+ *     credit-exhaustion / session-limit (TIER 1, some providers report status there),
+ *     then the broad quota-suspicious pre-filter (TIER 2, Slice A2b) across both
+ *     channels combined → `quota_unclassified` conservative re-queue + verbatim-text
+ *     harvest, before finally erroring (TIER 3 — text matches nothing quota-shaped);
  *  5. append the per-run token-usage ledger line at result-handling time (never on the
  *     admission path — INV: no added admission latency), best-effort;
  *  6. success. The result CONTENT is adjudicated downstream by the deterministic merge,
@@ -124,6 +128,29 @@ export async function finalizeProviderLaunchResult<TPacket>(
         rateLimit: { channel: "status", text: stdoutText },
       };
     }
+
+    // TIER 2 (Slice A2b): neither channel matched a PRECISE credit/rate-limit
+    // pattern. Before falling through to a silent, unclassified raw `error` —
+    // the exact "worker AND dispatcher both die raw" failure mode
+    // credit-exhaustion detection fixed, but only for text it recognizes — run
+    // the deliberately broad `detectQuotaSuspicious` pre-filter across BOTH
+    // channels combined. A positive match here degrades CONSERVATIVELY
+    // (re-queue with a reversible cooldown, the pool is never permanently
+    // excluded — see the `quota_unclassified` branch in rollingDispatch.ts) and
+    // carries the verbatim text so the operator can classify it and improve the
+    // pattern set, instead of a silent death with no signal at all.
+    const combinedText = [stderrText, stdoutText].filter((t) => t.length > 0).join("\n");
+    if (combinedText.length > 0 && detectQuotaSuspicious(combinedText)) {
+      return {
+        packet,
+        outcome: "quota_unclassified",
+        quotaUnclassified: {
+          channel: stderrText.length > 0 ? "error" : "status",
+          text: combinedText,
+        },
+      };
+    }
+
     return {
       packet,
       outcome: "error",

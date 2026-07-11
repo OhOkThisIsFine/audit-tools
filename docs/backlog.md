@@ -32,6 +32,224 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
 > lives in git log / memory). Condense at write time, not in a later doc-review pass.
+- **Gate-0 provider_confirmation gaps (2026-07-10, maximal-coverage live run, tool-should-decide ×3).**
+  (a) `sources[]` pools never render in the Gate-0 roster table — `providerConfirmation.ts` reads only the
+  legacy `openai_compatible` block while `apiPool.ts:418` folds every source into dispatch, so the operator
+  confirms an ordering that omits pools that WILL route (opencode-free was invisible at the gate).
+  (b) The legacy `openai_compatible` block has no `cost_per_mtok`, so a free endpoint (NIM) prices at the
+  models.dev list price ($1/Mtok for nemotron-ultra) with no way to declare the real cost — only `sources[]`
+  entries carry the operator-declared override; the gate should say so or the block should take the field.
+  (c) CLI backends (codex) show "resolved at dispatch" with no way to enumerate their model/effort roster at
+  the gate, though codex `sources[]` entries with pinned `model` + `parameters.extra_args` are supported —
+  the gate never mentions that affordance. Workaround used: NIM + opencode moved to 5 tiered $0 `sources[]`.
+
+- **Cold-start admission granted ~750k est. tokens into a 26%-remaining session window → entire wave fleet died at the wall (2026-07-11 live run, tool-should-decide, HIGH).**
+  The Claude /usage probe WORKED (pool snapshot showed session remaining_pct 0.26, reset 09:40Z, coverage
+  "established") but admission granted 6 packets (~130k est. each across haiku/sonnet/fable pools,
+  `calibrating: true`, `remaining_token_budget: null`) — with tokens-per-percent not yet learned, percent
+  data never constrained the grant. Dispatcher + all 6 workers were killed mid-flight by the session limit
+  (second wall death this run). Pre-calibration grants against a percent-only source should be conservative
+  (e.g. one probe packet per pool until tokens-per-percent has a first observation), not the full
+  calibration batch. Positive: the 20-min lease TTL correctly expired the dead wave's leases (no
+  double-grant), and re-dispatch after reset lost nothing.
+- **Steady-state repeat grants re-recommend interactive confirmation every pass (2026-07-11 live run, tool-should-decide, low).**
+  `confirmation_recommended: true` fired on every wave of the same run (~12 waves at 6/73 packets) — the
+  operator had to opt out manually. First grant of a run: confirm; subsequent same-shape grants: don't.
+- **"Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).**
+  The step prompt tells the host to hand the rolling loop to one dedicated dispatcher subagent, but worker
+  completion notifications deliver to the MAIN session (the dispatcher idles between events), so the host
+  must manually relay every completion to the dispatcher — the exact per-node tracking the delegation was
+  meant to remove. Either the prompt's model is wrong for hosts with this notification topology, or the
+  worker prompts should instruct workers to message the dispatcher directly.
+- **NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).**
+  Hybrid partition (3 packets): 2 returned results inline, 1 errored empty. If it recurs on a specific
+  model (ultra vs nano), demote that source or add a bounded same-packet retry on a sibling $0 pool.
+- **Deep-tier model out of usage CREDITS (not rate-limited) has no graceful degrade → worker dies raw, pipeline must drop the tier by hand (2026-07-11 live run, tool-should-decide, HIGH).**
+  Mid host-wave, the fable/deep pool returned "You're out of usage credits" (a distinct condition from a
+  429/session wall — it does not reset on a timer). The worker and the dispatcher both died with a raw API
+  error; the tool had no signal for it and kept the deep tier in the roster, so any deep-routed packet would
+  re-die. Manual recovery: drop `deep` from `--host-models`, re-dispatch on haiku+sonnet. A credit-exhausted
+  pool should be detected (error-class parse, like 429/524) and removed from the admissible set for the rest
+  of the run with a friction event — not left to re-kill every deep packet. Relates the cross-provider quota
+  matrix (this is a Claude-side quota SIGNAL the admission layer doesn't yet consume).
+- **Same-account sources form separately-keyed quota pools → learned 429 cooldown never gates siblings (2026-07-11 live run, tool-should-decide, HIGH).**
+  Headless NIM cycles: primary `openai-compatible/*` key accumulated 61 consecutive 429s + a cooldown, but
+  `nim-nano`/`nim-super`/`nim-kimi` (same NVIDIA_API_KEY, same endpoint rate limit) and even a second cycle
+  kept firing under their own clean quota-state keys — 209 then 158 packet errors across two cycles because
+  backoff learned on one pool key doesn't bind the same ACCOUNT's other pools. Pool identity must include
+  the account axis ([[quota-dispatch-vision]]: pool = provider+account[,model]) — e.g. key learned
+  RPM/cooldown by (endpoint, api_key_env/account) and share it across that account's sources; per-model
+  keys should only subdivide budgets, not evade the account-level 429 state. Positive: the primary key's
+  cooldown DID engage (reactive learning works where the key matches), results kept ingesting (96 accepted
+  by cycle 2's merge), and the run stayed resumable throughout.
+- **Abandoned-wave leases saturate the cold-start cap → phantom "quota wall" (2026-07-11 live run, low — NOT a release bug; the reconcile already exists).**
+  A host grant came back `granted 0`, all 14 packets `cap_reached`, `headroom_before: null` (ledger never
+  consulted): `admitBatch` seeds `countByPool` from the ledger's live leases (admissionLoop.ts:307-319), the
+  ledger held 4 leaked leases (2/pool, agent `24556`) with the 10-min TTL still live, and with cold-start
+  effectiveCap = 2/pool the phantoms fully saturated the cap. BUT the release machinery is present and
+  correct — `mergeAndIngestCommand.ts:594` reconciles a grant's leases at the top of every merge and
+  `dispatch.ts:657` reconciles on the pause path. The leak's true cause was OPERATIONAL: waves I KILLED
+  mid-flight this session (stopped drain, dead dispatchers, session-limit fleet deaths) never reached merge
+  or pause-reconcile, so their leases freed only via the 20-min TTL. Working-as-designed backstop; cleared 4
+  by hand. Only residual worth considering (deferred, low): a `next-step` startup sweep that reconciles
+  leases whose owning run is demonstrably dead, so an abandoned wave doesn't false-wall a fresh one for up
+  to 20 min. Not a defect in the release path itself.
+- **Cold-start `TOKEN_BUDGET_COLD_START_SLOTS = 2` is an arbitrary throttle that never graduates on the host path (2026-07-11 live run, tool-should-decide, HIGH — the owner's "no random low/med/high thresholds" objection).**
+  A token-aware admitter should size the calibration batch to tokens-that-fit, not a hardcoded "2." On the
+  host path it is doubly broken: (a) it never graduates because host subagent token usage is never recorded
+  into quota-state, so the pool is perpetually `calibrating` and capped at 2/pool forever (see the
+  calibrate-forever entry); (b) it is trivially jammed to zero by the lease leak above. Endpoint: derive the
+  bootstrap batch from a conservative token estimate against the real remaining budget, and RECORD host
+  usage so the pool graduates after the first wave. Retires the magic constant. [[quota-onetrack-always-on]]
+- **Residual remaining_pct thresholds — SHIPPED 2026-07-11 (commit 87143ffc, worktree branch — unmerged, batch-ship after Fix 2 + audit finish).**
+  Deleted `QUOTA_REMAINING_PCT_LOW`/`CRITICAL` + re-exports. `isPoolQuotaDegraded(schedule, budgetTokens)` now
+  hard-degrades a pool when its derived `remaining_token_budget` can't fund the packet's estimated tokens
+  (token-vs-token, no cliff) — strictly more correct than the old `<0.3` (a 5%-but-token-rich pool is no
+  longer wrongly sunk). `selectProvider` folded to one composite sort (hard-degraded → capability → load →
+  relative-headroom tiebreak). Independent adversarial review caught that the first attempt's
+  `binding_cap==="token_budget"` signal was unreachable at requestedConcurrency:1; fixed to the always-stamped
+  `remaining_token_budget`, re-verified. 2 regression tests added. **Residual (interlocks with Fix 2):** an
+  UNcalibrated near-wall pool (budget null — incl. the cold HostSessionQuotaSource 0.05 band before a slope is
+  learned) is not proactively sunk; it relies on the reactive 429→cooldown floor until host-usage recording
+  (Fix 2) lets the pool learn a slope → derivable budget → proactive spill. Minor by-design: the check uses
+  raw budget (no safety-margin, ignores in-flight) → under-detection only, backstopped.
+  [[concurrency-is-declared-or-absent-never-learned]]
+- **empty_grant wall: prose promises "wait for the reset" but derives none, and the binding window can be days out while the session window is fresh (2026-07-11 live run, tool-should-decide, medium — NOTE: the granted-0 I first attributed here was actually the lease leak above; this entry stands only for the derives-no-reset-time UX).**
+  `detectHostDispatchWall` (hostDispatchWall.ts:27-49) returns `earliestResetAt: null` on the empty_grant
+  axis, and the blocked step's stop-condition says "wait for the reset" with no time; the actual binder was
+  the WEEKLY-window learned budget (min-across-windows, scheduler.ts:350-456) — 3 days out — while the
+  session window sat at 96%. Also: each walled pass bumps `pause_count`; at LIVELOCK_PAUSE_LIMIT=3 the run
+  routes to synthesis on partial coverage EVEN IF the hybrid NIM partition is still making progress every
+  pass — wall-pass counting should not count passes in which the in-process partition ingested results.
+  Surface per-pool binding window + derived budget + packet cost in the blocked step so the operator can
+  see WHY zero packets fit.
+- **merge-and-ingest labels every undispatched pending task "(budget-capped)" (2026-07-11 live run, tool-should-decide, low).**
+  mergeAndIngestCommand.ts:705-709 hardwires the "(budget-capped)" suffix for any task with no result-map
+  entry and no on-disk result — during the NIM-partition cycle this misdiagnosed plan-deferral as a quota
+  decision and sent the investigation toward a nonexistent Claude→NIM budget coupling. Label should state
+  the actual hold reason (top-K deferral / peer claim / pool split).
+- **openai-compatible review dispatch sends path-only prompts a single-shot worker cannot execute (2026-07-11 live run, tool-should-decide, HIGH).**
+  ⚠️ **VERIFY-FIRST CAVEAT (2026-07-11 recon):** the "defaults off" premise below is now FALSE on HEAD —
+  `gatherReferencedFiles` (openAiCompatibleProvider.ts:397) inlines by DEFAULT (skips only when
+  `include_referenced_files === false`), and the read-heavy caps + "single-shot worker has no Read tool"
+  comment landed in `fbbf3039` (2026-07-05, BEFORE the 2026-07-11 run). So the run STILL needing the
+  explicit `include_referenced_files:true` workaround is a CONTRADICTION → the real defect is elsewhere in
+  the review-dispatch → provider-config wiring (apiPool.ts:342 only forwards `oc.include_referenced_files`
+  when defined; trace how the hybrid-partition review packets build their per-source provider config, and
+  whether the token-regex actually matches the packet's path tokens / resolves them in the worker's
+  repoRoot). Part (2) — the "refuse to dispatch a review packet the worker CANNOT comply with → unroutable"
+  guard — is the still-unbuilt half regardless. Do NOT blind-flip a default that is already on; TRACE first.
+  The hybrid NIM partition's packet prompts (9.8KB) reference file paths but inline NO file content, and
+  `include_referenced_files` defaults off — a single-shot /chat/completions worker has no disk, so every
+  result came back schema-valid but fabricated-empty (`total_lines: 0`, zero findings). The line-count
+  validator correctly rejected all 10 ("expected 701, got 0"), so a whole partition cycle burned with
+  zero yield and no friction event pointing at the cause. For API-pool review dispatch the tool should
+  force (or default) `include_referenced_files: true` and refuse to dispatch a review packet whose prompt
+  lacks its files' content — a worker that CANNOT comply should be unroutable, not quietly wasted.
+  Workaround applied to this run's session config: `parameters.include_referenced_files: true` on all 5
+  $0 sources. Positive: leads-not-verdicts validation held (no garbage entered coverage).
+- **A2b unmatched-quota fallback — two residuals (SHIPPED unmerged; each low, documented at the code site).**
+  The three-tier quota-error classifier + verbatim meta-audit harvest shipped (owner-designed: precise
+  auto-match → `quota_unclassified` conservative degrade + verbatim-message harvest → pattern improvement).
+  Independent adversarial review caught + fixed pre-commit a HIGH scrub gap (missed `nvapi-`/`ghp_`/JWT/bare
+  `*_KEY`), a HIGH unscrubbed triage-prompt leak path, an over-broad filter (matched crash text), and the
+  A-8 hybrid settle gap. Residuals:
+  - (a) **`pausedPoolResetAt` + `quotaUnclassifiedPoolIds` are not injected across sub-waves** the way
+    `costDemotedPoolIds` is (`rollingDispatch.ts` state ctor + `unifiedRolling.ts`), so within a multi-sub-wave
+    drive the reversible pause + the harvest-once gate reset at each sub-wave boundary — a chronically
+    quota_unclassified pool is re-attempted once per sub-wave (bounded; friction dedup collapses the repeat
+    harvest). Fix = thread both through the dispatcher options like `costDemotedPoolIds`. Efficiency-only.
+  - (b) **The A-8 hybrid `executeInProcessPartition` (direct `Promise.all`) never invokes the rolling engine's
+    hooks**, so the VERBATIM harvest (`captureQuotaUnclassifiedFriction` / `captureCreditExhaustionFriction`)
+    does not fire there — a settled node surfaces only as a `quota_escalation` friction (no verbatim text).
+    Affects `credit_exhausted` identically (pre-existing, not new to A2b). Fix = thread verbatim capture into
+    `executeInProcessPartition`. The pool IS now settled there (no unbounded re-offer), so this is harvest-signal
+    completeness, not a safety gap.
+- **Design (remove-waves track): dispatch should be gated ONLY by token-budget, rate, and true task-unlocks — the host merge/re-grant barrier is artificial for independent review packets (2026-07-11 live run, owner design statement, forward-track).**
+  Owner's spec: when dispatching up to quota with tokens estimated a-priori, the ONLY legitimate reasons to
+  hold a packet for a later dispatch are (1) a non-parallelizable predecessor finishes and UNLOCKS the task,
+  (2) the quota window refreshes, (3) the pool is RATE-limited (RPM/TPM) — not budget-limited. Any other
+  hold is pure latency. Mapping onto audit-code:
+  - Base review packets are embarrassingly parallel (read-only, no write conflict, no ordering) → they
+    should ALL dispatch the instant they fit budget+rate; the `next-step → dispatch → merge-and-ingest →
+    next-step` barrier on the host path is an artificial wave, NOT one of (1)/(2)/(3).
+  - The IN-PROCESS rolling engine (codex/NIM via `driveRollingAuditDispatch`) ALREADY implements the correct
+    model — continuous slot-pull, dispatch-to-capacity, refill-on-completion, pace-on-rate. The host path is
+    the deviation.
+  - Legitimate (1) DOES apply to ONE layer: selective-deepening tasks are derived from completed packets'
+    findings (`+N deepening` per merge), so a merge must precede them — the barrier is correct for the
+    deepening layer, artificial for the base frontier.
+  - The calibration cap (below) is a FOURTH, illegitimate hold: it throttles on not-knowing-quota-in-tokens,
+    which is neither budget, rate, nor unlock — and never resolves. Endpoint: host admission should grant the
+    full budget-and-rate-fitting independent set at once (like the in-process engine), reserving merge-gated
+    re-grants for the deepening layer only. Realizes [[self-scaling-pipeline-not-forked-paths]] on the host path.
+- **Host pools calibrate FOREVER → grant permanently stuck at the cold-start batch, real headroom unusable (2026-07-11 live run, tool-should-decide, HIGH — throughput consequence of the quota-invisible-host-fan-out gap below).**
+  With the `parallel_workers` cap removed, host grants still came out at exactly 4 while Claude quota sat at
+  ~50%. Root cause: both host pools show `calibrating: true`, `remaining_token_budget: null`, so admission
+  falls back to `TOKEN_BUDGET_COLD_START_SLOTS = 2` per pool (scheduler.ts:342) → 2 pools × 2 = 4; the 12
+  denials are `cap_reached` with `headroom_before: null` (the calibration batch, NOT a real budget). The
+  comment promises graduation "once even one slope sample lands," but the host-dispatch path never records
+  the subagents' actual token spend into quota-state (file-based result protocol carries no usage), so
+  `tokens_per_pct` is never learned and the pool never leaves calibration — every host wave is fixed at 4
+  regardless of available quota. The in-process source pools (codex/NIM) are NOT stuck (slot/rpm-sized), so
+  they eat 50+ tasks/cycle while the host manages 4. Fix belongs with the gap below: capture host-subagent
+  usage (the harness reports subagent_tokens per completion) and feed `recordTokensPerPctObservation` so the
+  host pool graduates and admission can spend the real headroom. Until then, host throughput is bottlenecked
+  by an unlearnable budget while free in-process pools carry the run.
+- **Tool-prescribed host Agent fan-out is quota-INVISIBLE — subagent died raw at the session wall (2026-07-10 live run, tool-should-decide, HIGH).**
+  The design-review (5 perspectives + judge) and systemic-challenge steps instruct the host to dispatch its
+  own subagents, but that host fan-out never touches the quota layer: no admission grant, no lease, no
+  consult of the Claude /usage percent probe (which exists — cross-provider quota matrix), no pre-wall
+  pacing, and when the host session limit hit mid-round (systemic round 3), the subagent was terminated by
+  a raw API error with no `quota_escalation`/friction event and no pause artifact. Recovery was clean
+  (nothing written → step simply re-emits; resumability HELD), but the wall was invisible to the tool.
+  Fix direction: host-fan-out steps should register the host pool + consume admission like any dispatch
+  (the host-path enforcement track covered packet dispatch, not these prescribed-fan-out steps). Confirms +
+  sharpens the existing "ad-hoc Agent fan-out has no per-agent ledger" sliver.
+- **Design-review worker prompts embed the `next-step` advance command → subagent becomes a second driver (2026-07-10 live run, tool-should-decide).**
+  The contract-review prompt file ends with "when written, run: audit-code next-step …", so the dispatched
+  subagent advanced the orchestrator itself while the host was still mid-parallel-dispatch (5 conceptual
+  perspectives in flight). Harmless this time (the pending obligation just re-emitted under a new agent id),
+  but it is a double-driver hazard: worker-facing prompt files should carry only the write-your-results
+  contract; the advance command belongs to the dispatching host's step prompt alone.
+  **FIXED (5b81c81f, unmerged): removed the advance from the `design_review_parallel` contract-review WORKER
+  packet (nextStepCommand.ts) + regression test. FOLLOW-UP (low, latent):** the solo `design_review_contract`
+  branch renders the SAME adversarial reviewer prompt directly as the host's `current-prompt.md` with its
+  advance intact — host-facing today (correct), but if a host ever forwards that current-prompt.md verbatim
+  to a subagent the same second-driver bug recurs, and it also has the host mark its own homework (vs
+  [[delegate-adversarial-phases-to-separate-agent]]). Consider making the solo branch dispatch the contract
+  review to an independent subagent too (advance stays host-only), unifying both branches.
+- **charter_delta prompt never documents the goal_graph schema (2026-07-10 live run, tool-should-decide).**
+  The step prompt's output example shows `"goal_graph": { "nodes": [], "edges": [] }` with no field docs; the
+  actual shape (`GoalNodeSchema`/`GoalEdgeSchema` in `src/shared/types/charter.ts` — nodes need
+  `node_id`/`premise_height`/`statement`, edges are strict `{from,to}` serves-pairs) is validator-only
+  knowledge, so a first submission with natural `{id,label}`/`{from,to,kind}` shapes hard-fails zod. Render
+  the node/edge fields (and the "every edge means serves" semantic) into the prompt example.
+- **Charter extraction silently keeps one charter per kind (2026-07-10 live run, watch item, low).**
+  Submitting >1 charter of the same kind for a subsystem is accepted but the register keeps only one — no
+  warning in the next-step output. If "up to three = one per kind" is the contract, validate/say so at
+  submission instead of silently discarding.
+
+- **Charter-layer defects found + FIXED dogfooding /audit-code (2026-07-10, orchestrator + Opus recon/impl/adversarial agents).**
+  A dogfood audit of this repo surfaced three defects in the conceptual design-review charter layer; all fixed
+  (4 commits on the lap branch, one loop-core-attested + independently adversarially reviewed, validated
+  end-to-end). Durable design → memory [[charter-layer-independence-and-node-selection]].
+  - **(tool-should-decide) Consensus metric was size-hostile → charter review only ever saw test-file dyads.**
+    `src/shared/decompose/consensus.ts` scored a cluster by the mean over all C(n,2) member-pairs (missing ⇒ 0),
+    so only 2-file dyads cleared the bar and a 449-file `.gitignore` blob leaked into contested. Replaced with a
+    size-robust per-source best-fit F1 (precision×recall) + whole-area-community cap + abstain-vs-disagree voting
+    + ≥2-sources-together floor. On this repo consensus went 4 test dyads → 2 real subsystems, blob gone.
+  - **(ambiguous-direction) Single agent authored all charter kinds AND their deltas — author marking own homework.**
+    The design-of-record mandates independently-sourced, never-reconciled views, but one host pass wrote
+    stated/inferred/revealed + the deltas. Split into a charters-only extraction (independent, access-scoped
+    per-kind subagents: revealed=code-only, stated=docs-only) + a NEW `charter_delta` step where an independent
+    miner authors the gaps + goal_graph. The delta is now genuine disagreement, not one narrator's story.
+  - **(tool-should-decide) Prompt advertised "four charters" at a `deep` ceiling that only requests three.**
+    The count string was hardcoded; now tracks the ceiling (True nominatable only at `deepest`).
+  - **Recurrence of [[external-audit-catalogs-are-leads]] / verify-before-building:** the charter step was
+    reviewing test files because the *consensus criterion itself* was the bug — not visible without dogfooding.
+    A live self-audit remains the cheapest way to surface these; the env-bound dispatch/quota watch items below
+    were the original goal of the run and are still unexercised (audit paused at charter phase to fix the tool).
 
 - **A doc-review auto-apply / hook re-reverted a COMMITTED owner decision during a process restart (2026-07-10, tool-should-decide).**
   Mid-lap the process restarted; on restart, CLAUDE.md + `project-philosophy.md` came back MODIFIED — the change

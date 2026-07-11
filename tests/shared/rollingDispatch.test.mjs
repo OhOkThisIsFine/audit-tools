@@ -654,6 +654,154 @@ test("createRollingDispatcher — onCreditExhausted is NOT fired for a plain rat
 });
 
 // ---------------------------------------------------------------------------
+// Quota-unclassified (Slice A2b / backlog HIGH 2026-07-11) — TIER 2 of the
+// three-tier classifier: a worker death whose text was quota-SUSPICIOUS (the
+// broad pre-filter matched) but classified as NEITHER precise class. Must
+// degrade CONSERVATIVELY: re-queue with a reversible cooldown, and — critically
+// unlike credit_exhausted — the pool is NEVER added to exhaustedPoolIds.
+// ---------------------------------------------------------------------------
+
+test("createRollingDispatcher — quota_unclassified result re-queues the packet to a surviving pool WITHOUT permanently excluding the dying pool", async () => {
+  await setupTmpQuotaDir();
+  const { readQuotaState } = await import("../../src/shared/quota/state.ts");
+  const attemptsByPool = { "pool-a": 0, "pool-b": 0 };
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      attemptsByPool[slot.poolId] = (attemptsByPool[slot.poolId] ?? 0) + 1;
+      if (slot.poolId === "pool-a") {
+        return {
+          packet,
+          outcome: "quota_unclassified",
+          quotaUnclassified: { channel: "error", text: "unrecognized billing rejection" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+
+  dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
+  const results = await dispatcher.run();
+
+  expect(results.length, "both packets complete after re-route").toBe(2);
+  expect(results.every((r) => r.outcome === "success")).toBeTruthy();
+  expect(attemptsByPool["pool-a"]).toBe(1);
+  expect(attemptsByPool["pool-b"] >= 2).toBeTruthy();
+  expect(dispatcher.getTerminal()).toBe(null);
+
+  const state = dispatcher.getState();
+  expect(
+    state.exhaustedPoolIds.has("pool-a"),
+    "quota_unclassified must NEVER add the pool to the permanent exclusion set",
+  ).toBe(false);
+  // Instead, a REVERSIBLE in-memory pause (piece D mechanism) bounds this run's
+  // retries against the dying pool without ever excluding it.
+  expect(state.pausedPoolResetAt.has("pool-a"), "reversible pause, not exclusion").toBe(true);
+
+  // The conservative degrade also recorded a real, reversible, timed cooldown
+  // in the PERSISTED quota state (never silent, never permanent).
+  const quotaState = await readQuotaState();
+  expect(quotaState.entries["pool-a"]?.cooldown_until, "reversible cooldown recorded").not.toBe(null);
+});
+
+test("createRollingDispatcher — fires onQuotaUnclassified once per pool with poolId + verbatim text", async () => {
+  await setupTmpQuotaDir();
+  const harvested = [];
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      if (slot.poolId === "pool-a") {
+        return {
+          packet,
+          outcome: "quota_unclassified",
+          quotaUnclassified: { channel: "error", text: "mystery quota-shaped rejection" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+    onQuotaUnclassified: (info) => harvested.push(info),
+  });
+
+  dispatcher.enqueue([makePacket("p1"), makePacket("p2")]);
+  await dispatcher.run();
+
+  // pool-a is paused (not excluded) after its first quota_unclassified, so p2
+  // never re-hits it within this run — the harvest hook fires exactly once.
+  expect(harvested.length, "onQuotaUnclassified fires once per pool").toBe(1);
+  expect(harvested[0]).toEqual({ poolId: "pool-a", text: "mystery quota-shaped rejection" });
+});
+
+test("createRollingDispatcher — onQuotaUnclassified is NOT fired for credit_exhausted or rate_limited results (classes stay disjoint)", async () => {
+  await setupTmpQuotaDir();
+  const harvested = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b"), makePool("pool-c")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      if (slot.poolId === "pool-a") {
+        return { packet, outcome: "credit_exhausted", creditExhaustion: { channel: "error", text: "out of credits", rawMatch: "out of credits" } };
+      }
+      if (slot.poolId === "pool-b") {
+        return { packet, outcome: "rate_limited" };
+      }
+      return { packet, outcome: "success" };
+    },
+    onQuotaUnclassified: (info) => harvested.push(info),
+  });
+  dispatcher.enqueue([makePacket("p1")]);
+  await dispatcher.run();
+  expect(harvested.length).toBe(0);
+});
+
+test("createRollingDispatcher — when the only pool repeatedly quota_unclassifies, the run resolves via a RETRYABLE quota_paused strand (bounded, never a livelock, pool never excluded)", async () => {
+  await setupTmpQuotaDir();
+  let attempts = 0;
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("only-pool")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => {
+      attempts++;
+      return {
+        packet,
+        outcome: "quota_unclassified",
+        quotaUnclassified: { channel: "error", text: "persistent unrecognized quota rejection" },
+      };
+    },
+  });
+
+  dispatcher.enqueue([makePacket("p1")]);
+  // Bound the wait: with only ONE pool and no exclusion mechanism, the
+  // reversible in-memory pause is what stops the engine from spinning forever
+  // re-selecting the same dying pool — assert run() resolves promptly rather
+  // than hanging or busy-looping.
+  const results = await Promise.race([
+    dispatcher.run(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("dispatcher.run() did not resolve — livelock")), 5000)),
+  ]);
+
+  // Never lands (the sole pool always quota_unclassifies) — no completion
+  // result — but the pool was attempted exactly ONCE (paused immediately after,
+  // never re-selected in a tight loop) and never permanently excluded.
+  expect(results.length).toBe(0);
+  expect(attempts, "attempted once, then paused (not re-selected in a spin loop)").toBe(1);
+
+  const state = dispatcher.getState();
+  expect(state.exhaustedPoolIds.has("only-pool"), "never permanently excluded").toBe(false);
+  expect(state.pausedPoolResetAt.has("only-pool"), "reversibly paused").toBe(true);
+
+  const terminal = dispatcher.getTerminal();
+  expect(terminal !== null, "stranded work surfaces a terminal").toBeTruthy();
+  // RETRYABLE quota_paused (not the non-retryable empty_pool credit_exhausted
+  // hits) — this reflects that the degrade is reversible, not permanent.
+  expect(terminal.reason).toBe("quota_paused");
+  expect(terminal.stranded_ids).toEqual(["p1"]);
+});
+
+// ---------------------------------------------------------------------------
 // Piece D — quota-death = retryable pause + pool-pause + quota_paused terminal
 // ---------------------------------------------------------------------------
 

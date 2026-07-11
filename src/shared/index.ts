@@ -608,12 +608,14 @@ export type {
   StepBoundaryFriction,
   CostDriftInfo,
   CreditExhaustionInfo,
+  QuotaUnclassifiedInfo,
 } from "./friction/stepBoundaryCapture.js";
 export {
   captureStepBoundaryFriction,
   stepBoundaryEventId,
   captureCostDriftFriction,
   captureCreditExhaustionFriction,
+  captureQuotaUnclassifiedFriction,
 } from "./friction/stepBoundaryCapture.js";
 export { emitBlindDispatchFrictionIfBlind } from "./friction/blindDispatchFriction.js";
 
@@ -957,6 +959,7 @@ export {
   DEFAULT_COOLDOWN_MS,
   detectCreditExhaustionError,
   detectCreditExhaustionFromChannel,
+  detectQuotaSuspicious,
 } from "./quota/errorParsing.js";
 export type { WorkerOutputChannel } from "./quota/errorParsing.js";
 export type { CreditExhaustionDetectionResult } from "./quota/errorParsing.js";

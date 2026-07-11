@@ -163,6 +163,108 @@ test("finalizeProviderLaunchResult: credit-exhaustion reported on stdout (some p
   });
 });
 
+// Slice A2b (TIER 2, backlog HIGH) — the broad quota-suspicious pre-filter: a
+// worker death whose text matches NEITHER precise pattern above (credit /
+// rate-limit) but still smells quota-shaped must classify as the conservative
+// `quota_unclassified` outcome, never fall through to a silent, unclassified
+// `error`.
+
+test("finalizeProviderLaunchResult: a quota-suspicious-but-unmatched stderr message classifies as quota_unclassified, not a raw error", async () => {
+  await withTmpDir(async (dir) => {
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json"); // never written — worker died
+    // Deliberately vendor prose that matches NEITHER CREDIT_EXHAUSTION_PATTERNS
+    // nor ALL_RATE_LIMIT_PATTERNS precisely, but is still quota-shaped ("billing").
+    await writeFile(
+      stderrPath,
+      "Upstream billing service rejected this request; account is over its configured cap.",
+      "utf8",
+    );
+    await writeFile(stdoutPath, "", "utf8");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: true },
+      {
+        packet: basePacket(),
+        providerName: "openai-compatible",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: "nim-deep",
+      },
+    );
+
+    expect(result.outcome).toBe("quota_unclassified");
+    expect(result.outcome).not.toBe("error");
+    expect(result.quotaUnclassified?.channel).toBe("error");
+    expect(result.quotaUnclassified?.text).toContain("billing service rejected");
+  });
+});
+
+test("finalizeProviderLaunchResult: quota_unclassified is checked AFTER credit/rate-limit — a precise match still wins", async () => {
+  await withTmpDir(async (dir) => {
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json");
+    await writeFile(stderrPath, "429 Too Many Requests", "utf8");
+    await writeFile(stdoutPath, "", "utf8");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: true },
+      {
+        packet: basePacket(),
+        providerName: "openai-compatible",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: "nim-deep",
+      },
+    );
+
+    // "429 Too Many Requests" is ALSO quota-suspicious, but the precise
+    // rate_limited classifier runs first and wins.
+    expect(result.outcome).toBe("rate_limited");
+  });
+});
+
+test("finalizeProviderLaunchResult: a clearly non-quota death still classifies as a raw error (TIER 2 does not over-fire)", async () => {
+  await withTmpDir(async (dir) => {
+    const stderrPath = join(dir, "stderr.txt");
+    const stdoutPath = join(dir, "stdout.txt");
+    const resultPath = join(dir, "result.json");
+    await writeFile(stderrPath, "TypeError: cannot read property 'foo' of undefined", "utf8");
+    await writeFile(stdoutPath, "", "utf8");
+
+    const result = await finalizeProviderLaunchResult(
+      { accepted: true },
+      {
+        packet: basePacket(),
+        providerName: "openai-compatible",
+        entityLabel: "packet p1",
+        resultPath,
+        stdoutPath,
+        stderrPath,
+        artifactsDir: dir,
+        runId: "run-1",
+        packetId: "p1",
+        poolId: "nim-deep",
+      },
+    );
+
+    expect(result.outcome).toBe("error");
+    expect(result.quotaUnclassified).toBeUndefined();
+  });
+});
+
 test("finalizeProviderLaunchResult: a healthy result file quoting a credit-exhaustion string is NEVER reclassified (CE-003 channel isolation)", async () => {
   await withTmpDir(async (dir) => {
     const stderrPath = join(dir, "stderr.txt");

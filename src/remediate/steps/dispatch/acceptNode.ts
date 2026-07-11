@@ -38,7 +38,7 @@ import {
 import { enforceAcceptWriteScope } from "./writeScope.js";
 
 /** Worker transport outcome (mirrors shared `RollingDispatchResult["outcome"]`). */
-export type NodeWorkerOutcome = "success" | "error" | "rate_limited" | "timeout" | "credit_exhausted";
+export type NodeWorkerOutcome = "success" | "error" | "rate_limited" | "timeout" | "credit_exhausted" | "quota_unclassified";
 
 export interface AcceptNodeWorktreeParams {
   root: string;
@@ -242,16 +242,22 @@ async function acceptNodeWorktreeLocked(
   // never trusted over this value.
   let committedOid: string | undefined;
 
-  if (workerOutcome === "rate_limited" || workerOutcome === "credit_exhausted") {
+  if (
+    workerOutcome === "rate_limited" ||
+    workerOutcome === "credit_exhausted" ||
+    workerOutcome === "quota_unclassified"
+  ) {
     // Piece D — quota-death worktree preservation: a worker that died on a host
-    // session-limit (rate_limited) OR a non-resettable out-of-credits pool
-    // (credit_exhausted) is a RETRYABLE re-route, not a failure — the rolling
-    // engine excludes the exhausted pool and re-queues this node onto a
-    // surviving one. Leave its worktree INTACT (do NOT removeWorktree) so
-    // nothing is destroyed during the re-route; the node redoes clean on
-    // re-entry (`resetNodeWorktreeAndBranch` handles the clean redo). Nothing
-    // to land now — return the outcome so the rolling engine records the
-    // pause/re-route + strands the node pending.
+    // session-limit (rate_limited), a non-resettable out-of-credits pool
+    // (credit_exhausted), OR a quota-suspicious-but-unmatched death (Slice A2b
+    // `quota_unclassified` — conservative re-queue, the pool stays admissible,
+    // never excluded) is a RETRYABLE re-route, not a failure — the rolling
+    // engine re-queues this node (excluding the pool only for credit_exhausted /
+    // an unresettable rate_limited). Leave its worktree INTACT (do NOT
+    // removeWorktree) so nothing is destroyed during the re-route; the node
+    // redoes clean on re-entry (`resetNodeWorktreeAndBranch` handles the clean
+    // redo). Nothing to land now — return the outcome so the rolling engine
+    // records the pause/re-route + strands the node pending.
     return { outcome: workerOutcome, verifyPassed, merged };
   }
 

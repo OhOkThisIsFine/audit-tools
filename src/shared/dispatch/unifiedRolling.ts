@@ -161,6 +161,15 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
    * emission. Omit to leave the exclusion silent.
    */
   onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Quota-unclassified harvest (Slice A2b, TIER 2): invoked once per pool the
+   * first time a `quota_unclassified` result lands (broad quota-suspicious
+   * pre-filter matched, but neither precise class did). The engine has already
+   * degraded conservatively (re-queued, reversible cooldown, pool NEVER added to
+   * the exclusion set). Forwarded to the engine; the consumer wires it to
+   * friction emission carrying the verbatim text. Omit to leave it silent.
+   */
+  onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
   /** Engine escalation hooks (host-session rate-limit accrual + strand-not-requeue read). */
   recordRateLimit?: (packet: RollingDispatchPacket<TPayload>, result: RollingDispatchResult<TPayload>) => void;
   isPacketEscalated?: (packetId: string) => boolean;
@@ -270,6 +279,7 @@ export async function driveRolling<TItem, TPayload>(
           : {}),
         ...(config.onCostDrift ? { onCostDrift: config.onCostDrift } : {}),
         ...(config.onCreditExhausted ? { onCreditExhausted: config.onCreditExhausted } : {}),
+        ...(config.onQuotaUnclassified ? { onQuotaUnclassified: config.onQuotaUnclassified } : {}),
         costDemotedPoolIds,
         onResult: (result) => {
           out.allResults.push(result);

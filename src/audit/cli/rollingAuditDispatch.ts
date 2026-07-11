@@ -38,6 +38,7 @@ import {
   captureStepBoundaryFriction,
   captureCostDriftFriction,
   captureCreditExhaustionFriction,
+  captureQuotaUnclassifiedFriction,
   resolveHostProviderName,
   resolveConversationHostProvider,
   resolveRollingEngineFlag,
@@ -503,6 +504,14 @@ export async function driveRollingAuditDispatch(params: {
       // chokepoint, like the cost-drift hook above).
       onCreditExhausted: (info) => {
         captureCreditExhaustionFriction(artifactsDir, runId, info, "audit-code");
+      },
+      // Quota-unclassified harvest (Slice A2b): a pool death whose text was
+      // quota-suspicious but matched no precise pattern degraded conservatively
+      // (re-queued, never permanently excluded); surface the verbatim
+      // (secret-scrubbed) text as reviewable friction so the operator can
+      // classify it and improve errorParsing.ts's pattern set.
+      onQuotaUnclassified: (info) => {
+        captureQuotaUnclassifiedFriction(artifactsDir, runId, info, "audit-code");
       },
     },
     dispatchPacket,

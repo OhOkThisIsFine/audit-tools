@@ -38,6 +38,22 @@
  *   persisted backoff `cooldown_until` is ever set — the exclusion is a
  *   permanent-for-this-run, in-memory demotion, never a timed retry. `onCreditExhausted`
  *   is the consumer's friction-emission seam (mirrors `onCostDrift`).
+ * - Quota-unclassified harvest (Slice A2b, TIER 2 of the three-tier classifier):
+ *   TIER 1 is the precise `detectCreditExhaustionError` / `detectRateLimitError`
+ *   above (unchanged). TIER 3 is a death whose text matches neither precise
+ *   pattern NOR the broad `detectQuotaSuspicious` pre-filter — a genuine,
+ *   unclassified `error`. TIER 2 sits between them: a death whose text IS
+ *   quota-suspicious (the broad pre-filter matched) but classified as NEITHER
+ *   precise class. A `quota_unclassified` result degrades CONSERVATIVELY — like
+ *   the transient-429 re-route above, it RE-QUEUES the packet and records the
+ *   quota outcome as `rate_limited` (a REVERSIBLE, timed backoff cooldown), but
+ *   it is the ONE thing it must NEVER do that credit_exhausted does: it never
+ *   adds the pool to `exhaustedPoolIds`. Guessing a permanent exclusion from an
+ *   ambiguous, broadly-matched message is worse than the silent-death bug this
+ *   fixes — only a CONFIDENT precise credit-exhaustion match may ever permanently
+ *   exclude a pool. `onQuotaUnclassified` is the consumer's harvest seam: it
+ *   carries the verbatim matched text so an operator can classify the death and
+ *   improve `errorParsing.ts`'s pattern set (mirrors `onCreditExhausted`).
  */
 
 import type { SessionConfig } from "../types/sessionConfig.js";
@@ -87,7 +103,7 @@ export interface RollingDispatchPacket<TPacket> {
 /** Outcome of dispatching a single packet. */
 export interface RollingDispatchResult<TPacket> {
   packet: RollingDispatchPacket<TPacket>;
-  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted";
+  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted" | "quota_unclassified";
   /** Actual tokens consumed, if the provider reports it. */
   actualTokens?: number;
   /**
@@ -134,6 +150,18 @@ export interface RollingDispatchResult<TPacket> {
     channel: WorkerOutputChannel;
     text: string;
     rawMatch: string | null;
+  };
+  /**
+   * The worker ERROR/STATUS channel VERBATIM evidence that classified a
+   * `quota_unclassified` outcome (Slice A2b, TIER 2): the broad
+   * `detectQuotaSuspicious` pre-filter matched but neither `credit_exhausted`
+   * nor `rate_limited` did. Carried so the consumer's `onQuotaUnclassified` hook
+   * can harvest the (secret-scrubbed at the sink) verbatim text for pattern
+   * improvement. Absent on other outcomes.
+   */
+  quotaUnclassified?: {
+    channel: WorkerOutputChannel;
+    text: string;
   };
 }
 
@@ -203,6 +231,24 @@ export interface RollingDispatchState<TPacket> {
    * `driveRolling` does) it spans every sub-wave + level of the whole drive.
    */
   costDemotedPoolIds: Set<string>;
+  /**
+   * Pool ids `onQuotaUnclassified` has already fired for (Slice A2b) — a
+   * bookkeeping-ONLY set, never consulted by `selectProvider`. UNLIKE
+   * `exhaustedPoolIds`, membership here never excludes a pool from selection —
+   * it exists solely to gate the harvest hook to once per pool per DISPATCHER
+   * INSTANCE (mirrors the `firstForPool` gate on `onCreditExhausted`, scoped to a
+   * dedicated set so it can never be confused with — or accidentally feed — the
+   * exclusion set). NOTE: this set (and `pausedPoolResetAt`) is constructed fresh
+   * per dispatcher, and `driveRolling` spins a fresh dispatcher per sub-wave, so
+   * across a multi-sub-wave drive the gate (and the reversible pause) reset at each
+   * sub-wave boundary — the persistence-level friction dedup ({eventType,runId,
+   * discriminator}, first-write-wins) collapses the resulting cross-sub-wave repeat
+   * harvest into one record, but a chronically-quota_unclassified pool is re-attempted
+   * once per sub-wave rather than staying paused its full window. Injecting this set +
+   * `pausedPoolResetAt` across sub-waves (as `costDemotedPoolIds` already is) is a
+   * documented follow-up (docs/backlog.md) — bounded efficiency only, not a safety gap.
+   */
+  quotaUnclassifiedPoolIds: Set<string>;
 }
 
 /** Consumer-provided configuration for the rolling dispatcher. */
@@ -246,6 +292,18 @@ export interface RollingDispatchConfig<TPacket> {
    * friction emitted, exclusion still happens).
    */
   onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Quota-unclassified harvest (Slice A2b, TIER 2): invoked once per pool the
+   * FIRST time a `quota_unclassified` result lands for it — a worker death whose
+   * text was quota-SUSPICIOUS (the broad `detectQuotaSuspicious` pre-filter
+   * matched) but classified as NEITHER precise class. The engine has already
+   * degraded conservatively by the time this fires (re-queued with a reversible
+   * cooldown; the pool is NEVER added to `exhaustedPoolIds` on this guess). The
+   * consumer wires it to friction emission carrying the verbatim text. Best-
+   * effort — a throwing hook never aborts dispatch. Omit to leave the degrade
+   * silent (no friction, degrade still happens).
+   */
+  onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
   /**
    * Shared cost-demotion set for reactive cost verification. When a driver runs
    * several dispatchers over one logical run (`driveRolling` creates one per
@@ -584,6 +642,7 @@ export function createRollingDispatcher<TPacket>(
     onResult,
     onCostDrift,
     onCreditExhausted,
+    onQuotaUnclassified,
     costDemotedPoolIds: injectedCostDemotedPoolIds,
     isPacketEscalated,
     recordRateLimit,
@@ -602,6 +661,7 @@ export function createRollingDispatcher<TPacket>(
     // A driver-provided set (driveRolling) makes demotion span this run's sub-waves
     // + levels; a standalone dispatcher owns a fresh per-instance set.
     costDemotedPoolIds: injectedCostDemotedPoolIds ?? new Set(),
+    quotaUnclassifiedPoolIds: new Set(),
   };
 
   const inFlightTracker = new InFlightTokenTracker();
@@ -855,10 +915,17 @@ export function createRollingDispatcher<TPacket>(
     // cooldown is a TIMED reset; credit exhaustion has none. The permanent-for-
     // the-run exclusion lives entirely in the in-memory exhaustedPoolIds set
     // below, never in the persisted quota-state cooldown.
+    // quota_unclassified records as 'rate_limited' — NOT 'error' — precisely so
+    // recordWaveOutcomeUnsafe DOES apply its exponential-backoff cooldown_until
+    // (state.ts:412-430). That reversible, timed cooldown IS the "conservative
+    // degrade" mechanism (isPoolQuotaDegraded spills load off the pool while the
+    // cooldown is active, but the pool stays selectable — never a hard
+    // in-run exclusion via exhaustedPoolIds, unlike credit_exhausted below).
     const quotaOutcome = result.outcome === "success" ? "success"
       : result.outcome === "rate_limited" ? "rate_limited"
       : result.outcome === "error" ? "error"
       : result.outcome === "credit_exhausted" ? "error"
+      : result.outcome === "quota_unclassified" ? "rate_limited"
       : "timeout" as const;
 
     try {
@@ -995,6 +1062,71 @@ export function createRollingDispatcher<TPacket>(
             kind: "rolling_dispatch_requeue_credit_exhausted",
             packet_id: packet.id,
             exhausted_pool_id: providerSlot.poolId,
+          }) + "\n",
+        );
+      } catch {
+        // Observability must never abort a run.
+      }
+      return;
+    }
+
+    // Quota-unclassified (Slice A2b, TIER 2, backlog HIGH 2026-07-11): a worker
+    // death whose text was quota-SUSPICIOUS (the broad `detectQuotaSuspicious`
+    // pre-filter matched) but classified as NEITHER precise class above. This is
+    // the CONSERVATIVE degrade — the hard-won lesson from the credit-exhaustion
+    // review: guessing a permanent exclusion from an ambiguous, broadly-matched
+    // message is worse than the silent-death bug this fixes. So, DELIBERATELY
+    // UNLIKE credit_exhausted: the pool is NEVER added to `exhaustedPoolIds` —
+    // it stays fully selectable across future runs / re-derivations. The
+    // quotaOutcome mapping above already recorded this as a 'rate_limited'
+    // outcome, so `recordWaveOutcome` applied a REAL, REVERSIBLE, timed backoff
+    // cooldown (`cooldown_until`) to the PERSISTED quota state.
+    //
+    // Within THIS run, a bounded livelock guard is still required: a pool that
+    // is neither excluded (exhaustedPoolIds) nor paused (pausedPoolResetAt) is
+    // re-selected on EVERY dispatch pass, so a pool that keeps returning
+    // quota_unclassified forever would spin the engine's tight dispatch loop
+    // indefinitely (unlike credit_exhausted / a bare-429 rate_limited, which are
+    // both bounded by exhaustedPoolIds shrinking the admissible set toward
+    // empty). Reuse the SAME `pausedPoolResetAt` piece-D mechanism a parsed
+    // session-limit reset uses (`computeCooldownUntil`, in-memory, per-pool,
+    // monotonically extended never shortened): it is exactly "reversible pool
+    // cooldown/pause" — the pool becomes selectable again once the pause
+    // elapses, and if it is the only pool, `noPoolCanAcceptNow` correctly
+    // strands the remainder as a RETRYABLE `quota_paused` terminal (INV-QD-07)
+    // instead of spinning forever.
+    if (result.outcome === "quota_unclassified") {
+      const resetAtMs = Date.parse(computeCooldownUntil(null));
+      const priorPause = state.pausedPoolResetAt.get(providerSlot.poolId);
+      state.pausedPoolResetAt.set(
+        providerSlot.poolId,
+        priorPause != null ? Math.max(priorPause, resetAtMs) : resetAtMs,
+      );
+      // Fire the harvest hook only the FIRST time a given pool hits this (mirrors
+      // onCreditExhausted's firstForPool gate) — a DEDICATED bookkeeping set, never
+      // exhaustedPoolIds, so this can never accidentally exclude the pool.
+      const firstForPool = !state.quotaUnclassifiedPoolIds.has(providerSlot.poolId);
+      state.quotaUnclassifiedPoolIds.add(providerSlot.poolId);
+      if (firstForPool) {
+        try {
+          onQuotaUnclassified?.({
+            poolId: providerSlot.poolId,
+            text: result.quotaUnclassified?.text ?? "",
+          });
+        } catch {
+          // Best-effort: a throwing friction hook must never abort dispatch.
+        }
+      }
+      if (!state.completedIds.has(packet.id) && !state.pendingQueue.some((q) => q.id === packet.id)) {
+        state.pendingQueue.unshift(packet);
+      }
+      try {
+        process.stderr.write(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            kind: "rolling_dispatch_requeue_quota_unclassified",
+            packet_id: packet.id,
+            pool_id: providerSlot.poolId,
           }) + "\n",
         );
       } catch {

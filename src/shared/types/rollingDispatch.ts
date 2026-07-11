@@ -44,7 +44,7 @@ export interface RollingDispatchEnginePacket<TPacket = unknown> {
 /** Outcome returned after each packet completes. */
 export interface RollingDispatchEngineResult<TPacket = unknown> {
   packet: RollingDispatchEnginePacket<TPacket>;
-  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted";
+  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted" | "quota_unclassified";
   actualTokens?: number;
   error?: unknown;
   /**
@@ -60,6 +60,15 @@ export interface RollingDispatchEngineResult<TPacket = unknown> {
    * above). Absent on non-credit_exhausted outcomes.
    */
   creditExhaustion?: { channel: "error" | "status" | "result"; text: string; rawMatch: string | null };
+  /**
+   * Worker ERROR/STATUS channel VERBATIM evidence that classified a
+   * `quota_unclassified` outcome (Slice A2b, TIER 2): the broad
+   * `detectQuotaSuspicious` pre-filter matched but neither `credit_exhausted`
+   * nor `rate_limited` did. Carried so the consumer's `onQuotaUnclassified` hook
+   * can harvest the verbatim (secret-scrubbed at the sink) text for pattern
+   * improvement. Absent on other outcomes.
+   */
+  quotaUnclassified?: { channel: "error" | "status" | "result"; text: string };
 }
 
 /**
@@ -119,4 +128,17 @@ export interface RollingDispatchEngineContract<TPacket = unknown> {
    * exclusion silent (no friction, exclusion still happens).
    */
   onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Quota-unclassified harvest (Slice A2b, TIER 2): invoked every time a
+   * `quota_unclassified` result lands — a worker death whose text was
+   * quota-SUSPICIOUS (the broad pre-filter matched) but matched neither the
+   * precise `credit_exhausted` nor `rate_limited` class. The engine has already
+   * degraded CONSERVATIVELY by the time this fires (re-queued with a reversible
+   * cooldown; the pool is NEVER permanently excluded on this guess — see
+   * `rollingDispatch.ts`). The consumer wires it to friction emission carrying
+   * the verbatim text, so an operator can classify it and improve the pattern
+   * set. Optional — omit to leave the degrade silent (no friction, degrade still
+   * happens).
+   */
+  onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
 }

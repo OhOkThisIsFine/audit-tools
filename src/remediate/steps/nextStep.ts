@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -761,6 +761,15 @@ export interface DriveRollingDispatchOptions {
    * leave the exclusion silent.
    */
   onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Quota-unclassified harvest (Slice A2b, TIER 2): invoked once per pool when
+   * a `quota_unclassified` result lands, after the shared driver has already
+   * degraded conservatively (re-queued, reversible cooldown, the pool NEVER
+   * added to the permanent exclusion set). Forwarded to the shared driver; the
+   * caller wires it to friction carrying the verbatim text. Omit to leave it
+   * silent.
+   */
+  onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
 }
 
 export interface DriveRollingDispatchResult {
@@ -861,6 +870,7 @@ export async function driveRollingDispatch(
     ...(options.root !== undefined ? { root: options.root } : {}),
     ...(options.onCostDrift ? { onCostDrift: options.onCostDrift } : {}),
     ...(options.onCreditExhausted ? { onCreditExhausted: options.onCreditExhausted } : {}),
+    ...(options.onQuotaUnclassified ? { onQuotaUnclassified: options.onQuotaUnclassified } : {}),
     // Single-flight (CE-001) is enforced by the unified driver.
     rebuildBetweenLevels: options.rebuildSharedBetweenLevels,
     // Host-session escalation: feed recordLimit (write) at the rate_limited observation
@@ -1201,11 +1211,15 @@ export async function driveRollingImplementDispatch(
       verify_passed: accept.verifyPassed,
       merged: accept.merged,
     });
-    // Release the claim ONLY on a terminal accept. A `rate_limited` or
-    // `credit_exhausted` worker re-queues (still owned work — keep the claim so
-    // a peer can't grab it mid-retry); success / error / timeout is terminal →
-    // free it through the shared registry (token-checked).
-    if (result.outcome !== "rate_limited" && result.outcome !== "credit_exhausted") {
+    // Release the claim ONLY on a terminal accept. A `rate_limited`,
+    // `credit_exhausted`, or `quota_unclassified` worker re-queues (still owned
+    // work — keep the claim so a peer can't grab it mid-retry); success / error /
+    // timeout is terminal → free it through the shared registry (token-checked).
+    if (
+      result.outcome !== "rate_limited" &&
+      result.outcome !== "credit_exhausted" &&
+      result.outcome !== "quota_unclassified"
+    ) {
       await releaseNodeClaim(registry, claimTokens, block.block_id);
     }
     return result;
@@ -1250,6 +1264,14 @@ export async function driveRollingImplementDispatch(
     // friction so the operator knows to top up credits.
     onCreditExhausted: (info) => {
       captureCreditExhaustionFriction(artifactsDir, runId, info, "remediate-code");
+    },
+    // Quota-unclassified harvest (Slice A2b): a pool death whose text was
+    // quota-suspicious but matched no precise pattern degraded conservatively
+    // (re-queued, never permanently excluded); surface the verbatim
+    // (secret-scrubbed) text as reviewable friction so the operator can
+    // classify it and improve errorParsing.ts's pattern set.
+    onQuotaUnclassified: (info) => {
+      captureQuotaUnclassifiedFriction(artifactsDir, runId, info, "remediate-code");
     },
   });
 
@@ -1974,37 +1996,49 @@ async function buildImplementDispatchStep(ctx: {
           registry: hybridClaimRegistry,
           sourceByPoolId: sourceByPoolId(confirmedPools),
         });
-        // DC-4: a backend pool whose node rate-limited OR credit-exhausted is
-        // exhausted → settle it (cross-cycle) so the next cycle routes its share
-        // to the host pool. credit_exhausted MUST settle here too: this partition
-        // spans multiple cycles, each with its own fresh in-process dispatcher (a
-        // fresh in-memory exhaustedPoolIds), so without settling here a
-        // credit-exhausted pool (no reset timer, unlike rate_limited) would be
-        // RE-OFFERED next cycle and re-die on the same dead pool.
-        const rateLimitedOrCreditExhausted = new Set(
+        // DC-4: a backend pool whose node rate-limited, credit-exhausted, OR
+        // returned a quota_unclassified death → settle it (cross-cycle) so the next
+        // cycle routes its share to the host pool. This partition spans multiple
+        // cycles, each with its own fresh in-process dispatcher (a fresh in-memory
+        // exhaustedPoolIds AND pausedPoolResetAt), so the rolling engine's own
+        // reversible pause evaporates at the cycle boundary — without settling here,
+        // credit_exhausted (no reset timer) and a chronically-quota_unclassified pool
+        // alike would be RE-OFFERED next cycle and re-die on the same pool. Settling
+        // in the hybrid path is the cross-cycle analog of the rolling path's pause.
+        // NOTE: the verbatim-message harvest (captureQuotaUnclassifiedFriction /
+        // captureCreditExhaustionFriction) rides the rolling engine's hooks, which
+        // this direct-Promise.all partition does not invoke; here every settled node
+        // still surfaces as a quota_escalation friction (below), but without the
+        // verbatim text. Threading verbatim capture into executeInProcessPartition is
+        // a documented follow-up (affects credit_exhausted identically — not new to A2b).
+        const settledOutcomeBlocks = new Set(
           inProcessOutcome.nodes
-            .filter((n) => n.outcome === "rate_limited" || n.outcome === "credit_exhausted")
+            .filter(
+              (n) =>
+                n.outcome === "rate_limited" ||
+                n.outcome === "credit_exhausted" ||
+                n.outcome === "quota_unclassified",
+            )
             .map((n) => n.block_id),
         );
         const exhaustedPools = new Set(
-          partition.inProcess.filter((a) => rateLimitedOrCreditExhausted.has(a.nodeId)).map((a) => a.poolId),
+          partition.inProcess.filter((a) => settledOutcomeBlocks.has(a.nodeId)).map((a) => a.poolId),
         );
         for (const poolId of exhaustedPools) {
           await partition.coordinator.settlePool(poolId);
         }
-        // Surface each rate-limited/credit-exhausted node as reviewable friction
-        // (not just the settle side-effect above). The shared step-boundary
-        // chokepoint dedupes on {eventType, runId, discriminator}, so a
-        // chronically-exhausted backend pool re-hitting the same block_id across
-        // cycles collapses to one record.
-        for (const blockId of rateLimitedOrCreditExhausted) {
+        // Surface each settled node as reviewable friction (not just the settle
+        // side-effect above). The shared step-boundary chokepoint dedupes on
+        // {eventType, runId, discriminator}, so a chronically-exhausted backend pool
+        // re-hitting the same block_id across cycles collapses to one record.
+        for (const blockId of settledOutcomeBlocks) {
           void captureStepBoundaryFriction(
             artifactsDir,
             runId,
             {
               eventType: "quota_escalation",
               discriminator: blockId,
-              note: "A-8 hybrid in-process node rate-limited or credit-exhausted; its backend pool was settled for this run.",
+              note: "A-8 hybrid in-process node rate-limited / credit-exhausted / quota-unclassified; its backend pool was settled for this run.",
               severity: "high",
               category: "trap",
               area: "dispatch/quota",

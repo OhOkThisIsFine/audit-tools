@@ -134,6 +134,7 @@ export async function runRollingDispatch<TPacket>(
     ...(contract.isPacketEscalated ? { isPacketEscalated: contract.isPacketEscalated } : {}),
     ...(contract.onCostDrift ? { onCostDrift: contract.onCostDrift } : {}),
     ...(contract.onCreditExhausted ? { onCreditExhausted: contract.onCreditExhausted } : {}),
+    ...(contract.onQuotaUnclassified ? { onQuotaUnclassified: contract.onQuotaUnclassified } : {}),
     onResult: (result) => {
       contract.onResult?.(result);
       // FND-OBS-99e3a861: emit a structured progress line on each result so

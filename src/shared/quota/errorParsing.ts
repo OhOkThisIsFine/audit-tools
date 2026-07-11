@@ -189,6 +189,44 @@ export function detectCreditExhaustionFromChannel(
   return detectCreditExhaustionError(text);
 }
 
+// Slice A2b (TIER 2 of the three-tier classifier — see rollingDispatch.ts's
+// header doc for the full design): a deliberately BROAD, routing-only
+// pre-filter for "does this text merely SMELL quota/billing-related?". Neither
+// CREDIT_EXHAUSTION_PATTERNS nor ALL_RATE_LIMIT_PATTERNS is exhaustive — a
+// provider death whose text matches neither currently falls through to a raw,
+// silent `error` outcome (the exact failure mode credit-exhaustion detection
+// fixed, but only for text it recognizes). This pattern is intentionally far
+// broader than either precise class: a false positive here only routes an
+// unmatched death to the CONSERVATIVE `quota_unclassified` degrade (re-queue +
+// reversible cooldown, never a permanent pool exclusion — see
+// `rollingDispatch.ts`) instead of a silent raw error, so over-matching is
+// cheap. It is NEVER used to classify a `credit_exhausted` or `rate_limited`
+// outcome — those stay owned by their precise detectors above, checked first.
+// Broad — but NOT so broad it fires on ordinary crash text. Bare "limit" /
+// "usage" / "credit" / "exceeded" / "rate" matched generic failures ("Maximum
+// call stack size exceeded", a CLI "Usage:" banner, "...(reading credit)",
+// "limit-based pagination") — adversarial-review finding. Require quota/billing-
+// SPECIFIC phrasing (a qualifier before "limit", "credits" not bare "credit",
+// etc.). Genuinely novel wording the precise detectors AND this filter both miss
+// is caught by the host-observation net (triage.ts mechanism B), so erring
+// slightly narrow here is safe; erring broad masks a real bug as a quota event.
+const QUOTA_SUSPICIOUS_PATTERN =
+  /\b(?:quota|billing|429|402|payment required|too many requests|throttl(?:e|ed|ing)|insufficient (?:quota|credits?|balance|funds)|credit balance|out of (?:usage |prepaid )?credits?|(?:no )?credits? (?:remaining|left)|(?:usage|rate|spend(?:ing)?|session|account|daily|weekly|monthly|token|request|concurrency)[- ]?(?:limit|cap)|(?:quota|usage|credit|rate|plan|token|request|spend(?:ing)?)\s+(?:exceeded|reached)|limit (?:reached|exceeded|hit)|rate[- ]?limit(?:ed|ing)?|exceeded your (?:current )?(?:quota|limit|usage|plan)|over (?:your )?(?:quota|limit))\b/i;
+
+/**
+ * TIER 2 broad pre-filter (Slice A2b): true when `text` merely smells
+ * quota/billing-related. Deliberately over-broad and routing-ONLY — a positive
+ * result is never a classification by itself (see
+ * {@link detectCreditExhaustionError} / {@link detectRateLimitError} for the
+ * precise, acted-on classes). Callers use a positive result only to decide
+ * whether an otherwise-unmatched provider death should surface as the
+ * conservative `quota_unclassified` outcome (re-queue + verbatim-message
+ * harvest for pattern improvement) rather than a silent, unclassified `error`.
+ */
+export function detectQuotaSuspicious(text: string): boolean {
+  return QUOTA_SUSPICIOUS_PATTERN.test(text);
+}
+
 function extractResetsInMs(text: string): number | null {
   const match = /Resets in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i.exec(text);
   if (!match) return null;

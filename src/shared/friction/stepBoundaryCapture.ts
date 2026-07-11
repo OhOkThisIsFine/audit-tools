@@ -61,6 +61,15 @@ import type { FrictionCategory } from "./frictionRecord.js";
  *                           excluded it from this run's admissible set and the
  *                           operator should top up credits (discriminator: the
  *                           pool id).
+ *  - `quota_unclassified`  — a dispatch pool death whose text was quota-
+ *                           SUSPICIOUS (a deliberately broad pre-filter matched)
+ *                           but classified as NEITHER `credit_exhausted` nor
+ *                           `rate_limited`; the tool degraded it conservatively
+ *                           (re-queued, reversible cooldown, pool NEVER
+ *                           permanently excluded) and harvested the verbatim
+ *                           (secret-scrubbed) message so the operator can
+ *                           classify it and improve the pattern set
+ *                           (discriminator: the pool id).
  */
 export type StepBoundaryEventType =
   | "phase_reemit"
@@ -74,6 +83,7 @@ export type StepBoundaryEventType =
   | "node_quarantine"
   | "declared_cost_drift"
   | "credit_exhausted"
+  | "quota_unclassified"
   | (string & {});
 
 /**
@@ -110,6 +120,11 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // A credit-exhausted pool needs an operator action (top up credits) before it
   // can ever serve again — same "operator must reconcile" shape as a cost drift.
   credit_exhausted: "tool_should_decide",
+  // A quota-unclassified death is exactly "the host had to remember/notice
+  // something the tool should guarantee" — the tool COULD NOT confidently
+  // classify it, so the operator must review the verbatim text and (if it's a
+  // real quota/billing death) teach the tool a new precise pattern.
+  quota_unclassified: "tool_should_decide",
 };
 
 /**
@@ -285,6 +300,128 @@ export function captureCreditExhaustionFriction(
         (info.rawMatch ? ` (matched: "${info.rawMatch}")` : "") +
         ` — excluded from this run's admissible set for the remainder of the run ` +
         `(no reset timer); top up credits to restore it.`,
+      severity: "high",
+      area: "dispatch/quota",
+    },
+    source,
+  );
+}
+
+/**
+ * Minimal, single-sourced redaction of secret-shaped VALUES from a captured
+ * verbatim provider message before it is persisted to the friction record.
+ *
+ * Recon for Slice A2b found no existing helper for this: `stripClaudeCodeEnv`
+ * (`../tooling/exec.js`) filters env-var NAMES out of a subprocess env object —
+ * a different concern from redacting secret VALUES embedded in arbitrary text.
+ * The backlog's noted `consent_token` strip-before-persist is a planned, not yet
+ * implemented, forward constraint (see `docs/backlog.md`). So this is a new,
+ * deliberately minimal, narrowly-scoped function — NOT a general secret-
+ * detection framework — used only at this one sink:
+ *  (a) the literal value of any CURRENTLY-SET env var whose NAME looks like a
+ *      credential (`/API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i`) — this
+ *      catches the exact provider keys the tool is configured with
+ *      (`openai_compatible.api_key_env`, `ANTHROPIC_API_KEY`, etc.), the same
+ *      "known-secret-env-var-NAME" signal `stripClaudeCodeEnv` uses, applied to
+ *      redacting values instead of dropping entries;
+ *  (b) generic secret-shaped substrings as a backstop (`Bearer <token>`, an
+ *      `sk-…`-style API-key prefix) for a key the text carries that is not (or
+ *      is no longer) present in this process's env.
+ * Over-redaction here is safe (the harvest note still names the pool and
+ * retains surrounding context for pattern authoring); under-redaction is the
+ * risk this function exists to bound, so it errs broad.
+ */
+export function scrubSecretValuesFromText(text: string): string {
+  let scrubbed = text;
+  // Layer (a): redact the literal VALUE of any currently-set env var whose NAME
+  // looks secret-ish. Segment-matched (underscore/boundary delimited) so a name
+  // like MONKEY or KEYBOARD does not trip, but NVIDIA_API_KEY / NIM_KEY /
+  // GITHUB_TOKEN / AWS_SECRET_ACCESS_KEY / *_PAT all do. Best-effort: only
+  // catches secrets that live in THIS process's env — layer (b) is the backstop
+  // for everything else.
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!value || value.length < 6) continue;
+    if (
+      !/(?:^|_)(?:API_?KEY|APIKEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTH|PAT)(?:$|_)/i.test(
+        name,
+      )
+    ) {
+      continue;
+    }
+    scrubbed = scrubbed.split(value).join("[REDACTED]");
+  }
+  // Layer (b): shape-based backstop for secrets NOT in this process's env —
+  // vendor key prefixes (OpenAI/Anthropic sk-, NVIDIA nvapi-, GitHub gh?_, Slack
+  // xox?-, AWS AKIA, Google AIza), Bearer/JWT, key=value assignments, and
+  // query-string credentials. Over-redaction is safe here; under-redaction is the
+  // risk. Ordered value-first so an assignment's value is caught even when its
+  // key word isn't in the list.
+  return scrubbed
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[REDACTED]")
+    .replace(/\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}/gi, "[REDACTED]")
+    .replace(/\bnvapi-[A-Za-z0-9_-]{16,}/gi, "[REDACTED]")
+    .replace(/\bgh[posru]_[A-Za-z0-9]{20,}/g, "[REDACTED]")
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/gi, "[REDACTED]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]")
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}/g, "[REDACTED]")
+    .replace(
+      /\b(api[_-]?key|apikey|token|secret|password|passwd|access[_-]?token|access[_-]?key|credentials?)\b(\s*[:=]\s*)["']?[A-Za-z0-9._~+/=-]{6,}["']?/gi,
+      "$1$2[REDACTED]",
+    )
+    .replace(
+      /([?&](?:api[_-]?key|apikey|token|key|secret|access_token|password)=)[^&\s"']+/gi,
+      "$1[REDACTED]",
+    );
+}
+
+/** Quota-unclassified harvest facts routed through {@link captureQuotaUnclassifiedFriction}. */
+export interface QuotaUnclassifiedInfo {
+  poolId: string;
+  /**
+   * The verbatim worker ERROR/STATUS channel text that tripped the broad
+   * `detectQuotaSuspicious` pre-filter but matched neither `credit_exhausted`
+   * nor `rate_limited`. Scrubbed of secret-shaped values by
+   * {@link captureQuotaUnclassifiedFriction} before it is embedded in the
+   * persisted note — callers must pass the RAW text, never pre-scrub it (single
+   * scrub point, so it can never be forgotten at a second call site).
+   */
+  text: string;
+}
+
+/**
+ * Route a Slice A2b quota-unclassified degrade (TIER 2 — the broad
+ * `detectQuotaSuspicious` pre-filter matched a worker death's text, but neither
+ * precise class did, so the engine degraded conservatively: re-queued with a
+ * reversible cooldown, the pool NEVER added to the permanent exclusion set)
+ * through the step-boundary chokepoint as a `quota_unclassified` fact. This is
+ * the TOOL AUTO-CAPTURE harvest mechanism: it persists the VERBATIM (secret-
+ * scrubbed) provider message so an operator can classify it and consider
+ * teaching `errorParsing.ts` a new precise pattern. Mirrors
+ * {@link captureCreditExhaustionFriction}'s single-source-the-template shape;
+ * fire-and-forget, never awaited by the caller. The text is scrubbed via
+ * {@link scrubSecretValuesFromText} and bounded to 2000 chars before it is
+ * embedded in the persisted note, so a pathologically large stderr capture
+ * never bloats the friction record.
+ */
+export function captureQuotaUnclassifiedFriction(
+  artifactsDir: string,
+  runId: string,
+  info: QuotaUnclassifiedInfo,
+  source: FrictionCaptureArtifact["tool"],
+): void {
+  const verbatim = scrubSecretValuesFromText(info.text).trim().slice(0, 2000);
+  void captureStepBoundaryFriction(
+    artifactsDir,
+    runId,
+    {
+      eventType: "quota_unclassified",
+      discriminator: info.poolId,
+      note:
+        `pool "${info.poolId}" reported a quota-suspicious provider message that matched NO known pattern ` +
+        `(neither credit_exhausted nor rate_limited) — re-queued conservatively (reversible cooldown; the ` +
+        `pool was NOT permanently excluded). Classify it and consider adding a pattern to errorParsing.ts. ` +
+        `Verbatim (secret-scrubbed): "${verbatim}"`,
       severity: "high",
       area: "dispatch/quota",
     },

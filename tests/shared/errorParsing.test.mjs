@@ -4,6 +4,7 @@ const {
   detectRateLimitError,
   detectCreditExhaustionError,
   detectCreditExhaustionFromChannel,
+  detectQuotaSuspicious,
 } = await import("../../src/shared/quota/errorParsing.ts");
 const { ClaudeCodeErrorParser } = await import("../../src/shared/quota/errorParsers/claudeCodeErrorParser.ts");
 
@@ -162,4 +163,47 @@ test("detectCreditExhaustionFromChannel: channel-isolated (CE-003) — only erro
   // A healthy AuditResult that merely QUOTES a credit-exhaustion string (e.g. a
   // finding describing this exact bug) must never trip it via the result channel.
   expect(detectCreditExhaustionFromChannel("result", text).isCreditExhausted).toBe(false);
+});
+
+// Slice A2b — TIER 2 broad quota-suspicious pre-filter. Deliberately broad
+// (routing-only, never itself a classification) so a provider death that
+// matches NEITHER precise pattern above still surfaces as `quota_unclassified`
+// instead of a silent, unclassified `error`.
+
+test("detectQuotaSuspicious: matches a broad range of quota/billing-shaped words", () => {
+  expect(detectQuotaSuspicious("Your account has hit a spending limit")).toBe(true);
+  expect(detectQuotaSuspicious("Unexpected billing error, contact support")).toBe(true);
+  expect(detectQuotaSuspicious("HTTP 429 received from upstream")).toBe(true);
+  expect(detectQuotaSuspicious("throttled by the gateway")).toBe(true);
+  expect(detectQuotaSuspicious("Too Many Requests")).toBe(true);
+  expect(detectQuotaSuspicious("usage exceeded for this account")).toBe(true);
+  expect(detectQuotaSuspicious("insufficient balance to proceed")).toBe(true);
+  // Vendor prose that doesn't precisely match either TIER-1 pattern class but is
+  // still recognizably quota-shaped (the exact gap this tier exists to catch).
+  expect(detectQuotaSuspicious("Your organization has reached its monthly usage cap")).toBe(true);
+});
+
+test("detectQuotaSuspicious: does NOT match ordinary, non-quota-shaped text (broad but not unbounded)", () => {
+  expect(detectQuotaSuspicious("The build completed successfully")).toBe(false);
+  expect(detectQuotaSuspicious("TypeError: cannot read property of undefined")).toBe(false);
+  expect(detectQuotaSuspicious("connection refused")).toBe(false);
+  expect(detectQuotaSuspicious("")).toBe(false);
+  // Adversarial-review over-fire cases: bare "exceeded"/"usage"/"credit"/"limit"
+  // in ordinary crash text must NOT route a genuine bug to the quota degrade
+  // (masking it) — these all matched the original loose pattern.
+  expect(detectQuotaSuspicious("RangeError: Maximum call stack size exceeded")).toBe(false);
+  expect(detectQuotaSuspicious("Usage: audit-code <command> [options]")).toBe(false);
+  expect(detectQuotaSuspicious("TypeError: cannot read properties of undefined (reading credit)")).toBe(false);
+  expect(detectQuotaSuspicious("npm WARN deprecated pkg@1.0.0: use limit-based pagination")).toBe(false);
+});
+
+test("detectQuotaSuspicious: is a superset — every precise credit/rate-limit match is ALSO quota-suspicious", () => {
+  const creditText =
+    "Your credit balance is too low to access the Claude API. Please go to Plans & Billing to upgrade or purchase credits.";
+  expect(detectCreditExhaustionError(creditText).isCreditExhausted).toBe(true);
+  expect(detectQuotaSuspicious(creditText)).toBe(true);
+
+  const rateText = "429 Too Many Requests";
+  expect(detectRateLimitError(rateText).isRateLimited).toBe(true);
+  expect(detectQuotaSuspicious(rateText)).toBe(true);
 });
