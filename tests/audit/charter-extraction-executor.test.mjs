@@ -154,6 +154,32 @@ describe("runCharterExtractionExecutor — ingest path (charters only)", () => {
     expect(reg.validation_issues.join()).toContain("not a consensus node");
   });
 
+  test("a dropped over-count charter (>1 of a kind) surfaces its message in progress_summary, not just a count", () => {
+    // "kept the first, dropped the rest" was recorded into validation_issues but
+    // the progress summary showed only "N gate drop(s)" — the operator never saw
+    // WHICH charter was discarded or why (2026-07-10 dogfooding). The message must
+    // now appear in the surfaced summary.
+    const submission = {
+      subsystems: [
+        {
+          node_id: "src/a.ts",
+          charters: [
+            { kind: "stated", purpose: "exists so callers get audited output", provenance: [], confidence: "high" },
+            { kind: "stated", purpose: "a SECOND stated charter — over-count, must be dropped", provenance: [], confidence: "high" },
+          ],
+        },
+      ],
+    };
+    const run = runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      submission,
+    );
+    expect(run.progress_summary).toContain("gate drop(s):");
+    expect(run.progress_summary).toContain('more than one "stated" charter');
+    // The drop is still recorded in the register too (surfacing is additive).
+    expect(run.updated.charter_register.validation_issues.join()).toContain('more than one "stated" charter');
+  });
+
   test("no consensus subsystems → deltas_pending false (delta pass self-satisfies)", () => {
     // ghost.ts is grounded out, so no subsystem survives → nothing to mine.
     const submission = { subsystems: [{ node_id: "ghost.ts", charters: [] }] };

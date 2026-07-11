@@ -103,16 +103,22 @@ export function runCharterExtractionExecutor(
     validation_issues: assembled.validation_issues,
     deltas_pending: assembled.subsystems.length > 0,
   };
+  // Surface each gate-drop MESSAGE, not just a count — a silently-dropped charter
+  // (e.g. a second charter of the same kind for a subsystem, kept-first) is
+  // invisible to the operator when only "N gate drop(s)" is shown, so they never
+  // learn a submission was over-count and discarded. The messages are short
+  // one-liners (assembleCharters), so listing them is bounded and cheap.
+  const dropSummary =
+    register.validation_issues.length > 0
+      ? `, ${register.validation_issues.length} gate drop(s):\n` +
+        register.validation_issues.map((m) => `  - ${m}`).join("\n")
+      : ".";
   return {
     updated: { ...bundle, charter_register: register },
     artifacts_written: ["charter_register.json"],
     progress_summary:
       `Charter extraction complete: ${register.subsystems.length} subsystem(s)` +
-      (register.deltas_pending
-        ? " awaiting the independent delta-miner"
-        : "") +
-      (register.validation_issues.length > 0
-        ? `, ${register.validation_issues.length} gate drop(s).`
-        : "."),
+      (register.deltas_pending ? " awaiting the independent delta-miner" : "") +
+      dropSummary,
   };
 }
