@@ -490,8 +490,10 @@ describe("INV-RS-10 / CE-001 / CE-002: tool-owned final gate command list", () =
 
   it("CE-001: every UNIT command is build-free (never `npm test`/`npm run build`)", () => {
     const unit = toolOwnedFinalGateCommands(REPO_ROOT).filter((c) => c.layer === "unit");
-    // Single package: node:test (shared+audit) + vitest (remediate).
-    expect(unit.length).toBe(2);
+    // Single package, ONE vitest runner: `npx vitest run` covers all three areas
+    // (tests/shared, tests/audit, tests/remediate) per vitest.config.ts — the
+    // node:test split was retired in the single-vitest migration.
+    expect(unit.length).toBe(1);
     for (const c of unit) {
       expect(c.build_free).toBe(true);
       const joined = c.argv.join(" ");
@@ -542,8 +544,8 @@ describe("INV-RS-10: runToolOwnedFinalGate execution + CE-002 residual", () => {
     const result = await runToolOwnedFinalGate(REPO_ROOT, { runner });
     expect(result.passed).toBe(true);
     expect(result.scoped_out).toBe(false);
-    // All four commands ran (build, check, node:test unit, vitest unit).
-    expect(seen.length).toBe(4);
+    // All three commands ran (build, check, single vitest unit suite).
+    expect(seen.length).toBe(3);
     // CE-002: the runtime/packaged-bin smoke surface is declared as a residual.
     expect(result.runtime_residual.surface).toMatch(/smoke/i);
     expect(result.runtime_residual.commands.length).toBeGreaterThan(0);

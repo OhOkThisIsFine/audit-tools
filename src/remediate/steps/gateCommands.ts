@@ -54,13 +54,12 @@ export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[]
   return [
     { argv: ["npm", "run", "build"], build_free: false, layer: "build" },
     { argv: ["npm", "run", "check"], build_free: true, layer: "check" },
-    // BUILD-FREE unit suites at the repo root (single package — no `npm -w`, never
-    // `npm test`, which prepends a build). node:test for shared+audit, vitest for remediate.
-    {
-      argv: ["node", "--import", "tsx/esm", "--test", "tests/shared/*.test.mjs", "tests/audit/*.test.mjs"],
-      build_free: true,
-      layer: "unit",
-    },
+    // BUILD-FREE unit suite at the repo root (single package — no `npm -w`, never
+    // `npm test`, which prepends a build). ONE vitest runner covers all three areas
+    // (tests/shared, tests/audit, tests/remediate) per vitest.config.ts `include` —
+    // the node:test split was retired in the single-vitest migration, so a separate
+    // `node --import tsx/esm --test` command would both be redundant with this and
+    // FAIL on the current tree (the .test.mjs files use vitest globals, not node:test).
     {
       argv: ["npx", "vitest", "run"],
       build_free: true,
