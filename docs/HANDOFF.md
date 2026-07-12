@@ -55,14 +55,18 @@
 
 ## ▶ IMMEDIATE NEXT — the bounded forward remainder (quota cluster shipped)
 
-**DEFERRED (owner call 2026-07-12, resume on fresh quota): the high-signal self-audit remediation.**
-The gate bug that blocked it is fixed + shipped (v0.32.61 — remediate's tool-owned gate no longer uses the
-retired node:test runner; [[remediate-gate-nodetest-runner-bug]]). A force-synthesized slice of 356 crit/high
-+ high-confidence real-bug findings (168 post-dedup, 16-node DAG) is fully planned and its contract artifacts
-are **preserved on the primary checkout at `.audit-tools/remediation/`** (session config with NIM/opencode-free/
-codex at `.remediation-artifacts/session-config.json`). Re-run `/remediate-code` against it with the fixed bin
-next session; the run terminal-blocked at status=complete, so it likely needs a fresh run or a manual
-blocked→pending reset rather than a plain resume. Findings slice: `.audit-tools/audit/audit-findings-critical-slice.json`.
+**EXECUTED 2026-07-12 — the high-signal self-audit remediation re-run was a DIAGNOSTIC success, not a fix-landing one.**
+Driving it on codex-only (headless in-process, `REMEDIATE_HOST_CAN_DISPATCH=false` + `provider:codex` +
+`REMEDIATE_SKIP_FINAL_GATE=1`) surfaced the real root cause and 2 dispatch bugs — **all fixed + shipped v0.32.62**
+([[synth-scopeless-nodes-doomed-run]]): (1) the force-synth collapsed 168 well-formed findings into **16
+undispatchable nodes with EMPTY affected_files/touched_files** (scope only in prose) → workers blind, nodes
+never dispatched, whole-DAG cascade-block. Fixed: synth now derives scope from module `file_scope`. (2) flaky
+tool-owned gate `--retry`. (3) missing-result diagnosability. **The run itself stayed doomed on this degenerate
+slice** and is PAUSED at `waiting_for_triage` on branch `remediation/selfaudit-2026-07-11-highsignal-slice`
+(14 cascade-blocked, roots false-positive) — not worth resuming; a FRESH audit→remediate on a clean plan is the
+right re-validation (the synth fix means new plans carry real scope). The audit artifacts were deleted this
+session for a parallel fresh audit in another IDE. Residuals: the never-dispatched anti-cascade retry + the
+`rollingDispatch` test de-flake + a dispatch-boundary "no scope-less dispatch" guard — all in `docs/backlog.md`.
 
 The 2026-07-11 maximal-coverage run surfaced the dispatch/quota bug batch; its fixes shipped in the
 current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
