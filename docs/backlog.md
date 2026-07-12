@@ -45,10 +45,10 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 - **Abandoned-wave leases saturate the cold-start cap → phantom "quota wall" (2026-07-11 live run, low — NOT a release bug; the reconcile already exists).**
   A host grant came back `granted 0`, all 14 packets `cap_reached`, `headroom_before: null` (ledger never
   consulted): `admitBatch` seeds `countByPool` from the ledger's live leases (admissionLoop.ts:307-319), the
-  ledger held 4 leaked leases (2/pool, agent `24556`) with the 10-min TTL still live, and with cold-start
+  ledger held 4 leaked leases (2/pool, agent `24556`) with the 20-min TTL still live, and with cold-start
   effectiveCap = 2/pool the phantoms fully saturated the cap. BUT the release machinery is present and
-  correct — `mergeAndIngestCommand.ts:594` reconciles a grant's leases at the top of every merge and
-  `dispatch.ts:657` reconciles on the pause path. The leak's true cause was OPERATIONAL: waves I KILLED
+  correct — `mergeAndIngestCommand.ts:595` reconciles a grant's leases at the top of every merge and
+  `dispatch.ts:679` reconciles on the pause path. The leak's true cause was OPERATIONAL: waves I KILLED
   mid-flight this session (stopped drain, dead dispatchers, session-limit fleet deaths) never reached merge
   or pause-reconcile, so their leases freed only via the 20-min TTL. Working-as-designed backstop; cleared 4
   by hand. Only residual worth considering (deferred, low): a `next-step` startup sweep that reconciles
@@ -63,27 +63,14 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   pass — wall-pass counting should not count passes in which the in-process partition ingested results.
   Surface per-pool binding window + derived budget + packet cost in the blocked step so the operator can
   see WHY zero packets fit.
-- **openai-compatible review dispatch sends path-only prompts a single-shot worker cannot execute (2026-07-11 live run, tool-should-decide, HIGH).**
-  ⚠️ **VERIFY-FIRST CAVEAT (2026-07-11 recon):** the "defaults off" premise below is now FALSE on HEAD —
-  `gatherReferencedFiles` (openAiCompatibleProvider.ts:397) inlines by DEFAULT (skips only when
-  `include_referenced_files === false`), and the read-heavy caps + "single-shot worker has no Read tool"
-  comment landed in `fbbf3039` (2026-07-05, BEFORE the 2026-07-11 run). So the run STILL needing the
-  explicit `include_referenced_files:true` workaround is a CONTRADICTION → the real defect is elsewhere in
-  the review-dispatch → provider-config wiring (apiPool.ts:342 only forwards `oc.include_referenced_files`
-  when defined; trace how the hybrid-partition review packets build their per-source provider config, and
-  whether the token-regex actually matches the packet's path tokens / resolves them in the worker's
-  repoRoot). Part (2) — the "refuse to dispatch a review packet the worker CANNOT comply with → unroutable"
-  guard — is the still-unbuilt half regardless. Do NOT blind-flip a default that is already on; TRACE first.
-  The hybrid NIM partition's packet prompts (9.8KB) reference file paths but inline NO file content, and
-  `include_referenced_files` defaults off — a single-shot /chat/completions worker has no disk, so every
-  result came back schema-valid but fabricated-empty (`total_lines: 0`, zero findings). The line-count
-  validator correctly rejected all 10 ("expected 701, got 0"), so a whole partition cycle burned with
-  zero yield and no friction event pointing at the cause. For API-pool review dispatch the tool should
-  force (or default) `include_referenced_files: true` and refuse to dispatch a review packet whose prompt
-  lacks its files' content — a worker that CANNOT comply should be unroutable, not quietly wasted.
-  Workaround applied to this run's session config: `parameters.include_referenced_files: true` on all 5
-  $0 sources. Positive: leads-not-verdicts validation held (no garbage entered coverage).
-- **A2b unmatched-quota fallback — two residuals (SHIPPED unmerged; each low, documented at the code site).**
+- **openai-compatible review dispatch: unroutable-guard still unbuilt (2026-07-11, tool-should-decide).**
+  `include_referenced_files` already defaults to true (`openAiCompatibleProvider.ts:397`, shipped
+  `fbbf3039`) — the original "defaults off" framing is moot. Still missing: a pre-dispatch
+  refuse-to-dispatch guard for a review packet a single-shot worker cannot comply with (no disk access,
+  so a packet whose prompt references file paths but inlines no content comes back schema-valid but
+  fabricated-empty). Verify `apiPool.ts:343-345`'s per-source forwarding reaches hybrid-partition packet
+  configs, then build the guard.
+- **A2b unmatched-quota fallback — two residuals (SHIPPED; each low, documented at the code site).**
   The three-tier quota-error classifier + verbatim meta-audit harvest shipped (owner-designed: precise
   auto-match → `quota_unclassified` conservative degrade + verbatim-message harvest → pattern improvement).
   Independent adversarial review caught + fixed pre-commit a HIGH scrub gap (missed `nvapi-`/`ghp_`/JWT/bare
@@ -118,19 +105,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     which is neither budget, rate, nor unlock — and never resolves. Endpoint: host admission should grant the
     full budget-and-rate-fitting independent set at once (like the in-process engine), reserving merge-gated
     re-grants for the deepening layer only. Realizes [[self-scaling-pipeline-not-forked-paths]] on the host path.
-- **Host pools calibrate FOREVER → grant permanently stuck at the cold-start batch, real headroom unusable (2026-07-11 live run, tool-should-decide, HIGH — throughput consequence of the quota-invisible-host-fan-out gap below).**
-  With the `parallel_workers` cap removed, host grants still came out at exactly 4 while Claude quota sat at
-  ~50%. Root cause: both host pools show `calibrating: true`, `remaining_token_budget: null`, so admission
-  falls back to `TOKEN_BUDGET_COLD_START_SLOTS = 2` per pool (scheduler.ts:342) → 2 pools × 2 = 4; the 12
-  denials are `cap_reached` with `headroom_before: null` (the calibration batch, NOT a real budget). The
-  comment promises graduation "once even one slope sample lands," but the host-dispatch path never records
-  the subagents' actual token spend into quota-state (file-based result protocol carries no usage), so
-  `tokens_per_pct` is never learned and the pool never leaves calibration — every host wave is fixed at 4
-  regardless of available quota. The in-process source pools (codex/NIM) are NOT stuck (slot/rpm-sized), so
-  they eat 50+ tasks/cycle while the host manages 4. Fix belongs with the gap below: capture host-subagent
-  usage (the harness reports subagent_tokens per completion) and feed `recordTokensPerPctObservation` so the
-  host pool graduates and admission can spend the real headroom. Until then, host throughput is bottlenecked
-  by an unlearnable budget while free in-process pools carry the run.
 - **Tool-prescribed host Agent fan-out is quota-INVISIBLE — subagent died raw at the session wall (2026-07-10 live run, tool-should-decide, HIGH).**
   The design-review (5 perspectives + judge) and systemic-challenge steps instruct the host to dispatch its
   own subagents, but that host fan-out never touches the quota layer: no admission grant, no lease, no
@@ -141,45 +115,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   Fix direction: host-fan-out steps should register the host pool + consume admission like any dispatch
   (the host-path enforcement track covered packet dispatch, not these prescribed-fan-out steps). Confirms +
   sharpens the existing "ad-hoc Agent fan-out has no per-agent ledger" sliver.
-- **Design-review worker prompts embed the `next-step` advance command → subagent becomes a second driver (2026-07-10 live run, tool-should-decide).**
-  The contract-review prompt file ends with "when written, run: audit-code next-step …", so the dispatched
-  subagent advanced the orchestrator itself while the host was still mid-parallel-dispatch (5 conceptual
-  perspectives in flight). Harmless this time (the pending obligation just re-emitted under a new agent id),
-  but it is a double-driver hazard: worker-facing prompt files should carry only the write-your-results
-  contract; the advance command belongs to the dispatching host's step prompt alone.
-  **FIXED (5b81c81f, unmerged): removed the advance from the `design_review_parallel` contract-review WORKER
-  packet (nextStepCommand.ts) + regression test. FOLLOW-UP (low, latent):** the solo `design_review_contract`
-  branch renders the SAME adversarial reviewer prompt directly as the host's `current-prompt.md` with its
-  advance intact — host-facing today (correct), but if a host ever forwards that current-prompt.md verbatim
-  to a subagent the same second-driver bug recurs, and it also has the host mark its own homework (vs
-  [[delegate-adversarial-phases-to-separate-agent]]). Consider making the solo branch dispatch the contract
-  review to an independent subagent too (advance stays host-only), unifying both branches.
-- **Charter extraction silently keeps one charter per kind (2026-07-10 live run, watch item, low).**
-  Submitting >1 charter of the same kind for a subsystem is accepted but the register keeps only one — no
-  warning in the next-step output. If "up to three = one per kind" is the contract, validate/say so at
-  submission instead of silently discarding.
-
-- **Charter-layer defects found + FIXED dogfooding /audit-code (2026-07-10, orchestrator + Opus recon/impl/adversarial agents).**
-  A dogfood audit of this repo surfaced three defects in the conceptual design-review charter layer; all fixed
-  (4 commits on the lap branch, one loop-core-attested + independently adversarially reviewed, validated
-  end-to-end). Durable design → memory [[charter-layer-independence-and-node-selection]].
-  - **(tool-should-decide) Consensus metric was size-hostile → charter review only ever saw test-file dyads.**
-    `src/shared/decompose/consensus.ts` scored a cluster by the mean over all C(n,2) member-pairs (missing ⇒ 0),
-    so only 2-file dyads cleared the bar and a 449-file `.gitignore` blob leaked into contested. Replaced with a
-    size-robust per-source best-fit F1 (precision×recall) + whole-area-community cap + abstain-vs-disagree voting
-    + ≥2-sources-together floor. On this repo consensus went 4 test dyads → 2 real subsystems, blob gone.
-  - **(ambiguous-direction) Single agent authored all charter kinds AND their deltas — author marking own homework.**
-    The design-of-record mandates independently-sourced, never-reconciled views, but one host pass wrote
-    stated/inferred/revealed + the deltas. Split into a charters-only extraction (independent, access-scoped
-    per-kind subagents: revealed=code-only, stated=docs-only) + a NEW `charter_delta` step where an independent
-    miner authors the gaps + goal_graph. The delta is now genuine disagreement, not one narrator's story.
-  - **(tool-should-decide) Prompt advertised "four charters" at a `deep` ceiling that only requests three.**
-    The count string was hardcoded; now tracks the ceiling (True nominatable only at `deepest`).
-  - **Recurrence of [[external-audit-catalogs-are-leads]] / verify-before-building:** the charter step was
-    reviewing test files because the *consensus criterion itself* was the bug — not visible without dogfooding.
-    A live self-audit remains the cheapest way to surface these; the env-bound dispatch/quota watch items below
-    were the original goal of the run and are still unexercised (audit paused at charter phase to fix the tool).
-
+- **Design-review worker prompts — FOLLOW-UP (low, latent):** the solo `design_review_contract` branch
+  still embeds the next-step advance command directly in its worker-facing prompt (`nextStepCommand.ts:391`)
+  — same second-driver hazard already fixed for `design_review_parallel` (`e6b580d0`), and it has the host
+  mark its own homework (vs [[delegate-adversarial-phases-to-separate-agent]]). Consider dispatching the
+  contract review to an independent subagent there too.
 - **A doc-review auto-apply / hook re-reverted a COMMITTED owner decision during a process restart (2026-07-10, tool-should-decide).**
   Mid-lap the process restarted; on restart, CLAUDE.md + `project-philosophy.md` came back MODIFIED — the change
   reverted the DD-1 Own-vs-acquire→CLAUDE.md promotion the owner had explicitly chosen and I had already committed
@@ -316,7 +256,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   efficiency follow-up from the lease-TTL fix; adversarial-review finding).** With `DISPATCH_LEASE_TTL_MS`
   (20 min, `src/shared/quota/reservationLedger.ts`), a crashed sibling's orphan lease can block an
   in-process run's packet for up to the TTL — correct (waits, never double-grants), but the run loop's
-  pending retry tick (`rollingDispatch.ts` ~1109-1122, 50ms) then hammers `admitAgainstLedger` →
+  pending retry tick (`rollingDispatch.ts` ~1348, 50ms) then hammers `admitAgainstLedger` →
   `withFileLock` read-modify-write per pending packet (~24k lock cycles worst case). Fix direction:
   backoff on ledger-blocked retries, or heartbeat-renewed short leases (the ClaimRegistry pattern,
   `auditStep.ts:96`) restoring ~30s crash recovery. Efficiency-only; folds naturally into D-66/67 slice-3
@@ -414,10 +354,10 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     opencode-free is live-verified: base `https://opencode.ai/zen/v1`, public `/models`, free models via
     `Bearer public` returning `cost:"0"` (design premise held; docs' "API key" is the PAID tier). opencode-free
     is a pure-config `sources[]` entry (`api_key:"public"` + `cost_per_mtok:0`) — no provider code.
-    - **Increment 1 — declared per-source cost seam → SHIPPED, commit `6349bdc5`.**
+    - **Increment 1 — declared per-source cost seam → SHIPPED.**
       `DispatchableSource.cost_per_mtok` → `deriveCostRank` rung 2a (declared 0 = free-first). The design memory's
       "deriveCostRank prices free ~0 automatically" was FALSE (non-models.dev ids → worst band); this is the real fix.
-    - **Increment 2 — reactive cost verification → SHIPPED, commit `65ace2c1` (loop-core, full pipeline).**
+    - **Increment 2 — reactive cost verification → SHIPPED (loop-core, full pipeline).**
       Provider extracts the endpoint-reported cost (opencode's `cost`) → `LaunchFreshSessionResult.observedCostUsd`;
       dispatcher closures relay it to `RollingDispatchResult`; the rolling engine's `handleResult` demotes a
       declared-free pool that reports cost>0 (folded into `selectProvider`'s degraded partition, once per pool) +
@@ -518,7 +458,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     per-node + base-branch locks). Slice-3 heartbeat machinery shrinks it if a real cooperative run
     shows it matters.
   - **Discovered asymmetry:** remediate's `phase:main` mutex has OD3 layer-1 only (`withClaimHeartbeat`
-    wraps `advance()`, `nextStep.ts` ~4948), NO layer-2 re-check before persist — unlike audit's
+    wraps `advance()`, `nextStep.ts` ~5088), NO layer-2 re-check before persist — unlike audit's
     `auditStep.ts:216-239` template. Not mechanically mirrorable (remediate's persists are distributed
     inside `advance()`); tracked as a still-open correctness gap for slice-3 to fold in.
 
@@ -564,21 +504,14 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     machinery in the repo (pause/claim/quota), a genuine divergence to respect, and the owner's own
     "redesign before scheduled autonomy" caution applies; do NOT rush it as a tail-end change.
 
-- **Move the per-lap cadence rules (risk-tier + friction-walk) from host-habit to tool-enforcement
-  (doc-review D-68/D-69).** Both halves are tool-enforced: the risk-tier half via the `leanFastPath` →
-  Dial A/B continuum fold (the standalone `evaluateFastPath` boolean gate is deleted; finding-level
-  simplicity signals fold INTO the risk tier as escalate-on-evidence via `findingRiskEvidence` in
-  `src/remediate/riskSignal.ts`, and the lean path is taken IFF the effective tier is `low` — design of
-  record [`spec/self-scaling-pipeline-design.md`](../spec/self-scaling-pipeline-design.md),
-  [[self-scaling-pipeline-not-forked-paths]]); the friction-walk half via mechanical step-boundary
-  capture + an in-run blocking per-category close-out + a session-end Stop-hook backstop.
-  - **Genuine residue (accepted, not built):** (a) the LAP-level decision to route an item through the
-    orchestrator vs hand-fix it is still host judgment — its tool-enforced end-state is "route substantive work
-    through the self-scaling orchestrator" (the [[self-scaling-pipeline-not-forked-paths]] north star), not a new
-    gate; (b) a hand-fix lap that never invokes an orchestrator produces no friction artifact, so it is covered
-    only by the Stop-hook backstop (and only if a recent run artifact exists in its 12h window). Closing (b)
-    mechanically (e.g. block session end on any commit-bearing lap lacking a friction walk) would be fragile and
-    over-fire; deferred with `CLAUDE.md`'s "Redesign before scheduled autonomy" rather than force it.
+- **Per-lap cadence rules tool-enforcement (doc-review D-68/D-69) — genuine residue (accepted, not
+  built):** (a) the LAP-level decision to route an item through the orchestrator vs hand-fix it is still
+  host judgment — its tool-enforced end-state is "route substantive work through the self-scaling
+  orchestrator" (the [[self-scaling-pipeline-not-forked-paths]] north star), not a new gate; (b) a
+  hand-fix lap that never invokes an orchestrator produces no friction artifact, so it is covered only by
+  the Stop-hook backstop (and only if a recent run artifact exists in its 12h window). Closing (b)
+  mechanically (e.g. block session end on any commit-bearing lap lacking a friction walk) would be fragile
+  and over-fire; deferred with `CLAUDE.md`'s "Redesign before scheduled autonomy" rather than force it.
   [[enforce-robustness-in-tooling-not-host-discretion]] / [[self-scaling-pipeline-not-forked-paths]]
 
 - **Context-efficiency access-memory track (items 1-3) shipped; non-blocking follow-up open:** packet `task_ids`/`lens` attribution missing from the token-usage ledger (`DispatchPlanEntry` carries neither).
