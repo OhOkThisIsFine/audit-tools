@@ -229,8 +229,16 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
 - **`intent_checkpoint` upgrade** — capture the goal **graph + edges** (the four charters with
   provenance + the ceiling meta-intent), not a flat intent list. This seeds the charter
   layer.
-- **`ClarificationRequest` / `waiting_for_clarification`** — charter-alignment questions are these,
-  sourced from charter-deltas instead of implementation ambiguity.
+- **Charter-clarification reuses the clarification-pause *pattern*, NOT remediate's
+  `ClarificationRequest` type or `waiting_for_clarification` status.** Charter-alignment questions are
+  symmetric charter-pair arbitrations (VOI-ranked, risk-gated) resolved by an inline symmetric answer
+  re-applied on deterministic re-derivation — genuinely different in shape AND resolution semantics
+  from remediate's finding-ambiguity questions (which resolve via an imperative keep/reject/defer
+  action that mutates item state). So audit uses its own `CharterClarificationRequest` and an
+  obligation-gated pause (the `charter_clarification` obligation — audit has no dedicated
+  `waiting_for_clarification` status; its status enum is `not_started|active|blocked|complete`). This
+  is a deliberate **category difference, not drift** — the resolution semantics are two different
+  operations, not two policy settings of one core, so a shared type would be a false unification.
 - **Contract vs conceptual modes** — the charter-delivery review is *conceptual*, and it *consumes*
   the contract-assessment obligations as part of "what the subsystem really owes."
 - **Leads-not-verdicts** — every finding, especially high-blast and True ones, is a lead the owner
