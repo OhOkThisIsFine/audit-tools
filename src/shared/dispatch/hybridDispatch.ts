@@ -73,8 +73,18 @@ export interface HybridDispatchInput {
  * which is what makes the distribution continuous.
  */
 export async function planHybridDispatch(input: HybridDispatchInput): Promise<HybridDispatchPartition> {
+  // Stamp each pool with the caller's own in-process classification BEFORE the S4
+  // capacity fold sizes it — this is what exempts a self-pacing backend pool from
+  // the host-oriented cold-start PROBE clamp (`scheduleWave`'s `selfPacing`; see
+  // `CapacityPool.selfPacing`). Single-sourced here so the exemption always tracks
+  // the same classification `isInProcess` uses to bucket the resulting assignments,
+  // and no caller has to remember to set it when building its pool list.
+  const pools: CapacityPool[] = input.pools.map((pool) => ({
+    ...pool,
+    selfPacing: input.isInProcess(pool),
+  }));
   const coordinator = new HybridSpillCoordinator({
-    pools: input.pools,
+    pools,
     sessionConfig: input.sessionConfig,
     claimRegistry: input.claimRegistry,
     readSettled: input.readSettled,

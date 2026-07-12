@@ -264,6 +264,90 @@ test("cold start, one window known + a sibling window still calibrating: clamps 
   expect(schedule.max_concurrent).toBe(COLD_START_PROBE_BATCH); // still clamped by the unresolved sibling
 });
 
+// ── selfPacing exemption (2026-07-11 in-process-vs-host cold-start over-reach) ──
+// The host-oriented cold-start PROBE must not throttle a self-pacing (in-process)
+// pool's partition size — it paces on real RPM/TPM/429 signals instead. Real
+// per-pool signals (RPM/TPM, an active cooldown, a genuinely known-zero budget)
+// must still bind regardless of selfPacing; only the unknown-budget PROBE is exempt.
+
+test("selfPacing pool: a sibling-window-calibrating clamp does NOT throttle below the known budget's own headroom", () => {
+  const base = {
+    providerName: "openai-compatible",
+    sessionConfig: { quota: { safety_margin: 1.0 } },
+    hostModel: null,
+    requestedConcurrency: 10,
+    estimatedSlotTokens: new Array(10).fill(1000),
+    quotaSourceSnapshot: {
+      remaining_pct: 0.5,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null,
+      captured_at: new Date().toISOString(),
+      source: "test",
+      windows: [
+        { label: "session", remaining_pct: null, tokens_remaining: 100_000, reset_at: null },
+        { label: "weekly", remaining_pct: 0.5, tokens_remaining: null, reset_at: null },
+      ],
+    },
+  };
+
+  const hostGoverned = scheduleWave(base);
+  expect(hostGoverned.calibrating).toBe(true);
+  expect(hostGoverned.max_concurrent).toBe(COLD_START_PROBE_BATCH); // unchanged default behavior
+
+  const selfPaced = scheduleWave({ ...base, selfPacing: true });
+  expect(selfPaced.calibrating).toBe(true);
+  // Exempt from the probe: sized against the KNOWN 100_000-token budget instead,
+  // which comfortably fits all 10 requested 1000-token slots.
+  expect(selfPaced.max_concurrent).toBe(10);
+});
+
+test("selfPacing pool: fully cold (no absolute or learned budget anywhere) still admits the full requested wave", () => {
+  const base = {
+    providerName: "openai-compatible",
+    sessionConfig: { quota: { safety_margin: 1.0 } },
+    hostModel: null,
+    requestedConcurrency: 5,
+    estimatedSlotTokens: new Array(5).fill(500),
+    quotaSourceSnapshot: {
+      remaining_pct: 0.9,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null,
+      captured_at: new Date().toISOString(),
+      source: "test",
+    },
+  };
+
+  const hostGoverned = scheduleWave(base);
+  expect(hostGoverned.calibrating).toBe(true);
+  expect(hostGoverned.max_concurrent).toBe(COLD_START_PROBE_BATCH); // clamped: unknown ceiling
+
+  const selfPaced = scheduleWave({ ...base, selfPacing: true });
+  expect(selfPaced.calibrating).toBe(true);
+  expect(selfPaced.max_concurrent).toBe(5); // NOT probe-throttled — self-paces via real RPM/TPM/429 signals
+});
+
+test("selfPacing pool: a genuinely KNOWN-zero budget still throttles to 1 (real signal, not the probe)", () => {
+  const schedule = scheduleWave({
+    providerName: "openai-compatible",
+    sessionConfig: { quota: { safety_margin: 1.0 } },
+    hostModel: null,
+    requestedConcurrency: 8,
+    selfPacing: true,
+    quotaSourceSnapshot: {
+      remaining_pct: 0,
+      reset_at: new Date(Date.now() + 60_000).toISOString(),
+      requests_remaining: null,
+      tokens_remaining: 0,
+      captured_at: new Date().toISOString(),
+      source: "test",
+    },
+  });
+  expect(schedule.max_concurrent).toBe(1);
+  expect(schedule.binding_cap).toBe("cooldown");
+});
+
 test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'", () => {
   const capped = scheduleWave({
     providerName: "claude-code",

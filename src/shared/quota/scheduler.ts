@@ -144,6 +144,24 @@ export interface ScheduleWaveOptions {
    * over-subscribes the remaining window. Defaults to 0.
    */
   inFlightTokens?: number;
+  /**
+   * True when this pool is dispatched IN-PROCESS by the orchestrator itself
+   * (the rolling engine's continuous slot-pull — codex/NIM/opencode/worker-command,
+   * per the tool's own `isInProcess` classification) rather than granted to the
+   * conversation host's subagent driver. Self-pacing pools already refill on
+   * completion and back off on real RPM/TPM/429 signals, so the COLD-START PROBE
+   * clamp ({@link COLD_START_PROBE_BATCH}, via {@link deriveColdStartAdmissionBatch}'s
+   * unknown-budget branch) does not apply to them — that clamp exists to protect the
+   * host-path GRANT (`admissionLoop.ts`) from sizing a batch against a budget nobody
+   * has measured yet, a failure mode that cannot occur on a self-pacing pool (see
+   * docs/backlog.md "dispatch should be gated ONLY by token-budget, rate, and true
+   * task-unlocks" + the 2026-07-11 in-process-vs-host cold-start finding). Real
+   * per-pool signals (RPM/TPM, an active cooldown, a genuinely KNOWN-zero budget)
+   * still apply unchanged — only the unknown-budget probe is exempted. Defaults to
+   * false (host-governed) when unset: the exemption must be explicitly claimed by
+   * the caller's own in-process classification, never inferred here.
+   */
+  selfPacing?: boolean;
 }
 
 // Named quota tuning defaults (previously inline magic literals). Centralised
@@ -603,6 +621,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     quotaSourceSnapshot = null,
     discoveredLimits = null,
     inFlightTokens = 0,
+    selfPacing = false,
   } = options;
   // Descending sort so sumTopN picks the largest slots
   const slotsSorted = estimatedSlotTokens
@@ -710,8 +729,10 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       // If another of the pool's own windows is still cold (no absolute + no
       // learned slope), that OTHER window's true budget is unknown — clamp to
       // the slope-learning probe so a healthy window's budget can't over-dispatch
-      // an un-calibrated one (MIN across the pool's windows).
-      if (calibrating) {
+      // an un-calibrated one (MIN across the pool's windows). Self-pacing pools
+      // are exempt (see `selfPacing` doc) — they pace on real RPM/TPM/429 signals,
+      // not this host-oriented probe.
+      if (calibrating && !selfPacing) {
         k = Math.min(k, deriveColdStartAdmissionBatch({ availableBudget: null, perPacketTokenEstimate: avgTokens }));
       }
       k = Math.max(1, k);
@@ -719,10 +740,10 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
         waveSize = k;
         bindingCap = "token_budget";
       }
-    } else if (calibrating) {
+    } else if (calibrating && !selfPacing) {
       // Cold start: no window has an absolute or learned budget at all. Admit
       // only the slope-learning probe — never a batch sized against a ceiling
-      // nobody has measured yet.
+      // nobody has measured yet. Self-pacing pools are exempt (see `selfPacing` doc).
       const probeBatch = deriveColdStartAdmissionBatch({ availableBudget: null, perPacketTokenEstimate: avgTokens });
       if (probeBatch < waveSize) {
         waveSize = probeBatch;
