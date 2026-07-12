@@ -3044,3 +3044,49 @@ export async function promoteImplementationDagToExtractedPlan(
 
   await writeJsonFile(paths.extractedPlan, extractedPlan);
 }
+
+// ── Lean-path extracted plan (the `low` risk tier's plan emission) ────────────
+//
+// The heavy pipeline above derives its `extracted-plan.json` from the adversarial
+// DAG (`source: "contract_pipeline"`). The `low` risk tier skips that design loop
+// (its findings are a handful of concrete, already-grounded fixes) and emits this
+// lean sibling instead, tagged `source: "lean_fast_path"` so the two producers are
+// distinguished at the artifact level. Both rejoin the SAME plan→implement→close
+// machinery — `normalizeExtractedPlan` synthesizes one block per finding and
+// `applyPlanPipeline` merges blocks sharing a file + splits by context budget, so
+// block derivation is single-sourced, not reimplemented here. The retained safety
+// net (grounding re-pass, affected-file hash snapshot, per-node verify-before-merge,
+// final whole-repo gate) still runs; only the adversarial DESIGN loop + obligation
+// derivation are dropped. (Relocated from the retired `steps/leanFastPath.ts` — DD-21.)
+
+/** Source tag stamped on a lean-fast-path extracted plan (distinguishes it from `contract_pipeline`). */
+export const LEAN_FAST_PATH_SOURCE = "lean_fast_path";
+
+/** The minimal `extracted-plan.json` shape the lean path emits. */
+export interface LeanExtractedPlan {
+  plan_id: string;
+  findings: Finding[];
+  project_type: string;
+  source: typeof LEAN_FAST_PATH_SOURCE;
+  candidate_closing_actions: string[];
+}
+
+/**
+ * Build the lean extracted plan from the approved findings. Blocks are
+ * intentionally omitted: `normalizeExtractedPlan` synthesizes one block per
+ * finding and `applyPlanPipeline` then merges blocks sharing a file + splits by
+ * context budget — the same deterministic block derivation the contract pipeline
+ * feeds into, single-sourced rather than reimplemented here.
+ */
+export function buildLeanExtractedPlan(
+  findings: Finding[],
+  planId: string,
+): LeanExtractedPlan {
+  return {
+    plan_id: planId,
+    findings,
+    project_type: "unknown",
+    source: LEAN_FAST_PATH_SOURCE,
+    candidate_closing_actions: ["none"],
+  };
+}

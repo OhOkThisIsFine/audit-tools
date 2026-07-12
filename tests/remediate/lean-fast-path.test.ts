@@ -8,8 +8,8 @@ import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import {
   buildLeanExtractedPlan,
   LEAN_FAST_PATH_SOURCE,
-  LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
-} from "../../src/remediate/steps/leanFastPath.js";
+} from "../../src/remediate/steps/contractPipeline.js";
+import { LEAN_LIGHT_REVIEW_SCHEMA_VERSION } from "../../src/remediate/riskSignal.js";
 import {
   findingRiskEvidence,
   MAX_FAST_PATH_FINDINGS,

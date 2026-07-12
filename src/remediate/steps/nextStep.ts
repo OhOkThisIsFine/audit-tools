@@ -70,13 +70,8 @@ import {
   buildNextContractPipelineStep,
   shouldEnterContractPipeline,
   writePathASeedFromFindings,
-} from "./contractPipeline.js";
-import {
   buildLeanExtractedPlan,
-  interpretLeanLightReviewVerdict,
-  LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
-  type LeanLightReviewDisposition,
-} from "./leanFastPath.js";
+} from "./contractPipeline.js";
 import {
   contractArtifactExists,
   contractPipelineDir,
@@ -103,6 +98,9 @@ import {
   escalateRiskSignal,
   findingRiskEvidence,
   distinctAffectedFiles,
+  interpretLeanLightReviewVerdict,
+  LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
+  type LeanLightReviewDisposition,
 } from "../riskSignal.js";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import {
@@ -2993,8 +2991,10 @@ async function handleReadyIntakeContractPipeline(
         // Persist the filter dispositions so coverage is built over the originals.
         await persistReviewFilterDispositions(artifactsDir, originals, filter);
 
-        // Lean path = the `low` risk tier's realization (D-68 — leanFastPath folded
-        // into the self-scaling dial). A run skips the heavy contract DESIGN loop and
+        // Lean path = the `low` risk tier's realization (D-68 — the standalone lean
+        // fast-path folded into the self-scaling dial; its two mechanisms now live in
+        // `riskSignal.ts` (light-review) + `contractPipeline.ts` (lean plan builder)).
+        // A run skips the heavy contract DESIGN loop and
         // synthesizes the extracted plan directly IFF its effective risk tier is `low`;
         // the plan→implement→close machinery (per-node verify-before-merge + the final
         // whole-repo gate) is the retained safety net. Runs only here — on Path A

@@ -16,8 +16,8 @@ import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import {
   interpretLeanLightReviewVerdict,
   LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
-} from "../../src/remediate/steps/leanFastPath.js";
-import { readIntakeRiskSignal } from "../../src/remediate/riskSignal.js";
+  readIntakeRiskSignal,
+} from "../../src/remediate/riskSignal.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
 const FAST_PATH_FIXTURE = fileURLToPath(

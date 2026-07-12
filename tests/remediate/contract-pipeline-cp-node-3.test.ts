@@ -18,7 +18,7 @@ import { rejectionRewriteInstruction } from "../../src/remediate/steps/contractP
 import {
   interpretLeanLightReviewVerdict,
   LEAN_LIGHT_REVIEW_SCHEMA_VERSION,
-} from "../../src/remediate/steps/leanFastPath.js";
+} from "../../src/remediate/riskSignal.js";
 import { CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION } from "audit-tools/shared";
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";

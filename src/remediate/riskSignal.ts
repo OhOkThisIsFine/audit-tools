@@ -23,7 +23,7 @@
  */
 
 import type { Finding } from "audit-tools/shared";
-import { readOptionalJsonFile, writeJsonFile, findingIsGrounded } from "audit-tools/shared";
+import { readOptionalJsonFile, writeJsonFile, findingIsGrounded, isRecord } from "audit-tools/shared";
 import { intakePaths } from "./intake.js";
 
 export const INTAKE_RISK_SIGNAL_SCHEMA_VERSION =
@@ -491,4 +491,68 @@ export async function ensureIntakeRiskSignal(
   const signal = computeIntakeRiskSignal(await resolveInput());
   await writeIntakeRiskSignal(artifactsDir, signal);
   return signal;
+}
+
+// ── Low-tier light adversarial review floor (T1 slice 3b) ─────────────────────
+//
+// The `low` risk tier does NOT skip adversarial scrutiny — that would be a
+// zero-scrutiny fork, and remediation legitimately catches upstream (audit)
+// errors. Instead a low-tier run runs ONE bounded LIGHT adversarial pass over the
+// approved findings (the floor: light, never off — `adversarialDepthForTier("low")
+// === "light"`, above) before the lean plan is trusted. A `clear` verdict proceeds
+// to the lean plan; a verdict surfacing a real concern ESCALATES the run (evidence
+// the change is harder than assessed) and routes it to the full contract pipeline.
+// The verdict is a mechanical on-disk gate, NOT a "please self-check" instruction
+// the host might ignore. (Relocated from the retired `steps/leanFastPath.ts`, whose
+// filename read as a vestige of the pre-fold "separate lean path" era — DD-21.)
+
+export const LEAN_LIGHT_REVIEW_SCHEMA_VERSION =
+  "remediate-code-lean-light-review/v1alpha1" as const;
+
+export type LeanLightReviewDisposition = "clear" | "escalate";
+
+/**
+ * Interpret a host-written light-review verdict, fail-safe toward escalation:
+ * any malformed / ambiguous verdict, or an `escalate` with no stated concern,
+ * routes to the full pipeline. The floor must never silently pass — when in
+ * doubt, escalate (a wrong call costs extra pipeline work, never skipped review).
+ */
+export function interpretLeanLightReviewVerdict(raw: unknown): {
+  disposition: LeanLightReviewDisposition;
+  concerns: string[];
+} {
+  if (!isRecord(raw)) {
+    return { disposition: "escalate", concerns: ["unreadable light-review verdict"] };
+  }
+  // Schema-version gate: a verdict that does not carry the exact expected
+  // schema_version is not a trustworthy light-review emission (it may be a stale,
+  // mis-shaped, or wrong-contract artifact). Fail safe toward escalation rather
+  // than trusting an unversioned `clear`.
+  if (raw.schema_version !== LEAN_LIGHT_REVIEW_SCHEMA_VERSION) {
+    return {
+      disposition: "escalate",
+      concerns: [
+        `light-review verdict schema_version must be "${LEAN_LIGHT_REVIEW_SCHEMA_VERSION}"`,
+      ],
+    };
+  }
+  const concerns = Array.isArray(raw.concerns)
+    ? raw.concerns.filter((c): c is string => typeof c === "string")
+    : [];
+  if (raw.disposition === "clear") {
+    return { disposition: "clear", concerns: [] };
+  }
+  if (raw.disposition === "escalate") {
+    return {
+      disposition: "escalate",
+      concerns:
+        concerns.length > 0
+          ? concerns
+          : ["light review escalated without a stated concern"],
+    };
+  }
+  return {
+    disposition: "escalate",
+    concerns: ["light-review verdict missing a valid disposition"],
+  };
 }

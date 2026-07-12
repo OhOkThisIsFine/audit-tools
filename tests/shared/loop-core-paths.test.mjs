@@ -18,7 +18,6 @@ describe("loopCorePaths — the single-sourced loop-core path set", () => {
     expect(isLoopCorePath("src/remediate/steps/dispatch/acceptNode.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/steps/rollingSession.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/steps/contractPipeline.ts")).toBe(true);
-    expect(isLoopCorePath("src/remediate/steps/leanFastPath.ts")).toBe(true);
     expect(isLoopCorePath("src/remediate/riskSignal.ts")).toBe(true);
   });
 

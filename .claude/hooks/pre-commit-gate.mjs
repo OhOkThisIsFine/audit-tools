@@ -53,7 +53,6 @@ const LOOP_CORE_PATTERNS = [
   "src/remediate/riskSignal.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",
-  "src/remediate/steps/leanFastPath.ts",
   "src/remediate/steps/nextStep.ts",
   "src/remediate/steps/rollingSession.ts",
   "src/shared/dispatch/",
