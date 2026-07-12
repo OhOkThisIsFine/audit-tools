@@ -155,8 +155,8 @@ rather than letting one credential's snapshot masquerade as both.
 
 The key + resolution + stamping is realized across `scheduler.ts` `buildProviderModelKey`,
 `httpQuotaSource.ts` `parseProviderModelKey`, `quotaSource.ts` `resolveAccountIdSafe`,
-`apiPool.ts` `buildHostModelPools`/`buildSourcePool`, and `compositeQuotaSource.ts`
-`buildAccountScopedQuotaSource`:
+`apiPool.ts` `buildHostModelPools`/`buildSourcePool`, `accountId.ts` `deriveLocalAccountId`,
+and `compositeQuotaSource.ts` `buildAccountScopedQuotaSource`:
 - The quota key carries an **account discriminator**, not just provider/model. A bare
   `provider/model` key is only sufficient when there is exactly one account for that
   provider in the run; once a second same-provider account is a dispatch target, the
@@ -165,7 +165,11 @@ The key + resolution + stamping is realized across `scheduler.ts` `buildProvider
   already carries it (Claude OAuth: the account/org on the token; Codex: `account_id` in
   `~/.codex/auth.json`; etc.). The host pool's account comes from the host credential; each
   target pool's from that target's credential. Same provider + equal account id → merge to
-  one pool (§5a); differing ids → keep separate (§5b).
+  one pool (§5a); differing ids → keep separate (§5b). Exception: `openai-compatible`
+  bare-API-key sources have no credential to read identity from, so `accountId.ts`
+  `deriveLocalAccountId` derives a LOCAL, credential-value-free id from `(endpoint,
+  api_key_env)` instead — a third, deterministic mechanism that is neither "read from the
+  credential" nor "guessed."
 - The §4 self-gating still holds per pool: a source answers for `(provider, account)` it
   owns and is null-with-no-I/O otherwise — so account B's CLI source never probes account
   A's endpoint with A's token.
