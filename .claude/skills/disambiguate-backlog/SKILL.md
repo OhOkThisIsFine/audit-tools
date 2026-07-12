@@ -30,7 +30,7 @@ Scope is two raw-signal sources, nothing else:
   tracks*, *Deferred / waiting*. (Skip *Durable traps* — it's reference, not
   work-to-spec; only touch a trap if the owner asks.)
 - **meta-audit reflections** — worker feedback: `meta-audit-log.md` if present
-  (gitignored, append-only) plus any `agent-feedback.jsonl` under
+  (untracked by convention, append-only) plus any `agent-feedback.jsonl` under
   `.audit-tools/**`. Shape: `{ instruction_clarity, ambiguities[],
   tool_friction[], suggestions[], severity }` (`src/shared/agentReflections.ts`).
   A recurring `ambiguous`/`unclear` reflection is a design gap the same way a
