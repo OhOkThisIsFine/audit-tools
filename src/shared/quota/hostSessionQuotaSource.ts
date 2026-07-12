@@ -15,8 +15,11 @@
  *    consumed AuditResult content is never inspected, so a healthy result that
  *    merely quotes a limit string cannot pause the run.
  *  - **Throttle before the wall.** The snapshot exposes `remaining_pct` so the
- *    scheduler's existing LOW / CRITICAL bands throttle the wave BEFORE the
- *    account is fully exhausted, rather than only reacting after a hard 429.
+ *    scheduler's token-budget gate ({@link deriveTokenBudget}) sizes the wave
+ *    against the account's remaining tokens (remaining_pct × learned
+ *    tokens-per-pct) BEFORE it is fully exhausted, rather than only reacting after
+ *    a hard 429. A near-wall window derives a small budget and thus a small wave —
+ *    the throttle emerges from the token math, not a fixed percentage cliff.
  *  - **Auto-pause / auto-resume.** Recording a limit sets `cooldown_until` to the
  *    parsed reset (next-future-occurrence for clock times; DEFAULT_COOLDOWN_MS
  *    when unparseable). Once an injected `now` passes the reset the source
@@ -52,13 +55,14 @@ export const DEFAULT_MAX_CONSECUTIVE_RE_LIMITS = 3;
 const WINDOW_PAUSED_REMAINING_PCT = 0;
 /**
  * `remaining_pct` reported while a limit is active but the window has not yet been
- * recorded as paused for THIS key — graduated band so the scheduler's CRITICAL
- * throttle (`QUOTA_REMAINING_PCT_CRITICAL`) fires as the account approaches the
- * wall rather than only after a hard 429. Used when a limit has been seen this
- * window cycle but the cooldown has since elapsed and a fresh same-cycle limit is
- * being tracked.
+ * recorded as paused for THIS key — a small graduated band so the scheduler's
+ * token-budget gate derives a near-empty budget (and thus throttles the wave) as
+ * the account approaches the wall rather than only after a hard 429. Used when a
+ * limit has been seen this window cycle but the cooldown has since elapsed and a
+ * fresh same-cycle limit is being tracked. Exported so tests assert the reported
+ * band directly rather than against a separate percentage constant.
  */
-const WINDOW_NEAR_WALL_REMAINING_PCT = 0.05;
+export const WINDOW_NEAR_WALL_REMAINING_PCT = 0.05;
 
 /** Injected clock — defaults to the system clock, overridable in tests. */
 export type NowFn = () => number;

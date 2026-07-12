@@ -323,15 +323,6 @@ export function selectDispatchDriver(
   };
 }
 
-/**
- * Real-time quota-source `remaining_pct` thresholds retained for consumers that
- * classify a pool's health from its live snapshot (e.g. the rolling engine's
- * proactive cross-pool spill, INV-QD-14). These are NO LONGER wave-sizing
- * cliffs: the scheduler sizes the wave against the learned token BUDGET gate
- * ({@link deriveTokenBudget}), not a fixed remaining_pct step function.
- */
-export const QUOTA_REMAINING_PCT_CRITICAL = 0.1;
-export const QUOTA_REMAINING_PCT_LOW = 0.3;
 
 /**
  * Slope-learning PROBE batch — the fallback used ONLY when a window's token

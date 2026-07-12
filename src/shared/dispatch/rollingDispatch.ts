@@ -62,7 +62,6 @@ import type { QuotaStateEntry, QuotaState, WaveSchedule } from "../quota/types.j
 import {
   scheduleWave,
   buildProviderModelKey,
-  QUOTA_REMAINING_PCT_LOW,
 } from "../quota/scheduler.js";
 import {
   recordWaveOutcome,
@@ -475,22 +474,27 @@ function poolCapabilityRank(pool: CapacityPool): number {
 
 /**
  * Classify a pool as quota-degraded from its live signals: an active cooldown
- * (learned 429 backoff, or a critical proactive reset folded in by
- * `scheduleWave`) or a real-time `remaining_pct` below the LOW band. A degraded
- * pool is still dispatchable — `scheduleWave` floors the wave at 1 — but it is
- * deprioritised so load spills to a healthier peer first (INV-QD-14).
+ * (learned 429 backoff, or a critical proactive reset folded in by `scheduleWave`)
+ * or a derived remaining token budget too small to fund even this packet's
+ * estimated tokens. A degraded pool is still dispatchable — `scheduleWave` floors
+ * the wave at 1 — but it is deprioritised so load spills to a healthier peer first
+ * (INV-QD-14).
  *
- * Reads the same `QUOTA_REMAINING_PCT_LOW` threshold the scheduler uses to halve
- * a wave, so "degraded enough to halve" and "degraded enough to spill off" stay
- * defined by one constant rather than a second magic number.
+ * The near-wall signal is a token-vs-token comparison, never a remaining_pct cliff:
+ * a pool is degraded exactly when `deriveTokenBudget`'s remaining budget (absolute
+ * `tokens_remaining`, or `remaining_pct × learned tokens_per_pct`) can't cover the
+ * packet — so a 5%-remaining window that still holds plenty of absolute tokens is
+ * NOT degraded (the old `< 0.3` cliff wrongly sank it), while a window with barely
+ * any tokens left IS, whatever its percentage. A pool with no derivable budget (an
+ * uncalibrated window ⇒ `remaining_token_budget == null`) can't be token-reasoned
+ * about, so it is not proactively degraded here; the reactive 429→cooldown floor
+ * (INV-QD-07) backstops it. `budgetTokens` is the packet's estimated cost, the same
+ * quantity the scheduler's token gate spends against.
  */
-function isPoolQuotaDegraded(
-  pool: CapacityPool,
-  schedule: WaveSchedule,
-): boolean {
+function isPoolQuotaDegraded(schedule: WaveSchedule, budgetTokens: number): boolean {
   if (schedule.cooldown_until) return true;
-  const remainingPct = pool.quotaSourceSnapshot?.remaining_pct;
-  return remainingPct != null && remainingPct < QUOTA_REMAINING_PCT_LOW;
+  const remaining = schedule.remaining_token_budget;
+  return remaining != null && remaining < budgetTokens;
 }
 
 /**
@@ -544,21 +548,6 @@ export function selectProvider<TPacket>(
     const resetAt = pausedPoolResetAt.get(poolId);
     return resetAt != null && now < resetAt;
   };
-
-  // Capability ordering: high-complexity → descending rank, low-complexity → ascending.
-  // Within an equal-capability tie, balance by current in-flight load (least-loaded
-  // first) so a run of same-complexity packets fans OUT across equal pools rather than
-  // front-loading the first — deliberate multi-pool fan-out even when the pools are
-  // unbounded (defect-1 sub-defect 2). Each dispatch updates the tracker, so the next
-  // same-rank packet in the pass prefers the peer that is now less loaded.
-  const sorted = [...confirmedPools]
-    .filter((p) => !exhaustedPoolIds.has(p.id) && !isPausedNow(p.id))
-    .sort((a, b) => {
-      const diff = poolCapabilityRank(b) - poolCapabilityRank(a);
-      const capOrdered = highComplexity ? diff : -diff;
-      if (capOrdered !== 0) return capOrdered;
-      return inFlightTracker.getInFlightTokens(a.id) - inFlightTracker.getInFlightTokens(b.id);
-    });
 
   // Ask scheduleWave whether each pool can accept one more slot, accounting for
   // in-flight tokens as additional estimated slot cost. The schedule already
@@ -616,22 +605,44 @@ export function selectProvider<TPacket>(
     });
   };
 
-  const evaluated = sorted.map((pool) => ({ pool, schedule: scheduleForPool(pool) }));
+  const evaluated = confirmedPools
+    .filter((p) => !exhaustedPoolIds.has(p.id) && !isPausedNow(p.id))
+    .map((pool) => ({ pool, schedule: scheduleForPool(pool) }));
 
-  // Proactive cross-pool spill (INV-QD-14): healthy pools first, then degraded,
-  // each group keeping the capability order above (a stable partition). Quota
-  // management is not switchable (one track, always-on), so this ordering always
-  // applies — there is no inert "quota disabled" mode.
-  // A cost-demoted pool (declared free but observed charging) is treated as
-  // degraded so it spills behind healthy pools — the routing half of reactive cost
-  // verification. Folded in here (not into `isPoolQuotaDegraded`, which is a pure
-  // function of live quota signals) because the demotion set is dispatch-run state.
-  const isDegraded = (e: { pool: CapacityPool; schedule: WaveSchedule }): boolean =>
-    isPoolQuotaDegraded(e.pool, e.schedule) || costDemotedPoolIds.has(e.pool.id);
-  const ordered = [
-    ...evaluated.filter((e) => !isDegraded(e)),
-    ...evaluated.filter((e) => isDegraded(e)),
-  ];
+  // Single ordering pass (INV-QD-14 proactive spill), in priority order — quota
+  // management is one track, always-on, so this ordering always applies:
+  //  1. Health: a HARD-degraded pool — active cooldown, cost-demoted (declared free
+  //     but observed charging), or one whose derived remaining budget can't fund this
+  //     packet's estimated tokens (`isPoolQuotaDegraded`) — sinks below every pool with
+  //     live headroom so load spills off it BEFORE a 429. These are the KNOWABLE
+  //     constraint signals; there is deliberately NO absolute remaining_pct cliff, so a
+  //     pool that cannot be token-reasoned about (an uncalibrated window) is not
+  //     proactively sunk — the reactive 429→cooldown floor backstops it. Cost-demotion
+  //     is folded in here (not into `isPoolQuotaDegraded`, a pure function of live quota
+  //     signals) because the demotion set is dispatch-run state.
+  //  2. Capability: high-complexity packets prefer the most-capable pool, low-complexity
+  //     the least (preserving expensive capacity for harder work). Rank from `pool.rank`,
+  //     never a provider-name table (INV-shared-core-02).
+  //  3. Load balance: within an equal-capability tie, least in-flight-loaded first so a
+  //     run of same-complexity packets fans OUT across equal pools rather than
+  //     front-loading the first (defect-1 sub-defect 2).
+  //  4. Relative headroom: a final tiebreak toward the pool with more remaining quota —
+  //     a pure RELATIVE comparison of the pools' own `remaining_pct`, never a threshold.
+  const isHardDegraded = (e: { pool: CapacityPool; schedule: WaveSchedule }): boolean =>
+    isPoolQuotaDegraded(e.schedule, packet.estimatedTokens) || costDemotedPoolIds.has(e.pool.id);
+  const ordered = [...evaluated].sort((a, b) => {
+    const degradedDiff = (isHardDegraded(a) ? 1 : 0) - (isHardDegraded(b) ? 1 : 0);
+    if (degradedDiff !== 0) return degradedDiff;
+    const rankDiff = poolCapabilityRank(b.pool) - poolCapabilityRank(a.pool);
+    const capOrdered = highComplexity ? rankDiff : -rankDiff;
+    if (capOrdered !== 0) return capOrdered;
+    const loadDiff =
+      inFlightTracker.getInFlightTokens(a.pool.id) - inFlightTracker.getInFlightTokens(b.pool.id);
+    if (loadDiff !== 0) return loadDiff;
+    const headroomA = a.pool.quotaSourceSnapshot?.remaining_pct ?? Number.POSITIVE_INFINITY;
+    const headroomB = b.pool.quotaSourceSnapshot?.remaining_pct ?? Number.POSITIVE_INFINITY;
+    return headroomB - headroomA;
+  });
 
   for (const { pool, schedule } of ordered) {
     if (schedule.max_concurrent > 0) {

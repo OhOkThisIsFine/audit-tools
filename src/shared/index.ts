@@ -1039,8 +1039,6 @@ export {
   buildProviderModelKey,
   parseHostModelRoster,
   DEFAULT_SAFETY_MARGIN,
-  QUOTA_REMAINING_PCT_CRITICAL,
-  QUOTA_REMAINING_PCT_LOW,
 } from "./quota/scheduler.js";
 export type {
   ScheduleWaveOptions,

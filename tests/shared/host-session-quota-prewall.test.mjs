@@ -9,10 +9,9 @@ const { buildQuotaSource, CompositeQuotaSource } = await import(
 const { createRollingDispatcher } = await import(
   "../../src/shared/dispatch/rollingDispatch.ts"
 );
-const {
-  QUOTA_REMAINING_PCT_CRITICAL,
-  QUOTA_REMAINING_PCT_LOW,
-} = await import("../../src/shared/quota/scheduler.ts");
+const { WINDOW_NEAR_WALL_REMAINING_PCT } = await import(
+  "../../src/shared/quota/hostSessionQuotaSource.ts"
+);
 
 const KEY = "claude-code/standard";
 const OTHER_KEY = "openai-compatible/some-model";
@@ -123,15 +122,17 @@ test("graduated pre-wall: after a recorded limit the band is below CRITICAL (sch
   const resetMs = new Date(event.cooldown_until).getTime();
 
   // Advance past the reset so the window reopened but the tracker is still live —
-  // the account just brushed the wall. The graduated band must be < CRITICAL so
-  // the rolling engine's proactive spill (and the token-budget gate's near-wall
-  // handling) treat the pool as degraded BEFORE a hard 429.
+  // the account just brushed the wall. The source reports the small graduated
+  // near-wall band, so the token-budget gate derives a near-empty budget (and the
+  // rolling engine's proactive spill deprioritises the pool) BEFORE a hard 429.
   now.set(resetMs + 1);
   const probe = await hostSession.probeUsage(KEY);
   expect(probe.status).toBe("ok");
   expect(probe.snapshot.remaining_pct > 0, "graduated, not a hard 0").toBeTruthy();
-  expect(probe.snapshot.remaining_pct < QUOTA_REMAINING_PCT_CRITICAL, `near-wall band must be below CRITICAL (${QUOTA_REMAINING_PCT_CRITICAL}); got ${probe.snapshot.remaining_pct}`).toBeTruthy();
-  expect(probe.snapshot.remaining_pct < QUOTA_REMAINING_PCT_LOW).toBeTruthy();
+  expect(
+    probe.snapshot.remaining_pct,
+    `near-wall band reports the graduated remaining_pct; got ${probe.snapshot.remaining_pct}`,
+  ).toBe(WINDOW_NEAR_WALL_REMAINING_PCT);
 });
 
 test("isPaused fix: an in-flight same-packet re-limit sequence still escalates even when probed between limits", async () => {

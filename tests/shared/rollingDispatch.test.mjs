@@ -1048,8 +1048,15 @@ test("selectProvider — spills off a quota-degraded pool to a healthy peer (INV
   // Same (absent) rank → capability is a tie, so health is the sole differentiator.
   // The degraded pool is FIRST in the array: only the spill reorder can make the
   // healthy peer win, so this isolates the new behaviour.
-  const degraded = makePool("degraded-pool", { quotaSourceSnapshot: { remaining_pct: 0.05 } });
-  const healthy = makePool("healthy-pool", { quotaSourceSnapshot: { remaining_pct: 0.95 } });
+  // degraded-pool has only 100 tokens left — it cannot fund the 1000-token packet, so
+  // its derived remaining budget is below the packet cost → hard-degraded (token-native,
+  // no percentage cliff). healthy-pool has ample tokens.
+  const degraded = makePool("degraded-pool", {
+    quotaSourceSnapshot: { remaining_pct: 0.05, tokens_remaining: 100 },
+  });
+  const healthy = makePool("healthy-pool", {
+    quotaSourceSnapshot: { remaining_pct: 0.95, tokens_remaining: 1_000_000 },
+  });
   const tracker = new InFlightTokenTracker();
   const slot = selectProvider(packet, [degraded, healthy], tracker, {}, enabledSession());
   expect(slot !== null).toBeTruthy();
@@ -1122,13 +1129,70 @@ test("selectProvider — falls back to the pool's construction snapshot cooldown
 test("selectProvider — all pools degraded still yields a slot; capability order applies within the fallback group (INV-QD-14)", async () => {
   await setupTmpQuotaDir();
   const packet = makePacket("p1", { complexity: 1.0 });
-  const deep = makePool("deep-pool", { rank: "deep", quotaSourceSnapshot: { remaining_pct: 0.04 } });
-  const small = makePool("small-pool", { rank: "small", quotaSourceSnapshot: { remaining_pct: 0.04 } });
+  // Both pools have only 100 tokens left — neither can fund the 1000-token packet, so
+  // both are hard-degraded (all-degraded fallback group).
+  const deep = makePool("deep-pool", {
+    rank: "deep",
+    quotaSourceSnapshot: { remaining_pct: 0.04, tokens_remaining: 100 },
+  });
+  const small = makePool("small-pool", {
+    rank: "small",
+    quotaSourceSnapshot: { remaining_pct: 0.04, tokens_remaining: 100 },
+  });
   const tracker = new InFlightTokenTracker();
   // small-pool first in array; a degraded pool is a usable fallback, never a stall.
   const slot = selectProvider(packet, [small, deep], tracker, {}, enabledSession());
   expect(slot !== null, "a degraded pool is still a usable fallback — never a stall").toBeTruthy();
   expect(slot.poolId, "within the all-degraded group, high-complexity still prefers deep").toBe("deep-pool");
+});
+
+test("selectProvider — a near-wall pool that can't fund the packet's tokens spills to a healthy peer of LOWER capability (INV-QD-14, token-native, reachable at requestedConcurrency:1)", async () => {
+  await setupTmpQuotaDir();
+  // Regression: the health signal must be reachable at the requestedConcurrency:1 the
+  // selection path uses (the `binding_cap === "token_budget"` signal was NOT — it only
+  // sets when the gate REDUCES a >1 wave). A high-complexity packet would normally
+  // prefer the deep pool by capability, but the deep pool's remaining budget (100
+  // tokens) can't fund the 1000-token packet → hard-degraded → load spills to the
+  // lower-capability but healthy standard pool BEFORE a 429.
+  const packet = makePacket("p1", { complexity: 0.9, estimatedTokens: 1000 });
+  const nearWall = makePool("nearwall-deep", {
+    rank: "deep",
+    quotaSourceSnapshot: { remaining_pct: 0.05, tokens_remaining: 100 },
+  });
+  const healthy = makePool("healthy-standard", {
+    rank: "standard",
+    quotaSourceSnapshot: { remaining_pct: 0.9, tokens_remaining: 1_000_000 },
+  });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [nearWall, healthy], tracker, {}, enabledSession());
+  expect(slot !== null).toBeTruthy();
+  expect(
+    slot.poolId,
+    "a near-wall pool that can't fund the packet is spilled even to a lower-capability healthy peer",
+  ).toBe("healthy-standard");
+});
+
+test("selectProvider — a low remaining_pct pool that STILL holds enough tokens is NOT degraded (the retired percentage cliff is gone)", async () => {
+  await setupTmpQuotaDir();
+  // 4% remaining but 50k absolute tokens left — plenty to fund the 1000-token packet.
+  // The retired `remaining_pct < 0.3` cliff would have WRONGLY spilled this off; the
+  // token-native signal keeps the more-capable pool because it can actually fund the work.
+  const packet = makePacket("p1", { complexity: 0.9, estimatedTokens: 1000 });
+  const lowPctButFunded = makePool("lowpct-deep", {
+    rank: "deep",
+    quotaSourceSnapshot: { remaining_pct: 0.04, tokens_remaining: 50_000 },
+  });
+  const healthy = makePool("healthy-standard", {
+    rank: "standard",
+    quotaSourceSnapshot: { remaining_pct: 0.9, tokens_remaining: 1_000_000 },
+  });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [lowPctButFunded, healthy], tracker, {}, enabledSession());
+  expect(slot !== null).toBeTruthy();
+  expect(
+    slot.poolId,
+    "low % but enough absolute tokens → still the most-capable pool (no percentage cliff)",
+  ).toBe("lowpct-deep");
 });
 
 test("selectProvider — among healthy pools, capability still decides; health never overrides rank within a group (INV-QD-14)", async () => {
