@@ -11,10 +11,13 @@
 - **Current version = `package.json`** (authoritative). Per-lap shipped detail is NOT narrated here
   (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
-- **Almost everything still open is env-bound live validation, not code.** All major code tracks are
-  complete (host-path quota enforcement ✅ 2026-07-10; access-memory ✅; cost↔speed dial ✅; admission
-  control ✅; arbitrage Phase-0 CODE-COMPLETE; conceptual design review ✅). The bottleneck has flipped:
-  the highest-leverage next action is the **maximal-coverage live run** below, not another code lap.
+- **The maximal-coverage validation run was executed 2026-07-11; its dispatch/quota fix cluster shipped
+  in the current release** (Fix 2 cold-start token-sizing + host-usage recording; Fix 3 token-native
+  spill degradation; credit-exhaustion pool-death class; account-axis 429 cooldown fold; three-tier
+  unmatched-quota harvest; confirm-once; Gate-0 `sources[]` roster; contract-review double-driver). All
+  major code tracks remain complete (host-path quota enforcement ✅ 2026-07-10; access-memory ✅; cost↔speed
+  dial ✅; admission control ✅; arbitrage Phase-0 CODE-COMPLETE; conceptual design review ✅). Next is the
+  bounded forward remainder below + a confirming re-run.
 - **Local env note:** the box runs npm 12.0.0 — it blocks dependency install scripts by default and can
   emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable traps
   before any manual `npm install -g` / packaged-install work.
@@ -46,12 +49,37 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — the maximal-coverage env-bound validation run (owner-attended)
+## ▶ IMMEDIATE NEXT — the bounded forward remainder (quota cluster shipped)
 
-One correctly-configured live audit clears most of the open env-bound watches at once. The owner has
-been misdirected toward these piecemeal before — this is the consolidated recipe. Per-item pass/fail
-detail lives in `docs/backlog.md` → **Live-validation guide** (the run-config matrix + each item's
-"⬇ Live-run watch" line); this section is the *how to launch it*.
+The 2026-07-11 maximal-coverage run surfaced the dispatch/quota bug batch; its fixes shipped in the
+current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
+**full-suite-verify before each loop-core commit**:
+
+1. **critical-flow LLM pass — BUILD it (owner decision locked). NOT loop-core → lower risk.**
+   `spec/audit/audit-goals.md` allows an LLM fallback only when the deterministic confidence check fails.
+   The deterministic side is real (`criticalFlows.fallback_required` in `src/audit/extractors/flows.ts`)
+   but its only consumer (`structureExecutors.ts:173`) just appends an informational string — no
+   executor/worker-prompt runs an actual LLM critical-flow pass on the flag. Wire the gated pass.
+2. **C — host Agent fan-out is quota-invisible (HIGH, loop-core).** The design-review (5 perspectives +
+   judge) and systemic-challenge steps dispatch host subagents that never touch the quota layer (no
+   admission grant/lease, no /usage probe, no pre-wall pacing) → raw death at the session wall. Register
+   the host pool + consume admission for those prescribed-fan-out steps. `docs/backlog.md` → Open bugs.
+3. **D — empty_grant derives no reset-time + wall-pass counts NIM-progress passes (medium, loop-core).**
+   `detectHostDispatchWall` (`hostDispatchWall.ts:27-49`) returns `earliestResetAt:null`; surface the
+   per-pool binding window + derived budget + packet cost. And LIVELOCK_PAUSE_LIMIT shouldn't count
+   passes where the in-process NIM partition ingested results. `docs/backlog.md` → Open bugs.
+4. **openai-compatible config trace (VERIFY FIRST — do NOT blind-flip an already-on default).** The
+   provider already inlines referenced files by default (since `fbbf3039`); the run still needing the
+   `include_referenced_files` workaround is a contradiction → trace the hybrid review-dispatch →
+   provider-config wiring, then build the "refuse to dispatch an unroutable review packet" guard.
+5. **Low residuals:** doc-review auto-apply re-asserting a resolved decision after a process restart; the
+   two A2b residuals; untracked-exclusion residuals (a–e). All in `docs/backlog.md` → Open bugs.
+
+**Confirming re-run (verification track, not blocking the remainder):** re-run the maximal-coverage audit
+on a fresh Claude window to confirm the shipped fixes hold live, finish the parked self-audit (14/261
+packets, resumable), then hand-label `corpus/<run-id>.labels.json` (the A2 oracle unblock). Recipe below.
+
+<details><summary>Reusable launch recipe for the maximal-coverage validation run</summary>
 
 **Where.** A Claude Code conversation opened at the **primary `C:\Code\audit-tools` checkout, branch
 `main`, clean tree — never a lap worktree** (slash workflows run the GLOBAL bin, so worktree state is
@@ -98,16 +126,19 @@ repo + toolchain — none on this box); Copilot/Antigravity quota endpoints (nee
 gated e2es (`RUN_PROVIDER_MATRIX_E2E=1`, `RUN_NIM_E2E=1`, `AUDIT_TOOLS_LIVE_QUOTA=1` — creds + env vars,
 runnable any time).
 
+</details>
+
 ---
 
 ## Suggested ordering — everything else open, sequenced
 
-**Agent laps (while the validation run is pending / between its sessions) — the open-bugs cluster in
-`docs/backlog.md`** (each lean unless noted): doc-review auto-apply re-asserting a resolved decision
-after a process restart; critical-flow LLM fallback spec'd-but-unwired (owner call: build vs downgrade
-the norm). (SHIPPED 2026-07-11: M-B3 citation-gate wrong-phase re-emit; `validate-artifact --name
-judge_report` unsatisfiable self-check — both had burned a live run. Audit worker scratch polluting
-the audited repo root: FIXED 2026-07-10 — residuals under backlog *Open bugs*.)
+**Agent laps — the forward remainder is the IMMEDIATE NEXT list above.** Newly shipped in the current
+release (the 2026-07-11 run's dispatch/quota cluster): Fix 2 cold-start token-sizing + host-usage
+recording; Fix 3 token-native spill; credit-exhaustion pool-death class; account-axis cooldown fold;
+three-tier unmatched-quota harvest; confirm-once; Gate-0 `sources[]` roster; contract-review
+double-driver; charter-extraction gate-drop messages; goal_graph schema in the charter-delta prompt;
+real admission-hold reason. (Earlier: M-B3 + `judge_report` self-check SHIPPED 2026-07-11 — both had
+burned a live run; audit worker scratch pollution FIXED 2026-07-10 — residuals under backlog *Open bugs*.)
 
 **WAITING (gated, not next): D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the
 LONG-lived execution claims — `task-claims.json` 20-min lease, remediate node-claims; FOCUSED-LAP,
