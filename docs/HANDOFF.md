@@ -55,6 +55,15 @@
 
 ## ▶ IMMEDIATE NEXT — the bounded forward remainder (quota cluster shipped)
 
+**DEFERRED (owner call 2026-07-12, resume on fresh quota): the high-signal self-audit remediation.**
+The gate bug that blocked it is fixed + shipped (v0.32.61 — remediate's tool-owned gate no longer uses the
+retired node:test runner; [[remediate-gate-nodetest-runner-bug]]). A force-synthesized slice of 356 crit/high
++ high-confidence real-bug findings (168 post-dedup, 16-node DAG) is fully planned and its contract artifacts
+are **preserved on the primary checkout at `.audit-tools/remediation/`** (session config with NIM/opencode-free/
+codex at `.remediation-artifacts/session-config.json`). Re-run `/remediate-code` against it with the fixed bin
+next session; the run terminal-blocked at status=complete, so it likely needs a fresh run or a manual
+blocked→pending reset rather than a plain resume. Findings slice: `.audit-tools/audit/audit-findings-critical-slice.json`.
+
 The 2026-07-11 maximal-coverage run surfaced the dispatch/quota bug batch; its fixes shipped in the
 current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
 **full-suite-verify before each loop-core commit**:
