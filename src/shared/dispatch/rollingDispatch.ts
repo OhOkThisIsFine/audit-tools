@@ -68,8 +68,10 @@ import {
   recordWaveOutcome,
   readQuotaState,
   emptyQuotaState,
-  recordTokensPerPctObservation,
+  quotaSnapshotWindowPctMap,
+  foldSlopeObservationFromPctMaps,
 } from "../quota/state.js";
+import type { QuotaWindowPctReading } from "../quota/state.js";
 import { buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "../quota/capacity.js";
 import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { detectRateLimitError, computeCooldownUntil } from "../quota/errorParsing.js";
@@ -699,41 +701,27 @@ export function createRollingDispatcher<TPacket>(
   // Δpercent and seed/update the learned tokens_per_pct slope. Degrade-safe: when
   // the snapshot hasn't moved (Δpercent below the floor) nothing is learned.
   interface SlopeBaseline {
-    /** remaining_pct (0–1) per window label at the baseline reading. */
-    pctByLabel: Map<string, number>;
+    /** remaining_pct (0–1) + reset_at per window label at the baseline reading. */
+    pctByLabel: Map<string, QuotaWindowPctReading>;
     /** Tokens dispatched against this pool since the baseline reading. */
     tokensSinceBaseline: number;
   }
   const slopeBaselines: Map<string, SlopeBaseline> = new Map();
 
-  function windowPctMap(pool: CapacityPool | undefined): Map<string, number> {
-    const map = new Map<string, number>();
-    const snap = pool?.quotaSourceSnapshot;
-    if (!snap) return map;
-    if (snap.windows && snap.windows.length > 0) {
-      for (const w of snap.windows) {
-        if (w.remaining_pct != null && Number.isFinite(w.remaining_pct)) {
-          map.set(w.label, w.remaining_pct);
-        }
-      }
-    } else if (snap.remaining_pct != null && Number.isFinite(snap.remaining_pct)) {
-      map.set("default", snap.remaining_pct);
-    }
-    return map;
-  }
-
   function ensureBaseline(poolId: string): void {
     if (slopeBaselines.has(poolId)) return;
     const pool = confirmedPools.find((p) => p.id === poolId);
     slopeBaselines.set(poolId, {
-      pctByLabel: windowPctMap(pool),
+      pctByLabel: quotaSnapshotWindowPctMap(pool?.quotaSourceSnapshot),
       tokensSinceBaseline: 0,
     });
   }
 
   /**
    * Attribute the tokens dispatched since the baseline to whichever of the pool's
-   * windows have MOVED, folding a slope sample per moved window. No-op when the
+   * windows have MOVED, folding a slope sample per moved window (single-sourced
+   * in {@link foldSlopeObservationFromPctMaps}, shared with the host-dispatch
+   * merge path via {@link foldSlopeObservationFromSnapshots}). No-op when the
    * pool has no live snapshot or no window advanced. Re-baselines on any fold.
    */
   async function observeSlope(poolId: string, tokens: number): Promise<void> {
@@ -741,26 +729,14 @@ export function createRollingDispatcher<TPacket>(
     if (!baseline) return;
     baseline.tokensSinceBaseline += Math.max(0, tokens);
     const pool = confirmedPools.find((p) => p.id === poolId);
-    const current = windowPctMap(pool);
-    let foldedAny = false;
-    for (const [label, priorPct] of baseline.pctByLabel) {
-      const nowPct = current.get(label);
-      if (nowPct == null) continue;
-      if ((priorPct - nowPct) * 100 < 0.5) continue; // below MIN_SLOPE_DELTA_PERCENT
-      try {
-        await recordTokensPerPctObservation(
-          poolId,
-          label,
-          priorPct,
-          nowPct,
-          baseline.tokensSinceBaseline,
-        );
-      } catch {
-        // Non-fatal: slope learning must never abort dispatch.
-      }
-      foldedAny = true;
-    }
-    if (foldedAny) {
+    const current = quotaSnapshotWindowPctMap(pool?.quotaSourceSnapshot);
+    const folded = await foldSlopeObservationFromPctMaps(
+      poolId,
+      baseline.pctByLabel,
+      current,
+      baseline.tokensSinceBaseline,
+    );
+    if (folded.length > 0) {
       slopeBaselines.set(poolId, { pctByLabel: current, tokensSinceBaseline: 0 });
       quotaStateCacheDirty = true;
     }

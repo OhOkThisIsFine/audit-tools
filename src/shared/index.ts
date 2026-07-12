@@ -945,6 +945,10 @@ export {
   recordWaveOutcome,
   foldTokensPerPctObservation,
   recordTokensPerPctObservation,
+  quotaSnapshotWindowPctMap,
+  foldSlopeObservationFromPctMaps,
+  foldSlopeObservationFromSnapshots,
+  MIN_SLOPE_DELTA_PERCENT,
   foldOutputRatioObservation,
   recordOutputRatioObservation,
   OUTPUT_RATIO_EWMA_ALPHA,
@@ -952,6 +956,7 @@ export {
   BASE_COOLDOWN_MS,
   MAX_COOLDOWN_MS,
 } from "./quota/state.js";
+export type { QuotaWindowPctReading } from "./quota/state.js";
 export {
   detectRateLimitError,
   detectRateLimitFromChannel,

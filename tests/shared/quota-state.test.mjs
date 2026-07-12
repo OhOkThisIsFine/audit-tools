@@ -15,6 +15,9 @@ const {
   recordWaveOutcome,
   foldTokensPerPctObservation,
   recordTokensPerPctObservation,
+  quotaSnapshotWindowPctMap,
+  foldSlopeObservationFromPctMaps,
+  foldSlopeObservationFromSnapshots,
 } = await import("../../src/shared/quota/state.ts");
 
 async function withTempStateDir(fn) {
@@ -164,6 +167,135 @@ test("recordTokensPerPctObservation persists a per-window slope to quota-state",
     // 2000 tokens / (0.2-0.1)*100 = 10 percent → 200 tokens/pct.
     expect(Math.abs(entry.tokens_per_pct.weekly - 200) < 1e-9).toBeTruthy();
   });
+});
+
+// ── quotaSnapshotWindowPctMap / foldSlopeObservationFromPctMaps ─────────────
+// The single-sourced fold CORE behind both slope-learning call sites (the
+// in-process rolling dispatcher's observeSlope AND the host-dispatch merge
+// path's foldSlopeObservationFromSnapshots) — a fix here applies to both.
+
+test("quotaSnapshotWindowPctMap: single-window snapshot falls back to a 'default' label, carrying reset_at", () => {
+  const map = quotaSnapshotWindowPctMap({
+    remaining_pct: 0.6,
+    reset_at: "2026-07-11T10:00:00.000Z",
+    requests_remaining: null,
+    tokens_remaining: null,
+    captured_at: "2026-07-11T09:00:00.000Z",
+    source: "test",
+  });
+  expect(map.get("default")).toEqual({ remainingPct: 0.6, resetAt: "2026-07-11T10:00:00.000Z" });
+});
+
+test("quotaSnapshotWindowPctMap: multi-window snapshot keys by label, each with its own reset_at", () => {
+  const map = quotaSnapshotWindowPctMap({
+    remaining_pct: 0.6,
+    reset_at: "2026-07-11T10:00:00.000Z",
+    requests_remaining: null,
+    tokens_remaining: null,
+    captured_at: "2026-07-11T09:00:00.000Z",
+    source: "test",
+    windows: [
+      { label: "session", remaining_pct: 0.6, reset_at: "2026-07-11T10:00:00.000Z" },
+      { label: "weekly", remaining_pct: 0.9, reset_at: "2026-07-18T00:00:00.000Z" },
+    ],
+  });
+  expect(map.get("session")).toEqual({ remainingPct: 0.6, resetAt: "2026-07-11T10:00:00.000Z" });
+  expect(map.get("weekly")).toEqual({ remainingPct: 0.9, resetAt: "2026-07-18T00:00:00.000Z" });
+  expect(map.has("default")).toBe(false);
+});
+
+test("foldSlopeObservationFromPctMaps: zero/negative delta is rejected for both an increase and no change", async () => {
+  await withTempStateDir(async () => {
+    const priorIncrease = new Map([["default", { remainingPct: 0.4, resetAt: null }]]);
+    const currentIncrease = new Map([["default", { remainingPct: 0.5, resetAt: null }]]); // went UP
+    const foldedIncrease = await foldSlopeObservationFromPctMaps("prov/model", priorIncrease, currentIncrease, 5000);
+    expect(foldedIncrease).toEqual([]);
+
+    const priorSame = new Map([["default", { remainingPct: 0.4, resetAt: null }]]);
+    const currentSame = new Map([["default", { remainingPct: 0.4, resetAt: null }]]); // unchanged
+    const foldedSame = await foldSlopeObservationFromPctMaps("prov/model", priorSame, currentSame, 5000);
+    expect(foldedSame).toEqual([]);
+
+    const state = await readQuotaState();
+    expect(state.entries["prov/model"]).toBeUndefined();
+  });
+});
+
+test("foldSlopeObservationFromPctMaps (P1): a label whose reset_at differs between PRE and POST (rollover) is skipped", async () => {
+  await withTempStateDir(async () => {
+    // PRE: 0.5 remaining in the window resetting at T1. POST: 0.3 remaining but
+    // reset_at moved to T2 — the window rolled over, so this is NOT the ~20pt
+    // drop it looks like; folding it would learn a fake slope.
+    const prior = new Map([["session", { remainingPct: 0.5, resetAt: "2026-07-11T10:00:00.000Z" }]]);
+    const current = new Map([["session", { remainingPct: 0.3, resetAt: "2026-07-11T15:00:00.000Z" }]]);
+    const folded = await foldSlopeObservationFromPctMaps("prov/model", prior, current, 5000);
+    expect(folded).toEqual([]);
+
+    const state = await readQuotaState();
+    expect(state.entries["prov/model"]).toBeUndefined();
+  });
+});
+
+test("foldSlopeObservationFromPctMaps (P1): matching reset_at (or an unknown one on either side) still folds", async () => {
+  await withTempStateDir(async () => {
+    const prior = new Map([["session", { remainingPct: 0.5, resetAt: "2026-07-11T10:00:00.000Z" }]]);
+    const current = new Map([["session", { remainingPct: 0.4, resetAt: "2026-07-11T10:00:00.000Z" }]]);
+    const folded = await foldSlopeObservationFromPctMaps("prov/model", prior, current, 5000);
+    expect(folded).toEqual(["session"]);
+
+    // An unknown reset_at on one side cannot prove a rollover, so it doesn't block.
+    const prior2 = new Map([["weekly", { remainingPct: 0.5, resetAt: null }]]);
+    const current2 = new Map([["weekly", { remainingPct: 0.4, resetAt: "2026-07-18T00:00:00.000Z" }]]);
+    const folded2 = await foldSlopeObservationFromPctMaps("prov/model2", prior2, current2, 5000);
+    expect(folded2).toEqual(["weekly"]);
+  });
+});
+
+test("foldSlopeObservationFromSnapshots (C1 shared-core wrapper): folds a real PRE/POST snapshot pair end to end", async () => {
+  await withTempStateDir(async () => {
+    const pre = {
+      remaining_pct: 0.5,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null,
+      captured_at: "2026-07-11T09:00:00.000Z",
+      source: "test",
+    };
+    const post = {
+      remaining_pct: 0.4,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null,
+      captured_at: "2026-07-11T09:05:00.000Z",
+      source: "test",
+    };
+    const folded = await foldSlopeObservationFromSnapshots("prov/model", pre, post, 1500);
+    expect(folded).toEqual(["default"]);
+    const state = await readQuotaState();
+    // 1500 tokens / (0.5-0.4)*100 = 10 percent → 150 tokens/pct.
+    expect(Math.abs(state.entries["prov/model"].tokens_per_pct.default - 150) < 1e-6).toBe(true);
+  });
+});
+
+test("foldSlopeObservationFromPctMaps (C2): a swallowed write failure is never reported as folded", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "audit-tools-quota-c2-"));
+  try {
+    setQuotaStateDir(dir);
+    // Force recordTokensPerPctObservation's read-modify-write to throw: point
+    // the state PATH at a directory instead of a file (EISDIR on read).
+    await mkdir(join(dir, "quota-state.json"));
+
+    const prior = new Map([["default", { remainingPct: 0.5, resetAt: null }]]);
+    const current = new Map([["default", { remainingPct: 0.4, resetAt: null }]]);
+    const folded = await foldSlopeObservationFromPctMaps("prov/model", prior, current, 1000);
+
+    // BEFORE the C2 fix this would be ["default"] even though nothing was
+    // actually written — the caller (rollingDispatch's observeSlope) would
+    // wrongly re-baseline as if a fold had occurred.
+    expect(folded).toEqual([]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 // ── INV-QD-15: an unusable quota-state file must never masquerade as cold start ──

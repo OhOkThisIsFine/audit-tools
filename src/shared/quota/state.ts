@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ObservedWaveOutcome, QuotaState, QuotaStateEntry } from "./types.js";
 import { withFileLock } from "./fileLock.js";
 import { writeJsonFile } from "../io/json.js";
+import type { QuotaUsageSnapshot } from "./quotaSource.js";
 
 let _statePath: string | undefined;
 
@@ -356,6 +357,146 @@ export async function recordTokensPerPctObservation(
     state.entries[providerModelKey] = entry;
     await writeQuotaState(state);
   });
+}
+
+/**
+ * One window's remaining-percent reading paired with the `reset_at` identity
+ * it was read against, so two readings of the "same" label taken at different
+ * times can be checked for a window ROLLOVER (see the P1 guard in
+ * {@link foldSlopeObservationFromPctMaps}) before their percents are diffed.
+ */
+export interface QuotaWindowPctReading {
+  remainingPct: number;
+  /** The window's `reset_at` at the time of this reading, or null when the source didn't report one (rollover detection is then skipped for this reading — an unknown reset identity never blocks a fold it can't judge). */
+  resetAt: string | null;
+}
+
+/**
+ * Build a window-label → {@link QuotaWindowPctReading} map from a quota usage
+ * snapshot. Falls back to a single `"default"` label when the source has no
+ * per-window breakdown (single-window providers). Returns an empty map for a
+ * null/absent snapshot or one with no usable percent reading.
+ *
+ * Single-sourced so the in-process rolling dispatcher and the host-dispatch
+ * merge path attribute a slope sample against the SAME window semantics —
+ * see {@link foldSlopeObservationFromSnapshots}.
+ */
+export function quotaSnapshotWindowPctMap(
+  snapshot: QuotaUsageSnapshot | null | undefined,
+): Map<string, QuotaWindowPctReading> {
+  const map = new Map<string, QuotaWindowPctReading>();
+  if (!snapshot) return map;
+  if (snapshot.windows && snapshot.windows.length > 0) {
+    for (const w of snapshot.windows) {
+      if (w.remaining_pct != null && Number.isFinite(w.remaining_pct)) {
+        map.set(w.label, { remainingPct: w.remaining_pct, resetAt: w.reset_at ?? null });
+      }
+    }
+  } else if (snapshot.remaining_pct != null && Number.isFinite(snapshot.remaining_pct)) {
+    map.set("default", { remainingPct: snapshot.remaining_pct, resetAt: snapshot.reset_at ?? null });
+  }
+  return map;
+}
+
+/**
+ * Attribute tokens dispatched between a PRE and POST window-pct reading (as
+ * produced by {@link quotaSnapshotWindowPctMap}) to whichever windows moved
+ * past {@link MIN_SLOPE_DELTA_PERCENT}, folding one
+ * {@link recordTokensPerPctObservation} sample per moved window.
+ *
+ * This is the single-sourced fold CORE behind both slope-learning call sites:
+ * the in-process rolling dispatcher (`rollingDispatch.ts`'s `observeSlope`,
+ * which baselines a live-polled snapshot per pool across a run) and the
+ * host-dispatch merge path (`mergeAndIngestCommand.ts` via
+ * {@link foldSlopeObservationFromSnapshots}, which has only a pre-grant
+ * snapshot and a post-merge re-probe — one pair per wave, not a continuous
+ * poll). Both feed the same math so the two engines cannot drift on how a
+ * sample is attributed.
+ *
+ * No-op (never throws) when `tokensDispatched` is non-positive/non-finite, or
+ * when no window appears in both maps with a meaningful Δpercent — mirroring
+ * {@link foldTokensPerPctObservation}'s own degrade-safe floor so the
+ * pre-check here is an optimization (skip the locked write), not a second
+ * source of truth for the threshold. A per-window
+ * `recordTokensPerPctObservation` failure is swallowed: slope learning must
+ * never abort the caller — but (C2) the label is only reported as FOLDED once
+ * the write actually SUCCEEDS, so a swallowed throw never falsely reports
+ * "slope updated" to the caller.
+ *
+ * P1 window-identity guard: a label present on both sides is only diffed when
+ * neither reading's `reset_at` is known to differ from the other's. A window
+ * ROLLOVER between the PRE and POST reading (e.g. remaining_pct=0.5 in the old
+ * window resets to 1.0, then drains to 0.3 in the new one) would otherwise
+ * compute a slope against a fake ~20-point drop instead of the real ~70-point
+ * one — worse, in a case where the new window's drop is SMALLER than the old
+ * window's remaining budget, the "delta" can even look like an increase and get
+ * caught by the zero/negative-delta floor below, or look like a small dip and
+ * silently understate the slope. Either way it is not a same-window
+ * measurement, so it is skipped rather than folded.
+ *
+ * Returns the window labels actually folded, so a caller that re-baselines on
+ * any fold (the in-process dispatcher) can tell whether one occurred without
+ * re-deriving the same comparison.
+ */
+export async function foldSlopeObservationFromPctMaps(
+  providerModelKey: string,
+  priorPctByLabel: Map<string, QuotaWindowPctReading>,
+  currentPctByLabel: Map<string, QuotaWindowPctReading>,
+  tokensDispatched: number,
+): Promise<string[]> {
+  const folded: string[] = [];
+  if (!Number.isFinite(tokensDispatched) || tokensDispatched <= 0) return folded;
+  for (const [label, prior] of priorPctByLabel) {
+    const current = currentPctByLabel.get(label);
+    if (current == null) continue;
+    if (prior.resetAt != null && current.resetAt != null && prior.resetAt !== current.resetAt) {
+      // P1: same label, different window instance — a rollover, not consumption.
+      continue;
+    }
+    // Zero/negative-delta guard: post_pct >= pre_pct (no consumption, or an
+    // increase — e.g. a window that reopened) must never fold. This is also
+    // enforced inside foldTokensPerPctObservation/recordTokensPerPctObservation
+    // itself via MIN_SLOPE_DELTA_PERCENT, but checking it here too means a
+    // non-positive delta never even reaches the locked write.
+    if ((prior.remainingPct - current.remainingPct) * 100 < MIN_SLOPE_DELTA_PERCENT) continue;
+    try {
+      await recordTokensPerPctObservation(
+        providerModelKey,
+        label,
+        prior.remainingPct,
+        current.remainingPct,
+        tokensDispatched,
+      );
+      // C2: push only AFTER a successful write — a throw below is caught and
+      // swallowed (slope learning must never abort the caller) WITHOUT this
+      // label being reported as folded.
+      folded.push(label);
+    } catch {
+      // Non-fatal: slope learning must never abort the caller.
+    }
+  }
+  return folded;
+}
+
+/**
+ * Snapshot-based convenience wrapper over {@link foldSlopeObservationFromPctMaps}:
+ * maps a PRE and POST {@link QuotaUsageSnapshot} through
+ * {@link quotaSnapshotWindowPctMap} and folds the result. The natural entry
+ * point for a caller (the host-dispatch merge path) that holds two whole
+ * snapshots rather than pre-extracted per-window maps.
+ */
+export async function foldSlopeObservationFromSnapshots(
+  providerModelKey: string,
+  priorSnapshot: QuotaUsageSnapshot | null | undefined,
+  currentSnapshot: QuotaUsageSnapshot | null | undefined,
+  tokensDispatched: number,
+): Promise<string[]> {
+  return foldSlopeObservationFromPctMaps(
+    providerModelKey,
+    quotaSnapshotWindowPctMap(priorSnapshot),
+    quotaSnapshotWindowPctMap(currentSnapshot),
+    tokensDispatched,
+  );
 }
 
 function blankEntry(): QuotaStateEntry {

@@ -721,6 +721,45 @@ function validateResultIdentityFields(ctx: ResultValidationContext, issues: Audi
   }
 }
 
+/**
+ * Sanity-check an optional `token_usage` field: when present, both
+ * `input_tokens`/`output_tokens` must be finite, non-negative numbers. This is
+ * host-populated metadata (the worker itself cannot know its own harness-
+ * reported usage — see `AuditResultSchema.token_usage` in `types.ts`), so a
+ * malformed shape is downgraded to a WARNING rather than a hard reject: it
+ * must never block ingest of otherwise-valid findings, it just means this
+ * result's usage is not trusted for `recordTokensPerPctObservation` (the merge
+ * path independently re-checks `Number.isFinite` before summing, so a warned
+ * value is defensively excluded there too, not merely flagged here).
+ */
+function validateResultTokenUsage(ctx: ResultValidationContext, issues: AuditResultIssue[]): void {
+  const { result, taskId, resultIndex } = ctx;
+  const tokenUsage = result.token_usage;
+  if (tokenUsage === undefined) return;
+  if (!isRecord(tokenUsage)) {
+    pushIssue(issues, {
+      severity: "warning",
+      result_index: resultIndex,
+      task_id: taskId,
+      field: "token_usage",
+      message: `token_usage must be an object, got ${describeValue(tokenUsage)}. Ignored for quota learning.`,
+    });
+    return;
+  }
+  for (const key of ["input_tokens", "output_tokens"] as const) {
+    const value = tokenUsage[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      pushIssue(issues, {
+        severity: "warning",
+        result_index: resultIndex,
+        task_id: taskId,
+        field: `token_usage.${key}`,
+        message: `token_usage.${key} must be a non-negative finite number, got ${describeValue(value)}. Ignored for quota learning.`,
+      });
+    }
+  }
+}
+
 function validateFileCoverageEntry(
   entry: unknown,
   j: number,
@@ -960,6 +999,7 @@ function validateSingleAuditResult(
   const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskNormMap, normLineIndex, allTasks, normBoundary };
 
   validateResultIdentityFields(ctx, issues);
+  validateResultTokenUsage(ctx, issues);
 
   const { normalizedFileCoverage, declaredAssignedCoveragePaths } = validateResultFileCoverage(ctx, issues);
 

@@ -26,6 +26,7 @@ import { artifactNameForId, isCanonicalResultFilename, getArtifactsDir, getFlag 
 import { buildWorkerResult } from "./workerResult.js";
 import { PACKET_SCHEMA_FILENAMES } from "../io/runArtifacts.js";
 import { readOwnerTokens } from "./ownerTokens.js";
+import { recordHostTokenUsageObservation } from "./dispatch/tokenUsageObservation.js";
 
 // Schema pointer files prepare-dispatch copies into task-results/ for optional
 // worker self-validation. They are expected, not stray — skip them when
@@ -698,6 +699,43 @@ export async function mergeAndIngest(params: {
   // Phase 4: warn on cross-packet duplicate findings (all results in memory here —
   // more accurate than per-packet early-warning at submit time).
   warnOnDuplicateFindings(passing);
+
+  // Phase 4.5 (Slice B, KEYSTONE, backlog 2026-07-11 "Host pools calibrate
+  // FOREVER"): fold this wave's host-reported token_usage into the host pool's
+  // learned tokens_per_pct slope, so admission can graduate off the cold-start
+  // calibration batch and size grants against real headroom. Best-effort and
+  // fully independent of ingestion outcome — never gates or fails the merge.
+  try {
+    const observation = await recordHostTokenUsageObservation({ runDir, passing });
+    if (observation.recorded) {
+      process.stderr.write(
+        `[merge-and-ingest] Recorded ${observation.tokens} token(s) of usage against pool ` +
+          `'${observation.poolId}' (tokens_per_pct slope updated).\n`,
+      );
+    } else if (observation.reason === "implausible_token_sum") {
+      // C4: never fold a sum this far outside plausibility — surface it loudly
+      // so an operator can spot a host tool stamping cumulative totals instead
+      // of per-dispatch usage, rather than silently dropping the sample.
+      process.stderr.write(
+        `[merge-and-ingest] Warning: rejected implausible host token_usage sum ` +
+          `(${observation.tokens} tokens against pool '${observation.poolId}') — ` +
+          `grossly exceeds the pool's per-dispatch context window × result count. ` +
+          `Not folded into tokens_per_pct. Check whether the host is stamping a ` +
+          `cumulative session total instead of per-dispatch usage.\n`,
+      );
+    } else if (observation.reason === "probe_timeout") {
+      process.stderr.write(
+        `[merge-and-ingest] Warning: host token-usage post-wave quota probe timed out ` +
+          `(pool '${observation.poolId}') — skipped, non-fatal.\n`,
+      );
+    }
+  } catch (error) {
+    process.stderr.write(
+      `[merge-and-ingest] Warning: host token-usage quota recording failed (non-fatal): ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
+  }
 
   // FND-OBS-48c05a13 (+ 2026-07-11 dogfooding): log notDispatched task IDs early
   // (before ingestion) so operators can trace them and re-enter dispatch next
