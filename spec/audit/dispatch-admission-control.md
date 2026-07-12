@@ -298,9 +298,10 @@ orchestrators (audit `dispatch_review`, remediate rolling session).
   learns (`recordTokensPerPctObservation`) and the snapshot the quota source already
   supplies. Cold start (no learned slope for the resourceKey) → probe-then-widen
   (Resolved decision 4): a deliberately narrow first grant, widening as the first
-  completions calibrate the slope. **On the claude-code host path the slope never
-  learns** (the host returns no actual-usage number), so there the operative budget is
-  the declared-cap output envelope only (Resolved decision 1) — the ledger prevents
+  completions calibrate the slope. **On the claude-code host path the slope learns from
+  host-reported `token_usage`** when the host stamps it (`recordHostTokenUsageObservation`,
+  `src/audit/cli/dispatch/tokenUsageObservation.ts`), and degrades to the declared-cap
+  output envelope only (Resolved decision 1) when it doesn't — the ledger prevents
   co-located double-counting but never gates on an absolute token ceiling; the reactive
   429 floor remains the safety. The token-budget path is live only where a provider
   reports usage (NIM/openai-compatible), and its live validation is the env-bound item
@@ -352,8 +353,9 @@ remediate (this is `resolvePoolBudget`'s input; see [[claude-usage-endpoint-body
 
 `hostConcurrencyLimit` (when a host declares one) and real RPM/TPM still clamp the
 admitted set; `reset_at` bounds how long a fully-spent pool stays parked before it
-refills. On the claude-code host path the slope never learns (percent-only, no
-actual-usage number), so there the operative budget is the declared-cap output envelope
+refills. On the claude-code host path the slope learns from host-reported `token_usage`
+when the host stamps it, and degrades to percent-only (no actual-usage number) otherwise,
+so there the operative budget is the declared-cap output envelope
 and the reactive 429 floor — the ledger prevents co-located double-counting but never
 gates on an absolute token ceiling (see *Host-path admission shape*).
 
