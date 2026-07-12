@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 
-const { scheduleWave } = await import("../../src/shared/quota/scheduler.ts");
+const { scheduleWave, COLD_START_PROBE_BATCH } = await import("../../src/shared/quota/scheduler.ts");
 
 // A minimal session-config that keeps quota enabled.
 function baseSessionConfig(overrides = {}) {
@@ -226,6 +226,42 @@ test("cooldown cap: an active cooldown throttles to one slot and short-circuits 
   expect(schedule.max_concurrent, "an active cooldown caps the wave at a single slot").toBe(1);
   expect(schedule.binding_cap).toBe("cooldown");
   expect(schedule.cooldown_until).toBe(future);
+});
+
+// ── Cold-start token-aware sizing (2026-07-11 backlog Bug 1a) ───────────────────
+// Cold-start batch sizing must derive from a conservative token estimate against
+// the real remaining budget, not a flat magic constant — and when NO real budget
+// signal exists at all, it must fall back to a small slope-learning probe, never
+// a large batch against an unknown ceiling.
+
+test("cold start, one window known + a sibling window still calibrating: clamps to the slope-learning probe despite a known budget", () => {
+  // "session" window has an absolute tokens_remaining (known budget = 100_000);
+  // "weekly" window has only a remaining_pct with no learned slope (unresolved).
+  // The pool-level MIN budget is still 100_000 (from the known window), but the
+  // grant must clamp to the probe because the OTHER window's true budget is
+  // unknown — a healthy window must not over-dispatch an un-calibrated sibling.
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: { quota: { safety_margin: 1.0 } },
+    hostModel: null,
+    requestedConcurrency: 10,
+    estimatedSlotTokens: new Array(10).fill(1000),
+    quotaSourceSnapshot: {
+      remaining_pct: 0.5,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null,
+      captured_at: new Date().toISOString(),
+      source: "test",
+      windows: [
+        { label: "session", remaining_pct: null, tokens_remaining: 100_000, reset_at: null },
+        { label: "weekly", remaining_pct: 0.5, tokens_remaining: null, reset_at: null },
+      ],
+    },
+  });
+  expect(schedule.calibrating).toBe(true);
+  expect(schedule.remaining_token_budget).toBe(100_000); // the KNOWN window's budget, surfaced verbatim
+  expect(schedule.max_concurrent).toBe(COLD_START_PROBE_BATCH); // still clamped by the unresolved sibling
 });
 
 test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'", () => {

@@ -139,35 +139,39 @@ test("grants persist as ledger leases and the artifact shape validates", async (
   expect(() => DispatchAdmissionSchema.parse(admission)).not.toThrow();
 });
 
-// ── Cold-start calibration clamp (host-path over-grant fix) ──────────────────
-// At cold start a live snapshot exists but no real token budget can be derived yet
-// (budget ⇒ +Infinity), so WITHOUT this clamp the host grant would fan out the whole
-// frontier before the tokens-per-percent slope is observed. `calibrating` caps the
-// grant to a bounded calibration batch — the bound the host ACTUALLY obeys (the
+// ── Cold-start calibration clamp (host-path over-grant fix, token-aware sizing) ──
+// At full cold start a live snapshot exists but NO window has a real token budget
+// yet (pool.budget ⇒ +Infinity), so WITHOUT this clamp the host grant would fan
+// out the whole frontier — at arbitrary per-packet size — before the
+// tokens-per-percent slope is observed. `calibrating` caps the grant via
+// `deriveColdStartAdmissionBatch`: sized to what conservatively fits when
+// `pool.budget` is still a real finite number (a SIBLING window is the
+// uncalibrated one), else the small slope-learning probe
+// (`COLD_START_PROBE_BATCH`) — the bound the host ACTUALLY obeys (the
 // scheduler's max_concurrent cold-start clamp never reaches the grant).
 
-const { TOKEN_BUDGET_COLD_START_SLOTS } = await import(
+const { COLD_START_PROBE_BATCH } = await import(
   "../../src/shared/quota/scheduler.ts"
 );
 
-test("cold start: a calibrating pool with +Infinity budget caps the grant to the calibration batch", async () => {
+test("cold start, UNKNOWN budget (+Infinity): caps the grant to the slope-learning probe, never a large batch", async () => {
   const ledger = await freshLedger();
   const calibratingHost = pool("host#a/m", { budget: Infinity, calibrating: true });
   const packets = Array.from({ length: 6 }, (_, i) => pkt(`p${i + 1}`, 100));
   const res = await admitBatch({ packets, pools: [calibratingHost], ledger });
-  // Bounded to the calibration batch despite infinite budget and no declared cap.
-  expect(res.granted.length).toBe(TOKEN_BUDGET_COLD_START_SLOTS);
-  expect(res.blocked.length).toBe(6 - TOKEN_BUDGET_COLD_START_SLOTS);
-  const ex = res.explains.find((e) => e.packet_id === `p${TOKEN_BUDGET_COLD_START_SLOTS + 1}`);
+  // Bounded to the probe despite infinite budget and no declared cap.
+  expect(res.granted.length).toBe(COLD_START_PROBE_BATCH);
+  expect(res.blocked.length).toBe(6 - COLD_START_PROBE_BATCH);
+  const ex = res.explains.find((e) => e.packet_id === `p${COLD_START_PROBE_BATCH + 1}`);
   expect(ex.reason).toBe("cap_reached");
 });
 
-test("cold start: a declared cap TIGHTER than the calibration batch still wins (min semantics)", async () => {
+test("cold start: a declared cap TIGHTER than the probe still wins (min semantics)", async () => {
   const ledger = await freshLedger();
   const cappedCalibrating = pool("codex#a/m", { budget: Infinity, calibrating: true, declaredCap: 1 });
   const packets = Array.from({ length: 4 }, (_, i) => pkt(`p${i + 1}`, 100));
   const res = await admitBatch({ packets, pools: [cappedCalibrating], ledger });
-  expect(res.granted.length).toBe(1); // min(declaredCap=1, COLD_START=2)
+  expect(res.granted.length).toBe(1); // min(declaredCap=1, probe=COLD_START_PROBE_BATCH)
 });
 
 test("NOT calibrating: an established pool with budget grants the full batch (clamp does not fire)", async () => {
@@ -179,26 +183,87 @@ test("NOT calibrating: an established pool with budget grants the full batch (cl
   expect(res.blocked.length).toBe(0);
 });
 
-test("cold start: a declared cap LOOSER than the calibration batch loses to it (6 → COLD_START)", async () => {
+test("cold start, UNKNOWN budget: a declared cap LOOSER than the probe loses to it", async () => {
   const ledger = await freshLedger();
   const looseCalibrating = pool("codex#a/m", { budget: Infinity, calibrating: true, declaredCap: 6 });
   const packets = Array.from({ length: 6 }, (_, i) => pkt(`p${i + 1}`, 100));
   const res = await admitBatch({ packets, pools: [looseCalibrating], ledger });
-  expect(res.granted.length).toBe(TOKEN_BUDGET_COLD_START_SLOTS); // min(6, 2)
+  expect(res.granted.length).toBe(COLD_START_PROBE_BATCH); // min(6, probe)
 });
 
 test("mixed pools: a calibrating pool is clamped while a coexisting established pool takes the overflow", async () => {
   const ledger = await freshLedger();
-  // Calibrating host is cheapest → fills first but is capped at the calibration batch;
+  // Calibrating host is cheapest → fills first but is capped at the probe batch;
   // the established (real-budget, not calibrating) source is NOT clamped → takes the rest.
   const calibratingHost = pool("host#a/m", { budget: Infinity, calibrating: true, costRank: 0 });
   const establishedSource = pool("nim#a/m", { budget: Infinity, calibrating: false, costRank: 1 });
   const packets = Array.from({ length: 5 }, (_, i) => pkt(`p${i + 1}`, 100));
   const res = await admitBatch({ packets, pools: [calibratingHost, establishedSource], ledger });
   const counts = res.granted.reduce((m, g) => ((m[g.pool_id] = (m[g.pool_id] ?? 0) + 1), m), {});
-  expect(counts["host#a/m"]).toBe(TOKEN_BUDGET_COLD_START_SLOTS); // calibrating pool clamped
-  expect(counts["nim#a/m"]).toBe(5 - TOKEN_BUDGET_COLD_START_SLOTS); // established pool takes overflow, unclamped
+  expect(counts["host#a/m"]).toBe(COLD_START_PROBE_BATCH); // calibrating pool clamped to the probe
+  expect(counts["nim#a/m"]).toBe(5 - COLD_START_PROBE_BATCH); // established pool takes overflow, unclamped
   expect(res.granted.length).toBe(5); // nothing dropped — overflow had a home
+});
+
+// ── Cold start, KNOWN (finite) budget: token-aware sizing, not a flat count ──────
+// A pool can be `calibrating: true` while `pool.budget` is STILL a real finite
+// number — the MIN-across-windows case where ONE sibling window has no learned
+// slope but another window's budget is known (scheduler.ts's own per-window MIN
+// reduction). In that case the grant must size to what the KNOWN budget
+// conservatively fits, not the flat probe — this is the "derive the bootstrap
+// batch from a conservative token estimate against the real remaining budget"
+// fix (2026-07-11 backlog Bug 1a).
+
+test("cold start, KNOWN ample budget: batch sizes to what fits — MORE than the old flat probe/2", async () => {
+  const ledger = await freshLedger();
+  // budget=100_000, packets cost 100 each, default safety margin 0.8 →
+  // floor(100_000*0.8/100) = 800, far more than any flat small-count fallback.
+  const ampleCalibrating = pool("host#a/m", { budget: 100_000, calibrating: true });
+  const packets = Array.from({ length: 10 }, (_, i) => pkt(`p${i + 1}`, 100));
+  const res = await admitBatch({ packets, pools: [ampleCalibrating], ledger });
+  expect(res.granted.length).toBe(10); // ample known budget admits the WHOLE batch
+  expect(res.blocked.length).toBe(0);
+});
+
+test("cold start, KNOWN tight budget: batch sizes DOWN to what fits — fewer than an ample batch would get", async () => {
+  const ledger = await freshLedger();
+  // budget=150, packets cost 100 each → floor(150*0.8/100) = 1: only one packet's
+  // worth of headroom, so the second is blocked by the count-derived cap.
+  const tightCalibrating = pool("host#a/m", { budget: 150, calibrating: true });
+  const packets = [pkt("p1", 100), pkt("p2", 100)];
+  const res = await admitBatch({ packets, pools: [tightCalibrating], ledger });
+  expect(res.granted.length).toBe(1);
+  expect(res.blocked).toEqual(["p2"]);
+});
+
+test("ANTI-OVER-ADMISSION GUARD: a large per-packet estimate against a SMALL known budget admits ZERO, never exceeds budget", async () => {
+  // The 2026-07-11 incident shape: a calibrating pool with a small real remaining
+  // budget (analogous to a tight session window) facing packets whose own token
+  // estimate individually exceeds it. The batch must NEVER be granted past the
+  // known budget — regardless of how the count-derived cap floors — because the
+  // reservation ledger's own per-packet budget check is the backstop.
+  const ledger = await freshLedger();
+  const smallKnownBudget = pool("host#a/m", { budget: 1_000, calibrating: true });
+  const hugePackets = [pkt("p1", 5_000), pkt("p2", 5_000), pkt("p3", 5_000)];
+  const res = await admitBatch({ packets: hugePackets, pools: [smallKnownBudget], ledger });
+  expect(res.granted.length).toBe(0); // never grants a packet that blows the known budget
+  expect(res.blocked).toEqual(["p1", "p2", "p3"]);
+  for (const ex of res.explains) {
+    expect(ex.admitted).toBe(false);
+    expect(ex.reason).toBe("budget_exhausted");
+  }
+});
+
+test("ANTI-OVER-ADMISSION GUARD: unknown (+Infinity) budget never admits more than the slope-learning probe, however large the packets", async () => {
+  // The other half of the same incident shape: when the budget is genuinely
+  // UNKNOWN (not just small), a batch of huge packets must still be capped to the
+  // probe count — never a large batch fanned out against an unmeasured ceiling.
+  const ledger = await freshLedger();
+  const unknownBudget = pool("host#a/m", { budget: Infinity, calibrating: true });
+  const hugePackets = Array.from({ length: 5 }, (_, i) => pkt(`p${i + 1}`, 375_000));
+  const res = await admitBatch({ packets: hugePackets, pools: [unknownBudget], ledger });
+  expect(res.granted.length).toBe(COLD_START_PROBE_BATCH);
+  expect(res.blocked.length).toBe(5 - COLD_START_PROBE_BATCH);
 });
 
 // ── Cost↔speed dispatch dial (spec/dispatch-cost-speed-dial.md) ──────────────

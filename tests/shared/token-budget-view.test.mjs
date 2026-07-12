@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { renderTokenBudgetView, scheduleWave } from "audit-tools/shared";
-import { TOKEN_BUDGET_COLD_START_SLOTS } from "../../src/shared/quota/scheduler.ts";
+import { COLD_START_PROBE_BATCH } from "../../src/shared/quota/scheduler.ts";
 
 function withQuotaFile(contract, fn) {
   const dir = mkdtempSync(path.join(tmpdir(), "tbv-"));
@@ -152,9 +152,9 @@ test("scheduleWave stamps calibrating=true at cold start (percent-only snapshot,
     },
   });
   // No real token budget derivable yet → calibrating, and the flag is stamped so the
-  // host-path admission grant (not just max_concurrent) gets the calibration-batch cap.
+  // host-path admission grant (not just max_concurrent) gets the probe-batch cap.
   expect(schedule.calibrating).toBe(true);
   expect(schedule.remaining_token_budget).toBe(null);
-  expect(schedule.max_concurrent).toBe(TOKEN_BUDGET_COLD_START_SLOTS);
+  expect(schedule.max_concurrent).toBe(COLD_START_PROBE_BATCH);
 });
 

@@ -334,12 +334,69 @@ export const QUOTA_REMAINING_PCT_CRITICAL = 0.1;
 export const QUOTA_REMAINING_PCT_LOW = 0.3;
 
 /**
- * Cold-start per-window calibration batch: with no learned tokens_per_pct slope
- * for a window and no absolute tokens_remaining, admit at most this many slots so
- * the run can OBSERVE Δutilization and seed the slope. This is a BOOTSTRAP, not a
- * permanent cap — once even one slope sample lands, the learned budget governs.
+ * Slope-learning PROBE batch — the fallback used ONLY when a window's token
+ * budget is genuinely UNKNOWN (uncalibrated: no absolute `tokens_remaining`, no
+ * learned `tokens_per_pct` slope — e.g. a percent-only quota source pre-slope).
+ * This is deliberately the smaller end of the defensible "1-2 packet probe"
+ * range, not a throughput throttle: one admitted+completed packet is enough to
+ * observe a real usage delta and seed the slope, after which
+ * {@link deriveColdStartAdmissionBatch}'s known-budget branch governs sizing.
+ *
+ * Kept small ON PURPOSE — under-admission here just costs one extra `next-step`
+ * round trip (cheap); over-admission against an unknown ceiling bets the whole
+ * batch against a budget nobody has measured yet (the 2026-07-11
+ * 750k-tokens-into-a-26%-remaining-window incident: two calibrating-pool packets
+ * fanned out before any slope existed to size them against). This constant must
+ * stay the ONLY hardcoded admission-count fallback in the cold-start path — every
+ * clamp site derives its batch through {@link deriveColdStartAdmissionBatch}
+ * instead of referencing a magic number directly.
  */
-export const TOKEN_BUDGET_COLD_START_SLOTS = 2;
+export const COLD_START_PROBE_BATCH = 1;
+
+/**
+ * Derive a conservative admission batch size for a calibrating (cold-start)
+ * window/pool — the single source both `scheduleWave`'s per-window clamp and the
+ * host-path grant (`admitBatch`/`admissionLoop.ts`) call, so they can never drift
+ * onto two different sizing rules.
+ *
+ * - KNOWN budget (`availableBudget` finite, e.g. a MIN-reduced
+ *   `remaining_token_budget` even while a SIBLING window is still calibrating):
+ *   size to the largest packet count that fits `availableBudget * safetyFraction`
+ *   at `perPacketTokenEstimate` tokens each — NOT a fixed number. Shrinks for a
+ *   tight budget or a large packet estimate, grows for an ample budget or a small
+ *   estimate. Floored at 1 so a technically-doesn't-fit-the-safety-margin packet
+ *   still gets ONE attempt rather than being silently starved — the reservation
+ *   ledger's own per-packet check (`ReservationLedger.admit`, unaffected by
+ *   `safetyFraction`) is the HARD backstop: it compares the packet's real cost
+ *   against the pool's full remaining budget (not the margined figure here) and
+ *   is the only place that can reject a lease outright, so a floor-to-1 result
+ *   can consume UP TO the full known budget in one grant, never past it.
+ * - UNKNOWN budget (`availableBudget` null/non-finite, or no usable
+ *   `perPacketTokenEstimate`): grant only {@link COLD_START_PROBE_BATCH} — never
+ *   a batch sized against a ceiling nobody has measured yet. NOTE: this bounds
+ *   the admitted packet COUNT, not the admitted packet's own token SIZE — a
+ *   single very large packet can still be the one probe packet admitted (no
+ *   token signal exists yet to size against). Closing that residual requires a
+ *   real budget signal (Slice B: host-usage recording so a calibrating pool
+ *   graduates), not a bigger constant here.
+ */
+export function deriveColdStartAdmissionBatch(params: {
+  availableBudget: number | null | undefined;
+  perPacketTokenEstimate: number;
+  safetyFraction?: number;
+}): number {
+  const { availableBudget, perPacketTokenEstimate, safetyFraction = DEFAULT_SAFETY_MARGIN } = params;
+  if (
+    availableBudget != null &&
+    Number.isFinite(availableBudget) &&
+    availableBudget >= 0 &&
+    Number.isFinite(perPacketTokenEstimate) &&
+    perPacketTokenEstimate > 0
+  ) {
+    return Math.max(1, Math.floor((availableBudget * safetyFraction) / perPacketTokenEstimate));
+  }
+  return COLD_START_PROBE_BATCH;
+}
 
 /**
  * Derive a single window's remaining token budget, in learned/absolute priority:
@@ -651,21 +708,24 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
         k = Math.max(1, Math.floor((budgetTokens - inFlightTokens) / avgTokens));
       }
       // If another of the pool's own windows is still cold (no absolute + no
-      // learned slope), that window can't be budgeted yet — clamp to the
-      // per-window cold-start batch too so a healthy window's budget can't
-      // over-dispatch an un-calibrated one (MIN across the pool's windows).
-      if (calibrating) k = Math.min(k, TOKEN_BUDGET_COLD_START_SLOTS);
+      // learned slope), that OTHER window's true budget is unknown — clamp to
+      // the slope-learning probe so a healthy window's budget can't over-dispatch
+      // an un-calibrated one (MIN across the pool's windows).
+      if (calibrating) {
+        k = Math.min(k, deriveColdStartAdmissionBatch({ availableBudget: null, perPacketTokenEstimate: avgTokens }));
+      }
       k = Math.max(1, k);
       if (k < waveSize) {
         waveSize = k;
         bindingCap = "token_budget";
       }
     } else if (calibrating) {
-      // Cold start: no window has an absolute or learned budget. Admit a small
-      // bounded batch to observe Δutilization and seed the slope — a bootstrap,
-      // not a permanent ceiling.
-      if (TOKEN_BUDGET_COLD_START_SLOTS < waveSize) {
-        waveSize = TOKEN_BUDGET_COLD_START_SLOTS;
+      // Cold start: no window has an absolute or learned budget at all. Admit
+      // only the slope-learning probe — never a batch sized against a ceiling
+      // nobody has measured yet.
+      const probeBatch = deriveColdStartAdmissionBatch({ availableBudget: null, perPacketTokenEstimate: avgTokens });
+      if (probeBatch < waveSize) {
+        waveSize = probeBatch;
         bindingCap = "token_budget";
       }
     }

@@ -22,7 +22,7 @@ import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { estimatePacketCost } from "../quota/packetCost.js";
 import type { DispatchCapacityPoolSummary } from "../quota/capacity.js";
-import { TOKEN_BUDGET_COLD_START_SLOTS } from "../quota/scheduler.js";
+import { deriveColdStartAdmissionBatch } from "../quota/scheduler.js";
 import { tierRank } from "./tierRank.js";
 import { deriveCostRank, lookupConfirmedPosition } from "./costRank.js";
 
@@ -60,12 +60,14 @@ export interface AdmissionPool {
   /** Largest packet cost this pool can fit (context window − output). */
   capacityTokens: number;
   /**
-   * Cold-start calibration (see WaveSchedule.calibrating): a live snapshot exists but
-   * no real token budget could be derived yet (no absolute count, no learned slope).
-   * When true, {@link admitBatch} caps this pool's GRANT to a bounded calibration batch
-   * (`TOKEN_BUDGET_COLD_START_SLOTS`) so the host-path fan-out cannot grant the whole
-   * frontier before the tokens-per-percent slope is observed — the grant obeys this,
-   * whereas the scheduler's `max_concurrent` clamp (which the host ignores) does not.
+   * Cold-start calibration (see WaveSchedule.calibrating): at least one binding window
+   * has no real token budget derived yet (no absolute count, no learned slope). When
+   * true, {@link admitBatch} caps this pool's GRANT via
+   * {@link deriveColdStartAdmissionBatch} — sized to `budget` when `budget` is still a
+   * real finite number (a SIBLING window is the uncalibrated one), else the small
+   * slope-learning probe — so the host-path fan-out cannot grant the whole frontier
+   * before the tokens-per-percent slope is observed. The grant obeys this, whereas the
+   * scheduler's `max_concurrent` clamp (which the host ignores) does not.
    */
   calibrating?: boolean;
 }
@@ -345,15 +347,22 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
     let lastPool = candidates[0]!;
     for (const pool of candidates) {
       // Effective in-flight cap = the declared hard cap, TIGHTENED at cold start to a
-      // bounded calibration batch. At cold start no real token budget exists (budget
-      // ⇒ +Infinity), so without this the host grant would fan out the ENTIRE frontier
-      // before the tokens-per-percent slope can be observed — the scheduler's
+      // TOKEN-AWARE calibration batch (never a flat magic count). `pool.budget` is
+      // `remaining_token_budget ?? +Infinity` (apiPool.ts): when it is still a real
+      // finite number (a SIBLING window is the uncalibrated one), size the batch to
+      // what conservatively fits THIS packet's own cost estimate; when it is
+      // genuinely +Infinity (no window has any real budget yet — e.g. a percent-only
+      // quota source pre-slope), fall back to the small slope-learning probe. Without
+      // this the host grant would fan out the ENTIRE frontier — at arbitrary per-packet
+      // size — before the tokens-per-percent slope can be observed: the scheduler's
       // `max_concurrent` cold-start clamp does NOT reach the grant, which is what the
       // host actually obeys. Only affects `grantLeases:true` (host path); the in-process
       // driver returns before admitBatch.
-      const effectiveCap = pool.calibrating
-        ? Math.min(pool.declaredCap ?? TOKEN_BUDGET_COLD_START_SLOTS, TOKEN_BUDGET_COLD_START_SLOTS)
-        : pool.declaredCap;
+      const coldStartBatch = pool.calibrating
+        ? deriveColdStartAdmissionBatch({ availableBudget: pool.budget, perPacketTokenEstimate: packet.cost })
+        : null;
+      const effectiveCap =
+        coldStartBatch != null ? Math.min(pool.declaredCap ?? coldStartBatch, coldStartBatch) : pool.declaredCap;
       if (effectiveCap != null && (countByPool.get(pool.poolId) ?? 0) >= effectiveCap) {
         lastReason = "cap_reached";
         lastPool = pool;
