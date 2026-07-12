@@ -2916,6 +2916,44 @@ export async function promoteImplementationDagToExtractedPlan(
   const lastOrdinal = Math.max(0, ...slugToOrdinal.values());
   const hasMultiPhase = phaseCut ? phaseCut.phases.length > 1 : false;
 
+  // Root-cause fix for scope-less nodes: the DAG's write scope
+  // (`output_files`/`files_likely_touched`) is host-authored and a coarse
+  // "Remediate <module>" decomposition can leave it EMPTY, which promotes a
+  // finding with empty affected_files AND a block with empty touched_files — an
+  // undispatchable node (no worktree seed, no write scope, no paths for a
+  // single-shot worker to inline) that silently dooms the whole run and
+  // cascade-blocks its dependents. Derive the write scope DETERMINISTICALLY from
+  // the module decomposition instead of trusting the host to have filled it: each
+  // node's obligations are `OBL-<moduleSlug>-…`, and every module declares its
+  // `file_scope`, so a node that declared no files inherits the file_scope of the
+  // module(s) its obligations belong to. (Declared files still win when present.)
+  const decomposedModules = await readDecomposedModules(artifactsDir);
+  // Sorted longest-slug-first so an obligation id resolves to its OWNING module by
+  // longest-`OBL-<slug>-`-prefix match — the same resolution phaseCut uses, so a
+  // shorter slug that prefixes another module's slug never mis-claims its files.
+  const moduleScopesBySlug = decomposedModules
+    .map((m) => ({ slug: moduleSlug(m.name), files: m.file_scope }))
+    .sort((a, b) => b.slug.length - a.slug.length);
+  const deriveNodeFiles = (node: {
+    output_files?: string[];
+    files_likely_touched?: string[];
+    satisfies_obligations?: string[];
+    verification_obligation_ids?: string[];
+  }): string[] => {
+    const declared = [...new Set(node.output_files ?? node.files_likely_touched ?? [])];
+    if (declared.length > 0) return declared;
+    const obligationIds = [
+      ...(node.satisfies_obligations ?? []),
+      ...(node.verification_obligation_ids ?? []),
+    ];
+    const inherited = new Set<string>();
+    for (const id of obligationIds) {
+      const owner = moduleScopesBySlug.find((m) => id.startsWith(`OBL-${m.slug}-`));
+      if (owner) for (const f of owner.files) inherited.add(f);
+    }
+    return [...inherited];
+  };
+
   const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
   const findings = nodes.map((node, index) => {
     const id = ensureNodeId(node.id, index);
@@ -2946,11 +2984,11 @@ export async function promoteImplementationDagToExtractedPlan(
       confidence: "high",
       lens,
       summary: node.description ?? node.title ?? "",
-      // output_files (declared write scope) takes priority over files_likely_touched.
-      // Map each path to the { path } shape that Finding.affected_files expects.
-      affected_files: (node.output_files ?? node.files_likely_touched ?? []).map(
-        (p) => ({ path: p }),
-      ),
+      // output_files (declared write scope) takes priority over files_likely_touched;
+      // when the node declared neither, inherit the module file_scope (deriveNodeFiles)
+      // so the finding is never scope-less. Map each path to the { path } shape that
+      // Finding.affected_files expects.
+      affected_files: deriveNodeFiles(node).map((p) => ({ path: p })),
       evidence:
         obligationEvidence.length > 0
           ? obligationEvidence
@@ -2997,9 +3035,10 @@ export async function promoteImplementationDagToExtractedPlan(
     const deps = ((node as { depends_on?: string[] }).depends_on ?? []).map(
       (depId) => toBlockId(depId),
     );
-    const touchedFiles = [
-      ...new Set(node.output_files ?? node.files_likely_touched ?? []),
-    ];
+    // Same derivation as the finding's affected_files: declared write scope, else
+    // the module file_scope inherited via the node's obligations — so the block's
+    // file-ownership scheduler never sees an empty (undispatchable) touched set.
+    const touchedFiles = deriveNodeFiles(node);
     // Phase ordinal from the union of this node's obligations (max → fail-toward-
     // later). Only stamped when there is a genuine multi-phase cut, so a single-
     // phase change carries no ordinal and the scheduler runs no barrier.

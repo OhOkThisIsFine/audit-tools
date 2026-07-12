@@ -756,7 +756,39 @@ describe("N-R12: promoteImplementationDagToExtractedPlan — propagates files_li
     expect(plan.findings[0].affected_files).toEqual([{ path: "src/foo.ts" }, { path: "src/bar.ts" }]);
   });
 
-  it("node without files_likely_touched produces affected_files=[]", async () => {
+  it("node with NO declared files but WITH module obligations inherits the module file_scope (root-cause fix: no scope-less nodes)", async () => {
+    // A coarse "Remediate <module>" decomposition leaves output_files /
+    // files_likely_touched empty on the DAG node; without the fallback that
+    // promotes a scope-less, undispatchable finding (empty affected_files) that
+    // silently dooms the run. The node's obligations are `OBL-<slug>-…`, so it
+    // must inherit the file_scope of the module they belong to.
+    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", {
+      contract_version: CHAIN_PAYLOADS.module_decomposition.contract_version,
+      goal_id: "G1",
+      modules: [
+        { name: "mod-x", responsibilities: "X.", file_scope: ["src/x1.ts", "src/x2.ts"] },
+        { name: "mod-y", responsibilities: "Y.", file_scope: ["src/y.ts"] },
+      ],
+    });
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G1",
+      nodes: [{
+        id: "N-mod-x", title: "Remediate mod-x", description: "d",
+        satisfies_obligations: ["OBL-mod-x-contract", "OBL-mod-x-inv-1"], depends_on: [],
+        verification_obligation_ids: [], targeted_commands: [], status: "pending",
+      }],
+      edges: [],
+      created_at: CREATED_AT,
+    });
+    await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR);
+    const plan = JSON.parse(await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"));
+    expect(plan.findings[0].affected_files).toEqual([{ path: "src/x1.ts" }, { path: "src/x2.ts" }]);
+    // The block's touched_files is derived the same way (file-ownership scheduler).
+    expect(plan.blocks[0].touched_files).toEqual(["src/x1.ts", "src/x2.ts"]);
+  });
+
+  it("node with no declared files AND no obligations to inherit from produces affected_files=[]", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
       contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
       goal_id: "G1",
