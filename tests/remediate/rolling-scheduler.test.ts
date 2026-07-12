@@ -502,6 +502,19 @@ describe("INV-RS-10 / CE-001 / CE-002: tool-owned final gate command list", () =
     }
   });
 
+  it("is FLAKE-TOLERANT: the unit (vitest) command carries --retry so a transient flake does not coarse-reblock the whole run", () => {
+    // A single timing flake in the target suite otherwise makes the whole-repo gate
+    // red → coarse-reblock-all (INV-RS-09) → on a second flake terminal-blocks the run
+    // (CE-003) with zero fixes landed. Retry at the test level spares a flaky-but-not-
+    // broken test; a genuinely broken test still fails all retries. Gate-scoped only.
+    const unit = toolOwnedFinalGateCommands(REPO_ROOT).filter((c) => c.layer === "unit");
+    for (const c of unit) {
+      const joined = c.argv.join(" ");
+      expect(joined).toMatch(/\bvitest\b/);
+      expect(c.argv.some((a) => /^--retry(=\d+)?$/.test(a))).toBe(true);
+    }
+  });
+
   it("CE-001: single-flight — the unit suites are distinct commands (no suite run twice)", () => {
     const unit = toolOwnedFinalGateCommands(REPO_ROOT).filter((c) => c.layer === "unit");
     const joined = unit.map((c) => c.argv.join(" "));

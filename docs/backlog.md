@@ -34,6 +34,17 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 > lives in git log / memory). Condense at write time, not in a later doc-review pass.
 - **Friction walk (force-synthesize→remediate dogfood lap, 2026-07-12):** (1) **tool-should-decide (HIGH, FIXED v0.32.61):** remediate's tool-owned final/phase-boundary gate was hardwired to the retired `node --test` runner (`gateCommands.ts`) → failed on the vitest tree → EVERY remediate run terminal-blocked with zero fixes; a unit test pinned the broken shape. [[remediate-gate-nodetest-runner-bug]]. **Open forward gap:** no end-to-end remediate-*run* smoke exercises the real tool-owned gate — add one (see Forward tracks) so a broken gate can't hide behind unit tests again. (2) **inefficient-feeding (medium):** the contract pipeline requires ~15 sequential HOST-authoring turns (goal→context→decomp→16 shards→seam→critique→testplan→assessment→counterexample→judge→DAG) BEFORE any dispatch, so with host fan-out off (to save Claude quota) the quota is spent up-front on planning regardless of routing fixes to $0 NIM/Codex; and each failed next-step CONSUMES the `*.input.json` (full regen, no in-place field fix). (3) **tool-should-decide (low):** the implementation_dag citation-grounding gate grounds on lowercased path/symbol *tokens* from title+description, so a node whose scope is dotfiles with no code symbols (`.gemini/*.toml`) or whose prose cites real paths non-token-shaped is rejected — 2 grounding re-loops until a real camelCase symbol / clean lowercase path was embedded.
 - **Friction walk (quota-cluster batch-ship lap, 2026-07-11):** (1) **NIM `llm read`/`write` unusable for reasoning-heavy review** — the selected `nvidia/nemotron-3-ultra-550b` won't emit valid JSON for a `read` review prompt (returned prose "Let me ana…" twice → the strict JSON contract errors out), and a ~500-line diff times out at the default 120s. The "delegate heavy loop-core review to the free NIM pool" workflow ([[three-tier-quota-error-classification]], [[free-nim-pool-first-default-worker]]) silently degrades to doing it in-Claude. Endpoint: either pin a JSON-reliable model for `llm read`/`write`, add a longer default timeout for large stdin, or teach the worker to salvage prose→structured. (inefficient-feeding, medium). (2) **`pre-commit-gate.mjs` false-positives on `git commit -C <sha>`** — the bypass-flag scan flags `-C` as `-n`/`--no-verify`, blocking a legitimate reuse-message commit; had to fall back to `-F <file>`. Tighten the flag regex to word-boundaries. (tool-should-decide, low). (3) **`rtk npm run …` → "program not found"** on this box — the rtk npm wrapper can't resolve the npm shim, so `rtk npm run build`/`check` fail; use PowerShell `npm` directly (CLAUDE.md's "always prefix rtk" doesn't hold for npm here). (durable trap, low).
+- **Codex in-process worker intermittently produces NO result file → node blocks + cascade (2026-07-12 codex-primary self-audit re-run, HIGH).**
+  On the headless in-process rolling engine (`driveRollingImplementDispatch`, `provider: "codex"`),
+  CP-NODE-8 was prepared (`implement-CP-BLOCK-CP-NODE-8.md` written) but the codex worker left NO
+  `*.result.json`, NO stdout/stderr, NO task.json — it never executed or its output was lost. The node
+  exhausted its 2/2 contract retry budget and blocked; because the force-synth DAG is near-linear
+  (6→8→7→12→…), that ONE missing-result node dependency-cascade-blocked 13 downstream nodes (INV-RS-01).
+  Same missing-result CLASS as the NIM openai-compatible failure but on the CLI provider, so it is NOT the
+  file-inlining bug — the in-process engine dispatched a node whose worker silently produced nothing.
+  Endpoint: the engine must treat "prepared-but-no-result" as a retriable spawn failure with a captured
+  cause (codex exit/stderr), not a silent 0-byte → block; and a near-linear DAG should not let one flaky
+  spawn wall the whole run. Two flaky-worker misses now = terminal cascade.
 - **"Delegate the rolling loop" dispatcher pattern breaks on notification routing (2026-07-11 live run, tool-should-decide, medium).**
   The step prompt tells the host to hand the rolling loop to one dedicated dispatcher subagent, but worker
   completion notifications deliver to the MAIN session (the dispatcher idles between events), so the host
@@ -71,6 +82,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   so a packet whose prompt references file paths but inlines no content comes back schema-valid but
   fabricated-empty). Verify `apiPool.ts:343-345`'s per-source forwarding reaches hybrid-partition packet
   configs, then build the guard.
+  **CONFIRMED on the IMPLEMENT dispatch path too (2026-07-12 codex-primary self-audit re-run, HIGH).**
+  With `include_referenced_files: true` set on the `nim` source, an implement node routed to the NIM
+  openai-compatible pool (CP-NODE-6) came back with the worker explicitly stating *"source files not
+  provided; cannot verify claim … Cannot read files in non-interactive mode"* + stderr
+  `[openai-compatible] response was not parseable JSON: no JSON object found`, and its result was dropped
+  ("Missing implement worker result → marking items blocked"). So the referenced-file inlining is NOT
+  reaching implement-dispatch packets (same fabricated-empty / unroutable class as review). The
+  refuse-to-dispatch guard must cover implement packets, not just review. **Live workaround:** route the
+  run codex-only (`provider: "codex"`, drop the openai-compatible sources) — the CLI worker reads the
+  worktree directly. NIM/opencode remain unusable for implement until the inlining is fixed + the guard built.
 - **A2b unmatched-quota fallback — two residuals (SHIPPED; each low, documented at the code site).**
   The three-tier quota-error classifier + verbatim meta-audit harvest shipped (owner-designed: precise
   auto-match → `quota_unclassified` conservative degrade + verbatim-message harvest → pattern improvement).

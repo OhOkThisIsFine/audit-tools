@@ -1,4 +1,4 @@
-import { mkdir, rename } from "node:fs/promises";
+import { mkdir, rename, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { OwnershipRegistry } from "../../dispatch/ownershipRegistry.js";
@@ -457,6 +457,62 @@ function obligationIdsForFinding(
   ];
 }
 
+/**
+ * Diagnose WHY a planned block produced no result file, so the merge's `blocked`
+ * failure_reason carries a cause instead of an opaque "no result file". The
+ * per-node dispatcher (`makeProviderNodeDispatcher`) writes `<block>.task.json`
+ * BEFORE it launches the provider, so the task file's presence is a reliable
+ * discriminator:
+ *   • NO task.json  ⇒ the block was in the dispatch plan but the rolling engine
+ *     NEVER dispatched it (a plan-vs-drive eligibility inconsistency — an ENGINE
+ *     bug, not a worker failure). This is the dangerous case: one un-dispatched
+ *     node terminal-blocks its whole dependent subtree (INV-RS-01 cascade), so
+ *     naming it explicitly is what makes the strand diagnosable.
+ *   • task.json present ⇒ the worker WAS dispatched but wrote no result; surface
+ *     the captured stderr tail (the provider's own error text) as the cause.
+ * Pure/read-only: reads sidecar files, never mutates state.
+ */
+async function diagnoseMissingResultCause(
+  dir: string,
+  blockId: string | undefined,
+): Promise<{ dispatched: boolean; logSuffix: string; reasonDetail: string }> {
+  if (!blockId) {
+    return {
+      dispatched: false,
+      logSuffix: "marking items blocked (no block id to diagnose).",
+      reasonDetail: "",
+    };
+  }
+  const dispatched = existsSync(join(dir, `${blockId}.task.json`));
+  let stderrTail = "";
+  const stderrPath = join(dir, `${blockId}.stderr.txt`);
+  if (existsSync(stderrPath)) {
+    try {
+      stderrTail = (await readFile(stderrPath, "utf8")).trim().slice(-600);
+    } catch {
+      /* unreadable stderr degrades to none */
+    }
+  }
+  if (!dispatched) {
+    return {
+      dispatched: false,
+      logSuffix:
+        "the block was NEVER dispatched (no task.json) — a rolling-engine plan/drive inconsistency, not a worker failure.",
+      reasonDetail:
+        ` Root cause: the block was in the dispatch plan but no worker was ever dispatched for it ` +
+        `(no ${blockId}.task.json) — a rolling-engine plan-vs-drive eligibility inconsistency, NOT a worker ` +
+        `failure. A dependent cascade from here means one un-dispatched node stranded its whole subtree.`,
+    };
+  }
+  return {
+    dispatched: true,
+    logSuffix: `the worker WAS dispatched but wrote no result${stderrTail ? " (stderr captured)" : " and left no stderr"}.`,
+    reasonDetail: stderrTail
+      ? ` The worker WAS dispatched (task.json present) but wrote no result; stderr tail: ${stderrTail}`
+      : ` The worker WAS dispatched (task.json present) but wrote no result and left no stderr.`,
+  };
+}
+
 export async function mergeImplementResults(
   options: DispatchOptions,
   runId: string,
@@ -621,7 +677,14 @@ async function mergeImplementResultsIntoState(
       if (item.block_id && quotaPausedStrandedBlocks.has(item.block_id)) {
         continue;
       }
-      console.warn(`Missing implement worker result: ${item.result_path} — marking items blocked.`);
+      // Capture WHY there is no result (dispatched-but-silent vs never-dispatched)
+      // so the `blocked` reason is diagnosable instead of opaque — the opacity here
+      // is what made a one-node strand cascade-blocking the whole DAG impossible to
+      // root-cause after the fact.
+      const cause = await diagnoseMissingResultCause(dir, item.block_id);
+      console.warn(
+        `Missing implement worker result: ${item.result_path} — ${cause.logSuffix}`,
+      );
       const block = item.block_id
         ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
         : undefined;
@@ -634,7 +697,7 @@ async function mergeImplementResultsIntoState(
         stateItem.status = "blocked";
         markTerminal(stateItem);
         stateItem.failure_reason =
-          `Implementation worker did not produce a result file: ${item.result_path}`;
+          `Implementation worker did not produce a result file: ${item.result_path}.${cause.reasonDetail}`;
       }
       continue;
     }

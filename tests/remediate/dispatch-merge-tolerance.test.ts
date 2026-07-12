@@ -135,6 +135,77 @@ afterEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
 });
 
+/**
+ * Write a dispatch-plan for the single block but NO result file, optionally
+ * seeding the sidecars the merge diagnoses (`<block>.task.json` = "was
+ * dispatched"; `<block>.stderr.txt` = the provider's error text), then merge.
+ */
+async function mergeWithMissingResult(opts: {
+  taskJson?: boolean;
+  stderr?: string;
+}): Promise<RemediationState> {
+  const runId = "PLAN-1";
+  const resultDir = join(ARTIFACTS_DIR, "runs", runId, "implement");
+  await mkdir(resultDir, { recursive: true });
+  const resultPath = join(resultDir, "implement-CP-BLOCK-N-x.result.json");
+  await writeFile(
+    join(resultDir, "dispatch-plan.json"),
+    JSON.stringify({
+      contract_version: REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+      phase: "implement",
+      run_id: runId,
+      repo_root: REPO_DIR,
+      artifacts_dir: ARTIFACTS_DIR,
+      items: [
+        {
+          task_id: "implement-CP-BLOCK-N-x",
+          block_id: "CP-BLOCK-N-x",
+          prompt_path: join(resultDir, "implement-CP-BLOCK-N-x.md"),
+          result_path: resultPath,
+          access: { read_paths: ["src/x.ts"], write_paths: ["src/x.ts", resultPath] },
+        },
+      ],
+    }),
+  );
+  // Deliberately DO NOT write resultPath — this is the missing-result case.
+  if (opts.taskJson) {
+    await writeFile(join(resultDir, "CP-BLOCK-N-x.task.json"), JSON.stringify({ id: "CP-BLOCK-N-x" }));
+  }
+  if (opts.stderr !== undefined) {
+    await writeFile(join(resultDir, "CP-BLOCK-N-x.stderr.txt"), opts.stderr);
+  }
+  return mergeImplementResults({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR }, runId);
+}
+
+// ---------------------------------------------------------------------------
+// Missing-result diagnosis (fix: opaque "no result file" cascade)
+// ---------------------------------------------------------------------------
+
+describe("mergeImplementResults — missing-result cause diagnosis", () => {
+  it("NEVER-DISPATCHED (no task.json): blocks with an explicit engine plan/drive-inconsistency cause, not an opaque reason", async () => {
+    await saveState(makeNodeState());
+    const merged = await mergeWithMissingResult({ taskJson: false });
+    const item = merged.items["N-x"];
+    expect(item.status).toBe("blocked");
+    // The failure names that no worker was ever dispatched (the dangerous
+    // cascade root), not just "no result file".
+    expect(item.failure_reason).toMatch(/no worker was ever dispatched/i);
+    expect(item.failure_reason).toMatch(/task\.json/i);
+  });
+
+  it("DISPATCHED-BUT-SILENT (task.json present): blocks and surfaces the captured stderr tail as the cause", async () => {
+    await saveState(makeNodeState());
+    const merged = await mergeWithMissingResult({
+      taskJson: true,
+      stderr: "codex: fatal: sandbox denied write outside workspace",
+    });
+    const item = merged.items["N-x"];
+    expect(item.status).toBe("blocked");
+    expect(item.failure_reason).toMatch(/WAS dispatched/i);
+    expect(item.failure_reason).toMatch(/sandbox denied write/);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // buildBlockAliasMap
 // ---------------------------------------------------------------------------

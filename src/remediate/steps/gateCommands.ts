@@ -60,8 +60,19 @@ export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[]
     // the node:test split was retired in the single-vitest migration, so a separate
     // `node --import tsx/esm --test` command would both be redundant with this and
     // FAIL on the current tree (the .test.mjs files use vitest globals, not node:test).
+    //
+    // `--retry=2` is FLAKE-TOLERANCE, not flake-masking: the tool-owned gate is a
+    // ROBUSTNESS check (did the remediation's edits break the repo?), and its red is
+    // COARSE-REBLOCK-ALL (INV-RS-09) — a single transient timing flake in the target
+    // suite (e.g. a rolling-dispatch "expected 1 to be 2" race under full parallel
+    // load) otherwise reopens EVERY item to pending and, on a second flake, terminal-
+    // blocks the whole run (CE-003 bound 2) with zero fixes landed — the exact failure
+    // this scoping is closing. A genuinely-broken test still fails all retries → red →
+    // reblock; only a test that PASSES on retry (i.e. was flaky, not broken) is spared.
+    // Gate-scoped ON PURPOSE (never vitest.config `retry`, which would mask flakes in
+    // CI / `npm test` where surfacing them is the point).
     {
-      argv: ["npx", "vitest", "run"],
+      argv: ["npx", "vitest", "run", "--retry=2"],
       build_free: true,
       layer: "unit",
     },
