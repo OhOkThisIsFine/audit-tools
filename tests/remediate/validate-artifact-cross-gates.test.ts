@@ -35,6 +35,9 @@ import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
   CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
+  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
 } from "audit-tools/shared";
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
@@ -368,6 +371,110 @@ describe("runValidateArtifactAction (validate-artifact --name X self-check)", ()
     expect(result.status).toBe("ok");
     expect(result.issue_count).toBe(0);
     expect(exitCode).toBe(0);
+  });
+
+  it("RED→GREEN: judge_report with an accepted counterexample self-validates 'ok' pre-DAG (was falsely 'error')", async () => {
+    // The OBL-CO-03 evidence-threading gate fail-closes when a judge accepts a
+    // counterexample but no implementation_dag threads it. The DAG is authored
+    // AFTER the judge, so at judge-authoring time it cannot exist — the judge
+    // author could never satisfy "fix issues until ok". A write-time self-check
+    // must not report a defect scoped to a DOWNSTREAM (not-yet-authored) artifact.
+    const repo = await makeTempDir();
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    const inFlight = {
+      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+      goal_id: "G1",
+      verdict: "needs_repair",
+      classifications: [
+        {
+          counterexample_id: "CE-1",
+          classification: "accepted",
+          rationale: "the counterexample exposes a real gap the design must address",
+        },
+      ],
+      repair_directive: {
+        target: "finalized_module_contracts",
+        instruction: "tighten the session contract to reject the accepted counterexample",
+      },
+    };
+    const file = await writeTempFile(repo, "judge.json", inFlight);
+
+    const { result, exitCode } = await runValidateArtifactAction({
+      name: "judge_report",
+      file,
+      root: repo,
+      artifactsDir,
+    });
+
+    expect(result.status).toBe("ok");
+    expect(exitCode).toBe(0);
+    expect(
+      (result.issues ?? []).some((i) => i.path.startsWith("implementation_dag")),
+    ).toBe(false);
+  });
+
+  it("non-weakening: self-checking the implementation_dag itself STILL catches an unthreaded accepted counterexample", async () => {
+    // The suppression is phase-scoped to the artifact being authored. When the
+    // DAG is the in-flight artifact, an `implementation_dag`-scoped defect is NOT
+    // downstream of itself — the promotion-boundary self-check must still fire.
+    const repo = await makeTempDir();
+    const artifactsDir = join(repo, ".audit-tools", "remediation");
+    await writeContractArtifact(artifactsDir, "obligation_ledger", {
+      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+      goal_id: "G1",
+      obligations: [
+        { id: "O-1", description: "a structural boundary", kind: "structural", depends_on: [], status: "pending" },
+      ],
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "counterexample", {
+      contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
+      goal_id: "G1",
+      counterexamples: [{ id: "CE-1", description: "a real gap" }],
+      created_at: CREATED_AT,
+    });
+    await writeContractArtifact(artifactsDir, "judge_report", {
+      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
+      goal_id: "G1",
+      verdict: "approved",
+      classifications: [
+        { counterexample_id: "CE-1", classification: "accepted", rationale: "must be addressed downstream" },
+      ],
+      created_at: CREATED_AT,
+    });
+    // In-flight DAG: traceable via O-1 but does NOT thread the accepted CE-1.
+    const inFlight = {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G1",
+      nodes: [
+        {
+          id: "CP-001",
+          title: "Do the structural work",
+          description: "Apply the structural boundary change.",
+          satisfies_obligations: ["O-1"],
+          addresses_counterexamples: [],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+        },
+      ],
+      edges: [],
+    };
+    const file = await writeTempFile(repo, "dag.json", inFlight);
+
+    const { result, exitCode } = await runValidateArtifactAction({
+      name: "implementation_dag",
+      file,
+      root: repo,
+      artifactsDir,
+    });
+
+    expect(result.status).toBe("error");
+    expect(exitCode).toBe(1);
+    expect(
+      (result.issues ?? []).some((i) => i.path.startsWith("implementation_dag")),
+    ).toBe(true);
   });
 
   it("a corrupt (malformed-JSON) sibling envelope errors out (exit 2), not an unhandled crash", async () => {

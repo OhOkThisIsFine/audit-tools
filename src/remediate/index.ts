@@ -428,6 +428,31 @@ export async function runValidateArtifactAction(options: {
     };
   }
 
+  // A write-time self-check for `name` gates only what is KNOWABLE when `name`
+  // is authored — it must not report a defect scoped to an artifact authored
+  // LATER in the pipeline (which does not exist yet at this write). The
+  // canonical example: the OBL-CO-03 evidence-threading cross-gate fail-closes
+  // when a judge ACCEPTS a counterexample but no implementation_dag threads it —
+  // correct at the DAG/promotion boundary, but the DAG is authored AFTER the
+  // judge, so `validate-artifact --name judge_report` could never return "ok"
+  // for an honest judge with accepted counterexamples (its "fix issues until ok"
+  // prompt was unsatisfiable). Suppress cross-gate issues whose scoped artifact
+  // is DOWNSTREAM of `name`; the promotion sweep (where that downstream artifact
+  // IS the in-flight one, so its order is not > name's) still enforces them in
+  // full. This phase-scopes ONLY the singular self-check to match what next-step
+  // applies at `name`'s phase — the shared cross-gate SET the plural sweep and
+  // next-step run is untouched, so the two can never diverge on what IS checked.
+  const nameOrder = CP_ARTIFACT_NAMES.indexOf(name);
+  const isDownstreamScopedIssue = (issue: ValidationIssue): boolean => {
+    // Issue paths are `<artifact>.<field>…` / `<artifact>[i]…`; the leading
+    // segment names the artifact the defect belongs to. A non-artifact prefix
+    // (e.g. `decomposition_file_scope.repo_tree`) resolves to -1 → never
+    // suppressed (only a POSITIVE downstream match is dropped).
+    const lead = issue.path.split(/[.[]/, 1)[0];
+    return CP_ARTIFACT_NAMES.indexOf(lead as ContractPipelineArtifactName) > nameOrder;
+  };
+  crossGateIssues = crossGateIssues.filter((issue) => !isDownstreamScopedIssue(issue));
+
   const issues = [...structuralIssues, ...crossGateIssues];
   const errors = issues.filter((issue) => issue.severity === "error");
   return {

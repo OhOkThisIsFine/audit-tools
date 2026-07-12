@@ -71,13 +71,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     to such paths fail grounding while the disposition (which uses `-z`) keeps them in scope.
   - (e) The audit `renderEdgeReasoningStepPrompt` single-agent dispatch carries no scratch-dir note (params
     lack run context; one bounded agent writing one results file — lowest-risk path, add if it ever litters).
-- **`validate-artifact --name judge_report` can never return "ok" for an honest needs_repair verdict (2026-07-09).**
-  The self-check runs the cross-gate `implementation_dag.evidence_threading` (OBL-CO-03 check 2,
-  src/remediate/validation/contractPipelineGates.ts:600), fail-closed when accepted counterexamples exist and no
-  implementation_dag does — but the DAG only exists after judge approval, so the needs_repair path is unsatisfiable at
-  judge-authoring time. Ingest applies only the structural validator so the run proceeds, but the self-check
-  contradicts the step prompt's "fix issues until ok". Fix: scope judge_report validate-artifact to the structural
-  validator (or suppress DAG-dependent cross-gates for artifacts authored before the DAG phase).
 - **Friction-walk lesson (ledger-writer / acceptNode-inert-clean lap):** `[[spec-degradation-and-doc-staleness]]`
   (verify premises before building; a pause/interrupt is not a content-veto) — see memory. Open tool slivers:
   (a) NIM `llm read` going down silently degrades the "route review to free NIM" plan to paid subagents with no
