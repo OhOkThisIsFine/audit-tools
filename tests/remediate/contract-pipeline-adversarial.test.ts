@@ -983,6 +983,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
   async function writeChainThroughAssessment(
     finalizedModuleContractsOverride?: unknown,
     obligationLedgerOverride?: unknown,
+    moduleDecompositionOverride?: unknown,
   ): Promise<void> {
     const base = payloads();
     const chainNames = [
@@ -999,7 +1000,12 @@ describe("design-spec structural gates: critic phase gate checks", () => {
       "contract_assessment_report",
     ] as const;
     for (const name of chainNames) {
-      if (name === "finalized_module_contracts" && finalizedModuleContractsOverride !== undefined) {
+      if (name === "module_decomposition" && moduleDecompositionOverride !== undefined) {
+        // Written into the chain BEFORE ingest so downstream dependency hashes
+        // are computed against it (mutating it post-ingest would stale the
+        // downstream artifacts and re-emit drafting instead of reaching critic).
+        await writeRawArtifact(name, moduleDecompositionOverride);
+      } else if (name === "finalized_module_contracts" && finalizedModuleContractsOverride !== undefined) {
         await writeRawArtifact(name, finalizedModuleContractsOverride);
       } else if (name === "obligation_ledger" && obligationLedgerOverride !== undefined) {
         await writeRawArtifact(name, obligationLedgerOverride);
@@ -1051,6 +1057,55 @@ describe("design-spec structural gates: critic phase gate checks", () => {
     expect(prompt).toMatch(/Contract Finalization|Finalized Module Contracts/i);
     // Gate error message present
     expect(prompt).toMatch(/Design Structural Gate Errors|outputs/i);
+  });
+
+  it("M-B3: pre-critic citation gate re-emits the DECOMPOSITION phase (not contract_finalization) for an ungrounded file_scope", async () => {
+    // file_scope lives ONLY in module_decomposition (finalized contracts carry
+    // interface fields, not paths). A module citing a ghost path with no real
+    // symbol must re-emit the phase that OWNS file_scope — `decomposition` — so
+    // re-authoring can actually fix the path. Re-emitting contract_finalization
+    // (the prior bug) could never change file_scope → the gate looped forever.
+    const ghostDecomposition = {
+      contract_version: CP_MODULE_DECOMPOSITION_VERSION,
+      goal_id: "G1",
+      modules: [
+        {
+          name: "ghost-module",
+          responsibilities: "do the work",
+          file_scope: ["ghost-dir/ghost-file-xyz.ts"],
+        },
+      ],
+      created_at: CREATED_AT,
+    };
+    // A single STRUCTURAL obligation (not testable) so the empty test_validator_plan
+    // does not trip the earlier pre-critic paired-obligation gate (5b) — the point
+    // of this test is the citation gate (5c), which must be REACHED.
+    const structuralLedger = {
+      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+      goal_id: "G1",
+      obligations: [
+        {
+          id: "O-1",
+          description: "the module boundary is respected",
+          kind: "structural",
+          depends_on: [],
+          status: "pending",
+        },
+      ],
+      created_at: CREATED_AT,
+    };
+    await writeChainThroughAssessment(undefined, structuralLedger, ghostDecomposition);
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    expect(step?.step_kind).toBe("contract_pipeline");
+    const prompt = await promptOf(step!);
+    // The citation gate fired…
+    expect(prompt).toMatch(/Source-Grounded Citation Gate Errors/);
+    // …and re-emitted the DECOMPOSITION phase (its prompt carries the decompose
+    // instruction), NOT contract_finalization.
+    expect(prompt).toMatch(/Decompose the goal into a set of named modules/i);
+    expect(step?.stop_condition ?? "").toMatch(/phase "decomposition"/);
   });
 
   it("appends N-R21 advisory when circular obligation dependency warning is present", async () => {

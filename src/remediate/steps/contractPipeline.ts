@@ -1148,10 +1148,14 @@ export async function evaluatePreCriticStructuralGate(
 // A contract finding that cites a file path or a code symbol must point at
 // something REAL in the working tree. The gate runs at two boundaries:
 //
-//  1. PRE-CRITIC: ground the finalized_module_contracts' `file_scope` citations
-//     (each module declares the files it owns). A module that cites only a path
-//     that does not exist AND no real symbol is hallucinating its scope before
-//     the adversarial budget is ever spent — re-emit contract_finalization.
+//  1. PRE-CRITIC: ground the module_decomposition's `file_scope` citations
+//     (each module declares the files it owns; file_scope lives in the
+//     decomposition — the finalized contracts carry interface fields, not
+//     paths). A module that cites only a path that does not exist AND no real
+//     symbol is hallucinating its scope before the adversarial budget is ever
+//     spent — re-emit the `decomposition` phase (the phase that OWNS file_scope,
+//     so re-authoring it can actually fix the bad path; re-emitting a downstream
+//     phase like contract_finalization could never change file_scope → loops).
 //  2. PROMOTION BACKSTOP: ground every promoted extracted-plan finding's
 //     citations before the plan is handed to the document/implement flow.
 //
@@ -2673,9 +2677,12 @@ ${preCriticGate.errorLines.join("\n")}
     }
 
     // 5c. M-B3 source-grounded citation gate (pre-critic boundary): ground the
-    //     finalized module contracts' file_scope citations against the working
-    //     tree before the adversarial loop. A module citing only a non-existent
-    //     path and no real symbol is re-emitted to contract_finalization, and the
+    //     module_decomposition's file_scope citations against the working tree
+    //     before the adversarial loop. A module citing only a non-existent path
+    //     and no real symbol is re-emitted to the `decomposition` phase — the
+    //     phase that OWNS file_scope (the finalized contracts carry interface
+    //     fields, not paths, so re-emitting contract_finalization could never
+    //     change file_scope and an ungrounded scope would loop forever). The
     //     grounding-driven re-emit is a backend-observed step-boundary fact routed
     //     through the single CE-005 chokepoint as phase_reemit.
     const preCriticCitationGate = await evaluatePreCriticCitationGrounding(
@@ -2688,19 +2695,19 @@ ${preCriticGate.errorLines.join("\n")}
         runId,
         {
           eventType: "phase_reemit",
-          discriminator: "contract_finalization:citation_grounding:pre_critic",
+          discriminator: "decomposition:citation_grounding:pre_critic",
           note:
-            "contract_finalization re-emitted: a module contract cited a component " +
+            "decomposition re-emitted: a module's file_scope cited a component " +
             "that does not exist in the working tree (M-B3 citation grounding).",
           category: "trap",
         },
         "remediate-code",
       );
       return buildPhaseStep(
-        "contract_finalization",
+        "decomposition",
         `## Source-Grounded Citation Gate Errors
 
-A module contract cites a component that does not exist in the working tree. Every cited path or symbol must point at something real before adversarial review begins:
+A module's file_scope cites a component that does not exist in the working tree. file_scope lives in the module decomposition (the finalized contracts carry interface fields, not paths), so fix the offending path(s) in the decomposition — every cited path or symbol must point at something real before adversarial review begins:
 
 ${preCriticCitationGate.errorLines.join("\n")}
 `,

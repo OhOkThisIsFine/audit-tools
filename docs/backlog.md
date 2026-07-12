@@ -46,15 +46,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   hook should reconcile against the fetched remote's resolved-state (or flag "worktree behind main — list may
   be stale") before surfacing.
 
-- **M-B3 citation gate re-emits the WRONG phase — gate input is `module_decomposition`, repair target is
-  `contract_finalization` (2026-07-09).** `evaluatePreCriticCitationGrounding` (src/remediate/steps/contractPipeline.ts
-  ~1209) grounds `module_decomposition.file_scope` against the working tree, but on failure the router re-emits
-  `contract_finalization` with a "module contract cites…" prompt — re-authoring finalized contracts can never change
-  the decomposition's file_scope, so an ungrounded scope loops forever (hit live on the ARC-0c1762db run: file_scope
-  cited untracked scratch `all_batch1_prompts.json`; unblocked by hand-editing `module_decomposition.input.json`,
-  which ingest re-derives). Fix: route the M-B3 re-emit to a `module_decomposition` repair step (and word the gate
-  error as a decomposition file_scope defect), or ground file_scope at decomposition-ingest so the defect surfaces in
-  the producing phase, not three phases later.
 - **Untracked-exclusion scope rule — residuals (shipped 2026-07-10; each low-severity, documented at the
   code site).** The scratch-pollution bug is FIXED in tooling: `buildFileDisposition` now runs an `untracked`
   scope rule (one batched `git ls-files -z`; still-included files absent from the index → `excluded/untracked`,
