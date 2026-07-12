@@ -9,7 +9,7 @@
 
 import { test, expect } from "vitest";
 
-const { buildHostModelPools, buildSourcePool } = await import(
+const { buildHostModelPools, buildSourcePool, buildSourcePools } = await import(
   "../../src/shared/quota/apiPool.ts"
 );
 const { parseProviderModelKey } = await import("../../src/shared/quota/httpQuotaSource.ts");
@@ -69,4 +69,98 @@ test("buildSourcePool: a provider-shaped source pool carries the model its key w
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
   expect(pool.hostModel).toBe("m1");
   assertModelMatchesKey(pool);
+});
+
+// ---------------------------------------------------------------------------
+// buildSourcePools — account-axis cooldown fold (Bug 3 / Slice A3, backlog
+// HIGH 2026-07-11): the construction-time counterpart to the live fold
+// `selectProvider` applies in rollingDispatch.ts (`rollingDispatch.test.mjs`).
+// Two same-account sources (same NVIDIA_API_KEY, same endpoint) must come out
+// of `buildSourcePools` with a SHARED effective cooldown even though only one
+// of them ever recorded a 429 under its OWN pool key.
+// ---------------------------------------------------------------------------
+
+test("buildSourcePools: a cooldown recorded under one same-account source's key folds onto its sibling's frozen quotaStateEntry", async () => {
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const sessionConfig = {
+    sources: [
+      {
+        id: "nim-nano",
+        provider: "openai-compatible",
+        endpoint: "https://integrate.api.nvidia.com/v1",
+        api_key_env: "NVIDIA_API_KEY",
+        model: "nano",
+      },
+      {
+        id: "nim-super",
+        provider: "openai-compatible",
+        endpoint: "https://integrate.api.nvidia.com/v1",
+        api_key_env: "NVIDIA_API_KEY",
+        model: "super",
+      },
+    ],
+  };
+  // Only nim-nano's OWN pool key ("nim-nano") carries the learned cooldown —
+  // exactly what a real recordWaveOutcome(providerModelKey=poolId, ...) writes.
+  const quotaEntries = {
+    "nim-nano": {
+      updated_at: new Date().toISOString(),
+      cooldown_until: future,
+      last_429_at: new Date().toISOString(),
+      consecutive_429_count: 3,
+    },
+  };
+  const pools = await buildSourcePools({
+    sessionConfig,
+    primaryProviderName: "claude-code",
+    quotaSource: STUB_QUOTA,
+    quotaEntries,
+  });
+  const nano = pools.find((p) => p.id === "nim-nano");
+  const superPool = pools.find((p) => p.id === "nim-super");
+  expect(nano.quotaStateEntry?.cooldown_until).toBe(future);
+  expect(
+    superPool.quotaStateEntry?.cooldown_until,
+    "nim-super shares nim-nano's (endpoint, api_key_env) account — the cooldown recorded under nim-nano's OWN key must fold onto nim-super's effective entry too",
+  ).toBe(future);
+});
+
+test("buildSourcePools: sources with DIFFERENT api_key_env do not fold cooldowns onto each other", async () => {
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const sessionConfig = {
+    sources: [
+      {
+        id: "source-a",
+        provider: "openai-compatible",
+        endpoint: "https://integrate.api.nvidia.com/v1",
+        api_key_env: "NVIDIA_API_KEY_A",
+        model: "m1",
+      },
+      {
+        id: "source-b",
+        provider: "openai-compatible",
+        endpoint: "https://integrate.api.nvidia.com/v1",
+        api_key_env: "NVIDIA_API_KEY_B",
+        model: "m2",
+      },
+    ],
+  };
+  const quotaEntries = {
+    "source-a": {
+      updated_at: new Date().toISOString(),
+      cooldown_until: future,
+      last_429_at: null,
+    },
+  };
+  const pools = await buildSourcePools({
+    sessionConfig,
+    primaryProviderName: "claude-code",
+    quotaSource: STUB_QUOTA,
+    quotaEntries,
+  });
+  const sourceB = pools.find((p) => p.id === "source-b");
+  expect(
+    sourceB.quotaStateEntry?.cooldown_until ?? null,
+    "a different api_key_env is a different account — source-a's cooldown must not fold onto source-b",
+  ).toBe(null);
 });

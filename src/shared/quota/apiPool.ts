@@ -12,6 +12,7 @@ import { probeQuotaSource, resolveAccountIdSafe } from "./quotaSource.js";
 import { buildProviderModelKey } from "./scheduler.js";
 import { parseProviderModelKey } from "./httpQuotaSource.js";
 import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
+import { deriveLocalAccountId, foldAccountCooldown } from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 import { resolveConversationHostProvider } from "../providers/providerPathGuard.js";
@@ -454,9 +455,35 @@ export async function buildSourcePools(params: {
   const sources = collectDispatchableSources(params.sessionConfig, params.primaryProviderName, {
     demotePrimaryInProcess: params.demotePrimaryInProcess,
   });
-  return Promise.all(
+  const pools = await Promise.all(
     sources.map((source) =>
       buildSourcePool({ source, quotaSource: params.quotaSource, quotaEntries: params.quotaEntries }),
     ),
   );
+  return foldAccountCooldownAcrossPools(pools);
+}
+
+/**
+ * Re-derive each pool's `quotaStateEntry` by folding in the account-scoped
+ * cooldown/429 signal from its siblings (Bug 3 / Slice A3: account-axis pool
+ * identity). Applied ONCE across the whole freshly-built pool set — after
+ * this, every pool's frozen `quotaStateEntry` already reflects the worst
+ * cooldown its account has seen, so a peer whose OWN key never recorded a 429
+ * still shows up degraded. This is the construction-time counterpart to the
+ * live fold `selectProvider` applies mid-run in `rollingDispatch.ts` (same
+ * {@link foldAccountCooldown} primitive, single-sourced). A pool with no
+ * derivable account (not `openai-compatible`, missing endpoint/api_key_env, or
+ * an explicit `source.account` override) is returned unchanged.
+ */
+function foldAccountCooldownAcrossPools(pools: CapacityPool[]): CapacityPool[] {
+  return pools.map((pool) => {
+    const accountId = pool.source ? deriveLocalAccountId(pool.source) : null;
+    if (!accountId) return pool;
+    const siblingEntries = pools
+      .filter((p) => p !== pool && p.source && deriveLocalAccountId(p.source) === accountId)
+      .map((p) => p.quotaStateEntry ?? null);
+    if (siblingEntries.length === 0) return pool;
+    const folded = foldAccountCooldown(pool.quotaStateEntry ?? null, siblingEntries);
+    return folded === (pool.quotaStateEntry ?? null) ? pool : { ...pool, quotaStateEntry: folded };
+  });
 }

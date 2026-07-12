@@ -1143,6 +1143,100 @@ test("selectProvider — among healthy pools, capability still decides; health n
 });
 
 // ---------------------------------------------------------------------------
+// selectProvider — account-axis cooldown fold (Bug 3 / Slice A3, backlog HIGH
+// 2026-07-11): same-account openai-compatible/NIM sources (same endpoint +
+// api_key_env) must share ONE reactive cooldown, so a 429 learned on one pool
+// gates every sibling pool of that account — not just the pool whose own key
+// recorded it.
+// ---------------------------------------------------------------------------
+
+test("selectProvider — a cooldown learned on one same-account source gates its sibling (Bug 3 account fold)", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 0.5 });
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  // nim-nano and nim-super share ONE NVIDIA_API_KEY against the SAME endpoint —
+  // the exact live-run shape (primary + nim-nano/nim-super/nim-kimi, backlog
+  // 2026-07-11). Only nim-nano's OWN key recorded the learned cooldown.
+  const nimNano = makePool("nim-nano", {
+    source: {
+      provider: "openai-compatible",
+      endpoint: "https://integrate.api.nvidia.com/v1",
+      api_key_env: "NVIDIA_API_KEY",
+      model: "nano",
+    },
+  });
+  const nimSuper = makePool("nim-super", {
+    source: {
+      provider: "openai-compatible",
+      endpoint: "https://integrate.api.nvidia.com/v1",
+      api_key_env: "NVIDIA_API_KEY",
+      model: "super",
+    },
+  });
+  // A pool on a genuinely different account — must stay eligible.
+  const otherAccount = makePool("healthy-other-account", {
+    source: {
+      provider: "openai-compatible",
+      endpoint: "https://other-endpoint.example/v1",
+      api_key_env: "OTHER_KEY",
+      model: "x",
+    },
+  });
+  const tracker = new InFlightTokenTracker();
+  const liveEntries = { "nim-nano": { cooldown_until: future } };
+  const slot = selectProvider(
+    packet,
+    [nimNano, nimSuper, otherAccount],
+    tracker,
+    liveEntries,
+    enabledSession(),
+  );
+  expect(slot !== null).toBeTruthy();
+  expect(
+    slot.poolId,
+    "nim-super shares nim-nano's (endpoint, api_key_env) account — a cooldown on nim-nano must fold onto nim-super too, so both spill for the peer on a genuinely different account",
+  ).toBe("healthy-other-account");
+});
+
+test("selectProvider — sources with DIFFERENT api_key_env stay independent (no over-gating)", async () => {
+  await setupTmpQuotaDir();
+  const packet = makePacket("p1", { complexity: 0.5 });
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const cooling = makePool("cooling-pool", {
+    source: {
+      provider: "openai-compatible",
+      endpoint: "https://integrate.api.nvidia.com/v1",
+      api_key_env: "NVIDIA_API_KEY_A",
+      model: "m1",
+    },
+  });
+  // Same endpoint, DIFFERENT api_key_env — a genuinely different account/key —
+  // must NOT be gated by the sibling's cooldown.
+  const independent = makePool("independent-pool", {
+    source: {
+      provider: "openai-compatible",
+      endpoint: "https://integrate.api.nvidia.com/v1",
+      api_key_env: "NVIDIA_API_KEY_B",
+      model: "m2",
+    },
+  });
+  const tracker = new InFlightTokenTracker();
+  const liveEntries = { "cooling-pool": { cooldown_until: future } };
+  const slot = selectProvider(
+    packet,
+    [cooling, independent],
+    tracker,
+    liveEntries,
+    enabledSession(),
+  );
+  expect(slot !== null).toBeTruthy();
+  expect(
+    slot.poolId,
+    "a different api_key_env is a different account — cooling-pool's cooldown must NOT fold onto independent-pool",
+  ).toBe("independent-pool");
+});
+
+// ---------------------------------------------------------------------------
 // selectProvider — least-loaded balancing within an equal-rank tie
 // (defect-1 sub-defect 2: deliberate multi-pool fan-out, even unbounded)
 // ---------------------------------------------------------------------------
