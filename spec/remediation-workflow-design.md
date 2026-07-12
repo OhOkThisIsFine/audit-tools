@@ -161,7 +161,8 @@ that gap.
 
 **Exception, superseding this section:** [`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md)
 is the newer design-of-record and specs a bounded lean fast path
-(`src/remediate/steps/leanFastPath.ts`) that lets a qualifying Path-A run (small,
+(`src/remediate/riskSignal.ts` / `src/remediate/steps/contractPipeline.ts`, gated by
+`runLeanLightReviewGate` in `src/remediate/steps/nextStep.ts`) that lets a qualifying Path-A run (small,
 grounded, high-confidence, non-systemic finding set) skip the adversarial
 contract-design loop while still rejoining the normal plan→implement→close
 machinery (deterministic grounding, block derivation, file-hash integrity,
