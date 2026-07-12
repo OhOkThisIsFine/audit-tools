@@ -28,18 +28,22 @@
 
 - **Risk-tier every lap** ([[risk-tier-loop-laps-cheap-vs-heavy]]): full adversarial contract pipeline only
   for risky/complex changes; trivial mechanical clusters run lean (one implementation agent → full-suite
-  gate → ship). This is the *host workaround* until the self-scaling pipeline makes it the tool's own job
-  (tool-enforcement target now tracked as a forward-track in `docs/backlog.md`).
+  gate → ship). **Tool-enforced**, not a host workaround: the lean path is taken automatically when the
+  effective risk tier is `low` via the risk-tier → Dial A/B continuum fold (`findingRiskEvidence` in
+  `src/remediate/riskSignal.ts`); accepted residue in `docs/backlog.md`.
 - **Full friction walk every lap** ([[log-all-friction-categories-every-lap]]): log all three categories
-  (ambiguous-direction / tool-should-decide / inefficient-feeding) to backlog + `open_observations`; don't
-  trust the empty mechanical friction set.
+  (ambiguous-direction / tool-should-decide / inefficient-feeding) to backlog + `open_observations`.
+  **Mechanically backstopped**: step-boundary capture + an in-run blocking per-category close-out gate +
+  a session-end Stop-hook (`.claude/hooks/friction-stop-gate.mjs`); accepted residue (hand-fix laps that
+  never invoke an orchestrator) in `docs/backlog.md`.
 - **Release:** `npm run release:patch:publish`; recover a bad attempt with
   `gh release delete vX.Y.Z --cleanup-tag` + forward-bump.
   Run `npm run verify:release` locally before tagging (local pre-tag gate is only `check`).
-  CI gate is split for speed (2026-07-04): `verify:release` = `verify:checks` (cheap deterministic chain) +
-  vitest; `ci.yml`/`publish-package.yml` run `verify:checks` and a **4-way sharded vitest matrix** as
-  parallel jobs, publish `needs:` both. vitest was ~93% of the old serial gate → sharding is the only lever
-  that moved release latency. Remaining redundancy (suite runs 3× per push) tracked in `docs/backlog.md`.
+  CI gate is split for speed: `verify:release` = `verify:checks` (cheap deterministic chain) + vitest;
+  `ci.yml` runs the cheap chain only, `audit-code-test-suite.yml` owns the vitest suite once per Node line
+  (20 + 22, each sharded 4 ways) with a release-bump skip guard, and `publish-package.yml` runs the
+  authoritative release-time gate (`verify:checks` + a 4-way sharded vitest matrix). vitest was ~93% of the
+  old serial gate → sharding is the only lever that moved release latency. No open per-push redundancy.
 - **Branch-strand trap (bit twice already):** a remediation run leaves you checked out on its
   worktree branch — commit/push docs from `main` (verify `git rev-parse --abbrev-ref HEAD`) or the commit
   strands off main.
@@ -132,13 +136,9 @@ runnable any time).
 
 ## Suggested ordering — everything else open, sequenced
 
-**Agent laps — the forward remainder is the IMMEDIATE NEXT list above.** Newly shipped in the current
-release (the 2026-07-11 run's dispatch/quota cluster): Fix 2 cold-start token-sizing + host-usage
-recording; Fix 3 token-native spill; credit-exhaustion pool-death class; account-axis cooldown fold;
-three-tier unmatched-quota harvest; confirm-once; Gate-0 `sources[]` roster; contract-review
-double-driver; charter-extraction gate-drop messages; goal_graph schema in the charter-delta prompt;
-real admission-hold reason. (Earlier: M-B3 + `judge_report` self-check SHIPPED 2026-07-11 — both had
-burned a live run; audit worker scratch pollution FIXED 2026-07-10 — residuals under backlog *Open bugs*.)
+**Agent laps — the forward remainder is the IMMEDIATE NEXT list above.** Residuals from earlier shipped
+fixes (M-B3/`judge_report` self-check, audit worker scratch pollution) live under `docs/backlog.md` →
+Open bugs.
 
 **WAITING (gated, not next): D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the
 LONG-lived execution claims — `task-claims.json` 20-min lease, remediate node-claims; FOCUSED-LAP,
