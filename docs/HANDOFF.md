@@ -103,12 +103,11 @@ runnable any time).
 ## Suggested ordering — everything else open, sequenced
 
 **Agent laps (while the validation run is pending / between its sessions) — the open-bugs cluster in
-`docs/backlog.md`** (each lean unless noted): M-B3 citation gate re-emitting the wrong phase;
-`validate-artifact --name judge_report` unsatisfiable self-check; doc-review auto-apply re-asserting a
-resolved decision after a process restart; critical-flow LLM fallback spec'd-but-unwired (owner call:
-build vs downgrade the norm). Pick by bite-frequency — the first two each burned a live run. (Audit
-worker scratch polluting the audited repo root: FIXED 2026-07-10 — untracked disposition rule + host
-scratch-dir prompt note; residuals under backlog *Open bugs*.)
+`docs/backlog.md`** (each lean unless noted): doc-review auto-apply re-asserting a resolved decision
+after a process restart; critical-flow LLM fallback spec'd-but-unwired (owner call: build vs downgrade
+the norm). (SHIPPED 2026-07-11: M-B3 citation-gate wrong-phase re-emit; `validate-artifact --name
+judge_report` unsatisfiable self-check — both had burned a live run. Audit worker scratch polluting
+the audited repo root: FIXED 2026-07-10 — residuals under backlog *Open bugs*.)
 
 **WAITING (gated, not next): D-66/67 slice-3** (heartbeat / merge-time ownership-gate CHECK on the
 LONG-lived execution claims — `task-claims.json` 20-min lease, remediate node-claims; FOCUSED-LAP,
