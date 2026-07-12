@@ -36,7 +36,7 @@ design spends that data: **cost becomes real dollars, decoupled from capability.
   `costRank` from the **same rung** (see below), so a dollar value is never compared against
   a tier ordinal. The result is always a well-defined total order.
 
-## The three-rung resolution
+## The four-rung resolution
 
 `costRank` for a pool resolves top-down, mirroring `resolveLimits`' rung structure:
 
@@ -44,15 +44,21 @@ design spends that data: **cost becomes real dollars, decoupled from capability.
    provider/model cost ordering (from Gate-0, below), a pool's `costRank` is the confirmed
    integer position of its provider/model. The operator ordered *every* candidate — including
    unknown-price ones — so this rung is total and internally consistent.
-2. **models.dev price.** Otherwise `costRank` is the model's **blended price** — a single
-   representative $/Mtok scalar = `input · 0.75 + output · 0.25` (a prompt-heavy blend; the
-   workload reads far more than it writes, but output price is typically 4–5× input so it is
-   not dropped). Cheaper sorts first.
-3. **Tier ordinal** (fallback). When neither a confirmed position nor a resolvable price
-   exists, `costRank` falls back to `tierRank(pool.rank)` — the pre-existing behavior.
+2. **Operator-declared per-source price** (rung 2a). When a pool's own configured source
+   declares a `$/Mtok` (`declaredCostPerMtok`), that value is authoritative over the generic
+   models.dev catalog — the operator knows their own endpoint's cost (e.g. a free arbitrage
+   backend declares `0`, sorting free-first). A negative/non-finite declared value is ignored
+   and falls through to the next rung.
+3. **models.dev price** (rung 2b). Otherwise `costRank` is the model's **blended price** — a
+   single representative $/Mtok scalar = `input · 0.75 + output · 0.25` (a prompt-heavy blend;
+   the workload reads far more than it writes, but output price is typically 4–5× input so it
+   is not dropped). Cheaper sorts first.
+4. **Tier ordinal** (fallback). When neither a confirmed position, a declared price, nor a
+   resolvable models.dev price exists, `costRank` falls back to `tierRank(pool.rank)` — the
+   pre-existing behavior.
 
 Rungs never mix *within* a pass because a confirmed ordering covers the whole candidate set
-or none of it, and (rung 2 vs 3) an unknown-price pool is offset to sort **after** all
+or none of it, and (rung 2a/2b vs 3) an unknown-price pool is offset to sort **after** all
 priced pools (`UNKNOWN_PRICE_BAND_BASE + tierRank`), preserving tier order among the unknowns.
 So: all-known ⇒ ordered by real dollars; all-unknown ⇒ ordered by tier (today's behavior,
 no regression); mixed ⇒ priced pools first by dollars, unknown-price pools after by tier —
