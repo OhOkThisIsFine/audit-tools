@@ -144,24 +144,6 @@ export interface ScheduleWaveOptions {
    * over-subscribes the remaining window. Defaults to 0.
    */
   inFlightTokens?: number;
-  /**
-   * True when this pool is dispatched IN-PROCESS by the orchestrator itself
-   * (the rolling engine's continuous slot-pull — codex/NIM/opencode/worker-command,
-   * per the tool's own `isInProcess` classification) rather than granted to the
-   * conversation host's subagent driver. Self-pacing pools already refill on
-   * completion and back off on real RPM/TPM/429 signals, so the COLD-START PROBE
-   * clamp ({@link COLD_START_PROBE_BATCH}, via {@link deriveColdStartAdmissionBatch}'s
-   * unknown-budget branch) does not apply to them — that clamp exists to protect the
-   * host-path GRANT (`admissionLoop.ts`) from sizing a batch against a budget nobody
-   * has measured yet, a failure mode that cannot occur on a self-pacing pool (see
-   * docs/backlog.md "dispatch should be gated ONLY by token-budget, rate, and true
-   * task-unlocks" + the 2026-07-11 in-process-vs-host cold-start finding). Real
-   * per-pool signals (RPM/TPM, an active cooldown, a genuinely KNOWN-zero budget)
-   * still apply unchanged — only the unknown-budget probe is exempted. Defaults to
-   * false (host-governed) when unset: the exemption must be explicitly claimed by
-   * the caller's own in-process classification, never inferred here.
-   */
-  selfPacing?: boolean;
 }
 
 // Named quota tuning defaults (previously inline magic literals). Centralised
@@ -372,10 +354,35 @@ export const QUOTA_REMAINING_PCT_LOW = 0.3;
 export const COLD_START_PROBE_BATCH = 1;
 
 /**
+ * Cold-start WAVE concurrency default — bounds `scheduleWave`'s own calibrating
+ * clamp (the in-process/wave partition size), distinct from
+ * {@link COLD_START_PROBE_BATCH} which sizes the HOST-PATH admission GRANT
+ * (`admissionLoop.ts`'s `deriveColdStartAdmissionBatch` call, gated on
+ * `grantLeases:true`). The two clamps protect different failure modes:
+ *
+ * - The host grant (`admissionLoop.ts`) can fan an ENTIRE frontier out at
+ *   arbitrary per-packet size against an unmeasured budget in ONE call — that is
+ *   the real 750k-into-a-26%-window fleet-death this batch fixed, and it stays
+ *   sized to a 1-packet slope-learning probe when the budget is unknown.
+ * - `scheduleWave`'s own wave/partition sizing (used by BOTH the host-dispatch
+ *   summary AND the in-process rolling engine's own slot count, e.g. NIM/codex)
+ *   is not a single unmetered grant — the engine re-derives its wave every
+ *   cycle, refilling on completion and backing off on real RPM/TPM/429 signals.
+ *   Throttling it to the 1-packet probe (as 9b5553c0 did) starves a healthy
+ *   in-process partition down to a single concurrent slot for no real reason —
+ *   confirmed by the resulting hybrid-inprocess regression. A calibrating
+ *   pool/window here is instead bounded to this small CONCURRENCY default (the
+ *   pre-9b5553c0 behaviour) so the run can still observe several Δutilization
+ *   samples per cycle while staying conservative against an unmeasured ceiling.
+ */
+export const TOKEN_BUDGET_COLD_START_SLOTS = 2;
+
+/**
  * Derive a conservative admission batch size for a calibrating (cold-start)
- * window/pool — the single source both `scheduleWave`'s per-window clamp and the
- * host-path grant (`admitBatch`/`admissionLoop.ts`) call, so they can never drift
- * onto two different sizing rules.
+ * window/pool — the single source of the host-path grant
+ * (`admitBatch`/`admissionLoop.ts`) sizing rule. NOT used by `scheduleWave`'s own
+ * wave-sizing clamp — see {@link TOKEN_BUDGET_COLD_START_SLOTS} for why the two
+ * are deliberately separate constants/call sites.
  *
  * - KNOWN budget (`availableBudget` finite, e.g. a MIN-reduced
  *   `remaining_token_budget` even while a SIBLING window is still calibrating):
@@ -621,7 +628,6 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     quotaSourceSnapshot = null,
     discoveredLimits = null,
     inFlightTokens = 0,
-    selfPacing = false,
   } = options;
   // Descending sort so sumTopN picks the largest slots
   const slotsSorted = estimatedSlotTokens
@@ -728,25 +734,24 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       }
       // If another of the pool's own windows is still cold (no absolute + no
       // learned slope), that OTHER window's true budget is unknown — clamp to
-      // the slope-learning probe so a healthy window's budget can't over-dispatch
-      // an un-calibrated one (MIN across the pool's windows). Self-pacing pools
-      // are exempt (see `selfPacing` doc) — they pace on real RPM/TPM/429 signals,
-      // not this host-oriented probe.
-      if (calibrating && !selfPacing) {
-        k = Math.min(k, deriveColdStartAdmissionBatch({ availableBudget: null, perPacketTokenEstimate: avgTokens }));
+      // the cold-start CONCURRENCY default so a healthy window's budget can't
+      // over-dispatch an un-calibrated one (MIN across the pool's windows). See
+      // {@link TOKEN_BUDGET_COLD_START_SLOTS} for why this is a concurrency
+      // default, not the host-grant's 1-packet probe.
+      if (calibrating) {
+        k = Math.min(k, TOKEN_BUDGET_COLD_START_SLOTS);
       }
       k = Math.max(1, k);
       if (k < waveSize) {
         waveSize = k;
         bindingCap = "token_budget";
       }
-    } else if (calibrating && !selfPacing) {
-      // Cold start: no window has an absolute or learned budget at all. Admit
-      // only the slope-learning probe — never a batch sized against a ceiling
-      // nobody has measured yet. Self-pacing pools are exempt (see `selfPacing` doc).
-      const probeBatch = deriveColdStartAdmissionBatch({ availableBudget: null, perPacketTokenEstimate: avgTokens });
-      if (probeBatch < waveSize) {
-        waveSize = probeBatch;
+    } else if (calibrating) {
+      // Cold start: no window has an absolute or learned budget at all. Admit a
+      // small bounded batch to observe Δutilization and seed the slope — a
+      // bootstrap, not a permanent ceiling (see {@link TOKEN_BUDGET_COLD_START_SLOTS}).
+      if (TOKEN_BUDGET_COLD_START_SLOTS < waveSize) {
+        waveSize = TOKEN_BUDGET_COLD_START_SLOTS;
         bindingCap = "token_budget";
       }
     }

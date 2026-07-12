@@ -233,15 +233,6 @@ export interface CapacityPool {
    * sources of the same provider (e.g. two NIM endpoints) launch distinctly.
    */
   source?: DispatchableSource;
-  /**
-   * True when this pool is dispatched IN-PROCESS by the orchestrator itself (vs
-   * granted to the conversation host's subagent driver) — threaded straight into
-   * {@link scheduleWave}'s `selfPacing` so its cold-start PROBE clamp (host-only
-   * by design) does not throttle a self-pacing pool's partition size. Set by
-   * {@link planHybridDispatch} from the caller's own `isInProcess` classification;
-   * left unset (host-governed) for any pool built outside the hybrid split.
-   */
-  selfPacing?: boolean;
 }
 
 /** One pool's slice of the overall dispatch capacity. */
@@ -604,7 +595,6 @@ function schedulePool(
     discoveredLimits: pool.discoveredLimits ?? null,
     quotaSourceSnapshot: pool.quotaSourceSnapshot ?? null,
     inFlightTokens: pool.inFlightTokens ?? 0,
-    selfPacing: pool.selfPacing ?? false,
   });
   return {
     pool_id: pool.id,

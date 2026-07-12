@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 
-const { scheduleWave, COLD_START_PROBE_BATCH } = await import("../../src/shared/quota/scheduler.ts");
+const { scheduleWave, TOKEN_BUDGET_COLD_START_SLOTS } = await import("../../src/shared/quota/scheduler.ts");
 
 // A minimal session-config that keeps quota enabled.
 function baseSessionConfig(overrides = {}) {
@@ -228,18 +228,28 @@ test("cooldown cap: an active cooldown throttles to one slot and short-circuits 
   expect(schedule.cooldown_until).toBe(future);
 });
 
-// ── Cold-start token-aware sizing (2026-07-11 backlog Bug 1a) ───────────────────
-// Cold-start batch sizing must derive from a conservative token estimate against
-// the real remaining budget, not a flat magic constant — and when NO real budget
-// signal exists at all, it must fall back to a small slope-learning probe, never
-// a large batch against an unknown ceiling.
+// ── Cold-start CONCURRENCY sizing (2026-07-11 backlog Bug 1a + its two mis-fixes) ──
+// scheduleWave's own calibrating clamp — which sizes BOTH the host-facing summary
+// and the in-process rolling engine's own wave/partition (NIM/codex/opencode) — is
+// bounded by a small CONCURRENCY default (TOKEN_BUDGET_COLD_START_SLOTS), never the
+// host-grant's 1-packet slope-learning probe (COLD_START_PROBE_BATCH, which stays
+// scoped to admissionLoop.ts's token-aware GRANT sizing — see the constant's doc in
+// scheduler.ts) and never left unbounded against an unmeasured ceiling. Two prior
+// regressions here: 9b5553c0 wrongly reused the 1-packet probe for this clamp
+// (starved a healthy in-process partition to 1, breaking hybrid-inprocess);
+// 5e697640 wrongly exempted "self-pacing" pools from the clamp entirely (left a
+// calibrating in-process partition UNBOUNDED, breaking hybrid-dispatch's
+// capacity-bounded assertion). Neither distinction (host-vs-probe sizing rule,
+// self-pacing-vs-host exemption) survives — every calibrating pool, host or
+// in-process, clamps to the SAME concurrency default.
 
-test("cold start, one window known + a sibling window still calibrating: clamps to the slope-learning probe despite a known budget", () => {
+test("cold start, one window known + a sibling window still calibrating: clamps to the cold-start concurrency default despite a known budget", () => {
   // "session" window has an absolute tokens_remaining (known budget = 100_000);
   // "weekly" window has only a remaining_pct with no learned slope (unresolved).
   // The pool-level MIN budget is still 100_000 (from the known window), but the
-  // grant must clamp to the probe because the OTHER window's true budget is
-  // unknown — a healthy window must not over-dispatch an un-calibrated sibling.
+  // wave must clamp to the cold-start concurrency default because the OTHER
+  // window's true budget is unknown — a healthy window must not over-dispatch an
+  // un-calibrated sibling.
   const schedule = scheduleWave({
     providerName: "claude-code",
     sessionConfig: { quota: { safety_margin: 1.0 } },
@@ -261,18 +271,12 @@ test("cold start, one window known + a sibling window still calibrating: clamps 
   });
   expect(schedule.calibrating).toBe(true);
   expect(schedule.remaining_token_budget).toBe(100_000); // the KNOWN window's budget, surfaced verbatim
-  expect(schedule.max_concurrent).toBe(COLD_START_PROBE_BATCH); // still clamped by the unresolved sibling
+  expect(schedule.max_concurrent).toBe(TOKEN_BUDGET_COLD_START_SLOTS); // still clamped by the unresolved sibling
 });
 
-// ── selfPacing exemption (2026-07-11 in-process-vs-host cold-start over-reach) ──
-// The host-oriented cold-start PROBE must not throttle a self-pacing (in-process)
-// pool's partition size — it paces on real RPM/TPM/429 signals instead. Real
-// per-pool signals (RPM/TPM, an active cooldown, a genuinely known-zero budget)
-// must still bind regardless of selfPacing; only the unknown-budget PROBE is exempt.
-
-test("selfPacing pool: a sibling-window-calibrating clamp does NOT throttle below the known budget's own headroom", () => {
+test("cold-start concurrency clamp binds an in-process (backend) pool identically to a host pool — no selfPacing exemption", () => {
   const base = {
-    providerName: "openai-compatible",
+    providerName: "openai-compatible", // in-process backend provider (NIM)
     sessionConfig: { quota: { safety_margin: 1.0 } },
     hostModel: null,
     requestedConcurrency: 10,
@@ -290,25 +294,20 @@ test("selfPacing pool: a sibling-window-calibrating clamp does NOT throttle belo
       ],
     },
   };
-
-  const hostGoverned = scheduleWave(base);
-  expect(hostGoverned.calibrating).toBe(true);
-  expect(hostGoverned.max_concurrent).toBe(COLD_START_PROBE_BATCH); // unchanged default behavior
-
-  const selfPaced = scheduleWave({ ...base, selfPacing: true });
-  expect(selfPaced.calibrating).toBe(true);
-  // Exempt from the probe: sized against the KNOWN 100_000-token budget instead,
-  // which comfortably fits all 10 requested 1000-token slots.
-  expect(selfPaced.max_concurrent).toBe(10);
+  const schedule = scheduleWave(base);
+  expect(schedule.calibrating).toBe(true);
+  // Bounded to the concurrency default, NOT unbounded (would be 10 if exempted)
+  // and NOT the 1-packet host-grant probe.
+  expect(schedule.max_concurrent).toBe(TOKEN_BUDGET_COLD_START_SLOTS);
 });
 
-test("selfPacing pool: fully cold (no absolute or learned budget anywhere) still admits the full requested wave", () => {
-  const base = {
+test("fully cold in-process pool (no absolute or learned budget anywhere) clamps to the concurrency default, not the full requested wave", () => {
+  const schedule = scheduleWave({
     providerName: "openai-compatible",
     sessionConfig: { quota: { safety_margin: 1.0 } },
     hostModel: null,
-    requestedConcurrency: 5,
-    estimatedSlotTokens: new Array(5).fill(500),
+    requestedConcurrency: 12,
+    estimatedSlotTokens: new Array(12).fill(500),
     quotaSourceSnapshot: {
       remaining_pct: 0.9,
       reset_at: null,
@@ -317,24 +316,19 @@ test("selfPacing pool: fully cold (no absolute or learned budget anywhere) still
       captured_at: new Date().toISOString(),
       source: "test",
     },
-  };
-
-  const hostGoverned = scheduleWave(base);
-  expect(hostGoverned.calibrating).toBe(true);
-  expect(hostGoverned.max_concurrent).toBe(COLD_START_PROBE_BATCH); // clamped: unknown ceiling
-
-  const selfPaced = scheduleWave({ ...base, selfPacing: true });
-  expect(selfPaced.calibrating).toBe(true);
-  expect(selfPaced.max_concurrent).toBe(5); // NOT probe-throttled — self-paces via real RPM/TPM/429 signals
+  });
+  expect(schedule.calibrating).toBe(true);
+  expect(schedule.max_concurrent).toBe(TOKEN_BUDGET_COLD_START_SLOTS);
+  expect(schedule.max_concurrent).toBeGreaterThan(0);
+  expect(schedule.max_concurrent).toBeLessThan(12);
 });
 
-test("selfPacing pool: a genuinely KNOWN-zero budget still throttles to 1 (real signal, not the probe)", () => {
+test("a genuinely KNOWN-zero budget still throttles to 1 (real signal, not the calibration clamp)", () => {
   const schedule = scheduleWave({
     providerName: "openai-compatible",
     sessionConfig: { quota: { safety_margin: 1.0 } },
     hostModel: null,
     requestedConcurrency: 8,
-    selfPacing: true,
     quotaSourceSnapshot: {
       remaining_pct: 0,
       reset_at: new Date(Date.now() + 60_000).toISOString(),
