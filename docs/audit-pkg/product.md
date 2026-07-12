@@ -51,8 +51,8 @@ The intended workflow is:
 
 Semantic review belongs to the active host conversation by default. The backend
 provider adapters — the authoritative current roster is `PROVIDER_NAMES`
-(`src/shared/types/sessionConfig.ts`) — are compatibility bridges for repo-local
-fallback workflows.
+(`src/shared/types/sessionConfig.ts`) — are compatibility bridges for
+repo-local fallback workflows.
 
 ## Language strategy
 

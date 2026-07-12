@@ -67,7 +67,10 @@ test("release docs point at trusted publishing instead of token-based npm auth",
   expect(releasing).toMatch(/Trusted Publishing/i);
   expect(releasing).toMatch(/publish-package\.yml/);
   expect(releasing).toMatch(/workflow_dispatch/);
-  expect(releasing).toMatch(/Node `20` and Node `22`/);
+  // The Node matrix is documented as self-describing from the workflow files
+  // (DD-8: no pinned version status strings in the concept doc) — assert the
+  // durable pointer, not specific major versions.
+  expect(releasing).toMatch(/Node majors matrixed in .*\.github\/workflows/i);
   expect(releasing).toMatch(/dry_run=true/);
   expect(releasing).toMatch(/\*-npm-logs/);
   expect(releasing).toMatch(/npm run release:patch/);
