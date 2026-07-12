@@ -189,8 +189,11 @@ agent-owns-ship-pipeline)*
   mechanism + deletion in one commit); never add-then-delete across commits.
 - **Dead-code release gate = default-mode knip** (not `--production`, which false-positives on dispatch/
   alias wiring); tested-but-unwired is a periodic manual grep-zero sweep.
-- **Keep the two orchestrators in parity** — a fix in one usually belongs in both; shared logic →
-  `audit-tools/shared`.
+- **One core, two draws — not two forks in parity.** There is ONE shared body of logic; auditing and
+  remediating are two *draws* from it (read-only selection vs. write/apply selection). Default is one shared
+  core + per-mode policy/draw, never two forks kept "in parity"; single-source the common core in
+  `audit-tools/shared`, each orchestrator a thin policy-selecting adapter (so a fix in one usually belongs
+  in both).
 - **Prefer extraction over drift-tests** — single-source two copies instead of guarding them with a drift
   test; make drift impossible. *(home: `CLAUDE.md` → Conventions/Preferences for the other B3 bullets;
   memory: knip-deadcode-gate-default-mode, prefer-extraction-over-drift-tests — the latter not yet in

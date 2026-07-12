@@ -106,7 +106,7 @@ what" — no separate roster.
 ## Decisions (settled)
 
 - **Cooperative, not isolated** — peers contribute to ONE shared run; no primary/secondary.
-- **No TTL/heartbeat as run-liveness** (D2 from the first draft still holds) — a *claim's* heartbeat is a
+- **No TTL/heartbeat as run-liveness** — a *claim's* heartbeat is a
   short work-lease (that's what `STALE_LOCK_MS` reclaim is for), but the RUN itself has no wall-clock
   liveness; run progress is the shared ledger/state, staleness is the dependency-DAG at merge.
 - **No host/agent label in shared state** (D3 holds) — coordination is about WHAT is claimed, not WHO.
@@ -179,14 +179,12 @@ external linter reformat of `intent_checkpoint.json` still causes re-derive chur
   interval are a `(taskLeaseMs, heartbeatMs)` pair with `heartbeatMs << taskLeaseMs << (typical task
   duration ceiling)`; concrete values set in slice 2.
 
-  **Partially shipped for the long-lived-claim mechanism.** The heartbeat + revocation protocol
-  above is wired only to the short-lived coordination mutexes (`withClaimHeartbeat` on
-  bundle-mutation and `phase:main`) — layer (1), continuous re-validation. For the long-lived
-  per-task / per-node *execution* claims (`task-claims.json`, remediate's node-claims), the
-  merge-time ownership gate — layer (2) — has since shipped: `mergeAndIngestCommand.ts` now
-  gates ingestion through `partitionByOwnership` (`docs/backlog.md` D-66/67 slice-1). What
-  remains open is layer (1) for these long-lived claims: they still hold a long lease with **no
-  live heartbeat** across the out-of-process worker run, resting on dedup-by-`task_id` /
-  dedup-by-id at ingest plus the layer-2 merge-time gate as the correctness backstop for a rare
-  lease overrun. Extending continuous heartbeat re-validation onto those long-lived execution
-  claims (slice-3) is tracked as open work in `docs/backlog.md`.
+  **The two layers map onto the two claim lifetimes.** Layer (1)'s continuous heartbeat
+  re-validation (`withClaimHeartbeat`) fits the short-lived coordination mutexes (bundle-mutation,
+  `phase:main`), where a live heartbeat spans the whole critical section. The long-lived per-task /
+  per-node *execution* claims (`task-claims.json`, remediate's node-claims) hold a long lease across an
+  out-of-process worker run with no live heartbeat, so they rest on layer (2) — the merge-time ownership
+  gate at the single ingest chokepoint (`mergeAndIngestCommand.ts` → `partitionByOwnership`), backed by
+  dedup-by-`task_id` / dedup-by-id — as the airtight backstop against a rare lease overrun. Extending
+  continuous heartbeat re-validation over the long-lived execution claims is the natural forward
+  extension.

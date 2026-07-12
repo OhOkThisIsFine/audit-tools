@@ -103,6 +103,15 @@ auto-applied. Two smells force the question (do not silently "fix" either):
   type + reason-to-exist, fold into an existing canonical doc, or delete."* Never leave it
   unrouted and silently maintained.
 
+## Normative goals docs — re-check against the executor/phase registry on any change
+
+A **normative goals doc** (`spec/audit/audit-goals.md`, `spec/remediate/remediation-goals.md`) enumerates
+the obligations / phases / executors its area must satisfy. Whenever a new obligation, phase, or executor
+ships in that area, the goals doc gets a **"does this still match the current executor/phase registry?"**
+check *then* — driven by the code change, not deferred for the next doc-review pass to discover the drift.
+A registry entry the doc omits, or a doc entry the registry no longer has, is a **design-decision →
+escalate** (goals docs are normative — never silently rewritten to match code).
+
 ## Shipped-entry deletion — a "SHIPPED" note is itself status-noise
 
 `backlog.md` says *"Remove an entry once it ships."* Enforce it literally — a recorded

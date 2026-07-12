@@ -126,7 +126,13 @@ pending → planning → implementing → closing → complete
 
 **Phases** (`src/remediate/phases/`):
 - `plan.ts` — `RemediationPlan` with `Finding[]` + `RemediationBlock[]`; detects auditor vs. conversation input
-- document phase (`ItemSpec` per finding: concrete changes, tests to write) — in `src/remediate/steps/dispatch.ts`
+- planning gates (there is no separate "document" phase — dissolved, N-R13): at planning, before any
+  implement dispatch, a review-necessity gate (`runPlanningReviewGate`) surfaces findings tiered by
+  review-need for a batched keep/decline (declined → recorded `ignored`) and an up-front ambiguity gate
+  (`runPlanAmbiguityGate`) batches all scoping/judgment ambiguities into one `clarification_request`;
+  planning then transitions DIRECTLY to implementing. `ItemSpec` is optional enrichment — when absent,
+  implement dispatch reads scope from `finding.affected_files` (`buildImplementDispatchItem`). Both gates
+  in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch.ts`.
 - implement phase (dispatches implementation with test execution + verification) — in `src/remediate/steps/dispatch.ts`
 - `triage.ts` — failed items; retry vs. block
 - `close.ts` — closing actions (test suites, build, lint)

@@ -44,6 +44,10 @@ provider_confirmation        [user gate — shared with audit; session-level]
   → close                    [evidence-backed verification report]
 ```
 
+Onto CLAUDE.md's five-state machine (`pending → planning → implementing → closing → complete`):
+everything through the `contract_pipeline` phases is **planning**, `rolling_dispatch` is **implementing**,
+and `close` is **closing** (`pending`/`complete` bookend the run).
+
 ---
 
 ## Gate 0 — Provider confirmation (shared with audit)

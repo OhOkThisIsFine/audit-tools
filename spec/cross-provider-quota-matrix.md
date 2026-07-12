@@ -114,8 +114,9 @@ confirm wham/usage still authorizes when running it live.)
 (or `now + reset_after_seconds`). Emit two snapshots (5h + weekly), keyed by
 `limit_window_seconds` (18000 vs 604800). `credits.unlimited/has_credits` flags whether %-limits apply.
 
-**Refresh** (on 401): `POST https://auth.openai.com/oauth/token`, `grant_type=refresh_token`,
-`client_id=app_EMoamEEZ73f0CkXaXp7hrann`.
+**Refresh** (on 401) — *ecosystem/protocol background, informational only — NOT implemented in
+`CodexQuotaSource` (`fetchSnapshot` returns `null` on failure; no refresh logic)*: `POST
+https://auth.openai.com/oauth/token`, `grant_type=refresh_token`, `client_id=app_EMoamEEZ73f0CkXaXp7hrann`.
 
 **Degrade:** proactive GET → reactive `x-codex-*` headers on `/responses` completions
 (`x-codex-primary-used-percent`, `-primary-reset-at`, `-primary-window-minutes`, + secondary)

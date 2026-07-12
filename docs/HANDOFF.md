@@ -83,20 +83,8 @@ start a step. That is the only live check for the just-shipped lease-TTL fix ([[
 and the multi-IDE concurrent-admitter model: the second admitter must see the account's cap still held
 (no double-grant) while the first wave is in flight.
 
-**Watch — summary only; the authoritative pass/fail per item is its ⬇ line in the backlog guide:**
-- Wall: graceful resumable pause (never a crash), worktrees intact, resume with no lost/redone packets,
-  pacing that *learns* (slope adjusts after the first window reading) and slows pre-wall.
-- `quota_escalation` friction event recorded when a packet escalates pools at the wall.
-- Every `deepening:*` task converges — no orphans, no `force-synthesis` needed to finish.
-- Codex path: driver-selection log picks **Y-dispatcher** (not slot-pull); route only small packets to
-  codex (known-poor at read-heavy — backlog Durable traps).
-- NIM: results conform on first emit (schema-repair rounds ~0).
-- opencode-free: fills first (declared free); demotion + `declared_cost_drift` friction if it bills.
-- knip dead-code leads reach the per-file lens (leads-not-verdicts).
-- Scratch-pollution fix (shipped 2026-07-10): untracked files are excluded from audit scope by the new
-  `untracked` disposition rule, and dispatch prompts direct host scratch into
-  `.audit-tools/<area>/scratch/<run-id>/` — confirm no worker/host scratch lands at the target repo root,
-  and that the `file_disposition` artifact records the rule outcome (`untracked.applied` / guard branch).
+**Watch:** see `docs/backlog.md` → Live-validation guide — each item's ⬇ Live-run watch line is the
+authoritative pass/fail.
 
 **Fail-signal protocol:** any wedge needing `force-synthesis`, crash at the wall, orphaned `deepening:*`
 tasks, silently-skipped analyzer, or missing friction event → one line under backlog *Open bugs* before

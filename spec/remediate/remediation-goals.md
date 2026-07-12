@@ -55,12 +55,14 @@ The plan-building mechanism is named below (Planning mechanisms).
 Every item follows the ordered workflow:
 
 ```
-Document -> Write Tests -> Refactor Code -> Verify Code Against Tests -> Verify Code Against Documentation
+Write Tests -> Refactor Code -> Verify Code Against Tests -> Verify Code Against Documentation
 ```
 
-Steps may be declared not-applicable per item during the Document phase (for
-example, a comment-only fix has no test step). The declaration is part of
-the item record.
+There is no separate per-item "document" authoring step (dissolved — N-R13):
+planning emits an OPTIONAL `item_spec` enrichment, and when it is absent implement
+dispatch reads scope directly from the finding. Steps may be declared
+not-applicable per item (for example, a comment-only fix has no test step); the
+declaration is part of the item record.
 
 ## Planning mechanisms
 
@@ -112,37 +114,45 @@ input is Markdown, free-form, or conversational.
 - Emit `remediation_plan.json` conforming to the `RemediationPlan` contract (validated by the
   hand-written TypeScript validators in `src/remediate/validation/`, per the Schemas section below).
 
-### Phase 2: Document (LLM + user, batched)
+### Phase 2: Planning gates (batched review + ambiguity)
 
-For every item the LLM produces a change write-up covering:
+There is no separate per-item LLM "document" phase (dissolved — N-R13): planning
+transitions DIRECTLY to implementing. Before any implement dispatch, two batched
+gates fire at planning, each at most once per run:
 
-- the concrete change to be made,
-- tests that will be written (names and assertions),
-- steps declared not-applicable, with rationale,
-- any ambiguities that must be resolved before the item can proceed (see
-  Ambiguity criteria below).
+- **Review-necessity gate** (`runPlanningReviewGate`): the plan's nodes are
+  surfaced tiered by how much human review each needs, for a batched keep/decline.
+  A declined node becomes a RECORDED terminal disposition (`ignored`), never
+  silently bulk-dispositioned inside a quality-tail node.
+- **Ambiguity gate** (`runPlanAmbiguityGate`): every scoping/judgment ambiguity
+  across all items is batched into a single `clarification_request.json` and
+  surfaced to the user at once (categories under Ambiguity criteria below).
+  Remediation halts until every clarification is resolved.
 
-The LLM also confirms the project-level closing action selected by Phase 1
-or proposes an alternative, including the `custom` escape hatch for
-user-supplied commands.
+The LLM also confirms the project-level closing action selected by Phase 1, or
+proposes an alternative, including the `custom` escape hatch for user-supplied
+commands.
 
-**Dependency ambiguity:** `public_contract` is one of the recognized ambiguity kinds. When the LLM flags an item with it, that ambiguity is surfaced in the clarification batch below for user resolution. (Automatic `parallel_safe` stripping from the tag alone is not currently wired — parallel-safety is computed deterministically at plan time, and dependencies that surface are resolved through triage.)
+**Dependency ambiguity:** `public_contract` is one of the recognized ambiguity
+kinds; when an item is flagged with it the ambiguity rides the clarification batch
+for user resolution. Automatic `parallel_safe` stripping from the tag alone is
+**not** wired — parallel-safety is computed deterministically at plan time, and a
+dependency that surfaces later is resolved through triage.
 
-All ambiguities across all items are batched into a single
-`clarification_request.json` and surfaced to the user at once. Remediation
-halts until every clarification is resolved.
+Appropriateness decisions are per-item, not per-block. The LLM may propose marking
+any individual item "deemed inappropriate"; that proposal rides the same
+clarification batch and requires user confirmation. A block may contain some items
+that are remediated and others declared inappropriate without dropping the block.
 
-Appropriateness decisions are per-item, not per-block. The LLM may propose
-marking any individual item "deemed inappropriate"; that proposal is part
-of the same clarification batch and requires user confirmation. A block
-may contain some items that are remediated and others that are declared
-inappropriate without dropping the block as a whole.
+`ItemSpec` is OPTIONAL enrichment, not a mandatory per-finding write-up: when a
+node carries one it seeds test authoring and the code-vs-spec conformance check;
+when it is absent, implement dispatch reads file scope directly from
+`finding.affected_files` (`buildImplementDispatchItem`). Any produced `item_spec`
+and the project-level `closing_plan` persist inline on `RemediationState`
+(`state.items[id].item_spec`, `state.closing_plan`), validated against
+`ItemSpecSchema` / `ClosingPlanSchema` before the next phase may read them.
 
-Phase 2 output: an `item_spec` per item and a project-level `closing_plan`, both persisted
-inline on `RemediationState` (`state.items[id].item_spec`, `state.closing_plan`) and validated
-against `ItemSpecSchema`/`ClosingPlanSchema` before the next phase may read them.
-
-After Phase 2 exits cleanly, no further user interaction occurs until the
+After the gates exit cleanly, no further user interaction occurs until the
 end-of-run triage window.
 
 ### Phase 3: Implement (LLM, sequential or parallel)
@@ -226,7 +236,8 @@ Deterministic responsibilities:
 LLM responsibilities:
 
 - finding extraction from Markdown, free-form, or conversational inputs
-- item write-ups and ambiguity identification
+- ambiguity identification and optional `item_spec` enrichment (no mandatory
+  per-item write-up phase)
 - test authoring
 - refactor authoring
 - code-vs-documentation conformance verification
@@ -332,8 +343,13 @@ and triage decisions are persisted so resume does not re-prompt.
 Optional. Default sequential. Enabled per-run via configuration. When
 enabled:
 
-- parallel-safety is determined deterministically in Phase 1, but can be revoked by the LLM in Phase 2 (`public_contract` dependency inference).
+- parallel-safety is determined deterministically in Phase 1 and is NOT revoked by
+  an LLM `public_contract` inference (that automatic stripping is not wired); a
+  dependency that surfaces later is resolved through triage.
 - each parallel block runs in an isolated workspace (worktree or
   equivalent),
-- merge-back is serialized in deterministic order. If a rebase-and-test fails during merge, the block falls back to a sorted sequential queue.
+- merge-back is serialized in deterministic dispatch order; before merging, the
+  worktree is rebased onto `HEAD` and tests run, and on failure the node is
+  quarantined into the end-of-run triage window (there is no sorted sequential
+  fallback queue — see Phase 3's Deterministic Merge & Fallback).
 - Phase 4 re-validates the final combined tree.

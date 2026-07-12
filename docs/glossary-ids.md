@@ -22,7 +22,7 @@ The grep that backs the guard recognises these family shapes:
 | `N-` | `N-<phase><NN>` | **Node id** in a remediation/redesign plan DAG (e.g. the redesign `N-R*`/`N-S*` nodes, the self-audit `N-X*`/`N-CE*` nodes). A node is a bounded unit of planned work. |
 | `SEAM-` | `SEAM-<NAME>` | **Multi-agent seam contract** — a hand-off boundary between independently-run agents (or between dispatch and merge) whose contract both sides must honour. |
 | `OBS-` / `ARC-` / `COR-` / `MNT-` / `TST-` / `REL-` / `CFG-` / `DAT-` / `SEC-` / `PRF-` / `OPR-` | `<LENS>-<hash>` | **Auditor finding id** — a finding emitted by `audit-code`, keyed by lens prefix + a short content hash (see `findingIdentitySignature`). Stable across re-audits of the same defect. |
-| `FND-` | `FND-<LENS>-<hash>` | **Obligation-bound finding reference** — the same auditor finding id wrapped as a remediation obligation handle (`FND-OBS-99e3a861`); the `FND-` prefix marks it as the unit a remediation node satisfies. |
+| `FND-` | `FND-<LENS>-<hash>` | **Self-audit finding citation** — an audit-side source comment referencing a prior self-audit finding of this repo (e.g. `FND-OBS-99e3a861`, alongside `ARC-<hash>`). It cites the past finding a piece of code answers; it is NOT a remediation-obligation handle (remediate never mints or consumes an `FND-`). |
 
 ## INV-* areas (invariant namespaces)
 

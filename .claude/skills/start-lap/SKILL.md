@@ -78,6 +78,7 @@ Terse digest (caveman mode): current live version + released-vs-local delta, syn
 pulled / already current / stranded on branch X), a one-line skim of what shipped since (step 4), the
 **immediate next item** from HANDOFF's roadmap with its backlog home, and any open doc-review items
 awaiting the owner. Then **start on that next item** — risk-tier it first
-([[risk-tier-loop-laps-cheap-vs-heavy]]: loop-core work → full pipeline, trivial mechanical → lean) —
-unless the owner redirects. Getting rolling is the point of the skill; don't park at "here's the next
+([[risk-tier-loop-laps-cheap-vs-heavy]]): scale pipeline depth to the risk tier — full adversarial depth
+for loop-core / complex work, leaner for trivial mechanical clusters; it's ONE pipeline dialed by risk,
+not a separate lean path — unless the owner redirects. Getting rolling is the point of the skill; don't park at "here's the next
 item, what now?".

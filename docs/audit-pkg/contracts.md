@@ -161,14 +161,12 @@ metadata, but consumers should rely on shared edge concepts:
 Packet planning should use graph edges to explain why files belong together,
 not merely to merge every connected group. Weak or high-fan-in edges should
 become context hints rather than unlimited packet expansion.
-Current deterministic import edges include JS/TS import kinds and Python
-`python-import` / `python-from-import` edges when local modules resolve.
-Current deterministic reference edges also include package entrypoints, package
-script links, workspace/project module links, JSON Schema `$ref` links, schema
-contract test links, bounded JSON Schema suite links, bounded GitHub Actions
-workflow suite links, bounded package script suite links, bounded TypeScript
-type contract suite links, bounded Python test-utility suite links, and
-deterministic test/source naming links.
+Each edge carries a durable shape — `from`, `to`, `kind`, and optional
+`direction` / `confidence` / `reason` — and consumers reason over that contract,
+never a fixed enumeration of kinds. The authoritative, current set of edge kinds
+(import, reference, ownership, bounded-suite, test/source naming, …) is whatever
+the extractors registry emits (`src/audit/extractors/`); new analyzers enrich
+the graph by adding kinds without changing this contract.
 
 Consumers should treat graph evidence by authority:
 

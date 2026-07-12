@@ -30,7 +30,8 @@ or a collection of one-off audit phases.
    confidence bar — and any property that *can* be guaranteed mechanically is
    enforced in tooling rather than left to LLM instruction-following.
 3. The audit is binary: it is either complete or it is not.
-4. The final retained output is deterministic Markdown at `audit-report.md`.
+4. The final retained outputs are the machine contract `audit-findings.json` (the source of truth)
+   and its deterministic Markdown render `audit-report.md`; both are promoted together on completion.
 
 ## Invariants
 
@@ -48,7 +49,9 @@ Deterministic responsibilities:
 
 - repository intake and file discovery
 - scope exclusion
-- unit, graph, surface, and initial critical-flow inference
+- unit, graph, surface, and initial critical-flow inference (graph enrichment's edge-reasoning,
+  `edgeReasoning.ts`, may take an OPTIONAL additive host/LLM rewrite for low-confidence edges —
+  mirroring the synthesis-narrative carve-out; edge identity/confidence stays deterministic)
 - task generation
 - result validation and coverage accounting
 - runtime command discovery and execution
@@ -62,6 +65,17 @@ LLM responsibilities:
 - semantic review of assigned auditable source files
 - critical-flow fallback only when deterministic flow inference explicitly marks
   itself below the confidence bar
+- a layer of host/LLM-delegated judgment steps interleaved at fixed points in the obligation
+  chain (the `PRIORITY` array in `src/audit/orchestrator/nextStep.ts`), each a bounded, gated,
+  attributable step that runs only when its obligation is unsatisfied — the deterministic frontier
+  folds silently, these break the fold for host input or LLM judgment. In obligation order they are:
+  interactive **provider confirmation** and **intent checkpoint** (host-interactive gates);
+  **charter extraction** and **charter delta** (subsystem-charter authoring/diff);
+  **contract** and **conceptual design review**; **charter clarification**; the **systemic
+  (second-order adversarial) challenge**; and, after synthesis, the optional additive
+  **synthesis-narrative** themes layer. This layer is bounded and recorded like all LLM work
+  (Invariant 3); the mechanism internals live in
+  [`spec/conceptual-design-review-design.md`](conceptual-design-review-design.md).
 
 ## Auditable scope
 
@@ -126,7 +140,8 @@ valve, no partial-success status is introduced.
 
 ## Final output and cleanup
 
-- The final authoritative output is repo-root `audit-report.md`.
+- The final authoritative outputs are repo-root `audit-findings.json` (the machine contract / source
+  of truth) and its human render `audit-report.md`; `promoteFinalAuditReport` promotes both together.
 - The report must be deterministic and work-block-first.
 - Root-cause clustering is not part of the mandatory deterministic core: the
   retained deterministic report is work-block-first and does not cluster by root

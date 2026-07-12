@@ -49,9 +49,10 @@ The intended workflow is:
 7. The backend ingests results, performs selective deepening and runtime
    validation when needed, and writes the final `audit-report.md`.
 
-Semantic review belongs to the active host conversation by default. Backend
-provider adapters such as `claude-code`, `opencode`, `subprocess-template`, and
-`vscode-task` are compatibility bridges for repo-local fallback workflows.
+Semantic review belongs to the active host conversation by default. The backend
+provider adapters — the authoritative current roster is `PROVIDER_NAMES`
+(`src/shared/types/sessionConfig.ts`) — are compatibility bridges for repo-local
+fallback workflows.
 
 ## Language strategy
 

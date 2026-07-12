@@ -29,6 +29,10 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+> **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
+> durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
+> lives in git log / memory). Condense at write time, not in a later doc-review pass.
+
 - **A doc-review auto-apply / hook re-reverted a COMMITTED owner decision during a process restart (2026-07-10, tool-should-decide).**
   Mid-lap the process restarted; on restart, CLAUDE.md + `project-philosophy.md` came back MODIFIED — the change
   reverted the DD-1 Own-vs-acquire→CLAUDE.md promotion the owner had explicitly chosen and I had already committed

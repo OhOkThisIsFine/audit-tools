@@ -3,10 +3,10 @@
 ## Public product surface
 
 The intended public product surface is a single logical skill call, `advance_audit` — the
-aspirational entrypoint name this contract is written against. The current shipped surface for that
-call is the conversation-first `audit-code next-step` CLI / `/audit-code` slash command (with
-`audit-code advance-audit` as a direct CLI precursor); `advance_audit` is the logical name those
-executors sit behind.
+aspirational entrypoint name this contract is written against, the logical call every executor sits
+behind. The interim precursor surface is the conversation-first `audit-code next-step` CLI /
+`/audit-code` slash command; the concrete command names live in the entrypoint/CLI reference, so this
+contract stays written against the durable `advance_audit` surface rather than narrating current wiring.
 
 Everything else in the repository should be treated as internal support for that entrypoint unless explicitly documented otherwise.
 

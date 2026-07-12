@@ -107,8 +107,9 @@ implementation must hold.
 
 ## Still-gated (not landable on tooling alone)
 
-> **D8** is the only genuinely-open item in this doc; it should be tracked as open work in
-> [`backlog.md`](backlog.md) (this doc is architecture-of-record, not a status tracker). The F5-consent and
+> The sole genuinely-open item from this doc (D8 prose-staleness narrowing) is tracked as open work in
+> [`backlog.md`](backlog.md) (Deferred/waiting — prose-heavy staleness narrowing); this doc is
+> architecture-of-record, not a status tracker. The F5-consent and
 > Parity notes below are durable rationale — an implemented control and a standing preference — not open
 > backlog items.
 
