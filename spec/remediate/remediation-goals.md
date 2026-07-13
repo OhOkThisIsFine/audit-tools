@@ -3,7 +3,7 @@
 This document is the normative product definition for the remediator. Other
 specs and docs should defer to it. The remediator may be paired with the auditor
 but runs independently; when the two are paired, read alongside the auditor's
-[`spec/audit-goals.md`](../audit/audit-goals.md).
+[`spec/audit/audit-goals.md`](../audit/audit-goals.md).
 
 ## Core principles
 
