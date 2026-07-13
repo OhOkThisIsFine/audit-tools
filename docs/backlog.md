@@ -32,19 +32,15 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
 > lives in git log / memory). Condense at write time, not in a later doc-review pass.
-- **Friction walk (force-synthesize→remediate dogfood lap, 2026-07-12):** (1) **tool-should-decide (HIGH, FIXED v0.32.61):** remediate's tool-owned final/phase-boundary gate was hardwired to the retired `node --test` runner (`gateCommands.ts`) → failed on the vitest tree → EVERY remediate run terminal-blocked with zero fixes; a unit test pinned the broken shape. [[remediate-gate-nodetest-runner-bug]]. **Open forward gap:** no end-to-end remediate-*run* smoke exercises the real tool-owned gate — add one (see Forward tracks) so a broken gate can't hide behind unit tests again. (2) **inefficient-feeding (medium):** the contract pipeline requires ~15 sequential HOST-authoring turns (goal→context→decomp→16 shards→seam→critique→testplan→assessment→counterexample→judge→DAG) BEFORE any dispatch, so with host fan-out off (to save Claude quota) the quota is spent up-front on planning regardless of routing fixes to $0 NIM/Codex; and each failed next-step CONSUMES the `*.input.json` (full regen, no in-place field fix). (3) **tool-should-decide (low):** the implementation_dag citation-grounding gate grounds on lowercased path/symbol *tokens* from title+description, so a node whose scope is dotfiles with no code symbols (`.gemini/*.toml`) or whose prose cites real paths non-token-shaped is rejected — 2 grounding re-loops until a real camelCase symbol / clean lowercase path was embedded.
+- **Friction walk (force-synthesize→remediate dogfood lap, 2026-07-12):** (1) **inefficient-feeding (medium):** the contract pipeline requires ~15 sequential HOST-authoring turns (goal→context→decomp→16 shards→seam→critique→testplan→assessment→counterexample→judge→DAG) BEFORE any dispatch, so with host fan-out off (to save Claude quota) the quota is spent up-front on planning regardless of routing fixes to $0 NIM/Codex; and each failed next-step CONSUMES the `*.input.json` (full regen, no in-place field fix). (2) **tool-should-decide (low):** the implementation_dag citation-grounding gate grounds on lowercased path/symbol *tokens* from title+description, so a node whose scope is dotfiles with no code symbols (`.gemini/*.toml`) or whose prose cites real paths non-token-shaped is rejected — 2 grounding re-loops until a real camelCase symbol / clean lowercase path was embedded.
 - **Friction walk (quota-cluster batch-ship lap, 2026-07-11):** (1) **NIM `llm read`/`write` unusable for reasoning-heavy review** — the selected `nvidia/nemotron-3-ultra-550b` won't emit valid JSON for a `read` review prompt (returned prose "Let me ana…" twice → the strict JSON contract errors out), and a ~500-line diff times out at the default 120s. The "delegate heavy loop-core review to the free NIM pool" workflow ([[three-tier-quota-error-classification]], [[free-nim-pool-first-default-worker]]) silently degrades to doing it in-Claude. Endpoint: either pin a JSON-reliable model for `llm read`/`write`, add a longer default timeout for large stdin, or teach the worker to salvage prose→structured. (inefficient-feeding, medium). (2) **`pre-commit-gate.mjs` false-positives on `git commit -C <sha>`** — the bypass-flag scan flags `-C` as `-n`/`--no-verify`, blocking a legitimate reuse-message commit; had to fall back to `-F <file>`. Tighten the flag regex to word-boundaries. (tool-should-decide, low). (3) **`rtk npm run …` → "program not found"** on this box — the rtk npm wrapper can't resolve the npm shim, so `rtk npm run build`/`check` fail; use PowerShell `npm` directly (CLAUDE.md's "always prefix rtk" doesn't hold for npm here). (durable trap, low).
-- **Node "no result file" → cascade — ROOT-CAUSED to the synth degeneracy, mostly FIXED v0.32.62 ([[synth-scopeless-nodes-doomed-run]]).**
-  Original symptom (2026-07-12 self-audit re-run): CP-NODE-8 had a prompt but NO `*.result.json` / stdout /
-  stderr / `task.json`, exhausted its 2/2 retry budget, blocked, and cascade-blocked 13 downstream nodes
-  (near-linear DAG, INV-RS-01). The `task.json` is written BEFORE launch, so its absence proved the node was
-  **never dispatched** (planned-but-not-driven), not a codex silent-fail — and that traced to the real root
-  cause: the synth emitted nodes with **empty affected_files/touched_files** (undispatchable). FIXED:
-  (a) synth now derives scope from module `file_scope` (`c60eb73f`); (b) `mergeImplementResults` now captures
-  the cause — never-dispatched (no `task.json`) vs dispatched-but-silent (stderr tail) (`aee3fc77`).
-  **Residual (deferred, needs clean repro):** the never-dispatched anti-cascade — leave a planned-but-not-driven
-  node PENDING (bounded-retry) instead of terminal-blocking its subtree. Diagnosability shipped; the
-  termination-safe retry did not (livelock risk needs a repro to validate).
+- **Never-dispatched anti-cascade retry (deferred, needs clean repro) [[synth-scopeless-nodes-doomed-run]].**
+  A planned-but-not-driven node (no `task.json` written before launch) still terminal-blocks its whole
+  downstream subtree (INV-RS-01) instead of retrying bounded-PENDING. Diagnosability (distinguishing
+  never-dispatched from dispatched-but-silent) shipped in `mergeImplementResults`; the termination-safe
+  retry did not — livelock risk needs a repro to validate before building it. Also still open: a
+  dispatch-boundary "no scope-less dispatch" guard (refuse to dispatch a node whose synth-derived scope
+  is empty, rather than relying solely on the synth-side fix that derives scope from module `file_scope`).
 - **`tests/shared/rollingDispatch.test.mjs` is a genuine timing flake (2026-07-12, tool-should-decide, medium).**
   "second dispatch should start after first completes: expected 1 to be 2" — a wall-clock/ordering assertion
   that flakes under full parallel load; passes in isolation. It flaked the v0.32.62 publish CI (shard 2/4;
@@ -254,7 +250,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     with per-file verification (many tests mutate fs / spawn subprocesses → isolation-off risks bleed).
 
 - **Dispatch admission-control rework — residual (env-bound / deeper, not blocking).** Shipped; see
-  `docs/HANDOFF.md` T5-3 for what landed. Design of record
+  `docs/HANDOFF.md` → "T5 forward tracks" for what landed. Design of record
   [`spec/audit/dispatch-admission-control.md`](spec/audit/dispatch-admission-control.md);
   [[capability-is-per-auditor-not-per-audit]] / [[dispatch-admission-control-design]].
   - (a) **live validation** of the real host+codex+NIM concurrent run — a metered multi-pool run confirming
