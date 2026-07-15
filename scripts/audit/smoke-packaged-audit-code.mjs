@@ -93,6 +93,16 @@ async function advanceToDispatchReady(runNextStep, root) {
     const step = JSON.parse((await runNextStep()).stdout);
     assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
     detail(`next-step -> ${step.step_kind} (${step.status})`);
+    if (step.step_kind === "critical_flow_fallback") {
+      // Deterministic flow inference fell below the confidence bar; answer the
+      // host fallback gate with an empty enrichment (nothing to add).
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        step.artifact_paths.critical_flow_fallback_results,
+        JSON.stringify({ flows: [] }, null, 2) + "\n",
+      );
+      continue;
+    }
     if (step.step_kind === "analyzer_install") {
       await mkdir(incomingDir, { recursive: true });
       await writeFile(
