@@ -16,6 +16,7 @@ import { deriveLocalAccountId, foldAccountCooldown } from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 import { resolveConversationHostProvider } from "../providers/providerPathGuard.js";
+import { expandRepairProxySources } from "./repairProxyRegistry.js";
 
 /**
  * The stable id of a dispatchable source — its explicit `id`, or a
@@ -463,6 +464,17 @@ export async function buildSourcePools(params: {
   const sources = collectDispatchableSources(params.sessionConfig, params.primaryProviderName, {
     demotePrimaryInProcess: params.demotePrimaryInProcess,
   });
+  // repair-proxy discovery: when a `/registry` endpoint is configured, expand its
+  // reachable providers into per-`provider/model` sources and concat (deduped by id —
+  // registry ids are stable/distinct). Fail-open: `expandRepairProxySources` returns []
+  // on any registry failure, so a proxy outage never breaks source-gather.
+  if (params.sessionConfig.repair_proxy?.base_url) {
+    const discovered = await expandRepairProxySources(params.sessionConfig.repair_proxy);
+    for (const source of discovered) {
+      const id = dispatchableSourceId(source);
+      if (!sources.some((s) => dispatchableSourceId(s) === id)) sources.push(source);
+    }
+  }
   const pools = await Promise.all(
     sources.map((source) =>
       buildSourcePool({ source, quotaSource: params.quotaSource, quotaEntries: params.quotaEntries }),

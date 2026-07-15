@@ -332,6 +332,30 @@ export interface DispatchableSource {
   account?: string;
 }
 
+/**
+ * Discovery config for a repair-proxy dispatch backend — an OpenAI-compatible
+ * multiplexer that fronts many HTTP providers/models behind ONE endpoint. audit-tools
+ * reads its `GET {base_url}/registry`, expands the reachable providers into one
+ * {@link DispatchableSource} per selected `provider/model`, and dispatches through the
+ * UNCHANGED `openai-compatible` transport (the proxy routes the namespaced model).
+ * Endpoint/host operator-supplied — no hardcoded proxy URL in core logic.
+ */
+export interface RepairProxyConfig {
+  /** The repair-proxy root URL. `/registry` is read for discovery; `/v1/chat/completions`
+   * is the dispatch transport (appended by `OpenAiCompatibleProvider`). */
+  base_url: string;
+  /** Env var holding the proxy API key, if the proxy requires one. */
+  api_key_env?: string;
+  /** Per reachable backend provider, take the top-K models by capability. Default 5. */
+  top_k?: number;
+  /**
+   * Per-backend-provider overrides keyed by the registry provider name. `cost_per_mtok`
+   * seeds the admission cost rank (else resolved from models.dev at rank time);
+   * `enabled: false` excludes that provider from discovery.
+   */
+  providers?: Record<string, { cost_per_mtok?: number; enabled?: boolean }>;
+}
+
 export interface BlockQuotaConfig {
   context_tokens?: number;
   reserved_output_tokens?: number;
@@ -582,6 +606,12 @@ export interface SessionConfig {
    * provider) is folded in as one implicit source for back-compat.
    */
   sources?: DispatchableSource[];
+  /**
+   * Discover dispatchable backends from a repair-proxy `/registry` endpoint and
+   * expand them into per-`provider/model` {@link DispatchableSource}s at pool-build
+   * time. See {@link RepairProxyConfig}.
+   */
+  repair_proxy?: RepairProxyConfig;
   agent_task_batch_size?: number;
   parallel_workers?: number;
   block_quota?: BlockQuotaConfig;
