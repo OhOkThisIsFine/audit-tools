@@ -18,6 +18,15 @@
   major code tracks remain complete (host-path quota enforcement ✅ 2026-07-10; access-memory ✅; cost↔speed
   dial ✅; admission control ✅; arbitrage Phase-0 CODE-COMPLETE; conceptual design review ✅). Next is the
   bounded forward remainder below + a confirming re-run.
+- **⚠️ In-flight branch `feat/repair-proxy-jit-dispatch` (NOT merged):** the repair-proxy dispatch
+  integration — audit-tools discovers repair-proxy `/registry` → per-`(provider,model)` sources with
+  per-provider 429 folding + a capability tiebreak in Gate-0 ordering. Slices A/B/D + 429 refinement
+  landed (attested, unit-green). **Immediate next (before merge):** (1) wire the Gate-0 candidate build
+  to FEED `source.capability_rank` + live pool saturation into `suggestCostOrdering` (currently the
+  mechanism is inert); (2) live e2e validation of a real dispatch through repair-proxy. Full detail +
+  residuals in `docs/backlog.md` → "repair-proxy dispatch integration"; design of record in
+  `spec/repair-proxy-dispatch-integration.md`. Companion work lives in the separate `C:\Code\repair-proxy`
+  repo (OpenAI front + `/registry` endpoint, already shipped on its `main`).
 - **Local env note:** the box runs npm 12.0.0 — it blocks dependency install scripts by default and can
   emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable traps
   before any manual `npm install -g` / packaged-install work.
