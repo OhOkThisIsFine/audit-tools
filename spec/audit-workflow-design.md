@@ -83,8 +83,10 @@ design review.
   prefix shares the same status and reason, show the directory once with a file
   count. Enumerate individual files only where they are the odd ones out within
   an otherwise-included directory. Cap is high (exact value TBD) to handle
-  unusual projects. Generalize the aggregation already present in
-  `buildFileDisposition` for vcs-ignored files above 200.
+  unusual projects. This aggregation is `buildExcludedSummary` in
+  `src/audit/orchestrator/intentCheckpointExecutor.ts`; it groups ALL excluded
+  files by top-level path prefix (not specifically vcs-ignored files), with no
+  count threshold on the aggregate.
 
 *Disposition override proposals:*
 - Scan `file_disposition` for suspicious inclusions the heuristics missed
