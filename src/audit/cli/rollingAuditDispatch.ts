@@ -104,6 +104,7 @@ const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
   "openai-compatible",
   "codex",
   "opencode",
+  "agy",
 ]);
 
 /**

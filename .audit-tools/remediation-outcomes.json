@@ -1,0 +1,3457 @@
+{
+  "contract_version": "remediate-code-outcomes/v1alpha1",
+  "total": 16,
+  "by_outcome": {
+    "resolved": 0,
+    "verified_no_change": 1,
+    "inappropriate": 0,
+    "ignored": 15,
+    "blocked": 0
+  },
+  "by_lens": {
+    "security": {
+      "ignored": 15,
+      "verified_no_change": 1
+    }
+  },
+  "started_at": "2026-07-12T19:13:31.259Z",
+  "completed_at": "2026-07-14T05:30:22.858Z",
+  "duration_ms": 123034568,
+  "outcomes": [
+    {
+      "finding_id": "CP-NODE-1",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-audit-cli-dispatch-contract",
+          "Satisfies contract obligation: OBL-audit-cli-dispatch-inv-1",
+          "Satisfies contract obligation: OBL-audit-cli-dispatch-inv-2",
+          "Satisfies contract obligation: OBL-audit-cli-dispatch-inv-3",
+          "Satisfies contract obligation: OBL-audit-cli-dispatch-fail-1",
+          "Satisfies contract obligation: OBL-audit-cli-dispatch-fail-2",
+          "Verifies contract obligation: OBL-audit-cli-dispatch-contract",
+          "Verifies contract obligation: OBL-audit-cli-dispatch-inv-1",
+          "Verifies contract obligation: OBL-audit-cli-dispatch-inv-2",
+          "Verifies contract obligation: OBL-audit-cli-dispatch-inv-3",
+          "Verifies contract obligation: OBL-audit-cli-dispatch-fail-1",
+          "Verifies contract obligation: OBL-audit-cli-dispatch-fail-2"
+        ],
+        "id": "CP-NODE-1",
+        "title": "Remediate audit-cli-dispatch (src/audit/cli/auditStep.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/audit/cli/auditStep.ts, src/audit/cli/dispatch.ts, src/audit/cli/mergeAndIngestCommand.ts, src/audit/cli/args.ts, src/audit/cli/dispatch/quotaPool.ts, src/audit/cli/forceSynthesisCommand.ts, src/audit/cli/rollingAuditDispatch.ts, src/audit/cli/statusCommand.ts and 17 more in module file_scope. Intent: do not swallow merge/ingest errors into a success status; resume when the quota wall clears. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/audit/cli/auditStep.ts, src/audit/cli/dispatch.ts, src/audit/cli/mergeAndIngestCommand.ts, src/audit/cli/args.ts, src/audit/cli/dispatch/quotaPool.ts, src/audit/cli/forceSynthesisCommand.ts, src/audit/cli/rollingAuditDispatch.ts, src/audit/cli/statusCommand.ts and 17 more in module file_scope. Intent: do not swallow merge/ingest errors into a success status; resume when the quota wall clears. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-audit-cli-dispatch-contract",
+          "OBL-audit-cli-dispatch-inv-1",
+          "OBL-audit-cli-dispatch-inv-2",
+          "OBL-audit-cli-dispatch-inv-3",
+          "OBL-audit-cli-dispatch-fail-1",
+          "OBL-audit-cli-dispatch-fail-2"
+        ],
+        "verification_obligation_ids": [
+          "OBL-audit-cli-dispatch-contract",
+          "OBL-audit-cli-dispatch-inv-1",
+          "OBL-audit-cli-dispatch-inv-2",
+          "OBL-audit-cli-dispatch-inv-3",
+          "OBL-audit-cli-dispatch-fail-1",
+          "OBL-audit-cli-dispatch-fail-2"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/audit"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-1",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-10",
+        "CP-BLOCK-CP-NODE-12",
+        "CP-BLOCK-CP-NODE-3"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-10",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-shared-dispatch-loopcore-contract",
+          "Satisfies contract obligation: OBL-shared-dispatch-loopcore-inv-1",
+          "Satisfies contract obligation: OBL-shared-dispatch-loopcore-inv-2",
+          "Satisfies contract obligation: OBL-shared-dispatch-loopcore-inv-3",
+          "Satisfies contract obligation: OBL-shared-dispatch-loopcore-fail-1",
+          "Verifies contract obligation: OBL-shared-dispatch-loopcore-contract",
+          "Verifies contract obligation: OBL-shared-dispatch-loopcore-inv-1",
+          "Verifies contract obligation: OBL-shared-dispatch-loopcore-inv-2",
+          "Verifies contract obligation: OBL-shared-dispatch-loopcore-inv-3",
+          "Verifies contract obligation: OBL-shared-dispatch-loopcore-fail-1"
+        ],
+        "id": "CP-NODE-10",
+        "title": "Remediate shared-dispatch-loopcore (src/shared/dispatch/rollingDispatch.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/shared/dispatch/rollingDispatch.ts, src/shared/repair/brokeredDispatch.ts, src/shared/dispatch/coordinator.ts, src/shared/dispatch/providerLaunchFinalize.ts, src/shared/rolling/pausedState.ts. Intent: LOOP-CORE: budget fit must reserve expected per-packet output, not the model max-output window; keep rolling pause/resume correct + livelock-bounded. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/shared/dispatch/rollingDispatch.ts, src/shared/repair/brokeredDispatch.ts, src/shared/dispatch/coordinator.ts, src/shared/dispatch/providerLaunchFinalize.ts, src/shared/rolling/pausedState.ts. Intent: LOOP-CORE: budget fit must reserve expected per-packet output, not the model max-output window; keep rolling pause/resume correct + livelock-bounded. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-shared-dispatch-loopcore-contract",
+          "OBL-shared-dispatch-loopcore-inv-1",
+          "OBL-shared-dispatch-loopcore-inv-2",
+          "OBL-shared-dispatch-loopcore-inv-3",
+          "OBL-shared-dispatch-loopcore-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-shared-dispatch-loopcore-contract",
+          "OBL-shared-dispatch-loopcore-inv-1",
+          "OBL-shared-dispatch-loopcore-inv-2",
+          "OBL-shared-dispatch-loopcore-inv-3",
+          "OBL-shared-dispatch-loopcore-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/shared"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-10",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-12"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-11",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-shared-misc-contract",
+          "Satisfies contract obligation: OBL-shared-misc-inv-1",
+          "Satisfies contract obligation: OBL-shared-misc-inv-2",
+          "Satisfies contract obligation: OBL-shared-misc-inv-3",
+          "Satisfies contract obligation: OBL-shared-misc-fail-1",
+          "Verifies contract obligation: OBL-shared-misc-contract",
+          "Verifies contract obligation: OBL-shared-misc-inv-1",
+          "Verifies contract obligation: OBL-shared-misc-inv-2",
+          "Verifies contract obligation: OBL-shared-misc-inv-3",
+          "Verifies contract obligation: OBL-shared-misc-fail-1"
+        ],
+        "id": "CP-NODE-11",
+        "title": "Remediate shared-misc (src/shared/stableStringify.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/shared/stableStringify.ts, src/shared/index.ts, src/shared/loopCorePaths.ts, src/shared/providers/openAiCompatibleProvider.ts, src/shared/providers/providerPathGuard.ts, src/shared/providers/spawnLoggedCommand.ts, src/shared/contentKey.ts, src/shared/providers/providerFactory.ts and 9 more in module file_scope. Intent: keep exactly one stable serializer; host provider resolution must not misclassify a headless worker backend as the conversation host. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/shared/stableStringify.ts, src/shared/index.ts, src/shared/loopCorePaths.ts, src/shared/providers/openAiCompatibleProvider.ts, src/shared/providers/providerPathGuard.ts, src/shared/providers/spawnLoggedCommand.ts, src/shared/contentKey.ts, src/shared/providers/providerFactory.ts and 9 more in module file_scope. Intent: keep exactly one stable serializer; host provider resolution must not misclassify a headless worker backend as the conversation host. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-shared-misc-contract",
+          "OBL-shared-misc-inv-1",
+          "OBL-shared-misc-inv-2",
+          "OBL-shared-misc-inv-3",
+          "OBL-shared-misc-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-shared-misc-contract",
+          "OBL-shared-misc-inv-1",
+          "OBL-shared-misc-inv-2",
+          "OBL-shared-misc-inv-3",
+          "OBL-shared-misc-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/shared"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-11",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-10",
+        "CP-BLOCK-CP-NODE-12"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-12",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-contract",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-inv-1",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-inv-2",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-inv-3",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-inv-4",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-inv-5",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-fail-1",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-fail-2",
+          "Satisfies contract obligation: OBL-shared-quota-loopcore-fail-3",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-contract",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-inv-1",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-inv-2",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-inv-3",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-inv-4",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-inv-5",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-fail-1",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-fail-2",
+          "Verifies contract obligation: OBL-shared-quota-loopcore-fail-3",
+          "Addresses accepted counterexample: CE-001",
+          "Addresses accepted counterexample: CE-002"
+        ],
+        "id": "CP-NODE-12",
+        "title": "Remediate shared-quota-loopcore (src/shared/quota/fileLock.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/shared/quota/fileLock.ts, src/shared/quota/scheduler.ts, src/shared/quota/modelStatics.ts, src/shared/quota/claimRegistry.ts, src/shared/quota/claudeOAuthQuotaSource.ts, src/shared/quota/hostSessionQuotaSource.ts, src/shared/quota/capacity.ts, src/shared/quota/state.ts and 13 more in module file_scope. Intent: LOOP-CORE: claimMany must not re-grant a live same-pool claim with a fresh token; preserve stale-lock mutual exclusion under clock skew; apply host budget across pools not per-pool; make external token-read args injection-safe. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/shared/quota/fileLock.ts, src/shared/quota/scheduler.ts, src/shared/quota/modelStatics.ts, src/shared/quota/claimRegistry.ts, src/shared/quota/claudeOAuthQuotaSource.ts, src/shared/quota/hostSessionQuotaSource.ts, src/shared/quota/capacity.ts, src/shared/quota/state.ts and 13 more in module file_scope. Intent: LOOP-CORE: claimMany must not re-grant a live same-pool claim with a fresh token; preserve stale-lock mutual exclusion under clock skew; apply host budget across pools not per-pool; make external token-read args injection-safe. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-shared-quota-loopcore-contract",
+          "OBL-shared-quota-loopcore-inv-1",
+          "OBL-shared-quota-loopcore-inv-2",
+          "OBL-shared-quota-loopcore-inv-3",
+          "OBL-shared-quota-loopcore-inv-4",
+          "OBL-shared-quota-loopcore-inv-5",
+          "OBL-shared-quota-loopcore-fail-1",
+          "OBL-shared-quota-loopcore-fail-2",
+          "OBL-shared-quota-loopcore-fail-3"
+        ],
+        "verification_obligation_ids": [
+          "OBL-shared-quota-loopcore-contract",
+          "OBL-shared-quota-loopcore-inv-1",
+          "OBL-shared-quota-loopcore-inv-2",
+          "OBL-shared-quota-loopcore-inv-3",
+          "OBL-shared-quota-loopcore-inv-4",
+          "OBL-shared-quota-loopcore-inv-5",
+          "OBL-shared-quota-loopcore-fail-1",
+          "OBL-shared-quota-loopcore-fail-2",
+          "OBL-shared-quota-loopcore-fail-3"
+        ],
+        "addresses_counterexamples": [
+          "CE-001",
+          "CE-002"
+        ],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/shared"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-12",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-7"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-13",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-tests-audit-contract",
+          "Satisfies contract obligation: OBL-tests-audit-inv-1",
+          "Satisfies contract obligation: OBL-tests-audit-inv-2",
+          "Satisfies contract obligation: OBL-tests-audit-inv-3",
+          "Satisfies contract obligation: OBL-tests-audit-inv-4",
+          "Satisfies contract obligation: OBL-tests-audit-fail-1",
+          "Satisfies contract obligation: OBL-tests-audit-fail-2",
+          "Verifies contract obligation: OBL-tests-audit-contract",
+          "Verifies contract obligation: OBL-tests-audit-inv-1",
+          "Verifies contract obligation: OBL-tests-audit-inv-2",
+          "Verifies contract obligation: OBL-tests-audit-inv-3",
+          "Verifies contract obligation: OBL-tests-audit-inv-4",
+          "Verifies contract obligation: OBL-tests-audit-fail-1",
+          "Verifies contract obligation: OBL-tests-audit-fail-2"
+        ],
+        "id": "CP-NODE-13",
+        "title": "Remediate tests-audit (tests/audit/f3-schema-enforced-generation.test.mjs)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: tests/audit/f3-schema-enforced-generation.test.mjs, tests/audit/audit-cli-invariants.test.mjs, tests/audit/seam-host-only-next-step.test.mjs, tests/audit/audit-code-completion.test.mjs, tests/audit/audit-code-wrapper.test.mjs, tests/audit/graph-framework-routes.test.mjs, tests/audit/host-bootstrap-descriptors.test.mjs, tests/audit/host-model-roster.test.mjs and 22 more in module file_scope. Intent: import from TS source not dist/; scope+restore global console/env mutation; ground seam/exhaustiveness assertions in the real implementations. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: tests/audit/f3-schema-enforced-generation.test.mjs, tests/audit/audit-cli-invariants.test.mjs, tests/audit/seam-host-only-next-step.test.mjs, tests/audit/audit-code-completion.test.mjs, tests/audit/audit-code-wrapper.test.mjs, tests/audit/graph-framework-routes.test.mjs, tests/audit/host-bootstrap-descriptors.test.mjs, tests/audit/host-model-roster.test.mjs and 22 more in module file_scope. Intent: import from TS source not dist/; scope+restore global console/env mutation; ground seam/exhaustiveness assertions in the real implementations. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-tests-audit-contract",
+          "OBL-tests-audit-inv-1",
+          "OBL-tests-audit-inv-2",
+          "OBL-tests-audit-inv-3",
+          "OBL-tests-audit-inv-4",
+          "OBL-tests-audit-fail-1",
+          "OBL-tests-audit-fail-2"
+        ],
+        "verification_obligation_ids": [
+          "OBL-tests-audit-contract",
+          "OBL-tests-audit-inv-1",
+          "OBL-tests-audit-inv-2",
+          "OBL-tests-audit-inv-3",
+          "OBL-tests-audit-inv-4",
+          "OBL-tests-audit-fail-1",
+          "OBL-tests-audit-fail-2"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/audit"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-13",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-1",
+        "CP-BLOCK-CP-NODE-3"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-14",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-tests-remediate-contract",
+          "Satisfies contract obligation: OBL-tests-remediate-inv-1",
+          "Satisfies contract obligation: OBL-tests-remediate-inv-2",
+          "Satisfies contract obligation: OBL-tests-remediate-inv-3",
+          "Satisfies contract obligation: OBL-tests-remediate-fail-1",
+          "Verifies contract obligation: OBL-tests-remediate-contract",
+          "Verifies contract obligation: OBL-tests-remediate-inv-1",
+          "Verifies contract obligation: OBL-tests-remediate-inv-2",
+          "Verifies contract obligation: OBL-tests-remediate-inv-3",
+          "Verifies contract obligation: OBL-tests-remediate-fail-1"
+        ],
+        "id": "CP-NODE-14",
+        "title": "Remediate tests-remediate (tests/remediate/dispatch-worktree.test.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: tests/remediate/dispatch-worktree.test.ts, tests/remediate/wave-scheduler.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/n-r06-universal-contract-pipeline.test.ts, tests/remediate/next-step-implement-dispatch.test.ts, tests/remediate/a8.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts, tests/remediate/contract-pipeline-prompts.test.ts and 17 more in module file_scope. Intent: remove wall-clock setTimeout timing races; re-pin stale expectations to current source behavior. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: tests/remediate/dispatch-worktree.test.ts, tests/remediate/wave-scheduler.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/n-r06-universal-contract-pipeline.test.ts, tests/remediate/next-step-implement-dispatch.test.ts, tests/remediate/a8.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts, tests/remediate/contract-pipeline-prompts.test.ts and 17 more in module file_scope. Intent: remove wall-clock setTimeout timing races; re-pin stale expectations to current source behavior. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-tests-remediate-contract",
+          "OBL-tests-remediate-inv-1",
+          "OBL-tests-remediate-inv-2",
+          "OBL-tests-remediate-inv-3",
+          "OBL-tests-remediate-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-tests-remediate-contract",
+          "OBL-tests-remediate-inv-1",
+          "OBL-tests-remediate-inv-2",
+          "OBL-tests-remediate-inv-3",
+          "OBL-tests-remediate-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/remediate"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-14",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-6",
+        "CP-BLOCK-CP-NODE-7"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-15",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-tests-shared-contract",
+          "Satisfies contract obligation: OBL-tests-shared-inv-1",
+          "Satisfies contract obligation: OBL-tests-shared-inv-2",
+          "Satisfies contract obligation: OBL-tests-shared-inv-3",
+          "Satisfies contract obligation: OBL-tests-shared-fail-1",
+          "Verifies contract obligation: OBL-tests-shared-contract",
+          "Verifies contract obligation: OBL-tests-shared-inv-1",
+          "Verifies contract obligation: OBL-tests-shared-inv-2",
+          "Verifies contract obligation: OBL-tests-shared-inv-3",
+          "Verifies contract obligation: OBL-tests-shared-fail-1"
+        ],
+        "id": "CP-NODE-15",
+        "title": "Remediate tests-shared (tests/shared/token-budget-view.test.mjs)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: tests/shared/token-budget-view.test.mjs, tests/shared/audit-tools-path-guard.test.mjs, tests/shared/cost-rank.test.mjs, tests/shared/shared-tests-invariants.test.mjs, tests/shared/tier-rank.test.mjs, tests/shared/chunk-by-budget.test.mjs, tests/shared/count-by.test.mjs, tests/shared/cross-lens-dedupe.test.mjs and 3 more in module file_scope. Intent: import source not dist/alias; parameterize duplicated invariant tests; single-source drift-guard key lists. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: tests/shared/token-budget-view.test.mjs, tests/shared/audit-tools-path-guard.test.mjs, tests/shared/cost-rank.test.mjs, tests/shared/shared-tests-invariants.test.mjs, tests/shared/tier-rank.test.mjs, tests/shared/chunk-by-budget.test.mjs, tests/shared/count-by.test.mjs, tests/shared/cross-lens-dedupe.test.mjs and 3 more in module file_scope. Intent: import source not dist/alias; parameterize duplicated invariant tests; single-source drift-guard key lists. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-tests-shared-contract",
+          "OBL-tests-shared-inv-1",
+          "OBL-tests-shared-inv-2",
+          "OBL-tests-shared-inv-3",
+          "OBL-tests-shared-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-tests-shared-contract",
+          "OBL-tests-shared-inv-1",
+          "OBL-tests-shared-inv-2",
+          "OBL-tests-shared-inv-3",
+          "OBL-tests-shared-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/shared"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-15",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-11",
+        "CP-BLOCK-CP-NODE-12"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-16",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 0,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "User-deferred for this run: Codex worker (with file access) could not substantiate the claimed audit/remediate host-installer duplication — the cited files already single-source via scripts/shared/install-host-assets.mjs. Deferring this run rather than rejecting outright, pending owner confirmation that it is a false-positive from the force-synth slice.",
+      "started_at": "2026-07-12T19:23:40.941Z",
+      "completed_at": "2026-07-12T19:23:40.941Z",
+      "duration_ms": 0,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-wrapper-scripts-contract",
+          "Satisfies contract obligation: OBL-wrapper-scripts-inv-1",
+          "Satisfies contract obligation: OBL-wrapper-scripts-inv-2",
+          "Satisfies contract obligation: OBL-wrapper-scripts-inv-3",
+          "Satisfies contract obligation: OBL-wrapper-scripts-fail-1",
+          "Verifies contract obligation: OBL-wrapper-scripts-contract",
+          "Verifies contract obligation: OBL-wrapper-scripts-inv-1",
+          "Verifies contract obligation: OBL-wrapper-scripts-inv-2",
+          "Verifies contract obligation: OBL-wrapper-scripts-inv-3",
+          "Verifies contract obligation: OBL-wrapper-scripts-fail-1"
+        ],
+        "id": "CP-NODE-16",
+        "title": "Remediate wrapper-scripts (wrapper/remediate-code-wrapper-install-hosts.mjs)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: wrapper/remediate-code-wrapper-install-hosts.mjs, scripts/shared/update-models.mjs, scripts/shared/install-host-assets.mjs, scripts/audit/postinstall.mjs, wrapper/remediate-code-wrapper-opencode.mjs, scripts/audit/generate-schemas.mjs, scripts/audit/smoke-packaged-audit-code.mjs, scripts/audit/smoke-linked-audit-code.mjs and 8 more in module file_scope. Intent: single-source the duplicated audit/remediate host-installer framework where cited; keep postinstall scripts OS-agnostic + idempotent. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: wrapper/remediate-code-wrapper-install-hosts.mjs, scripts/shared/update-models.mjs, scripts/shared/install-host-assets.mjs, scripts/audit/postinstall.mjs, wrapper/remediate-code-wrapper-opencode.mjs, scripts/audit/generate-schemas.mjs, scripts/audit/smoke-packaged-audit-code.mjs, scripts/audit/smoke-linked-audit-code.mjs and 8 more in module file_scope. Intent: single-source the duplicated audit/remediate host-installer framework where cited; keep postinstall scripts OS-agnostic + idempotent. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-wrapper-scripts-contract",
+          "OBL-wrapper-scripts-inv-1",
+          "OBL-wrapper-scripts-inv-2",
+          "OBL-wrapper-scripts-inv-3",
+          "OBL-wrapper-scripts-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-wrapper-scripts-contract",
+          "OBL-wrapper-scripts-inv-1",
+          "OBL-wrapper-scripts-inv-2",
+          "OBL-wrapper-scripts-inv-3",
+          "OBL-wrapper-scripts-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-16",
+      "block_dependencies": [],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-2",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-audit-misc-contract",
+          "Satisfies contract obligation: OBL-audit-misc-inv-1",
+          "Satisfies contract obligation: OBL-audit-misc-inv-2",
+          "Satisfies contract obligation: OBL-audit-misc-inv-3",
+          "Satisfies contract obligation: OBL-audit-misc-fail-1",
+          "Verifies contract obligation: OBL-audit-misc-contract",
+          "Verifies contract obligation: OBL-audit-misc-inv-1",
+          "Verifies contract obligation: OBL-audit-misc-inv-2",
+          "Verifies contract obligation: OBL-audit-misc-inv-3",
+          "Verifies contract obligation: OBL-audit-misc-fail-1"
+        ],
+        "id": "CP-NODE-2",
+        "title": "Remediate audit-misc (src/audit/validation/artifacts.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/audit/validation/artifacts.ts, src/audit/cli.ts, src/audit/contracts/schemaEnforcedEmit.ts, src/audit/validation/auditResults.ts, src/audit/contracts/workerSchemas.ts, src/audit/decompose/sources.ts, src/audit/extractors/pathPatterns.ts, src/audit/reporting/synthesis.ts and 8 more in module file_scope. Intent: keep schema-enforced emit sound and synthesis deterministic + stable-ordered; malformed config degrades to a clear error. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/audit/validation/artifacts.ts, src/audit/cli.ts, src/audit/contracts/schemaEnforcedEmit.ts, src/audit/validation/auditResults.ts, src/audit/contracts/workerSchemas.ts, src/audit/decompose/sources.ts, src/audit/extractors/pathPatterns.ts, src/audit/reporting/synthesis.ts and 8 more in module file_scope. Intent: keep schema-enforced emit sound and synthesis deterministic + stable-ordered; malformed config degrades to a clear error. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-audit-misc-contract",
+          "OBL-audit-misc-inv-1",
+          "OBL-audit-misc-inv-2",
+          "OBL-audit-misc-inv-3",
+          "OBL-audit-misc-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-audit-misc-contract",
+          "OBL-audit-misc-inv-1",
+          "OBL-audit-misc-inv-2",
+          "OBL-audit-misc-inv-3",
+          "OBL-audit-misc-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/audit"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-2",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-11",
+        "CP-BLOCK-CP-NODE-3"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-3",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-audit-orchestrator-contract",
+          "Satisfies contract obligation: OBL-audit-orchestrator-inv-1",
+          "Satisfies contract obligation: OBL-audit-orchestrator-inv-2",
+          "Satisfies contract obligation: OBL-audit-orchestrator-inv-3",
+          "Satisfies contract obligation: OBL-audit-orchestrator-inv-4",
+          "Satisfies contract obligation: OBL-audit-orchestrator-inv-5",
+          "Satisfies contract obligation: OBL-audit-orchestrator-fail-1",
+          "Satisfies contract obligation: OBL-audit-orchestrator-fail-2",
+          "Verifies contract obligation: OBL-audit-orchestrator-contract",
+          "Verifies contract obligation: OBL-audit-orchestrator-inv-1",
+          "Verifies contract obligation: OBL-audit-orchestrator-inv-2",
+          "Verifies contract obligation: OBL-audit-orchestrator-inv-3",
+          "Verifies contract obligation: OBL-audit-orchestrator-inv-4",
+          "Verifies contract obligation: OBL-audit-orchestrator-inv-5",
+          "Verifies contract obligation: OBL-audit-orchestrator-fail-1",
+          "Verifies contract obligation: OBL-audit-orchestrator-fail-2"
+        ],
+        "id": "CP-NODE-3",
+        "title": "Remediate audit-orchestrator (src/audit/orchestrator/advance.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/audit/orchestrator/advance.ts, src/audit/orchestrator/fileAnchors.ts, src/audit/orchestrator/edgeReasoning.ts, src/audit/orchestrator/designReviewPrompt.ts, src/audit/orchestrator/graphEnrichmentExecutor.ts, src/audit/orchestrator/localCommands.ts, src/audit/orchestrator/artifactFreshness.ts, src/audit/orchestrator/artifactMetadata.ts and 19 more in module file_scope. Intent: forced-executor path must not emit a whole-bundle staleness record on an incomplete drain; add missing dependency-map edges; edgeReasoning must not drop edges sharing an (from,to) pair with different kinds; bound the staleness closure against cycles. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/audit/orchestrator/advance.ts, src/audit/orchestrator/fileAnchors.ts, src/audit/orchestrator/edgeReasoning.ts, src/audit/orchestrator/designReviewPrompt.ts, src/audit/orchestrator/graphEnrichmentExecutor.ts, src/audit/orchestrator/localCommands.ts, src/audit/orchestrator/artifactFreshness.ts, src/audit/orchestrator/artifactMetadata.ts and 19 more in module file_scope. Intent: forced-executor path must not emit a whole-bundle staleness record on an incomplete drain; add missing dependency-map edges; edgeReasoning must not drop edges sharing an (from,to) pair with different kinds; bound the staleness closure against cycles. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-audit-orchestrator-contract",
+          "OBL-audit-orchestrator-inv-1",
+          "OBL-audit-orchestrator-inv-2",
+          "OBL-audit-orchestrator-inv-3",
+          "OBL-audit-orchestrator-inv-4",
+          "OBL-audit-orchestrator-inv-5",
+          "OBL-audit-orchestrator-fail-1",
+          "OBL-audit-orchestrator-fail-2"
+        ],
+        "verification_obligation_ids": [
+          "OBL-audit-orchestrator-contract",
+          "OBL-audit-orchestrator-inv-1",
+          "OBL-audit-orchestrator-inv-2",
+          "OBL-audit-orchestrator-inv-3",
+          "OBL-audit-orchestrator-inv-4",
+          "OBL-audit-orchestrator-inv-5",
+          "OBL-audit-orchestrator-fail-1",
+          "OBL-audit-orchestrator-fail-2"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/audit"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-3",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-11"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-4",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-dispatch-scripts-contract",
+          "Satisfies contract obligation: OBL-dispatch-scripts-inv-1",
+          "Satisfies contract obligation: OBL-dispatch-scripts-inv-2",
+          "Satisfies contract obligation: OBL-dispatch-scripts-fail-1",
+          "Verifies contract obligation: OBL-dispatch-scripts-contract",
+          "Verifies contract obligation: OBL-dispatch-scripts-inv-1",
+          "Verifies contract obligation: OBL-dispatch-scripts-inv-2",
+          "Verifies contract obligation: OBL-dispatch-scripts-fail-1"
+        ],
+        "id": "CP-NODE-4",
+        "title": "Remediate dispatch-scripts (dispatch/merge-results.mjs)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: dispatch/merge-results.mjs, dispatch/validate-result.mjs, dispatch/validate.mjs. Intent: decouple from brittle compiled dist/ import paths where a finding cites it. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: dispatch/merge-results.mjs, dispatch/validate-result.mjs, dispatch/validate.mjs. Intent: decouple from brittle compiled dist/ import paths where a finding cites it. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-dispatch-scripts-contract",
+          "OBL-dispatch-scripts-inv-1",
+          "OBL-dispatch-scripts-inv-2",
+          "OBL-dispatch-scripts-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-dispatch-scripts-contract",
+          "OBL-dispatch-scripts-inv-1",
+          "OBL-dispatch-scripts-inv-2",
+          "OBL-dispatch-scripts-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-4",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-1"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-5",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-host-command-configs-contract",
+          "Satisfies contract obligation: OBL-host-command-configs-inv-1",
+          "Satisfies contract obligation: OBL-host-command-configs-inv-2",
+          "Satisfies contract obligation: OBL-host-command-configs-fail-1",
+          "Verifies contract obligation: OBL-host-command-configs-contract",
+          "Verifies contract obligation: OBL-host-command-configs-inv-1",
+          "Verifies contract obligation: OBL-host-command-configs-inv-2",
+          "Verifies contract obligation: OBL-host-command-configs-fail-1"
+        ],
+        "id": "CP-NODE-5",
+        "title": "Remediate host-command-configs (.gemini/commands/remediate-code.toml)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Fix the per-host argument convention in .gemini/commands/remediate-code.toml and .gemini/commands/audit-code.toml (no Claude-only $ARGUMENTS in a Gemini/Antigravity command) and reduce loader-workflow duplication where cited; these command assets are installed by wrapper/remediate-code-wrapper-install-hosts.mjs and wrapper/audit-code-wrapper-install-hosts.mjs. Verify each finding against current source before editing; decline non-reproducing leads with a reason.",
+        "concrete_change": "Fix the per-host argument convention in .gemini/commands/remediate-code.toml and .gemini/commands/audit-code.toml (no Claude-only $ARGUMENTS in a Gemini/Antigravity command) and reduce loader-workflow duplication where cited; these command assets are installed by wrapper/remediate-code-wrapper-install-hosts.mjs and wrapper/audit-code-wrapper-install-hosts.mjs. Verify each finding against current source before editing; decline non-reproducing leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-host-command-configs-contract",
+          "OBL-host-command-configs-inv-1",
+          "OBL-host-command-configs-inv-2",
+          "OBL-host-command-configs-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-host-command-configs-contract",
+          "OBL-host-command-configs-inv-1",
+          "OBL-host-command-configs-inv-2",
+          "OBL-host-command-configs-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-5",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-16"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-6",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "verified_no_change",
+      "rework_count": 1,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "started_at": "2026-07-12T19:19:48.290Z",
+      "completed_at": "2026-07-12T19:45:13.200Z",
+      "duration_ms": 1524910,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-remediate-contract-contract",
+          "Satisfies contract obligation: OBL-remediate-contract-inv-1",
+          "Satisfies contract obligation: OBL-remediate-contract-inv-2",
+          "Satisfies contract obligation: OBL-remediate-contract-inv-3",
+          "Satisfies contract obligation: OBL-remediate-contract-fail-1",
+          "Verifies contract obligation: OBL-remediate-contract-contract",
+          "Verifies contract obligation: OBL-remediate-contract-inv-1",
+          "Verifies contract obligation: OBL-remediate-contract-inv-2",
+          "Verifies contract obligation: OBL-remediate-contract-inv-3",
+          "Verifies contract obligation: OBL-remediate-contract-fail-1"
+        ],
+        "id": "CP-NODE-6",
+        "title": "Remediate remediate (remediate)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply cited fixes in src/remediate/contractPipeline (deriveObligationLedger in derive.ts, changeClassification, evaluateContractPipelineCrossGates in contractPipelineGates.ts): the change-classification baseline must exclude the module being classified from its own corpus; keep gate evaluation sound and finalization deterministic. Verify each finding against current source before editing; decline non-reproducing leads with a reason.",
+        "concrete_change": "Apply cited fixes in src/remediate/contractPipeline (deriveObligationLedger in derive.ts, changeClassification, evaluateContractPipelineCrossGates in contractPipelineGates.ts): the change-classification baseline must exclude the module being classified from its own corpus; keep gate evaluation sound and finalization deterministic. Verify each finding against current source before editing; decline non-reproducing leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-remediate-contract-contract",
+          "OBL-remediate-contract-inv-1",
+          "OBL-remediate-contract-inv-2",
+          "OBL-remediate-contract-inv-3",
+          "OBL-remediate-contract-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-remediate-contract-contract",
+          "OBL-remediate-contract-inv-1",
+          "OBL-remediate-contract-inv-2",
+          "OBL-remediate-contract-inv-3",
+          "OBL-remediate-contract-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-6",
+      "block_dependencies": [],
+      "final_status": "fixed"
+    },
+    {
+      "finding_id": "CP-NODE-7",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-contract",
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-inv-1",
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-inv-2",
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-inv-3",
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-inv-4",
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-fail-1",
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-fail-2",
+          "Satisfies contract obligation: OBL-remediate-dispatch-loopcore-fail-3",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-contract",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-inv-1",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-inv-2",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-inv-3",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-inv-4",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-fail-1",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-fail-2",
+          "Verifies contract obligation: OBL-remediate-dispatch-loopcore-fail-3",
+          "Addresses accepted counterexample: CE-001"
+        ],
+        "id": "CP-NODE-7",
+        "title": "Remediate remediate-dispatch-loopcore (src/remediate/dispatch/ownershipRegistry.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/remediate/dispatch/ownershipRegistry.ts, src/remediate/steps/dispatch/acceptNode.ts, src/remediate/steps/dispatch/marshal.ts, src/remediate/steps/rollingSession.ts, src/remediate/steps/dispatch/verifyCommands.ts, src/remediate/steps/dispatch/worktreeLifecycle.ts, src/remediate/steps/dispatch/waveScheduling.ts, src/remediate/dispatch/amendmentClaim.ts. Intent: LOOP-CORE: release a node claim/lease on every failure path; make file-ownership claim registration atomic; do not hold the session lock across long verify lifecycles; enrich accept/verify diagnostics. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/remediate/dispatch/ownershipRegistry.ts, src/remediate/steps/dispatch/acceptNode.ts, src/remediate/steps/dispatch/marshal.ts, src/remediate/steps/rollingSession.ts, src/remediate/steps/dispatch/verifyCommands.ts, src/remediate/steps/dispatch/worktreeLifecycle.ts, src/remediate/steps/dispatch/waveScheduling.ts, src/remediate/dispatch/amendmentClaim.ts. Intent: LOOP-CORE: release a node claim/lease on every failure path; make file-ownership claim registration atomic; do not hold the session lock across long verify lifecycles; enrich accept/verify diagnostics. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-remediate-dispatch-loopcore-contract",
+          "OBL-remediate-dispatch-loopcore-inv-1",
+          "OBL-remediate-dispatch-loopcore-inv-2",
+          "OBL-remediate-dispatch-loopcore-inv-3",
+          "OBL-remediate-dispatch-loopcore-inv-4",
+          "OBL-remediate-dispatch-loopcore-fail-1",
+          "OBL-remediate-dispatch-loopcore-fail-2",
+          "OBL-remediate-dispatch-loopcore-fail-3"
+        ],
+        "verification_obligation_ids": [
+          "OBL-remediate-dispatch-loopcore-contract",
+          "OBL-remediate-dispatch-loopcore-inv-1",
+          "OBL-remediate-dispatch-loopcore-inv-2",
+          "OBL-remediate-dispatch-loopcore-inv-3",
+          "OBL-remediate-dispatch-loopcore-inv-4",
+          "OBL-remediate-dispatch-loopcore-fail-1",
+          "OBL-remediate-dispatch-loopcore-fail-2",
+          "OBL-remediate-dispatch-loopcore-fail-3"
+        ],
+        "addresses_counterexamples": [
+          "CE-001"
+        ],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/remediate"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-7",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-8"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-8",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; plan/drive inconsistency — never dispatched.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-remediate-misc-contract",
+          "Satisfies contract obligation: OBL-remediate-misc-inv-1",
+          "Satisfies contract obligation: OBL-remediate-misc-inv-2",
+          "Satisfies contract obligation: OBL-remediate-misc-inv-3",
+          "Satisfies contract obligation: OBL-remediate-misc-fail-1",
+          "Verifies contract obligation: OBL-remediate-misc-contract",
+          "Verifies contract obligation: OBL-remediate-misc-inv-1",
+          "Verifies contract obligation: OBL-remediate-misc-inv-2",
+          "Verifies contract obligation: OBL-remediate-misc-inv-3",
+          "Verifies contract obligation: OBL-remediate-misc-fail-1"
+        ],
+        "id": "CP-NODE-8",
+        "title": "Remediate remediate-misc (src/remediate/riskSignal.ts)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: src/remediate/riskSignal.ts, src/remediate/intake.ts, src/remediate/phases/grounding.ts, src/remediate/phases/plan.ts, src/remediate/steps/contractPipeline.ts, src/remediate/dedup/crossLensDedup.ts, src/remediate/findingFilter.ts, src/remediate/intent/checkpointFilter.ts and 5 more in module file_scope. Intent: keep cross-lens dedup stable + lossless; close-phase git actions revertable + scope-fenced. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: src/remediate/riskSignal.ts, src/remediate/intake.ts, src/remediate/phases/grounding.ts, src/remediate/phases/plan.ts, src/remediate/steps/contractPipeline.ts, src/remediate/dedup/crossLensDedup.ts, src/remediate/findingFilter.ts, src/remediate/intent/checkpointFilter.ts and 5 more in module file_scope. Intent: keep cross-lens dedup stable + lossless; close-phase git actions revertable + scope-fenced. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-remediate-misc-contract",
+          "OBL-remediate-misc-inv-1",
+          "OBL-remediate-misc-inv-2",
+          "OBL-remediate-misc-inv-3",
+          "OBL-remediate-misc-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-remediate-misc-contract",
+          "OBL-remediate-misc-inv-1",
+          "OBL-remediate-misc-inv-2",
+          "OBL-remediate-misc-inv-3",
+          "OBL-remediate-misc-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check",
+          "npx vitest run tests/remediate"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-8",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-6"
+      ],
+      "final_status": "ignored"
+    },
+    {
+      "finding_id": "CP-NODE-9",
+      "lens": "security",
+      "file_exts": [],
+      "outcome": "ignored",
+      "rework_count": 3,
+      "closing_status": "skipped",
+      "closing_status_reason": "closing action is 'none' — no commit/push/publish configured",
+      "reason": "Retry budget exhausted; closing out run.",
+      "started_at": "2026-07-12T19:23:40.945Z",
+      "completed_at": "2026-07-14T05:30:22.858Z",
+      "duration_ms": 122801913,
+      "finding": {
+        "category": "General",
+        "affected_files": [],
+        "evidence": [
+          "Satisfies contract obligation: OBL-root-config-contract",
+          "Satisfies contract obligation: OBL-root-config-inv-1",
+          "Satisfies contract obligation: OBL-root-config-inv-2",
+          "Satisfies contract obligation: OBL-root-config-fail-1",
+          "Verifies contract obligation: OBL-root-config-contract",
+          "Verifies contract obligation: OBL-root-config-inv-1",
+          "Verifies contract obligation: OBL-root-config-inv-2",
+          "Verifies contract obligation: OBL-root-config-fail-1"
+        ],
+        "id": "CP-NODE-9",
+        "title": "Remediate root-config (schemas/audit_result.schema.json)",
+        "severity": "high",
+        "confidence": "high",
+        "lens": "security",
+        "summary": "Apply the cited approved findings scoped to these files: schemas/audit_result.schema.json, schemas/audit_results.schema.json, schemas/finding.schema.json, .github/workflows/ci.yml, docs/backlog.md, .github/workflows/audit-code-test-suite.yml, .github/workflows/publish-package.yml, schemas/audit_task.schema.json and 1 more in module file_scope. Intent: apply cited schema/CI/doc corrections; keep schema changes backward-compatible. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "concrete_change": "Apply the cited approved findings scoped to these files: schemas/audit_result.schema.json, schemas/audit_results.schema.json, schemas/finding.schema.json, .github/workflows/ci.yml, docs/backlog.md, .github/workflows/audit-code-test-suite.yml, .github/workflows/publish-package.yml, schemas/audit_task.schema.json and 1 more in module file_scope. Intent: apply cited schema/CI/doc corrections; keep schema changes backward-compatible. Verify each finding against current source before editing; decline non-reproducing/over-severe leads with a reason.",
+        "contract_goal_id": "selfaudit-2026-07-11-highsignal-slice",
+        "contract_obligation_ids": [
+          "OBL-root-config-contract",
+          "OBL-root-config-inv-1",
+          "OBL-root-config-inv-2",
+          "OBL-root-config-fail-1"
+        ],
+        "verification_obligation_ids": [
+          "OBL-root-config-contract",
+          "OBL-root-config-inv-1",
+          "OBL-root-config-inv-2",
+          "OBL-root-config-fail-1"
+        ],
+        "addresses_counterexamples": [],
+        "model_tier": "deep",
+        "targeted_commands": [
+          "npm run build",
+          "npm run check"
+        ],
+        "preconditions": [],
+        "expected_changes": ""
+      },
+      "block_id": "CP-BLOCK-CP-NODE-9",
+      "block_dependencies": [
+        "CP-BLOCK-CP-NODE-2"
+      ],
+      "final_status": "ignored"
+    }
+  ],
+  "ended_at": "2026-07-14T05:30:22.872Z",
+  "step_count": 8,
+  "combined_test_result": {
+    "passed": true,
+    "duration_ms": 0
+  },
+  "closing_result": {
+    "action": "none",
+    "status": "skipped",
+    "commands": []
+  },
+  "plan_coverage": {
+    "contract_version": "remediate-code-coverage/v1alpha1",
+    "plan_id": "selfaudit-2026-07-11-highsignal-slice",
+    "source_finding_count": 356,
+    "planned_count": 168,
+    "folded_count": 2,
+    "dropped_count": 11,
+    "checkpoint_dropped_count": 174,
+    "phantom_dropped_count": 1,
+    "declined_review_count": 0,
+    "entries": [
+      {
+        "finding_id": "COR-c0c7b68d",
+        "title": "AntigravityQuotaSource token reading has SQL injection vulnerability",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-e8894bed",
+        "title": "cost-rank.test.mjs imports from compiled dist/ instead of source",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-4cbd9207",
+        "title": "$ARGUMENTS variable uses Claude Code convention in Gemini/Antigravity command",
+        "disposition": "planned",
+        "evidence_grounded": false
+      },
+      {
+        "finding_id": "TST-f4c03567",
+        "title": "a8.test.ts healthy-before-degraded test asserts incorrect expectation",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-77c2921e",
+        "title": "advanceAudit forced executor path bypasses drain but still emits staleness record",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-89494d58",
+        "title": "advanceHostRolling holds the session file lock across the whole accept lifecycle, exceeding the lock's 10s acquire timeout and 30s stale-steal window",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-33a19af0",
+        "title": "advanceRollingPause uses strandedIds parameter but passes next.stranded_node_ids to terminal",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-1f68e3a6",
+        "title": "applyEdgeReasoning uses byEndpoints map which only stores first edge per (from,to) pair",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-6d1b1dbc",
+        "title": "Audit and remediation installers duplicate the same host framework",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-b409faac",
+        "title": "audit-cli-invariants.test.mjs tests INV-audit-cli-02 but only verifies fallthrough behavior, not the null guard fix",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-08f23bd8",
+        "title": "audit-code-completion.test.mjs captureConsoleLog overrides console.log/console.warn/process.stderr.write globally - test pollution risk",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-08f23bd8-2",
+        "title": "audit-code-completion.test.mjs withEnvParity mutates global process.env.CLAUDECODE - potential test pollution",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-756614b5",
+        "title": "Base-branch mutual exclusion is time-bounded, not ownership-bounded: unbounded verify work runs inside a non-renewed, 30s-stealable, 10s-timeout file lock",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "COR-5990a635",
+        "title": "brokeredDispatch.ts fitWaveToBudget uses resolveContextBudget which subtracts output_tokens from context_tokens, but output_tokens is the model's max output cap, not reserved output",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-d370d262",
+        "title": "buildFileAnchorSummary assigns end_line to nested symbols incorrectly",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-48407592",
+        "title": "Cascading failure risk - test dependencies on external provider launches",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-89494d58-2",
+        "title": "Claim lease leaked on accept-node failure, permanently stranding nodes",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-c5b9c7b8",
+        "title": "claimMany same-poolId re-grant rotates a live peer's ownerToken, allowing double execution within one run",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-23ea892d",
+        "title": "claimRegistry.claimMany re-grants own pool's live claims without checking staleness",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-5babe2b1",
+        "title": "cli-dispatcher.test.mjs imports the CLI from dist/, passing on stale builds",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-e36d2490",
+        "title": "Concurrency tests use setTimeout for timing-dependent assertions",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-f793f450",
+        "title": "Configured worker provider is misclassified as the conversation host",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-b315dab9",
+        "title": "CP-NODE-3 state-transition test acts as drift guard for state machine",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-c66ed30f",
+        "title": "Cycle detection over the union of heterogeneous edge relations produces confidently-worded phantom findings in the product's own output",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "MNT-756614b5",
+        "title": "Deep nesting in acceptNode.ts acceptNodeWorktreeLocked function",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-f034244f",
+        "title": "Deep nesting in mergeImplementResultsIntoState (marshal.ts)",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-ba198373",
+        "title": "deliverable-paths-single-source.test.mjs is a drift guard test policing duplicated paths",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-94d4181f",
+        "title": "Dependency cycle: 5 modules",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "ARC-7b2ee968",
+        "title": "Dependency cycle: 6 modules",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "COR-a3eb0f88",
+        "title": "dependencyMap ARTIFACT_DEPENDS_ON_MAP missing dependency for audit_tasks on coverage_matrix",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-03dfe668",
+        "title": "deriveObligationLedger classifies obligations using baseline from finalizedModuleContracts which includes the module being processed",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-9922ddf5",
+        "title": "designReviewPrompt.ts: Multiple prompt rendering functions share duplicated structure",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-c2c7d80e",
+        "title": "dispatch.host_pause handling doesn't clear paused state when wall clears",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-bf1aa003",
+        "title": "dispatch/validate.mjs couples the dispatch scripts to a compiled dist/ path",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-5b808eac",
+        "title": "Drift guard test pattern: test enforces sync between two copies of logic that should be single-sourced",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-67ac0215",
+        "title": "Drift guard tests (INV-shared-tests-03 through 07) are themselves duplicated logic that should be parameterized",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-0cb408b9",
+        "title": "driveRollingAuditDispatch swallows ingestion errors and returns null ingest",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-5a22b79f",
+        "title": "Dual-source dependency map (TypeScript + Markdown) kept in sync by tests instead of single-sourced",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-31493580",
+        "title": "Duplicated 'large file packet' detection and handling logic across three files",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-295ac5fd",
+        "title": "Duplicated git repository initialization logic in dispatch-worktree.test.ts",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-5d482d67",
+        "title": "Duplicated loader workflow and capability handshake between audit-code and remediate-code",
+        "disposition": "planned",
+        "evidence_grounded": false
+      },
+      {
+        "finding_id": "MNT-f55170f3",
+        "title": "Duplicated smoke test infrastructure between linked and packaged variants",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-ab2b6b12",
+        "title": "Duplicated stable stringify implementation",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-28c53378",
+        "title": "Duplicated test helper functions across test files",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-b409faac",
+        "title": "Duplicated test infrastructure across audit test files",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-295ac5fd-2",
+        "title": "Duplicated test infrastructure for git repo setup across test files",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-efea49c2",
+        "title": "Entire test file is a drift guard for duplicated obligation-abstraction interface",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "OBS-0d1b020f",
+        "title": "Error diagnostic in acceptNodeWorktree omits critical context fields",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "OBS-448fa17a",
+        "title": "Error reporting lacks contextual metadata for debugging",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "OBS-ec916126",
+        "title": "Error reporting lacks contextual metadata in verify/merge failures",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-f93dac11",
+        "title": "Excessive function length in close.ts - runClosePhase spans 400+ lines",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-80d2cbe9",
+        "title": "Excessive function length in evaluateContractPipelineCrossGates (contractPipelineGates.ts)",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-b4474a95",
+        "title": "Excessive function length in marshal.ts mergeImplementResultsIntoState",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-90ce55c3",
+        "title": "Excessive function length in prepareDispatchArtifacts (400+ lines)",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-df2450e1",
+        "title": "Excessive function length in riskSignal.ts (494 lines) with multiple responsibilities",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-426f9398",
+        "title": "Excessive function length in scheduler.ts scheduleWave",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-295ac5fd-3",
+        "title": "Excessive test file size: dispatch-worktree.test.ts at 953 lines",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-3b372c5a",
+        "title": "executorRunners.ts: EXECUTOR_RUNNERS object has 25 entries with inconsistent argument adaptation patterns",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-218898bc",
+        "title": "Exhaustiveness test compares two handwritten kind sets",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-114e4941",
+        "title": "Fail-closed gates without machine-verified repair routes: recovery from a wedged run is expert-only hand-surgery, fatal to the scheduled-autonomy roadmap",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "ARC-d3d6f01b",
+        "title": "File-lock mutual exclusion breaks for any critical section longer than STALE_LOCK_MS: a live holder is stolen from, including during the irreversible base-mutating accept section",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "MNT-ce7a29fc",
+        "title": "fileAnchors.ts: buildFileAnchorSummary at 150+ lines handles boundary anchors, symbol scanning, keyword scanning, graph edges, analyzer signals, sorting, span assignment, and capping",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-1f4323b7",
+        "title": "fileLock.stealStaleLock has TOCTOU between reading stale token and unlinking",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-fec492a6",
+        "title": "fromJson restores amendmentClaims but doesn't restore inFlightClaims",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "CFG-7098a3cf",
+        "title": "Generated deployment data is sourced from an unpinned live endpoint",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "DAT-c245f968",
+        "title": "Generated schema set is committed non-transactionally",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-17aa79e6",
+        "title": "graphEnrichmentExecutor.ts: Single 332-line function mixes analyzer resolution, execution, edge merging, and capability recording",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-27f0f33c",
+        "title": "Hallucination regression gate uses baseline.hallucination_rate ?? 0 which treats missing baseline as 0%",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-9893aa31",
+        "title": "handoffInFlight transfers amendmentClaims by original path key but inFlightClaims by canonical key, causing mismatch",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-9537e0ed",
+        "title": "Inconsistent abstraction for file path canonicalization - multiple implementations",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-eaf93797",
+        "title": "Inconsistent priority rules between file-level and flow-level requeue generators",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-3034b4d6",
+        "title": "Incorrect case-insensitive lookup in modelStatics.ts matches wrong model on collision",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-073d8483",
+        "title": "Incorrect confidence comparison in conflictGroups uses wrong rank values",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-90f4b85a",
+        "title": "Incorrect fallback in resolveConversationHostProvider for codex",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-8e03999c",
+        "title": "Incorrect global host budget derivation in capacity.ts",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-cc6cba85",
+        "title": "Incorrect handling of worker_command in WorkerCommandProvider",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-6d4e81d4",
+        "title": "Incorrect ownership gate check - uses listLiveClaims instead of heartbeat",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-849039de",
+        "title": "Incorrect provider priority ordering in PROVIDER_PRIORITY_RULES",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-16ed1f73",
+        "title": "Incorrect self-spawn guard for codex in providerPathGuard.ts",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-d6b4a996",
+        "title": "Incorrect task claim lease duration for merge-time ownership gate",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-45661d82",
+        "title": "Incorrect task completion check in computeForcedStrandedTaskIds",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "OPR-4581bbdb",
+        "title": "install-host-assets.mjs lacks dry-run/preview mode for writes to user home directory",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-3ff413ca",
+        "title": "INV-WH test is a drift guard for duplicated windowsHide logic",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-49c40e7f",
+        "title": "isFileOwnershipDisjoint treats empty scope as disjoint only when no other nodes in flight, but logic is inverted",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-5b657a74",
+        "title": "Large contractPipelineGates.ts file (1530 lines) with multiple responsibilities",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-4c1e8a96",
+        "title": "Large install-hosts.mjs file with multiple responsibilities (1187 lines)",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-6d1638b5",
+        "title": "Layering inversion at the hashing seam plus two divergent staleness engines: the shared layer imports from src/audit, and remediate re-implemented the projection it could not reach",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "COR-73811538",
+        "title": "loadFromCheckpoint calls fromJson but inFlightClaims are never restored, breaking scheduling after restart",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-5c45a68d",
+        "title": "Maintainability regression tests pin technical debt as expected behavior",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-b6f5e505",
+        "title": "Massive test file with 1538 lines violates single-responsibility and is hard to maintain",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-7ba22541",
+        "title": "Massive test file with excessive length and mixed concerns",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-dc543acf",
+        "title": "merge-results.mjs and validate-result.mjs have no dedicated tests",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-5bc008f3",
+        "title": "Missing await in verifyInstalledBootstrap for collectVerifyCheck calls",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-9c2dfe48",
+        "title": "Missing error handling for missing prompt/skill assets in postinstall.mjs",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-dacfd3aa",
+        "title": "Missing null check for `acceptOutcome.committedOid` in quarantine call",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-5ee2e3c2",
+        "title": "Missing null check for assetPaths.opencodeConfigPath in writeOpenCodeAssets",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-150657ea",
+        "title": "Missing null check on sharedOpenCodePermissions before destructuring",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-5de91d99",
+        "title": "Missing required install assets return success",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-f280fcde",
+        "title": "Missing test coverage for installer bootstrap flows (install, ensure, verify, detect-refresh)",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-450c8693",
+        "title": "Missing test coverage for OpenCode config merging and permission validation",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-48407592-2",
+        "title": "Missing timeout on broker admission and awaitNextCompletion calls",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-eb3aeddf",
+        "title": "Missing timeout on external fetch call",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-85039569",
+        "title": "Missing timeout on HTTP fetch to Claude usage endpoint",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-b15957d3",
+        "title": "Missing validation of assetPaths in installBootstrap before passing to write functions",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-d7897098",
+        "title": "Mixed unit and integration tests in same file with shared mock pollution risk",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-eb3aeddf-2",
+        "title": "Model refresh fetch has no timeout",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-7b5c2e1b",
+        "title": "Multiple test files import from dist/ or package export instead of src/",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-89182ae2",
+        "title": "negativeAssertionIsScoped returns false for empty anchors array, but obligationScopeAnchors can return empty array",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "DAT-eb3aeddf",
+        "title": "No schema validation of external API response at trust boundary",
+        "disposition": "planned"
+      },
+      {
+        "finding_id": "MNT-b15957d3",
+        "title": "One module owns every host deployment lifecycle",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-7a747303",
+        "title": "OpenAiCompatibleProvider.launch is a ~280-line, deeply-nested method",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-7a747303-2",
+        "title": "openAiCompatibleProvider.ts: launch method exceeds 400 lines with multiple responsibilities",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-1c87775c",
+        "title": "OpenCode permission merging is untested for remediation",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-f1a976fb",
+        "title": "packetIdsToTaskIds uses stale dispatch result map from current pass only",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-3cc44eb1",
+        "title": "Parallel test execution causes filesystem race conditions",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-b6736930",
+        "title": "Potential data loss in `quarantineFailedNodeCommit` when `git rev-parse` fails",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-d6b4a996-2",
+        "title": "Potential data loss when passing.length === 0 and notDispatched.length > 0",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-637acf05",
+        "title": "Potential null dereference in Python import resolution",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-4331bac0",
+        "title": "Potential race condition in `resetNodeWorktreeAndBranch` - worktree removal and branch deletion not atomic",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-2dbb2e8e",
+        "title": "Provider resolution uses wrong config when session config has errors",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-4459b0e6",
+        "title": "Quota export parity is policed by a copied symbol list",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-07afed57",
+        "title": "quotaSource.ts probeQuotaSource treats plain null from queryCurrentUsage as not_applicable instead of degraded",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-256ae7a9",
+        "title": "Race condition in claim re-validation after executor execution",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-eefa6f69",
+        "title": "readRequiredSource treats missing required source as success",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-58abc192",
+        "title": "reconvergeContractArtifact compares semantic hash of prior payload against re-derived payload but prior payload may be undefined",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-e362503b",
+        "title": "remediate-code's 5,048-line imperative decision monolith re-derives the shared ObligationEngine and structurally blocks the safety patterns audit-code already has",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "TST-b15957d3",
+        "title": "Remediation host installer has no behavioral test suite",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-74b18d12",
+        "title": "repoRoot fallback uses getRootDir(argv) which may not match task.json repo_root",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-376fbbd0",
+        "title": "resolveModelStatics provider fallback returns wrong provider's statics on collision",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-97bd80ea",
+        "title": "Rolling engine tests silently skip when git unavailable",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-5ba6a907",
+        "title": "runAutoFixExecutor doesn't await hasPrettierConfig before using its result",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-f7dd41cb",
+        "title": "scheduler.ts computeUncappedWaveSize has infinite loop risk in TPM capping with slotsSorted",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-89911925",
+        "title": "scheduler.ts deriveTokenBudget treats remaining_pct <= 0 as budget=0 but remaining_pct can be null",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-508f39a1",
+        "title": "seam-dependency-map-executor-writeset-parity.test.mjs: extractArtifactsWritten uses regex parsing of TypeScript source which is fragile and may miss dynamic patterns",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-b24d3b84",
+        "title": "seam-host-only-next-step.test.mjs: RETURN_KINDS_FROM_NEXT_STEP_HELPERS and CMD_NEXT_STEP_HANDLED_KINDS are manually maintained duplicates of source code",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-75c25bd2",
+        "title": "seam-provider-quota-instantiation-parity.test.mjs: Test launches real claude-code provider subprocess to verify skip-permissions default",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-bca0dd84",
+        "title": "Significant code duplication between merge-results.mjs and validate-result.mjs",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "OBS-51d11db6",
+        "title": "Silent degradation on configuration errors",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "OBS-a996555b",
+        "title": "Silent degrades in composite quota source lack diagnostic context",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "DAT-eb3aeddf-2",
+        "title": "Snapshot overwrite is not atomic",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-8ebb2d29",
+        "title": "stableStringify sorts keys with locale-sensitive localeCompare — the canonical content-hash serializer is not machine-deterministic",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "MNT-9422f049",
+        "title": "stableStringifyProjection duplicates the canonical stableStringify serializer",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-256ae7a9-2",
+        "title": "Stale bundle used in nonPersistingResult after claim wait",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-9985a674",
+        "title": "Staleness detection misses transitive dependency on absent artifacts",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-3b9f8e02",
+        "title": "state.ts foldTokensPerPctObservation uses priorRemainingPct - newRemainingPct but percent drop should be positive when quota consumed",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-f120d0eb",
+        "title": "StepKind coverage test duplicates the union it claims to cover",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-e1b4fc3d",
+        "title": "submitPacketCommand case-insensitive packet_id matching can match wrong packet",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-30096900",
+        "title": "Test documents founding-bug quota mis-keying as expected behavior",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-b6f5e505-2",
+        "title": "Test file mixes unit tests for multiple distinct modules creating tight coupling",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-53d9315b",
+        "title": "Test imports compiled dist/ instead of source in field-trial-remediation.test.mjs",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-ba62a837",
+        "title": "Test imports compiled dist/ instead of source in finalization-cycle-guard.test.mjs",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-48509b7a",
+        "title": "Test imports compiled dist/ instead of source in flow-planning.test.mjs",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-a3d1849e",
+        "title": "Test imports from wrapper/audit-code-wrapper-lib.mjs instead of source",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-40d3e08d",
+        "title": "Test uses real filesystem/git operations without proper isolation, risking flakiness",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-30294721",
+        "title": "Test uses real git operations without isolation - non-deterministic and slow",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-b8537a17",
+        "title": "Tests import from compiled dist/ paths instead of source",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-7b2d18c9",
+        "title": "Tests import from compiled dist/ rather than source, risking stale build passes",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-7b5c2e1b-2",
+        "title": "tier-rank.test.mjs imports from dist/shared/index.js — tests compiled output, not source",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-e015c165",
+        "title": "Tight coupling to dist/ build output structure",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-fdcea34e",
+        "title": "token-budget-view.test.mjs imports from 'audit-tools/shared' (package export) not src/",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "DAT-cdf53569",
+        "title": "Two incompatible finding schemas with no clear relationship",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "CFG-7098a3cf-2",
+        "title": "update-models.mjs fetches external dependency without version pinning or integrity verification",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-940c53f8",
+        "title": "validate-result.mjs does not expand a top-level AuditResult[] payload before validating",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-176bf609",
+        "title": "validateArtifactBundle doesn't validate audit_tasks artifact",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-9ad6db10",
+        "title": "wave-scheduler.test.ts is a 1538-line god test file with excessive coupling and duplicated infrastructure",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-7426b113",
+        "title": "within-root.test.mjs has critically insufficient test coverage for security-critical path resolution",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-74b18d12-2",
+        "title": "WorkerTask.repo_root used without validation in validateResultCommand",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "MNT-4c1e8a96-2",
+        "title": "Wrapper files cannot import shared modules (pre-dist bootstrap constraint)",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-629774ee",
+        "title": "Writeset coverage depends on a manually maintained source-file list",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-426f9398",
+        "title": "Zero remaining token budget handling may cause infinite loop",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-7ba22541",
+        "title": "audit-code-wrapper.test.mjs likely contains drift guard tests for CLI/wrapper contract synchronization",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-e9d48378",
+        "title": "fileLock.acquireLock uses mtimeMs for staleness but doesn't handle clock skew between processes",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-8e03999c-2",
+        "title": "Global host-concurrency budget silently disabled whenever any source pool is present",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-f8a1a0de",
+        "title": "Hand-rolled Windows .cmd/.ps1 shim spawning and cmd.exe quoting reimplements cross-spawn in a known-CVE-class area",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "COR-e8e7b50d",
+        "title": "Potential infinite loop in computeStaleArtifacts transitive closure",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "COR-448fa17a",
+        "title": "Race condition in OwnershipRegistry.claimInFlight - check-then-act not atomic",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "REL-4fe8a97a",
+        "title": "Stale lock cleanup in fileLock can race with legitimate holder",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "TST-01a97589",
+        "title": "Three test files import from \"audit-tools/shared\" package alias which may resolve to dist/",
+        "disposition": "planned",
+        "evidence_grounded": true
+      },
+      {
+        "finding_id": "ARC-cf04c85b",
+        "title": "Validation economy is inverted: 500+ static test files while the binding constraint is live runs — and the highest-pressure path (graceful pause at the quota wall) has never executed under real pressure",
+        "disposition": "dropped_no_evidence",
+        "rationale": "Finding carried no evidence and was excluded from the plan.",
+        "drop_reason": "no_evidence"
+      },
+      {
+        "finding_id": "COR-e73c2ea8",
+        "title": "A corrupt (unparseable) audit_state.json makes cleanup throw before the force branch, so even --force cannot clear the directory",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-ee5cf7e5",
+        "title": "advanceAudit drain loop uses WeakMap for derivation cache but bundle identity changes each iteration",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-55debab0",
+        "title": "Antigravity manifest version is permanently pinned to 1.0.0",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-8229c789",
+        "title": "applyDisposition calls handoffInFlight with toNodeId ?? nodeId but handoffInFlight returns early if fromNodeId === toNodeId",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d81b6e22",
+        "title": "applyTemplate doesn't handle missing placeholders correctly",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f5884e25",
+        "title": "artifactMetadata computeArtifactMetadata carries forward baselines from bundle.artifact_metadata without checking if it's current",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "DAT-78b9b908",
+        "title": "audit_results.schema.json duplicates audit_result.schema.json instead of using $ref",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-5d482d67",
+        "title": "Bare command assumes PATH availability",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-1cb44163",
+        "title": "brokeredDispatch.ts broker() persists cooldown best-effort but doesn't await it, creating race with subsequent broker() calls",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-a983aa02",
+        "title": "buildWaveSlotEntry doesn't validate required fields in slot.paths",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f5becf1f",
+        "title": "charterClarificationExecutor uses bundle.intent_checkpoint without null check",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-39b7a31b",
+        "title": "claimAmendment checks contractScopes with _scopeHasCanonical but amendmentClaims with _amendmentClaimantByCanonical - both use canonical comparison but amendmentClaims stored by original path",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-39b7a31b-2",
+        "title": "claimInFlight throws on foreign owner but claimAmendment returns 'contended' for same condition",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-6c938bd8",
+        "title": "claimRegistry.heartbeat does not verify poolId matches",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d5e9b0fb",
+        "title": "clampPerspectiveCount allows count=1 when requested=1 but DEFAULT_CONCEPTUAL_PERSPECTIVES=5",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-64fbd57a",
+        "title": "classifyObligationChange uses baselineSymbols from finalizedModuleContracts but the corpus includes the module's own name",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-ced44dad",
+        "title": "claudeOAuthQuotaSource.readAccountId returns null when using default credentials path under test runner",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-5d482d67-2",
+        "title": "Complex JSON escaping in --host-models example is error-prone",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-a1a68c78",
+        "title": "compositeQuotaSource.probeUsage treats throw from source as degraded but continues cascade",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f5884e25-2",
+        "title": "computeArtifactMetadata treats missing previousEntry as revision 0 for dependencyRevisions",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-0b199e07",
+        "title": "computeDesignReReviewDelta compares projections but doesn't handle missing keys in prior snapshot",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-fecc410a",
+        "title": "designReviewProjection projectUnitManifest uses deriveUnitScopeDisposition which may not be imported",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-1e0d0b17",
+        "title": "Documented cross-lens finding override is hard-rejected by validateAuditResults",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-b4f75d6f",
+        "title": "Duplicate release-bump skip logic across workflows creates inconsistency risk",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-9de0ca43",
+        "title": "edgeReasoningContentHash includes reason field which changes after rewrite, breaking cache invalidation",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-c295047f",
+        "title": "ensureNodeId uses index-based fallback but index may not be stable across re-runs",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "DAT-78b9b908-2",
+        "title": "Enum definitions inlined across multiple schema files instead of using $ref",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-23881647",
+        "title": "errorParsing.extractResetsAtClockMs doesn't handle timezone or cross-day correctly for 'resets at 3:30pm'",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-a0227a1d",
+        "title": "Failed tasks search uses same flawed logic as pending tasks",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-ec916126",
+        "title": "Git operations in acceptNodeWorktree lack timeouts, can hang indefinitely",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-ddea7bf5",
+        "title": "groundExtractedFindings repairZeroPathFindings callback receives phantom paths but returns corrected paths without re-grounding",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-395fc426",
+        "title": "Hardcoded blend weights must match costRank.ts but lack cross-validation",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-ed04d382",
+        "title": "Hardcoded fixture data may drift from actual auditor contract",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-ddb2e650",
+        "title": "Hardcoded line count in sample result file_coverage",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-952b075b",
+        "title": "hostSessionQuotaSource.probeUsage returns not_applicable when window is open and no tracker, masking learned source",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-5c6716e5",
+        "title": "hostSessionQuotaSource.recordLimit uses nowMs for cooldown calculation but tracker.last_reset_ms for priorResetElapsed check",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-18641b6d",
+        "title": "httpQuotaSource.shouldSkipNetwork returns true under test runner when using default fetch, but fetchImpl could be a test double",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-1e8b3dc0",
+        "title": "Incorrect conflict counting in update-languages.mjs",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-3a1a4cf9",
+        "title": "Incorrect fallback in lineCountForPath when all sources are undefined",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d40c6447",
+        "title": "Incorrect handling of `hostMaxConcurrent` when explicitly set to 0",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-3b739e20",
+        "title": "Incorrect package_counts behavior in buildFindingsDigest drops empty-string bucket",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-89aad51b",
+        "title": "Incorrect regex pattern in EVIDENCE_PATH_TOKEN_RE misses Windows paths with drive letters",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-cec8b8d0",
+        "title": "Incorrect roster comparison in sharedProviderConfirmation.ts",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-22ded017",
+        "title": "Incorrect tier ordering in finalizeDispatchQuota",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f6961f6f",
+        "title": "Incorrect variable name in `forceAddNewSourceFiles` - uses `worktreeRoot` as root for `toRepoRelative`",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-8c497987",
+        "title": "isBuildFreeVerifyCommand uses incorrect case for --noEmit flag check",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-41672e2c",
+        "title": "isDesignReviewStale uses stableStringifyProjection but doesn't check if input exists in snapshot",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-0632768a",
+        "title": "isDirectCliExecution compares resolved paths but import.meta.url may be file:// URL",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-b6f5d040",
+        "title": "isPathExcluded returns true if ANY file matches exclusion, but comment says 'ANY-file aggregation (vs audit's every-file)'",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-e0f110ff",
+        "title": "isSignificantLineCountDivergence treats expected=0 as always significant",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-74b18d12-3",
+        "title": "lineIndex built from matchingTasks[0] only, ignores other tasks with same taskId",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-58feaccc",
+        "title": "Misplaced regression test for jsonc.ts in graph-framework-routes test file",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "DAT-cdf53569-2",
+        "title": "Missing cross-field validation: line_end >= line_start in affected_files",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-1c87775c",
+        "title": "Missing error handling for readJson in buildMergedOpenCodeProjectConfig when existing config is invalid",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-c8830f3e",
+        "title": "Missing error handling for runAuditStep failures",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-792f4c0b",
+        "title": "Missing error handling for writeJsonFile in mergeOperatorForcedTerminal",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f727ae98",
+        "title": "Missing error handling in readRemediationAccessMemory for malformed JSON",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d2f789db",
+        "title": "Missing null check for bundle.repo_manifest before accessing properties",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-6511699f",
+        "title": "Missing null check for sessionConfig in resolveContextBudgetFromConfig",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-eb09e01e",
+        "title": "Missing null check for sessionConfig.claude_code in hasConfiguredClaudeCode",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-9783421f",
+        "title": "Missing null check for task.file_paths in buildHighRiskCleanFollowupTask",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-9bbe9c24",
+        "title": "Missing timeout on async operations in test helpers",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-a8e30413",
+        "title": "Missing validation for command_template in SubprocessTemplateProvider constructor",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-9f45969d",
+        "title": "Missing validation for empty file_paths in buildFindingFollowupTask",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-27f0f33c-2",
+        "title": "Missing validation for empty findings array when computing scorecard",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-b85ed67b",
+        "title": "Missing validation for quota.max_concurrent in buildSourcePool",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-dfe4bd73",
+        "title": "Missing validation of required --updates flag",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d6b4a996-3",
+        "title": "Missing validation of workerTask.repo_root before use in groundPassingFindings",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-12eb6366",
+        "title": "nextStepPausesForHostInput checks graph_enrichment_executor but doesn't verify it's actually the next step",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-564a6137",
+        "title": "No gh auth pre-check before release operations",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-eb3aeddf-3",
+        "title": "No retry logic for transient network failures",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "DAT-c5ea3938",
+        "title": "No shape validation at the vendored-snapshot trust boundary; nested tables and entry fields are blind casts",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-6a531492",
+        "title": "Numeric CLI flags silently swallow malformed values instead of failing loudly",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-a0227a1d-2",
+        "title": "Obligation state counting assumes all states are known keys in obligationStates",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-95ccec0b",
+        "title": "OpenCodeQuotaSource reads auth file synchronously in async method",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d2f789db-2",
+        "title": "Orphaned audit results bypass the validation gate entirely yet still flow into the persistent ledger",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-3b739e20-2",
+        "title": "package_counts in buildFindingsDigest uses firstFile.split()[0] ?? \"(root)\" but split on empty string returns [\"\\u0022] so nullish coalescing never triggers",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-a0227a1d-3",
+        "title": "Pending tasks summary only checks first run directory with pending-audit-tasks.json",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-76686cbb",
+        "title": "phaseOrdinalForObligations uses longest-slug prefix match but slugs can be prefixes of each other",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-641d1d9f",
+        "title": "Potential undefined access in buildPrioritizedReadingList when unitFiles.get returns undefined",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d2f789db-3",
+        "title": "Potential undefined access in partitionOrphanedAuditResults result handling",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f614205f",
+        "title": "Potential undefined access in runHostVerifyChecks when hostDefinition.verify is missing",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-c2c7d80e-2",
+        "title": "prepareDispatchArtifacts called with providerName but hostModel from sessionConfig.block_quota",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-07afed57-2",
+        "title": "probeQuotaSource does not catch errors from a native probeUsage implementation",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-eefa6f69-2",
+        "title": "process.exitCode reset to 0 in readRequiredSource masks prior failures",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-85a995a0",
+        "title": "profile.mjs spawnSync has no timeout",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d8a3c152",
+        "title": "Provider-stated cooldown is unreachable for rate_limited outcomes; exponential backoff always overrides it",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d9ab52ec",
+        "title": "quotaCoverageNudge.ts shouldEmitQuotaNudge has race condition between existsSync and writeFileSync",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-144082fa",
+        "title": "Race condition in credential file access between read and refresh",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-7957ede5",
+        "title": "Registry propagation verification treats timeout as success, masking potential installability issues",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-cc11e3d0",
+        "title": "releaseInFlight releases inFlightClaims but not amendmentClaims, while applyDisposition for releasing dispositions calls both",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-96f1b917",
+        "title": "releaseLock check-then-unlink is non-atomic and mutual exclusion is bounded by STALE_LOCK_MS with no heartbeat",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-dc847788",
+        "title": "reservationLedger.ts admit() uses cost <= 0 check but cost could be NaN",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d0ed5f79",
+        "title": "resolveAnalyzerPlan returns 'absent' for auto setting when dependency missing, but executor only installs for ephemeral/permanent",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-1610e49f",
+        "title": "resolveCandidate doesn't validate resolved command exists before returning",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-2dbb2e8e-2",
+        "title": "resolvedProvider logic has unreachable branch for sessionConfigErrorCount > 0",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-741fe35d",
+        "title": "resolveFromPath returns null for commands with path separators that don't exist",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-87a3ac29",
+        "title": "runCli catches errors but only logs message, losing stack trace",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-63fd326d",
+        "title": "runFindingFilterPass order: no-evidence drop before cross-lens dedup means dedup never sees no-evidence findings",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-de0d5e79",
+        "title": "runFirstAvailableCommand treats spawnSync error as non-fatal",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-bc56edbf",
+        "title": "runGraphEnrichmentExecutor uses floor.analyzers_used but floor may not have analyzers_used field",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-357ae017",
+        "title": "runSingleAdvanceStep adds tooling_manifest.json and AGENT_FEEDBACK_FILENAME to metadata unconditionally",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-dc524856",
+        "title": "Same JSON escaping fragility in --host-models example",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-ddb2e650-2",
+        "title": "Sample runtime validation report marks all tasks as confirmed without actual validation",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f62fb0d4",
+        "title": "scheduler.ts scheduleWave token-budget gate uses calibrating flag incorrectly across windows",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-c245f968",
+        "title": "Schema regeneration can leave a partially updated set",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-4baae04e",
+        "title": "semanticProjection for finalized_module_contracts doesn't include seam_adjustments in projection",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "DAT-a010c231",
+        "title": "Silent data loss on malformed model entries",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f4ce746e",
+        "title": "Silent error swallowing in provider limits query and cached limits lookup",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-64a4f332",
+        "title": "Single retry on 401 with no backoff or jitter",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-bb95612b",
+        "title": "smoke-linked-remediate-code.mjs doesn't validate next-step JSON structure beyond basic fields",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-c5ea3938",
+        "title": "Snapshot entries are cast to ModelStatics without field validation; malformed values propagate into limit resolution",
+        "disposition": "folded_into",
+        "folded_into": "DAT-c5ea3938",
+        "drop_reason": "cross_lens_dedup"
+      },
+      {
+        "finding_id": "COR-b019d3b9",
+        "title": "Stale result detection in deriveAuditState doesn't handle missing result_baselines",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d8a3c152-2",
+        "title": "state.ts recordWaveOutcome clears cooldown on success only if cooldown not active, but doesn't clear last_429_at",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-e1b4fc3d-2",
+        "title": "submitPacketCommand doesn't validate result file paths against packet boundary",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-48407592-3",
+        "title": "Test pollution - shared mutable state across tests",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-afc4a1d5",
+        "title": "test.concurrent tests race on the shared process.exitCode global (assert-then-reset interleaving)",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "DAT-551cdff2",
+        "title": "The zod line_ranges refinement (end >= start) is silently dropped from the generated worker-facing JSON schema",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-20949223",
+        "title": "TOCTOU race condition in writeGeneratedFile and installMergedJson",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-f62fb0d4-2",
+        "title": "Token-budget gate floors at one full slot with no cooldown when the remaining budget is positive but smaller than any slot",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-482762b6",
+        "title": "Unbounded cumulative wall time in host session quota source",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-097a6957",
+        "title": "Unhandled promise rejection in async test callbacks",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-9bbe9c24-2",
+        "title": "Unhandled promise rejection in test cleanup - temp directory not cleaned on test failure",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-eb3aeddf",
+        "title": "update-models.mjs fetch has no timeout",
+        "disposition": "folded_into",
+        "folded_into": "DAT-eb3aeddf",
+        "drop_reason": "cross_lens_dedup"
+      },
+      {
+        "finding_id": "COR-7a8c84b2",
+        "title": "validateArtifactBundle throws TypeError on malformed nested entries instead of reporting issues",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-e0f110ff-2",
+        "title": "validateAuditResults uses task.file_line_counts for lineIndex but task may not have it",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-0dda78fe",
+        "title": "validateCycleBreak replaces all cycle-member needs with mediator but doesn't handle mediator needing cycle members",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-d44dd747",
+        "title": "validateSessionConfig re-exported but validateConfiguredProviderEnvironment not validated for all providers",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-176bf609-2",
+        "title": "validateTaskLineRanges allows line_end < line_start check but doesn't validate against file length",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-182085b7",
+        "title": "verifyFindingAnchor doesn't handle missing confirm_if.text for output_includes/excludes",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-985e8187",
+        "title": "verifyRunnerForTestFile only recognizes test files under tests/ directory",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-1bc4c271",
+        "title": "weightedGraph pair key uses a space separator, corrupting edges for paths containing spaces",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-1051c193",
+        "title": "Windows tree-kill uses taskkill /F at the graceful SIGTERM stage, collapsing the escalation contract",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-de2e6540",
+        "title": "Worktree creation in prepareHostRollingDispatch lacks rollback on partial failure",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-84c6817f",
+        "title": "buildAnalyzerSignalAnchorIndex lowercases path keys but analyzerSignalAnchorsForPath also lowercases",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-2195bf1d",
+        "title": "buildExcludedSummary only collapses the single majority group; a second equally-homogeneous group is emitted as duplicate individual rows",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-5e99b254",
+        "title": "buildFlowRequeueTasks skips unsupported lenses silently instead of logging",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "DAT-eff086cb",
+        "title": "buildWorkerRepairContract marks every validation error required:true, contradicting its documented optional-field mapping",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-2b2406c5",
+        "title": "chunkLineCount returns empty array for totalLines <= 0 but doesn't validate chunkSize",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-5e2e1429",
+        "title": "claimRegistry.mintOwnerToken uses Math.random() which is not cryptographically secure",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-4fdc9a58",
+        "title": "cmdScoreTokens silently overwrites the JSON scorecard with the markdown summary when --out does not end in .json",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-c4268aa3",
+        "title": "codexQuotaSource.readCredentials does not validate account_id presence before returning",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-073d8483-2",
+        "title": "conflictGroups spread gate mixes intra-task variance with inter-task disagreement, flagging non-conflicts",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-6ba55c63",
+        "title": "Confusing variable naming: 'complexity' field is a priority score",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-85133d90",
+        "title": "crossLensDedup uses process.stderr.write for logging which is not testable",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-9726005c",
+        "title": "Default-exported declarations and assignment-form route registrations are misclassified, skewing symbol spans and route counts — advisory impact only",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-7afdd110",
+        "title": "Drain cap off-by-one: MAX_DRAIN_STEPS permits MAX_DRAIN_STEPS+1 executed steps before the graceful emit",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-2575e3f7",
+        "title": "Duplicate countLines implementation in smoke-packaged-audit-code.mjs",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-b2cc5f69",
+        "title": "Edges lacking a confidence value are treated as confidence 0 and become rewrite candidates; kind-less rewrites bind to an arbitrary first edge — recommend downgrade from high",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-be35f910",
+        "title": "fileLock.generateOwnerToken uses same weak randomness as claimRegistry",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-2fd5edc6",
+        "title": "findingIntentWeight adds PRIORITY_SIGNAL_BOOST for ANY priority signal, not per signal",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-56006ec4",
+        "title": "getFlag treats a flag whose value is missing (next token is another --flag) as absent rather than an error",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-6a5b35d7",
+        "title": "graphEnrichmentUnresolvedAnalyzers returns empty array when root or repo_manifest missing",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-b15957d3-2",
+        "title": "Inconsistent newline normalization in skill source reading",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-5bc008f3-2",
+        "title": "Incorrect error message in verifyInstalledBootstrap for missing host manifest entry",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-9a7a9790-2",
+        "title": "Incorrect handling of empty pendingItemTokens in computeDispatchCapacity",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-4f140255",
+        "title": "Incorrect tier escalation logic in escalateRiskSignal - rationale array not copied when tier unchanged",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-dced63f7",
+        "title": "isLockfilePath matches by raw suffix without a path/basename boundary",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-b7fcf3d1",
+        "title": "Missing validation for empty findings array in buildReviewRequest",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-91b56f2e",
+        "title": "normalizeExistingFindingsReport drops refuted findings from the grounding breakdown",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-578fc35a",
+        "title": "pathTokensInCommand regex misses relative paths starting with ./ or ../",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-00ebc99d",
+        "title": "Potential division by zero in applyVcsIgnoreRule share guard",
+        "disposition": "dropped_phantom_paths",
+        "rationale": "Every cited affected_files path was phantom (does not exist in the repository) and one bounded repair attempt did not produce a real path.",
+        "phantom_paths_removed": [
+          "src/audit/orchestrator/extractors/disposition.ts"
+        ],
+        "drop_reason": "phantom_paths"
+      },
+      {
+        "finding_id": "COR-a33fa075",
+        "title": "Prose references are treated as manifest entries",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-b4f75d6f-2",
+        "title": "Release-bump skip guard only matches single-digit major versions (v0-v9)",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-0343202d",
+        "title": "resolveWorkerTaskTimeoutMs doesn't handle negative timeout_ms",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-49b807bd",
+        "title": "routeAmendmentRequest logs to process.stderr for each path, creating noisy output",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-4b0f91e1",
+        "title": "Schema-generation tests leak a temporary artifacts directory",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-be769857",
+        "title": "session-start-hook test derives the hook path from URL.pathname without percent-decoding, breaking under checkout paths containing spaces or non-ASCII",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-06c4649f",
+        "title": "slidingWindow.ts runSlidingWindow doesn't handle concurrency=0 or negative",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-c0c7b68d-2",
+        "title": "spawnSync sqlite3 token read has no timeout and can block the event loop indefinitely",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-462472e5",
+        "title": "StepProgressSchema allows negative numbers for count fields",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-7a747303",
+        "title": "Successful non-JSON responses escape the provider result contract",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-abd3e3d9",
+        "title": "tokenBudgetView.ts renderTokenBudgetView accesses p.quota_source_snapshot.windows without checking if windows exists",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "REL-c5ea3938",
+        "title": "Transient snapshot read failure is cached as permanent for the process lifetime, silently",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-e4f9c18a",
+        "title": "Unguarded array access in buildFindingEnumeration when findings array is empty",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-985e8187-2",
+        "title": "verifyRunnerForTestFile does not handle .spec. test files",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      },
+      {
+        "finding_id": "COR-a983aa02-2",
+        "title": "writeWaveManifest doesn't ensure parent directory exists",
+        "disposition": "dropped_by_checkpoint",
+        "rationale": "Finding excluded by the intent checkpoint (filter or excluded scope).",
+        "drop_reason": "intent_checkpoint"
+      }
+    ]
+  }
+}

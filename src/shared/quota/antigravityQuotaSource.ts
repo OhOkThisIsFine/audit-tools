@@ -26,7 +26,7 @@ import {
  * prefer the LS hook over replaying the cloud endpoint with a scraped token.
  */
 
-const ANTIGRAVITY_PROVIDER_NAMES = new Set(["antigravity"]);
+const ANTIGRAVITY_PROVIDER_NAMES = new Set(["antigravity", "agy"]);
 const USAGE_ENDPOINT =
   "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 const DEFAULT_USER_AGENT = "antigravity";

@@ -254,6 +254,7 @@ export type {
   DispatchableSourceProvider,
   VSCodeTaskConfig,
   AntigravityConfig,
+  AgyConfig,
   BlockQuotaConfig,
   QuotaModelLimits,
   QuotaConfig,
@@ -853,6 +854,12 @@ export {
   OPENCODE_PROVIDER_NAME,
   createOpenCodeProvider,
 } from "./providers/opencodeProvider.js";
+export {
+  AgyProvider,
+  AGY_PROVIDER_NAME,
+  buildActiveAgySessionMessage,
+} from "./providers/agyProvider.js";
+export type { AgyProviderOptions } from "./providers/agyProvider.js";
 
 // Provider auto-resolution + factory (single source of truth for both orchestrators)
 export type {

@@ -305,6 +305,7 @@ describe("M5 dispatch broker — classifyProvider single struct (inv-1, inv-7, C
 
   it("keys off provider-class, never a model-name table (inv-7)", () => {
     expect(classifyProvider("codex").hostClass).toBe("hosted");
+    expect(classifyProvider("agy").hostClass).toBe("hosted");
     expect(classifyProvider("antigravity").hostClass).toBe("unknown");
   });
 
@@ -607,6 +608,7 @@ describe("M5-WIRING convergence — floor+mechanism from the single classifyProv
 
   it("classifyProvider keys off provider-class, never a model-name table (no-hardcoded-models)", () => {
     expect(classifyProvider("codex").hostClass).toBe("hosted");
+    expect(classifyProvider("agy").hostClass).toBe("hosted");
     expect(classifyProvider("antigravity").hostClass).toBe("unknown");
     expect(classifyProvider("worker-command").hostClass).toBe("local");
   });

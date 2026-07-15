@@ -9,6 +9,7 @@ import type {
   ClaudeCodeConfig,
   CodexConfig,
   OpenCodeConfig,
+  AgyConfig,
 } from "../types/sessionConfig.js";
 import { WorkerCommandProvider } from "./workerCommandProvider.js";
 import { SubprocessTemplateProvider } from "./subprocessTemplateProvider.js";
@@ -39,6 +40,10 @@ function hasConfiguredCodex(config: CodexConfig | undefined): boolean {
   return Boolean(config?.command?.trim()) || hasEntries(config?.extra_args);
 }
 
+function hasConfiguredAgy(config: AgyConfig | undefined): boolean {
+  return Boolean(config?.command?.trim()) || hasEntries(config?.extra_args);
+}
+
 /**
  * openai-compatible is configured when both an endpoint and a model are set. The
  * API key is resolved (and degrades) at launch — env presence is intentionally
@@ -60,6 +65,7 @@ export interface AutoProviderContext {
   insideOpenCode: boolean;
   insideClaudeCode: boolean;
   insideCodex: boolean;
+  insideAgy: boolean;
   inAntigravity: boolean;
   hasVSCodeTaskTemplate: boolean;
   hasAntigravityTemplate: boolean;
@@ -67,10 +73,12 @@ export interface AutoProviderContext {
   hasClaudeCodeConfig: boolean;
   hasOpenCodeConfig: boolean;
   hasCodexConfig: boolean;
+  hasAgyConfig: boolean;
   hasOpenAiCompatibleConfig: boolean;
   claudeAvailable: boolean;
   opencodeAvailable: boolean;
   codexAvailable: boolean;
+  agyAvailable: boolean;
 }
 
 function getAutoProviderContext(
@@ -90,11 +98,14 @@ function getAutoProviderContext(
   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
   const codexCommand = sessionConfig.codex?.command ?? "codex";
   const insideCodex = isSelfSpawnBlocked("codex", env);
+  const insideAgy = isSelfSpawnBlocked("agy", env);
+  const agyCommand = sessionConfig.agy?.command ?? "agy";
   return {
     inVSCode: (env.TERM_PROGRAM ?? "").toLowerCase() === "vscode",
     insideOpenCode: Boolean(env.OPENCODE),
     insideClaudeCode,
     insideCodex,
+    insideAgy,
     // In-IDE marker for Antigravity: either an `ANTIGRAVITY` env var or
     // `TERM_PROGRAM === "antigravity"`, mirroring the VSCode / TERM_PROGRAM
     // pattern. Both paths require an operator-configured command_template to
@@ -114,6 +125,7 @@ function getAutoProviderContext(
     hasClaudeCodeConfig: hasConfiguredClaudeCode(sessionConfig),
     hasOpenCodeConfig: hasConfiguredOpenCode(sessionConfig),
     hasCodexConfig: hasConfiguredCodex(sessionConfig.codex),
+    hasAgyConfig: hasConfiguredAgy(sessionConfig.agy),
     hasOpenAiCompatibleConfig: hasConfiguredOpenAiCompatible(
       sessionConfig.openai_compatible,
     ),
@@ -122,6 +134,11 @@ function getAutoProviderContext(
     // Self-spawn guard mirrors claudeAvailable: a fresh `codex` subprocess
     // cannot be spawned from inside a codex session.
     codexAvailable: !insideCodex && lookupCommand(codexCommand),
+    // Gated for July 18, 2026 sunset cleanup: fallback check for gemini CLI executable on PATH
+    agyAvailable:
+      !insideAgy &&
+      (lookupCommand(agyCommand) ||
+        (sessionConfig.agy?.command === undefined && lookupCommand("gemini"))),
   };
 }
 
@@ -150,6 +167,13 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
       "false by the self-spawn guard, so the config/tie-break rungs below would " +
       "not reach it — but a host already inside codex can drive it in-session).",
     predicate: (ctx) => ctx.insideCodex,
+  },
+  {
+    name: "agy",
+    comment:
+      "Running inside an agy session: use it directly (agyAvailable is forced " +
+      "false by the self-spawn guard, but a host already inside agy can drive it in-session).",
+    predicate: (ctx) => ctx.insideAgy,
   },
   {
     name: "vscode-task",
@@ -189,12 +213,22 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
     predicate: (ctx) => ctx.hasCodexConfig && ctx.codexAvailable,
   },
   {
+    name: "agy",
+    comment: "Config-gated: operator explicitly configured agy and it is available.",
+    predicate: (ctx) => ctx.hasAgyConfig && ctx.agyAvailable,
+  },
+  {
     name: "claude-code",
     comment:
       "Tie-break: claude is available — prefer claude-code. (No `!opencodeAvailable` " +
       "guard: opencode no longer competes at the bare-availability rung, so claude " +
       "wins whenever present rather than yielding to an unconfigured opencode.)",
     predicate: (ctx) => ctx.claudeAvailable,
+  },
+  {
+    name: "agy",
+    comment: "Tie-break: agy/gemini is available — prefer agy.",
+    predicate: (ctx) => ctx.agyAvailable,
   },
   // NOTE: there is deliberately NO bare-availability opencode tie-break. A
   // PATH-detected `opencode` is OPT-IN only — it is auto-selected solely via the
@@ -328,6 +362,9 @@ export interface FreshSessionProviderDeps {
   createOpenCodeProvider: (
     config: OpenCodeConfig | undefined,
   ) => FreshSessionProvider;
+  createAgyProvider: (
+    config: AgyConfig | undefined,
+  ) => FreshSessionProvider;
   /**
    * Optional structured run logger. When provided, auto-resolution decisions are
    * emitted as a structured `provider_launch` event in addition to the human-readable
@@ -425,6 +462,8 @@ function constructProvider(
       return new OpenAiCompatibleProvider(sessionConfig.openai_compatible);
     case "opencode":
       return deps.createOpenCodeProvider(sessionConfig.opencode);
+    case "agy":
+      return deps.createAgyProvider(sessionConfig.agy);
     case "vscode-task":
       if (!sessionConfig.vscode_task?.command_template?.length) {
         throw new Error(

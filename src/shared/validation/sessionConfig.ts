@@ -594,6 +594,7 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
   validateAgentProviderSection(value.claude_code, "claude_code", issues);
   validateAgentProviderSection(value.codex, "codex", issues);
   validateAgentProviderSection(value.opencode, "opencode", issues);
+  validateAgentProviderSection(value.agy, "agy", issues);
   validateOpenAiCompatibleSection(
     value.openai_compatible,
     "openai_compatible",

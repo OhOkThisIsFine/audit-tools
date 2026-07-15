@@ -93,6 +93,7 @@ const INTERACTIVE_PROVIDER_OPTIONS: readonly ProviderName[] = [
   "subprocess-template",
   "vscode-task",
   "antigravity",
+  "agy",
 ];
 
 function buildPendingObligations(state: AuditState): string[] {

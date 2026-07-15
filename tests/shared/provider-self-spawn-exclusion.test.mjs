@@ -38,6 +38,10 @@ test("isSelfSpawnBlocked is the single-sourced, machine-readable guard", () => {
   expect(isSelfSpawnBlocked("claude-code", {})).toBe(false);
   expect(isSelfSpawnBlocked("codex", { CODEX: "1" })).toBe(true);
   expect(isSelfSpawnBlocked("codex", {})).toBe(false);
+  expect(isSelfSpawnBlocked("agy", { AGY_CLI: "1" })).toBe(true);
+  expect(isSelfSpawnBlocked("agy", { ANTIGRAVITY_CLI: "1" })).toBe(true);
+  expect(isSelfSpawnBlocked("agy", { GEMINI_CLI: "1" })).toBe(true);
+  expect(isSelfSpawnBlocked("agy", {})).toBe(false);
   // Providers without a self-spawn hazard are never blocked.
   expect(isSelfSpawnBlocked("opencode", { OPENCODE: "1" })).toBe(false);
   expect(isSelfSpawnBlocked("worker-command", {})).toBe(false);

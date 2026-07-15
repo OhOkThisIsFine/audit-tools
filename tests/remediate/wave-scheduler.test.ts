@@ -630,6 +630,7 @@ describe("F4 inv-7 — F4-owned classification + driver-tier selection", () => {
     // F4's own classifier — no F3 descriptor involved.
     expect(classifyProvider("claude-code").hostClass).toBe("hosted");
     expect(classifyProvider("codex").hostClass).toBe("hosted");
+    expect(classifyProvider("agy").hostClass).toBe("hosted");
     expect(classifyProvider("worker-command").hostClass).toBe("local");
     expect(classifyProvider("antigravity").hostClass).toBe("unknown");
   });
@@ -1148,6 +1149,7 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
     // the injected host ceiling (8 > floor), not the provider type or any
     // external descriptor. antigravity classifies "unknown" yet a reported
     // ceiling above the floor still makes it capable and sizes the wave to 8.
+    expect(classifyProvider("agy").hostClass).toBe("hosted");
     expect(classifyProvider("antigravity").hostClass).toBe("unknown");
 
     const slots = Array.from({ length: CAPABLE_CEILING }, (_, i) =>
@@ -1186,6 +1188,7 @@ describe("F4 fail-2 [CP-NODE-50]: capable host off the floor, unknown host stays
     // An unknown provider with NO reported ceiling and NO learned evidence is a
     // first-contact host: classifyProvider is F4-owned, and with no head-room
     // signal the capability classifier must hold it at the floor (not capable).
+    expect(classifyProvider("agy").hostClass).toBe("hosted");
     expect(classifyProvider("antigravity").hostClass).toBe("unknown");
 
     const slots = Array.from({ length: CAPABLE_CEILING }, (_, i) =>

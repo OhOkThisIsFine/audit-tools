@@ -20,7 +20,8 @@ export function hostClassFor(providerName: ResolvedProviderName): ProviderType {
   switch (providerName) {
     case "claude-code":
     case "codex":
-      // codex is a hosted model backend — engages hosted concurrency defaults +
+    case "agy":
+      // codex/agy are hosted model backends — engages hosted concurrency defaults +
       // learned-limits, same as claude-code.
       return "hosted";
     case "opencode":
