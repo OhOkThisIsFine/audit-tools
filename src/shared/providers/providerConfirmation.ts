@@ -360,12 +360,27 @@ export function annotateConfirmedPool(
     key: m.model_id,
     model: m.model_id,
   }));
-  // Gate-0 source fold: every dispatchable source pool (explicit sources[] + repair-proxy
-  // expansion) becomes a ranked candidate, keyed by its stable source id so a namespaced
-  // `provider/model` never collides with a provider-name key. Each carries its declared
-  // cost (authoritative; 0 = free) and raw capability rank so the suggestion is truthful
-  // and the capability tiebreak applies among cost-equal source pools.
-  const sourceCandidates: CostCandidate[] = sources.map((source) => ({
+  // A source whose model is ALREADY represented by a provider candidate (the legacy
+  // `openai_compatible` block folds into BOTH the `openai-compatible` provider entry AND
+  // a `collectDispatchableSources` source) or a host tier is the SAME pool — folding it
+  // again would double-rank one model_id and let the source position overwrite the
+  // provider's in the model-keyed dispatch map. Dedup by model_id so each pool is ranked
+  // once. Repair-proxy sources carry distinct namespaced models, so they're never skipped.
+  const claimedModels = new Set<string>();
+  for (const entry of pool) {
+    const m = representativeModelId(entry.name, sessionConfig);
+    if (m) claimedModels.add(m);
+  }
+  for (const m of hostModels) claimedModels.add(m.model_id);
+  const foldedSources = sources.filter(
+    (source) => !(source.model && claimedModels.has(source.model)),
+  );
+  // Gate-0 source fold: every remaining dispatchable source pool (explicit sources[] +
+  // repair-proxy expansion) becomes a ranked candidate, keyed by its stable source id so a
+  // namespaced `provider/model` never collides with a provider-name key. Each carries its
+  // declared cost (authoritative; 0 = free) and raw capability rank so the suggestion is
+  // truthful and the capability tiebreak applies among cost-equal source pools.
+  const sourceCandidates: CostCandidate[] = foldedSources.map((source) => ({
     key: sourceCandidateKey(source),
     model: source.model ?? null,
     provider: source.provider,
@@ -391,7 +406,7 @@ export function annotateConfirmedPool(
     blended_price_usd_per_mtok: resolveModelPrice(m.model_id) ?? null,
     cost_order: positions.get(m.model_id) ?? 0,
   }));
-  const source_pool_cost_order: SourcePoolCostEntry[] = sources.map((source) => {
+  const source_pool_cost_order: SourcePoolCostEntry[] = foldedSources.map((source) => {
     const key = sourceCandidateKey(source);
     const declared =
       typeof source.cost_per_mtok === "number" && Number.isFinite(source.cost_per_mtok) && source.cost_per_mtok >= 0

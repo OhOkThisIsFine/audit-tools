@@ -254,6 +254,26 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
     const { source_pool_cost_order } = annotateConfirmedPool(basePool, NIM_CONFIG);
     expect(source_pool_cost_order).toEqual([]);
   });
+
+  test("a source whose model duplicates a provider representative model is NOT double-ranked", () => {
+    // NIM_CONFIG.openai_compatible.model is the openai-compatible provider's representative
+    // model AND folds into a source (collectDispatchableSources) — the same pool. Folding it
+    // again would double-rank one model_id and let the source position overwrite the
+    // provider's in the dispatch map (the CI regression). It must be deduped out.
+    const poolWithOac = [
+      { name: "openai-compatible", capability_tier: "capable", excluded: false },
+      { name: "worker-command", capability_tier: "unknown", excluded: false },
+    ];
+    const repModel = NIM_CONFIG.openai_compatible.model;
+    const sources = [
+      { id: "legacy-oac", provider: "openai-compatible", model: repModel, cost_per_mtok: 1 },
+      { id: "rp/distinct", provider: "openai-compatible", model: "nvidia/distinct-model", cost_per_mtok: 2 },
+    ];
+    const { source_pool_cost_order } = annotateConfirmedPool(poolWithOac, NIM_CONFIG, undefined, sources);
+    const models = source_pool_cost_order.map((e) => e.model_id);
+    expect(models).not.toContain(repModel); // deduped against the provider entry
+    expect(models).toContain("nvidia/distinct-model"); // a genuinely-distinct source stays
+  });
 });
 
 describe("parseProviderConfirmationInput — degrade-safe", () => {
