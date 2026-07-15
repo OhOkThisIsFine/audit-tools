@@ -14,20 +14,19 @@
 - **The maximal-coverage validation run's dispatch/quota fix cluster shipped in the current release.**
   All major code tracks remain complete (see Track status below). Next is the bounded forward remainder
   below + a confirming re-run.
-- **repair-proxy dispatch integration — MERGED + PUBLISHED (v0.32.64, PR #11).** Slices A/B/D + 429
-  refinement + the Gate-0/dispatch capability FEED (both halves) are on `main` and in the shipped global
-  bin. `capability_rank` feeds BOTH ordering decisions — (Gap 2) `DispatchableSource.capability_rank`→
-  `CapacityPool`→summary→`AdmissionPool.capabilityScore` as the finer cost-equal/same-tier DISPATCH tiebreak;
-  (Gate-0 fold) `annotateConfirmedPool` folds every source (incl. async repair-proxy `/registry` expansion
-  via `gatherDispatchableSources`) into the ranked candidate set + `source_pool_cost_order`, threaded to
-  dispatch by `model_id` (deduped against provider representative models so the legacy `openai_compatible`
-  pool isn't double-ranked — the CI-caught fix). Design of record `spec/repair-proxy-dispatch-integration.md`.
-  **Remaining (▶ next):** (1) **owner-attended full dogfood run** — start `repair-proxy --config
-  C:\Code\repair-proxy\config.json` (:8791), add `repair_proxy: { base_url: "http://127.0.0.1:8791" }` to the
-  session config, `/audit-code` on this repo (now the shipped global bin exercises the feature), watch packets
-  dispatch to per-`(provider,model)` pools + 429 folds; only the discovery→Gate-0 path is validated so far.
-  (2) **`saturated` half** (live-quota demotion of source pools at Gate-0) — unbuilt; `docs/backlog.md` →
-  "repair-proxy dispatch integration".
+- **repair-proxy dispatch integration — SUPERSEDED (the source-pool model was wrong); reworking to the
+  unified worker model.** The owner-attended dogfood ran 2026-07-15 and proved the integration is the wrong
+  abstraction: a host-driven `/audit-code` planned 430 tasks and dispatched **zero** (repair-proxy sources
+  failed on a missing key the loopback proxy doesn't need; audit packets exceeded the single-shot inline
+  caps; the host review path then walled at 56%). Root: repair-proxy is NOT a cost-ranked source pool — it is
+  a loopback Anthropic `/v1/messages` **tool-repair transport** for agentic claude-harness workers (owner-
+  confirmed). New **design of record: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
+  (ONE core, three worker KINDS; repair-proxy = kind-1 launch-transport; per-auditor handshake inventory;
+  retire the source-pool wiring). The old `spec/repair-proxy-dispatch-integration.md` is retired with the code.
+  Memory [[unified-dispatch-worker-model]]. **▶ Next = the decomposition in the new spec** (retire source-pool
+  wiring → move inventory to the handshake → wire repair-proxy as a kind-1 transport → fix C cold-start wall);
+  each a loop-core commit (green + attestation). Full dogfood findings: `docs/backlog.md` → "Live dogfood:
+  BOTH dispatch paths failed".
 - **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
   and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
   inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
