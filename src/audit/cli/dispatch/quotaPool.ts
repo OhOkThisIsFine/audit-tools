@@ -272,6 +272,17 @@ export async function finalizeDispatchQuota(params: {
    * confirmation (spec/dispatch-cost-speed-dial.md). 0/absent ⇒ cost-first (default).
    */
   dispatchBias?: number;
+  /**
+   * Host fan-out mode (item C): gate the admission purely on TOKEN BUDGET, dropping
+   * the cold-start calibration clamp and the concurrency cap. A design-review /
+   * systemic panel is a bounded, known set the host dispatches in one turn — not an
+   * open-ended packet frontier that needs slope-learning caution (the cold-start
+   * probe would clamp every >probe-size panel to a partial grant → the atomic panel
+   * could never dispatch = livelock), and the host serializes subagents up to its
+   * OWN concurrency cap, so a concurrency shortfall is not an affordability wall. The
+   * only legitimate fan-out wall is budget-exhausted (ledger denies) or cooldown.
+   */
+  fanoutMode?: boolean;
 }): Promise<{
   dispatchQuota: DispatchQuota;
   dispatchQuotaPath: string;
@@ -307,6 +318,27 @@ export async function finalizeDispatchQuota(params: {
   const admissionPools: AdmissionPool[] = admissionPoolsFromSummaries(
     summarizeDispatchCapacityPools(dispatchCapacity),
     params.confirmedCostPositions,
+  ).map((pool) =>
+    // Fan-out mode: budget-only gating so an atomic panel dispatches whenever its
+    // tokens fit the session budget, and pauses only on a genuine budget/cooldown
+    // wall. Three relaxations vs the packet path, all because fan-out is HOST-ONLY
+    // (the subagents run on the conversation host — there is no alternative pool to
+    // route to): (1) `calibrating:false` drops the cold-start probe clamp that would
+    // livelock a panel larger than the probe; (2) `declaredCap:null` drops the
+    // concurrency cap (the host serializes subagents past its cap — a concurrency
+    // shortfall is not an affordability wall); (3) `capacityTokens:+Infinity` drops
+    // the context-FIT gate — with only the host pool there is nowhere else to route a
+    // large prompt, the host runs it on its OWN model window (not the tool's
+    // conservative blind 32k default), so a context-fit block here would
+    // permanently-wall a panel the host can actually run.
+    params.fanoutMode
+      ? {
+          ...pool,
+          calibrating: false,
+          declaredCap: null,
+          capacityTokens: Number.POSITIVE_INFINITY,
+        }
+      : pool,
   );
   // Per-packet reservation = input estimate + output envelope (declared output cap at
   // cold start; the learned (resourceKey,lens) ratio refines it once a provider

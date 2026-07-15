@@ -8,6 +8,7 @@ import {
   charterReviewDisposition,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
+import type { HostFanoutUnit } from "./dispatch/hostFanoutGate.js";
 import {
   type DesignReviewOptions,
   renderConceptualReviewPrompt,
@@ -124,6 +125,13 @@ export interface ConceptualDispatch {
   /** Result files the host's subagents write. */
   writePaths: string[];
   /**
+   * One host-fan-out unit per subagent this conceptual pass dispatches (N
+   * perspectives + judge when deep; the lone reviewer when shallow), each sized
+   * from its rendered prompt bytes — the quota gate leases the whole panel
+   * all-or-nothing against the host session before the step is emitted.
+   */
+  fanoutUnits: HostFanoutUnit[];
+  /**
    * Relative model ranks for the deep fan-out: perspectives route `"standard"`
    * by default (divergent ideation), the judge routes `"deep"` (it merges,
    * dedups, and ranks across every perspective output). Absent when shallow.
@@ -177,11 +185,9 @@ export async function prepareConceptualDispatch(opts: {
       incoming,
       "design-review-conceptual-prompt.md",
     );
-    await writeFile(
-      conceptualPromptPath,
-      renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix,
-      "utf8",
-    );
+    const conceptualPromptText =
+      renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix;
+    await writeFile(conceptualPromptPath, conceptualPromptText, "utf8");
     return {
       deep: false,
       conceptualResultsPath,
@@ -195,6 +201,12 @@ export async function prepareConceptualDispatch(opts: {
       },
       readPaths: [conceptualPromptPath],
       writePaths: [conceptualResultsPath],
+      fanoutUnits: [
+        {
+          id: "conceptual",
+          estInputBytes: Buffer.byteLength(conceptualPromptText, "utf8"),
+        },
+      ],
     };
   }
 
@@ -218,6 +230,9 @@ export async function prepareConceptualDispatch(opts: {
     promptPath: string;
     resultsPath: string;
   }> = [];
+  // One fan-out unit per subagent, sized from its rendered prompt bytes — the
+  // quota gate leases the whole panel (perspectives + judge) all-or-nothing.
+  const fanoutUnits: HostFanoutUnit[] = [];
   for (let i = 0; i < total; i++) {
     const p = perspectives[i];
     const promptPath = join(
@@ -228,25 +243,34 @@ export async function prepareConceptualDispatch(opts: {
       incoming,
       `design-review-conceptual-p${i + 1}-findings.json`,
     );
-    await writeFile(
-      promptPath,
-      renderConceptualPerspectivePrompt(bundle, p, i, total, reviewOptions),
-      "utf8",
+    const promptText = renderConceptualPerspectivePrompt(
+      bundle,
+      p,
+      i,
+      total,
+      reviewOptions,
     );
+    await writeFile(promptPath, promptText, "utf8");
     perspectiveFiles.push({ name: p.name, promptPath, resultsPath });
+    fanoutUnits.push({
+      id: `perspective-${i + 1}`,
+      estInputBytes: Buffer.byteLength(promptText, "utf8"),
+    });
   }
 
   const judgePromptPath = join(
     incoming,
     "design-review-conceptual-judge-prompt.md",
   );
-  await writeFile(
-    judgePromptPath,
+  const judgePromptText =
     renderConceptualJudgePrompt(
       perspectiveFiles.map((f) => ({ name: f.name, path: f.resultsPath })),
-    ) + reReviewSuffix,
-    "utf8",
-  );
+    ) + reReviewSuffix;
+  await writeFile(judgePromptPath, judgePromptText, "utf8");
+  fanoutUnits.push({
+    id: "judge",
+    estInputBytes: Buffer.byteLength(judgePromptText, "utf8"),
+  });
 
   const perspectiveLines = perspectiveFiles.map(
     (f, i) =>
@@ -290,6 +314,7 @@ export async function prepareConceptualDispatch(opts: {
       ...perspectiveFiles.map((f) => f.resultsPath),
       conceptualResultsPath,
     ],
+    fanoutUnits,
     modelHints,
   };
 }

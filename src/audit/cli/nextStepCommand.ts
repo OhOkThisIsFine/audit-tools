@@ -49,6 +49,11 @@ import {
   persistConfigErrorHandoff,
 } from "./reviewRun.js";
 import { renderSemanticReviewStep } from "./semanticReviewStep.js";
+import {
+  gateHostFanout,
+  type HostFanoutFamily,
+  type HostFanoutUnit,
+} from "./dispatch/hostFanoutGate.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { renderProviderConfirmationPrompt } from "./providerConfirmationStep.js";
 import { writeCurrentStep } from "./steps.js";
@@ -91,6 +96,75 @@ export {
 } from "./nextStepHelpers.js";
 
 import { runDeterministicForNextStep } from "./nextStepHelpers.js";
+
+/**
+ * Gate a HOST fan-out step through the quota layer (item C). Registers the host
+ * pool, leases the whole panel all-or-nothing, and — when the host session is at
+ * its wall — writes a resumable pause step (mirroring the packet path's
+ * `semanticReviewStep` wall pause) INSTEAD of the fan-out step, so the fan-out can
+ * never die raw at the wall. Returns true when it paused (the caller must return
+ * without emitting its dispatch step); false when capacity was granted and the
+ * caller should proceed. On the granted path the panel's leases are reconciled at
+ * results ingest (`reconcileHostFanoutLeases`).
+ */
+async function gateHostFanoutOrPause(params: {
+  root: string;
+  artifactsDir: string;
+  sessionConfig: SessionConfig;
+  hostDescriptor: HostDispatchDescriptor;
+  continueCommand: string;
+  family: HostFanoutFamily;
+  units: HostFanoutUnit[];
+}): Promise<boolean> {
+  const outcome = await gateHostFanout({
+    artifactsDir: params.artifactsDir,
+    sessionConfig: params.sessionConfig,
+    family: params.family,
+    units: params.units,
+    hostActiveSubagentLimit: params.hostDescriptor.maxActiveSubagents,
+    hostContextTokens: params.hostDescriptor.contextTokens,
+    hostOutputTokens: params.hostDescriptor.outputTokens,
+    hostModelId: params.hostDescriptor.modelId,
+  });
+  if (!outcome.atWall) return false;
+
+  const resetClause = outcome.earliestResetAt
+    ? ` (resets at ${outcome.earliestResetAt})`
+    : "";
+  const label =
+    params.family === "systemic_challenge"
+      ? "systemic-challenge adversary"
+      : "design-review";
+  const step = await writeCurrentStep({
+    artifactsDir: params.artifactsDir,
+    stepKind: "blocked",
+    status: "ready",
+    runId: null,
+    allowedCommands: [params.continueCommand],
+    allowedMcpTools: ["auditor_continue_audit"],
+    progress: {
+      summary:
+        `Host session quota wall${resetClause}; ${label} fan-out ` +
+        `(${outcome.requiredCount} subagent(s)) paused, resumable.`,
+      granted_count: outcome.grantedCount,
+    },
+    stopCondition:
+      `Host session quota is at its wall${resetClause}. Wait for the reset, then run ` +
+      `next-step to resume — the tool re-checks the live quota and re-grants the ` +
+      `${label} fan-out when capacity returns.`,
+    repoRoot: params.root,
+    artifactPaths: { dispatch_quota: outcome.dispatchQuotaPath },
+    prompt:
+      `The host session limit is exhausted${resetClause}, so the ` +
+      `${outcome.requiredCount}-subagent ${label} fan-out cannot be dispatched this pass ` +
+      `without dying at the wall. This is a graceful, resumable pause — nothing was ` +
+      `dispatched and no work was lost. Wait for the quota to reset, then run ` +
+      "`next-step`; the tool re-checks the live quota and re-grants the fan-out when " +
+      "capacity returns.",
+  });
+  console.log(JSON.stringify(step, null, 2));
+  return true;
+}
 
 export async function cmdNextStep(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
@@ -266,6 +340,21 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       `Then run: ${continueCommand}`,
       "",
     ].join("\n");
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig,
+        hostDescriptor,
+        continueCommand,
+        family: "design_review",
+        units: [
+          { id: "design_review", estInputBytes: Buffer.byteLength(fullPrompt, "utf8") },
+        ],
+      })
+    ) {
+      return;
+    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "design_review",
@@ -349,6 +438,28 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "",
     ].join("\n");
 
+    // The parallel step dispatches BOTH panels (contract + conceptual) in one host
+    // turn, so the gate leases them together and pauses if EITHER can't be granted.
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig,
+        hostDescriptor,
+        continueCommand,
+        family: "design_review",
+        units: [
+          {
+            id: "contract",
+            estInputBytes: Buffer.byteLength(contractPromptText, "utf8"),
+          },
+          ...conceptual.fanoutUnits,
+        ],
+      })
+    ) {
+      return;
+    }
+
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "design_review_parallel",
@@ -395,6 +506,21 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "",
       ...(contractReReview ? ["", contractReReview] : []),
     ].join("\n");
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig,
+        hostDescriptor,
+        continueCommand,
+        family: "design_review",
+        units: [
+          { id: "contract", estInputBytes: Buffer.byteLength(prompt, "utf8") },
+        ],
+      })
+    ) {
+      return;
+    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "design_review_contract",
@@ -446,6 +572,20 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       `  ${continueCommand}`,
       "",
     ].join("\n");
+
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig,
+        hostDescriptor,
+        continueCommand,
+        family: "design_review",
+        units: conceptual.fanoutUnits,
+      })
+    ) {
+      return;
+    }
 
     const step = await writeCurrentStep({
       artifactsDir,
@@ -588,6 +728,31 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     const submissionPath = join(artifactsDir, "incoming", "systemic-challenge.json");
     const metrics =
       result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
+    const adversaryPrompt = renderSecondOrderAdversaryPrompt({
+      round: (result.bundle.systemic_challenge?.rounds.length ?? 0) + 1,
+      priorFindingCount: result.bundle.systemic_challenge?.findings.length ?? 0,
+      metrics,
+      submissionPath,
+      continueCommand,
+    });
+    if (
+      await gateHostFanoutOrPause({
+        root,
+        artifactsDir,
+        sessionConfig,
+        hostDescriptor,
+        continueCommand,
+        family: "systemic_challenge",
+        units: [
+          {
+            id: "adversary",
+            estInputBytes: Buffer.byteLength(adversaryPrompt, "utf8"),
+          },
+        ],
+      })
+    ) {
+      return;
+    }
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "systemic_challenge",
@@ -600,13 +765,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       artifactPaths: {
         systemic_challenge_submission: submissionPath,
       },
-      prompt: renderSecondOrderAdversaryPrompt({
-        round: (result.bundle.systemic_challenge?.rounds.length ?? 0) + 1,
-        priorFindingCount: result.bundle.systemic_challenge?.findings.length ?? 0,
-        metrics,
-        submissionPath,
-        continueCommand,
-      }),
+      prompt: adversaryPrompt,
       access: {
         read_paths: [join(artifactsDir, "systemic_challenge.json")],
         write_paths: [submissionPath],

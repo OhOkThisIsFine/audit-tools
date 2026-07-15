@@ -76,6 +76,7 @@ import {
   materializeReviewRun,
 } from "./reviewRun.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
+import { reconcileHostFanoutLeases } from "./dispatch/hostFanoutGate.js";
 import {
   driveRollingAuditDispatch,
   resolveAuditRollingEngineEnabled,
@@ -503,6 +504,13 @@ export async function handleDesignReviewBranch(
     }
   }
 
+  if (contractIncoming || conceptualIncoming) {
+    // Item C: the design-review fan-out results are in — release the host-fan-out
+    // panel's leases now, before the coverage packet dispatch that follows, rather
+    // than letting them linger to the 20-min TTL and depress its headroom.
+    await reconcileHostFanoutLeases(params.artifactsDir, "design_review");
+  }
+
   if (consumed && existing) {
     await writeJsonFile(
       join(params.artifactsDir, "design_assessment.json"),
@@ -886,6 +894,10 @@ export async function handleSystemicChallengeBranch(
           preferredExecutor: "systemic_challenge_executor",
           systemicChallengePath: path,
         });
+        // Item C: this adversary round's findings are folded — release its host
+        // fan-out lease before the next round (or the coverage dispatch) rather
+        // than at the 20-min TTL.
+        await reconcileHostFanoutLeases(p.artifactsDir, "systemic_challenge");
       },
       shouldOmit: (b) => {
         // Shallow ceiling (default): omit deterministically, no host turn.
