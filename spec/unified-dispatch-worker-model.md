@@ -1,7 +1,7 @@
 # Unified dispatch worker model
 
-Design of record. **Supersedes [`repair-proxy-dispatch-integration.md`](repair-proxy-dispatch-integration.md)** —
-that spec modelled repair-proxy as a cost-ranked openai-compatible *source pool*, which the
+Design of record. **Supersedes the retired `repair-proxy-dispatch-integration.md`** (deleted with the
+source-pool wiring) — that spec modelled repair-proxy as a cost-ranked openai-compatible *source pool*, which the
 2026-07-15 dogfood proved is the wrong abstraction (a host-driven audit planned 430 tasks and
 dispatched zero). This spec replaces it.
 

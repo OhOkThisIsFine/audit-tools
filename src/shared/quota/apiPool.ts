@@ -16,7 +16,6 @@ import { deriveLocalAccountId, foldAccountCooldown } from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 import { resolveConversationHostProvider } from "../providers/providerPathGuard.js";
-import { expandRepairProxySources } from "./repairProxyRegistry.js";
 
 /**
  * The stable id of a dispatchable source — its explicit `id`, or a
@@ -462,28 +461,19 @@ export function collectDispatchableSources(
 }
 
 /**
- * The FULL dispatchable source list for a run: the synchronous `collectDispatchableSources`
- * set PLUS the repair-proxy `/registry` expansion (per-`provider/model` sources), deduped by
- * dispatchable id. The single async source-gather point — both the dispatch pool builder
- * ({@link buildSourcePools}) and the Gate-0 confirmation surface consume it, so what the
- * operator confirms is exactly what routes (no more display/dispatch drift on the source set).
- * Fail-open: `expandRepairProxySources` returns [] on any registry failure, so a proxy outage
- * never breaks source-gather.
+ * The FULL dispatchable source list for a run — the configured
+ * `collectDispatchableSources` set. The single async source-gather point: both the
+ * dispatch pool builder ({@link buildSourcePools}) and the Gate-0 confirmation surface
+ * consume it, so what the operator confirms is exactly what routes (no display/dispatch
+ * drift on the source set). Async is retained as the stable seam for the per-auditor
+ * inventory resolution the handshake will feed here.
  */
 export async function gatherDispatchableSources(
   sessionConfig: SessionConfig,
   primaryProviderName: string,
   options?: { demotePrimaryInProcess?: boolean },
 ): Promise<DispatchableSource[]> {
-  const sources = collectDispatchableSources(sessionConfig, primaryProviderName, options);
-  if (sessionConfig.repair_proxy?.base_url) {
-    const discovered = await expandRepairProxySources(sessionConfig.repair_proxy);
-    for (const source of discovered) {
-      const id = dispatchableSourceId(source);
-      if (!sources.some((s) => dispatchableSourceId(s) === id)) sources.push(source);
-    }
-  }
-  return sources;
+  return collectDispatchableSources(sessionConfig, primaryProviderName, options);
 }
 
 /**

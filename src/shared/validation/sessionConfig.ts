@@ -157,84 +157,6 @@ function validateDispatchableSources(
   });
 }
 
-/**
- * Validate the `repair_proxy` discovery section — the OpenAI-compatible multiplexer
- * whose `/registry` audit-tools expands into per-`provider/model` sources. `base_url`
- * is a required non-empty string when the section is present (no hardcoded proxy host);
- * `top_k` is a positive integer when provided; `api_key_env` a non-empty string; each
- * `providers[name]` override is shape-checked (`cost_per_mtok` non-negative finite,
- * `enabled` boolean).
- */
-function validateRepairProxy(value: unknown, issues: ValidationIssue[]): void {
-  if (value === undefined) return;
-  if (!isRecord(value)) {
-    pushIssue(issues, "repair_proxy", "repair_proxy must be a JSON object.");
-    return;
-  }
-  if (typeof value.base_url !== "string" || value.base_url.trim().length === 0) {
-    pushIssue(
-      issues,
-      "repair_proxy.base_url",
-      "base_url is required and must be a non-empty string.",
-    );
-  }
-  if (
-    value.api_key_env !== undefined &&
-    (typeof value.api_key_env !== "string" || value.api_key_env.trim().length === 0)
-  ) {
-    pushIssue(
-      issues,
-      "repair_proxy.api_key_env",
-      "api_key_env must be a non-empty string when provided.",
-    );
-  }
-  if (
-    value.top_k !== undefined &&
-    (typeof value.top_k !== "number" || !Number.isInteger(value.top_k) || value.top_k <= 0)
-  ) {
-    pushIssue(
-      issues,
-      "repair_proxy.top_k",
-      "top_k must be a positive integer when provided.",
-    );
-  }
-  if (value.providers !== undefined) {
-    if (!isRecord(value.providers)) {
-      pushIssue(
-        issues,
-        "repair_proxy.providers",
-        "providers must be a JSON object mapping provider name to overrides.",
-      );
-    } else {
-      for (const [name, override] of Object.entries(value.providers)) {
-        const path = `repair_proxy.providers.${name}`;
-        if (!isRecord(override)) {
-          pushIssue(issues, path, "each provider override must be a JSON object.");
-          continue;
-        }
-        if (
-          override.cost_per_mtok !== undefined &&
-          (typeof override.cost_per_mtok !== "number" ||
-            !Number.isFinite(override.cost_per_mtok) ||
-            override.cost_per_mtok < 0)
-        ) {
-          pushIssue(
-            issues,
-            `${path}.cost_per_mtok`,
-            "cost_per_mtok must be a non-negative finite number when provided.",
-          );
-        }
-        if (override.enabled !== undefined && typeof override.enabled !== "boolean") {
-          pushIssue(issues, `${path}.enabled`, "enabled must be a boolean when provided.");
-        }
-        if (override.per_model_limits !== undefined && typeof override.per_model_limits !== "boolean") {
-          pushIssue(issues, `${path}.per_model_limits`, "per_model_limits must be a boolean when provided.");
-        }
-      }
-    }
-  }
-}
-
 function pushIssue(
   issues: ValidationIssue[],
   path: string,
@@ -680,7 +602,6 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
     provider === "openai-compatible",
   );
   validateDispatchableSources(value.sources, issues);
-  validateRepairProxy(value.repair_proxy, issues);
 
   if (value.synthesis !== undefined) {
     if (!isRecord(value.synthesis)) {
