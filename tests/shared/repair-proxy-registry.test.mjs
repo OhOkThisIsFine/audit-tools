@@ -47,6 +47,25 @@ test("selectRepairProxyCandidates: top-K by composite_rank, null-capability last
   expect(got.some((c) => c.model === "m-null")).toBe(false);
 });
 
+test("selectRepairProxyCandidates: malformed model entries are skipped, not thrown on (fail-open)", () => {
+  // A 200 body that parsed but has junk model entries: a string, a null, and an
+  // object with no `id`. localeCompare on an undefined id would throw out of the whole
+  // source-gather path and break Gate-0 — these must be filtered before ranking.
+  const reg = registry({
+    nim: {
+      reachable: true,
+      has_key: true,
+      models: ["not-an-object", null, { capability: { composite_rank: 3 } }, model("good", 1)],
+    },
+  });
+  let got;
+  expect(() => {
+    got = selectRepairProxyCandidates(reg, { base_url: BASE, top_k: 5 });
+  }).not.toThrow();
+  // Only the well-formed model survives.
+  expect(got.map((c) => c.model)).toEqual(["good"]);
+});
+
 test("selectRepairProxyCandidates: default top_k is 5", () => {
   const models = Array.from({ length: 8 }, (_, i) => model(`m${i}`, i));
   const reg = registry({ nim: { reachable: true, has_key: true, models } });

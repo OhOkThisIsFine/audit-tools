@@ -124,7 +124,15 @@ export function selectRepairProxyCandidates(
     const provider = registry.providers[name];
     if (!provider || provider.reachable !== true || provider.has_key !== true) continue;
     if (cfg.providers?.[name]?.enabled === false) continue;
-    const models = Array.isArray(provider.models) ? provider.models : [];
+    // Fail-open hardening: the registry body is validated only down to `providers`
+    // being a record (fetchRepairProxyRegistry), so a 200 with malformed model entries
+    // (missing/ non-string `id`, or a non-object) reaches here. Drop those BEFORE the
+    // sort — `undefined.localeCompare` would otherwise throw out of the whole
+    // source-gather path and break Gate-0 / dispatch (the "degrades to [] on ANY
+    // malformed body" contract). Skip-the-bad-entry, not drop-the-provider.
+    const models = (Array.isArray(provider.models) ? provider.models : []).filter(
+      (m): m is RegistryModel => isRecord(m) && typeof m.id === "string",
+    );
     // Rank by capability (lower composite_rank first), tie-break by model id for a
     // stable, content-derived order; then take the top-K.
     const ranked = [...models].sort((a, b) => {

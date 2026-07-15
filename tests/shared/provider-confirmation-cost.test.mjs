@@ -103,6 +103,32 @@ describe("readConfirmedCostPositions — confirmation→dispatch link", () => {
     }
   });
 
+  test("a folded source pool threads its confirmed position by model_id", async () => {
+    const root = await mkdtemp(join(tmpdir(), "audit-cost-conf-"));
+    try {
+      const sources = [
+        { id: "rp/nvidia", provider: "openai-compatible", model: "nvidia/llama-x", cost_per_mtok: 4, capability_rank: 7 },
+      ];
+      const confirmation = buildSharedProviderConfirmation(
+        NIM_CONFIG,
+        process.env,
+        [],
+        [],
+        undefined,
+        undefined,
+        sources,
+      );
+      expect(confirmation.source_pool_cost_order?.[0]?.model_id).toBe("nvidia/llama-x");
+      await writeSharedProviderConfirmation(root, confirmation);
+      const positions = await readConfirmedCostPositions(root, NIM_CONFIG);
+      // The source's model id resolves to its confirmed cost position — the SAME key a
+      // repair-proxy dispatch pool (pool.model = "nvidia/llama-x") looks up at dispatch.
+      expect(positions.has("nvidia/llama-x")).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("degrades to an empty map when root is absent", async () => {
     const positions = await readConfirmedCostPositions(undefined, NIM_CONFIG);
     expect(positions.size).toBe(0);
@@ -191,6 +217,42 @@ describe("annotateConfirmedPool — host roster pricing (c)", () => {
     const { host_model_cost_order } = annotateConfirmedPool(basePool, NIM_CONFIG, input);
     expect(host_model_cost_order[0].blended_price_usd_per_mtok).toBeNull();
     expect(typeof host_model_cost_order[0].cost_order).toBe("number");
+  });
+});
+
+describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", () => {
+  const basePool = [
+    { name: "claude-code", capability_tier: "frontier", excluded: false },
+    { name: "worker-command", capability_tier: "unknown", excluded: false },
+  ];
+
+  test("declared-free source sorts first and threads its position by model_id", () => {
+    const sources = [
+      // A declared-free arbitrage pool (cost 0 → routes first) and a declared-priced one.
+      { id: "opencode-free", provider: "opencode", model: "free/model-x", cost_per_mtok: 0 },
+      { id: "rp/paid", provider: "openai-compatible", model: "nvidia/paid-y", cost_per_mtok: 5 },
+    ];
+    const { source_pool_cost_order } = annotateConfirmedPool(basePool, {}, undefined, sources);
+    const byId = Object.fromEntries(source_pool_cost_order.map((e) => [e.source_id, e]));
+    expect(byId["opencode-free"].cost_order).toBeLessThan(byId["rp/paid"].cost_order);
+    expect(byId["opencode-free"].price_declared).toBe(true);
+    expect(byId["opencode-free"].blended_price_usd_per_mtok).toBe(0);
+    expect(byId["opencode-free"].model_id).toBe("free/model-x");
+  });
+
+  test("capability_rank breaks a cost-equal tie among source pools (lower = first)", () => {
+    const sources = [
+      { id: "rp/weak", provider: "openai-compatible", model: "prov/weak", cost_per_mtok: 3, capability_rank: 40 },
+      { id: "rp/strong", provider: "openai-compatible", model: "prov/strong", cost_per_mtok: 3, capability_rank: 2 },
+    ];
+    const { source_pool_cost_order } = annotateConfirmedPool(basePool, {}, undefined, sources);
+    const byId = Object.fromEntries(source_pool_cost_order.map((e) => [e.source_id, e.cost_order]));
+    expect(byId["rp/strong"]).toBeLessThan(byId["rp/weak"]);
+  });
+
+  test("no sources → empty source_pool_cost_order (headless / no-source path unchanged)", () => {
+    const { source_pool_cost_order } = annotateConfirmedPool(basePool, NIM_CONFIG);
+    expect(source_pool_cost_order).toEqual([]);
   });
 });
 

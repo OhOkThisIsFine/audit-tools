@@ -888,6 +888,7 @@ export {
   annotateConfirmedPoolCost,
   annotateConfirmedPool,
   deriveSourcePoolDisplay,
+  deriveSourcePoolDisplayFromSources,
 } from "./providers/providerConfirmation.js";
 export {
   commandExists,
@@ -1086,6 +1087,7 @@ export {
   sourceProviderConfig,
   dispatchableSourceId,
   collectDispatchableSources,
+  gatherDispatchableSources,
   primaryInProcessSource,
   isDemotableInProcessProvider,
   shouldDemotePrimaryInProcess,

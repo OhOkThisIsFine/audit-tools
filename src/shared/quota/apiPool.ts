@@ -52,6 +52,17 @@ function nonNegativeCostOrNull(value: number | undefined): number | null {
 }
 
 /**
+ * A source's raw capability rank (registry `composite_rank`, LOWER = more capable),
+ * normalized to a finite number or null. Absent / non-finite ⇒ null (no finer
+ * capability signal → admission falls back to the tier ordinal alone). No sign
+ * constraint: a rank is a relative ordinal, not a cost.
+ */
+function finiteRankOrNull(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value;
+}
+
+/**
  * Bridge a generic {@link DispatchableSource} to the concrete per-provider config
  * block its provider constructor expects, so `createFreshSessionProvider` can build
  * the right backend FROM the source (not the global block). `endpoint` + `parameters`
@@ -265,6 +276,10 @@ export async function buildSourcePool(params: {
     // (rung 2, authoritative over the models.dev catalog). 0 = declared-free → routes
     // first. null when unset/invalid ⇒ falls through to the catalog price / tier.
     declaredCostPerMtok: nonNegativeCostOrNull(source.cost_per_mtok),
+    // Raw per-model capability rank (LOWER = more capable) → the host-path admission
+    // tiebreak among cost-equal, same-tier pools. Finite-or-null; a non-finite value
+    // degrades to null (no finer signal) rather than poisoning the comparator.
+    declaredCapabilityRank: finiteRankOrNull(source.capability_rank),
     quotaStateEntry: quotaEntries[poolKey] ?? null,
     // QuotaModelLimits is structurally a DiscoveredRateLimitsInput (RPM/TPM/context/
     // output) — the operator-declared per-source rate limit feeds the S4 fold.
@@ -447,6 +462,31 @@ export function collectDispatchableSources(
 }
 
 /**
+ * The FULL dispatchable source list for a run: the synchronous `collectDispatchableSources`
+ * set PLUS the repair-proxy `/registry` expansion (per-`provider/model` sources), deduped by
+ * dispatchable id. The single async source-gather point — both the dispatch pool builder
+ * ({@link buildSourcePools}) and the Gate-0 confirmation surface consume it, so what the
+ * operator confirms is exactly what routes (no more display/dispatch drift on the source set).
+ * Fail-open: `expandRepairProxySources` returns [] on any registry failure, so a proxy outage
+ * never breaks source-gather.
+ */
+export async function gatherDispatchableSources(
+  sessionConfig: SessionConfig,
+  primaryProviderName: string,
+  options?: { demotePrimaryInProcess?: boolean },
+): Promise<DispatchableSource[]> {
+  const sources = collectDispatchableSources(sessionConfig, primaryProviderName, options);
+  if (sessionConfig.repair_proxy?.base_url) {
+    const discovered = await expandRepairProxySources(sessionConfig.repair_proxy);
+    for (const source of discovered) {
+      const id = dispatchableSourceId(source);
+      if (!sources.some((s) => dispatchableSourceId(s) === id)) sources.push(source);
+    }
+  }
+  return sources;
+}
+
+/**
  * Build the CapacityPool for every configured dispatchable backend source (the
  * generalization of the former openai-compatible-only `buildConfiguredApiPool`): one
  * pool per source, the IDENTICAL shape across audit + remediate, so the spill topology
@@ -461,20 +501,9 @@ export async function buildSourcePools(params: {
   /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
   demotePrimaryInProcess?: boolean;
 }): Promise<CapacityPool[]> {
-  const sources = collectDispatchableSources(params.sessionConfig, params.primaryProviderName, {
+  const sources = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
     demotePrimaryInProcess: params.demotePrimaryInProcess,
   });
-  // repair-proxy discovery: when a `/registry` endpoint is configured, expand its
-  // reachable providers into per-`provider/model` sources and concat (deduped by id —
-  // registry ids are stable/distinct). Fail-open: `expandRepairProxySources` returns []
-  // on any registry failure, so a proxy outage never breaks source-gather.
-  if (params.sessionConfig.repair_proxy?.base_url) {
-    const discovered = await expandRepairProxySources(params.sessionConfig.repair_proxy);
-    for (const source of discovered) {
-      const id = dispatchableSourceId(source);
-      if (!sources.some((s) => dispatchableSourceId(s) === id)) sources.push(source);
-    }
-  }
   const pools = await Promise.all(
     sources.map((source) =>
       buildSourcePool({ source, quotaSource: params.quotaSource, quotaEntries: params.quotaEntries }),

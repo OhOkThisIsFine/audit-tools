@@ -10,7 +10,9 @@ import type {
 import {
   applyGuidanceFile,
   buildSharedProviderConfirmation,
-  deriveSourcePoolDisplay,
+  deriveSourcePoolDisplayFromSources,
+  gatherDispatchableSources,
+  resolveFreshSessionProviderName,
   PROVIDER_CONFIRMATION_INPUT_FILENAME,
   auditArtifactsDir,
   promotedAuditFindingsPath,
@@ -619,7 +621,22 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     // The tool's suggested pool (price-ascending). Built from the SAME discovery +
     // annotation the executor will use, so what the operator sees is what routes
     // if they accept it verbatim.
-    const suggested = buildSharedProviderConfirmation(sessionConfig);
+    // Gate-0 source fold: expand every dispatchable source pool (explicit sources[] +
+    // repair-proxy /registry) so the suggested ordering + roster the operator sees is
+    // exactly what routes. Fail-open — a registry outage yields [] (no source pools).
+    const primaryProviderName = resolveFreshSessionProviderName(undefined, sessionConfig, {
+      env: process.env,
+    });
+    const dispatchSources = await gatherDispatchableSources(sessionConfig, primaryProviderName);
+    const suggested = buildSharedProviderConfirmation(
+      sessionConfig,
+      process.env,
+      [],
+      [],
+      undefined,
+      undefined,
+      dispatchSources,
+    );
     const step = await writeCurrentStep({
       artifactsDir,
       stepKind: "provider_confirmation",
@@ -634,7 +651,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       },
       prompt: renderProviderConfirmationPrompt({
         providerPool: suggested.provider_pool,
-        sourcePools: deriveSourcePoolDisplay(sessionConfig),
+        sourcePools: deriveSourcePoolDisplayFromSources(dispatchSources),
         inputPath,
         continueCommand,
       }),

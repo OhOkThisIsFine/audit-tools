@@ -194,6 +194,16 @@ export interface CapacityPool {
    * enters the slot math.
    */
   declaredCostPerMtok?: number | null;
+  /**
+   * Raw per-`(provider,model)` capability rank for this pool's endpoint (from
+   * `source.capability_rank`) — LOWER = more capable (the registry `composite_rank`,
+   * never collapsed into a tier). Carried through unfolded to the summary → the
+   * host-path admission tiebreak, where it refines the coarse tier ordinal among
+   * cost-equal pools of the same tier (e.g. many repair-proxy models all landing on
+   * the neutral "standard" fallback tier). null/absent ⇒ no finer signal; ordering
+   * falls back to the tier ordinal alone. Never enters the slot math.
+   */
+  declaredCapabilityRank?: number | null;
   /** Learned quota-state entry for this pool's provider/model key, if any. */
   quotaStateEntry?: QuotaStateEntry | null;
   /** RPM/TPM discovered for this pool (provider query or response headers). */
@@ -266,6 +276,12 @@ export interface PoolDispatchAllocation {
    */
   declaredCostPerMtok?: number | null;
   /**
+   * Echo of {@link CapacityPool.declaredCapabilityRank} — the pool's raw per-model
+   * capability rank (LOWER = more capable). Carried through unfolded so the summary
+   * surfaces it to the host-path admission tiebreak; never affects the slot math here.
+   */
+  declaredCapabilityRank?: number | null;
+  /**
    * True when this pool is the conversation host's own pool (no backing
    * {@link CapacityPool.source}), false for a configured backend source. Carried so
    * the throughput axis of the cost↔speed dial can tell a hardware-parallel source
@@ -325,6 +341,13 @@ export const DispatchCapacityPoolSummarySchema = z
      * models.dev catalog); 0 = declared-free → routes first.
      */
     declared_cost_per_mtok: z.number().min(0).nullable().optional(),
+    /**
+     * Raw per-`(provider,model)` capability rank for this pool (from
+     * source.capability_rank; see CapacityPool.declaredCapabilityRank). LOWER = more
+     * capable. Surfaced so the host-path admission builder feeds it as the finer
+     * capability tiebreak among cost-equal, same-tier pools. Absent ⇒ tier ordinal only.
+     */
+    capability_rank: z.number().nullable().optional(),
   })
   .strict();
 export type DispatchCapacityPoolSummary = z.infer<
@@ -611,6 +634,7 @@ function schedulePool(
     ...(pool.quotaCoverage ? { quotaCoverage: pool.quotaCoverage } : {}),
     ...(pool.concurrencyCap != null ? { concurrencyCap: pool.concurrencyCap } : {}),
     ...(pool.declaredCostPerMtok != null ? { declaredCostPerMtok: pool.declaredCostPerMtok } : {}),
+    ...(pool.declaredCapabilityRank != null ? { declaredCapabilityRank: pool.declaredCapabilityRank } : {}),
   };
 }
 
@@ -654,5 +678,6 @@ export function summarizeDispatchCapacityPools(
     ...(allocation.quotaCoverage ? { quota_coverage: allocation.quotaCoverage } : {}),
     ...(allocation.concurrencyCap != null ? { concurrency_cap: allocation.concurrencyCap } : {}),
     ...(allocation.declaredCostPerMtok != null ? { declared_cost_per_mtok: allocation.declaredCostPerMtok } : {}),
+    ...(allocation.declaredCapabilityRank != null ? { capability_rank: allocation.declaredCapabilityRank } : {}),
   }));
 }

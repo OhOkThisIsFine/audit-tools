@@ -14,6 +14,7 @@ import { suggestCostOrdering, resolveModelPrice, type CostCandidate } from "../d
 import type {
   ConfirmedPoolEntry,
   HostModelCostEntry,
+  SourcePoolCostEntry,
   ProviderConfirmationInput,
 } from "../types/providerConfirmation.js";
 
@@ -276,6 +277,28 @@ export interface AnnotatedConfirmation {
    * kept separate from `provider_pool` so no pool consumer sees duplicate names.
    */
   host_model_cost_order: HostModelCostEntry[];
+  /**
+   * Dispatchable SOURCE pools (explicit `sources[]` + repair-proxy expansion) with
+   * their confirmed positions (Gate-0 source fold). Kept separate from `provider_pool`
+   * because a source is keyed by `(provider, model)`, not a single provider name.
+   */
+  source_pool_cost_order: SourcePoolCostEntry[];
+}
+
+/** Stable source id (matches `deriveSourcePoolDisplay` / the dispatch id convention). */
+function dispatchSourceKey(source: DispatchableSource): string {
+  return source.id ?? `${source.provider}:${source.model ?? source.endpoint ?? "default"}`;
+}
+
+/**
+ * Internal candidate key for a source in the unified cost ordering. Prefixed so a source's
+ * operator-set id can never collide with a provider-NAME key or a host `model_id` key in
+ * the shared position map (they share one keyspace in `resolveFinalCostOrder`) — a collision
+ * would let one entry's `cost_order` silently overwrite the other's. The prefix is internal
+ * only; the emitted `source_id` + the operator `cost_order` keyspace are unaffected.
+ */
+function sourceCandidateKey(source: DispatchableSource): string {
+  return `source::${dispatchSourceKey(source)}`;
 }
 
 /**
@@ -323,6 +346,7 @@ export function annotateConfirmedPool(
   pool: ConfirmedPoolEntry[],
   sessionConfig: SessionConfig,
   input?: ProviderConfirmationInput,
+  sources: DispatchableSource[] = [],
 ): AnnotatedConfirmation {
   const hostModels = input?.host_models ?? [];
   const providerCandidates: CostCandidate[] = pool.map((entry) => ({
@@ -336,8 +360,20 @@ export function annotateConfirmedPool(
     key: m.model_id,
     model: m.model_id,
   }));
+  // Gate-0 source fold: every dispatchable source pool (explicit sources[] + repair-proxy
+  // expansion) becomes a ranked candidate, keyed by its stable source id so a namespaced
+  // `provider/model` never collides with a provider-name key. Each carries its declared
+  // cost (authoritative; 0 = free) and raw capability rank so the suggestion is truthful
+  // and the capability tiebreak applies among cost-equal source pools.
+  const sourceCandidates: CostCandidate[] = sources.map((source) => ({
+    key: sourceCandidateKey(source),
+    model: source.model ?? null,
+    provider: source.provider,
+    ...(source.cost_per_mtok !== undefined ? { declaredCost: source.cost_per_mtok } : {}),
+    ...(source.capability_rank != null ? { capabilityRank: source.capability_rank } : {}),
+  }));
   const positions = resolveFinalCostOrder(
-    [...providerCandidates, ...hostCandidates],
+    [...providerCandidates, ...hostCandidates, ...sourceCandidates],
     input?.cost_order,
   );
   const provider_pool = pool.map((entry) => {
@@ -355,7 +391,25 @@ export function annotateConfirmedPool(
     blended_price_usd_per_mtok: resolveModelPrice(m.model_id) ?? null,
     cost_order: positions.get(m.model_id) ?? 0,
   }));
-  return { provider_pool, host_model_cost_order };
+  const source_pool_cost_order: SourcePoolCostEntry[] = sources.map((source) => {
+    const key = sourceCandidateKey(source);
+    const declared =
+      typeof source.cost_per_mtok === "number" && Number.isFinite(source.cost_per_mtok) && source.cost_per_mtok >= 0
+        ? source.cost_per_mtok
+        : undefined;
+    const price =
+      declared ?? (source.model ? resolveModelPrice(source.model, source.provider) ?? null : null);
+    return {
+      source_id: dispatchSourceKey(source),
+      provider: source.provider,
+      ...(source.model ? { model_id: source.model } : {}),
+      blended_price_usd_per_mtok: price,
+      price_declared: declared !== undefined,
+      ...(source.capability_rank != null ? { capability_rank: source.capability_rank } : {}),
+      cost_order: positions.get(key) ?? 0,
+    };
+  });
+  return { provider_pool, host_model_cost_order, source_pool_cost_order };
 }
 
 /**
@@ -437,7 +491,18 @@ export interface SourcePoolDisplayEntry {
 export function deriveSourcePoolDisplay(
   sessionConfig: SessionConfig,
 ): SourcePoolDisplayEntry[] {
-  const sources = sessionConfig.sources ?? [];
+  return deriveSourcePoolDisplayFromSources(sessionConfig.sources ?? []);
+}
+
+/**
+ * Same display derivation as {@link deriveSourcePoolDisplay} but over an EXPLICIT source
+ * list — used by the Gate-0 confirmation display so the roster includes the async
+ * repair-proxy `/registry` expansion (which is not in `sessionConfig.sources`), matching
+ * exactly what {@link gatherDispatchableSources} folds into dispatch.
+ */
+export function deriveSourcePoolDisplayFromSources(
+  sources: DispatchableSource[],
+): SourcePoolDisplayEntry[] {
   return sources.map((source) => {
     const id =
       source.id ?? `${source.provider}:${source.model ?? source.endpoint ?? "default"}`;

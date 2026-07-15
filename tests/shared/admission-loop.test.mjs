@@ -26,6 +26,7 @@ function pool(
     declaredCap = null,
     costRank = 0,
     capabilityRank = 0,
+    capabilityScore = null,
     throughputConcurrency = Infinity,
     capacityTokens = Infinity,
     calibrating = false,
@@ -38,6 +39,7 @@ function pool(
     declaredCap,
     costRank,
     capabilityRank,
+    capabilityScore,
     throughputConcurrency,
     capacityTokens,
     calibrating,
@@ -75,6 +77,37 @@ test("capability gate: a packet too large for the cheap pool routes to the capab
   const byPacket = Object.fromEntries(res.granted.map((g) => [g.packet_id, g.pool_id]));
   expect(byPacket.p1).toBe("small#a/m");
   expect(byPacket.p2).toBe("deep#a/m");
+});
+
+test("raw capability score breaks a cost-equal, same-tier tie (lower score = more capable, routes first)", async () => {
+  const ledger = await freshLedger();
+  // Two repair-proxy-style pools: identical cost, identical tier ordinal (both the
+  // neutral fallback), differing only by raw composite_rank. Each fits exactly one
+  // packet, so the FIRST packet reveals which pool the router prefers.
+  const strong = pool("rp/strong", { budget: 1000, costRank: 0, capabilityRank: 1, capabilityScore: 3 });
+  const weak = pool("rp/weak", { budget: 1000, costRank: 0, capabilityRank: 1, capabilityScore: 40 });
+  const res = await admitBatch({
+    packets: [pkt("p1", 1000), pkt("p2", 1000)],
+    pools: [weak, strong],
+    ledger,
+  });
+  const byPacket = Object.fromEntries(res.granted.map((g) => [g.packet_id, g.pool_id]));
+  // p1 → the more-capable (lower-score) pool; p2 spills to the other.
+  expect(byPacket.p1).toBe("rp/strong");
+  expect(byPacket.p2).toBe("rp/weak");
+});
+
+test("raw capability score never reorders against cost (cost stays primary)", async () => {
+  const ledger = await freshLedger();
+  // The cheaper pool is LESS capable (higher score); cost must still win.
+  const cheapWeak = pool("cheap/weak", { budget: 1000, costRank: 0, capabilityRank: 1, capabilityScore: 999 });
+  const dearStrong = pool("dear/strong", { budget: 1000, costRank: 5, capabilityRank: 1, capabilityScore: 1 });
+  const res = await admitBatch({
+    packets: [pkt("p1", 1000)],
+    pools: [dearStrong, cheapWeak],
+    ledger,
+  });
+  expect(res.granted[0].pool_id).toBe("cheap/weak");
 });
 
 test("declared in-flight cap limits a pool by COUNT; overflow spills to the next pool", async () => {

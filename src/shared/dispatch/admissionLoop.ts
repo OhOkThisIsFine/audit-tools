@@ -49,6 +49,15 @@ export interface AdmissionPool {
   /** Capability rank — HIGHER is more capable; ties break toward more capable. */
   capabilityRank: number;
   /**
+   * Raw per-`(provider,model)` capability score (registry `composite_rank`) — LOWER
+   * is more capable, the inverse convention of {@link capabilityRank}. A FINER tiebreak
+   * consulted only AFTER the coarse tier ordinal, so it reorders only among cost-equal
+   * pools that also share a tier (e.g. many repair-proxy models on the neutral fallback
+   * tier). null/absent ⇒ no finer signal; a present score sorts before an absent one
+   * within that tie. Never reorders against cost or tier.
+   */
+  capabilityScore?: number | null;
+  /**
    * Throughput rank for the cost↔speed dial — the pool's effective PARALLELISM (higher
    * = faster; `+Infinity` = hardware-parallel). Consulted only when λ > 0. Derived
    * pool-class-aware by {@link deriveThroughputConcurrency} at the build site — a
@@ -124,6 +133,7 @@ export function admissionPoolsFromSummaries(
       confirmedPosition: lookupConfirmedPosition(confirmedCostPositions, pool.model),
     }),
     capabilityRank: tierRank(pool.rank),
+    capabilityScore: pool.capability_rank ?? null,
     throughputConcurrency: deriveThroughputConcurrency({
       isConversationHost: pool.is_conversation_host,
       hostActiveSubagents: pool.host_concurrency_limit?.active_subagents,
@@ -232,9 +242,24 @@ function defaultCapable(pool: AdmissionPool, packet: AdmissionCandidate): boolea
   return pool.capacityTokens >= packet.cost;
 }
 
-/** Cost-first order: cheapest first, ties toward the more capable pool. */
+/**
+ * Finer capability tiebreak on the raw registry score (LOWER = more capable), consulted
+ * only after the coarse tier ordinal has tied. A present score sorts before an absent
+ * one; both absent ⇒ 0 (fall through to the next tiebreak). Never a primary axis — it
+ * only refines cost-equal, same-tier pools (e.g. repair-proxy models on one tier).
+ */
+function capabilityScoreCmp(a: AdmissionPool, b: AdmissionPool): number {
+  const av = typeof a.capabilityScore === "number" && Number.isFinite(a.capabilityScore) ? a.capabilityScore : null;
+  const bv = typeof b.capabilityScore === "number" && Number.isFinite(b.capabilityScore) ? b.capabilityScore : null;
+  if (av !== null && bv !== null) return av - bv; // lower = more capable, sorts first
+  if (av !== null) return -1; // present before absent
+  if (bv !== null) return 1;
+  return 0;
+}
+
+/** Cost-first order: cheapest first, ties toward the more capable pool (tier, then raw score). */
 function costFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
-  return a.costRank - b.costRank || b.capabilityRank - a.capabilityRank;
+  return a.costRank - b.costRank || b.capabilityRank - a.capabilityRank || capabilityScoreCmp(a, b);
 }
 
 /** Deterministic tiebreak so equal-key orderings are stable across processes. */
@@ -251,7 +276,7 @@ function speedFirstCmp(a: AdmissionPool, b: AdmissionPool): number {
     if (tb === Number.POSITIVE_INFINITY) return 1;
     return tb - ta;
   }
-  return b.capabilityRank - a.capabilityRank || poolIdCmp(a, b);
+  return b.capabilityRank - a.capabilityRank || capabilityScoreCmp(a, b) || poolIdCmp(a, b);
 }
 
 /**

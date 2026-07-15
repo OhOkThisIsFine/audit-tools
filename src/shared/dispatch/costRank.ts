@@ -173,6 +173,15 @@ export interface CostCandidate {
    */
   capabilityRank?: number | null;
   /**
+   * Optional operator/registry-declared blended `$/Mtok` for this candidate's endpoint —
+   * AUTHORITATIVE over the models.dev catalog price when present (mirrors dispatch's
+   * rung-2 `declaredCostPerMtok`). `0` = a genuinely-free backend (routes first). A finite
+   * value here is used as the candidate's price directly; absent ⇒ fall back to
+   * `resolveModelPrice(model, provider)`. Lets a declared-free source pool sort truthfully
+   * on the Gate-0 suggestion surface, not by its catalog price.
+   */
+  declaredCost?: number | null;
+  /**
    * Optional live quota-saturation marker: `true` when this candidate's pool is out
    * of usable headroom (exhausted budget / in active cooldown). A saturated candidate
    * is DEMOTED below every healthy candidate in the suggested order — a STABLE
@@ -206,7 +215,13 @@ export interface OrderedCostCandidate extends CostCandidate {
  */
 export function suggestCostOrdering(candidates: CostCandidate[]): OrderedCostCandidate[] {
   const priced = candidates.map((c) => {
-    const price = resolveModelPrice(c.model, c.provider);
+    // A declared cost (operator/registry) is authoritative over the catalog — 0 = free,
+    // routes first. Absent/non-finite ⇒ fall back to the models.dev catalog price.
+    const declared =
+      typeof c.declaredCost === "number" && Number.isFinite(c.declaredCost) && c.declaredCost >= 0
+        ? c.declaredCost
+        : undefined;
+    const price = declared ?? resolveModelPrice(c.model, c.provider);
     return { candidate: c, price };
   });
   const sorted = [...priced].sort((a, b) => {

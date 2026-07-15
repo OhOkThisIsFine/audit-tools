@@ -109,6 +109,40 @@ export interface HostModelCostEntry {
   cost_order: number;
 }
 
+/**
+ * A configured/discovered dispatchable SOURCE pool's persisted cost position (Gate-0
+ * source fold). Lives on the shared confirmation alongside `provider_pool` +
+ * `host_model_cost_order`; merged into the model-keyed dispatch positions map by
+ * `readConfirmedCostPositions` so a source pool (an explicit `sources[]` entry OR a
+ * repair-proxy-expanded `provider/model`) routes by its operator-confirmed order exactly
+ * like a configured provider pool or host tier. Kept as a separate list (not extra
+ * `provider_pool` entries) because a source is keyed by `(provider, model)`, not by a
+ * single provider name — many sources can share the `openai-compatible` provider.
+ */
+export interface SourcePoolCostEntry {
+  /** Dispatchable source id (`id` or `provider:model`) — stable display + reorder key. */
+  source_id: string;
+  /** The source's provider transport (e.g. `openai-compatible`). */
+  provider: string;
+  /**
+   * The source's model id — the DISPATCH cost-position key (a repair-proxy source's
+   * namespaced `provider/model`, or a plain source model). Absent when the source
+   * declares no model (then it contributes no dispatch position, only display).
+   */
+  model_id?: string;
+  /**
+   * Declared ($/Mtok) when the source set one (authoritative; `0` = free), else the
+   * models.dev blended price, else `null` when unpriceable. Advisory.
+   */
+  blended_price_usd_per_mtok: number | null;
+  /** Whether {@link blended_price_usd_per_mtok} came from the source's declared cost. */
+  price_declared: boolean;
+  /** Raw per-model capability rank (LOWER = more capable), when the source carries one. */
+  capability_rank?: number;
+  /** Operator-confirmed 0-based cost position (rung 1 of costRank). */
+  cost_order: number;
+}
+
 // ---------------------------------------------------------------------------
 // Contract types
 // ---------------------------------------------------------------------------

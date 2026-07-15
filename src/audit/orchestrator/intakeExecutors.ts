@@ -6,6 +6,8 @@ import {
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
   readProviderConfirmationInput,
+  gatherDispatchableSources,
+  resolveFreshSessionProviderName,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { confirmProviders } from "./providerConfirmation.js";
@@ -143,6 +145,13 @@ export async function runProviderConfirmationAutoComplete(
   );
   const artifactsWritten = ["provider_confirmation.json"];
   if (root) {
+    // Gate-0 source fold: expand every dispatchable source pool (explicit sources[] +
+    // repair-proxy /registry) so the confirmed cost ordering the operator approves is
+    // exactly what routes. Fail-open — a registry outage yields [] (no source pools).
+    const primaryProviderName = resolveFreshSessionProviderName(undefined, sessionConfig, {
+      env: process.env,
+    });
+    const sources = await gatherDispatchableSources(sessionConfig, primaryProviderName);
     await writeSharedProviderConfirmation(
       root,
       buildSharedProviderConfirmation(
@@ -152,6 +161,7 @@ export async function runProviderConfirmationAutoComplete(
         input?.include ?? [],
         undefined,
         input ?? undefined,
+        sources,
       ),
     );
     artifactsWritten.push("provider-confirmation.json");

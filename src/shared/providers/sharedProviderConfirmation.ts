@@ -34,7 +34,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import type { DispatchableSource, ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import { auditToolsDir } from "../io/auditToolsPaths.js";
 import { readJsonFile, writeJsonFile } from "../io/json.js";
 import { withFileLock } from "../quota/fileLock.js";
@@ -48,6 +48,7 @@ import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
 import type {
   ConfirmedPoolEntry,
   HostModelCostEntry,
+  SourcePoolCostEntry,
   ProviderConfirmationInput,
 } from "../types/providerConfirmation.js";
 import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "../types/providerConfirmation.js";
@@ -111,6 +112,15 @@ export interface SharedProviderConfirmation {
    * order. Absent/empty on the headless path (no host roster is reported).
    */
   host_model_cost_order?: HostModelCostEntry[];
+  /**
+   * Dispatchable SOURCE pools (explicit `sources[]` + repair-proxy expansion) with their
+   * operator-confirmed cost positions (Gate-0 source fold). Merged into the model-keyed
+   * dispatch positions map by `readConfirmedCostPositions` so a source pool routes by its
+   * confirmed order exactly like a provider pool / host tier. Absent when no source is
+   * configured (or a confirmation written before this field existed) ⇒ dispatch falls to
+   * declared/catalog price then tier, exactly as before.
+   */
+  source_pool_cost_order?: SourcePoolCostEntry[];
   /**
    * Operator-confirmed cost↔speed dispatch bias (λ) ∈ [0, 1], the durable operating
    * point on the cost-vs-throughput frontier (spec/dispatch-cost-speed-dial.md). Read
@@ -221,6 +231,7 @@ export function buildSharedProviderConfirmation(
   include: ResolvedProviderName[] = [],
   detectCommand?: (command: string) => boolean,
   input?: ProviderConfirmationInput,
+  sources: DispatchableSource[] = [],
 ): SharedProviderConfirmation {
   const discovered = discoverProviders(sessionConfig, env, detectCommand);
   const excludeSet = new Set<ResolvedProviderName>(exclude);
@@ -260,7 +271,7 @@ export function buildSharedProviderConfirmation(
   // Cost-first routing: annotate with representative model price + cost_order,
   // read at dispatch as rung 1 of costRank (spec/cost-first-routing.md). When an
   // operator input is present its ordering wins and its host roster is priced.
-  const annotated = annotateConfirmedPool(pool, sessionConfig, input);
+  const annotated = annotateConfirmedPool(pool, sessionConfig, input, sources);
   return {
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
@@ -268,6 +279,9 @@ export function buildSharedProviderConfirmation(
     provider_pool: annotated.provider_pool,
     ...(annotated.host_model_cost_order.length > 0
       ? { host_model_cost_order: annotated.host_model_cost_order }
+      : {}),
+    ...(annotated.source_pool_cost_order.length > 0
+      ? { source_pool_cost_order: annotated.source_pool_cost_order }
       : {}),
     ...(clampDispatchBias(input?.dispatch_bias) != null
       ? { dispatch_bias: clampDispatchBias(input?.dispatch_bias) }
@@ -344,6 +358,21 @@ function isHostModelCostEntry(value: unknown): value is HostModelCostEntry {
   );
 }
 
+function isSourcePoolCostEntry(value: unknown): value is SourcePoolCostEntry {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.source_id === "string" &&
+    typeof obj.provider === "string" &&
+    (obj.model_id === undefined || typeof obj.model_id === "string") &&
+    (obj.blended_price_usd_per_mtok === null ||
+      typeof obj.blended_price_usd_per_mtok === "number") &&
+    typeof obj.cost_order === "number"
+  );
+}
+
 /**
  * Validate a parsed value as a SharedProviderConfirmation. Returns the typed
  * value or `null` when any required field is missing or malformed — a corrupt
@@ -373,6 +402,12 @@ function parseSharedProviderConfirmation(
     obj.host_model_cost_order.every(isHostModelCostEntry)
       ? (obj.host_model_cost_order as HostModelCostEntry[])
       : undefined;
+  // source_pool_cost_order is optional + additive; a malformed value degrades to absent.
+  const sourcePools =
+    Array.isArray(obj.source_pool_cost_order) &&
+    obj.source_pool_cost_order.every(isSourcePoolCostEntry)
+      ? (obj.source_pool_cost_order as SourcePoolCostEntry[])
+      : undefined;
   // dispatch_bias is optional + additive; a malformed/out-of-range value degrades to
   // the cost-first default (clamp → undefined only when non-finite), never blocking.
   const dispatchBias = clampDispatchBias(obj.dispatch_bias);
@@ -383,6 +418,9 @@ function parseSharedProviderConfirmation(
     provider_pool: obj.provider_pool as ConfirmedPoolEntry[],
     ...(hostModels && hostModels.length > 0
       ? { host_model_cost_order: hostModels }
+      : {}),
+    ...(sourcePools && sourcePools.length > 0
+      ? { source_pool_cost_order: sourcePools }
       : {}),
     ...(dispatchBias != null ? { dispatch_bias: dispatchBias } : {}),
     roster: obj.roster,
@@ -471,6 +509,19 @@ export async function readConfirmedCostPositions(
   // in the single unified cost order, so a plain merge preserves the total order.
   const positions = resolveConfirmedCostPositions(read.confirmation.provider_pool);
   for (const entry of read.confirmation.host_model_cost_order ?? []) {
+    if (
+      entry.model_id &&
+      Number.isFinite(entry.cost_order) &&
+      entry.cost_order >= 0
+    ) {
+      positions.set(entry.model_id, entry.cost_order);
+    }
+  }
+  // Source pools (explicit sources[] + repair-proxy expansion) route by their confirmed
+  // position keyed on the source's model id — the SAME model-keyed lookup a repair-proxy
+  // dispatch pool resolves against (pool.model = the namespaced `provider/model`). An entry
+  // without a model_id is display-only and contributes no dispatch position.
+  for (const entry of read.confirmation.source_pool_cost_order ?? []) {
     if (
       entry.model_id &&
       Number.isFinite(entry.cost_order) &&
