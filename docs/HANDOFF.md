@@ -73,20 +73,18 @@ The 2026-07-11 maximal-coverage run and the 2026-07-12 self-audit re-run both su
 bugs; fixes shipped in the current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
 **full-suite-verify before each loop-core commit**:
 
-1. **D — empty_grant derives no reset-time + wall-pass counts NIM-progress passes (medium, loop-core).**
-   `detectHostDispatchWall` (`hostDispatchWall.ts:27-49`) returns `earliestResetAt:null`; surface the
-   per-pool binding window + derived budget + packet cost. And LIVELOCK_PAUSE_LIMIT shouldn't count
-   passes where the in-process NIM partition ingested results. `docs/backlog.md` → Open bugs.
-2. **openai-compatible config trace (VERIFY FIRST — do NOT blind-flip an already-on default).** The
+1. **openai-compatible config trace (VERIFY FIRST — do NOT blind-flip an already-on default).** The
    provider already inlines referenced files by default (since `fbbf3039`); the run still needing the
    `include_referenced_files` workaround is a contradiction → trace the hybrid review-dispatch →
    provider-config wiring, then build the "refuse to dispatch an unroutable review packet" guard.
-3. **Low residuals:** doc-review auto-apply re-asserting a resolved decision after a process restart; the
+2. **Low residuals:** doc-review auto-apply re-asserting a resolved decision after a process restart; the
    two A2b residuals; untracked-exclusion residuals (a–e). All in `docs/backlog.md` → Open bugs.
 
 _(Item C — host fan-out quota gate — SHIPPED v0.32.66: `gateHostFanout` + budget-only `fanoutMode` +
-bounded livelock→skip. The design-review/systemic fan-out now leases the host pool, pauses resumably at
-the wall, and skips the enrichment after the livelock bound instead of dying raw.)_
+bounded livelock→skip. Item D — empty_grant binding-window reset + progress-aware livelock — SHIPPED
+v0.32.67: `detectHostDispatchWall` surfaces the binding window/reset (gated on a real `budget_exhausted`
+block, not `cap_reached` ledger contention) via `renderHostWallExplanation`; `advanceHostDispatchPause`
+resets the wall-pass counter on a pass that accepted in-process coverage.)_
 
 **Confirming re-run (verification track, not blocking the remainder):** re-run the maximal-coverage audit
 on a fresh Claude window to confirm the shipped fixes hold live, finish the parked self-audit (14/261

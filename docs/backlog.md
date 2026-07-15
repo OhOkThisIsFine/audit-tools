@@ -74,15 +74,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   by hand. Only residual worth considering (deferred, low): a `next-step` startup sweep that reconciles
   leases whose owning run is demonstrably dead, so an abandoned wave doesn't false-wall a fresh one for up
   to 20 min. Not a defect in the release path itself.
-- **empty_grant wall: prose promises "wait for the reset" but derives none, and the binding window can be days out while the session window is fresh (2026-07-11 live run, tool-should-decide, medium — NOTE: the granted-0 I first attributed here was actually the lease leak above; this entry stands only for the derives-no-reset-time UX).**
-  `detectHostDispatchWall` (hostDispatchWall.ts:27-49) returns `earliestResetAt: null` on the empty_grant
-  axis, and the blocked step's stop-condition says "wait for the reset" with no time; the actual binder was
-  the WEEKLY-window learned budget (min-across-windows, scheduler.ts:350-456) — 3 days out — while the
-  session window sat at 96%. Also: each walled pass bumps `pause_count`; at LIVELOCK_PAUSE_LIMIT=3 the run
-  routes to synthesis on partial coverage EVEN IF the hybrid NIM partition is still making progress every
-  pass — wall-pass counting should not count passes in which the in-process partition ingested results.
-  Surface per-pool binding window + derived budget + packet cost in the blocked step so the operator can
-  see WHY zero packets fit.
+- **empty_grant reset-time + progress-aware livelock — SHIPPED v0.32.67 ([[host-fanout-quota-gate]]).**
+  `deriveTokenBudget` returns the binding (MIN-budget) window → `WaveSchedule.binding_window` → capacity
+  summary; `detectHostDispatchWall` derives `earliestResetAt` from it + `renderHostWallExplanation` surfaces
+  window/budget/cost in both pause renderers (audit + remediate parity), gated on a real `budget_exhausted`
+  block (`admissionBlockedOnBudget`) so a `cap_reached` ledger-contention grant keeps best-effort null-reset.
+  `advanceHostDispatchPause` gains `madeProgress` (in-process `accepted_count>0`) → resets the wall-pass
+  counter, so a hybrid run whose NIM partition keeps covering ground never trips the livelock give-up.
 - **openai-compatible review dispatch: unroutable-guard still unbuilt (2026-07-11, tool-should-decide).**
   `include_referenced_files` already defaults to true (`openAiCompatibleProvider.ts:397`, shipped
   `fbbf3039`) — the original "defaults off" framing is moot. Still missing: a pre-dispatch
