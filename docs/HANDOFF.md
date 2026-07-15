@@ -18,28 +18,28 @@
   major code tracks remain complete (host-path quota enforcement ✅ 2026-07-10; access-memory ✅; cost↔speed
   dial ✅; admission control ✅; arbitrage Phase-0 CODE-COMPLETE; conceptual design review ✅). Next is the
   bounded forward remainder below + a confirming re-run.
-- **▶ TOP PRIORITY — finish + dogfood the repair-proxy dispatch integration** (branch
+- **▶ TOP PRIORITY — dogfood + merge the repair-proxy dispatch integration** (branch
   `feat/repair-proxy-jit-dispatch`, [PR #11](https://github.com/OhOkThisIsFine/audit-tools/pull/11), NOT
-  merged). Slices A/B/D + 429 refinement landed (4 attested commits, unit-green); design of record
+  merged). Slices A/B/D + 429 refinement + **the Gate-0/dispatch capability FEED (step 1, both halves)**
+  landed (commit `81bd9105`, loop-core attested, unit-green, pushed); design of record
   `spec/repair-proxy-dispatch-integration.md`; residual detail `docs/backlog.md` → "repair-proxy dispatch
   integration". Companion `C:\Code\repair-proxy` (OpenAI front + `/registry`) already shipped on its `main`.
-  **Deliberate intermediate state (NOT a bug):** `DispatchableSource.capability_rank` and the
-  `suggestCostOrdering` `capabilityRank`/`saturated` params are SET + CONSUMED but not yet FED at Gate-0 —
-  so the capability tiebreak/demotion is inert until step 1. Deadcode gate is green (the fields have
-  consumers); do not "clean them up". Ordered next steps:
-  1. **Wire the Gate-0 FEED.** Feed point = `annotateConfirmedPool` (`src/shared/providers/providerConfirmation.ts:322`),
-     which builds the `CostCandidate[]` passed to `resolveFinalCostOrder`→`suggestCostOrdering`. Populate each
-     candidate's **`capabilityRank`** from the matching `DispatchableSource.capability_rank` (STATIC — map
-     via `sessionConfig.sources` + the repair-proxy expansion; the smaller half, likely stays sync) and
-     **`saturated`** from live pool health (the ASYNC half — probe `quotaSourceSnapshot`/cooldown; may need
-     the builder made async + a `quotaSource` dep + a candidate-key→`(provider,model,account)` pool map).
-     `suggestCostOrdering` already consumes both. Split allowed: land the static capability feed first.
-  2. **Dogfood audit-code through repair-proxy = the live e2e validation.** Start
-     `repair-proxy --config C:\Code\repair-proxy\config.json` (NIM+OpenRouter, OpenAI front on :8791); add
-     `repair_proxy: { base_url: "http://127.0.0.1:8791" }` to the audit session config; run audit-code on
-     THIS repo. Confirm packets dispatch to discovered per-`(provider,model)` pools, 429 folds per provider,
-     capability now orders Gate-0, and the run completes. This exercises Slices B+D live.
-  3. **Merge PR #11** once 1+2 are green (loop-core attestation already on the branch commits).
+  **Step 1 DONE (2026-07-15):** `capability_rank` now feeds BOTH ordering decisions — (Gap 2) threaded
+  `DispatchableSource.capability_rank`→`CapacityPool`→summary→`AdmissionPool.capabilityScore` as the finer
+  cost-equal/same-tier dispatch tiebreak (never reorders vs cost/tier); (Gate-0 fold) `annotateConfirmedPool`
+  now folds every source (incl. async repair-proxy `/registry` expansion via new `gatherDispatchableSources`)
+  into the ranked candidate set carrying `declaredCost`+`capabilityRank`, persists `source_pool_cost_order`,
+  threads each source's confirmed position to dispatch by `model_id`. **Live-validated** against the running
+  proxy: 9 pools (nim/openrouter/groq) folded cost-ascending ($0.10→$30, cost primacy holds), and the real
+  CLI `provider_confirmation` gate prompt now surfaces them. **Residual (split-allowed, NOT a bug):** the
+  `saturated` half (live-quota demotion of source pools at Gate-0) is not wired — capability half only;
+  `docs/backlog.md` → "repair-proxy dispatch integration". Ordered next steps:
+  1. **Owner-attended full dogfood run** — the multi-hour maximal-coverage validation (start
+     `repair-proxy --config C:\Code\repair-proxy\config.json` on :8791; `repair_proxy: { base_url:
+     "http://127.0.0.1:8791" }` in session config; `/audit-code` on THIS repo; let it run to completion,
+     watch packets dispatch to per-`(provider,model)` pools + 429 folds per provider). Runs the SHIPPED
+     global bin — so this must follow a merge+publish OR use the dev wrapper (`node audit-code.mjs`).
+  2. **Merge PR #11** once the attended run is green (loop-core attestation already on the branch commits).
 - **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
   and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
   inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
