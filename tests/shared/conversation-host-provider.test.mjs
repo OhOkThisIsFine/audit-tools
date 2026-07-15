@@ -37,6 +37,12 @@ describe("resolveConversationHostProvider", () => {
     }
   });
 
+  it("agy is detected from any of its self-spawn signals", () => {
+    for (const key of ["AGY_CLI", "ANTIGRAVITY_CLI", "GEMINI_CLI"]) {
+      expect(resolveConversationHostProvider({ env: { [key]: "x" } })).toBe("agy");
+    }
+  });
+
   it("codex wins over an also-present CLAUDECODE (a Codex host keeps its own meter)", () => {
     expect(
       resolveConversationHostProvider({ env: { ...CODEX_ENV, ...CLAUDE_ENV } }),

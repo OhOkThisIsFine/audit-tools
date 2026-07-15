@@ -92,6 +92,15 @@ export function isSelfSpawnBlocked(
         env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
     );
   }
+  if (provider === "agy") {
+    // Note: checks both agy/antigravity and the legacy gemini in-session env variables.
+    // Gated for July 18, 2026 sunset cleanup: env.GEMINI_CLI
+    return Boolean(
+      env.AGY_CLI ||
+        env.ANTIGRAVITY_CLI ||
+        env.GEMINI_CLI
+    );
+  }
   const signal = SELF_SPAWN_ENV_SIGNAL[provider];
   return signal !== undefined && Boolean(env[signal]);
 }
@@ -130,6 +139,7 @@ export function resolveConversationHostProvider(options?: {
   const env = options?.env ?? process.env;
   if (isSelfSpawnBlocked("codex", env)) return "codex";
   if (isSelfSpawnBlocked("claude-code", env)) return "claude-code";
+  if (isSelfSpawnBlocked("agy", env)) return "agy";
   return "claude-code";
 }
 

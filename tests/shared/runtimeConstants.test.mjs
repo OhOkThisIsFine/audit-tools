@@ -44,8 +44,12 @@ describe("PROVIDER_NAMES contains the expected provider strings", () => {
     expect(PROVIDER_NAMES.includes("antigravity")).toBeTruthy();
   });
 
-  it("has exactly 9 entries", () => {
-    expect(PROVIDER_NAMES.length).toBe(9);
+  it("contains 'agy'", () => {
+    expect(PROVIDER_NAMES.includes("agy")).toBeTruthy();
+  });
+
+  it("has exactly 10 entries", () => {
+    expect(PROVIDER_NAMES.length).toBe(10);
   });
 });
 

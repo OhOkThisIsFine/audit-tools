@@ -23,6 +23,9 @@ const { OpenAiCompatibleProvider } = await import(
 const { discoverOutputConstraintCapability } = await import(
   "audit-tools/shared/providers/providerFactory"
 );
+const { AgyProvider } = await import(
+  "audit-tools/shared/providers/agyProvider"
+);
 
 // Minimal deps for the factory. Codex/antigravity never touch the claude-code /
 // opencode options; a dummy activeSessionMessage satisfies the type.
@@ -642,4 +645,189 @@ test("CE-004: discoverOutputConstraintCapability advertises json_schema_constrai
     openai_compatible: { guided_json: false },
   });
   expect(structured.mode).toBe("structured_output");
+});
+
+// ── agy provider tests ────────────────────────────────────────────────────────
+
+test("resolveFreshSessionProviderName handles agy rules", () => {
+  // agy is in PROVIDER_NAMES
+  expect(PROVIDER_NAMES.includes("agy")).toBeTruthy();
+
+  // verbatim pass-through
+  expect(resolveFreshSessionProviderName("agy", {})).toBe("agy");
+
+  // inside active sessions resolves to agy
+  expect(
+    resolveFreshSessionProviderName("auto", {}, { env: { AGY_CLI: "1" }, commandExists: noCommands })
+  ).toBe("agy");
+  expect(
+    resolveFreshSessionProviderName("auto", {}, { env: { ANTIGRAVITY_CLI: "1" }, commandExists: noCommands })
+  ).toBe("agy");
+  expect(
+    resolveFreshSessionProviderName("auto", {}, { env: { GEMINI_CLI: "1" }, commandExists: noCommands })
+  ).toBe("agy");
+
+  // config-gated resolution
+  expect(
+    resolveFreshSessionProviderName(
+      "auto",
+      { agy: { command: "agy" } },
+      { env: {}, commandExists: (cmd) => cmd === "agy" }
+    )
+  ).toBe("agy");
+
+  // Gated for July 18, 2026 sunset cleanup: fallback config check for gemini
+  expect(
+    resolveFreshSessionProviderName(
+      "auto",
+      { agy: {} },
+      { env: {}, commandExists: (cmd) => cmd === "gemini" }
+    )
+  ).toBe("agy");
+
+  // tie-break when agy is available on PATH
+  expect(
+    resolveFreshSessionProviderName(
+      "auto",
+      {},
+      { env: {}, commandExists: (cmd) => cmd === "agy" }
+    )
+  ).toBe("agy");
+
+  // Gated for July 18, 2026 sunset cleanup: fallback tie-break when gemini is available on PATH
+  expect(
+    resolveFreshSessionProviderName(
+      "auto",
+      {},
+      { env: {}, commandExists: (cmd) => cmd === "gemini" }
+    )
+  ).toBe("agy");
+});
+
+test("createFreshSessionProvider constructs an AgyProvider", () => {
+  const provider = createFreshSessionProvider(
+    "agy",
+    { agy: {} },
+    {
+      ...deps,
+      createAgyProvider: (config) => new AgyProvider(config),
+    }
+  );
+  expect(provider.name).toBe("agy");
+  expect(provider instanceof AgyProvider).toBeTruthy();
+});
+
+test("AgyProvider: launches agy command with correct arguments and pipes stdin", async () => {
+  let launched = null;
+  const mockLauncher = async (command, args, options) => {
+    launched = { command, args, options };
+    return { exitCode: 0, stdout: "agy run complete", stderr: "" };
+  };
+
+  const tempDir = mkdtempSync(join(tmpdir(), "agy-test-"));
+  const promptPath = join(tempDir, "prompt.txt");
+  const taskPath = join(tempDir, "task.json");
+  writeFileSync(promptPath, "Hello agy!");
+  writeFileSync(taskPath, JSON.stringify({ id: "task-1", type: "remediate" }));
+
+  const provider = new AgyProvider(
+    {
+      command: "agy",
+      model: "gemini-1.5-pro",
+      dangerously_skip_permissions: true,
+      extra_args: ["--foo", "bar"],
+    },
+    { skipPermissionsDefault: false },
+    mockLauncher,
+  );
+
+  const res = await provider.launch({
+    promptPath,
+    taskPath,
+    sessionStateDir: tempDir,
+    taskIndex: 0,
+    concurrencySlot: 0,
+  });
+
+  expect(res.exitCode).toBe(0);
+  if (process.platform === "win32") {
+    expect(launched.command.toLowerCase()).toMatch(/cmd\.exe$/);
+    expect(launched.args[3]).toBe('agy --model gemini-1.5-pro --dangerously-skip-permissions --foo bar');
+  } else {
+    expect(launched.command).toBe("agy");
+    expect(launched.args).toEqual([
+      "--model",
+      "gemini-1.5-pro",
+      "--dangerously-skip-permissions",
+      "--foo",
+      "bar",
+    ]);
+  }
+  expect(launched.options.stdinText).toBe("Hello agy!");
+});
+
+test("AgyProvider: falls back to gemini command and flags", async () => {
+  let launched = null;
+  const mockLauncher = async (command, args, options) => {
+    launched = { command, args, options };
+    return { exitCode: 0, stdout: "gemini run complete", stderr: "" };
+  };
+
+  const tempDir = mkdtempSync(join(tmpdir(), "gemini-test-"));
+  const promptPath = join(tempDir, "prompt.txt");
+  const taskPath = join(tempDir, "task.json");
+  writeFileSync(promptPath, "Hello gemini!");
+  writeFileSync(taskPath, JSON.stringify({ id: "task-1", type: "remediate" }));
+
+  const provider = new AgyProvider(
+    {
+      command: "gemini",
+      model: "gemini-1.5-flash",
+      dangerously_skip_permissions: true,
+    },
+    { skipPermissionsDefault: false },
+    mockLauncher,
+  );
+
+  await provider.launch({
+    promptPath,
+    taskPath,
+    sessionStateDir: tempDir,
+    taskIndex: 0,
+    concurrencySlot: 0,
+  });
+
+  if (process.platform === "win32") {
+    expect(launched.command.toLowerCase()).toMatch(/cmd\.exe$/);
+    expect(launched.args[3]).toBe('gemini -m gemini-1.5-flash -y');
+  } else {
+    expect(launched.command).toBe("gemini");
+    expect(launched.args).toEqual(["-m", "gemini-1.5-flash", "-y"]);
+  }
+  expect(launched.options.stdinText).toBe("Hello gemini!");
+});
+
+test("AgyProvider: active session throws error", async () => {
+  const provider = new AgyProvider({}, { activeSessionMessage: "custom-active-error" });
+  const input = {
+    promptPath: "prompt.txt",
+    taskPath: "task.json",
+    sessionStateDir: "dir",
+    taskIndex: 0,
+    concurrencySlot: 0,
+  };
+
+  const originalEnv = process.env;
+  try {
+    process.env = { ...originalEnv, AGY_CLI: "1" };
+    await expect(provider.launch(input)).rejects.toThrow("custom-active-error");
+
+    process.env = { ...originalEnv, ANTIGRAVITY_CLI: "1" };
+    await expect(provider.launch(input)).rejects.toThrow("custom-active-error");
+
+    process.env = { ...originalEnv, GEMINI_CLI: "1" };
+    await expect(provider.launch(input)).rejects.toThrow("custom-active-error");
+  } finally {
+    process.env = originalEnv;
+  }
 });

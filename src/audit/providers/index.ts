@@ -9,6 +9,7 @@ import type {
 } from "audit-tools/shared";
 import { createClaudeCodeProvider } from "./claudeCodeProvider.js";
 import { createOpenCodeProvider } from "./opencodeProvider.js";
+import { createAgyProvider } from "./agyProvider.js";
 
 /**
  * Auto-resolution and provider wiring are single-sourced in `audit-tools/shared`.
@@ -37,5 +38,6 @@ export function createFreshSessionProvider(
     orchestratorName: "audit-code",
     createClaudeCodeProvider: (config) => createClaudeCodeProvider(config),
     createOpenCodeProvider: (config) => createOpenCodeProvider(config),
+    createAgyProvider: (config) => createAgyProvider(config),
   });
 }

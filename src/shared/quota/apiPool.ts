@@ -84,6 +84,14 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
     case "worker-command":
       // worker-command takes no construction config (host-dispatch default).
       return {};
+    case "agy":
+      return {
+        agy: {
+          command: source.endpoint,
+          model: source.model,
+          ...p,
+        },
+      };
   }
 }
 

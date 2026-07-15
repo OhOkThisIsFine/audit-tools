@@ -985,6 +985,7 @@ const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
   "opencode",
   "subprocess-template",
   "worker-command",
+  "agy",
 ]);
 
 function resolvesToInProcessDispatchProvider(

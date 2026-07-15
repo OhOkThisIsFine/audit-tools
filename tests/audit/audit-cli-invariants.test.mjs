@@ -28,7 +28,7 @@ test("INV-audit-cli-01: worker-command → blocked/manual message", () => {
 });
 
 test("INV-audit-cli-01: LLM providers → fan-out message", () => {
-  for (const provider of ["claude-code", "codex", "opencode", "antigravity"]) {
+  for (const provider of ["claude-code", "codex", "opencode", "antigravity", "agy"]) {
     const msg = buildManualReviewBlocker(provider);
     expect(msg, `${provider} must get the LLM fan-out message`).toMatch(/Ready for LLM semantic review/);
     expect(msg, `${provider} must NOT get the manual-waiting message`).not.toMatch(/waiting for manual audit results/);

@@ -77,6 +77,7 @@ function defaultCapabilityTier(name: ResolvedProviderName): CapabilityTier {
     case "subprocess-template":
     case "vscode-task":
     case "antigravity":
+    case "agy":
       return "capable";
     case "worker-command":
       return "unknown";
@@ -110,6 +111,17 @@ const CLI_PROBES: CliProbe[] = [
     providerName: "codex",
     defaultCommand: "codex",
     configCommand: (cfg) => cfg.codex?.command,
+  },
+  {
+    providerName: "agy",
+    defaultCommand: "agy",
+    configCommand: (cfg) => {
+      if (cfg.agy?.command) return cfg.agy.command;
+      // Gated for July 18, 2026 sunset cleanup: fallback to gemini command
+      if (commandExists("agy")) return "agy";
+      if (commandExists("gemini")) return "gemini";
+      return undefined;
+    },
   },
 ];
 

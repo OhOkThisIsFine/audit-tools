@@ -11,6 +11,7 @@ export const PROVIDER_NAMES = [
   "openai-compatible",
   "vscode-task",
   "antigravity",
+  "agy",
 ] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export type ResolvedProviderName = Exclude<ProviderName, "auto">;
@@ -213,6 +214,21 @@ export interface AntigravityConfig {
   env?: Record<string, string>;
 }
 
+/**
+ * Agy CLI backend config. Agy is a headless coding CLI (like claude-code and codex).
+ * Built on the same agent harness as the legacy Gemini CLI.
+ */
+export interface AgyConfig {
+  /** Launcher command on PATH (defaults to "agy"; falls back to "gemini" until July 18th sunset). */
+  command?: string;
+  /** Extra argv appended after default options. */
+  extra_args?: string[];
+  /** Dangerously skip permissions/prompts (passes --dangerously-skip-permissions on agy, -y on gemini). */
+  dangerously_skip_permissions?: boolean;
+  /** Model the agent should use (passes --model on agy, -m on gemini). */
+  model?: string;
+}
+
 export const PROVIDER_SECTION_KEYS = {
   "subprocess-template": "subprocess_template",
   "claude-code": "claude_code",
@@ -221,6 +237,7 @@ export const PROVIDER_SECTION_KEYS = {
   "openai-compatible": "openai_compatible",
   "vscode-task": "vscode_task",
   antigravity: "antigravity",
+  agy: "agy",
 } as const;
 
 /**
@@ -235,6 +252,7 @@ export const DISPATCHABLE_SOURCE_PROVIDERS = [
   "opencode",
   "worker-command",
   "subprocess-template",
+  "agy",
 ] as const;
 export type DispatchableSourceProvider =
   (typeof DISPATCHABLE_SOURCE_PROVIDERS)[number];
@@ -554,6 +572,7 @@ export interface SessionConfig {
   openai_compatible?: OpenAiCompatibleConfig;
   vscode_task?: VSCodeTaskConfig;
   antigravity?: AntigravityConfig;
+  agy?: AgyConfig;
   /**
    * Additional dispatchable backend sources the engine spills onto, beyond the
    * primary `provider`. Each is a generic `{provider, endpoint, parameters, quota}`
