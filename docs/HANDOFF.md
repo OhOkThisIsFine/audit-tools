@@ -18,15 +18,32 @@
   major code tracks remain complete (host-path quota enforcement ✅ 2026-07-10; access-memory ✅; cost↔speed
   dial ✅; admission control ✅; arbitrage Phase-0 CODE-COMPLETE; conceptual design review ✅). Next is the
   bounded forward remainder below + a confirming re-run.
-- **⚠️ In-flight branch `feat/repair-proxy-jit-dispatch` (NOT merged):** the repair-proxy dispatch
-  integration — audit-tools discovers repair-proxy `/registry` → per-`(provider,model)` sources with
-  per-provider 429 folding + a capability tiebreak in Gate-0 ordering. Slices A/B/D + 429 refinement
-  landed (attested, unit-green). **Immediate next (before merge):** (1) wire the Gate-0 candidate build
-  to FEED `source.capability_rank` + live pool saturation into `suggestCostOrdering` (currently the
-  mechanism is inert); (2) live e2e validation of a real dispatch through repair-proxy. Full detail +
-  residuals in `docs/backlog.md` → "repair-proxy dispatch integration"; design of record in
-  `spec/repair-proxy-dispatch-integration.md`. Companion work lives in the separate `C:\Code\repair-proxy`
-  repo (OpenAI front + `/registry` endpoint, already shipped on its `main`).
+- **▶ TOP PRIORITY — finish + dogfood the repair-proxy dispatch integration** (branch
+  `feat/repair-proxy-jit-dispatch`, [PR #11](https://github.com/OhOkThisIsFine/audit-tools/pull/11), NOT
+  merged). Slices A/B/D + 429 refinement landed (4 attested commits, unit-green); design of record
+  `spec/repair-proxy-dispatch-integration.md`; residual detail `docs/backlog.md` → "repair-proxy dispatch
+  integration". Companion `C:\Code\repair-proxy` (OpenAI front + `/registry`) already shipped on its `main`.
+  **Deliberate intermediate state (NOT a bug):** `DispatchableSource.capability_rank` and the
+  `suggestCostOrdering` `capabilityRank`/`saturated` params are SET + CONSUMED but not yet FED at Gate-0 —
+  so the capability tiebreak/demotion is inert until step 1. Deadcode gate is green (the fields have
+  consumers); do not "clean them up". Ordered next steps:
+  1. **Wire the Gate-0 FEED.** Feed point = `annotateConfirmedPool` (`src/shared/providers/providerConfirmation.ts:322`),
+     which builds the `CostCandidate[]` passed to `resolveFinalCostOrder`→`suggestCostOrdering`. Populate each
+     candidate's **`capabilityRank`** from the matching `DispatchableSource.capability_rank` (STATIC — map
+     via `sessionConfig.sources` + the repair-proxy expansion; the smaller half, likely stays sync) and
+     **`saturated`** from live pool health (the ASYNC half — probe `quotaSourceSnapshot`/cooldown; may need
+     the builder made async + a `quotaSource` dep + a candidate-key→`(provider,model,account)` pool map).
+     `suggestCostOrdering` already consumes both. Split allowed: land the static capability feed first.
+  2. **Dogfood audit-code through repair-proxy = the live e2e validation.** Start
+     `repair-proxy --config C:\Code\repair-proxy\config.json` (NIM+OpenRouter, OpenAI front on :8791); add
+     `repair_proxy: { base_url: "http://127.0.0.1:8791" }` to the audit session config; run audit-code on
+     THIS repo. Confirm packets dispatch to discovered per-`(provider,model)` pools, 429 folds per provider,
+     capability now orders Gate-0, and the run completes. This exercises Slices B+D live.
+  3. **Merge PR #11** once 1+2 are green (loop-core attestation already on the branch commits).
+- **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
+  and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
+  inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
+  (pre-existing, env-sensitive, spawned as a separate task) — not this branch's doing.
 - **Local env note:** the box runs npm 12.0.0 — it blocks dependency install scripts by default and can
   emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable traps
   before any manual `npm install -g` / packaged-install work.
