@@ -94,6 +94,31 @@ test("expandRepairProxySources: maps to the correct DispatchableSource shape", a
   expect(src.api_key_env).toBe("PROXY_KEY");
 });
 
+test("selectRepairProxyCandidates: carries composite_rank as capability_rank; null-capability omits it", () => {
+  const reg = registry({
+    nim: { reachable: true, has_key: true, models: [model("m-fast", 5), model("m-null", null)] },
+  });
+  const [fast] = selectRepairProxyCandidates(reg, { base_url: BASE, top_k: 2 });
+  expect(fast.model).toBe("m-fast");
+  expect(fast.capability_rank).toBe(5);
+  // Only the ranked model made top-2 (null sorts last); confirm no bogus rank leaks.
+  expect(selectRepairProxyCandidates(reg, { base_url: BASE, top_k: 2 }).every((c) =>
+    c.capability_rank === undefined || Number.isFinite(c.capability_rank),
+  )).toBe(true);
+});
+
+test("expandRepairProxySources: source carries capability_rank from the registry", async () => {
+  const reg = registry({
+    nim: { reachable: true, has_key: true, models: [model("ranked", 7), model("unranked", null)] },
+  });
+  const sources = await expandRepairProxySources({ base_url: BASE, top_k: 2 }, okFetch(reg));
+  const ranked = sources.find((s) => s.model === "nim/ranked");
+  const unranked = sources.find((s) => s.model === "nim/unranked");
+  expect(ranked.capability_rank).toBe(7); // LOWER = better, raw composite_rank
+  // null-capability model → no capability_rank key on the source (absent, not 0).
+  expect(unranked === undefined || unranked.capability_rank === undefined).toBe(true);
+});
+
 test("expandRepairProxySources: one source per selected model, cost override propagates", async () => {
   const reg = registry({
     nim: { reachable: true, has_key: true, models: [model("a", 1), model("b", 2)] },

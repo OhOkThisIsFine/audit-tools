@@ -162,6 +162,25 @@ export interface CostCandidate {
    */
   provider?: string | null;
   tier?: DispatchModelTier | null;
+  /**
+   * Optional per-`(provider,model)` capability rank — LOWER = better (the raw
+   * registry `composite_rank`, never collapsed into a tier). Cost stays the PRIMARY
+   * sort key; this is consulted ONLY as a tiebreak among candidates that are
+   * otherwise cost-equal (equal price, or both unknown-price at the same tier):
+   * lower rank sorts first. A present rank sorts before an absent one WITHIN a tie
+   * only; it is otherwise inert (never reorders against cost). Absent everywhere ⇒
+   * ordering unchanged.
+   */
+  capabilityRank?: number | null;
+  /**
+   * Optional live quota-saturation marker: `true` when this candidate's pool is out
+   * of usable headroom (exhausted budget / in active cooldown). A saturated candidate
+   * is DEMOTED below every healthy candidate in the suggested order — a STABLE
+   * partition that preserves each group's internal cost order — and echoed on the
+   * output. Absent/`false` = healthy = current behavior; with no saturated candidate
+   * the partition is a no-op, so "no quota signal" changes nothing.
+   */
+  saturated?: boolean;
 }
 
 /** A candidate with its resolved price + the tool's suggested position. */
@@ -169,16 +188,21 @@ export interface OrderedCostCandidate extends CostCandidate {
   /** Blended $/Mtok, or `undefined` when the dataset can't price it. */
   blended_price?: number;
   price_known: boolean;
-  /** 0-based suggested position (ascending cost). */
+  /** Echo of the input saturation marker (default `false`). */
+  saturated: boolean;
+  /** 0-based suggested position (ascending cost; saturated candidates demoted last). */
   suggested_order: number;
 }
 
 /**
  * Suggest a cost-ascending ordering for the Gate-0 confirmation surface: priced
  * candidates first (cheapest $/Mtok first), unknown-price candidates after,
- * ordered among themselves by capability tier (cheaper tier first). Stable on the
- * input `key` so equal-cost candidates keep a deterministic order. The operator
- * approves or reorders this; the confirmed order becomes rung 1.
+ * ordered among themselves by capability tier (cheaper tier first). Cost-equal
+ * candidates break by `capabilityRank` (lower = more capable, first), then by the
+ * input `key` for a deterministic tail. Finally, a STABLE quota partition demotes
+ * every `saturated` candidate below the healthy ones (each group keeps its cost
+ * order) so an exhausted backend never heads the list. The operator approves or
+ * reorders this; the confirmed order becomes rung 1.
  */
 export function suggestCostOrdering(candidates: CostCandidate[]): OrderedCostCandidate[] {
   const priced = candidates.map((c) => {
@@ -189,23 +213,50 @@ export function suggestCostOrdering(candidates: CostCandidate[]): OrderedCostCan
     const aKnown = a.price !== undefined;
     const bKnown = b.price !== undefined;
     if (aKnown && bKnown) {
-      return a.price! - b.price! || compareKey(a.candidate.key, b.candidate.key);
+      return a.price! - b.price! ||
+        compareCapability(a.candidate.capabilityRank, b.candidate.capabilityRank) ||
+        compareKey(a.candidate.key, b.candidate.key);
     }
     if (aKnown !== bKnown) return aKnown ? -1 : 1; // known before unknown
-    // Both unknown: order by capability tier, then key.
+    // Both unknown: order by capability tier, then per-model capability, then key.
     return tierRank(a.candidate.tier) - tierRank(b.candidate.tier) ||
+      compareCapability(a.candidate.capabilityRank, b.candidate.capabilityRank) ||
       compareKey(a.candidate.key, b.candidate.key);
   });
-  return sorted.map((entry, index) => ({
+  // Quota-aware demotion (fixes [[quota-before-cost-ordering]]): a stable partition —
+  // healthy candidates first (preserving their cost order), saturated after (preserving
+  // theirs). filter() is stable, so intra-group cost order is untouched; with no
+  // saturated candidate this is a plain copy (current behavior).
+  const partitioned = [
+    ...sorted.filter((e) => e.candidate.saturated !== true),
+    ...sorted.filter((e) => e.candidate.saturated === true),
+  ];
+  return partitioned.map((entry, index) => ({
     ...entry.candidate,
     blended_price: entry.price,
     price_known: entry.price !== undefined,
+    saturated: entry.candidate.saturated === true,
     suggested_order: index,
   }));
 }
 
 function compareKey(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Tiebreak comparator for per-model capability rank (LOWER = better). A present,
+ * finite rank sorts before an absent/non-finite one; two present ranks compare
+ * ascending; two absent are equal. Used ONLY to order candidates the cost keys
+ * already tied — never as a primary axis.
+ */
+function compareCapability(a: number | null | undefined, b: number | null | undefined): number {
+  const av = typeof a === "number" && Number.isFinite(a) ? a : null;
+  const bv = typeof b === "number" && Number.isFinite(b) ? b : null;
+  if (av !== null && bv !== null) return av - bv;
+  if (av !== null) return -1; // present before absent
+  if (bv !== null) return 1;
+  return 0;
 }
 
 /**

@@ -219,6 +219,45 @@ describe("suggestCostOrdering — Gate-0 suggestion", () => {
     expect(suggestion.find((s) => s.key === "custom-deep")?.price_known).toBe(false);
     expect(suggestion.find((s) => s.key === "custom-deep")?.blended_price).toBeUndefined();
   });
+  test("capability breaks a COST-EQUAL tie (lower rank = more capable, first)", () => {
+    // Same model ⇒ identical price ⇒ the tie is decided by capabilityRank.
+    const suggestion = suggestCostOrdering([
+      { key: "weak", model: "claude-sonnet-5", capabilityRank: 10 },
+      { key: "strong", model: "claude-sonnet-5", capabilityRank: 3 },
+    ]);
+    expect(suggestion.map((s) => s.key)).toEqual(["strong", "weak"]);
+  });
+  test("capability breaks a tie for two unknown-price, same-tier candidates", () => {
+    const suggestion = suggestCostOrdering([
+      { key: "b", model: UNKNOWN_MODEL, tier: "deep", capabilityRank: 8 },
+      { key: "a", model: UNKNOWN_MODEL, tier: "deep", capabilityRank: 2 },
+    ]);
+    expect(suggestion.map((s) => s.key)).toEqual(["a", "b"]);
+  });
+  test("cost PRIMACY: a cheaper-but-weaker candidate still beats a pricier-stronger one", () => {
+    // haiku ~2.00 with a WEAK rank vs opus ~10.00 with a STRONG rank — cost wins,
+    // capability is never consulted because the prices differ.
+    const suggestion = suggestCostOrdering([
+      { key: "opus-strong", model: "claude-opus-4-8", capabilityRank: 1 },
+      { key: "haiku-weak", model: "claude-haiku-4-5", capabilityRank: 999 },
+    ]);
+    expect(suggestion.map((s) => s.key)).toEqual(["haiku-weak", "opus-strong"]);
+  });
+  test("a present capabilityRank sorts before an absent one within a tie only", () => {
+    const suggestion = suggestCostOrdering([
+      { key: "absent", model: "claude-sonnet-5" },
+      { key: "present", model: "claude-sonnet-5", capabilityRank: 5 },
+    ]);
+    expect(suggestion.map((s) => s.key)).toEqual(["present", "absent"]);
+  });
+  test("no capabilityRank anywhere ⇒ ordering unchanged (key tiebreak preserved)", () => {
+    const suggestion = suggestCostOrdering([
+      { key: "z", model: "claude-sonnet-5" },
+      { key: "a", model: "claude-sonnet-5" },
+    ]);
+    expect(suggestion.map((s) => s.key)).toEqual(["a", "z"]);
+  });
+
   test("a suggested ordering fed back as confirmed positions preserves that order", () => {
     const suggestion = suggestCostOrdering([
       { key: "opus", model: "claude-opus-4-8", tier: "deep" },
@@ -230,5 +269,35 @@ describe("suggestCostOrdering — Gate-0 suggestion", () => {
       .sort((a, b) => a.rank - b.rank)
       .map((s) => s.key);
     expect(reordered).toEqual(["haiku", "opus"]);
+  });
+});
+
+describe("suggestCostOrdering — quota-aware demotion (fixes quota-before-cost-ordering)", () => {
+  test("a saturated candidate is demoted below every healthy one, cost order preserved intra-group", () => {
+    const suggestion = suggestCostOrdering([
+      { key: "haiku", model: "claude-haiku-4-5", saturated: true }, // cheapest but saturated
+      { key: "sonnet", model: "claude-sonnet-5" },
+      { key: "opus", model: "claude-opus-4-8" },
+    ]);
+    // Healthy (sonnet, opus) first by cost; saturated haiku demoted last despite being cheapest.
+    expect(suggestion.map((s) => s.key)).toEqual(["sonnet", "opus", "haiku"]);
+    expect(suggestion.find((s) => s.key === "haiku")?.saturated).toBe(true);
+    expect(suggestion.find((s) => s.key === "sonnet")?.saturated).toBe(false);
+  });
+  test("multiple saturated candidates keep their cost order among themselves, after the healthy", () => {
+    const suggestion = suggestCostOrdering([
+      { key: "opus", model: "claude-opus-4-8", saturated: true }, // dearer, saturated
+      { key: "haiku", model: "claude-haiku-4-5", saturated: true }, // cheaper, saturated
+      { key: "sonnet", model: "claude-sonnet-5" }, // healthy
+    ]);
+    expect(suggestion.map((s) => s.key)).toEqual(["sonnet", "haiku", "opus"]);
+  });
+  test("no saturation signal ⇒ ordering unchanged (additive no-op)", () => {
+    const withFlag = suggestCostOrdering([
+      { key: "opus", model: "claude-opus-4-8" },
+      { key: "haiku", model: "claude-haiku-4-5" },
+    ]);
+    expect(withFlag.map((s) => s.key)).toEqual(["haiku", "opus"]);
+    expect(withFlag.every((s) => s.saturated === false)).toBe(true);
   });
 });

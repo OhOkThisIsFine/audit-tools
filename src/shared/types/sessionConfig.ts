@@ -330,6 +330,14 @@ export interface DispatchableSource {
    * account. Omit to auto-resolve from {@link credentials_path} / the host cred.
    */
   account?: string;
+  /**
+   * Per-`(provider,model)` capability rank from the discovery registry — LOWER =
+   * better (the raw `composite_rank` from BFCL/Arena, never collapsed into a tier).
+   * Optional — absent leaves ranking unchanged; consumed only as a tiebreak among
+   * otherwise cost-equal candidates in `deriveCostRank`/`suggestCostOrdering`, never
+   * folded into the cost band itself (so it can't reorder against cost).
+   */
+  capability_rank?: number;
 }
 
 /**

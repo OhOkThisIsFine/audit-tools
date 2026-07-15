@@ -51,6 +51,12 @@ export interface RepairProxyCandidate {
   model: string;
   cost_per_mtok?: number;
   quota?: DispatchableSource["quota"];
+  /**
+   * The model's raw `composite_rank` (LOWER = better), carried onto the source so it
+   * flows into cost-ranking as a cost-equal tiebreak. Absent when the registry model
+   * has no `composite_rank` (the null-capability, sorts-last case).
+   */
+  capability_rank?: number;
 }
 
 const DEFAULT_TOP_K = 5;
@@ -128,10 +134,17 @@ export function selectRepairProxyCandidates(
     });
     const costOverride = cfg.providers?.[name]?.cost_per_mtok;
     for (const model of ranked.slice(0, topK)) {
+      // Carry the raw composite_rank (LOWER = better) onto the candidate — the same
+      // score used for the top-K ordering above becomes the downstream cost-equal
+      // tiebreak. Omitted for null-capability models (the +Infinity sentinel).
+      const rank = model.capability?.composite_rank;
+      const capabilityRank =
+        typeof rank === "number" && Number.isFinite(rank) ? rank : undefined;
       out.push({
         provider: name,
         model: model.id,
         ...(typeof costOverride === "number" ? { cost_per_mtok: costOverride } : {}),
+        ...(capabilityRank !== undefined ? { capability_rank: capabilityRank } : {}),
       });
     }
   }
@@ -172,6 +185,7 @@ export async function expandRepairProxySources(
       account,
       ...(candidate.cost_per_mtok !== undefined ? { cost_per_mtok: candidate.cost_per_mtok } : {}),
       ...(candidate.quota !== undefined ? { quota: candidate.quota } : {}),
+      ...(candidate.capability_rank != null ? { capability_rank: candidate.capability_rank } : {}),
     };
   });
 }
