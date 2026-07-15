@@ -154,6 +154,7 @@ Supported providers:
 - `openai-compatible`
 - `vscode-task`
 - `antigravity`
+- `agy`
 
 `worker-command` is the safest fallback default. `auto` is explicit opt-in.
 External providers are compatibility bridges, not the intended default review
