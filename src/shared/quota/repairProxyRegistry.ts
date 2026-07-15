@@ -157,16 +157,21 @@ export async function expandRepairProxySources(
   const registry = await fetchRepairProxyRegistry(cfg.base_url, fetchFn);
   if (!registry) return [];
   const baseUrl = cfg.base_url;
-  return selectRepairProxyCandidates(registry, cfg).map((candidate) => ({
-    id: `repair-proxy/${candidate.provider}/${candidate.model}`,
-    provider: "openai-compatible" as const,
-    endpoint: baseUrl,
-    model: `${candidate.provider}/${candidate.model}`,
-    ...(cfg.api_key_env !== undefined ? { api_key_env: cfg.api_key_env } : {}),
-    // Per-backend-provider quota accounting: the account axis is the backend provider,
-    // so all models of one provider share its cooldown/429 fold.
-    account: candidate.provider,
-    ...(candidate.cost_per_mtok !== undefined ? { cost_per_mtok: candidate.cost_per_mtok } : {}),
-    ...(candidate.quota !== undefined ? { quota: candidate.quota } : {}),
-  }));
+  return selectRepairProxyCandidates(registry, cfg).map((candidate) => {
+    // 429/cooldown fold axis: provider-wide by DEFAULT (one 429 propagates across all the
+    // provider's models), or per-model when the operator flags this provider as having
+    // distinct per-model rate limits. Per-pool token/concurrency limits stay per-model.
+    const perModel = cfg.providers?.[candidate.provider]?.per_model_limits === true;
+    const account = perModel ? `${candidate.provider}/${candidate.model}` : candidate.provider;
+    return {
+      id: `repair-proxy/${candidate.provider}/${candidate.model}`,
+      provider: "openai-compatible" as const,
+      endpoint: baseUrl,
+      model: `${candidate.provider}/${candidate.model}`,
+      ...(cfg.api_key_env !== undefined ? { api_key_env: cfg.api_key_env } : {}),
+      account,
+      ...(candidate.cost_per_mtok !== undefined ? { cost_per_mtok: candidate.cost_per_mtok } : {}),
+      ...(candidate.quota !== undefined ? { quota: candidate.quota } : {}),
+    };
+  });
 }

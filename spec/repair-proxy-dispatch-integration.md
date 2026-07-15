@@ -8,9 +8,17 @@ from live capability + quota + cost — realizing the [[relax-dispatch-source-fo
 
 ## Decisions (approved)
 
-- **JIT per-packet model**, not N pre-bound pools. One pool per *backend provider* (nim /
-  openrouter / groq / mistral); the model is chosen per packet at dispatch. Threaded through
-  `LaunchFreshSessionInput.model`. This is the [[relax-dispatch-source-forcing]] shape.
+- **Per-`(provider,model)` pools** (one CapacityPool per selected backend model), NOT
+  per-provider-with-a-threaded-model. Per-model windows / cost / capability are real and
+  belong per-pool; the scheduler picking a pool per packet IS the per-packet model choice, so
+  no `LaunchFreshSessionInput.model` thread is needed (Slice C dropped). The
+  [[relax-dispatch-source-forcing]] "don't pre-bind" concern is about scheduler *timing*
+  (JIT selection), orthogonal to pool granularity.
+- **429 fold axis = backend provider by DEFAULT** (`account`=provider) so one provider 429
+  propagates across all its models; **opt-in per-model isolation** via
+  `repair_proxy.providers[name].per_model_limits` (→ `account`=`provider/model`) for a provider
+  whose models have genuinely distinct rate limits. Per-pool `quota`/`concurrencyCap` are
+  always per-model regardless; this flag only scopes the shared-cooldown domain.
 - **Cost-aware top-K candidate set**: from repair-proxy `/registry`, take the top-K models per
   reachable provider by capability (BFCL/Arena raw scores), **factoring cost** — free models
   (declared/registry price 0) rank ahead; paid models are admitted only when capability justifies

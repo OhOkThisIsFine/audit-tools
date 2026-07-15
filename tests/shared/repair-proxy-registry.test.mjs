@@ -107,6 +107,21 @@ test("expandRepairProxySources: one source per selected model, cost override pro
   expect(new Set(sources.map((s) => s.id)).size).toBe(2);
 });
 
+test("expandRepairProxySources: 429 axis — provider-wide by default, per-model when flagged", async () => {
+  const reg = registry({
+    nim: { reachable: true, has_key: true, models: [model("a", 1), model("b", 2)] },
+  });
+  // default: all models share account=provider (one 429 propagates provider-wide)
+  const shared = await expandRepairProxySources({ base_url: BASE }, okFetch(reg));
+  expect(shared.map((s) => s.account)).toEqual(["nim", "nim"]);
+  // opt-in per_model_limits: account=provider/model (isolated 429 domains)
+  const isolated = await expandRepairProxySources(
+    { base_url: BASE, providers: { nim: { per_model_limits: true } } },
+    okFetch(reg),
+  );
+  expect(new Set(isolated.map((s) => s.account))).toEqual(new Set(["nim/a", "nim/b"]));
+});
+
 test("expandRepairProxySources: fail-open — fetch returning a non-200 → []", async () => {
   const notOk = async () => ({ ok: false, status: 500, async json() { return {}; } });
   const out = await expandRepairProxySources({ base_url: BASE }, notOk);

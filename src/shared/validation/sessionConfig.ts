@@ -227,6 +227,9 @@ function validateRepairProxy(value: unknown, issues: ValidationIssue[]): void {
         if (override.enabled !== undefined && typeof override.enabled !== "boolean") {
           pushIssue(issues, `${path}.enabled`, "enabled must be a boolean when provided.");
         }
+        if (override.per_model_limits !== undefined && typeof override.per_model_limits !== "boolean") {
+          pushIssue(issues, `${path}.per_model_limits`, "per_model_limits must be a boolean when provided.");
+        }
       }
     }
   }

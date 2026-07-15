@@ -351,9 +351,13 @@ export interface RepairProxyConfig {
   /**
    * Per-backend-provider overrides keyed by the registry provider name. `cost_per_mtok`
    * seeds the admission cost rank (else resolved from models.dev at rank time);
-   * `enabled: false` excludes that provider from discovery.
+   * `enabled: false` excludes that provider from discovery. `per_model_limits: true`
+   * isolates each model's 429/cooldown domain (pool `account` = `provider/model`) instead
+   * of the default provider-wide fold (`account` = provider) — set it for a provider whose
+   * models carry genuinely distinct rate limits. Per-pool token/concurrency limits are
+   * per-model regardless; this only scopes the shared-cooldown axis.
    */
-  providers?: Record<string, { cost_per_mtok?: number; enabled?: boolean }>;
+  providers?: Record<string, { cost_per_mtok?: number; enabled?: boolean; per_model_limits?: boolean }>;
 }
 
 export interface BlockQuotaConfig {
