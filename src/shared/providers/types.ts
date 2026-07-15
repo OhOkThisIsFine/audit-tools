@@ -32,6 +32,23 @@ export interface LaunchFreshSessionInput {
    * request behaves exactly as before.
    */
   outputSchema?: Record<string, unknown> | null;
+  /**
+   * The authoritative, repo-relative set of files the worker is granted to READ
+   * for this task (audit review: the packet's `access.read_paths`; remediate
+   * implement: the block's `access.read_paths`). A single-shot / no-file-access
+   * provider (openai-compatible / NIM) inlines the CURRENT CONTENTS of these files
+   * into the prompt deterministically — it has no Read tool, so paths alone are
+   * useless to it. The agentic-CLI providers (claude-code / codex / opencode)
+   * ignore this: they read the files themselves via their own tools.
+   *
+   * Distinct from the prose-scavenge fallback the openai-compatible provider also
+   * runs: this list is the CONTRACT (every existing member MUST inline or the
+   * launch refuses as unroutable), whereas scavenge is a best-effort supplement for
+   * paths mentioned in prompt prose but not granted. A member that does not exist
+   * on disk is a to-be-created file (a declared `touched_files` output) and is NOT
+   * a failure — the worker writes it from scratch.
+   */
+  referencedFiles?: string[];
 }
 
 export interface LaunchFreshSessionResult {

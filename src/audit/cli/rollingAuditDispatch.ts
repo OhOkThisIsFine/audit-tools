@@ -323,6 +323,14 @@ export function makeAuditProviderPacketDispatcher(params: {
         // CE-004: additively constrain a schema-capable backend to the AuditResult[]
         // shape; backends without schema-constrained decoding ignore this.
         outputSchema: workerResultOutputSchema(),
+        // The packet's REPO-RELATIVE source files under review. A single-shot /
+        // no-file-access worker (openai-compatible / NIM) inlines these files'
+        // current contents and refuses the dispatch if it cannot; the agentic-CLI
+        // providers ignore it and read the files themselves. NOT `access.read_paths`
+        // — that is the absolute host-scope grant (includes the prompt/result
+        // artifacts), which would self-inline the prompt and false-refuse on an
+        // out-of-repo artifacts dir.
+        referencedFiles: entry.file_paths,
       });
       return await finalizeProviderLaunchResult(launch, {
         packet,

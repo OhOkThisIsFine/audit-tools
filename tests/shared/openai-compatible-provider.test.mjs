@@ -312,6 +312,72 @@ test("defect-1 sub-3: referenced-file byte cap is operator-configurable (read-he
   expect(bigUser).toMatch(/xxxxxxxxxx/);
 });
 
+test("granted referencedFiles inline current contents deterministically (not via prose)", async () => {
+  // The prompt names NO paths; the granted read set alone must drive inlining — this
+  // is the deterministic fix for prompts authored paths-only for tool-using hosts.
+  const { repoRoot, input } = makeCtx("Review the granted files for correctness.");
+  writeFileSync(join(repoRoot, "hidden.ts"), "export const SECRET = 42;");
+  input.referencedFiles = ["hidden.ts"];
+  let captured;
+  const fetchFn = async (_url, init) => {
+    captured = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ files: [], result: [] }) } }] }),
+      text: async () => "",
+    };
+  };
+  const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn }).launch(input);
+  expect(res.accepted).toBe(true);
+  const userMsg = captured.messages.find((m) => m.role === "user").content;
+  expect(userMsg).toMatch(/SECRET = 42/);
+  expect(userMsg).toMatch(/hidden\.ts/);
+});
+
+test("unroutable guard: an over-cap granted file refuses the dispatch before any POST", async () => {
+  const { repoRoot, input } = makeCtx("Review bigfile.ts.");
+  writeFileSync(join(repoRoot, "bigfile.ts"), "x".repeat(2000));
+  input.referencedFiles = ["bigfile.ts"];
+  const fetchFn = fakeFetchReturning(JSON.stringify({ files: [], result: [] }));
+  const res = await new OpenAiCompatibleProvider(
+    { ...minimalConfig, referenced_file_byte_cap: 10 },
+    { fetchFn },
+  ).launch(input);
+  expect(res.accepted).toBe(false);
+  expect(res.error).toMatch(/unroutable/i);
+  expect(res.error).toMatch(/bigfile\.ts/);
+  // The guard fires BEFORE the request — no tokens are spent on a doomed packet.
+  expect(fetchFn._calls).toBe(0);
+});
+
+test("unroutable guard: a granted file that does not exist is a to-be-created output, not a refusal", async () => {
+  // A `touched_files` output the fix will CREATE is legitimately absent on disk; the
+  // worker writes it from scratch, so it must NOT trip the guard.
+  const { input } = makeCtx("Create newfile.ts with the fix.");
+  input.referencedFiles = ["newfile.ts"];
+  const fetchFn = fakeFetchReturning(
+    JSON.stringify({ files: [{ path: "newfile.ts", content: "export const x = 1;" }], result: { item_results: [] } }),
+  );
+  const res = await new OpenAiCompatibleProvider(minimalConfig, { fetchFn }).launch(input);
+  expect(res.accepted).toBe(true);
+  expect(fetchFn._calls).toBe(1);
+});
+
+test("unroutable guard is skipped when the operator disables inlining (paths-only by choice)", async () => {
+  const { repoRoot, input } = makeCtx("Review bigfile.ts.");
+  writeFileSync(join(repoRoot, "bigfile.ts"), "x".repeat(2000));
+  input.referencedFiles = ["bigfile.ts"];
+  const fetchFn = fakeFetchReturning(JSON.stringify({ files: [], result: [] }));
+  const res = await new OpenAiCompatibleProvider(
+    { ...minimalConfig, referenced_file_byte_cap: 10, include_referenced_files: false },
+    { fetchFn },
+  ).launch(input);
+  // include_referenced_files:false → no inlining, no guard: the launch proceeds.
+  expect(res.accepted).toBe(true);
+  expect(fetchFn._calls).toBe(1);
+});
+
 test("openai-compatible resolves verbatim and from config", () => {
   expect(resolveFreshSessionProviderName("openai-compatible", {})).toBe("openai-compatible");
   // Inside a CLAUDECODE session (claude can't self-spawn), a configured endpoint

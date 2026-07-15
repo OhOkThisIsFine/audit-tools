@@ -24,6 +24,14 @@ export interface ProviderNodeDispatcherParams {
   /** Per-block worktree-rooted prompt path written by `prepareImplementDispatch`. */
   promptPathByBlock: Map<string, string>;
   /**
+   * Per-block granted read set (repo-relative `access.read_paths`). A single-shot /
+   * no-file-access provider (openai-compatible / NIM) inlines these files' current
+   * contents into the prompt and refuses the node if it cannot; the agentic-CLI
+   * providers ignore it and read the worktree themselves. Absent for the injected
+   * test dispatcher.
+   */
+  referencedFilesByBlock?: Map<string, string[]>;
+  /**
    * Resolve the provider for a node launch. Defaults to `createFreshSessionProvider`
    * (the configured/auto-resolved backend). Injectable so the dispatch wiring can be
    * exercised in tests without spawning a real worker.
@@ -125,6 +133,10 @@ export function makeProviderNodeDispatcher(
         // spawnLoggedCommand). CLAUDECODE / CLAUDE_CODE_* are scrubbed from the
         // child env there, so the worker is graded on its own state.
         repoRoot: worktreeRoot,
+        // The node's granted read set (repo-relative), for a single-shot worker to
+        // inline the current contents of; absent → the provider's prose-scavenge
+        // fallback still runs.
+        referencedFiles: params.referencedFilesByBlock?.get(block.block_id),
       });
       return await finalizeProviderLaunchResult(launch, {
         packet,

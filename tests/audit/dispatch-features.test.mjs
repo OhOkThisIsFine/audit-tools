@@ -404,6 +404,29 @@ await test("FINDING-018: dispatch plan entries include access.read_paths with pr
   expect(entry.access.read_paths.some((p) => p.includes("only.ts")), "access.read_paths should include the packet's source file path").toBeTruthy();
 });
 
+await test("dispatch plan entry file_paths is the REPO-RELATIVE source set (for single-shot content inlining), excluding the prompt artifact", async (t) => {
+  const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+  await run(artifactsDir);
+
+  const plan = await readJson(join(runDir, "dispatch-plan.json"));
+  const entry = plan[0];
+
+  // file_paths drives openai-compatible / NIM content-inlining. It must be the
+  // repo-relative source set — NOT access.read_paths, which is absolute and carries
+  // the prompt artifact (self-inlining it, or false-refusing on an out-of-repo
+  // artifacts dir).
+  expect(Array.isArray(entry.file_paths), "entry should carry file_paths").toBeTruthy();
+  expect(entry.file_paths.some((p) => p.includes("only.ts")), "file_paths should include the packet source file").toBeTruthy();
+  // Repo-relative: no drive letter, no leading slash, no artifacts-dir prefix.
+  for (const p of entry.file_paths) {
+    expect(/^[A-Za-z]:[\\/]/.test(p), `file_paths entry must not be absolute: ${p}`).toBe(false);
+    expect(p.startsWith("/"), `file_paths entry must not be root-absolute: ${p}`).toBe(false);
+  }
+  // The prompt artifact must NOT be in file_paths (it would self-inline).
+  expect(entry.file_paths.includes(entry.prompt_path), "file_paths must not contain the prompt artifact").toBe(false);
+});
+
 await test("FINDING-018: dispatch plan entries access.write_paths contains only task result paths, not directories", async (t) => {
   const { artifactsDir, runDir } = await makeArtifactsDir(singlePacketTask());
   onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));

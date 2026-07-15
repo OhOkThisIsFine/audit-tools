@@ -1084,6 +1084,13 @@ export async function driveRollingImplementDispatch(
       .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
       .map((i) => [i.block_id, i.prompt_path]),
   );
+  // Per-block granted read set (repo-relative access.read_paths) so a single-shot /
+  // no-file-access provider can inline file contents; agentic CLIs ignore it.
+  const referencedFilesByBlock = new Map(
+    plan.items
+      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
+      .map((i) => [i.block_id, i.access?.read_paths ?? []]),
+  );
 
   // The RETAINED host-session source: threaded through pool sizing AND the
   // dispatcher's escalation hooks so the bounded re-limit chain (recordLimit →
@@ -1141,6 +1148,7 @@ export async function driveRollingImplementDispatch(
       runId,
       sessionConfig: options.sessionConfig,
       promptPathByBlock,
+      referencedFilesByBlock,
       sourceByPoolId: sourceByPoolId(confirmedPools),
     });
 
@@ -1378,6 +1386,9 @@ export async function executeInProcessPartition(params: {
     (i): i is typeof i & { block_id: string } => typeof i.block_id === "string",
   );
   const promptPathByBlock = new Map(withBlockId.map((i) => [i.block_id, i.prompt_path]));
+  const referencedFilesByBlock = new Map(
+    withBlockId.map((i) => [i.block_id, i.access?.read_paths ?? []]),
+  );
   const resultPathByBlock = new Map(withBlockId.map((i) => [i.block_id, i.result_path]));
   const state = await new StateStore(artifactsDir).loadState();
   const blockById = new Map<string, RemediationBlock>(
@@ -1392,6 +1403,7 @@ export async function executeInProcessPartition(params: {
       runId,
       sessionConfig,
       promptPathByBlock,
+      referencedFilesByBlock,
       sourceByPoolId: params.sourceByPoolId,
     });
 

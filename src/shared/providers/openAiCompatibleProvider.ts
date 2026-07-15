@@ -36,6 +36,23 @@ interface WorkerOutput {
   result?: unknown;
 }
 
+/** Outcome of inlining referenced file contents into the prompt. */
+interface ReferencedFilesResult {
+  /** The rendered "current contents" block appended to the user message ("" if none). */
+  text: string;
+  /**
+   * Granted (authoritative, `access.read_paths`) files that EXIST but could not be
+   * inlined — too large for the per-file / total-byte / file-count cap, or a path
+   * that escapes the repo. A non-empty list means the task is unroutable to a
+   * no-file-access worker: it would have to invent the missing content, so the
+   * launch refuses. An absent (to-be-created) granted file is NOT counted here — it
+   * is skipped silently, since the worker writes it from scratch. Prose-scavenged
+   * (supplementary) misses never appear here: they are best-effort and never gate a
+   * dispatch.
+   */
+  grantedUninlinable: string[];
+}
+
 type FetchFn = typeof fetch;
 
 export interface OpenAiCompatibleProviderDeps {
@@ -130,15 +147,37 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     }
 
     let messages: Array<{ role: string; content: string }>;
+    let referenced: ReferencedFilesResult;
     try {
       const prompt = await readFile(input.promptPath, "utf8");
-      const referenced = await this.gatherReferencedFiles(prompt, input.repoRoot);
+      referenced = await this.gatherReferencedFiles(prompt, input.repoRoot, input.referencedFiles);
       messages = [
         { role: "system", content: SINGLE_SHOT_SYSTEM_PROMPT },
-        { role: "user", content: prompt + referenced },
+        { role: "user", content: prompt + referenced.text },
       ];
     } catch (err) {
       return fail(`openai-compatible provider failed to read the prompt: ${errText(err)}`);
+    }
+
+    // Unroutable-packet guard (refuse-to-dispatch). A single-shot worker has no Read
+    // tool, so a task whose GRANTED files (access.read_paths) cannot be inlined would
+    // return a schema-VALID but fabricated-empty result that the merge then silently
+    // closes on invented content. Fail the launch cleanly here so the deterministic
+    // ingestion routes the task to error/triage/re-dispatch instead. The guard keys
+    // ONLY on the authoritative granted set — prose-scavenged extras are best-effort
+    // and never gate a dispatch (no heuristic false-refusals). Skipped when the
+    // operator disabled inlining (`include_referenced_files:false` = paths-only by
+    // choice, e.g. a large-context agentic relay), which the gather already honours
+    // by returning no uninlinable list.
+    const uninlinable = referenced.grantedUninlinable;
+    if (uninlinable.length > 0) {
+      return fail(
+        `refusing to dispatch an unroutable packet: ${uninlinable.length} granted file(s) could not be ` +
+          `inlined for a no-file-access worker (larger than the per-file/total inline cap, or unresolvable): ` +
+          `${uninlinable.slice(0, 12).join(", ")}${uninlinable.length > 12 ? ", …" : ""}. Raise ` +
+          `openai_compatible.referenced_file_byte_cap / referenced_files_total_byte_cap / referenced_files_max, ` +
+          `or route this task to a file-reading provider.`,
+      );
     }
 
     const controller = new AbortController();
@@ -384,17 +423,34 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
   }
 
   /**
-   * Best-effort: inline the current contents of repo-relative files the prompt
-   * names, so the model edits real content rather than hallucinating it. Bounded
-   * by per-file and aggregate byte caps and a file-count cap; silently skips
-   * missing / oversized / non-resolving paths. Disabled via
-   * `include_referenced_files:false`.
+   * Inline the current contents of the files the worker needs, so a single-shot
+   * model (no Read tool) works from real content rather than hallucinating it.
+   *
+   * Two sources, different guarantees:
+   *  - `referencedFiles` (the AUTHORITATIVE granted read set, repo-relative, passed
+   *    on the launch input from the packet/block `access.read_paths`): a CONTRACT.
+   *    Every member that exists on disk MUST inline; one that cannot (too large for
+   *    a cap, or path escape) is recorded in `grantedUninlinable` so the caller
+   *    refuses the dispatch rather than sending a task the worker can't complete. A
+   *    member that does NOT exist is a to-be-created output (`touched_files`) and is
+   *    skipped silently — not a failure.
+   *  - prose scavenge: a best-effort SUPPLEMENT for path-looking tokens in the
+   *    prompt body that are not in the granted set (context files, or a caller that
+   *    supplied no granted set at all). Misses are silent and NEVER gate a dispatch —
+   *    only the granted set can, so an un-plumbed caller keeps the prior
+   *    inline-what-you-can behaviour with no risk of a heuristic false-refusal.
+   *
+   * Bounded by per-file / aggregate byte caps and a file-count cap (all
+   * operator-tunable), with the granted set filled first so it is never starved by
+   * scavenged extras. Disabled entirely via `include_referenced_files:false`.
    */
   private async gatherReferencedFiles(
     prompt: string,
     repoRoot: string,
-  ): Promise<string> {
-    if (this.config.include_referenced_files === false) return "";
+    referencedFiles: string[] | undefined,
+  ): Promise<ReferencedFilesResult> {
+    const empty: ReferencedFilesResult = { text: "", grantedUninlinable: [] };
+    if (this.config.include_referenced_files === false) return empty;
     // Operator-tunable caps so a read-heavy AUDIT packet on a large-context endpoint
     // inlines every granted file (the single-shot worker has no Read tool) instead of
     // silently truncating to a coverage hole.
@@ -402,21 +458,77 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
     const totalCap = positiveOr(this.config.referenced_files_total_byte_cap, DEFAULT_REFERENCED_FILES_TOTAL_BYTE_CAP);
     const maxFiles = positiveOr(this.config.referenced_files_max, DEFAULT_REFERENCED_FILES_MAX);
 
+    const parts: string[] = [];
+    let total = 0;
+    let count = 0;
+    const inlined = new Set<string>();
+    const grantedTokens = new Set<string>();
+    const grantedUninlinable: string[] = [];
+
+    // 1) Granted (authoritative) set — deterministic, contract-enforced. Filled
+    //    FIRST so the caps can never let a scavenged extra crowd out a granted file.
+    for (const raw of referencedFiles ?? []) {
+      if (typeof raw !== "string" || raw.length === 0) continue;
+      const token = raw.replace(/\\/g, "/").replace(/^\.\//, "");
+      if (grantedTokens.has(token)) continue;
+      grantedTokens.add(token);
+      const abs = safeResolveInRepo(repoRoot, token);
+      if (!abs) {
+        // A granted path that escapes the repo is bad data, not a to-be-created
+        // file — surface it so the dispatch refuses rather than silently drops it.
+        grantedUninlinable.push(token);
+        continue;
+      }
+      let size: number;
+      try {
+        const info = await stat(abs);
+        if (!info.isFile()) continue; // a directory / non-file — skip, not a failure
+        size = info.size;
+      } catch (err) {
+        // ENOENT = the file does not exist: a declared `touched_files` output the
+        // worker CREATES from scratch — skip silently, not a failure. Any OTHER stat
+        // error (EACCES / ELOOP / ENOTDIR on an EXISTING granted path) is a genuine
+        // coverage hole: the worker needs content it cannot get, so refuse rather
+        // than let it fabricate the file.
+        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") continue;
+        grantedUninlinable.push(token);
+        continue;
+      }
+      if (size > perFileCap || count >= maxFiles) {
+        grantedUninlinable.push(token);
+        continue;
+      }
+      let body: string;
+      try {
+        body = await readFile(abs, "utf8");
+      } catch {
+        grantedUninlinable.push(token);
+        continue;
+      }
+      if (total + body.length > totalCap) {
+        grantedUninlinable.push(token);
+        continue;
+      }
+      parts.push(renderReferencedFilePart(token, body));
+      total += body.length;
+      count += 1;
+      inlined.add(token);
+    }
+
+    // 2) Prose scavenge — SUPPLEMENT only (excludes anything in the granted set).
     const candidates = new Set<string>();
     // Conservative file-ish tokens: a path segment with an extension. Strips
     // surrounding quotes/backticks/parens the prompt may wrap paths in.
     const re = /[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+/g;
     for (const match of prompt.matchAll(re)) {
       const token = match[0].replace(/\\/g, "/");
+      if (grantedTokens.has(token)) continue; // already handled by the granted pass
       if (token.length <= 256) candidates.add(token);
       if (candidates.size > maxFiles * 4) break;
     }
-
-    const parts: string[] = [];
-    let total = 0;
-    let count = 0;
     for (const token of candidates) {
       if (count >= maxFiles || total >= totalCap) break;
+      if (inlined.has(token)) continue;
       const abs = safeResolveInRepo(repoRoot, token);
       if (!abs) continue;
       try {
@@ -424,24 +536,27 @@ export class OpenAiCompatibleProvider implements FreshSessionProvider {
         if (!info.isFile() || info.size > perFileCap) continue;
         const body = await readFile(abs, "utf8");
         if (total + body.length > totalCap) continue;
-        parts.push(`\n--- BEGIN CURRENT FILE ${token} ---\n${body}\n--- END CURRENT FILE ${token} ---`);
+        parts.push(renderReferencedFilePart(token, body));
         total += body.length;
         count += 1;
+        inlined.add(token);
       } catch {
         // missing / binary / unreadable — skip.
       }
     }
-    if (parts.length === 0) return "";
+
     // Task-neutral framing: this serves BOTH edit tasks (remediate — return the new
     // contents in `files`) AND read-only review tasks (audit — leave `files` empty,
     // the finding array goes in `result`). The prior "edit these" wording pushed an
     // audit review worker toward returning file edits it should never make.
-    return (
-      "\n\nCURRENT CONTENTS OF REFERENCED FILES (provided so you work from real content, " +
-      "not guesses). Only include a file in `files` if the task instructs you to MODIFY " +
-      "it; for a read-only review task, leave `files` empty and put your output in " +
-      `\`result\`:${parts.join("")}`
-    );
+    const text =
+      parts.length === 0
+        ? ""
+        : "\n\nCURRENT CONTENTS OF REFERENCED FILES (provided so you work from real content, " +
+          "not guesses). Only include a file in `files` if the task instructs you to MODIFY " +
+          "it; for a read-only review task, leave `files` empty and put your output in " +
+          `\`result\`:${parts.join("")}`;
+    return { text, grantedUninlinable };
   }
 
   private async appendStdout(path: string, content: string): Promise<void> {
@@ -491,6 +606,11 @@ const SINGLE_SHOT_SYSTEM_PROMPT =
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Render one inlined file's current contents with clear begin/end delimiters. */
+function renderReferencedFilePart(token: string, body: string): string {
+  return `\n--- BEGIN CURRENT FILE ${token} ---\n${body}\n--- END CURRENT FILE ${token} ---`;
 }
 
 /**

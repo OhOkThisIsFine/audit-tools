@@ -134,4 +134,13 @@ export interface DispatchPlanEntry {
   complexity: DispatchComplexity;
   model_hint: DispatchModelHint;
   access: { read_paths: string[]; write_paths: string[]; forbidden_patterns: string[] };
+  /**
+   * The packet's REPO-RELATIVE source files under review (the file_coverage set).
+   * Distinct from `access.read_paths`, which is the host-enforcement scope grant
+   * (absolute, and includes the prompt/result artifacts) — this is purely the
+   * source read set a single-shot / no-file-access provider inlines the current
+   * contents of. Kept separate so inlining never re-inlines the prompt artifact or
+   * false-refuses on an out-of-repo artifacts dir.
+   */
+  file_paths: string[];
 }

@@ -524,6 +524,9 @@ export async function prepareDispatchArtifacts(params: {
         complexity,
         routingTiers: sessionConfig.dispatch?.routing_tiers,
       }),
+      // Repo-relative source read set for content-inlining (single-shot providers),
+      // kept distinct from the absolute host-scope `access.read_paths` below.
+      file_paths: packet.file_paths,
       access: {
         read_paths: [
           promptPath,
