@@ -130,16 +130,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     which is neither budget, rate, nor unlock — and never resolves. Endpoint: host admission should grant the
     full budget-and-rate-fitting independent set at once (like the in-process engine), reserving merge-gated
     re-grants for the deepening layer only. Realizes [[self-scaling-pipeline-not-forked-paths]] on the host path.
-- **Tool-prescribed host Agent fan-out is quota-INVISIBLE — subagent died raw at the session wall (2026-07-10 live run, tool-should-decide, HIGH).**
-  The design-review (5 perspectives + judge) and systemic-challenge steps instruct the host to dispatch its
-  own subagents, but that host fan-out never touches the quota layer: no admission grant, no lease, no
-  consult of the Claude /usage percent probe (which exists — cross-provider quota matrix), no pre-wall
-  pacing, and when the host session limit hit mid-round (systemic round 3), the subagent was terminated by
-  a raw API error with no `quota_escalation`/friction event and no pause artifact. Recovery was clean
-  (nothing written → step simply re-emits; resumability HELD), but the wall was invisible to the tool.
-  Fix direction: host-fan-out steps should register the host pool + consume admission like any dispatch
-  (the host-path enforcement track covered packet dispatch, not these prescribed-fan-out steps). Confirms +
-  sharpens the existing "ad-hoc Agent fan-out has no per-agent ledger" sliver.
+- **Prescribed host fan-out quota gate — SHIPPED v0.32.66 ([[host-fanout-quota-gate]]).** The design-review
+  (perspectives + judge + contract) and systemic-challenge steps now route through `gateHostFanout`
+  (`src/audit/cli/dispatch/hostFanoutGate.ts`): register the host pool + lease the whole panel (budget-only
+  `fanoutMode` — no cold-start clamp / concurrency cap / context-fit gate, since fan-out is host-only and
+  atomic), pause resumably at the wall, and SKIP the enrichment after the livelock bound. Residual (still
+  open, distinct): **ad-hoc** Agent fan-out (recon/review/compaction the host spawns outside these prescribed
+  steps) still has no per-agent ledger — see the "ledger-writer / acceptNode-inert-clean lap" sliver below.
 - **Design-review worker prompts — FOLLOW-UP (low, latent):** the solo `design_review_contract` branch
   still embeds the next-step advance command directly in its worker-facing prompt (`nextStepCommand.ts:391`)
   — same second-driver hazard already fixed for `design_review_parallel` (`e6b580d0`), and it has the host
