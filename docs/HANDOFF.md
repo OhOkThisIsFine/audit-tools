@@ -73,12 +73,17 @@ The 2026-07-11 maximal-coverage run and the 2026-07-12 self-audit re-run both su
 bugs; fixes shipped in the current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
 **full-suite-verify before each loop-core commit**:
 
-1. **openai-compatible config trace (VERIFY FIRST — do NOT blind-flip an already-on default).** The
-   provider already inlines referenced files by default (since `fbbf3039`); the run still needing the
-   `include_referenced_files` workaround is a contradiction → trace the hybrid review-dispatch →
-   provider-config wiring, then build the "refuse to dispatch an unroutable review packet" guard.
-2. **Low residuals:** doc-review auto-apply re-asserting a resolved decision after a process restart; the
+1. **Low residuals:** doc-review auto-apply re-asserting a resolved decision after a process restart; the
    two A2b residuals; untracked-exclusion residuals (a–e). All in `docs/backlog.md` → Open bugs.
+
+_(openai-compatible content-inlining + unroutable guard — SHIPPED v0.32.68. Root cause was NOT the
+`include_referenced_files` default (already on); the provider only ever inlined by scavenging path tokens
+from rendered PROSE, and prompts are authored paths-only for tool-using hosts → a single-shot NIM worker
+got no content, fabricated empty, was dropped. Fix: `LaunchFreshSessionInput.referencedFiles` (authoritative
+repo-relative granted read set) inlined deterministically + a refuse-to-dispatch guard when a granted file
+can't be inlined. Audit feeds a new repo-relative `DispatchPlanEntry.file_paths` (NOT the absolute
+`access.read_paths` host-grant — adversarial-review-caught HIGH). Remediate feeds `access.read_paths`.
+[[openai-compatible-content-inlining]].)_
 
 _(Item C — host fan-out quota gate — SHIPPED v0.32.66: `gateHostFanout` + budget-only `fanoutMode` +
 bounded livelock→skip. Item D — empty_grant binding-window reset + progress-aware livelock — SHIPPED
