@@ -732,7 +732,15 @@ test("F1 inv-6 [CP-NODE-7]: dep-map.md literal parity incl. git_history.json ups
     const row = line.match(rowPattern);
     if (!row) continue;
     const [, artifact, depsCell] = row;
-    const deps = [...depsCell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    // Only artifact edges (`*.json`) are upstream dependencies. The same
+    // `| \`artifact\` | \`x\` | … |` row shape is ALSO used by the producer table
+    // (`| \`git_history.json\` | \`structure_executor\` | — |`), whose middle
+    // column is an executor, not a dependency — filtering to `.json` keeps that
+    // (and any other non-artifact cell) out of the depends-on set for every
+    // dual-listed artifact, not just git_history.
+    const deps = [...depsCell.matchAll(/`([^`]+)`/g)]
+      .map((m) => m[1])
+      .filter((d) => d.endsWith(".json"));
     if (deps.length > 0) {
       const set = (mdDependsOn[artifact] ??= new Set());
       for (const dep of deps) set.add(dep);
