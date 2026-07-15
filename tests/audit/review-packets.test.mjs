@@ -1072,6 +1072,7 @@ test("prepare-dispatch writes one packet prompt for multiple task outputs", asyn
       "access",
       "complexity",
       "description",
+      "file_paths",
       "model_hint",
       "packet_id",
       "prompt_path",
