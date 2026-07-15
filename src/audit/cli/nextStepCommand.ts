@@ -54,6 +54,11 @@ import {
   type HostFanoutFamily,
   type HostFanoutUnit,
 } from "./dispatch/hostFanoutGate.js";
+import {
+  stampDesignReviewSkipped,
+  stampSystemicChallengeSkipped,
+} from "./nextStepHelpers.js";
+import type { ArtifactBundle } from "../io/artifacts.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { renderProviderConfirmationPrompt } from "./providerConfirmationStep.js";
 import { writeCurrentStep } from "./steps.js";
@@ -115,6 +120,7 @@ async function gateHostFanoutOrPause(params: {
   continueCommand: string;
   family: HostFanoutFamily;
   units: HostFanoutUnit[];
+  bundle: ArtifactBundle;
 }): Promise<boolean> {
   const outcome = await gateHostFanout({
     artifactsDir: params.artifactsDir,
@@ -135,6 +141,45 @@ async function gateHostFanoutOrPause(params: {
     params.family === "systemic_challenge"
       ? "systemic-challenge adversary"
       : "design-review";
+
+  // Livelock: the wall persisted past the bound. Skip this enrichment (stamp the pass
+  // satisfied) so a permanent host wall does not stall the run — the give-up analogue
+  // of the packet path's partial-synthesis terminal. The obligation is now satisfied,
+  // so the emitted step just advances; next-step derives the next obligation.
+  if (outcome.livelocked) {
+    if (params.family === "systemic_challenge") {
+      await stampSystemicChallengeSkipped(params.artifactsDir, params.bundle);
+    } else {
+      await stampDesignReviewSkipped(params.artifactsDir, params.bundle);
+    }
+    const skipStep = await writeCurrentStep({
+      artifactsDir: params.artifactsDir,
+      stepKind: "blocked",
+      status: "ready",
+      runId: null,
+      allowedCommands: [params.continueCommand],
+      allowedMcpTools: ["auditor_continue_audit"],
+      progress: {
+        summary:
+          `Host session quota wall persisted past the enrichment bound — ` +
+          `skipping the ${label} pass and continuing on the audit's coverage.`,
+        granted_count: 0,
+      },
+      stopCondition:
+        `The host quota wall persisted past the enrichment bound, so the ${label} ` +
+        `pass is skipped. Run next-step to continue — the audit proceeds without it.`,
+      repoRoot: params.root,
+      artifactPaths: { dispatch_quota: outcome.dispatchQuotaPath },
+      prompt:
+        `The host session limit stayed at its wall across repeated attempts, so the ` +
+        `audit is giving up on the ${label} enrichment pass and continuing on the ` +
+        "coverage it has. This is a graceful skip — nothing was lost. Run `next-step` " +
+        "to continue.",
+    });
+    console.log(JSON.stringify(skipStep, null, 2));
+    return true;
+  }
+
   const step = await writeCurrentStep({
     artifactsDir: params.artifactsDir,
     stepKind: "blocked",
@@ -347,6 +392,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         sessionConfig,
         hostDescriptor,
         continueCommand,
+        bundle: result.bundle,
         family: "design_review",
         units: [
           { id: "design_review", estInputBytes: Buffer.byteLength(fullPrompt, "utf8") },
@@ -447,6 +493,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         sessionConfig,
         hostDescriptor,
         continueCommand,
+        bundle: result.bundle,
         family: "design_review",
         units: [
           {
@@ -513,6 +560,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         sessionConfig,
         hostDescriptor,
         continueCommand,
+        bundle: result.bundle,
         family: "design_review",
         units: [
           { id: "contract", estInputBytes: Buffer.byteLength(prompt, "utf8") },
@@ -580,6 +628,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         sessionConfig,
         hostDescriptor,
         continueCommand,
+        bundle: result.bundle,
         family: "design_review",
         units: conceptual.fanoutUnits,
       })
@@ -742,6 +791,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         sessionConfig,
         hostDescriptor,
         continueCommand,
+        bundle: result.bundle,
         family: "systemic_challenge",
         units: [
           {

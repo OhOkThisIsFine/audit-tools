@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   estimateTokensFromBytes,
@@ -6,6 +6,9 @@ import {
   detectHostDispatchWall,
   emitBlindDispatchFrictionIfBlind,
   reconcileAdmissionLeasesFromQuotaFile,
+  checkLivelockGuard,
+  readJsonFile,
+  writeJsonFile,
 } from "audit-tools/shared";
 import type {
   SessionConfig,
@@ -53,6 +56,14 @@ export type HostFanoutFamily = "design_review" | "systemic_challenge";
 export interface HostFanoutGateOutcome {
   /** True when the host session cannot afford the whole panel this pass. */
   atWall: boolean;
+  /**
+   * True when the wall has persisted past the livelock bound (LIVELOCK_PAUSE_LIMIT
+   * consecutive walled passes). The enrichment must be SKIPPED — a design-review /
+   * systemic panel is enrichment, so a permanent host wall must not stall the run;
+   * the caller stamps the pass satisfied-by-skip and continues (parity with the
+   * packet path's livelock → partial-synthesis give-up). Only ever true when atWall.
+   */
+  livelocked: boolean;
   /** Advisory reset time to surface to the host; null when unknown. */
   earliestResetAt: string | null;
   reason: "empty_grant" | "cooldown" | "partial_grant" | null;
@@ -60,6 +71,57 @@ export interface HostFanoutGateOutcome {
   requiredCount: number;
   /** The namespaced dispatch-quota path — reconciled at results ingest. */
   dispatchQuotaPath: string;
+}
+
+/** Resumable pause-count state for a fan-out family (bounds the wall to a skip). */
+interface FanoutPauseState {
+  pause_count: number;
+  paused_at: string;
+}
+
+/**
+ * Advance the fan-out family's resumable pause counter from the fresh wall snapshot,
+ * bounding an indefinite wall to a skip. Fan-out has no `active-dispatch.json` run to
+ * hang `paused_state` on (it is not a packet-dispatch run), so it keeps its own tiny
+ * counter in the family dir. Returns true when the livelock bound is reached — the
+ * caller then skips the enrichment. Clears the counter on a cleared wall (resume) or
+ * at the bound (so a later obligation starts fresh).
+ *
+ * All call sites of one family (e.g. design_review's parallel/contract/conceptual
+ * emitters) share this single per-family counter. That is correct because the family's
+ * obligations run sequentially and any granted (non-wall) pass clears the counter — so
+ * a later obligation never inherits an earlier one's stale pause count.
+ */
+async function advanceFanoutPause(
+  runDir: string,
+  atWall: boolean,
+  livelockLimit?: number,
+): Promise<boolean> {
+  const path = join(runDir, "pause.json");
+  if (!atWall) {
+    await rm(path, { force: true }).catch(() => {});
+    return false;
+  }
+  const prior = await readJsonFile<FanoutPauseState>(path).catch(() => null);
+  if (!prior) {
+    await writeJsonFile(path, {
+      pause_count: 0,
+      paused_at: new Date().toISOString(),
+    } satisfies FanoutPauseState);
+    return false;
+  }
+  const nextCount = prior.pause_count + 1;
+  // netNewCapacity is 0 — a fan-out wall is the SAME host session regaining capacity
+  // after a reset, never a new provider, so the guard trips purely on pause count.
+  if (checkLivelockGuard(nextCount, 0, livelockLimit)) {
+    await rm(path, { force: true }).catch(() => {});
+    return true;
+  }
+  await writeJsonFile(path, {
+    pause_count: nextCount,
+    paused_at: prior.paused_at,
+  } satisfies FanoutPauseState);
+  return false;
 }
 
 /** The namespaced dispatch-quota path for a fan-out family (also the ingest reconcile target). */
@@ -181,8 +243,13 @@ export async function gateHostFanout(params: {
     await reconcileAdmissionLeasesFromQuotaFile(dispatchQuotaPath).catch(() => {});
   }
 
+  // Advance the resumable pause counter; a wall that persists past the bound flips to
+  // livelocked so the caller skips this enrichment rather than pausing forever.
+  const livelocked = await advanceFanoutPause(runDir, atWall);
+
   return {
     atWall,
+    livelocked,
     earliestResetAt: wall.earliestResetAt,
     reason: wall.reason ?? (partial ? "partial_grant" : null),
     grantedCount,

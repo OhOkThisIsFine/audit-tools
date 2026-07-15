@@ -17,6 +17,12 @@ const {
 const { setQuotaStateDir, writeQuotaState } = await import(
   "../../src/shared/quota/state.ts"
 );
+const { stampDesignReviewSkipped, stampSystemicChallengeSkipped } = await import(
+  "../../src/audit/cli/nextStepHelpers.ts"
+);
+const { readDesignReviewSnapshot, isDesignReviewStale } = await import(
+  "../../src/audit/orchestrator/designReviewSnapshot.ts"
+);
 
 async function tmp(prefix) {
   return await mkdtemp(join(tmpdir(), prefix));
@@ -189,6 +195,129 @@ describe("gateHostFanout — item C host fan-out quota gate", () => {
       // A second reconcile, and one for a family that never dispatched, are no-ops.
       await reconcileHostFanoutLeases(dir, "systemic_challenge");
       await reconcileHostFanoutLeases(dir, "design_review");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("gateHostFanout — livelock → skip (Increment 2)", () => {
+  test("a persistent wall flips to livelocked once the pause bound is reached", async () => {
+    const dir = await tmp("host-fanout-livelock-");
+    setQuotaStateDir(await tmp("host-fanout-state-"));
+    const resetAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    await writeQuotaState({
+      version: 2,
+      entries: {
+        "claude-code/*": {
+          updated_at: new Date().toISOString(),
+          cooldown_until: resetAt,
+          last_429_at: null,
+        },
+      },
+    });
+    try {
+      const flags = [];
+      // Same artifactsDir across passes ⇒ the family's pause.json counter persists.
+      for (let i = 0; i < 4; i++) {
+        const outcome = await gateHostFanout({
+          artifactsDir: dir,
+          sessionConfig: { provider: "claude-code" },
+          family: "design_review",
+          units: units(5),
+        });
+        expect(outcome.atWall).toBe(true);
+        flags.push(outcome.livelocked);
+      }
+      // LIVELOCK_PAUSE_LIMIT = 3: passes 1-3 pause (counter 0,1,2), the 4th trips the
+      // guard (nextCount 3 ≥ 3) → livelocked, so the caller skips the enrichment.
+      expect(flags).toEqual([false, false, false, true]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a cleared wall resets the pause counter (no premature skip after transient walls)", async () => {
+    const dir = await tmp("host-fanout-reset-");
+    const stateDir = await tmp("host-fanout-state-");
+    setQuotaStateDir(stateDir);
+    const cooldownEntries = {
+      "claude-code/*": {
+        updated_at: new Date().toISOString(),
+        cooldown_until: new Date(Date.now() + 60 * 60_000).toISOString(),
+        last_429_at: null,
+      },
+    };
+    try {
+      // Two walled passes (counter → 0, 1)…
+      await writeQuotaState({ version: 2, entries: cooldownEntries });
+      await gateHostFanout({ artifactsDir: dir, sessionConfig: { provider: "claude-code" }, family: "design_review", units: units(5) });
+      await gateHostFanout({ artifactsDir: dir, sessionConfig: { provider: "claude-code" }, family: "design_review", units: units(5) });
+      // …then the wall clears (counter reset)…
+      await writeQuotaState({ version: 2, entries: {} });
+      const cleared = await gateHostFanout({ artifactsDir: dir, sessionConfig: { provider: "claude-code" }, family: "design_review", units: units(5) });
+      expect(cleared.atWall).toBe(false);
+      // …so a fresh wall starts counting from zero — not immediately livelocked.
+      await writeQuotaState({ version: 2, entries: cooldownEntries });
+      const first = await gateHostFanout({ artifactsDir: dir, sessionConfig: { provider: "claude-code" }, family: "design_review", units: units(5) });
+      expect(first.atWall).toBe(true);
+      expect(first.livelocked).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("fan-out skip stamps (Increment 2)", () => {
+  test("stampDesignReviewSkipped satisfies both review passes", async () => {
+    const dir = await tmp("skip-design-");
+    try {
+      await stampDesignReviewSkipped(dir, { repo_manifest: { files: [] } });
+      const assessment = JSON.parse(
+        await readFile(join(dir, "design_assessment.json"), "utf8"),
+      );
+      expect(assessment.contract_reviewed).toBe(true);
+      expect(assessment.conceptual_reviewed).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("stampDesignReviewSkipped STICKS — both passes non-stale on the next derive even when design_assessment was absent", async () => {
+    // The self-restale trap: an absent design_assessment projects to null, but the
+    // stamp writes findings:[]. Snapshotting the input bundle would record null and
+    // re-stale against the reloaded [] next pass. This asserts the skip sticks in one
+    // cycle by snapshotting the just-written assessment.
+    const dir = await tmp("skip-design-stick-");
+    try {
+      const inputBundle = { repo_manifest: { files: [] } }; // no design_assessment
+      await stampDesignReviewSkipped(dir, inputBundle);
+      const writtenDA = JSON.parse(
+        await readFile(join(dir, "design_assessment.json"), "utf8"),
+      );
+      // The next derive reloads design_assessment (findings:[]) into the bundle.
+      const nextBundle = { ...inputBundle, design_assessment: writtenDA };
+      for (const pass of ["contract", "conceptual"]) {
+        const snapshot = await readDesignReviewSnapshot(dir, pass);
+        expect(snapshot, `snapshot for ${pass} must exist`).toBeTruthy();
+        expect(
+          isDesignReviewStale(snapshot, nextBundle),
+          `${pass} pass must read non-stale so the skip sticks`,
+        ).toBe(false);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("stampSystemicChallengeSkipped converges the loop", async () => {
+    const dir = await tmp("skip-systemic-");
+    try {
+      await stampSystemicChallengeSkipped(dir, {});
+      const register = JSON.parse(
+        await readFile(join(dir, "systemic_challenge.json"), "utf8"),
+      );
+      expect(register.converged).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -40,6 +40,8 @@ import {
 } from "audit-tools/shared";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
+import type { DesignAssessment } from "../types/designAssessment.js";
+import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
 import {
   captureDesignReviewSnapshot,
@@ -77,6 +79,79 @@ import {
 } from "./reviewRun.js";
 import { buildPendingAuditTasks } from "./dispatch.js";
 import { reconcileHostFanoutLeases } from "./dispatch/hostFanoutGate.js";
+
+/**
+ * Skip the design-review enrichment when the host quota wall has persisted past the
+ * fan-out livelock bound (item C, Increment 2). Stamps BOTH review passes satisfied
+ * with whatever findings already exist (empty if none) and captures their snapshots
+ * so `passIsStale` stays false — the skip STICKS rather than re-firing the obligation
+ * every pass. Mirrors the ingest-path stamp (contract_reviewed / conceptual_reviewed
+ * + snapshot), the give-up analogue of the packet path's partial-synthesis terminal.
+ */
+export async function stampDesignReviewSkipped(
+  artifactsDir: string,
+  bundle: ArtifactBundle,
+): Promise<void> {
+  const path = join(artifactsDir, "design_assessment.json");
+  const reviewedAt = new Date().toISOString();
+  const existing = await readJsonFile<DesignAssessment>(path).catch(() => null);
+  const assessment: DesignAssessment = {
+    ...(existing ?? { generated_at: reviewedAt, findings: [] }),
+    findings: existing?.findings ?? [],
+    contract_findings: existing?.contract_findings ?? [],
+    conceptual_findings: existing?.conceptual_findings ?? [],
+    contract_reviewed: true,
+    conceptual_reviewed: true,
+  };
+  await writeJsonFile(path, assessment);
+  // Capture the snapshots against the JUST-WRITTEN assessment, not the (possibly
+  // design_assessment-less) input bundle: `projectDesignAssessmentFindings` returns
+  // null for an absent design_assessment, but the file we just wrote projects to []
+  // — snapshotting the input bundle would record `null` and re-stale against the
+  // reloaded `[]` next pass (one wasted livelock cycle). Snapshotting the written
+  // assessment makes the skip stick in a single cycle even when it created the file.
+  const snapshotBundle = { ...bundle, design_assessment: assessment };
+  await captureDesignReviewSnapshot(
+    artifactsDir,
+    "contract",
+    assessment.contract_findings ?? [],
+    snapshotBundle,
+    reviewedAt,
+  );
+  await captureDesignReviewSnapshot(
+    artifactsDir,
+    "conceptual",
+    assessment.conceptual_findings ?? [],
+    snapshotBundle,
+    reviewedAt,
+  );
+}
+
+/**
+ * Skip the systemic-challenge loop when the host quota wall has persisted past the
+ * fan-out livelock bound (item C, Increment 2). Marks the register `converged` so the
+ * loop-until-dry obligation is satisfied and the run advances — the give-up analogue
+ * for the systemic enrichment layer.
+ */
+export async function stampSystemicChallengeSkipped(
+  artifactsDir: string,
+  bundle: ArtifactBundle,
+): Promise<void> {
+  const path = join(artifactsDir, "systemic_challenge.json");
+  const existing = await readJsonFile<SystemicChallengeRegister>(path).catch(() => null);
+  const register: SystemicChallengeRegister = existing
+    ? { ...existing, converged: true }
+    : {
+        generated_at: new Date().toISOString(),
+        target: "systemic_challenge",
+        ceiling: resolveCharterCeiling(bundle.intent_checkpoint),
+        rounds: [],
+        converged: true,
+        findings: [],
+        validation_issues: [],
+      };
+  await writeJsonFile(path, register);
+}
 import {
   driveRollingAuditDispatch,
   resolveAuditRollingEngineEnabled,
