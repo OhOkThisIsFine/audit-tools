@@ -17,7 +17,7 @@ import type {
 } from "../types.js";
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
-import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory } from "audit-tools/shared";
+import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, CriticalFlowFallbackResult, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory } from "audit-tools/shared";
 import type { ProviderConfirmationResult, AccessMemory } from "audit-tools/shared";
 import { PROVIDER_CONFIRMATION_RESULT_VERSION } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
@@ -124,6 +124,10 @@ type ArtifactPayloadMap = {
   graph_bundle: GraphBundle;
   surface_manifest: SurfaceManifest;
   critical_flows: CriticalFlowManifest;
+  // Durable host-authored critical-flow enrichment (the LLM fallback pass output).
+  // An UPSTREAM input to critical_flows: the structure phase merges it so a
+  // below-confidence-bar deterministic inference gets corrected/augmented flows.
+  critical_flow_fallback: CriticalFlowFallbackResult;
   flow_coverage: FlowCoverageManifest;
   risk_register: RiskRegister;
   git_history: GitHistory;
@@ -271,6 +275,7 @@ export const ARTIFACT_DEFINITIONS = {
   graph_bundle: jsonArtifact("graph_bundle.json", "analysis"),
   surface_manifest: jsonArtifact("surface_manifest.json", "analysis"),
   critical_flows: jsonArtifact("critical_flows.json", "analysis"),
+  critical_flow_fallback: jsonArtifact("critical-flow-fallback.json", "analysis"),
   flow_coverage: jsonArtifact("flow_coverage.json", "analysis"),
   risk_register: jsonArtifact("risk_register.json", "analysis"),
   git_history: jsonArtifact("git_history.json", "analysis"),

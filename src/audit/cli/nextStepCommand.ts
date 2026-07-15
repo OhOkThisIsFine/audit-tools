@@ -33,6 +33,7 @@ import { buildDesignReReviewSection } from "../orchestrator/designReviewSnapshot
 import { computeScopePreDigest } from "../orchestrator/intentCheckpointExecutor.js";
 import { unresolvedConstraintClauses } from "../orchestrator/intentInterpreter.js";
 import { renderSynthesisNarrativePrompt } from "../reporting/synthesisNarrativePrompt.js";
+import { renderCriticalFlowFallbackPrompt } from "../reporting/criticalFlowFallbackPrompt.js";
 import { renderCharterExtractionPrompt } from "./charterExtractionPrompt.js";
 import { renderCharterDeltaPrompt } from "./charterDeltaPrompt.js";
 import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
@@ -795,6 +796,50 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       access: {
         read_paths: [],
         write_paths: [edgeReasoningResultsPath],
+      },
+    });
+    console.log(JSON.stringify(step, null, 2));
+    return;
+  }
+
+  if (result.kind === "critical_flow_fallback") {
+    const fallbackResultsPath = join(
+      artifactsDir,
+      "incoming",
+      "critical-flow-fallback.json",
+    );
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
+    const basePrompt = result.bundle.critical_flows
+      ? renderCriticalFlowFallbackPrompt(result.bundle.critical_flows)
+      : "# Critical-flow fallback\n\nNo critical_flows manifest is available; write an empty flows array.";
+    const fullPrompt = [
+      basePrompt,
+      "## Results path",
+      "",
+      "Write the CriticalFlowFallbackResult JSON object to:",
+      "",
+      `  ${fallbackResultsPath}`,
+      "",
+      `Then run: ${continueCommand}`,
+      "",
+    ].join("\n");
+    const step = await writeCurrentStep({
+      artifactsDir,
+      stepKind: "critical_flow_fallback",
+      status: "ready",
+      runId: null,
+      allowedCommands: [continueCommand],
+      stopCondition:
+        "Write the critical-flow fallback enrichment to the results path, then run next-step.",
+      repoRoot: root,
+      artifactPaths: {
+        critical_flow_fallback_results: fallbackResultsPath,
+      },
+      prompt: fullPrompt,
+      access: {
+        read_paths: [],
+        write_paths: [fallbackResultsPath],
       },
     });
     console.log(JSON.stringify(step, null, 2));

@@ -133,6 +133,14 @@ async function advancePastDesignReview(root, wrapperArgs = ["next-step"], wrappe
     const step = JSON.parse(
       (await runWrapper(wrapperArgs, { cwd: root, ...wrapperOpts })).stdout,
     );
+    if (step.step_kind === "critical_flow_fallback") {
+      await mkdir(incomingDir, { recursive: true });
+      await writeFile(
+        step.artifact_paths.critical_flow_fallback_results,
+        JSON.stringify({ flows: [] }, null, 2) + "\n",
+      );
+      continue;
+    }
     if (step.step_kind === "analyzer_install") {
       await mkdir(incomingDir, { recursive: true });
       await writeFile(
@@ -247,6 +255,15 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
     const analyzerCache = join(dirname(root), "empty-analyzer-cache");
     await mkdir(analyzerCache, { recursive: true });
     const env = { AUDIT_TOOLS_ANALYZER_CACHE: analyzerCache };
+
+    // Pre-satisfy the critical-flow fallback gate (this fixture's deterministic
+    // flow inference falls below the confidence bar) so the first pause under test
+    // is the analyzer install, not the fallback host step.
+    await mkdir(join(root, ".audit-tools/audit", "incoming"), { recursive: true });
+    await writeFile(
+      join(root, ".audit-tools/audit", "incoming", "critical-flow-fallback.json"),
+      JSON.stringify({ flows: [] }, null, 2) + "\n",
+    );
 
     const proposed = JSON.parse(
       (await runWrapper(["next-step"], { cwd: root, env })).stdout,

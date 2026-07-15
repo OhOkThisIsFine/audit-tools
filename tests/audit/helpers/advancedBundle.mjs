@@ -106,6 +106,23 @@ const FIXTURE_STAGES = [
   // Host-delegated markers: auto_fixes_applied + syntax_resolved + external_analyzers_current.
   { upTo: "external_analyzers_current", run: async (b) => injectPreStructureMarkers(b) },
   { upTo: "structure_artifacts", run: forcedStep("structure_executor") },
+  // Critical-flow fallback: the small fixture's deterministic flow inference falls
+  // below the confidence bar (fallback_required), so this obligation blocks the
+  // chain until the host enrichment is provided. Inject an empty host submission
+  // (the durable upstream input) and re-run structure so critical_flows records
+  // the marker revision — leaving critical_flows fresh + the obligation satisfied,
+  // exactly as the real drain does after the host returns. (Harmless no-op merge
+  // when the fixture's flows happen to clear the bar.)
+  {
+    upTo: "critical_flow_fallback_current",
+    run: async (b) =>
+      (
+        await advanceAudit(
+          { ...b, critical_flow_fallback: { flows: [] } },
+          { preferredExecutor: "structure_executor" },
+        )
+      ).updated_bundle,
+  },
   { upTo: "graph_enrichment_current", run: forcedStep("graph_enrichment_executor") },
   { upTo: "design_assessment_current", run: forcedStep("design_assessment_executor") },
   { upTo: "structure_decomposition_current", run: forcedStep("structure_decomposition_executor") },

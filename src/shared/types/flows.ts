@@ -26,3 +26,19 @@ export const CriticalFlowManifestSchema = z
   })
   .strict();
 export type CriticalFlowManifest = z.infer<typeof CriticalFlowManifestSchema>;
+
+/**
+ * Host-authored critical-flow enrichment — the payload the LLM fallback pass
+ * returns (and the durable upstream input the structure phase merges) when the
+ * deterministic flow inference marked itself below the confidence bar
+ * (`CriticalFlowManifest.fallback_required`). Additive: each flow either
+ * upgrades an existing flow (reuse its exact `id`) or adds a new one.
+ */
+export const CriticalFlowFallbackResultSchema = z
+  .object({
+    flows: z.array(CriticalFlowSchema),
+  })
+  .strict();
+export type CriticalFlowFallbackResult = z.infer<
+  typeof CriticalFlowFallbackResultSchema
+>;

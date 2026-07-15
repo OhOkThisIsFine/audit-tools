@@ -38,7 +38,7 @@ different analyzer version can classify files differently).
 | `analyzer_capability.json` | `graph_bundle.json` |
 | `unit_manifest.json` | `repo_manifest.json`, `file_disposition.json` |
 | `surface_manifest.json` | `repo_manifest.json`, `file_disposition.json` |
-| `critical_flows.json` | `repo_manifest.json`, `file_disposition.json`, `surface_manifest.json` |
+| `critical_flows.json` | `repo_manifest.json`, `file_disposition.json`, `surface_manifest.json`, `critical-flow-fallback.json` |
 | `risk_register.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json` |
 | `git_history.json` | `repo_manifest.json`, `file_disposition.json` |
 | `external_analyzer_acquisition.json` | `repo_manifest.json`, `file_disposition.json` |
@@ -53,6 +53,16 @@ different analyzer version can classify files differently).
 anchor to the same triad as `charter_register.json` so the two conceptual-review
 outputs stale together whenever the charter register, the intent ceiling, or the
 repo manifest changes.
+
+`critical-flow-fallback.json` is a durable HOST INPUT (a leaf, like
+`intent_checkpoint.json`): the critical-flow LLM fallback pass writes the
+host-authored flow enrichment there when the deterministic inference falls below
+its confidence bar, and the structure phase merges it into `critical_flows.json`.
+Declaring it upstream of `critical_flows.json` is what makes the enrichment take
+effect cleanly — the submission re-stales `critical_flows.json`, so structure
+rebuilds `critical_flows.json` AND its `risk_register.json` sibling atomically off
+the merged flows (no self-clobber from a separate post-hoc rewrite). Absent on the
+common bar-met path → recorded at revision 0, never stale.
 
 `analyzer_capability.json` is the marker recording the outcome of the optional
 graph-enrichment pass (`applied` / `omitted`, plus per-analyzer resolution +

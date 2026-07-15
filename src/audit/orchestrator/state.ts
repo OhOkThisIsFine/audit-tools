@@ -159,6 +159,34 @@ export function deriveAuditState(
     ),
   );
 
+  // Critical-flow LLM fallback (audit-goals §Critical flows): a bounded host-LLM
+  // pass that enriches the flows when — and ONLY when — the deterministic
+  // inference explicitly marked itself below the confidence bar
+  // (`critical_flows.fallback_required`). When the bar was met this self-satisfies
+  // (nothing to review), so it never blocks the default path. When it fails, the
+  // host submission (critical-flow-fallback.json, a durable upstream input the
+  // structure phase merges) satisfies it: once present, the operator has been
+  // given the review turn — regardless of whether the merged flows fully cleared
+  // the bar — so the obligation never loops re-asking. It is a leaf host input, so
+  // it is never stale on its own; a code change re-runs structure (which re-derives
+  // fallback_required over the re-merged flows).
+  const criticalFlowFallbackNeeded =
+    has(bundle.critical_flows) &&
+    bundle.critical_flows?.fallback_required === true;
+  obligations.push(
+    obligation(
+      "critical_flow_fallback_current",
+      !criticalFlowFallbackNeeded
+        ? "satisfied"
+        : has(bundle.critical_flow_fallback)
+          ? "satisfied"
+          : "missing",
+      criticalFlowFallbackNeeded && !has(bundle.critical_flow_fallback)
+        ? "Deterministic critical-flow inference fell below the confidence bar; a host-LLM fallback pass is needed to enrich the flows."
+        : undefined,
+    ),
+  );
+
   obligations.push(
     obligation(
       "graph_enrichment_current",

@@ -41,6 +41,16 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["structure_artifacts"],
   },
   {
+    // Critical-flow LLM fallback. host_delegation (NON-DRAINABLE): when the
+    // deterministic flow inference marked itself below the confidence bar it emits
+    // a host step; when the bar was met the obligation self-satisfies and this is
+    // never selected. The consume path persists the host submission via the
+    // deterministic runner (the durable upstream input the structure phase merges).
+    id: "critical_flow_fallback_executor",
+    kind: "host_delegation",
+    obligation_ids: ["critical_flow_fallback_current"],
+  },
+  {
     id: "graph_enrichment_executor",
     kind: "deterministic",
     obligation_ids: ["graph_enrichment_current"],

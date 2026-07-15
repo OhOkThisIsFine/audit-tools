@@ -30,6 +30,7 @@ export const PRIORITY: string[] = [
   "syntax_resolved",
   "external_analyzers_current",
   "structure_artifacts",
+  "critical_flow_fallback_current",
   "graph_enrichment_current",
   "design_assessment_current",
   "structure_decomposition_current",

@@ -88,6 +88,14 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
           `false-cycle regression. Cycle detection must exempt the 'no-metadata' bootstrap ` +
           `state and tolerate content-signature revisits (see HANDOFF ⚠️ block).`).not.toBe("blocked");
 
+      if (step.step_kind === "critical_flow_fallback") {
+        await mkdir(incomingDir, { recursive: true });
+        await writeFile(
+          step.artifact_paths.critical_flow_fallback_results,
+          JSON.stringify({ flows: [] }, null, 2) + "\n",
+        );
+        continue;
+      }
       if (step.step_kind === "analyzer_install") {
         await mkdir(incomingDir, { recursive: true });
         await writeFile(

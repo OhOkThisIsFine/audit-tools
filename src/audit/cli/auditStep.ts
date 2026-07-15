@@ -36,7 +36,7 @@ import { formatAuditResultValidationError } from "./workerResult.js";
 import { looksLikeCliFlag, listBatchResultFiles } from "./args.js";
 import { buildLineIndex } from "./lineIndex.js";
 import type { AuditResult } from "../types.js";
-import type { AnalyzerSetting, SynthesisNarrative } from "audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
@@ -73,6 +73,7 @@ export interface RunAuditStepOptions {
   externalAnalyzerPath?: string;
   externalAnalyzerData?: ExternalAnalyzerResults;
   narrativeResultsPath?: string;
+  criticalFlowFallbackResultsPath?: string;
   charterSubmissionPath?: string;
   charterDeltaSubmissionPath?: string;
   clarificationAnswersPath?: string;
@@ -359,6 +360,11 @@ async function executeAdvance(
   const narrativeResults = options.narrativeResultsPath
     ? await readJsonFile<SynthesisNarrative>(options.narrativeResultsPath)
     : undefined;
+  const criticalFlowFallbackResults = options.criticalFlowFallbackResultsPath
+    ? await readJsonFile<CriticalFlowFallbackResult>(
+        options.criticalFlowFallbackResultsPath,
+      )
+    : undefined;
   const charterSubmission = options.charterSubmissionPath
     ? CharterSubmissionSchema.parse(
         await readJsonFile<unknown>(options.charterSubmissionPath),
@@ -392,6 +398,7 @@ async function executeAdvance(
     runtimeValidationUpdates,
     externalAnalyzerResults,
     narrativeResults,
+    criticalFlowFallbackResults,
     charterSubmission,
     charterDeltaSubmission,
     clarificationAnswers,

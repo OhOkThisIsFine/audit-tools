@@ -19,6 +19,7 @@ import {
 } from "audit-tools/shared";
 import type {
   AnalyzerSetting,
+  CriticalFlowFallbackResult,
   GraphEdge,
   SessionConfig,
   SynthesisNarrative,
@@ -213,6 +214,7 @@ export type NextStepResult =
   | { kind: "provider_confirmation"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "analyzer_install"; state: AuditState; bundle: ArtifactBundle; unresolved: AnalyzerPlanEntry[] }
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
+  | { kind: "critical_flow_fallback"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string; triage?: import("audit-tools/shared").FrictionTriageDecision }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
@@ -595,6 +597,7 @@ type OmittableGateAction<TStepKind extends string> =
   | { action: "run_omit" }
   | { action: "return"; result: { kind: TStepKind; state: AuditState; bundle: ArtifactBundle } };
 
+type CriticalFlowFallbackBranchResult = OmittableGateAction<"critical_flow_fallback">;
 type SynthesisNarrativeBranchResult = OmittableGateAction<"synthesis_narrative">;
 type CharterExtractionBranchResult = OmittableGateAction<"charter_extraction">;
 type CharterDeltaBranchResult = OmittableGateAction<"charter_delta">;
@@ -678,6 +681,45 @@ export async function handleSynthesisNarrativeBranch(
       },
       // Narrative disabled: omit (run the deterministic omit executor below).
       shouldOmit: () => !params.narrativeEnabled,
+    },
+    params,
+    bundle,
+    state,
+  );
+}
+
+/**
+ * Handle the `critical_flow_fallback_executor` incoming-artifact polling block.
+ * The obligation is only ever selected when the deterministic flow inference
+ * marked itself below the confidence bar (`critical_flows.fallback_required`),
+ * so — unlike the synthesis-narrative / charter gates — there is NO autonomous
+ * omit: the host (always the LLM, conversation-first) is expected to author the
+ * enrichment. Returns:
+ *   - `continue`  → a submission file was consumed + persisted; re-scan (structure
+ *     then re-stales + rebuilds critical_flows off the merged flows).
+ *   - `return`    → no submission yet; emit the critical_flow_fallback host step.
+ * `run_omit` is never returned (shouldOmit is constant-false).
+ */
+export async function handleCriticalFlowFallbackBranch(
+  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  bundle: ArtifactBundle,
+  state: AuditState,
+): Promise<CriticalFlowFallbackBranchResult> {
+  return runOmittableGate<CriticalFlowFallbackResult, "critical_flow_fallback">(
+    {
+      kind: "critical_flow_fallback",
+      filename: "critical-flow-fallback.json",
+      apply: async (_value, path, p) => {
+        await runAuditStep({
+          root: p.root,
+          artifactsDir: p.artifactsDir,
+          preferredExecutor: "critical_flow_fallback_executor",
+          criticalFlowFallbackResultsPath: path,
+        });
+      },
+      // Never omit: the obligation is only reached when the deterministic bar
+      // failed, and the host is always available to author the enrichment.
+      shouldOmit: () => false,
     },
     params,
     bundle,
@@ -866,17 +908,18 @@ export async function handleSystemicChallengeBranch(
 }
 
 /**
- * Coverage registry for the 7 audit host-gate branch handlers targeted by the
+ * Coverage registry for the audit host-gate branch handlers targeted by the
  * Tier C2 consolidation. `driven: "generic"` gates are fully parameterized
  * through `runOmittableGate`; `driven: "custom"` gates keep their own bespoke
  * body because their shape genuinely deviates from that common one — see the
  * section comment above `runOmittableGate` for exactly what deviates and why.
- * Exists so one source of truth enumerates all 7 gate kinds (asserted by a
+ * Exists so one source of truth enumerates all gate kinds (asserted by a
  * coverage test) rather than the count being implicit in which functions
  * happen to exist.
  */
 export type HostGateKind =
   | "graph_enrichment"
+  | "critical_flow_fallback"
   | "design_review"
   | "synthesis_narrative"
   | "charter_extraction"
@@ -900,6 +943,10 @@ export const HOST_GATE_DESCRIPTORS: Record<
       "design-review-conceptual-findings.json",
     ],
   },
+  critical_flow_fallback: {
+    driven: "generic",
+    incomingFiles: ["critical-flow-fallback.json"],
+  },
   synthesis_narrative: { driven: "generic", incomingFiles: ["synthesis-narrative.json"] },
   charter_extraction: { driven: "generic", incomingFiles: ["charter-extraction.json"] },
   charter_delta: { driven: "generic", incomingFiles: ["charter-delta.json"] },
@@ -909,6 +956,7 @@ export const HOST_GATE_DESCRIPTORS: Record<
 
 export const HOST_GATE_KINDS: readonly HostGateKind[] = [
   "graph_enrichment",
+  "critical_flow_fallback",
   "design_review",
   "synthesis_narrative",
   "charter_extraction",
@@ -1315,6 +1363,29 @@ export function buildAuditObligations(): AuditObligationDef[] {
     deterministic("syntax_resolved"),
     deterministic("external_analyzers_current"),
     deterministic("structure_artifacts"),
+    {
+      // Critical-flow fallback: when deterministic flow inference fell below the
+      // confidence bar, poll the host submission (persist it → structure re-merges
+      // on the next fold) or emit the host step. No autonomous omit — the host is
+      // always available to author the enrichment. Non-drainable (host_delegation),
+      // so the drain stops here when a submission is still owed.
+      id: "critical_flow_fallback_current",
+      derive: deriveObligationState("critical_flow_fallback_current"),
+      execute: async (bundle, ctx): Promise<AuditOutcome> => {
+        const state = deriveAuditState(bundle);
+        const branch = await handleCriticalFlowFallbackBranch(
+          ctx.params,
+          bundle,
+          state,
+        );
+        if (branch.action === "return") {
+          return { kind: "emit", step: branch.result };
+        }
+        // continue: a submission was consumed + persisted — re-scan (structure
+        // then re-stales + rebuilds critical_flows off the merged flows).
+        return { kind: "transition", state: await loadArtifactBundle(ctx.params.artifactsDir) };
+      },
+    },
     {
       // Graph enrichment: poll the analyzer-decision / edge-reasoning incoming
       // artifacts first (emit a host step when one is needed), otherwise run the

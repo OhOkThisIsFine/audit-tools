@@ -51,6 +51,7 @@ the staleness DAG (see dependency-map.md).
 | `graph_bundle.json` | JSON | Dependency/call graph, with optional external-analyzer edge enrichment. |
 | `surface_manifest.json` | JSON | Public API surface and exports. |
 | `critical_flows.json` | JSON | Identified critical execution/data flows. |
+| `critical-flow-fallback.json` | JSON | Durable host input: the LLM fallback flow enrichment authored when `critical_flows.fallback_required` is set. Merged into `critical_flows.json` by the structure phase. |
 | `flow_coverage.json` | JSON | Coverage of critical flows by ingested results. |
 | `risk_register.json` | JSON | Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list). |
 | `git_history.json` | JSON | Deterministic co-change/churn/authorship mined from the commit log. |

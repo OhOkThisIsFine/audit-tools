@@ -53,10 +53,19 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   "analyzer_capability.json": ["graph_bundle.json"],
   "unit_manifest.json": ["repo_manifest.json", "file_disposition.json"],
   "surface_manifest.json": ["repo_manifest.json", "file_disposition.json"],
+  // critical-flow-fallback.json is a DURABLE HOST INPUT (a leaf, like
+  // intent_checkpoint.json): the LLM fallback pass writes the host-authored flow
+  // enrichment, and the structure phase merges it into critical_flows. Declaring
+  // it upstream here is what makes the enrichment take effect cleanly — when the
+  // host submits it, critical_flows re-stales and structure rebuilds critical_flows
+  // AND risk_register atomically off the merged flows (no self-clobber loop from a
+  // separate post-hoc rewrite). Absent on the common (bar-met) path → recorded at
+  // revision 0, never stale.
   "critical_flows.json": [
     "repo_manifest.json",
     "file_disposition.json",
     "surface_manifest.json",
+    "critical-flow-fallback.json",
   ],
   "risk_register.json": [
     "repo_manifest.json",

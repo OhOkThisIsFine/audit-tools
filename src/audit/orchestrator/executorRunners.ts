@@ -22,6 +22,7 @@ import {
   runSynthesisExecutor,
   runSynthesisNarrativeExecutor,
 } from "./synthesisExecutors.js";
+import { runCriticalFlowFallbackExecutor } from "./criticalFlowFallbackExecutor.js";
 import { runCharterExtractionExecutor } from "./charterExtractionExecutor.js";
 import { runCharterDeltaExecutor } from "./charterDeltaExecutor.js";
 import { runCharterClarificationExecutor } from "./charterClarificationExecutor.js";
@@ -101,6 +102,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
     ),
   structure_executor: async (bundle, { options }) =>
     runStructureExecutor(bundle, options.root),
+  critical_flow_fallback_executor: async (bundle, { options }) =>
+    runCriticalFlowFallbackExecutor(bundle, options.criticalFlowFallbackResults),
   graph_enrichment_executor: async (bundle, { options }) =>
     runGraphEnrichmentExecutor(bundle, {
       root: options.root,

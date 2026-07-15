@@ -15,12 +15,14 @@ export type {
   FlowConfidenceLevel,
   CriticalFlow,
   CriticalFlowManifest,
+  CriticalFlowFallbackResult,
 } from "./types/flows.js";
 export {
   FLOW_CONFIDENCE_LEVELS,
   FlowConfidenceLevelSchema,
   CriticalFlowSchema,
   CriticalFlowManifestSchema,
+  CriticalFlowFallbackResultSchema,
 } from "./types/flows.js";
 export type {
   SurfaceKind,

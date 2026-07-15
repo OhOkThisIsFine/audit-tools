@@ -58,6 +58,17 @@ test("runDeterministicForNextStep advances through all deterministic obligations
       JSON.stringify({ schema_version: "provider-confirmation-input/v1" }, null, 2) + "\n",
     );
 
+    // Pre-satisfy the critical-flow fallback host gate too: this minimal fixture's
+    // deterministic flow inference falls below the confidence bar, so the drain
+    // would otherwise halt at critical_flow_fallback before reaching the intent
+    // checkpoint. Provide an empty host submission (the durable upstream input) so
+    // the deterministic block under test folds straight through to confirm_intent.
+    await mkdir(join(artifactsDir, "incoming"), { recursive: true });
+    await writeFile(
+      join(artifactsDir, "incoming", "critical-flow-fallback.json"),
+      JSON.stringify({ flows: [] }, null, 2) + "\n",
+    );
+
     const result = await runDeterministicForNextStep({
       root,
       artifactsDir,

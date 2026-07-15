@@ -25,6 +25,7 @@ export const StepKindSchema = z.enum([
   "analyzer_install",
   "edge_reasoning",
   "edge_reasoning_dispatch",
+  "critical_flow_fallback",
   "synthesis_narrative",
   "present_report",
   "blocked",

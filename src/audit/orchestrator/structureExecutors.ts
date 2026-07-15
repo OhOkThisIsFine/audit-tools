@@ -6,7 +6,10 @@ import {
   mergeAnalyzerGraphContribution,
   type GraphEdgeCache,
 } from "../extractors/graph.js";
-import { buildCriticalFlowManifest } from "../extractors/flows.js";
+import {
+  buildCriticalFlowManifest,
+  mergeCriticalFlowFallback,
+} from "../extractors/flows.js";
 import {
   buildRiskRegister,
   mergeAnalyzerRiskSignals,
@@ -68,11 +71,22 @@ export async function runStructureExecutor(
     disposition,
     { graphBundle },
   );
-  const criticalFlows = buildCriticalFlowManifest(
+  // Deterministic critical-flow inference, then — when a host critical-flow
+  // fallback submission has been persisted (the LLM pass that fires when the
+  // deterministic inference marked itself below the confidence bar) — fold it in.
+  // The submission is a DURABLE UPSTREAM INPUT (critical_flows depends on
+  // critical-flow-fallback.json in the DAG), so structure rebuilds critical_flows
+  // AND its risk_register sibling atomically off the enriched flows — no post-hoc
+  // rewrite of critical_flows from a separate executor (which would re-stale
+  // risk_register and re-fire this structure step in a clobber loop).
+  const deterministicFlows = buildCriticalFlowManifest(
     bundle.repo_manifest,
     surfaceManifest,
     disposition,
   );
+  const criticalFlows = bundle.critical_flow_fallback
+    ? mergeCriticalFlowFallback(deterministicFlows, bundle.critical_flow_fallback)
+    : deterministicFlows;
   // Structural graph signals are derived from the dependency graph ONLY —
   // before git-history co-change edges are merged in — so temporal coupling
   // never feeds cycle / hub / seam detection (allGraphEdges also skips the

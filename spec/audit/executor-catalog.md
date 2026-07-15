@@ -48,7 +48,8 @@ actual friction triage fires from the `present_report` terminal step
 | Executor | Kind | Obligation | Produces |
 |---|---|---|---|
 | `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | `external_analyzer_acquisition.json` (triggers `external_analyzer_results.json`) |
-| `structure_executor` | deterministic | `structure_artifacts` | `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `git_history.json` — all in one call |
+| `structure_executor` | deterministic | `structure_artifacts` | `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `git_history.json` — all in one call (merges any persisted `critical-flow-fallback.json` host enrichment into `critical_flows.json`) |
+| `critical_flow_fallback_executor` | host_delegation | `critical_flow_fallback_current` | `critical-flow-fallback.json` (the durable host-authored flow enrichment). Fires ONLY when the deterministic flow inference set `critical_flows.fallback_required`; emits a host step to author the enrichment, otherwise self-satisfies. Persisting the submission re-stales `critical_flows.json` so the structure phase merges it |
 | `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | `analyzer_capability.json` (+ refreshed `graph_bundle.json` when analyzer edges merge in) |
 | `design_assessment_executor` | deterministic | `design_assessment_current` | `design_assessment.json` (deterministic pass) |
 | `structure_decomposition_executor` | deterministic | `structure_decomposition_current` | `structure_decomposition.json` (overlay-and-delta structure operator) |

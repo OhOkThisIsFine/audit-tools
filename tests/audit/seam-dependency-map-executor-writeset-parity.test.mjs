@@ -100,6 +100,7 @@ const SIDE_CHANNEL_FILES = new Set([
 const EXECUTOR_SOURCE_FILES = [
   join(auditCodeRoot, "src", "audit", "orchestrator", "intakeExecutors.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "structureExecutors.ts"),
+  join(auditCodeRoot, "src", "audit", "orchestrator", "criticalFlowFallbackExecutor.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "charterExtractionExecutor.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "charterClarificationExecutor.ts"),
   join(auditCodeRoot, "src", "audit", "orchestrator", "systemicChallengeExecutor.ts"),

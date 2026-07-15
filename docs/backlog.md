@@ -287,13 +287,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   `auditStep.ts:96`) restoring ~30s crash recovery. Efficiency-only; folds naturally into D-66/67 slice-3
   (heartbeat-on-long-claims) if that opens.
 
-- **Critical-flow LLM fallback is spec'd but not wired (doc-review DD-14 #3).** `spec/audit/audit-goals.md`
-  says "LLM fallback is allowed only when [the deterministic confidence] check fails." The deterministic
-  side is real (`criticalFlows.fallback_required` in `src/audit/extractors/flows.ts`), but its only consumer
-  (`structureExecutors.ts:173`) merely appends an informational sentence to a progress string — no executor,
-  dispatch, or worker prompt triggers an actual LLM critical-flow-finding pass on the flag. Either build the
-  wiring (an LLM critical-flow pass gated on `fallback_required`) or, if judged not worth it, downgrade the
-  norm to a spec-only target. The norm is a valid design intent; the gap is the unbuilt consumer.
+- **Critical-flow LLM fallback — SHIPPED (`critical_flow_fallback_current` obligation).** Residual (accepted,
+  low): the host submission (`critical-flow-fallback.json`) is a durable leaf input that never re-stales, and
+  the obligation is satisfied by its PRESENCE alone — so once the host answers (even `{flows:[]}`), the pass is
+  permanently suppressed even if the repo later grows and deterministic inference stays below the bar. Matches
+  `intent_checkpoint` persistence semantics (a host input that persists). A future enhancement could re-prompt
+  when the repo materially changes (add `repo_manifest.json` as a marker dep, or gate satisfaction on
+  merged-flow freshness rather than marker presence) — deferred until a real run shows stale enrichment biting.
 
 - **Friction detection — M-QUOTA escalation chain: live validation env-bound.** The
   `recordLimit → escalate → strand → quota_escalation friction` chain is unit-tested end-to-end on both
