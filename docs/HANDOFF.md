@@ -14,28 +14,20 @@
 - **The maximal-coverage validation run's dispatch/quota fix cluster shipped in the current release.**
   All major code tracks remain complete (see Track status below). Next is the bounded forward remainder
   below + a confirming re-run.
-- **▶ TOP PRIORITY — dogfood + merge the repair-proxy dispatch integration** (branch
-  `feat/repair-proxy-jit-dispatch`, [PR #11](https://github.com/OhOkThisIsFine/audit-tools/pull/11), NOT
-  merged). Slices A/B/D + 429 refinement + **the Gate-0/dispatch capability FEED (step 1, both halves)**
-  landed (commit `81bd9105`, loop-core attested, unit-green, pushed); design of record
-  `spec/repair-proxy-dispatch-integration.md`; residual detail `docs/backlog.md` → "repair-proxy dispatch
-  integration". Companion `C:\Code\repair-proxy` (OpenAI front + `/registry`) already shipped on its `main`.
-  **Step 1 DONE (2026-07-15):** `capability_rank` now feeds BOTH ordering decisions — (Gap 2) threaded
-  `DispatchableSource.capability_rank`→`CapacityPool`→summary→`AdmissionPool.capabilityScore` as the finer
-  cost-equal/same-tier dispatch tiebreak (never reorders vs cost/tier); (Gate-0 fold) `annotateConfirmedPool`
-  now folds every source (incl. async repair-proxy `/registry` expansion via new `gatherDispatchableSources`)
-  into the ranked candidate set carrying `declaredCost`+`capabilityRank`, persists `source_pool_cost_order`,
-  threads each source's confirmed position to dispatch by `model_id`. **Live-validated** against the running
-  proxy: 9 pools (nim/openrouter/groq) folded cost-ascending ($0.10→$30, cost primacy holds), and the real
-  CLI `provider_confirmation` gate prompt now surfaces them. **Residual (split-allowed, NOT a bug):** the
-  `saturated` half (live-quota demotion of source pools at Gate-0) is not wired — capability half only;
-  `docs/backlog.md` → "repair-proxy dispatch integration". Ordered next steps:
-  1. **Owner-attended full dogfood run** — the multi-hour maximal-coverage validation (start
-     `repair-proxy --config C:\Code\repair-proxy\config.json` on :8791; `repair_proxy: { base_url:
-     "http://127.0.0.1:8791" }` in session config; `/audit-code` on THIS repo; let it run to completion,
-     watch packets dispatch to per-`(provider,model)` pools + 429 folds per provider). Runs the SHIPPED
-     global bin — so this must follow a merge+publish OR use the dev wrapper (`node audit-code.mjs`).
-  2. **Merge PR #11** once the attended run is green (loop-core attestation already on the branch commits).
+- **repair-proxy dispatch integration — MERGED + PUBLISHED (v0.32.64, PR #11).** Slices A/B/D + 429
+  refinement + the Gate-0/dispatch capability FEED (both halves) are on `main` and in the shipped global
+  bin. `capability_rank` feeds BOTH ordering decisions — (Gap 2) `DispatchableSource.capability_rank`→
+  `CapacityPool`→summary→`AdmissionPool.capabilityScore` as the finer cost-equal/same-tier DISPATCH tiebreak;
+  (Gate-0 fold) `annotateConfirmedPool` folds every source (incl. async repair-proxy `/registry` expansion
+  via `gatherDispatchableSources`) into the ranked candidate set + `source_pool_cost_order`, threaded to
+  dispatch by `model_id` (deduped against provider representative models so the legacy `openai_compatible`
+  pool isn't double-ranked — the CI-caught fix). Design of record `spec/repair-proxy-dispatch-integration.md`.
+  **Remaining (▶ next):** (1) **owner-attended full dogfood run** — start `repair-proxy --config
+  C:\Code\repair-proxy\config.json` (:8791), add `repair_proxy: { base_url: "http://127.0.0.1:8791" }` to the
+  session config, `/audit-code` on this repo (now the shipped global bin exercises the feature), watch packets
+  dispatch to per-`(provider,model)` pools + 429 folds; only the discovery→Gate-0 path is validated so far.
+  (2) **`saturated` half** (live-quota demotion of source pools at Gate-0) — unbuilt; `docs/backlog.md` →
+  "repair-proxy dispatch integration".
 - **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
   and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
   inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
