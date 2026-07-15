@@ -911,6 +911,7 @@ export type {
   QuotaState,
   WaveBindingCap,
   WaveSchedule,
+  QuotaBindingWindow,
   BackoffState,
   ObservedWaveOutcome,
 } from "./quota/types.js";
@@ -1306,7 +1307,7 @@ export type {
   AdmitBatchInput,
 } from "./dispatch/admissionLoop.js";
 export { reconcileAdmissionLeasesFromQuotaFile } from "./dispatch/admissionLeaseReconcile.js";
-export { detectHostDispatchWall } from "./dispatch/hostDispatchWall.js";
+export { detectHostDispatchWall, renderHostWallExplanation, admissionBlockedOnBudget } from "./dispatch/hostDispatchWall.js";
 export type { HostDispatchWall } from "./dispatch/hostDispatchWall.js";
 export { finalizeProviderLaunchResult } from "./dispatch/providerLaunchFinalize.js";
 export {

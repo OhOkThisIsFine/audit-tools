@@ -315,6 +315,19 @@ export const DispatchCapacityPoolSummarySchema = z
      * `remaining_pct` / `reset_at` come from `quota_source_snapshot`.
      */
     remaining_token_budget: z.number().nullable().optional(),
+    /**
+     * The window that bound `remaining_token_budget` (the MIN-budget window) + its
+     * reset — so an `empty_grant` wall can name WHY zero packets fit and derive a reset
+     * time from a low-but-nonzero window (D1). Null at cold start / no live snapshot.
+     */
+    binding_window: z
+      .object({
+        label: z.string(),
+        reset_at: z.string().nullable(),
+        budget: z.number(),
+      })
+      .nullable()
+      .optional(),
     in_flight_tokens: z.number().int().min(0).optional(),
     /**
      * Cold-start calibration for this pool (see WaveSchedule.calibrating): a live
@@ -671,6 +684,7 @@ export function summarizeDispatchCapacityPools(
     estimated_wave_tokens: allocation.schedule.estimated_wave_tokens,
     binding_cap: allocation.schedule.binding_cap ?? "none",
     remaining_token_budget: allocation.schedule.remaining_token_budget ?? null,
+    binding_window: allocation.schedule.binding_window ?? null,
     in_flight_tokens: allocation.schedule.in_flight_tokens ?? 0,
     ...(allocation.schedule.calibrating ? { calibrating: true } : {}),
     quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,

@@ -277,7 +277,7 @@ export type TerminalStepResult =
  * the fold continues).
  */
 export type NextStepResult =
-  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun; selectedExecutor?: string | null }
+  | { kind: "semantic_review"; state: AuditState; bundle: ArtifactBundle; activeReviewRun: ActiveReviewRun; selectedExecutor?: string | null; inProcessMadeProgress?: boolean }
   | { kind: "design_review"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
@@ -1789,6 +1789,9 @@ async function runHostDelegationObligation(
   // pool is confirmed (the existing host-review path is unchanged).
   let reviewBundle = bundle;
   let reviewState = state;
+  // D2: did the in-process (NIM) partition ingest results this pass? Carried to the
+  // host-complement pause so a productive pass resets the wall-pass livelock counter.
+  let inProcessMadeProgress = false;
   const hybridCfg = sessionConfig ?? ({} as SessionConfig);
   // Defect-1: an attended host (reached here because the headless in-process branch
   // above was skipped) demotes its configured primary in-process backend into the
@@ -1858,6 +1861,15 @@ async function runHostDelegationObligation(
           tasksOverride: nimTasks,
           poolsOverride: auditSourcePools,
         });
+        // Progress = the NIM partition ingested AND accepted ≥1 result this pass (real
+        // coverage), not merely that an ingest ran — a pass that folded only FAILED
+        // results (or an idempotent replay) advanced no coverage and must still count
+        // toward the livelock so a persistently-failing partition can't stall forever.
+        const acceptedCount = driven.ingest?.summary?.["accepted_count"];
+        inProcessMadeProgress =
+          driven.ingest != null &&
+          typeof acceptedCount === "number" &&
+          acceptedCount > 0;
         // Terminal accept for each in-process task → free its coordinator claim.
         for (const a of partition.inProcess) {
           await partition.coordinator.release(a);
@@ -1897,6 +1909,7 @@ async function runHostDelegationObligation(
     step: {
       kind: "semantic_review",
       selectedExecutor: decision.selected_executor,
+      inProcessMadeProgress,
       ...review,
     },
   };

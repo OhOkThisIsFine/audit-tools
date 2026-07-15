@@ -594,3 +594,40 @@ test("a quotaStateEntry NEVER caps the wave — concurrency is declared or absen
   expect(schedule.binding_cap).toBe("none");
 });
 
+
+// ── D1: binding window surfaced on the schedule ──────────────────────────────
+
+test("scheduleWave surfaces the binding window (the MIN-budget window) with its reset", () => {
+  const weeklyReset = "2026-07-18T00:00:00.000Z";
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 8,
+    quotaSourceSnapshot: {
+      remaining_pct: 0.02,
+      reset_at: weeklyReset,
+      requests_remaining: null,
+      tokens_remaining: 1200,
+      captured_at: "2026-07-15T00:00:00.000Z",
+      source: "test",
+      windows: [
+        // Session window is fresh (huge budget) but the weekly window is nearly
+        // empty — the weekly window binds, and days out.
+        { label: "session", remaining_pct: 0.96, reset_at: "2026-07-15T05:00:00.000Z", tokens_remaining: 500000 },
+        { label: "weekly", remaining_pct: 0.02, reset_at: weeklyReset, tokens_remaining: 1200 },
+      ],
+    },
+  });
+  expect(schedule.binding_window).toEqual({ label: "weekly", reset_at: weeklyReset, budget: 1200 });
+});
+
+test("scheduleWave binding_window is null with no live snapshot", () => {
+  const schedule = scheduleWave({
+    providerName: "claude-code",
+    sessionConfig: {},
+    hostModel: null,
+    requestedConcurrency: 8,
+  });
+  expect(schedule.binding_window ?? null).toBeNull();
+});

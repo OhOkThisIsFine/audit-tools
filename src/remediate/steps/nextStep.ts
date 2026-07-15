@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -2242,12 +2242,30 @@ Then run:
     // ungranted nodes stay PENDING and re-dispatch on resume (never abandoned to partial
     // coverage — the remediate divergence from audit's read-only bound-and-give-up).
     const implQuota = await readOptionalJsonFile<{
-      admission?: { granted_packet_ids?: string[] };
+      admission?: {
+        granted_packet_ids?: string[];
+        explains?: Array<{ reason?: string }>;
+      };
       cooldown_until?: string | null;
+      capacity_pools?: Array<{
+        is_conversation_host?: boolean;
+        binding_window?: QuotaBindingWindow | null;
+      }>;
     }>(implQuotaPath);
+    // D1 parity: the binding budget window (from the host pool's capacity summary) so an
+    // empty_grant wall derives a reset time instead of the bare `earliestResetAt: null` —
+    // but ONLY on a genuine BUDGET block, not a `cap_reached` ledger-contention wall
+    // (frees in seconds; the window reset may be days out).
+    const implBudgetBound = admissionBlockedOnBudget(implQuota?.admission?.explains ?? []);
+    const implBindingWindow = implBudgetBound
+      ? implQuota?.capacity_pools?.find((p) => p.is_conversation_host)?.binding_window ??
+        implQuota?.capacity_pools?.[0]?.binding_window ??
+        null
+      : null;
     const implWall = detectHostDispatchWall({
       grantedCount: implQuota?.admission?.granted_packet_ids?.length ?? 0,
       cooldownUntil: implQuota?.cooldown_until ?? null,
+      bindingWindow: implBindingWindow,
       now: Date.now(),
     });
     if (implWall.atWall) {

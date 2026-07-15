@@ -4,6 +4,7 @@ import {
   estimateTokensFromBytes,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   detectHostDispatchWall,
+  admissionBlockedOnBudget,
   emitBlindDispatchFrictionIfBlind,
   reconcileAdmissionLeasesFromQuotaFile,
   checkLivelockGuard,
@@ -13,6 +14,7 @@ import {
 import type {
   SessionConfig,
   HostModelRosterEntry,
+  QuotaBindingWindow,
 } from "audit-tools/shared";
 import type { HostSessionEscalation } from "audit-tools/shared/quota/hostSessionQuotaSource";
 import { buildDispatchPool, finalizeDispatchQuota } from "./quotaPool.js";
@@ -71,6 +73,10 @@ export interface HostFanoutGateOutcome {
   requiredCount: number;
   /** The namespaced dispatch-quota path — reconciled at results ingest. */
   dispatchQuotaPath: string;
+  /** The binding budget window (D1), for the host-facing wall explanation. Null on cooldown / no signal. */
+  bindingWindow: QuotaBindingWindow | null;
+  /** The smallest panel unit's estimated cost, compared against the binding budget in the wall message. */
+  perPacketCost: number | null;
 }
 
 /** Resumable pause-count state for a fan-out family (bounds the wall to a skip). */
@@ -227,11 +233,20 @@ export async function gateHostFanout(params: {
   });
 
   const grantedCount = admission.granted_packet_ids.length;
+  // Attribute the binding window only on a genuine BUDGET block — not a `cap_reached`
+  // ledger-contention empty grant (frees in seconds; the window reset may be days out).
+  const budgetBound = admissionBlockedOnBudget(admission.explains);
   const wall = detectHostDispatchWall({
     grantedCount,
     cooldownUntil: dispatchCapacity.cooldown_until ?? null,
+    bindingWindow: budgetBound ? (waveSchedule.binding_window ?? null) : null,
     now: Date.now(),
   });
+  // The smallest panel unit's cost — if even that doesn't fit the binding budget, zero
+  // grant, so it's the number the host step compares against the binding window.
+  const perPacketCost = packets.length
+    ? Math.min(...packets.map((p) => p.inputTokens))
+    : null;
   // Atomic panel: a partial grant cannot run (the judge needs every perspective),
   // so anything short of the full panel is a wall.
   const partial = grantedCount < units.length;
@@ -255,5 +270,7 @@ export async function gateHostFanout(params: {
     grantedCount,
     requiredCount: units.length,
     dispatchQuotaPath,
+    bindingWindow: wall.bindingWindow,
+    perPacketCost,
   };
 }

@@ -17,8 +17,8 @@ import type {
   CapacityPool,
   ResolvedProviderName,
 } from "audit-tools/shared";
-import type { HostModelRosterEntry, ProviderRateLimits } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, reconcileAdmissionLeasesFromQuotaFile } from "audit-tools/shared";
+import type { HostModelRosterEntry, ProviderRateLimits, QuotaBindingWindow } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile } from "audit-tools/shared";
 import { advanceHostDispatchPause } from "./dispatch/pausePersist.js";
 import { mergeOwnerTokens } from "./ownerTokens.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -165,6 +165,13 @@ export async function prepareDispatchArtifacts(params: {
    * spilling off of. Absent → the host-model pools from `buildDispatchPool`.
    */
   poolsOverride?: CapacityPool[];
+  /**
+   * D2: true when the in-process (NIM) partition ingested results earlier in THIS
+   * next-step (hybrid path). Threaded to the host-complement pause so a productive
+   * pass resets the wall-pass counter instead of counting toward the livelock give-up.
+   * Absent/false on the pure packet path (no in-process partition).
+   */
+  inProcessMadeProgress?: boolean;
   /**
    * Fed to the retained host-session source (both branches below) so a bounded
    * account-wall escalation routes to the caller's friction chokepoint instead of
@@ -664,12 +671,25 @@ export async function prepareDispatchArtifacts(params: {
   // resumable pause instead of a dispatch step. Host path only (grantLeases !== false);
   // the in-process driver pauses reactively via advanceRollingPause after its drive.
   let hostPause:
-    | { earliestResetAt: string | null; livelocked: boolean; strandedCount: number }
+    | {
+        earliestResetAt: string | null;
+        livelocked: boolean;
+        strandedCount: number;
+        bindingWindow: QuotaBindingWindow | null;
+        perPacketCost: number | null;
+      }
     | undefined;
   if (params.grantLeases !== false) {
+    // Only attribute the budget wall's binding window when admission actually blocked a
+    // packet on BUDGET — a `cap_reached` empty grant (the shared ledger momentarily full
+    // under a concurrent admitter) frees in seconds, so surfacing a binding window whose
+    // reset may be days out would mislead the host into over-waiting (keep the prior
+    // best-effort null-reset behavior for that case).
+    const budgetBound = admissionBlockedOnBudget(admission.explains);
     const wall = detectHostDispatchWall({
       grantedCount: admission.granted_packet_ids.length,
       cooldownUntil: dispatchCapacity.cooldown_until ?? null,
+      bindingWindow: budgetBound ? (waveSchedule.binding_window ?? null) : null,
       now: Date.now(),
     });
     if (wall.atWall) {
@@ -686,6 +706,10 @@ export async function prepareDispatchArtifacts(params: {
         artifactsDir,
         runId,
         atWall: true,
+        // D2: a pass where the in-process (NIM) partition ingested results is PROGRESS,
+        // not a stall — reset the wall-pass counter so a hybrid run whose NIM partition
+        // keeps covering ground never trips the host livelock give-up.
+        madeProgress: params.inProcessMadeProgress ?? false,
         strandedPacketIds,
         strandedTaskIds,
       });
@@ -693,6 +717,11 @@ export async function prepareDispatchArtifacts(params: {
         earliestResetAt: wall.earliestResetAt,
         livelocked: advance.livelocked,
         strandedCount: strandedPacketIds.length,
+        bindingWindow: wall.bindingWindow,
+        // The smallest packet's cost — the number compared against the binding budget.
+        perPacketCost: admissionPackets.length
+          ? Math.min(...admissionPackets.map((p) => p.inputTokens))
+          : null,
       };
     } else {
       // Wall cleared (or never hit): drop any carried pause so the next pass dispatches.

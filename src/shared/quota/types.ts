@@ -99,6 +99,20 @@ export const WaveBindingCapSchema = z.enum([
 ]);
 export type WaveBindingCap = z.infer<typeof WaveBindingCapSchema>;
 
+/**
+ * The quota window that BOUND a pool's derived token budget (the MIN across the
+ * pool's windows). Surfaced so an `empty_grant` wall can name WHY zero packets fit —
+ * a low (or empty) window whose reset may be days out even while the session window
+ * is fresh — and derive a reset time from it. `reset_at` can be null (a window with
+ * no declared reset). Absent/null when there is no live budget signal (cold start).
+ */
+export interface QuotaBindingWindow {
+  label: string;
+  reset_at: string | null;
+  /** The window's own remaining token budget (the value that won the MIN). */
+  budget: number;
+}
+
 export interface WaveSchedule {
   max_concurrent: number;
   estimated_wave_tokens: number;
@@ -121,6 +135,12 @@ export interface WaveSchedule {
    * cold start (no absolute/learned budget for any window yet).
    */
   remaining_token_budget?: number | null;
+  /**
+   * The window that bound `remaining_token_budget` (the MIN-budget window) + its
+   * reset. Lets an `empty_grant` wall surface WHY zero packets fit and derive a reset
+   * time when there is no cooldown. Absent/null at cold start / no live snapshot.
+   */
+  binding_window?: QuotaBindingWindow | null;
   /** Tokens already in flight against this pool when the wave was sized (0 default). */
   in_flight_tokens?: number;
   /**

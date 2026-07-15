@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { HostModelRosterEntry, ResolvedProviderName } from "audit-tools/shared";
-import { classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction } from "audit-tools/shared";
+import { classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, renderHostWallExplanation } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -44,6 +44,12 @@ export async function renderSemanticReviewStep(params: {
   hostCanSelectSubagentModel: boolean;
   /** Which executor selected this step; controls prompt variant. */
   selectedExecutor?: string | null;
+  /**
+   * D2: true when the in-process (NIM) partition ingested results earlier in this
+   * next-step (hybrid path) — resets the host-complement wall-pass counter so steady
+   * in-process progress never trips the livelock give-up.
+   */
+  inProcessMadeProgress?: boolean;
 }): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
   const { root, artifactsDir, activeReviewRun } = params;
   if (!params.hostCanDispatch) {
@@ -109,6 +115,7 @@ export async function renderSemanticReviewStep(params: {
     hostOutputTokens: params.hostOutputTokens,
     hostModelRoster: params.hostModelRoster,
     hostModelId: params.hostModelId,
+    inProcessMadeProgress: params.inProcessMadeProgress,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
   // The current driver's handshake rides the continue-command so a bare re-invocation
@@ -134,8 +141,12 @@ export async function renderSemanticReviewStep(params: {
   // snapshot — a genuine reset clears the wall and resumes; a livelock has already
   // recorded the partial-completion terminal, so re-running routes to synthesis.
   if (dispatch.host_pause) {
-    const { earliestResetAt, livelocked, strandedCount } = dispatch.host_pause;
+    const { earliestResetAt, livelocked, strandedCount, bindingWindow, perPacketCost } =
+      dispatch.host_pause;
     const resetClause = earliestResetAt ? ` (resets at ${earliestResetAt})` : "";
+    const wallExplain = livelocked
+      ? ""
+      : renderHostWallExplanation(bindingWindow, perPacketCost);
     return writeCurrentStep({
       artifactsDir,
       stepKind: "blocked",
@@ -152,7 +163,7 @@ export async function renderSemanticReviewStep(params: {
       },
       stopCondition: livelocked
         ? "Coverage bound reached at the quota wall — run next-step to synthesize the audit on partial coverage."
-        : `Provider quota is at its wall${resetClause}. Wait for the reset, then run next-step to resume — the tool re-grants automatically when capacity returns.`,
+        : `Provider quota is at its wall${resetClause}.${wallExplain} Wait for the reset, then run next-step to resume — the tool re-grants automatically when capacity returns.`,
       repoRoot: root,
       artifactPaths: {
         dispatch_quota: dispatch.dispatch_quota_path,
@@ -162,9 +173,9 @@ export async function renderSemanticReviewStep(params: {
         ? `The provider session limit stayed at its wall across repeated attempts, so the audit is giving up ` +
           `on ${strandedCount} unreviewed packet(s) and will synthesize on the coverage it has. Run \`next-step\` to continue to synthesis.`
         : `The provider session limit is exhausted${resetClause}, so no review packets can be dispatched this ` +
-          `pass. ${strandedCount} packet(s) remain pending. This is a graceful, resumable pause — nothing was ` +
-          `dispatched and no work was lost. Wait for the quota to reset, then run \`next-step\`; the tool ` +
-          `re-checks the live quota and re-grants the pending packets when capacity returns.`,
+          `pass. ${strandedCount} packet(s) remain pending.${wallExplain} This is a graceful, resumable pause — ` +
+          `nothing was dispatched and no work was lost. Wait for the quota to reset, then run \`next-step\`; the ` +
+          `tool re-checks the live quota and re-grants the pending packets when capacity returns.`,
     });
   }
 

@@ -112,6 +112,13 @@ export async function advanceHostDispatchPause(params: {
    * would pause-loop forever (the exact case the livelock bound exists to end).
    */
   strandedTaskIds: string[];
+  /**
+   * D2: true when the in-process (NIM) partition ingested results THIS pass. Such a
+   * pass is PROGRESS, not a stall — the wall-pass counter resets to 0, so a hybrid run
+   * whose in-process partition keeps covering ground never trips the host livelock
+   * give-up (which exists to bound an indefinite STALL, not steady partial progress).
+   */
+  madeProgress?: boolean;
   livelockLimit?: number;
 }): Promise<HostPauseAdvance> {
   const { artifactsDir, runId, atWall, strandedPacketIds, strandedTaskIds } = params;
@@ -122,6 +129,21 @@ export async function advanceHostDispatchPause(params: {
     // Wall cleared (or never hit): drop any carried pause so the next pass dispatches.
     if (priorPaused) await clearPausedState(artifactsDir, runId);
     return { paused: false, livelocked: false };
+  }
+
+  // Progress pass: still walled for the host complement, but the in-process partition
+  // covered ground — reset the counter so steady progress never trips the livelock.
+  if (params.madeProgress) {
+    await persistPausedState(artifactsDir, runId, {
+      lifecycle: {
+        kind: "waiting_for_provider",
+        paused_at: priorPaused?.lifecycle.paused_at ?? new Date().toISOString(),
+        pause_count: 0,
+        stranded_node_ids: strandedPacketIds,
+      },
+      settled_exclusions: priorPaused?.settled_exclusions ?? [],
+    });
+    return { paused: true, livelocked: false };
   }
 
   // First pause for this run: enter waiting_for_provider at pause_count 0.

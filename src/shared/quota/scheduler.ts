@@ -4,6 +4,7 @@ import type { DispatchModelTier } from "../types/stepContract.js";
 import { DispatchModelTierSchema } from "../types/stepContract.js";
 import type {
   HostConcurrencyLimit,
+  QuotaBindingWindow,
   QuotaStateEntry,
   ResolvedLimits,
   WaveBindingCap,
@@ -461,6 +462,13 @@ interface TokenBudgetResolution {
    * the gate can persist a cooldown and not flap. Null unless a window is empty.
    */
   exhaustedResetAt: string | null;
+  /**
+   * The window that produced the MIN budget (the binder) + its reset — surfaced so an
+   * `empty_grant` wall can name it and derive a reset time even when the window is
+   * low-but-nonzero (so `exhaustedResetAt` stays null). Null when no window had a
+   * derivable budget (cold start).
+   */
+  bindingWindow: QuotaBindingWindow | null;
 }
 
 /**
@@ -499,6 +507,7 @@ function deriveTokenBudget(
   let budget: number | null = null;
   let calibrating = false;
   let exhaustedResetAt: string | null = null;
+  let bindingWindow: QuotaBindingWindow | null = null;
 
   for (const w of windows) {
     const windowBudget = deriveWindowTokenBudget(
@@ -522,10 +531,15 @@ function deriveTokenBudget(
         exhaustedResetAt = reset;
       }
     }
-    budget = budget == null ? windowBudget : Math.min(budget, windowBudget);
+    // Track the binder — the window whose budget wins the MIN — so a wall can name it
+    // and derive a reset time even when it's low-but-nonzero (D1).
+    if (budget == null || windowBudget < budget) {
+      budget = windowBudget;
+      bindingWindow = { label: w.label, reset_at: w.reset_at, budget: windowBudget };
+    }
   }
 
-  return { budget, calibrating, exhaustedResetAt };
+  return { budget, calibrating, exhaustedResetAt, bindingWindow };
 }
 
 function sumTopN(sorted: number[], n: number): number {
@@ -699,13 +713,18 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   // Cold-start calibration flag, hoisted so it can be stamped on the schedule and
   // propagated to the host-path admission grant (not just the local waveSize clamp).
   let calibrating = false;
+  // The binding window (D1), hoisted so an empty_grant wall can surface it + its reset.
+  let bindingWindow: QuotaBindingWindow | null = null;
   if (quotaSourceSnapshot && !cooldownUntil) {
-    const { budget, calibrating: windowCalibrating, exhaustedResetAt } = deriveTokenBudget(
-      quotaSourceSnapshot,
-      quotaStateEntry?.tokens_per_pct,
-    );
+    const {
+      budget,
+      calibrating: windowCalibrating,
+      exhaustedResetAt,
+      bindingWindow: windowBinding,
+    } = deriveTokenBudget(quotaSourceSnapshot, quotaStateEntry?.tokens_per_pct);
     remainingTokenBudget = budget;
     calibrating = windowCalibrating;
+    bindingWindow = windowBinding;
     if (budget === 0) {
       // A genuinely empty window (remaining fraction 0 / absolute count 0):
       // throttle to 1 and persist a cooldown to its reset so a later transiently
@@ -765,6 +784,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     quota_source_snapshot: quotaSourceSnapshot,
     binding_cap: bindingCap,
     remaining_token_budget: remainingTokenBudget,
+    binding_window: bindingWindow,
     in_flight_tokens: inFlightTokens,
     calibrating,
   };

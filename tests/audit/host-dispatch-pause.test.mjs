@@ -95,4 +95,34 @@ describe("advanceHostDispatchPause (host-path quota wall)", () => {
     expect(r).toEqual({ paused: false, livelocked: false });
     expect((await readAD(dir)).paused_state).toBeUndefined();
   });
+
+  // D2 — a pass where the in-process (NIM) partition ingested results is progress, not
+  // a stall, so it resets the wall-pass counter and never trips the livelock.
+  it("madeProgress resets pause_count and never livelocks (steady in-process progress)", async () => {
+    const dir = await seed();
+    // Drive well past LIVELOCK_PAUSE_LIMIT — every pass is still walled for the host
+    // complement, but the in-process partition ingested each time.
+    for (let i = 0; i < 6; i++) {
+      const r = await advanceHostDispatchPause({ ...wallOpts(dir), madeProgress: true });
+      expect(r).toEqual({ paused: true, livelocked: false });
+      expect((await readAD(dir)).paused_state.lifecycle.pause_count).toBe(0);
+    }
+    // No terminal — the run kept covering ground via the in-process partition.
+    expect((await readAD(dir)).partial_completion_terminal).toBeUndefined();
+  });
+
+  it("a stall AFTER progress starts counting from 0 (progress reset the counter)", async () => {
+    const dir = await seed();
+    // Two stalls (count → 0, 1), then a progress pass resets…
+    await advanceHostDispatchPause(wallOpts(dir));
+    await advanceHostDispatchPause(wallOpts(dir));
+    expect((await readAD(dir)).paused_state.lifecycle.pause_count).toBe(1);
+    await advanceHostDispatchPause({ ...wallOpts(dir), madeProgress: true });
+    expect((await readAD(dir)).paused_state.lifecycle.pause_count).toBe(0);
+    // …so it now takes the full 3 more consecutive stalls to livelock, not 1.
+    await advanceHostDispatchPause(wallOpts(dir)); // 1
+    await advanceHostDispatchPause(wallOpts(dir)); // 2
+    const r = await advanceHostDispatchPause(wallOpts(dir)); // nextCount 3 → livelock
+    expect(r.livelocked).toBe(true);
+  });
 });

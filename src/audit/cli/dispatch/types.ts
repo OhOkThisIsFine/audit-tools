@@ -8,7 +8,7 @@ import {
   ACTIVE_DISPATCH_FILENAME,
 } from "../../types/activeDispatch.js";
 import type { AuditTask } from "../../types.js";
-import type { DispatchModelHint } from "audit-tools/shared";
+import type { DispatchModelHint, QuotaBindingWindow } from "audit-tools/shared";
 import type { CapacityPool } from "../../quota/index.js";
 import type { HostSessionQuotaSource } from "audit-tools/shared/quota/hostSessionQuotaSource";
 
@@ -77,6 +77,10 @@ export interface PrepareDispatchResult {
     earliestResetAt: string | null;
     livelocked: boolean;
     strandedCount: number;
+    /** The binding budget window (D1), for the host-facing wall explanation. Null on cooldown / no signal. */
+    bindingWindow: QuotaBindingWindow | null;
+    /** The smallest packet's estimated cost, compared against the binding budget in the wall message. */
+    perPacketCost: number | null;
   };
   /** Packets GRANTED for dispatch this pass by the admission loop (emergent width). */
   granted_count: number;

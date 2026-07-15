@@ -13,6 +13,7 @@ import {
   deriveSourcePoolDisplayFromSources,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
+  renderHostWallExplanation,
   PROVIDER_CONFIRMATION_INPUT_FILENAME,
   auditArtifactsDir,
   promotedAuditFindingsPath,
@@ -137,6 +138,10 @@ async function gateHostFanoutOrPause(params: {
   const resetClause = outcome.earliestResetAt
     ? ` (resets at ${outcome.earliestResetAt})`
     : "";
+  const wallExplain = renderHostWallExplanation(
+    outcome.bindingWindow,
+    outcome.perPacketCost,
+  );
   const label =
     params.family === "systemic_challenge"
       ? "systemic-challenge adversary"
@@ -194,16 +199,16 @@ async function gateHostFanoutOrPause(params: {
       granted_count: outcome.grantedCount,
     },
     stopCondition:
-      `Host session quota is at its wall${resetClause}. Wait for the reset, then run ` +
-      `next-step to resume — the tool re-checks the live quota and re-grants the ` +
+      `Host session quota is at its wall${resetClause}.${wallExplain} Wait for the reset, ` +
+      `then run next-step to resume — the tool re-checks the live quota and re-grants the ` +
       `${label} fan-out when capacity returns.`,
     repoRoot: params.root,
     artifactPaths: { dispatch_quota: outcome.dispatchQuotaPath },
     prompt:
       `The host session limit is exhausted${resetClause}, so the ` +
       `${outcome.requiredCount}-subagent ${label} fan-out cannot be dispatched this pass ` +
-      `without dying at the wall. This is a graceful, resumable pause — nothing was ` +
-      `dispatched and no work was lost. Wait for the quota to reset, then run ` +
+      `without dying at the wall.${wallExplain} This is a graceful, resumable pause — nothing ` +
+      `was dispatched and no work was lost. Wait for the quota to reset, then run ` +
       "`next-step`; the tool re-checks the live quota and re-grants the fan-out when " +
       "capacity returns.",
   });
@@ -1108,6 +1113,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     hostCanRestrictSubagentTools,
     hostCanSelectSubagentModel,
     selectedExecutor: result.selectedExecutor,
+    inProcessMadeProgress: result.inProcessMadeProgress,
   });
   console.log(JSON.stringify(step, null, 2));
 }

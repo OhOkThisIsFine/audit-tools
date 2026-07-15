@@ -17,11 +17,20 @@
  *    ignoring the cooldown throttle. The host must PAUSE, not fan the over-grant out.
  *    `cooldown_until` is the reset signal.
  */
+import type { QuotaBindingWindow } from "../quota/types.js";
+
 export interface HostDispatchWall {
   atWall: boolean;
-  /** Advisory reset time to surface to the host; null when unknown (bare empty grant). */
+  /** Advisory reset time to surface to the host; null when unknown. */
   earliestResetAt: string | null;
   reason: "empty_grant" | "cooldown" | null;
+  /**
+   * The window that bound the pool's token budget (the MIN-budget window), when the
+   * wall is a budget wall rather than a cooldown. Lets the host step name WHY zero
+   * packets fit — e.g. a low weekly window whose reset is days out while the session
+   * window is fresh (D1). Null on a cooldown wall or when no budget signal was given.
+   */
+  bindingWindow: QuotaBindingWindow | null;
 }
 
 export function detectHostDispatchWall(params: {
@@ -29,6 +38,13 @@ export function detectHostDispatchWall(params: {
   grantedCount: number;
   /** The wave's `cooldown_until` (the value written to `dispatch-quota.json`). */
   cooldownUntil?: string | null;
+  /**
+   * The pool's binding token-budget window (the MIN-budget window; from the wave
+   * schedule / capacity summary). On an `empty_grant` wall — where no cooldown carries
+   * a reset — this supplies the advisory reset time and the window identity so the
+   * host step can explain the wall instead of promising a reset it never derived.
+   */
+  bindingWindow?: QuotaBindingWindow | null;
   /** Injected wall-clock (ms) so the predicate is pure/testable. */
   now: number;
 }): HostDispatchWall {
@@ -40,10 +56,63 @@ export function detectHostDispatchWall(params: {
   if (cooldownActive) {
     // Cooldown wins the reason even if the grant also happens to be empty, because it
     // carries the authoritative reset signal.
-    return { atWall: true, earliestResetAt: params.cooldownUntil ?? null, reason: "cooldown" };
+    return {
+      atWall: true,
+      earliestResetAt: params.cooldownUntil ?? null,
+      reason: "cooldown",
+      bindingWindow: null,
+    };
   }
   if (params.grantedCount === 0) {
-    return { atWall: true, earliestResetAt: null, reason: "empty_grant" };
+    // Budget wall: the binding window supplies the reset (may still be null if that
+    // window declares no reset) and the identity for the host-facing explanation.
+    return {
+      atWall: true,
+      earliestResetAt: params.bindingWindow?.reset_at ?? null,
+      reason: "empty_grant",
+      bindingWindow: params.bindingWindow ?? null,
+    };
   }
-  return { atWall: false, earliestResetAt: null, reason: null };
+  return { atWall: false, earliestResetAt: null, reason: null, bindingWindow: null };
+}
+
+/**
+ * True when admission blocked at least one packet on BUDGET (`budget_exhausted`)
+ * rather than only a `cap_reached` ledger-contention wall. The single discriminator
+ * both orchestrators draw to decide whether an `empty_grant` should attach the binding
+ * window + its (possibly days-out) reset — a genuine budget wall — or keep the prior
+ * best-effort null-reset behavior for a transient ledger-full grant (frees in seconds).
+ */
+export function admissionBlockedOnBudget(
+  explains: ReadonlyArray<{ reason?: string }>,
+): boolean {
+  return explains.some((e) => e.reason === "budget_exhausted");
+}
+
+/**
+ * Human-facing explanation of a budget (`empty_grant`) wall for the host pause step —
+ * names the binding window, its remaining budget + reset, and (when known) the
+ * smallest packet's cost so the operator sees WHY zero packets fit rather than a bare
+ * "wait for the reset" with no time. Empty string when there is no binding window
+ * (cooldown wall, or no live budget signal), so callers can append it unconditionally.
+ * Deterministic formatting (no locale grouping) so it never churns across platforms.
+ */
+export function renderHostWallExplanation(
+  bindingWindow: QuotaBindingWindow | null,
+  perPacketCost?: number | null,
+): string {
+  if (!bindingWindow) return "";
+  const reset = bindingWindow.reset_at
+    ? `resets ${bindingWindow.reset_at}`
+    : "no declared reset time";
+  // Only claim "none fit" when the smallest packet genuinely exceeds the budget — the
+  // caller passes a binding window only on a budget wall, but keep the phrasing honest
+  // regardless (a healthy budget with a stated cost must never read "none fit").
+  const cost =
+    perPacketCost != null && Number.isFinite(perPacketCost)
+      ? perPacketCost > bindingWindow.budget
+        ? `; the smallest packet needs ~${Math.round(perPacketCost)} tokens, so none fit this pass`
+        : `; the smallest packet needs ~${Math.round(perPacketCost)} tokens`
+      : "";
+  return ` Binding quota window '${bindingWindow.label}': ~${Math.round(bindingWindow.budget)} tokens remaining, ${reset}${cost}.`;
 }
