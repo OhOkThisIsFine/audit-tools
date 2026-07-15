@@ -14,7 +14,7 @@ Remote `audit-tools`, branch `main` (not origin, not master).
 ## 1. Preflight gate (fast local fast-fail — CI is the authoritative full gate)
 
 The full vitest suite is ~93% of the gate and takes minutes on Windows, which is *not* the authoritative
-signal (Linux CI is). CI now runs the full suite **sharded across parallel jobs** (~2× faster) as the real
+signal (Linux CI is). CI runs the full suite **sharded across parallel jobs** (~2× faster) as the real
 gate, so the local preflight is a quick fast-fail, not the full run.
 
 - Fresh worktree → `npm install` first (otherwise tsc resolves `audit-tools/shared` against a stale `dist/` → fake "missing export" errors).
@@ -34,7 +34,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 - **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
   `dist/`. Push the lap branch's landed work onto `main` (`git push audit-tools HEAD:main`, a fast-forward),
-  then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` now admits any
+  then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` admits any
   branch whose HEAD already equals `origin/main` (`evaluateReleaseBranch()`), pushes the bump commit onto
   the remote `main` via `HEAD:refs/heads/main`, and never touches the primary worktree. The `ensureCleanWorktree()`
   CRLF/clean-tree guard and the `npm run check` pre-tag gate still run. No `--root`/branch flag is needed —

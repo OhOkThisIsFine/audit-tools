@@ -31,13 +31,16 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
-> lives in git log / memory). Condense at write time, not in a later doc-review pass.
+> lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`
+> appears only where a durable memory concept was actually captured for that item — by design, not every
+> entry has one.
 - **Friction walk (force-synthesize→remediate dogfood lap, 2026-07-12):** (1) **inefficient-feeding (medium):** the contract pipeline requires ~15 sequential HOST-authoring turns (goal→context→decomp→16 shards→seam→critique→testplan→assessment→counterexample→judge→DAG) BEFORE any dispatch, so with host fan-out off (to save Claude quota) the quota is spent up-front on planning regardless of routing fixes to $0 NIM/Codex; and each failed next-step CONSUMES the `*.input.json` (full regen, no in-place field fix). (2) **tool-should-decide (low):** the implementation_dag citation-grounding gate grounds on lowercased path/symbol *tokens* from title+description, so a node whose scope is dotfiles with no code symbols (`.gemini/*.toml`) or whose prose cites real paths non-token-shaped is rejected — 2 grounding re-loops until a real camelCase symbol / clean lowercase path was embedded.
 - **Friction walk (quota-cluster batch-ship lap, 2026-07-11):** (1) **NIM `llm read`/`write` unusable for reasoning-heavy review** — the selected `nvidia/nemotron-3-ultra-550b` won't emit valid JSON for a `read` review prompt (returned prose "Let me ana…" twice → the strict JSON contract errors out), and a ~500-line diff times out at the default 120s. The "delegate heavy loop-core review to the free NIM pool" workflow ([[three-tier-quota-error-classification]], [[free-nim-pool-first-default-worker]]) silently degrades to doing it in-Claude. Endpoint: either pin a JSON-reliable model for `llm read`/`write`, add a longer default timeout for large stdin, or teach the worker to salvage prose→structured. (inefficient-feeding, medium). (2) **`pre-commit-gate.mjs` false-positives on `git commit -C <sha>`** — the bypass-flag scan flags `-C` as `-n`/`--no-verify`, blocking a legitimate reuse-message commit; had to fall back to `-F <file>`. Tighten the flag regex to word-boundaries. (tool-should-decide, low). (3) **`rtk npm run …` → "program not found"** on this box — the rtk npm wrapper can't resolve the npm shim, so `rtk npm run build`/`check` fail; use PowerShell `npm` directly (CLAUDE.md's "always prefix rtk" doesn't hold for npm here). (durable trap, low).
 - **Friction walk (repair-proxy capability-feed ship lap, 2026-07-15):** (1) **tool-should-decide (medium):** the local `verify:release` gate returned **exit 0 while reporting "3 failed"** — a false green that let a deterministic bug (the Gate-0 fold double-ranked the legacy `openai_compatible` pool → `provider-confirmation-gate` `expected 2 to be 1`) reach the release CI, which correctly caught it in shard 3/4. The local full-suite gate must fail-nonzero on ANY deterministic test failure (suspect a `--retry` masking the count, or the profiling reporter swallowing vitest's exit code); until fixed, treat "N failed" in the summary as a hard stop regardless of exit code. (2) **tool-should-decide (low):** `tests/audit/quota-command.test.mjs > nothing written to disk` asserts `repoRoot/.audit-tools/audit/session-config.json` is absent, but that path is a **gitignored run artifact** a prior local audit/dogfood leaves behind → false LOCAL failure (green on a fresh CI clone). Harden the test to sandbox the repo-root probe (or assert against a temp root), not the live checkout.
 - **Provider auto-detection misses NIM (openai-compatible) when `openai_compatible` config absent — needs session config to appear (2026-07-13 audit-gate review).** NIM does not auto-detect via PATH probe like CLI providers; it requires explicit `openai_compatible` or `sources[]` session config to appear in the pool. User expectation: NIM should appear even without config. [[nim-not-auto-detected]]
 - **Provider cost ordering does not consult quota before suggesting order — quota-blocked providers still appear first (2026-07-13 audit-gate review).** The Gate-0 `suggestCostOrdering()` sorts purely by $/Mtok and tier; no quota headroom (remaining budget, rate-limit state, cold-start cap) is factored. A quota-saturated provider is still listed first, misleading the operator. Fix: pre-query quota state and demote/flag exhausted pools in the suggested order. [[quota-before-cost-ordering]]
 - **Provider tiering is per-provider, not per-model/effort — wrong granularity for multi-model backends (2026-07-13 audit-gate review).** The `capabilityTier` is pegged to the provider type (e.g., all claude-code → frontier, all codex → capable). A provider offering both frontier and fast models (e.g., openai-compatible with multiple models) assigns all its models the same tier. Fix: tier per `(provider, model, effort)` tuple, sourced from models.dev or declared config. [[per-model-tiering]]
+- **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
 - **Design (orchestrator-dispatch coupling): the dispatch system tries too hard to force specific assignments of nodes/packets to sources (2026-07-13, forward-track).** The current dispatch system/coordinator pre-assigns specific nodes to specific pools up-front, creating rigid bindings. Shift to the originally-intended model: decouple the `ClaimRegistry` so claims are pool-agnostic locks (simply checking out a node/task for an orchestrator, not binding it to a `poolId`), and move quota reservations to a **Just-in-Time (JIT)** model. The dispatch planner's role should be simplified to feeding the orchestrator clear, real-time metadata of each source's current quota headroom, rate limits (RPM/TPM), and capabilities, allowing the orchestrator to dynamically select and reserve quota JIT right before calling the provider. [[relax-dispatch-source-forcing]]
 - **repair-proxy dispatch integration — LANDED (Slices A/B/D + 429 refinement), residuals below.** Branch `feat/repair-proxy-jit-dispatch`; design of record `spec/repair-proxy-dispatch-integration.md`. audit-tools now discovers repair-proxy's `GET /registry` (via `SessionConfig.repair_proxy`) → expands a cost-aware top-K per reachable+keyed backend provider into per-`(provider,model)` `DispatchableSource[]` (`account`=backend provider → 429 folds per provider by default; `providers[name].per_model_limits` opts into per-model 429 isolation). Transport = unchanged `openai-compatible` provider against repair-proxy's new OpenAI front (`/v1/chat/completions`). Registry `composite_rank` → `DispatchableSource.capability_rank` → a `suggestCostOrdering` capability TIEBREAK (cost stays primary) + a stable saturated-pool demotion partition. This partially advances [[nim-not-auto-detected]] (discovery makes openai-compatible backends appear without hand-config, once `repair_proxy` is set), [[per-model-tiering]] (per-(provider,model) capability rank exists), and [[quota-before-cost-ordering]] (ordering mechanism exists). **Capability FEED SHIPPED 2026-07-15 (commit `81bd9105`, both halves, loop-core attested).** (Gap 2) `capability_rank` now threads `DispatchableSource`→`CapacityPool.declaredCapabilityRank`→summary `capability_rank`→`AdmissionPool.capabilityScore`, consumed as the finer cost-equal/same-tier dispatch tiebreak in `admissionLoop` comparators (never reorders vs cost or tier). (Gate-0 fold) `annotateConfirmedPool` gained a `sources` param; every dispatchable source (incl. async repair-proxy `/registry` expansion via new `gatherDispatchableSources`) folds into the ranked `CostCandidate` set carrying `declaredCost` (new authoritative field; 0=free) + `capabilityRank`, persists `source_pool_cost_order` on the shared confirmation, and `readConfirmedCostPositions` threads each source's confirmed position to dispatch by `model_id`. Source candidate keys namespaced (`source::`) to avoid provider/host key collision; registry fail-open hardened (malformed model entries filtered pre-sort). Live-validated against the running proxy (9 pools folded cost-ascending; the real CLI `provider_confirmation` gate prompt surfaces them). **Remaining residuals:** (1) **`saturated` half NOT wired** — the live-quota demotion of source pools at Gate-0 is unbuilt (capability half only; `suggestCostOrdering` still consumes `saturated`, so this is a feed, not a mechanism, gap — needs the confirmation builder to probe `quotaSourceSnapshot`/cooldown per source and set `CostCandidate.saturated`). Overlaps [[quota-before-cost-ordering]]. (2) **Owner-attended live e2e** — only the discovery→Gate-0 path is dogfood-validated; no full audit dispatch-to-completion through repair-proxy has been run (the multi-hour attended maximal-coverage run). Gate before merging the branch to main.
 - **Never-dispatched anti-cascade retry (deferred, needs clean repro) [[synth-scopeless-nodes-doomed-run]].**
@@ -133,24 +136,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   (`src/audit/cli/dispatch/hostFanoutGate.ts`): register the host pool + lease the whole panel (budget-only
   `fanoutMode` — no cold-start clamp / concurrency cap / context-fit gate, since fan-out is host-only and
   atomic), pause resumably at the wall, and SKIP the enrichment after the livelock bound. Residual (still
-  open, distinct): **ad-hoc** Agent fan-out (recon/review/compaction the host spawns outside these prescribed
+  open, distinct): **ad-hoc** Agent fan-out (recon/review the host spawns outside these prescribed
   steps) still has no per-agent ledger — see the "ledger-writer / acceptNode-inert-clean lap" sliver below.
 - **Design-review worker prompts — FOLLOW-UP (low, latent):** the solo `design_review_contract` branch
   still embeds the next-step advance command directly in its worker-facing prompt (`nextStepCommand.ts:391`)
   — same second-driver hazard already fixed for `design_review_parallel` (`e6b580d0`), and it has the host
   mark its own homework (vs [[delegate-adversarial-phases-to-separate-agent]]). Consider dispatching the
   contract review to an independent subagent there too.
-- **A doc-review auto-apply / hook re-reverted a COMMITTED owner decision during a process restart (2026-07-10, tool-should-decide).**
-  Mid-lap the process restarted; on restart, CLAUDE.md + `project-philosophy.md` came back MODIFIED — the change
-  reverted the DD-1 Own-vs-acquire→CLAUDE.md promotion the owner had explicitly chosen and I had already committed
-  (`f886066e`). `git reflog` showed NO git op caused it (only my own commits) → it was a DIRECT file edit by a hook /
-  the doc-review nightly re-applying its stale PRE-decision proposal. Caught by noticing the unexpected `M` in
-  `git status` before committing; restored the committed (owner-decided) version. **Trap:** after a process
-  restart, `git diff` your instruction files before committing — a background doc-review/hook can silently
-  re-assert a pre-decision version, and the reflog won't show it. **Tool fix (open):** the doc-review auto-apply
-  must not re-propose/re-apply an item whose decision is already recorded resolved (or already committed to the
-  tracked tree) — it should reconcile against HEAD, not a stale branch snapshot. Relates
-  [[enforce-robustness-in-tooling-not-host-discretion]].
+- **Doc-review auto-apply must reconcile against HEAD, not a stale branch snapshot (2026-07-10, tool-should-decide).**
+  **Tool fix (open):** the doc-review auto-apply must not re-propose/re-apply an item whose decision is already
+  recorded resolved (or already committed to the tracked tree) — it should reconcile against HEAD, not a stale
+  branch snapshot. Relates [[enforce-robustness-in-tooling-not-host-discretion]]. (The durable "git diff your
+  instruction files after a restart" trap this friction produced now lives under *Durable traps*.)
 - **Friction-walk lesson (lease-TTL / untracked-scope laps, recurring):** the SessionStart doc-review hook's
   clear-on-apply ledger (`doc-review-resolved.json`) is local-only — a worktree branched before a resolution
   commit lands on main re-surfaces already-resolved items from stale state (hit twice). Open tool fix: the
@@ -185,8 +182,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 - **Friction-walk lesson (ledger-writer / acceptNode-inert-clean lap):** `[[spec-degradation-and-doc-staleness]]`
   (verify premises before building; a pause/interrupt is not a content-veto) — see memory. Open tool slivers:
   (a) NIM `llm read` going down silently degrades the "route review to free NIM" plan to paid subagents with no
-  signal — a health-probe-then-route would remove the guesswork; (b) ad-hoc Agent fan-out (recon/review/
-  compaction) still has no per-agent ledger for a session-limit mid-edit death, unlike remediate-code's per-node
+  signal — a health-probe-then-route would remove the guesswork; (b) ad-hoc Agent fan-out (recon/review)
+  still has no per-agent ledger for a session-limit mid-edit death, unlike remediate-code's per-node
   worktrees + claims.
 
 - **External shared-logic audit V1–V7 residuals** (each deliberate, low-severity, documented at the code
@@ -315,6 +312,12 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Forward tracks
 
+- **Generate the executor↔artifact mapping from the registries (anti-drift).** `executor-catalog.md` +
+  `dependency-map.md` both render the executor→artifact relation, hand-maintained over `EXECUTOR_REGISTRY`
+  (`src/audit/orchestrator/executors.ts`) + `ARTIFACT_DEFINITIONS` (`src/audit/io/artifacts.ts`) — it drifted
+  once. The mapping is now consolidated to one hand-maintained home (`dependency-map.md`), but the durable fix
+  per "never hand-maintain a table someone else could generate" is to GENERATE the mapping from the two
+  registries at doc-build/check time. Forward track.
 - **End-to-end remediate-run smoke exercising the tool-owned gate (from the 2026-07-12 dogfood).** The
   node:test-gate bug ([[remediate-gate-nodetest-runner-bug]], fixed v0.32.61) blocked EVERY remediate run
   yet no gate/release check caught it: the gate command only runs in a live remediate *run*, and the unit
@@ -322,41 +325,6 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   phase-boundary/final gate against the actual repo tree (or a fixture repo with vitest tests) so a
   tool-owned gate that can't pass on a clean tree fails the release, not a dogfood run. Sibling of the
   packaged-bin smokes but for the *gate execution path*, not just `--version`.
-- **Shared-logic dedup bundle — one marginal item still open.**
-  - **Second-pass (2026-07-10) — 6 shipped.** A scout re-scan surfaced 7 leads; validated as
-    leads-not-verdicts ([[external-audit-catalogs-are-leads]]). SHIPPED (this branch): shared
-    `applyGuidanceFile` (`src/shared/intake/`); `normalizeForMatch`→`normalizeToContentTokens` rename;
-    shared `reconcileAdmissionLeasesFromQuotaFile` + `finalizeProviderLaunchResult` (`src/shared/dispatch/`,
-    also deleted the dead `RollingDispatchResult.observedUsage` relay); shared intent path-scope authority
-    `src/shared/intent/pathScope.ts` (`pathMatchesPrefix`/`globMatches`/`fileExclusionReason`) with the
-    audit/remediate structured-scope field coverage SYMMETRIZED (owner ruling: both honor
-    excluded_scope + disposition_overrides + must_not_touch; per-domain unit-vs-finding aggregation stays
-    forked); **shared cross-lens dedup core** `src/shared/findings/dedupe.ts`
-    (`crossLensDedupe(findings, policy) → {kept, mergeMap}` + shared `absorbFinding`/`mergeGrounding`/
-    `mergeAffectedFiles`) — audit `reporting/mergeFindings.ts` + remediate `dedup/crossLensDedup.ts` are now
-    thin policy-selecting adapters (categoryGate soft|hard · mutate|clone · exact-identity · grounding · sort
-    · break · onMerge). This is the direct payoff of the owner's one-core clarification — the "divergence" was
-    all POLICY on one identical skeleton, NOT a domain fork. Finished the picture by relocating audit's
-    same-lens pass + identity-key upsert (`sameLensDedupe`/`upsertFindingByIdentity`/`findingReEmissionKey`)
-    into `src/shared/findings/` too, and collapsing a duplicate `findingKey` in `systemicChallengeLoop.ts`.
-  - **Deliberately NOT built — Tier C (3), intra-remediate retry-cap helper** (5 `attempts >= CAP →
-    escalate` sites sharing a shape): marginal — the sites are 2-3 lines each over different state records;
-    a generic helper would abstract more than it saves. Revisit only if a 6th cap site appears.
-  - **Not-actionable but philosophy-consistent (core already shared; remainder is a legit per-mode DRAW,
-    not a fork):** projection-map capture/diff — the core (stable-serialize + leaf-diff + render) is already
-    single-sourced in `src/shared/reReview/projectionDiff.ts`; the residual `compute*Delta` traversals are
-    each mode's draw of its OWN artifacts (audit sync-from-bundle 7 fixed artifacts vs remediate
-    async-from-disk per-artifact dependency map) — genuinely different INPUT, not duplicated logic.
-  - **Rejected catalog rows (do NOT feed to remediation):** rolling-lifecycle unification as framed
-    (D-66/67 owns the correct bounded slices; full unification adjudicated WRONG), hybrid-spill sharing
-    (shipped — both sides call the same `HybridSpillCoordinator`/`planHybridDispatch`), generic
-    `DispatchPlanner` (admission math already shared; remainders are divergent read-only-vs-git-mutating
-    domains), `FindingAdmissibilityPolicy` (category error: evidence-integrity gate vs auto-apply safety
-    tier — the admissibility QUESTION differs, distinct from the dedup ALGORITHM above), `FreshnessGraph`
-    merge (artifact-DAG vs flat-hash are different abstractions — the real dup is the file-integrity pair in
-    Tier B), cross-orchestrator `ConvergenceController` (caps are not one mechanism),
-    grounding/step-contract/manifesting rows (already unified or remediate-only).
-
 - **Free/cheap multi-account "quota-arbitrage" dispatch tier (9router-inspired) — exploration → build.**
   Fan dispatch across genuinely-free backends + (later) N captured subscription-OAuth accounts, rotating on
   429/cooldown to exceed any single subscription's limit. Key finding: this is **extra SOURCE POOLS on our
@@ -583,6 +551,12 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 ## Durable traps (environment / tooling reference)
 
 Standing gotchas worth keeping for any agent (strong or weak):
+
+- **After a process restart, `git diff` your instruction files before committing.** A background
+  doc-review/hook can silently re-assert a pre-decision version of an instruction doc (e.g. CLAUDE.md,
+  `project-philosophy.md`), and `git reflog` won't show it (it's a direct file edit, not a git op). Caught
+  once (2026-07-10) by noticing an unexpected `M` in `git status`; restored the committed owner-decided
+  version. (The still-open tool fix — reconcile auto-apply against HEAD — lives under *Open bugs*.)
 
 - **npm 12.0.0 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).**
   Any child `npm install` of a package with a postinstall (e.g. the audit-tools tarball) silently skips the

@@ -17,6 +17,14 @@ declarative reference; that table is authoritative. For each artifact's exact
 filename/format/staleness, see [`artifact-contract.md`](artifact-contract.md)
 and [`dependency-map.md`](dependency-map.md) — not duplicated here.
 
+**Executor → artifact mapping lives in one place.** Which executor produces which
+artifact is hand-maintained authoritatively in
+[`dependency-map.md`](dependency-map.md) → *"Which executor produces each
+artifact"* (the by-artifact home). This catalog is the by-executor view and
+deliberately does **not** re-list producers, so the relation can't drift between
+two docs — consult dependency-map.md for the producing/refreshing executors of any
+artifact.
+
 Two executors carry `obligation_ids: []` and are never selected by the priority
 scan — they run only via an explicit `preferredExecutor` override:
 `runtime_validation_update_executor` (imported runtime-validation evidence) and
@@ -36,48 +44,48 @@ actual friction triage fires from the `present_report` terminal step
 
 ### Intake
 
-| Executor | Kind | Obligation | Produces |
+| Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `provider_confirmation_executor` | host_delegation | `provider_confirmation` | `provider_confirmation.json` |
-| `intake_executor` | deterministic | `repo_manifest`, `file_disposition` | `repo_manifest.json`, `file_disposition.json` (one call, one obligation with two artifact names) |
-| `intent_checkpoint_executor` | host_delegation | `intent_checkpoint_current` | `intent_checkpoint.json` |
-| `auto_fix_executor` | deterministic | `auto_fixes_applied` | `auto_fixes_applied.json` |
+| `provider_confirmation_executor` | host_delegation | `provider_confirmation` | — |
+| `intake_executor` | deterministic | `repo_manifest`, `file_disposition` | one call, one obligation with two artifact names |
+| `intent_checkpoint_executor` | host_delegation | `intent_checkpoint_current` | — |
+| `auto_fix_executor` | deterministic | `auto_fixes_applied` | — |
 
 ### Analysis
 
-| Executor | Kind | Obligation | Produces |
+| Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | `external_analyzer_acquisition.json` (triggers `external_analyzer_results.json`) |
-| `structure_executor` | deterministic | `structure_artifacts` | `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `graph_bundle.json`, `critical_flows.json`, `risk_register.json`, `git_history.json` — all in one call (merges any persisted `critical-flow-fallback.json` host enrichment into `critical_flows.json`) |
-| `critical_flow_fallback_executor` | host_delegation | `critical_flow_fallback_current` | `critical-flow-fallback.json` (the durable host-authored flow enrichment). Fires ONLY when the deterministic flow inference set `critical_flows.fallback_required`; emits a host step to author the enrichment, otherwise self-satisfies. Persisting the submission re-stales `critical_flows.json` so the structure phase merges it |
-| `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | `analyzer_capability.json` (+ refreshed `graph_bundle.json` when analyzer edges merge in) |
-| `design_assessment_executor` | deterministic | `design_assessment_current` | `design_assessment.json` (deterministic pass) |
-| `structure_decomposition_executor` | deterministic | `structure_decomposition_current` | `structure_decomposition.json` (overlay-and-delta structure operator) |
-| `charter_extraction_executor` | host_delegation | `charter_extraction_current` | `charter_register.json` (Phase C.1 charter layer — charters ONLY); at a deep+ ceiling emits an LLM charter-extraction step, otherwise the runner omits deterministically at the default shallow ceiling. Sets `deltas_pending` when it produced ≥1 subsystem for the independent delta pass |
-| `charter_delta_executor` | host_delegation | `charter_delta_current` | updates `charter_register.json` (Phase C.2 — the INDEPENDENT delta-miner routes+gates the deltas + goal_graph over the assembled charters); emits an LLM step when the register is `deltas_pending`, otherwise settles deterministically (no author marks its own homework) |
-| `design_review_contract` | host_delegation | `design_review_contract_completed` | updates `design_assessment.json` (contract-assessment mode — invariants/boundaries/obligations) |
-| `design_review_conceptual` | host_delegation | `design_review_conceptual_completed` | updates `design_assessment.json` (conceptual-critique mode — philosophy/alternatives) |
-| `charter_clarification_executor` | host_delegation | `charter_clarification_current` | `charter_clarification.json` (Phase D triangulation loop; assembles deterministically at a shallow ceiling / zero attention) |
-| `systemic_challenge_executor` | host_delegation | `systemic_challenge_current` | `systemic_challenge.json` (Phase E second-order-adversary loop-until-dry; omits deterministically at a shallow ceiling) |
-| `syntax_resolution_executor` | deterministic | `syntax_resolved` | `external_analyzer_results.json`, `syntax_resolution_status.json` |
+| `external_analyzer_acquisition_executor` | deterministic | `external_analyzers_current` | acquisition marker; triggers `external_analyzer_results.json` |
+| `structure_executor` | deterministic | `structure_artifacts` | emits all structure artifacts in one call (merges any persisted `critical-flow-fallback.json` host enrichment into `critical_flows.json`) |
+| `critical_flow_fallback_executor` | host_delegation | `critical_flow_fallback_current` | the durable host-authored flow enrichment. Fires ONLY when the deterministic flow inference set `critical_flows.fallback_required`; emits a host step to author the enrichment, otherwise self-satisfies. Persisting the submission re-stales `critical_flows.json` so the structure phase merges it |
+| `graph_enrichment_executor` | deterministic | `graph_enrichment_current` | records the graph-enrichment marker (+ refreshes `graph_bundle.json` when analyzer edges merge in) |
+| `design_assessment_executor` | deterministic | `design_assessment_current` | deterministic design pass |
+| `structure_decomposition_executor` | deterministic | `structure_decomposition_current` | overlay-and-delta structure operator |
+| `charter_extraction_executor` | host_delegation | `charter_extraction_current` | Phase C.1 charter layer — charters ONLY; at a deep+ ceiling emits an LLM charter-extraction step, otherwise the runner omits deterministically at the default shallow ceiling. Sets `deltas_pending` when it produced ≥1 subsystem for the independent delta pass |
+| `charter_delta_executor` | host_delegation | `charter_delta_current` | Phase C.2 — the INDEPENDENT delta-miner routes+gates the deltas + goal_graph over the assembled charters; emits an LLM step when the register is `deltas_pending`, otherwise settles deterministically (no author marks its own homework) |
+| `design_review_contract` | host_delegation | `design_review_contract_completed` | contract-assessment mode — invariants/boundaries/obligations |
+| `design_review_conceptual` | host_delegation | `design_review_conceptual_completed` | conceptual-critique mode — philosophy/alternatives |
+| `charter_clarification_executor` | host_delegation | `charter_clarification_current` | Phase D triangulation loop; assembles deterministically at a shallow ceiling / zero attention |
+| `systemic_challenge_executor` | host_delegation | `systemic_challenge_current` | Phase E second-order-adversary loop-until-dry; omits deterministically at a shallow ceiling |
+| `syntax_resolution_executor` | deterministic | `syntax_resolved` | — |
 
 ### Execution
 
-| Executor | Kind | Obligation | Produces |
+| Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `planning_executor` | deterministic | `planning_artifacts` | `scope.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_tasks.json` (+ `runtime_validation_report.json` when tasks exist), `audit_tasks.json`, `audit_plan_metrics.json`, `task_affinity_graph.json`, `requeue_tasks.json` — all in one call |
+| `planning_executor` | deterministic | `planning_artifacts` | emits all planning artifacts in one call |
 | `rolling_dispatch_executor` | host_delegation | `audit_tasks_completed` | consumes `audit_tasks.json`; drives host-subagent or in-process dispatch until results are produced |
-| `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | `external_analyzer_results.json` |
-| `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests into `audit_results.jsonl`; refreshes `coverage_matrix.json`, `flow_coverage.json`, `audit_tasks.json`, `audit_plan_metrics.json`, `requeue_tasks.json`, `access_memory.json` (+ `runtime_validation_tasks.json`/`runtime_validation_report.json` when planned) |
-| `runtime_validation_executor` | deterministic | `runtime_validation_current` | initial `runtime_validation_report.json` (+ `audit_tasks.json`/`audit_plan_metrics.json` when selective deepening adds tasks) — `runtime_validation_tasks.json` is produced by `planning_executor` and refreshed by `result_ingestion_executor` |
-| `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | refreshed `runtime_validation_report.json` from imported evidence (+ `audit_tasks.json`/`audit_plan_metrics.json` when selective deepening adds tasks) |
+| `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | imported normalized external-analyzer results |
+| `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests into `audit_results.jsonl` and refreshes the downstream planning/coverage artifacts |
+| `runtime_validation_executor` | deterministic | `runtime_validation_current` | produces the initial runtime-validation report (+ adds tasks/metrics when selective deepening applies) |
+| `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | refreshes the runtime-validation report from imported evidence (+ adds tasks/metrics when selective deepening applies) |
 
 ### Reporting
 
-| Executor | Kind | Obligation | Produces |
+| Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `synthesis_executor` | deterministic | `synthesis_current` | `audit-report.md` + `audit-findings.json` (co-produced) |
-| `synthesis_narrative_executor` | host_delegation | `synthesis_narrative_current` | `synthesis-narrative.json` (+ re-renders `audit-findings.json`/`audit-report.md` with the enriched narrative) |
+| `synthesis_executor` | deterministic | `synthesis_current` | co-produces the machine contract + its human render |
+| `synthesis_narrative_executor` | host_delegation | `synthesis_narrative_current` | optional LLM narrative pass (+ re-renders the contract/report with the enriched narrative) |
 
 ### Legacy / unreachable
 

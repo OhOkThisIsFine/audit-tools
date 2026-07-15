@@ -83,6 +83,39 @@ The orchestrator may mark completion only when:
 - no required requeue remains
 - no mandatory runtime validation obligation is unresolved in a way that blocks completion
 
+## State machine
+
+The orchestration above is expressed as a small state machine (following
+[audit-goals.md](audit-goals.md)).
+
+### Top-level states
+
+- `not_started`
+- `active`
+- `blocked`
+- `complete`
+
+The orchestrator advances through obligations in priority order (the *Priority
+order* section above is the canonical abstract ordering; the literal ordered chain
+of named obligations is the `PRIORITY` chain in
+`src/audit/orchestrator/nextStep.ts`).
+
+### Obligation-satisfaction rules
+
+- Excluded files must not create obligations.
+- `audit_tasks_completed` is satisfied only when all auditable coverage is done.
+- `runtime_validation_current` is satisfied when either no deterministic runtime
+  validation was planned, or all planned runtime tasks are resolved.
+- `synthesis_current` is satisfied only when `audit-report.md` is current.
+- The audit reaches `complete` only when no required obligation is missing or
+  stale and the final report exists.
+
+### Blocked behavior
+
+If deterministic progress cannot continue and the next step requires semantic
+review or explicit external input, the audit becomes `blocked` and writes only
+minimal resumable state.
+
 ## Anti-drift rule
 
 No new feature or component should be added without answering:

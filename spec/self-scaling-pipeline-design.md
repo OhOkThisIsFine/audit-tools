@@ -10,15 +10,14 @@ contracts → seam → finalize → critique → obligation-ledger → cyclic-se
 → assessment → counterexample → judge(+repair) → impl-DAG → review → dispatch → triage → close)
 applies the **same full ceremony to every input regardless of size or risk**. Empirically
 (laps 1–3) that made a one-line log-removal cost roughly the same orchestration as a
-concurrency-correctness change. The prior mitigation — a separate `leanFastPath` that *skipped*
-the whole design ceremony for pre-vetted structured-audit findings — was too trusting
-(remediation routinely re-finds errors in audit conclusions); it has since been softened (see
-Mechanisms, Dial A) to a mandatory light-review floor rather than a zero-scrutiny skip. It
-remained too narrow in scope (document/backlog input couldn't reach it) and structurally-forked
-(a separate eligible/ineligible gate rather than a point on the Dial A/B continuum). The A6
-target ("self-scaling pipeline, not forked paths") — collapsing `leanFastPath` into the dial as
-its lowest-risk tier rather than keeping it as separate code — shipped (`docs/backlog.md`
-doc-review D-68); see Mechanisms, Dial A/B below for the resulting shape.
+concurrency-correctness change. A separate `leanFastPath` that *skips*
+the whole design ceremony for pre-vetted structured-audit findings is the wrong shape: it is too
+trusting (remediation routinely re-finds errors in audit conclusions), too narrow in scope
+(document/backlog input can't reach it), and structurally-forked (a separate eligible/ineligible
+gate rather than a point on the Dial A/B continuum). Per the A6 target ("self-scaling pipeline,
+not forked paths"), the lowest-risk case is the lowest point of the dial, not separate code: Dial A
+enforces a mandatory light-review floor rather than a zero-scrutiny skip — see Mechanisms, Dial A/B
+below for the shape.
 
 ## Two distinct cost drivers (measured)
 
@@ -43,7 +42,7 @@ Critique / counterexample scrutiny scales with the assessed risk/complexity:
 **Floor is *light*, never *off*.** Nothing — including pre-vetted structured-audit findings — gets
 zero scrutiny, because remediation legitimately catches upstream (audit) errors. The
 structured-audit lean path now runs one bounded light adversarial pass before proceeding
-(`interpretLeanLightReviewVerdict`, now in `src/remediate/riskSignal.ts`), escalating to the full
+(`interpretLeanLightReviewVerdict` in `src/remediate/riskSignal.ts`), escalating to the full
 pipeline on any concern — a mandatory light-review floor, not a zero-scrutiny fork.
 
 ### Dial B — phase granularity / round-trips (the ceremony saving)

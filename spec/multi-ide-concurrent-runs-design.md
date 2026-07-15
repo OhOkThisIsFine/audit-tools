@@ -175,16 +175,16 @@ external linter reformat of `intent_checkpoint.json` still causes re-derive chur
      (`heartbeat`/`isClaimed` + token compare); `false` ⇒ **discard result, refuse the merge**. This
      closes the narrow race where revocation lands between A's last heartbeat and its ingest, enforced at
      the single merge chokepoint — so correctness never depends on the heartbeat timer's granularity.
-  Layer (1) makes revocation *timely*; layer (2) makes it *airtight*. The lease length and heartbeat
-  interval are a `(taskLeaseMs, heartbeatMs)` pair with `heartbeatMs << taskLeaseMs << (typical task
-  duration ceiling)`; concrete values set in slice 2.
+  Layer (1) makes revocation *timely*; layer (2) makes it *airtight*.
 
   **The two layers map onto the two claim lifetimes.** Layer (1)'s continuous heartbeat
-  re-validation (`withClaimHeartbeat`) fits the short-lived coordination mutexes (bundle-mutation,
-  `phase:main`), where a live heartbeat spans the whole critical section. The long-lived per-task /
-  per-node *execution* claims (`task-claims.json`, remediate's node-claims) hold a long lease across an
-  out-of-process worker run with no live heartbeat, so they rest on layer (2) — the merge-time ownership
+  re-validation (`withClaimHeartbeat`) is wired only to the short-lived coordination mutexes
+  (bundle-mutation, `phase:main`), where a live heartbeat spans the whole critical section
+  (`CLAIM_HEARTBEAT_MS` / `PHASE_CLAIM_HEARTBEAT_MS` = 10_000). The long-lived per-task / per-node
+  *execution* claims (`task-claims.json`, remediate's node-claims) hold a long lease across an
+  out-of-process worker run with no live heartbeat — they are **lease-only** (20-min TTL,
+  `AUDIT_TASK_CLAIM_LEASE_MS` = 20 · 60_000), resting entirely on layer (2): the merge-time ownership
   gate at the single ingest chokepoint (`mergeAndIngestCommand.ts` → `partitionByOwnership`), backed by
-  dedup-by-`task_id` / dedup-by-id — as the airtight backstop against a rare lease overrun. Extending
-  continuous heartbeat re-validation over the long-lived execution claims is the natural forward
-  extension.
+  dedup-by-`task_id` / dedup-by-id, as the airtight backstop against a rare lease overrun. Extending
+  continuous heartbeat re-validation over the long-lived execution claims is the still-open slice-3
+  work (tracked in `docs/backlog.md`).
