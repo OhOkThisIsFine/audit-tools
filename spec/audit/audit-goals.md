@@ -75,7 +75,7 @@ LLM responsibilities:
   (second-order adversarial) challenge**; and, after synthesis, the optional additive
   **synthesis-narrative** themes layer. This layer is bounded and recorded like all LLM work
   (Invariant 3); the mechanism internals live in
-  [`spec/conceptual-design-review-design.md`](conceptual-design-review-design.md).
+  [`spec/conceptual-design-review-design.md`](../conceptual-design-review-design.md).
 
 ## Auditable scope
 

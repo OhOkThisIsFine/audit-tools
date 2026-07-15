@@ -83,7 +83,7 @@ peer works a *different* unit but shares run state, so each needs its own step/p
 Implement is already claim-based rolling dispatch over a shared `ClaimRegistry` — cross-IDE peers slot in
 with no change to the claim mechanism. Remaining:
 
-- **Serial phases claim `phase:<name>`** (plan / document / triage / close) so two joining peers don't
+- **Serial phases claim a single `phase:main` mutex** (plan / triage / close) so two joining peers don't
   both plan; the non-winner picks an implementable claimable block or gets a cooperative-wait step.
 - **A plain second `next-step` enters the rolling join path** rather than contending on `state.json`
   (largely true via rolling today — verify + wire the entry so it's the default, not opt-in).

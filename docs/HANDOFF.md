@@ -55,21 +55,8 @@
 
 ## ▶ IMMEDIATE NEXT — the bounded forward remainder (quota cluster shipped)
 
-**EXECUTED 2026-07-12 — the high-signal self-audit remediation re-run was a DIAGNOSTIC success, not a fix-landing one.**
-Driving it on codex-only (headless in-process, `REMEDIATE_HOST_CAN_DISPATCH=false` + `provider:codex` +
-`REMEDIATE_SKIP_FINAL_GATE=1`) surfaced the real root cause and 2 dispatch bugs — **all fixed + shipped v0.32.62**
-([[synth-scopeless-nodes-doomed-run]]): (1) the force-synth collapsed 168 well-formed findings into **16
-undispatchable nodes with EMPTY affected_files/touched_files** (scope only in prose) → workers blind, nodes
-never dispatched, whole-DAG cascade-block. Fixed: synth now derives scope from module `file_scope`. (2) flaky
-tool-owned gate `--retry`. (3) missing-result diagnosability. **The run itself stayed doomed on this degenerate
-slice** and is PAUSED at `waiting_for_triage` on branch `remediation/selfaudit-2026-07-11-highsignal-slice`
-(14 cascade-blocked, roots false-positive) — not worth resuming; a FRESH audit→remediate on a clean plan is the
-right re-validation (the synth fix means new plans carry real scope). The audit artifacts were deleted this
-session for a parallel fresh audit in another IDE. Residuals: the never-dispatched anti-cascade retry + the
-`rollingDispatch` test de-flake + a dispatch-boundary "no scope-less dispatch" guard — all in `docs/backlog.md`.
-
-The 2026-07-11 maximal-coverage run surfaced the dispatch/quota bug batch; its fixes shipped in the
-current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
+The 2026-07-11 maximal-coverage run and the 2026-07-12 self-audit re-run both surfaced dispatch/quota
+bugs; fixes shipped in the current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
 **full-suite-verify before each loop-core commit**:
 
 1. **critical-flow LLM pass — BUILD it (owner decision locked). NOT loop-core → lower risk.**
