@@ -11,13 +11,9 @@
 - **Current version = `package.json`** (authoritative). Per-lap shipped detail is NOT narrated here
   (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
-- **The maximal-coverage validation run was executed 2026-07-11; its dispatch/quota fix cluster shipped
-  in the current release** (Fix 2 cold-start token-sizing + host-usage recording; Fix 3 token-native
-  spill degradation; credit-exhaustion pool-death class; account-axis 429 cooldown fold; three-tier
-  unmatched-quota harvest; confirm-once; Gate-0 `sources[]` roster; contract-review double-driver). All
-  major code tracks remain complete (host-path quota enforcement ✅ 2026-07-10; access-memory ✅; cost↔speed
-  dial ✅; admission control ✅; arbitrage Phase-0 CODE-COMPLETE; conceptual design review ✅). Next is the
-  bounded forward remainder below + a confirming re-run.
+- **The maximal-coverage validation run's dispatch/quota fix cluster shipped in the current release.**
+  All major code tracks remain complete (see Track status below). Next is the bounded forward remainder
+  below + a confirming re-run.
 - **Local env note:** the box runs npm 12.0.0 — it blocks dependency install scripts by default and can
   emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable traps
   before any manual `npm install -g` / packaged-install work.
