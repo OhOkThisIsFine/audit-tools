@@ -25,7 +25,8 @@ import { join } from "node:path";
 import {
   writeJsonFile,
   readOptionalJsonFile,
-  readValidatedSessionConfig,
+  readValidatedRepoSessionIntent,
+  resolveSessionConfig,
   formatValidationIssues,
   hashContent,
   isRecord,
@@ -1647,11 +1648,15 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
     // Concurrency cap from the shared scheduler: session config is loaded from
     // the same path decideNextStep uses, env + on-disk learned quota feed the
     // same wave-sizing implement dispatch consumes. itemCount = module count.
+    // G2: scheduleWave sizes concurrency from dispatch fields, so resolve the disk
+    // INTENT to driver-self-only (remediate has no `--auditor` descriptor yet — G6). A
+    // programmatic `options.sessionConfig` (effective) bypasses the seam.
+    const intentForSchedule = await readValidatedRepoSessionIntent(
+      join(root, "session-config.json"),
+    );
     const sessionConfig =
       options.sessionConfig ??
-      (await readValidatedSessionConfig(
-        join(root, "session-config.json"),
-      ));
+      (intentForSchedule ? resolveSessionConfig(intentForSchedule, null) : undefined);
     const schedule: WaveScheduleResult = await scheduleWave({
       sessionConfig: sessionConfig ?? null,
       itemCount: modules.length,

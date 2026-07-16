@@ -268,7 +268,9 @@ export type {
   DesignReviewConfig,
   AnalyzerSetting,
   SessionConfig,
-  HostDispatchInventory,
+  RepoSessionIntent,
+  RepoDispatchConfig,
+  DispatchInventoryField,
 } from "./types/sessionConfig.js";
 export {
   PROVIDER_NAMES,
@@ -280,9 +282,9 @@ export {
   resolveHostDispatchCapability,
   resolveRollingEngineFlag,
   assertHostProviderName,
-  applyDispatchInventory,
   DISPATCH_INVENTORY_FIELDS,
 } from "./types/sessionConfig.js";
+export { resolveSessionConfig } from "./config/resolveSessionConfig.js";
 
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
@@ -759,7 +761,8 @@ export {
 } from "./validation/findingsReport.js";
 export {
   validateSessionConfig,
-  readValidatedSessionConfig,
+  validateRepoSessionIntent,
+  readValidatedRepoSessionIntent,
   isBareExecutableName,
   isDirectExecutablePath,
   isSupportedConfiguredCommand,

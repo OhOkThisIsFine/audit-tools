@@ -6,9 +6,10 @@ import {
 import { join, resolve } from "node:path";
 import type {
   SessionConfig,
+  RepoSessionIntent,
 } from "audit-tools/shared";
 import {
-  applyDispatchInventory,
+  resolveSessionConfig,
   applyGuidanceFile,
   buildSharedProviderConfirmation,
   deriveSourcePoolDisplayFromSources,
@@ -42,10 +43,7 @@ import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.j
 import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
-import {
-  loadSessionConfig,
-  persistHostProvider,
-} from "../supervisor/sessionConfig.js";
+import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { ensureSupervisorDirs } from "../io/runArtifacts.js";
 import {
   persistConfigErrorHandoff,
@@ -240,17 +238,15 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   const hostOutputTokens = auditorSelf.output_tokens ?? null;
   const hostModelRoster = auditorSelf.roster ?? null;
   const hostModelId = auditorSelf.model_id ?? null;
-  const hostInventory = auditorDescriptor?.inventory ?? null;
-  // B1: an explicit --host-provider override is folded onto session-config.json
-  // BEFORE load, so the loaded config (and the disk-reloading semanticReviewStep)
-  // key the fan-out to the ACTUAL conversation host. Unset ⇒ auto-detected from env.
-  const hostProvider = getHostProvider(argv);
-  let sessionConfig: SessionConfig;
+  const hostSources = auditorDescriptor?.sources;
+  // G2: the driver's provider identity rides `descriptor.self.provider`; the standalone
+  // `--host-provider` flag (retained) overrides it. Folded onto the forward descriptor
+  // below and applied by `resolveSessionConfig` — no disk persistence (`persistHostProvider`
+  // retired: the provider is per-auditor capability, never written back to the repo config).
+  const hostProvider = getHostProvider(argv) ?? auditorSelf.provider ?? null;
+  let intent: RepoSessionIntent;
   try {
-    if (hostProvider !== null) {
-      await persistHostProvider(artifactsDir, hostProvider);
-    }
-    sessionConfig = await loadSessionConfig(artifactsDir);
+    intent = await loadSessionConfig(artifactsDir);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     await persistConfigErrorHandoff({
@@ -277,16 +273,22 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
 
   const hostCanDispatch = resolveHostDispatchCapability({
     explicit: hostCanDispatchSubagents,
-    sessionConfig,
+    sessionConfig: intent,
   });
 
-  // The current driver's capability handshake, built once from this invocation's
-  // parsed `--host-*` flags. It RIDES every continue-command this step emits so a
-  // bare re-invocation preserves the handshake instead of falling back to the
-  // stored session config — the founding-bug robustness fix (a *different* driver
-  // entering through its own loader overrides with its own flags).
+  // The current driver's RESOLVED descriptor, built once from this invocation's
+  // `--auditor` handshake (+ the retained `--host-provider` override). It RIDES every
+  // continue-command this step emits so a bare re-invocation preserves the driver's
+  // capability + provider + reachable sources instead of falling back to the stored
+  // config — the founding-bug robustness fix (a *different* driver entering through its
+  // own loader overrides with its own `--auditor`).
   const hostDescriptor: AuditorDescriptor = {
     self: {
+      // Provider + host/IDE launch blocks: the driver's identity + own launch transport.
+      ...(hostProvider != null ? { provider: hostProvider } : {}),
+      ...(auditorSelf.claude_code ? { claude_code: auditorSelf.claude_code } : {}),
+      ...(auditorSelf.vscode_task ? { vscode_task: auditorSelf.vscode_task } : {}),
+      ...(auditorSelf.antigravity ? { antigravity: auditorSelf.antigravity } : {}),
       // The RESOLVED capability rides forward (not the raw handshake bit), so a
       // bare resume preserves it — the founding-bug robustness fix.
       can_dispatch_subagents: hostCanDispatch,
@@ -300,44 +302,41 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       ...(hostModelRoster != null ? { roster: hostModelRoster } : {}),
       ...(hostModelId != null ? { model_id: hostModelId } : {}),
     },
-    inventory: hostInventory,
+    ...(hostSources !== undefined ? { sources: hostSources } : {}),
   };
 
-  // 2a-ii: the EFFECTIVE dispatch config every dispatch/provider consumer reads —
-  // the per-auditor handshake inventory overlaid onto the repo session-config
-  // (spec/unified-dispatch-worker-model.md). `applyDispatchInventory` returns the
-  // repo config UNCHANGED when no `--host-inventory` was reported (today's every
-  // host, until 2a-iii wires the loaders) — the deprecated repo-config fallback —
-  // and otherwise takes the inventory as authoritative WHOLESALE (no repo dispatch
-  // fields leak). Intent fields (synthesis/analyzers/graph/quota/…) are identical to
-  // `sessionConfig`, so the raw config below stays correct for those reads; only the
-  // DISPATCH consumers switch to the effective config. Persistence is untouched — the
-  // config store re-reads disk under lock, so an in-memory overlay can never write
-  // inventory back into the repo config.
-  const effectiveConfig = applyDispatchInventory(sessionConfig, hostInventory);
+  // G2: the EFFECTIVE dispatch config every dispatch/provider consumer reads — the
+  // per-auditor descriptor (`self.provider` + launch blocks + `sources[]`) resolved over
+  // the repo INTENT (`resolveSessionConfig`, spec/unified-dispatch-worker-model.md). The
+  // repo intent carries NO dispatch fields, so the backend/launch set comes wholly from
+  // the descriptor — never inherited across auditors. Intent fields (synthesis/analyzers/
+  // graph/quota/…) are preserved identically; only the DISPATCH consumers switch to the
+  // effective config. Persistence is untouched — the store reads/writes intent only, so an
+  // in-memory resolve can never write dispatch inventory back into the repo config.
+  const effectiveConfig = resolveSessionConfig(intent, hostDescriptor);
 
   const result = await runDeterministicForNextStep({
     root,
     artifactsDir,
     selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
-    timeoutMs: getTimeoutMs(argv, sessionConfig),
-    narrativeEnabled: sessionConfig.synthesis?.narrative !== false,
-    analyzers: sessionConfig.analyzers,
-    graphLlmEdgeReasoning: sessionConfig.graph?.llm_edge_reasoning,
+    timeoutMs: getTimeoutMs(argv, intent),
+    narrativeEnabled: intent.synthesis?.narrative !== false,
+    analyzers: intent.analyzers,
+    graphLlmEdgeReasoning: intent.graph?.llm_edge_reasoning,
     // Slice D: enable external-analyzer acquisition on the real CLI path (default-on;
     // session config can opt out). The executor builds its own global-`fetch`
     // adapter when no fetcher is injected. The unit/integration suite never reaches
     // here, so acquisition stays a hermetic no-op in tests.
     externalAcquisition: {
-      enabled: sessionConfig.external_acquisition?.enabled !== false,
-      consentToken: sessionConfig.external_acquisition?.consent_token,
-      analyzers: sessionConfig.analyzers,
+      enabled: intent.external_acquisition?.enabled !== false,
+      consentToken: intent.external_acquisition?.consent_token,
+      analyzers: intent.analyzers,
     },
     since: getFlag(argv, "--since"),
-    // 2a-ii: the fold's dispatch reads (buildAuditSourcePools / driveRollingAuditDispatch
+    // G2: the fold's dispatch reads (buildAuditSourcePools / driveRollingAuditDispatch
     // / planHybridDispatch / resolvesToInProcessDispatchProvider) key off this, so they
-    // see the per-auditor handshake inventory, not the repo config. Intent reads folded
-    // in here are identical either way (the overlay preserves every intent field).
+    // see the per-auditor descriptor's resolved backends, not the repo config. Intent
+    // reads folded in here are identical either way (resolve preserves every intent field).
     sessionConfig: effectiveConfig,
     // Defect-1: the resolved attended/headless discriminator, so the fold demotes a
     // configured in-process backend to a source pool (attended) rather than letting it
@@ -397,7 +396,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     await mkdir(join(artifactsDir, "incoming"), { recursive: true });
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const prompt = renderDesignReviewPrompt(result.bundle, {
-      max_units: sessionConfig.design_review?.max_units,
+      max_units: intent.design_review?.max_units,
     });
     const fullPrompt = [
       prompt,
@@ -455,7 +454,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
 
     const conceptualSettings = resolveConceptualReviewSettings(
       result.bundle,
-      sessionConfig,
+      intent,
     );
     const contractReReview = await buildDesignReReviewSection(
       artifactsDir,
@@ -567,7 +566,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       "contract",
     );
     const prompt = [
-      renderContractReviewPrompt(result.bundle, { max_units: sessionConfig.design_review?.max_units }),
+      renderContractReviewPrompt(result.bundle, { max_units: intent.design_review?.max_units }),
       "## Results path",
       "",
       "Write the JSON array of contract-review findings to:",
@@ -620,7 +619,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
     const conceptualSettings = resolveConceptualReviewSettings(
       result.bundle,
-      sessionConfig,
+      intent,
     );
     const conceptualReReview = await buildDesignReReviewSection(
       artifactsDir,
@@ -1135,11 +1134,11 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     hostCanSelectSubagentModel,
     selectedExecutor: result.selectedExecutor,
     inProcessMadeProgress: result.inProcessMadeProgress,
-    // 2a-ii: the per-auditor handshake inventory. renderSemanticReviewStep re-reads
-    // (and re-validates, fail-closed) the config from disk for its host-review
-    // dispatch, so it overlays the inventory over THAT config itself — and rides it
-    // on the continue-command it emits so a bare resume preserves it.
-    inventory: hostInventory,
+    // G2: the RESOLVED descriptor. renderSemanticReviewStep loads the repo INTENT from
+    // disk (fail-closed re-validated) and resolves THIS descriptor over it for its
+    // host-review dispatch — and rides it on the continue-command it emits so a bare
+    // resume preserves the driver's provider + sources.
+    descriptor: hostDescriptor,
   });
   console.log(JSON.stringify(step, null, 2));
 }

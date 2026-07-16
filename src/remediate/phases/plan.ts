@@ -12,7 +12,7 @@ import { isValidAuditFindingsReport } from "audit-tools/shared";
 import { readdirSync, statSync } from "node:fs";
 import { snapshotAffectedFileHashes } from "../utils/fileIntegrity.js";
 import {
-  readValidatedSessionConfig,
+  readValidatedRepoSessionIntent,
   resolveContextBudget,
   estimateTokensFromBytes,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
@@ -533,11 +533,12 @@ export async function applyPlanPipeline(
   // Merge blocks whose findings touch a shared file.
   blocks = mergeBlocksSharingFiles(blocks, findings, options.root);
 
-  // Split blocks that would exceed the implementation agent's context budget.
-  const sessionConfig = await readValidatedSessionConfig(
+  // Split blocks that would exceed the implementation agent's context budget. The
+  // context budget derives from INTENT fields (block_quota), so the raw intent suffices.
+  const intent = await readValidatedRepoSessionIntent(
     join(options.root, "session-config.json"),
   );
-  const contextBudget = resolveContextBudgetFromConfig(sessionConfig ?? null);
+  const contextBudget = resolveContextBudgetFromConfig(intent ?? null);
   blocks = splitBlocksByContextBudget(blocks, findings, options.root, contextBudget);
 
   // Record baseline file hashes for the integrity check that runs before dispatch.

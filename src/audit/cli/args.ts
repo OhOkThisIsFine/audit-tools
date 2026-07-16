@@ -12,9 +12,11 @@ import {
   resolveRepoRoot,
   resolveHostDispatchCapability as sharedResolveHostDispatchCapability,
   assertHostProviderName,
+  validateSessionConfig,
+  formatValidationIssues,
   type ProviderName,
   type SessionConfig,
-  type HostDispatchInventory,
+  type DispatchableSource,
   type AuditorDescriptor,
   type AuditorSelf,
 } from "audit-tools/shared";
@@ -232,15 +234,11 @@ export function getHostModel(argv: string[]): string | null {
 
 /**
  * Parse the current driver's dispatch-capability handshake, carried as ONE
- * `--auditor <json>` flag (G1 collapsed the former N `--host-*` scalar flags —
- * `--host-context-tokens`/`--host-output-tokens`/`--host-models`/`--host-model-id`/
- * `--host-max-active-subagents`/`--host-inventory` and the three capability
- * booleans — onto `descriptor.self` + `descriptor.inventory`). Malformed JSON or a
- * non-object throws loudly (mirrors the retired `--host-inventory` parser) so a
- * mistyped handshake fails here rather than silently downgrading. `null` when the
- * flag is absent. The nested `self` is normalized to an object; `inventory` is
- * normalized to `HostDispatchInventory | null` (absence ⇒ null, preserving the
- * null-vs-`{}` semantics `applyDispatchInventory` depends on).
+ * `--auditor <json>` flag (G1 collapsed the former N `--host-*` scalar flags onto
+ * `descriptor.self`; G2 folded the driver's provider identity + own host/IDE launch
+ * blocks onto `self` and resliced the per-backend dispatch blocks to a top-level
+ * `sources[]`). Malformed JSON or a non-object throws loudly so a mistyped handshake
+ * fails here rather than silently downgrading. `null` when the flag is absent.
  * [[capability-is-per-auditor-not-per-audit]] [[unified-dispatch-worker-model]]
  */
 export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
@@ -271,6 +269,16 @@ export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
   // (silent-drop of a non-positive-int, resolving to the conservative default);
   // booleans/model_id mirror their old parsers (drop a non-boolean / blank id).
   const self: AuditorSelf = {};
+  // `self.provider` is the driver's identity + quota-attribution key: a mistyped
+  // value would mis-charge dispatch fan-out to the wrong account, so it throws
+  // loudly here (same strictness as the retired `--host-provider` parser).
+  if (rawSelf.provider !== undefined) {
+    if (typeof rawSelf.provider !== "string") {
+      throw new Error("--auditor `self.provider` must be a string.");
+    }
+    assertHostProviderName(rawSelf.provider);
+    self.provider = rawSelf.provider;
+  }
   if (typeof rawSelf.model_id === "string" && rawSelf.model_id.trim().length > 0) {
     self.model_id = rawSelf.model_id.trim();
   }
@@ -283,6 +291,8 @@ export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
   if (outputTokens !== undefined) self.output_tokens = outputTokens;
   const maxActiveSubagents = normalizePositiveInteger(rawSelf.max_active_subagents);
   if (maxActiveSubagents !== undefined) self.max_active_subagents = maxActiveSubagents;
+  const parallelWorkers = normalizePositiveInteger(rawSelf.parallel_workers);
+  if (parallelWorkers !== undefined) self.parallel_workers = parallelWorkers;
   if (typeof rawSelf.can_dispatch_subagents === "boolean") {
     self.can_dispatch_subagents = rawSelf.can_dispatch_subagents;
   }
@@ -292,23 +302,53 @@ export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
   if (typeof rawSelf.can_select_subagent_model === "boolean") {
     self.can_select_subagent_model = rawSelf.can_select_subagent_model;
   }
-  const rawInventory = obj.inventory;
-  if (
-    rawInventory !== undefined &&
-    rawInventory !== null &&
-    (typeof rawInventory !== "object" || Array.isArray(rawInventory))
-  ) {
-    throw new Error("--auditor `inventory` must be a JSON object or null.");
+  // The driver's OWN launch transport (only the host/IDE providers that are NOT
+  // generic dispatchable sources). Passed through structurally like the retired
+  // inventory blocks; deep-validated downstream by the session-config validator when
+  // resolved. A non-object is dropped rather than throwing (mirrors the old
+  // pass-through), since these are optional operator tuning, not identity keys.
+  for (const key of ["claude_code", "vscode_task", "antigravity"] as const) {
+    const block = rawSelf[key];
+    if (block && typeof block === "object" && !Array.isArray(block)) {
+      (self as Record<string, unknown>)[key] = block;
+    }
   }
-  const inventory: HostDispatchInventory | null =
-    rawInventory === undefined
-      ? null
-      : (rawInventory as HostDispatchInventory | null);
+  const rawSources = obj.sources;
+  if (
+    rawSources !== undefined &&
+    rawSources !== null &&
+    !Array.isArray(rawSources)
+  ) {
+    throw new Error("--auditor `sources` must be a JSON array.");
+  }
+  const sources: DispatchableSource[] | undefined = Array.isArray(rawSources)
+    ? (rawSources as DispatchableSource[])
+    : undefined;
+  // Validate the descriptor's DISPATCH content through the SAME shape/injection checks
+  // the disk-load boundary applies (`validateSessionConfig`): descriptor `sources` +
+  // launch blocks are host-supplied and must be mechanically validated, never trusted
+  // (auditor-agnostic robustness — the descriptor is now the channel that carries what
+  // the repo config used to). A malformed source `quota` (the C1 over-sizing guard) or a
+  // command-injection-shaped launch command fails HERE at the parse boundary, not deep in
+  // dispatch. `provider` is left unset for this check so a launch-block source does not
+  // trip the "required section" validation. Errors throw; warnings are not surfaced here
+  // (a descriptor cannot be persisted, so there is nothing durable to flag).
+  const descriptorDispatchErrors = validateSessionConfig({
+    ...(sources !== undefined ? { sources } : {}),
+    ...(self.claude_code ? { claude_code: self.claude_code } : {}),
+    ...(self.vscode_task ? { vscode_task: self.vscode_task } : {}),
+    ...(self.antigravity ? { antigravity: self.antigravity } : {}),
+  }).filter((issue) => issue.severity === "error");
+  if (descriptorDispatchErrors.length > 0) {
+    throw new Error(
+      `--auditor descriptor is invalid:\n${formatValidationIssues(descriptorDispatchErrors).replace(/^ {2}/gm, "- ")}`,
+    );
+  }
   return {
     ...(typeof obj.auditor_id === "string" ? { auditor_id: obj.auditor_id } : {}),
     ...(typeof obj.resolved_at === "number" ? { resolved_at: obj.resolved_at } : {}),
     self,
-    inventory,
+    ...(sources !== undefined ? { sources } : {}),
   };
 }
 

@@ -74,7 +74,6 @@ async function persistEdgeReasoningState(root, artifactsDir, { flag, strip = fal
     join(artifactsDir, "session-config.json"),
     JSON.stringify(
       {
-        provider: "worker-command",
         analyzers: { typescript: "skip" },
         graph: { llm_edge_reasoning: flag },
       },
@@ -95,7 +94,7 @@ test.concurrent("next-step emits a single host edge-reasoning step, then rewrite
     // No callable subagent facility → a single one-shot host step.
     const paused = JSON.parse(
       (await runWrapper(
-        ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":false}}'],
+        ["next-step", "--auditor", '{"self":{"provider":"worker-command","can_dispatch_subagents":false}}'],
         { cwd: root },
       )).stdout,
     );
@@ -129,7 +128,7 @@ test.concurrent("next-step emits a single host edge-reasoning step, then rewrite
 
     // Re-run: the orchestrator applies the rewrites inside graph enrichment.
     await runWrapper(
-      ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":false}}'],
+      ["next-step", "--auditor", '{"self":{"provider":"worker-command","can_dispatch_subagents":false}}'],
       { cwd: root },
     );
 
@@ -164,7 +163,7 @@ test.concurrent("next-step emits a dispatch task carrying the edge-reasoning pro
 
     const step = JSON.parse(
       (await runWrapper(
-        ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":true}}'],
+        ["next-step", "--auditor", '{"self":{"provider":"worker-command","can_dispatch_subagents":true}}'],
         { cwd: root },
       )).stdout,
     );
@@ -202,7 +201,7 @@ test.concurrent("next-step does not pause for edge reasoning when the flag is of
 
     const step = JSON.parse(
       (await runWrapper(
-        ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":false}}'],
+        ["next-step", "--auditor", '{"self":{"provider":"worker-command","can_dispatch_subagents":false}}'],
         { cwd: root },
       )).stdout,
     );
@@ -234,7 +233,7 @@ test.concurrent("next-step does not pause for edge reasoning when there are no l
 
     const step = JSON.parse(
       (await runWrapper(
-        ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":false}}'],
+        ["next-step", "--auditor", '{"self":{"provider":"worker-command","can_dispatch_subagents":false}}'],
         { cwd: root },
       )).stdout,
     );

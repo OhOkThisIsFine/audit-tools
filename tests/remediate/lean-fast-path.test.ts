@@ -141,10 +141,17 @@ const harness = createNextStepHarness(".test-lean-fast-path");
 const { REPO_DIR, ARTIFACTS_DIR, writeReadyStructuredAuditIntake, approveReviewGate } = harness;
 
 describe("decideNextStep — lean path = the low risk tier (integration)", () => {
+  let priorRollingEngine;
   beforeEach(async () => {
     await harness.resetTestRepo();
+    // G2: dispatch.rolling_engine is unrepresentable on disk; pin the wave opt-out via
+    // the sanctioned env override so the post-fast-path step is a clean dispatch_implement.
+    priorRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
   });
   afterEach(async () => {
+    if (priorRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
+    else process.env.REMEDIATE_ROLLING_ENGINE = priorRollingEngine;
     await harness.cleanupTestRepo();
   });
 
@@ -154,12 +161,6 @@ describe("decideNextStep — lean path = the low risk tier (integration)", () =>
     // Ack the resume gate the planning→implementing fold passes through (as the
     // sibling planning-state dispatch tests do).
     await harness.acknowledgeResume();
-    // Pin the wave opt-out so the post-fast-path step is a clean dispatch_implement.
-    await writeFile(
-      join(REPO_DIR, "session-config.json"),
-      JSON.stringify({ dispatch: { rolling_engine: false } }),
-      "utf8",
-    );
 
     // T1 slice 3b — the low tier is not zero-scrutiny: it first emits a bounded
     // light adversarial review over the approved findings (the floor).

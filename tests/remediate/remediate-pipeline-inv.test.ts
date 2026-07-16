@@ -274,13 +274,17 @@ async function promptOf(step: { prompt_path: string }): Promise<string> {
   return readFile(step.prompt_path, "utf8");
 }
 
+let prevRollingEngine: string | undefined;
 beforeEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(ARTIFACTS_DIR, { recursive: true });
+  prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
 });
 
 afterEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
+  if (prevRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
+  else process.env.REMEDIATE_ROLLING_ENGINE = prevRollingEngine;
 });
 
 // ---------------------------------------------------------------------------
@@ -691,7 +695,7 @@ describe("INV-remediate-pipeline-07: resume/restart/merge ack choices reach dist
       JSON.stringify({ choice: "resume" }),
       "utf8",
     );
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
 
     // Must NOT emit confirm_resume_or_restart — it must advance to actual implementing
     const { decideNextStep } = await import("../../src/remediate/steps/nextStep.js");

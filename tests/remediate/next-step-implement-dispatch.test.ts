@@ -15,12 +15,19 @@ import {
 const harness = createNextStepHarness(".test-next-step-implement-dispatch");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, resetTestRepo, acknowledgeResume, writeIntentCheckpoint } = harness;
 
+// This file mixes rolling_engine on/off: capture/restore the env var per test and
+// set it inline (never globally) so a "true" test and a "false" test don't collide.
+// Tests that assert the rolling-default behavior leave it unset entirely.
+let prevRollingEngine: string | undefined;
 beforeEach(async () => {
   await harness.resetTestRepo();
+  prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
 });
 
 afterEach(async () => {
   await harness.cleanupTestRepo();
+  if (prevRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
+  else process.env.REMEDIATE_ROLLING_ENGINE = prevRollingEngine;
 });
 describe("decideNextStep — implementation dispatch and intent gate", () => {
   it("buildImplementDispatchStep: implementing state dispatches and leaves pending items untouched", async () => {
@@ -58,7 +65,7 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await saveState(documentingState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
 
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
@@ -86,9 +93,10 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await writeIntentCheckpoint();
     await writeFile(
       join(REPO_DIR, "session-config.json"),
-      JSON.stringify({ host_can_dispatch_subagents: true, dispatch: { rolling_engine: true } }),
+      JSON.stringify({ host_can_dispatch_subagents: true }),
       "utf8",
     );
+    process.env.REMEDIATE_ROLLING_ENGINE = "true";
 
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });
 
@@ -287,7 +295,7 @@ describe("decideNextStep — implementation dispatch and intent gate", () => {
     await saveState(documentingState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
 
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step).toBeDefined();

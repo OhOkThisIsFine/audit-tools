@@ -1,4 +1,4 @@
-import type { SessionConfig } from "audit-tools/shared";
+import { resolveSessionConfig, type RepoSessionIntent, type SessionConfig } from "audit-tools/shared";
 import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
@@ -20,19 +20,22 @@ import {
 
 export async function cmdQuota(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
-  let sessionConfig: SessionConfig;
+  let intent: RepoSessionIntent;
   try {
-    sessionConfig = await loadSessionConfig(artifactsDir);
+    intent = await loadSessionConfig(artifactsDir);
   } catch (e) {
     process.stderr.write(
       `[quota] session-config.json is invalid — using defaults. Error: ${e instanceof Error ? e.message : String(e)}\n`,
     );
-    sessionConfig = {} as SessionConfig;
+    intent = {};
   }
   const explicitProvider = getExplicitProvider(argv);
   const hostModel = getHostModel(argv);
-  // G1: driver handshake scalars come off the single `--auditor <json>` descriptor.
-  const self = getAuditorDescriptor(argv)?.self ?? {};
+  // G2: driver handshake comes off the single `--auditor <json>` descriptor; resolve it
+  // over the repo INTENT so the quota preview reflects the descriptor's provider/sources.
+  const descriptor = getAuditorDescriptor(argv);
+  const sessionConfig: SessionConfig = resolveSessionConfig(intent, descriptor);
+  const self = descriptor?.self ?? {};
   const providerName = resolveFreshSessionProviderName(
     explicitProvider ?? (sessionConfig.provider === undefined ? "auto" : undefined),
     sessionConfig,

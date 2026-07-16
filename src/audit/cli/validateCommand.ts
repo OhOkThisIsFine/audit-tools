@@ -1,17 +1,13 @@
 import { loadArtifactBundle } from "../io/artifacts.js";
-import { prefixValidationIssues } from "audit-tools/shared";
+import { prefixValidationIssues, validateRepoSessionIntent } from "audit-tools/shared";
 import type { SessionConfig } from "audit-tools/shared";
 import { validateArtifactBundle } from "../validation/artifacts.js";
-import {
-  validateConfiguredProviderEnvironment,
-  validateSessionConfig,
-} from "../validation/sessionConfig.js";
+import { validateConfiguredProviderEnvironment } from "../validation/sessionConfig.js";
 import {
   resolveFreshSessionProviderName,
 } from "../providers/index.js";
 import {
   getSessionConfigPath,
-  loadSessionConfig,
   readSessionConfigFile,
 } from "../supervisor/sessionConfig.js";
 import { getArtifactsDir } from "./args.js";
@@ -27,7 +23,7 @@ export async function cmdValidate(argv: string[]): Promise<void> {
       ? []
       : prefixValidationIssues(
           "session_config",
-          validateSessionConfig(rawSessionConfig),
+          validateRepoSessionIntent(rawSessionConfig),
         );
   // Only `error`-severity config issues make the config unusable — a
   // `warning` (e.g. dangerously_skip_permissions=true) is surfaced but must not

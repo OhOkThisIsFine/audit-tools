@@ -69,11 +69,16 @@ const decisionPath = join(ARTIFACTS_DIR, "review_decision.json");
 const seedPath = join(ARTIFACTS_DIR, "intake", "contract", "path_a_seed.json");
 const approvedFindingsPath = join(ARTIFACTS_DIR, "intake", "contract", "approved-findings.json");
 
+let prevRollingEngine: string | undefined;
 beforeEach(async () => {
   await harness.resetTestRepo();
+  prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
+  process.env.REMEDIATE_ROLLING_ENGINE = "false";
 });
 afterEach(async () => {
   await harness.cleanupTestRepo();
+  if (prevRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
+  else process.env.REMEDIATE_ROLLING_ENGINE = prevRollingEngine;
 });
 
 describe("review-approval gate: halt", () => {
@@ -379,7 +384,6 @@ describe("Path-B planning review gate", () => {
 
   it("declining a node records it terminal (never silently closed) and the run proceeds", async () => {
     await writePathBPlan();
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
     await decideNextStep({ root: REPO_DIR }); // halt + write request
 
     await writeFile(
@@ -405,7 +409,6 @@ describe("Path-B planning review gate", () => {
 
   it("re-running after the decision does not re-halt (fires at most once)", async () => {
     await writePathBPlan();
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
     await decideNextStep({ root: REPO_DIR });
     await writeFile(resolutionPath, JSON.stringify({}), "utf8");
     await decideNextStep({ root: REPO_DIR });
@@ -481,11 +484,6 @@ describe("up-front ambiguity gate (note 3, part A)", () => {
         project_type: "unknown",
         candidate_closing_actions: ["none"],
       }),
-      "utf8",
-    );
-    await writeFile(
-      join(REPO_DIR, "session-config.json"),
-      JSON.stringify({ dispatch: { rolling_engine: false } }),
       "utf8",
     );
     await harness.writeIntentCheckpoint();

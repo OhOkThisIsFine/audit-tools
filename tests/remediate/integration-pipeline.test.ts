@@ -180,6 +180,19 @@ function makePlanningState(items: Record<string, unknown> = {}): RemediationStat
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 
+// The rolling engine is now forced via the REMEDIATE_ROLLING_ENGINE env var
+// (dispatch.rolling_engine is unrepresentable on the persisted session-config).
+// A file-level pair captures/restores any prior value; the two tests that used
+// to write dispatch.rolling_engine:false set the env var to "false" inline.
+let prevRollingEngine: string | undefined;
+beforeEach(() => {
+  prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
+});
+afterEach(() => {
+  if (prevRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
+  else process.env.REMEDIATE_ROLLING_ENGINE = prevRollingEngine;
+});
+
 // ---------------------------------------------------------------------------
 // 1. confirm_intent gate — no path bypasses it
 // ---------------------------------------------------------------------------
@@ -348,7 +361,7 @@ describe("zero-findings planning state: presents user question instead of fallin
       }),
       "utf8",
     );
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -1175,7 +1188,7 @@ describe("infra-node live-surface verification: isInfraModifyingBlock", () => {
     } as RemediationState);
     await acknowledgeResume();
     await writeIntentCheckpoint();
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
 
     // Implementing state dispatches directly — no intermediate preview hop.
     const step = await decideNextStep({ root: REPO_DIR, hostCanDispatchSubagents: true });

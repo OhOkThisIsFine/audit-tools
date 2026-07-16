@@ -736,37 +736,39 @@ test("loadSessionConfig writes a default repo-local session config when missing"
   }
 });
 
-test("loadSessionConfig reads and returns a pre-existing config with a non-default provider", async () => {
+test("loadSessionConfig reads and returns a pre-existing intent config without clobbering it", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
+    // G2: the persisted config is a RepoSessionIntent — no dispatch fields (provider
+    // now rides the --auditor descriptor). Use an intent field to pin the read.
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ provider: "claude-code" }),
+      JSON.stringify({ timeout_ms: 45000 }),
       "utf8",
     );
     const config = await loadSessionConfig(artifactsDir);
-    expect(config.provider).toBe("claude-code");
+    expect(config.timeout_ms).toBe(45000);
     // File must not have been overwritten to a default value.
     const persisted = JSON.parse(
       await readFile(join(artifactsDir, "session-config.json"), "utf8"),
     );
-    expect(persisted.provider).toBe("claude-code");
+    expect(persisted.timeout_ms).toBe(45000);
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }
 });
 
-test("loadSessionConfig merges a partial config with defaults", async () => {
+test("loadSessionConfig returns a partial intent config as a plain object", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "audit-code-session-config-"));
   try {
-    // Only provider is set; all other SessionConfig fields are absent.
+    // Only one intent field is set; all other fields are absent.
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ provider: "codex" }),
+      JSON.stringify({ synthesis: { narrative: false } }),
       "utf8",
     );
     const config = await loadSessionConfig(artifactsDir);
-    expect(config.provider).toBe("codex");
+    expect(config.synthesis?.narrative).toBe(false);
     // The returned object must be a plain object (not null, not a string).
     expect(typeof config).toBe("object");
     expect(config !== null).toBeTruthy();

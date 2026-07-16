@@ -318,7 +318,6 @@ test.concurrent("next-step reads host_can_dispatch_subagents from session-config
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
         {
-          provider: "worker-command",
           host_can_dispatch_subagents: true,
         },
         null,
@@ -326,7 +325,11 @@ test.concurrent("next-step reads host_can_dispatch_subagents from session-config
       ) + "\n",
     );
 
-    const step = await advancePastDesignReview(root);
+    const step = await advancePastDesignReview(root, [
+      "next-step",
+      "--auditor",
+      JSON.stringify({ self: { provider: "worker-command" } }),
+    ]);
 
     expect(step.step_kind).toBe("dispatch_review");
     expect(step.artifact_paths.dispatch_plan).toMatch(/dispatch-plan\.json$/);

@@ -66,13 +66,12 @@ export interface AdvanceAuditOptions {
   preferredExecutor?: string;
   runLogger?: RunLogger;
   /**
-   * 2a-ii: the EFFECTIVE dispatch config (per-auditor handshake inventory overlaid
-   * onto the repo config; `applyDispatchInventory`). Threaded so the executors that
-   * read dispatch inventory — `provider_confirmation_executor`, which CONSUMES the
-   * operator confirmation and PERSISTS the routed pool — build/persist from the
-   * inventory, not a re-read of the raw repo config. Absent ⇒ the executor falls back
-   * to `loadSessionConfig` (the deprecated repo-config path).
-   * See `spec/unified-dispatch-worker-model.md`.
+   * G2: the EFFECTIVE dispatch config (the per-auditor descriptor resolved over the
+   * repo INTENT; `resolveSessionConfig`). Threaded so the executors that read dispatch
+   * inventory — `provider_confirmation_executor`, which CONSUMES the operator
+   * confirmation and PERSISTS the routed pool — build/persist from the descriptor, not a
+   * re-read of the raw repo config. Absent ⇒ the executor falls back to the repo INTENT
+   * resolved to driver-self-only. See `spec/unified-dispatch-worker-model.md`.
    */
   sessionConfig?: SessionConfig;
 }

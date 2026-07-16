@@ -126,7 +126,7 @@ previews the action without deleting anything.
 
 ## Session config
 
-Backend fallback configuration lives at:
+Audit-run configuration lives at:
 
 ```text
 .audit-tools/audit/session-config.json
@@ -135,15 +135,19 @@ Backend fallback configuration lives at:
 The canonical `/audit-code` conversation route should not require users to
 touch this file.
 
-Default:
+> **Dispatch capability is NOT configured here.** As of the unified-dispatch worker
+> model (G2), `session-config.json` carries audit **intent** only — analyzers,
+> synthesis, quota policy, budgeting, timeouts. The dispatch **backend/launch set**
+> (`provider`, `host_provider`, `sources[]`, the per-backend blocks
+> `codex`/`opencode`/`openai_compatible`/`vscode_task`/`antigravity`/`agy`/
+> `subprocess_template`/`claude_code`, `parallel_workers`, `dispatch.rolling_engine`)
+> is per-auditor CAPABILITY: it rides the per-invocation `--auditor <json>` descriptor,
+> resolved from the auditor's own environment, never inherited across auditors. Writing
+> any of those keys into `session-config.json` now FAILS at load
+> (`spec/unified-dispatch-worker-model.md`). The `rolling_engine` opt-out is the
+> `AUDIT_CODE_ROLLING_ENGINE` / `REMEDIATE_ROLLING_ENGINE` env var.
 
-```json
-{
-  "provider": "worker-command"
-}
-```
-
-Supported providers:
+The provider values a descriptor's `self.provider` may name:
 
 - `worker-command` — runs `task.worker_command`; generic subprocess fallback, not an LLM backend
 - `auto`
@@ -160,15 +164,13 @@ Supported providers:
 External providers are compatibility bridges, not the intended default review
 owner.
 
-Common fields:
+Common `session-config.json` (intent) fields:
 
 ```json
 {
-  "provider": "worker-command",
   "timeout_ms": 1800000,
   "ui_mode": "headless",
-  "agent_task_batch_size": 1,
-  "parallel_workers": 1
+  "agent_task_batch_size": 1
 }
 ```
 
@@ -238,10 +240,11 @@ Every other field is optional:
 
 You supply only ordering intent plus your model roster. The tool owns the prices,
 the capability flags, and the roster snapshot — you never hand-author those. If a
-provider you use isn't listed, it wasn't auto-detected: add its config to
-`session-config.json` (an OpenAI-compatible endpoint via
-`openai_compatible.{base_url,model,api_key_env}`, or a CLI backend via its
-`<name>.command`) and re-run the step.
+provider you use isn't listed, it wasn't auto-detected: it rides the per-auditor
+`--auditor <json>` descriptor (an OpenAI-compatible endpoint or CLI backend as a
+`sources[]` entry, resolved from your environment — NOT `session-config.json`, which
+no longer accepts dispatch config; see `spec/unified-dispatch-worker-model.md`), then
+re-run the step.
 
 Once the input is written, re-run the continue command the step printed
 (`audit-code next-step`). The tool consumes the input and promotes it into both

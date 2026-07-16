@@ -2,21 +2,20 @@ import { join } from "node:path";
 import {
   type AnalyzerSetting,
   type LockedJsonStore,
-  type ProviderName,
-  type SessionConfig,
+  type RepoSessionIntent,
   createLockedJsonStore,
   SKIP_WRITE,
   isRecord,
   readOptionalJsonFile,
   writeJsonFile,
   formatValidationIssues,
+  validateRepoSessionIntent,
   type ValidationIssue,
 } from "audit-tools/shared";
-import { validateSessionConfig } from "../validation/sessionConfig.js";
 
 const SESSION_CONFIG_FILENAME = "session-config.json";
 const SESSION_CONFIG_LOCK_FILENAME = "session-config.lock";
-const DEFAULT_SESSION_CONFIG: SessionConfig = {};
+const DEFAULT_SESSION_CONFIG: RepoSessionIntent = {};
 
 export function getSessionConfigPath(artifactsDir: string): string {
   return join(artifactsDir, SESSION_CONFIG_FILENAME);
@@ -42,7 +41,7 @@ function sessionConfigStore(
     lockPath: getSessionConfigLockPath(artifactsDir),
     parse: (raw) => (isRecord(raw) ? raw : { ...DEFAULT_SESSION_CONFIG }),
     validate: (next) =>
-      throwOnConfigErrors(configPath, validateSessionConfig(next)),
+      throwOnConfigErrors(configPath, validateRepoSessionIntent(next)),
   });
 }
 
@@ -59,11 +58,11 @@ function sessionConfigStore(
 async function mutateSessionConfigLocked(
   artifactsDir: string,
   merge: (base: Record<string, unknown>) => Record<string, unknown> | null,
-): Promise<SessionConfig> {
+): Promise<RepoSessionIntent> {
   const result = await sessionConfigStore(artifactsDir).mutate(
     (base) => merge(base) ?? SKIP_WRITE,
   );
-  return result as SessionConfig;
+  return result as RepoSessionIntent;
 }
 
 export async function readSessionConfigFile(
@@ -101,7 +100,7 @@ function throwOnConfigErrors(
 
 export async function loadSessionConfig(
   artifactsDir: string,
-): Promise<SessionConfig> {
+): Promise<RepoSessionIntent> {
   const configPath = getSessionConfigPath(artifactsDir);
   const rawConfig = await readOptionalJsonFile<unknown>(configPath);
   if (rawConfig === undefined) {
@@ -109,9 +108,9 @@ export async function loadSessionConfig(
     return { ...DEFAULT_SESSION_CONFIG };
   }
 
-  throwOnConfigErrors(configPath, validateSessionConfig(rawConfig));
+  throwOnConfigErrors(configPath, validateRepoSessionIntent(rawConfig));
 
-  return rawConfig as SessionConfig;
+  return rawConfig as RepoSessionIntent;
 }
 
 /**
@@ -123,34 +122,9 @@ export async function loadSessionConfig(
 export async function persistAnalyzerSettings(
   artifactsDir: string,
   settings: Record<string, AnalyzerSetting>,
-): Promise<SessionConfig> {
+): Promise<RepoSessionIntent> {
   return mutateSessionConfigLocked(artifactsDir, (base) => {
     const current = isRecord(base.analyzers) ? base.analyzers : {};
     return { ...base, analyzers: { ...current, ...settings } };
-  });
-}
-
-/**
- * B1: durably record the `--host-provider` override onto `session-config.json`,
- * preserving unknown fields, validating, and persisting. The conversation-host
- * identity is stable for a run, and the audit host-review path (`semanticReviewStep`)
- * re-reads the config file from disk — so persisting is the single-source seam that
- * makes the override reach it regardless of which subcommand re-enters the run.
- */
-export async function persistHostProvider(
-  artifactsDir: string,
-  hostProvider: ProviderName,
-): Promise<SessionConfig> {
-  return mutateSessionConfigLocked(artifactsDir, (base) => {
-    // Idempotent: an unchanged value is a no-op write. The host identity is stable
-    // for a run, so a bare re-invocation re-passing --host-provider must not rewrite
-    // the shared config file (needless churn + a wider lost-update window against a
-    // concurrent writer on the multi-IDE cooperative path). The compare reads `base`
-    // under the same held lock as the potential write, so it cannot race a
-    // concurrent writer that flipped the value between read and write.
-    if (base.host_provider === hostProvider) {
-      return null;
-    }
-    return { ...base, host_provider: hostProvider };
   });
 }

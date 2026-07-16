@@ -141,6 +141,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  delete process.env.REMEDIATE_ROLLING_ENGINE;
   await rm(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -213,7 +214,9 @@ describe("dispatch step prompts carry DISPATCH_PROMPT_HANDOFF_NOTE", () => {
     await saveState(makeImplementingState());
     await acknowledgeResume();
     await writeIntentCheckpoint();
-    await writeFile(join(REPO_DIR, "session-config.json"), JSON.stringify({ dispatch: { rolling_engine: false } }), "utf8");
+    // G2: dispatch.rolling_engine is unrepresentable on disk; pin the wave opt-out via
+    // the sanctioned env override (cleaned up in afterEach).
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
 
     const step = await decideNextStep({
       root: REPO_DIR,

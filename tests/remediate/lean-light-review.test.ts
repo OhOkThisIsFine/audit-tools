@@ -96,19 +96,19 @@ describe("lean light-review gate — state machine through decideNextStep", () =
     await writeReadyStructuredAuditIntake(FAST_PATH_FIXTURE);
     await approveReviewGate();
     await harness.acknowledgeResume();
-    await writeFile(
-      join(REPO_DIR, "session-config.json"),
-      JSON.stringify({ dispatch: { rolling_engine: false } }),
-      "utf8",
-    );
     return decideNextStep({ root: REPO_DIR }); // → lean light-review step
   }
 
+  let prevRollingEngine: string | undefined;
   beforeEach(async () => {
     await harness.resetTestRepo();
+    prevRollingEngine = process.env.REMEDIATE_ROLLING_ENGINE;
+    process.env.REMEDIATE_ROLLING_ENGINE = "false";
   });
   afterEach(async () => {
     await harness.cleanupTestRepo();
+    if (prevRollingEngine === undefined) delete process.env.REMEDIATE_ROLLING_ENGINE;
+    else process.env.REMEDIATE_ROLLING_ENGINE = prevRollingEngine;
   });
 
   it("an eligible run emits a lean_light_review step (NOT a direct lean plan)", async () => {

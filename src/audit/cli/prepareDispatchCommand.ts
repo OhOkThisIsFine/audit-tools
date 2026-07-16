@@ -6,21 +6,25 @@ import {
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
 import { packageRoot } from "./paths.js";
-import type { SessionConfig } from "audit-tools/shared";
+import { resolveSessionConfig, type RepoSessionIntent, type SessionConfig } from "audit-tools/shared";
 
 export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
   const runId = getFlag(argv, "--run-id");
   if (!runId) throw new Error("prepare-dispatch requires --run-id <run_id>");
   const artifactsDir = getArtifactsDir(argv);
-  let sessionConfig: SessionConfig;
+  let intent: RepoSessionIntent;
   try {
-    sessionConfig = await loadSessionConfig(artifactsDir);
+    intent = await loadSessionConfig(artifactsDir);
   } catch (e) {
     process.stderr.write(
       `[prepare-dispatch] session-config.json is invalid — using defaults. Error: ${e instanceof Error ? e.message : String(e)}\n`,
     );
-    sessionConfig = {} as SessionConfig;
+    intent = {};
   }
+  // G2: the driver handshake arrives as one `--auditor <json>`; resolve it over the repo
+  // INTENT so the dispatch pool/provider come from the descriptor, not the repo config.
+  const descriptor = getAuditorDescriptor(argv);
+  const sessionConfig: SessionConfig = resolveSessionConfig(intent, descriptor);
   const providerName = resolveFreshSessionProviderName(
     getExplicitProvider(argv) ??
       (sessionConfig.provider === undefined ? "auto" : undefined),
@@ -28,8 +32,7 @@ export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
   );
   const provider = createFreshSessionProvider(providerName, sessionConfig);
   const hostModel = getHostModel(argv) ?? sessionConfig.block_quota?.host_model ?? null;
-  // G1: the driver handshake arrives as one `--auditor <json>`; read the self scalars off it.
-  const self = getAuditorDescriptor(argv)?.self ?? {};
+  const self = descriptor?.self ?? {};
   const result = await prepareDispatchArtifacts({
     packageRoot,
     runId,

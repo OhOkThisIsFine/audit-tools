@@ -1,9 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import { promoteFinalAuditReport } from "../io/artifacts.js";
 import { clearDispatchFiles, ensureSupervisorDirs } from "../io/runArtifacts.js";
-import type { SessionConfig } from "audit-tools/shared";
+import { resolveSessionConfig, type RepoSessionIntent, type SessionConfig } from "audit-tools/shared";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
-import { resolveRunProviderName, getArtifactsDir, getRootDir, warnIfNotGitRepo, getBatchResultsDir, getFlag } from "./args.js";
+import { resolveRunProviderName, getArtifactsDir, getAuditorDescriptor, getRootDir, warnIfNotGitRepo, getBatchResultsDir, getFlag } from "./args.js";
 import { runAuditStep, ingestBatchAuditResults } from "./auditStep.js";
 import { emitEnvelope } from "./envelope.js";
 import { persistConfigErrorHandoff } from "./reviewRun.js";
@@ -24,9 +24,9 @@ export async function cmdAdvanceAudit(argv: string[]): Promise<void> {
   await cleanupStaleArtifactsDir(artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
   await ensureSupervisorDirs(artifactsDir);
-  let sessionConfig: SessionConfig;
+  let intent: RepoSessionIntent;
   try {
-    sessionConfig = await loadSessionConfig(artifactsDir);
+    intent = await loadSessionConfig(artifactsDir);
   } catch (error) {
     await persistConfigErrorHandoff({
       root,
@@ -35,6 +35,13 @@ export async function cmdAdvanceAudit(argv: string[]): Promise<void> {
     });
     throw error;
   }
+  // G2: resolve the per-auditor descriptor (absent on this legacy headless path ⇒
+  // driver-self-only) over the repo INTENT so the provider/dispatch reads below see
+  // the descriptor's backends, never the repo config.
+  const sessionConfig: SessionConfig = resolveSessionConfig(
+    intent,
+    getAuditorDescriptor(argv),
+  );
   const providerName = resolveRunProviderName(argv, sessionConfig);
   if (batchResultsDir) {
     const result = await ingestBatchAuditResults({

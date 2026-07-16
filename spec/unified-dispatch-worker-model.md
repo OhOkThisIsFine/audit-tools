@@ -212,10 +212,29 @@ must mean something to an auditor with a different reachable set) — default `p
   --host-can-dispatch-subagents / --host-inventory` flag-bag into one structured `--auditor <json>`
   ({auditor_id, resolved_at, self:{provider,roster,max_active_subagents,can_dispatch_subagents,
   can_proxy}, sources[]}). It rides every continue-command atomically. No back-compat.
-- **G2 — split the persisted type.** Introduce `RepoSessionIntent` (audit intent + policy + budgeting;
-  NO dispatch/capability fields); the store's read/write signature accepts only it. `resolve(intent,
-  descriptor)` produces the in-memory EFFECTIVE config every consumer reads. Delete the dispatch fields
-  from the persisted type outright (makes contamination unrepresentable — the endpoint of 2a-ii).
+- **[SHIPPED — type-split half] G2 — split the persisted type.** `RepoSessionIntent` (audit intent +
+  policy + budgeting; the `DISPATCH_INVENTORY_FIELDS` + `dispatch.rolling_engine` removed) is the only
+  thing the store reads/writes; `resolveSessionConfig(intent, descriptor)` (`src/shared/config/`) produces
+  the in-memory EFFECTIVE config every consumer reads. Dispatch fields are unrepresentable on disk —
+  enforced mechanically by `validateRepoSessionIntent` at BOTH read boundaries (audit `loadSessionConfig`,
+  remediate `readValidatedRepoSessionIntent`), not TS-only. Null descriptor fails closed to driver-self-only
+  (the deliberate change from `applyDispatchInventory(cfg,null)⇒cfg`). Two refinements beyond the sketch:
+  (a) the 3 host/IDE launch blocks (`claude_code`/`vscode_task`/`antigravity`) are NOT `DispatchableSource`s,
+  so they ride `descriptor.self.{claude_code,vscode_task,antigravity}` (the driver's own launch transport);
+  the 6 dispatchable providers ride `sources[]` (their launch config in endpoint+parameters). (b) The
+  descriptor's `sources[]` + launch blocks are validated at the `getAuditorDescriptor` parse boundary
+  (C1 quota + command-injection), symmetric with the disk-load boundary. `parallel_workers` moved onto
+  `self`. **Honest scope:** `confirmed_provider_pool`/`quota`/`block_quota`/`host_can_dispatch_subagents`
+  remain on the intent type (a HALF-type) → G3/G4/G5. **The deterministic source-emitter (Path A feeder)
+  was SPLIT OUT to G2.5** (owner, 2026-07-16): the type-split already satisfies atomic-replace (the
+  descriptor CAN carry sources) and is inert/unreleased, so per the spec's own "seam first, feeder follows"
+  the emitter is the immediate-next commit, not bundled.
+- **G2.5 — the deterministic source-emitter (Path A feeder).** A component audit-tools ships (a subcommand
+  the slash loader shells out to before `next-step`) that reads the per-auditor home-dir identity-keyed
+  `catalog-<auditor-id>.json` declaration, performs the `declared ∩ ambient-verifiable` intersection, and
+  prints the `--auditor sources[]` JSON — so operator multi-pool (NIM/opencode) is populated deterministically,
+  never by host-LLM prose (the banned host-discretion anti-pattern). Until it lands, multi-pool sources come
+  only from a hand-authored `--auditor`.
 - **G3 — split confirmed_provider_pool** into `DispatchPolicy` (exclusions + cost_order + confirmed flag,
   on intent) + per-auditor re-resolved reach; the `autonomous_mode`-keyed reconciliation gate; pin the
   exclusion-key grammar.

@@ -182,11 +182,9 @@ describe("executor consumes seeded operator input (b/c — reorder + host roster
     try {
       const artifactsDir = join(root, ".audit-tools", "audit");
       await mkdir(artifactsDir, { recursive: true });
-      // A session config so a configured pool is priceable at the gate.
-      await writeFile(
-        join(artifactsDir, "session-config.json"),
-        JSON.stringify(NIM_CONFIG, null, 2) + "\n",
-      );
+      // G2: the configured pool is dispatch capability, so it rides the EFFECTIVE
+      // config threaded into the executor (as a per-auditor descriptor would resolve
+      // it), NOT the repo session-config (which can no longer persist dispatch fields).
       // Operator submits a reorder + a host model roster (follow-up c). The host
       // model is a DISTINCT id from the configured pool's model so the two thread
       // to dispatch independently.
@@ -199,7 +197,7 @@ describe("executor consumes seeded operator input (b/c — reorder + host roster
         }) + "\n",
       );
 
-      const result = await runProviderConfirmationAutoComplete({}, root, artifactsDir);
+      const result = await runProviderConfirmationAutoComplete({}, root, artifactsDir, NIM_CONFIG);
       // Per-tool seam artifact was produced (obligation satisfied) and the summary
       // reflects the operator path, not the headless auto-complete.
       expect(result.artifacts_written).toContain("provider_confirmation.json");

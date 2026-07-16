@@ -38,7 +38,6 @@ async function persistFallbackState(root, artifactsDir) {
     join(artifactsDir, "session-config.json"),
     JSON.stringify(
       {
-        provider: "worker-command",
         analyzers: {
           typescript: "skip",
           python: "skip",
@@ -53,6 +52,10 @@ async function persistFallbackState(root, artifactsDir) {
   );
 }
 
+// Post-G2 the backend provider identity rides the per-invocation --auditor
+// descriptor rather than the persisted session-config.json (which now rejects it).
+const AUDITOR_ARGS = ["--auditor", JSON.stringify({ self: { provider: "worker-command" } })];
+
 test.concurrent("next-step emits a host critical-flow fallback step, then persists + satisfies on the host submission", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-"));
   const root = join(tempDir, "repo");
@@ -64,7 +67,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     // First next-step pauses on the critical-flow fallback host gate.
     const paused = JSON.parse(
       (await runWrapper(
-        ["next-step", "--no-host-can-dispatch-subagents"],
+        ["next-step", "--no-host-can-dispatch-subagents", ...AUDITOR_ARGS],
         { cwd: root },
       )).stdout,
     );
@@ -93,7 +96,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     // satisfied (the run advances past the gate, never re-asking).
     const advanced = JSON.parse(
       (await runWrapper(
-        ["next-step", "--no-host-can-dispatch-subagents"],
+        ["next-step", "--no-host-can-dispatch-subagents", ...AUDITOR_ARGS],
         { cwd: root },
       )).stdout,
     );
@@ -126,7 +129,7 @@ test.concurrent("next-step does not re-ask the critical-flow fallback once a sub
 
     const step = JSON.parse(
       (await runWrapper(
-        ["next-step", "--no-host-can-dispatch-subagents"],
+        ["next-step", "--no-host-can-dispatch-subagents", ...AUDITOR_ARGS],
         { cwd: root },
       )).stdout,
     );

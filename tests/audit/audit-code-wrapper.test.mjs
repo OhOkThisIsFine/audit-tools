@@ -46,6 +46,10 @@ const { isCanonicalResultFilename } = await import("../../src/audit/cli/args.ts"
 // hold on Windows as well as Linux CI.
 const { toPromptPathToken } = await import("audit-tools/shared");
 
+// Post-G2 the backend provider identity rides the per-invocation --auditor
+// descriptor rather than the persisted session-config.json (which now rejects it).
+const AUDITOR_ARGS = ["--auditor", JSON.stringify({ self: { provider: "worker-command" } })];
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 const wrapperPath = join(repoRoot, "audit-code.mjs");
@@ -246,7 +250,6 @@ async function withTempRepo(fn) {
       join(root, ".audit-tools/audit", "session-config.json"),
       JSON.stringify(
         {
-          provider: "worker-command",
           // Skip-all analyzer policy so the deterministic-frontier drain is
           // reproducible regardless of the host analyzer cache. Under the default
           // `auto` policy, an optional analyzer dependency that is absent from the
@@ -303,7 +306,7 @@ async function startDispatchRun(root) {
   const incomingDir = join(root, ".audit-tools/audit", "incoming");
   for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
     const step = JSON.parse(
-      (await runWrapper(["next-step"], { cwd: root })).stdout,
+      (await runWrapper(["next-step", ...AUDITOR_ARGS], { cwd: root })).stdout,
     );
     if (step.step_kind === "analyzer_install") {
       await mkdir(incomingDir, { recursive: true });
@@ -520,7 +523,7 @@ test.concurrent("audit-code wrapper advance-audit drains the deterministic regen
     // auto-completes headlessly, then intake → auto-fix → syntax → analyzer
     // acquisition → structure → graph enrichment → design assessment → structure
     // decomposition all run, halting at the intent_checkpoint host-input boundary.
-    const { stdout: stdout0 } = await runWrapper(["advance-audit"], { cwd: root });
+    const { stdout: stdout0 } = await runWrapper(["advance-audit", ...AUDITOR_ARGS], { cwd: root });
     const step0 = JSON.parse(stdout0);
 
     const info = await stat(artifactsDir);
@@ -543,7 +546,7 @@ test.concurrent("audit-code wrapper advance-audit drains the deterministic regen
     // A second advance from the same artifact directory continues past the intent
     // checkpoint (auto-completed headlessly) and drains onward, still making
     // progress against the same stable artifact dir.
-    const { stdout: stdout1 } = await runWrapper(["advance-audit"], { cwd: root });
+    const { stdout: stdout1 } = await runWrapper(["advance-audit", ...AUDITOR_ARGS], { cwd: root });
     const step1 = JSON.parse(stdout1);
 
     assertMatchesResponseSchema(step1, "auditCodeResponse");

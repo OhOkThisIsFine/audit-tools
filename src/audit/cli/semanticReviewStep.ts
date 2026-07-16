@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { HostModelRosterEntry, ResolvedProviderName, HostDispatchInventory, AuditorDescriptor } from "audit-tools/shared";
-import { applyDispatchInventory, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, renderHostWallExplanation } from "audit-tools/shared";
+import type { HostModelRosterEntry, ResolvedProviderName, AuditorDescriptor } from "audit-tools/shared";
+import { resolveSessionConfig, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, renderHostWallExplanation } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -40,13 +40,15 @@ export async function renderSemanticReviewStep(params: {
   /** Opaque model identity for the quota key when no model name resolves. */
   hostModelId?: string | null;
   /**
-   * 2a-ii: the per-auditor dispatch inventory reported this invocation
-   * (`--host-inventory`). Overlaid onto the disk-loaded session-config below so the
-   * host-review dispatch pool/provider come from the handshake, not the repo config
-   * (spec/unified-dispatch-worker-model.md). `null`/absent ⇒ the repo config is used
-   * unchanged (deprecated fallback).
+   * G2: the RESOLVED per-auditor descriptor for this invocation (the same forward
+   * descriptor `nextStepCommand` rides on continue-commands) — its `self.provider` /
+   * launch blocks + `sources[]` are resolved over the disk-loaded repo INTENT below
+   * (`resolveSessionConfig`) so the host-review dispatch pool/provider come from the
+   * handshake, never the repo config. This descriptor param is why `persistHostProvider`
+   * is retired: the driver's provider rides here, not a disk re-read
+   * (spec/unified-dispatch-worker-model.md, [[capability-is-per-auditor-not-per-audit]]).
    */
-  inventory?: HostDispatchInventory | null;
+  descriptor: AuditorDescriptor;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
   /** Which executor selected this step; controls prompt variant. */
@@ -100,13 +102,12 @@ export async function renderSemanticReviewStep(params: {
   // the dispatch path run against an attacker-influenced config. Matches every
   // sibling caller (advanceAuditCommand/nextStepCommand/prepareDispatchCommand/
   // quotaCommand), which all let the error propagate.
-  // 2a-ii: overlay the per-auditor handshake inventory onto the freshly-loaded
-  // (and re-validated, fail-closed) repo config, so the host-review dispatch
-  // provider/pool below read the inventory, not the repo's dispatch fields. Inert
-  // (returns the disk config unchanged) when no `--host-inventory` was reported.
-  const sessionConfig = applyDispatchInventory(
+  // G2: resolve the per-auditor descriptor over the freshly-loaded (and re-validated,
+  // fail-closed) repo INTENT, so the host-review dispatch provider/pool below read the
+  // descriptor's `self.provider` + `sources[]`, never the repo config's dispatch fields.
+  const sessionConfig = resolveSessionConfig(
     await loadSessionConfig(artifactsDir),
-    params.inventory,
+    params.descriptor,
   );
   // The host-review dispatch pool is keyed to the CURRENT driver's identity, never
   // an inherited headless-backend `sessionConfig.provider` (the founding capability-
@@ -132,24 +133,12 @@ export async function renderSemanticReviewStep(params: {
     inProcessMadeProgress: params.inProcessMadeProgress,
   });
   const mergeCommand = mergeAndIngestCommand(artifactsDir, activeReviewRun.run_id);
-  // The current driver's handshake rides the continue-command so a bare re-invocation
-  // preserves this invocation's capability instead of falling back to the stored
-  // session config (auditor-agnostic robustness — the founding-bug robustness fix).
-  const hostDescriptor: AuditorDescriptor = {
-    self: {
-      can_dispatch_subagents: params.hostCanDispatch,
-      ...(params.hostCanRestrictSubagentTools ? { can_restrict_subagent_tools: true } : {}),
-      ...(params.hostCanSelectSubagentModel ? { can_select_subagent_model: true } : {}),
-      ...(params.hostMaxActiveSubagents != null ? { max_active_subagents: params.hostMaxActiveSubagents } : {}),
-      ...(params.hostContextTokens != null ? { context_tokens: params.hostContextTokens } : {}),
-      ...(params.hostOutputTokens != null ? { output_tokens: params.hostOutputTokens } : {}),
-      ...(params.hostModelRoster != null ? { roster: params.hostModelRoster } : {}),
-      ...(params.hostModelId != null ? { model_id: params.hostModelId } : {}),
-    },
-    // 2a-ii: carry the dispatch inventory onto the continue-command this step emits, so
-    // a bare resume preserves this driver's inventory instead of silently dropping it.
-    inventory: params.inventory ?? null,
-  };
+  // The current driver's RESOLVED descriptor rides the continue-command so a bare
+  // re-invocation preserves this invocation's capability + provider + sources instead
+  // of falling back to the stored config (auditor-agnostic robustness — the founding-bug
+  // fix). It is the same descriptor resolved over intent above, so what dispatched and
+  // what a resume re-resolves cannot drift.
+  const hostDescriptor: AuditorDescriptor = params.descriptor;
   const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
 
   // Increment B — host-path quota wall. When admission granted zero OR a cooldown is

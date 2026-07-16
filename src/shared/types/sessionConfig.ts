@@ -545,16 +545,20 @@ export interface ConfirmedProviderPoolRef {
 export interface SessionConfig {
   provider?: ProviderName;
   /**
-   * Explicit override for the CONVERSATION-HOST identity — the auditor/agent
-   * actually driving THIS next-step process, whose account meter the dispatch
-   * fan-out is charged against (a quota-ATTRIBUTION key, distinct from
-   * `provider`, which may name a demoted headless backend that is only the
-   * per-packet worker). Normally left unset: `resolveConversationHostProvider`
-   * auto-detects the real host from the same in-session env signals the
-   * self-spawn guard reads (`isSelfSpawnBlocked` — CODEX* ⇒ codex, CLAUDECODE ⇒
-   * claude-code), defaulting to `claude-code`. Set this (via `--host-provider`)
-   * only to override that detection when the environment is ambiguous. `"auto"`
-   * is treated as unset (fall through to env detection).
+   * The CONVERSATION-HOST identity — the auditor/agent actually driving THIS
+   * next-step process, whose account meter the dispatch fan-out is charged against
+   * (a quota-ATTRIBUTION key). On the effective config produced by
+   * `resolveSessionConfig`, this is set to the SAME value as `provider` from the
+   * descriptor's `self.provider` (G2 collapsed the retired inventory's separate
+   * `provider`/`host_provider` into one driver identity — a demoted headless backend
+   * now rides `sources[]`, not a distinct `provider` field, so the two no longer
+   * diverge on the descriptor path). Still honored when a programmatic caller injects
+   * an effective config with them distinct (e.g. a test). Normally left unset on the
+   * intent: `resolveConversationHostProvider` auto-detects the real host from the same
+   * in-session env signals the self-spawn guard reads (`isSelfSpawnBlocked` — CODEX* ⇒
+   * codex, CLAUDECODE ⇒ claude-code), defaulting to `claude-code`. The retained
+   * `--host-provider` flag folds onto `descriptor.self.provider`. `"auto"` is treated
+   * as unset (fall through to env detection).
    */
   host_provider?: ProviderName;
   timeout_ms?: number;
@@ -622,37 +626,13 @@ export interface SessionConfig {
 }
 
 /**
- * The per-auditor DISPATCH INVENTORY carried on the handshake (`--host-inventory`),
- * NOT read from the repo session-config. The backend/launch set the CURRENT auditor
- * can dispatch to — reported fresh per-invocation and never inherited
- * ([[capability-is-per-auditor-not-per-audit]]). A structured subset of the former
- * session-config dispatch fields; the repo session-config keeps audit INTENT only.
- * See `spec/unified-dispatch-worker-model.md`. (Introduced by commit 2a-i as the
- * additive channel; consumers switch to reading it in 2a-ii.)
- */
-export interface HostDispatchInventory {
-  provider?: ProviderName;
-  host_provider?: ProviderName;
-  subprocess_template?: SubprocessTemplateConfig;
-  claude_code?: ClaudeCodeConfig;
-  codex?: CodexConfig;
-  opencode?: OpenCodeConfig;
-  openai_compatible?: OpenAiCompatibleConfig;
-  vscode_task?: VSCodeTaskConfig;
-  antigravity?: AntigravityConfig;
-  agy?: AgyConfig;
-  sources?: DispatchableSource[];
-  parallel_workers?: number;
-  rolling_engine?: boolean;
-}
-
-/**
- * The flat SessionConfig fields that constitute DISPATCH INVENTORY (the per-auditor
- * backend/launch set), as opposed to audit INTENT. Single-sourced so the overlay
- * ({@link applyDispatchInventory}) and any future validator/stripper cannot drift on
- * which fields are inventory vs intent. `rolling_engine` is deliberately absent: it is
- * flat on {@link HostDispatchInventory} but nested at `dispatch.rolling_engine` on
- * SessionConfig, so the overlay reconciles it separately.
+ * The flat {@link SessionConfig} fields that constitute DISPATCH INVENTORY (the
+ * per-auditor backend/launch set), as opposed to audit INTENT. Single-sourced so
+ * the persisted-type derivation ({@link RepoSessionIntent}), the store-level
+ * validator (`validateRepoSessionIntent`), and `resolve()` cannot drift on which
+ * fields are inventory vs intent. `dispatch.rolling_engine` is deliberately absent
+ * from this flat list — it is nested under `dispatch`, so {@link RepoSessionIntent}
+ * strips it via {@link RepoDispatchConfig} separately (see there).
  */
 export const DISPATCH_INVENTORY_FIELDS = [
   "provider",
@@ -667,55 +647,38 @@ export const DISPATCH_INVENTORY_FIELDS = [
   "agy",
   "sources",
   "parallel_workers",
-] as const satisfies readonly (keyof HostDispatchInventory & keyof SessionConfig)[];
+] as const satisfies readonly (keyof SessionConfig)[];
+
+export type DispatchInventoryField = (typeof DISPATCH_INVENTORY_FIELDS)[number];
 
 /**
- * Overlay the per-auditor dispatch inventory (reported this invocation via the
- * `--host-inventory` handshake) onto the repo session-config, returning the EFFECTIVE
- * config the dispatch/provider consumers read. The repo session-config carries audit
- * INTENT only; the dispatch backend/launch set comes from the per-auditor handshake,
- * never inherited across auditors ([[capability-is-per-auditor-not-per-audit]],
- * `spec/unified-dispatch-worker-model.md`, commit 2a-ii).
- *
- * - `inventory == null` (no `--host-inventory` this invocation — every current host,
- *   until 2a-iii wires the loaders to assemble it) → the repo session-config is returned
- *   UNCHANGED: the deprecated repo-config fallback, i.e. today's behavior byte-for-byte.
- * - `inventory` present → it is AUTHORITATIVE WHOLESALE: every repo dispatch field is
- *   dropped and replaced by the inventory's, so a partial host inventory (e.g. a
- *   host-only `{ provider: "claude-code" }`) degrades to host + auto-detected CLIs rather
- *   than leaking the repo's `sources` / backend blocks (the cross-contamination this
- *   rework kills — this is NOT a per-field `inventory.x ?? repo.x` fallback).
- *
- * Every INTENT field (synthesis / analyzers / graph / quota / block_quota / design_review
- * / …) is preserved identically. `rolling_engine` is overlaid onto `dispatch.rolling_engine`
- * while the other `dispatch.*` intent fields (confirm_threshold / max_packets / …) are kept.
- * Pure — never mutates its input.
+ * The `dispatch` sub-config as it appears on {@link RepoSessionIntent}: the fan-out
+ * INTENT knobs (confirm_threshold / max_packets / risk_mass_budget / routing_tiers)
+ * WITHOUT `rolling_engine`, which is per-auditor dispatch capability carried on the
+ * {@link AuditorDescriptor}, not repo intent.
  */
-export function applyDispatchInventory(
-  sessionConfig: SessionConfig,
-  inventory: HostDispatchInventory | null | undefined,
-): SessionConfig {
-  if (inventory == null) return sessionConfig;
-  const effective: SessionConfig = { ...sessionConfig };
-  // Wholesale-authoritative: strip every repo dispatch field first, so an inventory that
-  // does not report a field cannot leak the repo's stale value for it.
-  const eff = effective as Record<string, unknown>;
-  const inv = inventory as Record<string, unknown>;
-  for (const field of DISPATCH_INVENTORY_FIELDS) delete eff[field];
-  for (const field of DISPATCH_INVENTORY_FIELDS) {
-    if (inv[field] !== undefined) eff[field] = inv[field];
-  }
-  // rolling_engine is flat on the inventory, nested under `dispatch` on the config:
-  // overlay only that key, preserving the other dispatch.* INTENT fields.
-  const dispatchIntent: DispatchConfig = { ...sessionConfig.dispatch };
-  delete dispatchIntent.rolling_engine;
-  if (inventory.rolling_engine !== undefined) {
-    dispatchIntent.rolling_engine = inventory.rolling_engine;
-  }
-  if (Object.keys(dispatchIntent).length > 0) {
-    effective.dispatch = dispatchIntent;
-  } else {
-    delete effective.dispatch;
-  }
-  return effective;
-}
+export type RepoDispatchConfig = Omit<DispatchConfig, "rolling_engine">;
+
+/**
+ * The PERSISTED session type — audit INTENT + policy + budgeting ONLY, with every
+ * dispatch-inventory field removed so a resolved backend/launch set is UNREPRESENTABLE
+ * on disk (`session-config.json`). Derived from {@link SessionConfig} by omitting the
+ * {@link DISPATCH_INVENTORY_FIELDS} and re-typing `dispatch` to {@link RepoDispatchConfig}
+ * (dropping `rolling_engine`), so the two can never drift on the intent/inventory line.
+ * The store reads/writes ONLY this; every dispatch consumer reads the in-memory EFFECTIVE
+ * {@link SessionConfig} produced by `resolve(intent, descriptor)`. The dispatch
+ * backend/launch set rides the per-auditor {@link AuditorDescriptor}, never inherited
+ * across auditors ([[capability-is-per-auditor-not-per-audit]],
+ * `spec/unified-dispatch-worker-model.md`, G2).
+ *
+ * Honest scope (G2): `confirmed_provider_pool` / `quota` / `block_quota` /
+ * `host_can_dispatch_subagents` are ALSO capability but remain on the intent type until
+ * G3/G4/G5 — so this is a HALF-type (inventory removed; the other capability fields still
+ * present). The "zero dispatch/capability fields" endpoint is reached only after G4/G5.
+ */
+export type RepoSessionIntent = Omit<
+  SessionConfig,
+  DispatchInventoryField | "dispatch"
+> & {
+  dispatch?: RepoDispatchConfig;
+};

@@ -41,16 +41,12 @@ function cliInvocationTokens(): string[] {
 
 /**
  * Render an {@link AuditorDescriptor} back to the single re-parseable `--auditor
- * <json>` transport (G1 collapsed the former `--host-*` flag bag). Returns `[]`
- * when the descriptor is undefined OR carries nothing — no declared `self` field,
- * no inventory, no id/timestamp — so a host with no handshake emits a bare
- * continue-command exactly as before. Otherwise the whole descriptor is
- * JSON-serialized; `JSON.stringify` drops `undefined` self fields but keeps
- * `inventory: null` vs `inventory: {}` distinct — the OPPOSITE-semantics pair
- * `applyDispatchInventory` depends on (null ⇒ deprecated repo-config fallback;
- * `{}` ⇒ authoritatively-empty inventory = host-only), so an empty host-only
- * inventory survives a resume instead of silently re-inheriting the repo's
- * dispatch fields across one hop.
+ * <json>` transport (G1 collapsed the former `--host-*` flag bag; G2 folded the
+ * provider identity + launch blocks onto `self` and resliced dispatch backends to
+ * `sources[]`). Returns `[]` when the descriptor is undefined OR carries nothing —
+ * no declared `self` field, no sources, no id/timestamp — so a host with no
+ * handshake emits a bare continue-command exactly as before. Otherwise the whole
+ * descriptor is JSON-serialized (`JSON.stringify` drops `undefined` self fields).
  */
 export function renderAuditorDescriptor(
   descriptor: AuditorDescriptor | undefined,
@@ -61,7 +57,7 @@ export function renderAuditorDescriptor(
     Object.values(descriptor.self).some((value) => value !== undefined);
   const hasContent =
     selfHasField ||
-    descriptor.inventory != null ||
+    (descriptor.sources != null && descriptor.sources.length > 0) ||
     descriptor.auditor_id != null ||
     descriptor.resolved_at != null;
   if (!hasContent) return [];

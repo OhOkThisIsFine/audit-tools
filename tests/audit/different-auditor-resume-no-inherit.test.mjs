@@ -119,10 +119,14 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
     const runDir = join(artifactsDir, "runs", runId);
     await mkdir(join(runDir, "task-results"), { recursive: true });
 
-    // A run whose STORED session config pins the ORIGINAL auditor's provider (codex).
+    // G2: a provider can NO LONGER be stored on the repo config (dispatch capability
+    // rides the per-auditor --auditor descriptor, never the repo config) — so the
+    // "inherited codex provider" the original bug leaked is now STRUCTURALLY
+    // impossible. The stored config carries INTENT only; the resuming Claude host's
+    // identity comes from its descriptor + env below.
     await writeFile(
       join(artifactsDir, "session-config.json"),
-      JSON.stringify({ provider: "codex", quota: {} }),
+      JSON.stringify({ quota: {} }),
       "utf8",
     );
 
@@ -153,7 +157,17 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
       worker_command: ["audit-code", "submit-packet", "--artifacts-dir", artifactsDir],
     };
 
-    // A DIFFERENT auditor (a Claude host) resumes and fans out subagents.
+    // A DIFFERENT auditor (a Claude host) resumes and fans out subagents. Its
+    // descriptor carries no explicit provider, so the effective provider resolves to
+    // the conversation host via env detection (pinned to claude-code above) — never a
+    // stored codex value (there is none). The descriptor rides every continue-command.
+    const hostDescriptor = {
+      self: {
+        can_dispatch_subagents: true,
+        context_tokens: 200000,
+        output_tokens: 32000,
+      },
+    };
     result = await renderSemanticReviewStep({
       root: artifactsDir,
       artifactsDir,
@@ -164,6 +178,7 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
       hostOutputTokens: 32000,
       hostCanRestrictSubagentTools: false,
       hostCanSelectSubagentModel: false,
+      descriptor: hostDescriptor,
     });
   });
 
@@ -197,7 +212,7 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
     expect(cont).toContain("--auditor");
 
     // The command string has the format:
-    // ... --auditor "{"self":{...},"inventory":null}"
+    // ... --auditor "{"self":{...}}"
     // Extract the JSON that comes after --auditor
     const auditorIdx = cont.indexOf("--auditor");
     expect(auditorIdx).toBeGreaterThanOrEqual(0);

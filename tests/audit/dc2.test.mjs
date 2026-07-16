@@ -133,12 +133,18 @@ await test("the executor persists from the EFFECTIVE config, not a disk re-read 
   });
 });
 
-// The deprecated fallback: with no effective config threaded (the legacy headless
-// advance-audit entrypoint, which carries no handshake), the repo config IS read.
-await test("without an effective config the executor falls back to the repo config on disk", async () => {
+// G2: dispatch sources are UNREPRESENTABLE on the repo config (the validator rejects
+// them at load). With no effective config threaded (the legacy headless advance-audit
+// entrypoint, which carries no handshake), the fallback resolves the repo INTENT to
+// driver-self-only — so a repo config can no longer leak dispatch sources into the
+// persisted pool. (This is the structural guarantee that replaced the old
+// repo-config-is-the-fallback behavior.)
+await test("without an effective config the fallback is driver-self-only — repo dispatch sources cannot leak", async () => {
   await withTempRoot(async (root) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
+    // A repo config carrying dispatch sources is now INVALID (rejected at load); the
+    // executor's fallback swallows the load error and resolves to driver-self-only.
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify({
@@ -147,7 +153,7 @@ await test("without an effective config the executor falls back to the repo conf
     );
     await runProviderConfirmationAutoComplete({}, root, artifactsDir);
     const persisted = await readFile(sharedProviderConfirmationPath(root), "utf8");
-    expect(persisted, "the repo config is the deprecated fallback source").toContain("repo-disk-src");
+    expect(persisted, "repo dispatch sources cannot be persisted, so none leak into the pool").not.toContain("repo-disk-src");
   });
 });
 

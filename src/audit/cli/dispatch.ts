@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readJsonFile, writeJsonFile, computeDispatchCapacity } from "audit-tools/shared";
+import { readJsonFile, writeJsonFile, computeDispatchCapacity, resolveSessionConfig } from "audit-tools/shared";
 import type {
   SessionConfig,
   CapacityPool,
@@ -222,8 +222,12 @@ export async function prepareDispatchArtifacts(params: {
   // provider command, non-boolean dangerously_skip_permissions, …); swallowing it
   // here would build the dispatch against an attacker-influenced config. Matches
   // the sibling callers, which all let the error propagate.
+  // Callers pass the already-RESOLVED effective config; the fallback (no descriptor in
+  // scope here) resolves the repo INTENT to driver-self-only so it can never leak repo
+  // dispatch fields (which the store no longer persists anyway).
   const sessionConfig: SessionConfig =
-    params.sessionConfig ?? (await loadSessionConfig(artifactsDir));
+    params.sessionConfig ??
+    resolveSessionConfig(await loadSessionConfig(artifactsDir), null);
   const lensDefsPath = join(params.packageRoot, "dispatch", "lens-definitions.json");
   const lensDefs = await readJsonFile<Record<string, { description: string; do_not_report: string }>>(lensDefsPath);
 

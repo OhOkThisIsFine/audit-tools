@@ -8,7 +8,7 @@
  *
  * Rule (Auditor-agnostic robustness): both orchestrators MUST reject a malformed
  * `session-config.json` at load rather than degrade silently to a floor. The
- * shared {@link readValidatedSessionConfig} helper is the load-boundary chokepoint
+ * shared {@link readValidatedRepoSessionIntent} helper is the load-boundary chokepoint
  * that guarantees this without either orchestrator having to remember to call the
  * validator itself.
  */
@@ -17,10 +17,12 @@ import { readOptionalJsonFile } from "../io/json.js";
 import {
   ANALYZER_SETTINGS,
   DISPATCHABLE_SOURCE_PROVIDERS,
+  DISPATCH_INVENTORY_FIELDS,
   PROVIDER_NAMES,
   SESSION_UI_MODES,
   type AnalyzerSetting,
   type ProviderName,
+  type RepoSessionIntent,
   type SessionConfig,
   type SessionUiMode,
 } from "../types/sessionConfig.js";
@@ -489,7 +491,7 @@ function validateRoutingTiers(
  * Validate a SessionConfig's field shapes and surface security-sensitive
  * settings. Returns a (possibly empty) list of {@link ValidationIssue}s; `error`
  * severity means the config cannot be used safely, `warning` means the caller
- * should surface the concern before proceeding (see {@link readValidatedSessionConfig}).
+ * should surface the concern before proceeding (see {@link readValidatedRepoSessionIntent}).
  */
 export function validateSessionConfig(value: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -677,25 +679,61 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
 }
 
 /**
- * Read `session-config.json` from `path` and validate it at the load boundary —
- * the single chokepoint both orchestrators route through so a malformed config
- * fails loud instead of degrading silently to a floor (Auditor-agnostic
- * robustness; "keep orchestrators in parity"). Returns `undefined` when the file
- * is absent (a run with no session config is legal), the typed config when valid,
- * and THROWS on any `error`-severity issue. `warning`-severity issues (e.g.
- * `dangerously_skip_permissions=true`) do not block the load; they are surfaced
- * via `onWarnings` (defaulting to a stderr write so a security-sensitive setting
- * is never silently honored — same surface both orchestrators get).
+ * Validate a PERSISTED {@link RepoSessionIntent} — the on-disk `session-config.json`
+ * shape, which carries audit INTENT + policy ONLY. On top of every field-shape check
+ * {@link validateSessionConfig} runs, this REJECTS any dispatch-inventory field (the
+ * {@link DISPATCH_INVENTORY_FIELDS} + `dispatch.rolling_engine`) as an `error`, so a
+ * resolved backend/launch set is UNREPRESENTABLE on disk: it rides the per-auditor
+ * `--auditor` descriptor, never the repo config, and is never inherited across auditors
+ * ([[capability-is-per-auditor-not-per-audit]], `spec/unified-dispatch-worker-model.md`).
+ * This is what makes the "unrepresentable on disk" invariant REAL rather than
+ * TS-write-only — both the audit store and remediate's disk read route through it.
  */
-export async function readValidatedSessionConfig(
+export function validateRepoSessionIntent(value: unknown): ValidationIssue[] {
+  const issues = validateSessionConfig(value);
+  if (!isRecord(value)) return issues;
+  for (const field of DISPATCH_INVENTORY_FIELDS) {
+    if (value[field] !== undefined) {
+      pushIssue(
+        issues,
+        field,
+        `${field} is dispatch inventory and cannot be persisted on session-config.json — ` +
+          `it rides the per-auditor --auditor descriptor (spec/unified-dispatch-worker-model.md).`,
+      );
+    }
+  }
+  const dispatch = value.dispatch;
+  if (isRecord(dispatch) && dispatch.rolling_engine !== undefined) {
+    pushIssue(
+      issues,
+      "dispatch.rolling_engine",
+      "dispatch.rolling_engine is dispatch capability and cannot be persisted — " +
+        "set AUDIT_CODE_ROLLING_ENGINE / REMEDIATE_ROLLING_ENGINE or the --auditor descriptor.",
+    );
+  }
+  return issues;
+}
+
+/**
+ * Read `session-config.json` from `path` and validate it as a {@link RepoSessionIntent}
+ * at the load boundary — the single chokepoint both orchestrators route through so a
+ * malformed config (or one carrying dispatch inventory that can no longer be persisted)
+ * fails loud instead of degrading silently (Auditor-agnostic robustness). Returns
+ * `undefined` when the file is absent (a run with no session config is legal), the typed
+ * intent when valid, and THROWS on any `error`-severity issue. `warning`-severity issues
+ * (e.g. `dangerously_skip_permissions=true`) do not block the load; they are surfaced via
+ * `onWarnings` (defaulting to a stderr write so a security-sensitive setting is never
+ * silently honored). Consumers overlay the per-auditor descriptor via `resolveSessionConfig`.
+ */
+export async function readValidatedRepoSessionIntent(
   path: string,
   options: { onWarnings?: (warnings: ValidationIssue[]) => void } = {},
-): Promise<SessionConfig | undefined> {
+): Promise<RepoSessionIntent | undefined> {
   const raw = await readOptionalJsonFile<unknown>(path);
   if (raw === undefined) {
     return undefined;
   }
-  const issues = validateSessionConfig(raw);
+  const issues = validateRepoSessionIntent(raw);
   const errors = issues.filter((issue) => issue.severity === "error");
   if (errors.length > 0) {
     throw new Error(
@@ -712,5 +750,5 @@ export async function readValidatedSessionConfig(
         ));
     surface(warnings);
   }
-  return raw as SessionConfig;
+  return raw as RepoSessionIntent;
 }

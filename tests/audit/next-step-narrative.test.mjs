@@ -12,6 +12,10 @@ import {
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.ts");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.ts");
 
+// Post-G2 the backend provider identity rides the per-invocation --auditor
+// descriptor rather than the persisted session-config.json (which now rejects it).
+const AUDITOR_ARGS = ["--auditor", JSON.stringify({ self: { provider: "worker-command" } })];
+
 /** Drive the deterministic pipeline in-process up to (and including) synthesis,
  * leaving synthesis_narrative_current as the only outstanding obligation, and
  * persist the resulting bundle so the next-step CLI resumes from that state. */
@@ -33,9 +37,9 @@ async function persistSynthesisReadyState(root, artifactsDir) {
  * mandatory friction-triage pause (write ≥1 open_observation, then re-call) the
  * way a host would. promoteFinalAuditReport deletes artifactsDir, so recreate
  * the friction subdir before writing. Returns the completed present_report step. */
-async function nextStepToComplete(root) {
+async function nextStepToComplete(root, extraArgs = []) {
   for (let i = 0; i < 5; i++) {
-    const step = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+    const step = JSON.parse((await runWrapper(["next-step", ...extraArgs], { cwd: root })).stdout);
     if (
       step.step_kind === "present_report" &&
       step.status === "ready" &&
@@ -71,14 +75,14 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
-        { provider: "worker-command", analyzers: { typescript: "skip" } },
+        { analyzers: { typescript: "skip" } },
         null,
         2,
       ) + "\n",
     );
 
     // First next-step lands on the narrative pause.
-    const paused = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+    const paused = JSON.parse((await runWrapper(["next-step", ...AUDITOR_ARGS], { cwd: root })).stdout);
     expect(paused.step_kind).toBe("synthesis_narrative");
     expect(paused.status).toBe("ready");
     const narrativeResultsPath = paused.artifact_paths.synthesis_narrative_results;
@@ -122,7 +126,7 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
 
     // Second next-step ingests the narrative; subsequent calls clear the
     // friction-triage pause and complete.
-    const done = await nextStepToComplete(root);
+    const done = await nextStepToComplete(root, AUDITOR_ARGS);
     expect(done.step_kind).toBe("present_report");
     expect(done.status).toBe("complete");
 
@@ -155,7 +159,6 @@ test.concurrent("next-step omits the narrative when synthesis.narrative is disab
       join(artifactsDir, "session-config.json"),
       JSON.stringify(
         {
-          provider: "worker-command",
           synthesis: { narrative: false },
           analyzers: { typescript: "skip" },
         },
@@ -164,7 +167,7 @@ test.concurrent("next-step omits the narrative when synthesis.narrative is disab
       ) + "\n",
     );
 
-    const done = await nextStepToComplete(root);
+    const done = await nextStepToComplete(root, AUDITOR_ARGS);
     expect(done.step_kind).toBe("present_report");
     expect(done.status).toBe("complete");
 

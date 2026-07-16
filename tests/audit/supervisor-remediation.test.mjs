@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const { buildAuditCodeHandoff, writeAuditCodeHandoffArtifacts } = await import("../../src/audit/supervisor/operatorHandoff.ts");
 const { loadRunLedger } = await import("../../src/audit/supervisor/runLedger.ts");
-const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings, persistHostProvider } = await import("../../src/audit/supervisor/sessionConfig.ts");
+const { getSessionConfigPath, loadSessionConfig, persistAnalyzerSettings } = await import("../../src/audit/supervisor/sessionConfig.ts");
 
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
@@ -308,13 +308,13 @@ test("persistAnalyzerSettings merges settings into an existing valid config, pre
     const configPath = getSessionConfigPath(artifactsDir);
     await writeFile(
       configPath,
-      JSON.stringify({ provider: "codex", analyzers: { eslint: "ephemeral" } }, null, 2) + "\n",
+      JSON.stringify({ timeout_ms: 60000, analyzers: { eslint: "ephemeral" } }, null, 2) + "\n",
       "utf8",
     );
 
     const result = await persistAnalyzerSettings(artifactsDir, { semgrep: "permanent" });
 
-    expect(result.provider).toBe("codex");
+    expect(result.timeout_ms).toBe(60000);
     expect(result.analyzers?.eslint).toBe("ephemeral");
     expect(result.analyzers?.semgrep).toBe("permanent");
 
@@ -346,7 +346,7 @@ test("persistAnalyzerSettings merges into existing analyzers map without clobber
     await writeFile(
       configPath,
       JSON.stringify(
-        { provider: "claude-code", analyzers: { eslint: "ephemeral", semgrep: "skip" } },
+        { timeout_ms: 30000, analyzers: { eslint: "ephemeral", semgrep: "skip" } },
         null,
         2,
       ) + "\n",
@@ -391,26 +391,10 @@ test("persistAnalyzerSettings throws a validation error naming the config path w
   });
 });
 
-// ── RMW lock: concurrent persists of different fields must not lose either ────
-
-test("concurrent persistHostProvider + persistAnalyzerSettings do not lose either field (lock serializes RMW)", async () => {
-  await withTempDir("audit-code-session-config-rmw-lock-", async (artifactsDir) => {
-    const configPath = getSessionConfigPath(artifactsDir);
-
-    // Two writers touch DIFFERENT fields concurrently. Without a lock around the
-    // whole read→merge→write, they can each read the same base, then last-writer-
-    // wins clobbers the other's field. With the shared file lock, the critical
-    // sections are serialized, so BOTH fields survive.
-    await Promise.all([
-      persistHostProvider(artifactsDir, "codex"),
-      persistAnalyzerSettings(artifactsDir, { semgrep: "permanent" }),
-    ]);
-
-    const persisted = JSON.parse(await readFile(configPath, "utf8"));
-    expect(persisted.host_provider).toBe("codex");
-    expect(persisted.analyzers).toEqual({ semgrep: "permanent" });
-  });
-});
+// ── RMW lock: concurrent persists must not lose any writer's key ──────────────
+// (G2 retired `persistHostProvider` — the provider now rides the --auditor descriptor,
+// never a disk write — so the concurrent-different-fields RMW property is covered by the
+// many-writers analyzer test below, which exercises the same shared file lock.)
 
 test("many concurrent persistAnalyzerSettings writers each land their own key (no lost update)", async () => {
   await withTempDir("audit-code-session-config-rmw-lock-many-", async (artifactsDir) => {

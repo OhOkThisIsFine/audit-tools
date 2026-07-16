@@ -8,6 +8,7 @@ import {
   readProviderConfirmationInput,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
+  resolveSessionConfig,
   type SessionConfig,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -126,18 +127,23 @@ export async function runProviderConfirmationAutoComplete(
   artifactsDir?: string,
   effectiveConfig?: SessionConfig,
 ): Promise<ExecutorRunResult> {
-  // 2a-ii: prefer the EFFECTIVE dispatch config threaded from the next-step drain
-  // (the per-auditor handshake inventory overlaid onto the repo config). The confirmed
-  // pool this executor builds + persists is what routes for the whole session, so it
-  // MUST reflect the current auditor's inventory, not a re-read of the repo config that
-  // would re-leak another auditor's `sources`/backends (spec/unified-dispatch-worker-model.md).
-  // Fall back to loading the repo config (the deprecated path) only when no effective
-  // config was threaded — e.g. the legacy headless advance-audit entrypoint, which
-  // carries no handshake. Degrade to the empty permissive default when it is
-  // absent/unreadable — pricing is best-effort and must never block confirmation.
+  // G2: prefer the EFFECTIVE dispatch config threaded from the next-step drain (the
+  // per-auditor descriptor resolved over the repo INTENT). The confirmed pool this
+  // executor builds + persists is what routes for the whole session, so it MUST reflect
+  // the current auditor's descriptor, not a re-read of the repo config
+  // (spec/unified-dispatch-worker-model.md). Fall back to the repo INTENT resolved to
+  // driver-self-only (`resolveSessionConfig(intent, null)`) only when no effective config
+  // was threaded — e.g. the legacy headless advance-audit entrypoint, which carries no
+  // handshake. Degrade to the empty permissive default when it is absent/unreadable —
+  // pricing is best-effort and must never block confirmation.
   const sessionConfig: SessionConfig =
     effectiveConfig ??
-    (artifactsDir ? await loadSessionConfig(artifactsDir).catch(() => ({})) : {});
+    (artifactsDir
+      ? resolveSessionConfig(
+          await loadSessionConfig(artifactsDir).catch(() => ({})),
+          null,
+        )
+      : {});
   // Interactive Gate-0: the host may have submitted an operator ordering + host
   // roster to `provider-confirmation.input.json` (spec/cost-first-routing.md).
   // Absent ⇒ the tool's price-ascending suggestion (headless / no-operator path).

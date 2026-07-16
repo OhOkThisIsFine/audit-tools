@@ -1,13 +1,29 @@
 import type { HostModelRosterEntry } from "../quota/scheduler.js";
-import type { HostDispatchInventory } from "./sessionConfig.js";
+import type {
+  AntigravityConfig,
+  ClaudeCodeConfig,
+  DispatchableSource,
+  ProviderName,
+  VSCodeTaskConfig,
+} from "./sessionConfig.js";
 
 /**
- * The host-emitted scalars describing the auditor DRIVING this run — the
- * dispatch-capability handshake for the current driver's own model/context. All
- * optional: a field is present only when the host declared it this invocation.
- * (G1: collapsed from the former `--host-*` flag bag onto `descriptor.self`.)
+ * The host-emitted description of the auditor DRIVING this run — its provider
+ * identity, own launch transport, and dispatch-capability handshake for its own
+ * model/context. All optional: a field is present only when the host declared it
+ * this invocation. (G1: collapsed the former `--host-*` flag bag onto
+ * `descriptor.self`. G2: folded the driver's provider identity + its own launch
+ * blocks onto `self`, so the descriptor fully describes WHO drives + HOW to launch
+ * it, with the reachable dispatch pool on {@link AuditorDescriptor.sources}.)
  */
 export interface AuditorSelf {
+  /**
+   * The driver's provider identity — the conversation-host/quota-attribution key
+   * for THIS run (collapsed from the retired inventory's `provider` /
+   * `host_provider`, which were the same identity). Absent ⇒ resolve() leaves the
+   * effective provider to env auto-detection (`resolveConversationHostProvider`).
+   */
+  provider?: ProviderName;
   /** Opaque model identity (was `--host-model-id`); a quota-key segment only. */
   model_id?: string;
   /** Ordered model roster, lowest rank first (was `--host-models`). */
@@ -18,12 +34,31 @@ export interface AuditorSelf {
   output_tokens?: number;
   /** Operator override for in-flight subagent cap (was `--host-max-active-subagents`). */
   max_active_subagents?: number;
+  /**
+   * The driver's declared parallel-worker concurrency cap (the former
+   * `sessionConfig.parallel_workers`) — dispatch capability, so it rides the
+   * descriptor, not the repo config. Feeds `resolveHostConcurrencyLimit` /
+   * `resolveHostActiveSubagentLimit` via the resolved effective config.
+   */
+  parallel_workers?: number;
   /** Tristate: host can dispatch subagents (was `--host-can-dispatch-subagents`). */
   can_dispatch_subagents?: boolean;
   /** Host can restrict subagent tools (was `--host-can-restrict-subagent-tools`). */
   can_restrict_subagent_tools?: boolean;
   /** Host can select subagent model (was `--host-can-select-subagent-model`). */
   can_select_subagent_model?: boolean;
+  /**
+   * The driver's OWN launch transport, for the host/IDE providers that are NOT
+   * generic dispatchable sources ({@link DispatchableSource} excludes exactly
+   * `claude-code`/`vscode-task`/`antigravity`, which are driven through their
+   * host/IDE, not an endpoint+parameters source). The dispatchable backends'
+   * launch config rides `sources[]` instead. Present only for a configured
+   * non-default host command or IDE-task template; absent ⇒ the driver
+   * self-launches with defaults.
+   */
+  claude_code?: ClaudeCodeConfig;
+  vscode_task?: VSCodeTaskConfig;
+  antigravity?: AntigravityConfig;
 }
 
 /**
@@ -42,15 +77,18 @@ export interface AuditorDescriptor {
   auditor_id?: string;
   /** When the descriptor was resolved — wired in G5; optional/unused in G1. */
   resolved_at?: number;
-  /** The host-emitted scalars for the driving auditor's own model. */
+  /** The driving auditor's identity, own launch transport, and model scalars. */
   self: AuditorSelf;
   /**
-   * The per-auditor dispatch inventory (backends/launch blocks/sources) — resolved
-   * from the auditor's environment, never the repo session-config
-   * ([[capability-is-per-auditor-not-per-audit]]). `null` and `{}` are OPPOSITE
-   * semantics under `applyDispatchInventory` (null ⇒ deprecated repo-config
-   * fallback; `{}` ⇒ authoritatively-empty inventory = host-only), so absence is
-   * carried as `null`, never collapsed to `{}`. Resliced to `sources` in G2.
+   * The reachable dispatch pool the CURRENT auditor can spill work onto — the
+   * uniform `DispatchableSource[]` (NIM/vLLM endpoints, headless CLIs, subprocess
+   * templates), each with its own endpoint/parameters/quota. Resolved from the
+   * auditor's OWN environment (the deterministic source-emitter's `declared ∩
+   * ambient-verifiable` intersection), never the repo session-config
+   * ([[capability-is-per-auditor-not-per-audit]]). Absent/empty ⇒ the driver
+   * self-drives with no additional backends. (G2 resliced the retired
+   * `inventory` — provider + host/IDE launch blocks moved to {@link self}, the
+   * per-backend dispatch blocks folded here as sources.)
    */
-  inventory?: HostDispatchInventory | null;
+  sources?: DispatchableSource[];
 }

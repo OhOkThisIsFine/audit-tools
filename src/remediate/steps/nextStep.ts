@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readOptionalJsonFile, readValidatedSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
+import { readOptionalJsonFile, readValidatedRepoSessionIntent, resolveSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -1785,12 +1785,19 @@ async function buildImplementDispatchStep(ctx: {
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, options, store } = ctx;
 
-    const loadedSessionConfig = options.sessionConfig ??
-      await readValidatedSessionConfig(
+    // G2: the disk config is a RepoSessionIntent (no dispatch inventory). Resolve it to
+    // driver-self-only (`resolveSessionConfig(intent, null)`) — remediate carries no
+    // `--auditor` descriptor yet (that round-trip is G6), so its disk-configured dispatch
+    // backends are intentionally unavailable until then; a programmatic `options.sessionConfig`
+    // (tests / the audit→remediate handoff) is a full effective config and bypasses the seam.
+    const loadedIntent =
+      (await readValidatedRepoSessionIntent(
         join(root, ".remediation-artifacts", "session-config.json"),
-      ) ?? await readValidatedSessionConfig(
-        join(root, "session-config.json"),
-      );
+      )) ??
+      (await readValidatedRepoSessionIntent(join(root, "session-config.json")));
+    const loadedSessionConfig =
+      options.sessionConfig ??
+      (loadedIntent ? resolveSessionConfig(loadedIntent, null) : undefined);
     // B1: fold the `--host-provider` override onto `host_provider` so every
     // downstream host resolver keys the fan-out to the ACTUAL conversation host.
     // "auto" is treated as unset (fall through to env auto-detection).
@@ -3214,14 +3221,16 @@ async function handleReadyIntakeContractPipeline(
   // flag. Threaded into the contract pipeline so the adversarial 'critique' /
   // 'critic' prompts MANDATE an independent sub-agent reviewer when the host can
   // dispatch one (fail-safe: mandate by default).
-  const sessionConfigForDispatch =
-    options?.sessionConfig ??
-    (await readValidatedSessionConfig(
+  const loadedIntentForDispatch =
+    (await readValidatedRepoSessionIntent(
       join(root, ".remediation-artifacts", "session-config.json"),
     )) ??
-    (await readValidatedSessionConfig(
-      join(root, "session-config.json"),
-    ));
+    (await readValidatedRepoSessionIntent(join(root, "session-config.json")));
+  const sessionConfigForDispatch =
+    options?.sessionConfig ??
+    (loadedIntentForDispatch
+      ? resolveSessionConfig(loadedIntentForDispatch, null)
+      : undefined);
   const hostCanDispatchSubagents = resolveHostDispatchCapability({
     hostCanDispatchSubagents: options?.hostCanDispatchSubagents,
     sessionConfig: sessionConfigForDispatch,
@@ -4127,9 +4136,11 @@ export async function decideNextStep(
   // validated load (with `.remediation-artifacts/` path precedence + operator
   // warning surface) happens inside the loop, so suppress warnings here to avoid
   // emitting the same warning twice per invocation. Errors still throw.
+  // Only reads `observability.run_log` (an INTENT field), so the raw intent suffices —
+  // no descriptor resolve needed here.
   const sessionConfig =
     normalizedOptions.sessionConfig ??
-    (await readValidatedSessionConfig(join(root, "session-config.json"), {
+    (await readValidatedRepoSessionIntent(join(root, "session-config.json"), {
       onWarnings: () => {},
     }));
   const runLogger = new RunLogger(join(artifactsDir, "run.log.jsonl"), {
