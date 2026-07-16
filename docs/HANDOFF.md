@@ -69,28 +69,46 @@
 ## ▶ IMMEDIATE NEXT — the unified-dispatch-worker-model rework (IN PROGRESS)
 
 Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
-(memory [[unified-dispatch-worker-model]]). Triggered by the 2026-07-15 repair-proxy dogfood
-(`docs/backlog.md` → "Live dogfood: BOTH dispatch paths failed"). Owner-agreed to build the full
-decomposition. **Shipped so far:** commit 1 (`f5bca305`, retire the repair-proxy source-pool
-integration, −606 LOC, reviewed+attested) + commit 2a-i (`c167fbee`, the additive `--host-inventory`
-handshake channel) + **commit 2a-ii (`605d8a0a`, switch the dispatch consumers to READ the handshake
-inventory — loop-core, reviewed+attested).** **Resume at 2a-iii** — the decomposition + the two open
-decisions live in the spec:
+→ "Greenfield endpoint (owner-approved 2026-07-16)" + Decomposition (memory
+[[unified-dispatch-worker-model]]). A 3-person independent design panel (greenfield mandate) converged
+unanimously; **owner approved the greenfield endpoint** — full synthesis in
+[`docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md`](../docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md).
 
-- **2a-ii (SHIPPED `605d8a0a`, loop-core, reviewed+attested):** the dispatch consumers now read inventory
-  from the handshake via a single shared `applyDispatchInventory` overlay (repo config = deprecated
-  fallback; wholesale-authoritative when inventory present → host-only degrades correctly, no repo
-  cross-contamination). Inert until 2a-iii wires the loaders to assemble `--host-inventory` (no host emits
-  it yet → the null-inventory fallback runs = today's behavior byte-for-byte). Independent adversarial
-  review found+fixed 2 defects (provider_confirmation auto-complete persist-leak; empty `{}` inventory
-  round-trip drop). See the 2a-ii commit body.
-- **2a-iii (NEXT, loop-core):** add the remediate descriptor round-trip (absent today — `remediate/steps/prompts.ts`
-  `loaderCommand` doesn't re-emit `--host-*`); loaders assemble+pass `--host-inventory`; validator
-  rejects/warns repo inventory fields; DELETE the config inventory fields; resolve the 2 decisions
-  (confirmed_provider_pool re-validated-not-inherited; quota/block_quota split-field removal).
-- **Commit 3** repair-proxy as a kind-1 launch-transport (auto-detect + degrade to direct). **Commit 4**
-  fix C (host cold-start wall — **needs a clean minimal repro first**, the paused run was inconclusive).
-  **Commit 5** decide kind-3's fate.
+**The two "open decisions" are RESOLVED (they were one cut — INTENT vs CAPABILITY):**
+- **confirmed_provider_pool → SPLIT:** persist the operator's route DECISION (exclusions + cost order +
+  confirmed flag) as intent; re-resolve the concrete pool per-auditor + apply the decision as a filter;
+  reconciliation on a newly-reachable backend is `autonomous_mode`-keyed (attended → prompt the delta;
+  autonomous → fail-closed-exclude + friction).
+- **quota/block_quota → SPLIT** by "asserts capability vs asserts policy": windows/host_model/subagent-
+  limit/per-source-quota = capability (handshake, never persist); safety_margin/thresholds/λ = policy
+  (repo); learned rpm/tpm = the account-keyed ledger (not config).
+
+**Shipped:** commit 1 (`f5bca305`, retire the source-pool integration, reviewed+attested) + 2a-i
+(`c167fbee`, additive `--host-inventory` channel) + **2a-ii (`605d8a0a`, switch dispatch consumers to
+READ the handshake via `applyDispatchInventory` — loop-core, reviewed+attested; the correct RUNTIME
+overlay but a transitional half-measure — the repo still HAS the dispatch slots).** Inert until the host
+loaders emit inventory (no host does yet → today's behavior byte-for-byte).
+
+**Greenfield build sequence (each loop-core: green + independent review + attest):**
+- **G1 (IMMEDIATE NEXT)** — collapse the `--host-*` flag-bag into ONE `--auditor <json>` `AuditorDescriptor`.
+  **Fully reconned + planned:** [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](../docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md)
+  (target shape + exhaustive handshake-surface replace map + asset/guard/test list — the next agent should
+  NOT re-run this recon). Pure transport collapse; audit-only; `--host-provider` + inventory-reslice deferred to G2.
+- **G2** split the persisted type (`RepoSessionIntent`, zero dispatch fields → contamination unrepresentable;
+  `resolve(intent, descriptor)`) + fold `provider` into `self` + reslice inventory → `sources`.
+- **G3** split confirmed_provider_pool (policy on intent + re-resolved reach + autonomous-keyed reconciliation
+  + pin the exclusion-key grammar, default `provider:model`).
+- **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
+  `declared ∩ ambient-verifiable` reach + lies-reachably quarantine). **G6** remediate `--auditor` round-trip.
+- Orthogonal (retained): **commit 3** repair-proxy as a kind-1 launch-transport; **commit 4** fix C (host
+  cold-start wall — needs a clean minimal repro first); **commit 5** decide kind-3's fate.
+
+**⚠ Quota / free-dispatch blocker (this session):** owner is burning Claude quota fast; free-worker offload
+is DOWN both ways — `ANTHROPIC_BASE_URL` is real Anthropic (repair-proxy not fronting subagents — needs
+operator env setup) AND the `llm`/NIM completion endpoint times out/returns empty even on a trivial prompt.
+Until one clears, do the greenfield work in-Claude FRUGALLY (no subagent panels — the divergent-design
+phase is done + captured) or wait for the free lane. Fastest quota unblock = owner points `ANTHROPIC_BASE_URL`
+at a running repair-proxy backed by a free model.
 
 ## Older track — bounded quota-cluster remainder (secondary, not blocking the rework)
 
