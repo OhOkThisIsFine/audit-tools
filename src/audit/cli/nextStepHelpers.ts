@@ -163,7 +163,13 @@ import {
   auditNodeClaimRegistry,
   auditHybridSettledPath,
 } from "./hybridDispatch.js";
-import { planHybridDispatch, readSettledPools, addSettledPool } from "audit-tools/shared";
+import {
+  planHybridDispatch,
+  readSettledPools,
+  addSettledPool,
+  readConfirmedDispatchPolicy,
+  resolveExcludedProviders,
+} from "audit-tools/shared";
 import { resolveHostDispatchCapability } from "./args.js";
 
 // ── In-process dispatch: bounded no-progress retry (D1, NIM/Codex fix set) ─────
@@ -1799,6 +1805,13 @@ async function runHostDelegationObligation(
   // Defect-1: an attended host (reached here because the headless in-process branch
   // above was skipped) demotes its configured primary in-process backend into the
   // source-pool set, so the hybrid split fans the frontier across host + backend + NIM.
+  // The operator's Gate-0 route decision, applied as a set-difference over freshly
+  // gathered reach. Read here (not inside the pool build) because policy lives on the
+  // root-scoped confirmation and this is the layer that owns `root`. Self-spawn-blocked
+  // is recomputed against THIS process's env, never inherited from the writing auditor.
+  const auditExcludedProviders = resolveExcludedProviders(
+    await readConfirmedDispatchPolicy(ctx.params.root),
+  );
   const auditSourcePools = await buildAuditSourcePools(hybridCfg, {
     // B1 same-agent guard: don't demote the primary backend to a source when the
     // conversation host IS that provider (one account ⇒ host self-drives; else the
@@ -1807,6 +1820,7 @@ async function runHostDelegationObligation(
       sessionConfig: hybridCfg,
       hostCanDispatch,
     }),
+    excludedProviders: auditExcludedProviders,
   });
   if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditSourcePools.length > 0) {
     const pending = buildPendingAuditTasks(bundle);

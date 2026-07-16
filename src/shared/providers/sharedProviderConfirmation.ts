@@ -35,6 +35,8 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { DispatchableSource, ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
+import { PROVIDER_NAMES } from "../types/sessionConfig.js";
+import { isSelfSpawnBlocked } from "./providerPathGuard.js";
 import { auditToolsDir } from "../io/auditToolsPaths.js";
 import { readJsonFile, writeJsonFile } from "../io/json.js";
 import { withFileLock } from "../quota/fileLock.js";
@@ -96,9 +98,41 @@ export function sharedProviderConfirmationPath(root: string): string {
  * time. Staleness is "the current discovered roster differs from this snapshot"
  * — a provider appearing or disappearing forces a re-confirm.
  */
+/**
+ * The operator's explicit route DECISION — reach-free by construction.
+ *
+ * This is the POLICY half of the Gate-0 confirmation: it names *rules* (which
+ * provider names the operator ruled out, which self-spawn-blocked ones they ruled
+ * back in), never *reachable endpoints*. It is deliberately the operator's raw
+ * `exclude` / `include` input rather than the derived per-entry `excluded` flag,
+ * because that flag folds in the WRITING auditor's `CLAUDECODE`/`CODEX` env via
+ * `isSelfSpawnBlocked` — persisting it would make one auditor's environment
+ * decide another's routing. Self-spawn-blocked is therefore recomputed in the
+ * READING process (see {@link resolveExcludedProviders}).
+ *
+ * Because policy is reach-independent, it stays valid when the discovered roster
+ * changes — unlike the cost positions, which are reach-derived and drop out on a
+ * `reconfirm`. {@link readConfirmedDispatchPolicy} deliberately does NOT gate on
+ * the roster-freshness status for exactly this reason: an exclusion must fail
+ * CLOSED (keep excluding) when reach shifts, never fail open.
+ */
+export interface ConfirmedDispatchPolicy {
+  /** Provider names the operator excluded from the dispatchable pool. */
+  exclude?: ResolvedProviderName[];
+  /** Self-spawn-blocked provider names the operator explicitly opted back IN. */
+  include?: ResolvedProviderName[];
+}
+
 export interface SharedProviderConfirmation {
   /** Must equal SHARED_PROVIDER_CONFIRMATION_VERSION. */
   schema_version: typeof SHARED_PROVIDER_CONFIRMATION_VERSION;
+  /**
+   * The operator's explicit, reach-free route decision. Read at dispatch by
+   * {@link resolveExcludedProviders} and applied as a set-difference filter over
+   * freshly-discovered reach — never additively. Absent ⇒ no operator exclusions
+   * (self-spawn-blocked providers are still excluded, recomputed locally).
+   */
+  policy?: ConfirmedDispatchPolicy;
   /** Always true: the pool applies to the whole audit→remediate session. */
   session_level: true;
   /** ISO-8601 timestamp of when the pool was confirmed. */
@@ -286,8 +320,123 @@ export function buildSharedProviderConfirmation(
     ...(clampDispatchBias(input?.dispatch_bias) != null
       ? { dispatch_bias: clampDispatchBias(input?.dispatch_bias) }
       : {}),
+    ...(buildConfirmedDispatchPolicy(exclude, include) ?? {}),
     roster: sortRoster(discovered.map((p) => p.name)),
   };
+}
+
+/**
+ * Lift the operator's explicit route decision out of their Gate-0 input into the
+ * persisted policy half. Returns `undefined` when the operator named neither list
+ * (so the field stays absent rather than persisting an empty shell).
+ */
+function buildConfirmedDispatchPolicy(
+  exclude: readonly ResolvedProviderName[],
+  include: readonly ResolvedProviderName[],
+): { policy: ConfirmedDispatchPolicy } | undefined {
+  if (exclude.length === 0 && include.length === 0) return undefined;
+  return {
+    policy: {
+      ...(exclude.length > 0 ? { exclude: sortRoster([...exclude]) } : {}),
+      ...(include.length > 0 ? { include: sortRoster([...include]) } : {}),
+    },
+  };
+}
+
+/**
+ * The dispatchable-pool exclusion set for THIS process: the operator's explicit
+ * exclusions, plus every provider that is self-spawn-blocked *in this process's
+ * env* and was not explicitly opted back in.
+ *
+ * Reach is recomputed here rather than read from the artifact's derived `excluded`
+ * flag — that flag encodes the WRITING auditor's env, and an auditor for whom a
+ * provider is perfectly spawnable must not inherit another's block. The operator's
+ * decision is inherited (it is a rule); the reach assessment is not.
+ *
+ * ⚠ **This set is only safe to apply to SOURCE pools.** Inside any agent session it
+ * ALWAYS contains that agent (`CLAUDECODE` ⇒ `claude-code`, `CODEX` ⇒ `codex`) — i.e.
+ * the conversation host itself. Applying it to HOST pools would zero out dispatch
+ * entirely: the driver would exclude itself. It is harmless at `buildSourcePools`
+ * only because a host can never BE a source — `claude-code` is structurally absent
+ * from `DISPATCHABLE_SOURCE_PROVIDERS`, so in a Claude Code session the filter is a
+ * no-op. Honoring an operator exclusion of the host/primary provider therefore is NOT
+ * a matter of passing this set to the host-pool builder; it needs a separate decision
+ * about what excluding your own driver should even mean.
+ */
+/**
+ * Keep only real provider names, dropping anything unknown. Returns `undefined` for a
+ * non-array or an array with no recognizable name, so an unknown entry degrades that
+ * entry — never the whole list.
+ */
+function parseProviderNameList(
+  value: unknown,
+): ResolvedProviderName[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const names = value.filter((v): v is ResolvedProviderName =>
+    typeof v === "string" && RESOLVED_PROVIDER_NAMES.includes(v as ResolvedProviderName),
+  );
+  return names.length > 0 ? names : undefined;
+}
+
+/** Every concrete provider name — `auto` is a resolution directive, not a backend. */
+const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.filter(
+  (name): name is ResolvedProviderName => name !== "auto",
+);
+
+export function resolveExcludedProviders(
+  policy: ConfirmedDispatchPolicy | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): Set<ResolvedProviderName> {
+  const included = new Set(policy?.include ?? []);
+  const excluded = new Set<ResolvedProviderName>(policy?.exclude ?? []);
+  for (const name of RESOLVED_PROVIDER_NAMES) {
+    if (included.has(name)) continue;
+    if (isSelfSpawnBlocked(name, env)) excluded.add(name);
+  }
+  return excluded;
+}
+
+/**
+ * Read the operator's confirmed route policy from the shared Gate-0 confirmation.
+ *
+ * Deliberately reads the artifact DIRECTLY rather than going through
+ * {@link readSharedProviderConfirmation}, for two independent reasons — both about
+ * not letting a reach concern decide a policy question:
+ *
+ * 1. **Freshness must not gate policy.** `readSharedProviderConfirmation` degrades a
+ *    roster-changed artifact to `reconfirm`, which {@link readConfirmedCostPositions}
+ *    treats as "drop everything". That is right for cost positions (they ARE reach-
+ *    derived) and wrong for policy: an exclusion is a rule, so a shifted roster must
+ *    not silently un-exclude a backend the operator ruled out.
+ * 2. **A corrupt sibling field must not discard the decision.**
+ *    `parseSharedProviderConfirmation` returns `null` wholesale on any malformed
+ *    required field or a `schema_version` mismatch. Routing policy through it would
+ *    make an unrelated corruption (or a future version bump) silently lift the
+ *    operator's exclusions. Parsing `policy` on its own keeps that blast radius out.
+ *
+ * It also avoids `currentProviderRoster`'s per-provider `where`/`which` probes, which
+ * this function would only compute in order to throw away.
+ *
+ * **Honest limit — this is not absolutely fail-closed.** An absent or unparseable
+ * artifact yields `null` (no operator policy). That residue is irreducible here: with
+ * no readable decision on disk there is nothing to fail closed ON. Self-spawn-blocked
+ * providers are still excluded locally by {@link resolveExcludedProviders}, which
+ * needs no artifact.
+ */
+export async function readConfirmedDispatchPolicy(
+  root: string | undefined,
+): Promise<ConfirmedDispatchPolicy | null> {
+  if (!root) return null;
+  let raw: unknown;
+  try {
+    raw = await readJsonFile<unknown>(sharedProviderConfirmationPath(root));
+  } catch {
+    // Absent (ENOENT) / unreadable / invalid JSON — never-block, same contract as
+    // every other read of this artifact.
+    return null;
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return parseConfirmedDispatchPolicy((raw as Record<string, unknown>).policy) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +560,11 @@ function parseSharedProviderConfirmation(
   // dispatch_bias is optional + additive; a malformed/out-of-range value degrades to
   // the cost-first default (clamp → undefined only when non-finite), never blocking.
   const dispatchBias = clampDispatchBias(obj.dispatch_bias);
+  // policy is optional + additive; a malformed value degrades to absent. Note the
+  // asymmetry with the fields above: degrading policy to absent fails OPEN (the
+  // operator's exclusions stop applying), so each list is validated independently —
+  // a malformed `include` must not silently discard a well-formed `exclude`.
+  const policy = parseConfirmedDispatchPolicy(obj.policy);
   return {
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
@@ -423,7 +577,31 @@ function parseSharedProviderConfirmation(
       ? { source_pool_cost_order: sourcePools }
       : {}),
     ...(dispatchBias != null ? { dispatch_bias: dispatchBias } : {}),
+    ...(policy ? { policy } : {}),
     roster: obj.roster,
+  };
+}
+
+/**
+ * Parse the optional policy half. Each list is validated on its own so one
+ * malformed list cannot discard the other — degrading a well-formed `exclude` to
+ * absent would fail OPEN and route to a backend the operator ruled out.
+ */
+function parseConfirmedDispatchPolicy(
+  value: unknown,
+): ConfirmedDispatchPolicy | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const obj = value as Record<string, unknown>;
+  // Membership-checked, not just `typeof === "string"`: this field now decides
+  // routing, so an unknown name must not type-assert its way into the filter.
+  const exclude = parseProviderNameList(obj.exclude);
+  const include = parseProviderNameList(obj.include);
+  if (!exclude?.length && !include?.length) return undefined;
+  return {
+    ...(exclude?.length ? { exclude } : {}),
+    ...(include?.length ? { include } : {}),
   };
 }
 

@@ -56,7 +56,11 @@ export function isInProcessAuditPool(pool: { providerName: string }): boolean {
  */
 export async function buildAuditSourcePools(
   sessionConfig: SessionConfig,
-  options?: { demotePrimaryInProcess?: boolean },
+  options?: {
+    demotePrimaryInProcess?: boolean;
+    /** Operator-excluded + locally-self-spawn-blocked providers (`resolveExcludedProviders`). */
+    excludedProviders?: ReadonlySet<string>;
+  },
 ): Promise<CapacityPool[]> {
   const primaryProviderName =
     (sessionConfig as { provider?: string }).provider ?? "claude-code";
@@ -73,6 +77,7 @@ export async function buildAuditSourcePools(
     // backend (codex/opencode/openai-compatible) to a source pool so the host fans out
     // onto it alongside its own subagents instead of the backend monopolizing.
     demotePrimaryInProcess: options?.demotePrimaryInProcess,
+    excludedProviders: options?.excludedProviders,
   });
 }
 

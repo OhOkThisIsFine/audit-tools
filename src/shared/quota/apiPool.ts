@@ -490,10 +490,28 @@ export async function buildSourcePools(params: {
   quotaEntries: Record<string, QuotaStateEntry>;
   /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
   demotePrimaryInProcess?: boolean;
+  /**
+   * Provider names the operator ruled out at Gate-0, plus any recomputed as
+   * self-spawn-blocked in THIS process (`resolveExcludedProviders`). Applied as a
+   * set-difference over freshly-gathered reach — never additively.
+   *
+   * Filtered HERE, on the routing side, rather than inside
+   * {@link gatherDispatchableSources}: the gather also feeds the Gate-0 confirmation
+   * display, where an excluded provider must stay VISIBLE and marked excluded so the
+   * operator can see it and opt it back in. Display and routing diverge deliberately.
+   *
+   * Omit ⇒ no filtering (the pool build is unaware of Gate-0), so a caller that has
+   * no confirmation to read behaves exactly as before.
+   */
+  excludedProviders?: ReadonlySet<string>;
 }): Promise<CapacityPool[]> {
-  const sources = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
+  const gathered = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
     demotePrimaryInProcess: params.demotePrimaryInProcess,
   });
+  const excluded = params.excludedProviders;
+  const sources = excluded?.size
+    ? gathered.filter((source) => !excluded.has(source.provider))
+    : gathered;
   const pools = await Promise.all(
     sources.map((source) =>
       buildSourcePool({ source, quotaSource: params.quotaSource, quotaEntries: params.quotaEntries }),
