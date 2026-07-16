@@ -186,9 +186,11 @@ ordering matters).
 
 ## What changes
 
-- **Remove the reported concurrency number.** `--host-max-active-subagents` is
-  demoted to an explicit operator-only hard cap (one pool's optional in-flight
-  cap), never the primary source and never an LLM's answer to "how many?".
+- **Remove the reported concurrency number.** The operator override for the
+  in-flight subagent cap (the `--auditor` descriptor's `self.max_active_subagents`
+  field, formerly the standalone `--host-max-active-subagents` flag) is demoted
+  to an explicit operator-only hard cap (one pool's optional in-flight cap),
+  never the primary source and never an LLM's answer to "how many?".
 - **Add the shared reservation ledger** alongside the learned-quota store
   (`readQuotaState`/`recordWaveOutcome`), same `withFileLock`, keyed by
   `resourceKey`. The dispatch-quota schema already anticipates it
@@ -383,7 +385,8 @@ started-provider's quota", and a co-located double-run overshoot test.
 
 ## Relationship to existing machinery
 
-Generalizes: `--host-models` roster pools, A8 `poolsOverride` NIM spill,
+Generalizes: the `--auditor` descriptor's `self.roster` model pools (formerly
+the standalone `--host-models` flag), A8 `poolsOverride` NIM spill,
 `capacity_pools[]`, the ClaimRegistry, HostSessionQuotaSource, and the learned
 per-`(provider,model)` quota store — all already account-aware in the `pool_id`.
 The rework unifies them under one per-invocation pool-descriptor + admission gate.

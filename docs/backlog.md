@@ -36,7 +36,18 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 > entry has one.
 - **A "fully reconned, don't re-run the recon" plan doc was materially under-scoped (G1 lap 2026-07-15, inefficient-feeding, low).** [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](reviews/g1-auditor-descriptor-plan-2026-07-16.md) billed its handshake-surface map as "exhaustive … the next agent should NOT re-run this recon", but a source check (not a full re-recon — just verifying edit sites) found it MISSED two live consumers (`prepareDispatchCommand.ts`, `quotaCommand.ts` both parse the handshake directly) and wrongly declared `--host-model` dead (two callers). Cheap to absorb, but the "don't re-verify" framing is the trap — a pre-written plan's replace-set is a LEAD, not a verdict; always cross-check the exact edit sites against source before trusting an "exhaustive" claim. [[external-audit-catalogs-are-leads]]
 - **Offloaded (Haiku) test rewrites can silently WEAKEN assertions (G1 lap 2026-07-15, tool-should-decide, low-medium).** A Haiku subagent converting `quota-command.test.mjs` kept the test green but rewrote a malformed-roster assertion into one matching an incidental `is not a function` TypeError (asserting a downstream crash, not the intended CLI-boundary validation error). Green-but-weaker slips through a pass/fail gate. Endpoint: when offloading test rewrites, the parent MUST review the assertion semantics of each changed test (the independent-review step is the mechanical backstop — it caught this one), never trust "it passes." Generalizes [[delegate-adversarial-phases-to-separate-agent]] to offloaded test authoring.
-- **Live dogfood: BOTH dispatch paths failed to place a single review packet — free-pool in-process spill dispatched nothing AND host review walled at 56% (2026-07-15 repair-proxy dogfood, HIGH, reproduces [[relax-dispatch-source-forcing]] + [[capability-is-per-auditor-not-per-audit]]).** Config: host=claude-code, `repair_proxy` + `sources:[opencode-free]`, `dispatch.rolling_engine` unset (defaults TRUE). Result: 430 planned audit tasks, ZERO dispatched anywhere. VERIFIED facts (dispatch-quota.json + proxy access log + source): (1) **proxy received only 4 `/registry` hits and ZERO `/v1/chat/completions`** — no packet ever reached repair-proxy; (2) the in-process free-pool spill's gate PASSED (`resolveAuditRollingEngineEnabled`=TRUE default [`sessionConfig.ts:86`](src/shared/types/sessionConfig.ts); `auditSourcePools.length>0`, [`nextStepHelpers.ts:1808`](src/audit/cli/nextStepHelpers.ts)) and it DID assign the frontier to the source pools — but **every `openai-compatible` worker launch returned `fail()` BEFORE POSTing** (VERIFIED from `task-results/*.stderr.txt`, run 224009): **131 packets** = `"provider has no API key"` (repair-proxy is loopback/keyless but the provider demands a non-empty key and discovered repair-proxy sources carried none — `repairProxyRegistry.ts` (now retired) only set `api_key_env` when `cfg.api_key_env` was set) [**B1**]; **~136 packets** = `"refusing to dispatch an unroutable packet: N granted file(s) could not be inlined for a no-file-access worker"` — audit review packets bundle many files over the default inline caps (64KiB/file, 256KiB total, 24 files), the v0.32.68 [[openai-compatible-content-inlining]] residual (a) biting live [**B2**]; +2 `empty completion` (NIM). `!accepted`→`outcome:"error"` ([`providerLaunchFinalize.ts:62`](src/shared/dispatch/providerLaunchFinalize.ts)) is a TERMINAL completion, so the spill "completes" with 430 errors, 0 POSTs (proxy log confirms), 0 coverage; the host complement then walls. `active-dispatch.json` holds only `paused_state`. **These launch-layer failures are INDEPENDENT of the inventory-source architecture — the per-auditor-handshake decoupling would NOT fix dispatch.** (3) the host review path then built `capacity_pools`=host-ONLY (by design — [`tokenUsageObservation.ts:92`](src/audit/cli/dispatch/tokenUsageObservation.ts): source pools "belong to the separate in-process engine") and walled at **56% remaining, NOT exhaustion**: `empty_grant` from [`hostDispatchWall.ts:66`](src/shared/dispatch/hostDispatchWall.ts) with the misleading message "session limit is exhausted" ([`semanticReviewStep.ts:175`](src/audit/cli/semanticReviewStep.ts)); `admission.explains` was EMPTY (no per-packet reason recorded). Endpoints: (a1) **B1 — repair-proxy loopback sources need no key but the provider refuses without one**: stamp a placeholder key on repair-proxy-discovered sources (like opencode-free's `api_key:"public"`) or treat a loopback/127.0.0.1 endpoint as keyless-OK in `OpenAiCompatibleProvider` ([`:140`](src/shared/providers/openAiCompatibleProvider.ts)); (a2) **B2 — no-file-access single-shot workers can't take large multi-file audit packets**: either raise `openai_compatible.referenced_file*` caps, partition audit packets smaller for single-shot workers, or route oversized packets to a file-reading provider — a real design choice, since NIM/opencode/repair-proxy workers fundamentally have no Read tool; (b) **cold-start admission**: a host at 56% must not 0-grant → "exhausted" (the null-budget→+Infinity→probe path should still admit ≥1; capability/context-fit filter [`admissionLoop.ts:240`](src/shared/dispatch/admissionLoop.ts) or an empty-explains short-circuit is suspected — pin it); (c) **diagnostics**: `explains:[]` on a 0-grant is undebuggable, and "exhausted" is wrong at 56%. **Architectural (owner note [[capability-is-per-auditor-not-per-audit]] extension):** dispatch INVENTORY (`sources`/`repair_proxy`/provider blocks/available models) is read from the REPO-persisted `.audit-tools/audit/session-config.json` (single chokepoint `gatherDispatchableSources` [`apiPool.ts:473`](src/shared/quota/apiPool.ts)) → couples dispatch to the repo/run; it must be resolved PER-AUDITOR from the current auditor's environment at dispatch time (generalize the `--host-models` handshake channel), leaving the repo session-config to carry audit INTENT (scope/lenses/policy) only. Full writeup: scratchpad `repair-proxy-dogfood-findings.md`. **RESOLVED to a design of record ([`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md), [[unified-dispatch-worker-model]]):** repair-proxy is a kind-1 tool-repair launch-transport, not a source pool — so **B1/B2 dissolve by RETIRING the source-pool wiring** (not by fixing them), inventory moves to the per-auditor handshake, and only **C** (cold-start host wall) remains a standalone fix. The old "repair-proxy dispatch integration" item + `spec/repair-proxy-dispatch-integration.md` are retired by that rework.
+- **Host cold-start admission wall — still open (item C from the 2026-07-15 repair-proxy dogfood).** A host
+  at ~56% session-remaining (percent-only claude-oauth, no learned tokens-per-percent slope) granted 0
+  packets with `admission.explains` EMPTY and the misleading message "the provider session limit is
+  exhausted" ([`hostDispatchWall.ts`](src/shared/dispatch/hostDispatchWall.ts);
+  [`semanticReviewStep.ts`](src/audit/cli/semanticReviewStep.ts)). Cold start must admit ≥1 (probe), never
+  label ~56%-remaining "exhausted", and never emit a 0-grant with empty `explains`. B1 (repair-proxy
+  loopback source had no key) and B2 (single-shot worker couldn't inline large audit packets) DISSOLVED by
+  retiring the repair-proxy source-pool wiring (`repairProxyRegistry.ts` deleted, no
+  `SessionConfig.repair_proxy` field) per
+  [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md),
+  [[unified-dispatch-worker-model]] — only item C remains, tracked as "commit 4" in that spec's
+  Decomposition + `docs/HANDOFF.md`.
 - **Free NIM `llm` lane — `read` BACK, `write`/NIM-completion UNVERIFIED (updated G1 session 2026-07-15, external).** `llm read` responded correctly on real inputs during the G1 recon (the earlier "completions time out / return EMPTY" note was stale — the read side is usable again). `llm write` and the raw NIM completion endpoint + `ANTHROPIC_BASE_URL` subagent-fronting were NOT retested this session. Re-probe `llm write` before relying on it. When the free write-lane is uncertain, the working offload pattern is **Haiku subagents** (parent Opus orchestrates + verifies green + independent-reviews) — used successfully for G1's bulk. Compounds the standing NIM-reliability friction (JSON-contract failures on reasoning prompts). [[free-nim-pool-first-default-worker]]
 - **Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (2a-ii lap, tool-should-decide, low-medium) [[loop-core-enforcement-layer]].** `LOOP_CORE_PATTERNS` includes `src/audit/orchestrator/` (so 2a-ii's Finding-A fix in `advanceTypes.ts`/`executorRunners.ts`/`intakeExecutors.ts` correctly demanded attestation) but NOT `src/audit/cli/nextStepCommand.ts` / `semanticReviewStep.ts` / `prompts.ts` — where the CORE 2a-ii dispatch-inventory READ switch lives. A dispatch-substrate edit confined to those cli emitters (plausible for 2a-iii's loader wiring) would ship WITHOUT the attestation backstop. Endpoint (owner call): either add the audit cli dispatch-emitters to `src/shared/loopCorePaths.ts` (+ the `.mjs` hook parity list), or accept them as cli-glue and rely on the reviewer catching it. Not auto-expanded — widening the set makes every edit to the big `nextStepCommand.ts` require attestation, a real friction tax to weigh. **G1 (`e7b593ac`) is a concrete SECOND instance:** a breaking dispatch-handshake transport change spanning `args.ts`/`prompts.ts`/`nextStepCommand.ts`/`semanticReviewStep.ts`/`prepareDispatchCommand.ts`/`quotaCommand.ts` shipped attestation-free (none are loop-core by path). An independent review WAS done by discipline (and caught a real roster-validation-drop regression) — so the reviewer-catches-it fallback held, but only because the author chose to run it. Reinforces the owner-call endpoint above.
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide / conceptual (medium):** Gate-0 organizes repair-proxy-discovered pools under the TRANSPORT namespace (`repair-proxy/nim/z-ai/glm-5.2`) as if repair-proxy were a provider — owner: "repair-proxy isn't a provider, we shouldn't organize dispatch in those terms." The real axes are (a) the actual backend model and (b) the OPERATOR's cost relationship to it (subscription-included / free-tier / metered-paid), for which repair-proxy is just one transport. Endpoint: model dispatch pools by `(backend-model, operator-cost-class)`, with transport an attribute, not the namespace. (2) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (3) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (4) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (5) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
@@ -84,32 +95,12 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   by hand. Only residual worth considering (deferred, low): a `next-step` startup sweep that reconciles
   leases whose owning run is demonstrably dead, so an abandoned wave doesn't false-wall a fresh one for up
   to 20 min. Not a defect in the release path itself.
-- **empty_grant reset-time + progress-aware livelock — SHIPPED v0.32.67 ([[host-fanout-quota-gate]]).**
-  `deriveTokenBudget` returns the binding (MIN-budget) window → `WaveSchedule.binding_window` → capacity
-  summary; `detectHostDispatchWall` derives `earliestResetAt` from it + `renderHostWallExplanation` surfaces
-  window/budget/cost in both pause renderers (audit + remediate parity), gated on a real `budget_exhausted`
-  block (`admissionBlockedOnBudget`) so a `cap_reached` ledger-contention grant keeps best-effort null-reset.
-  `advanceHostDispatchPause` gains `madeProgress` (in-process `accepted_count>0`) → resets the wall-pass
-  counter, so a hybrid run whose NIM partition keeps covering ground never trips the livelock give-up.
-- **openai-compatible content-inlining + unroutable guard — SHIPPED v0.32.68 ([[openai-compatible-content-inlining]]).**
-  Root cause was NOT the `include_referenced_files` default (already on): the provider only ever inlined by
-  SCAVENGING path tokens from rendered PROSE, and prompts are authored paths-only for tool-using hosts →
-  a single-shot NIM worker (no Read tool) got no content, fabricated schema-valid-empty, was dropped —
-  on BOTH review and implement paths. Fix: `LaunchFreshSessionInput.referencedFiles` (authoritative
-  repo-relative granted read set) inlined deterministically (granted-first; prose-scavenge kept as
-  best-effort supplement that never gates a dispatch) + a refuse-to-dispatch guard (`accepted:false` →
-  triage/re-dispatch) when a granted file EXISTS but can't be inlined (over per-file/total/count cap or
-  path escape); an ENOENT granted file is a to-be-created `touched_files` output, skipped not failed.
-  Audit feeds a new repo-relative `DispatchPlanEntry.file_paths` (adversarial-review-caught HIGH: the
-  absolute `access.read_paths` host-grant would self-inline the prompt + false-refuse on an out-of-repo
-  `--artifacts-dir`); remediate feeds `access.read_paths` (repo-relative). Residuals (each accepted,
-  low): (a) **large-packet hard-refuse** — a review packet whose `file_paths` exceed the default caps
-  (64KiB/file, 256KiB total, 24 files) now REFUSES on a single-shot worker rather than silently
+- **openai-compatible content-inlining — residuals (each low, documented at the code site) ([[openai-compatible-content-inlining]]).**
+  (a) **large-packet hard-refuse** — a review packet whose `file_paths` exceed the default caps
+  (64KiB/file, 256KiB total, 24 files) REFUSES on a single-shot worker rather than silently
   half-reviewing (intended: loud > fabricated coverage; operator raises `openai_compatible.referenced_*`
   caps or routes to a file-reading provider). (b) The stat-error branch refuses on a non-ENOENT error
   (EACCES/ELOOP) for an existing granted file — correct, but untested (hard to simulate portably).
-  **The `include_referenced_files:true` live workaround is now obsolete** — NIM/opencode are usable for
-  review + implement (env-bound live confirmation still wanted on a real run).
 - **A2b unmatched-quota fallback — two residuals (each low, documented at the code site).**
   - (a) **`pausedPoolResetAt` + `quotaUnclassifiedPoolIds` are not injected across sub-waves** the way
     `costDemotedPoolIds` is (`rollingDispatch.ts` state ctor + `unifiedRolling.ts`), so within a multi-sub-wave
@@ -140,13 +131,9 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
     which is neither budget, rate, nor unlock — and never resolves. Endpoint: host admission should grant the
     full budget-and-rate-fitting independent set at once (like the in-process engine), reserving merge-gated
     re-grants for the deepening layer only. Realizes [[self-scaling-pipeline-not-forked-paths]] on the host path.
-- **Prescribed host fan-out quota gate — SHIPPED v0.32.66 ([[host-fanout-quota-gate]]).** The design-review
-  (perspectives + judge + contract) and systemic-challenge steps now route through `gateHostFanout`
-  (`src/audit/cli/dispatch/hostFanoutGate.ts`): register the host pool + lease the whole panel (budget-only
-  `fanoutMode` — no cold-start clamp / concurrency cap / context-fit gate, since fan-out is host-only and
-  atomic), pause resumably at the wall, and SKIP the enrichment after the livelock bound. Residual (still
-  open, distinct): **ad-hoc** Agent fan-out (recon/review the host spawns outside these prescribed
-  steps) still has no per-agent ledger — see the "ledger-writer / acceptNode-inert-clean lap" sliver below.
+- **Host fan-out quota gate — residual (still open) ([[host-fanout-quota-gate]]).** **ad-hoc** Agent
+  fan-out (recon/review the host spawns outside the prescribed design-review/systemic-challenge steps)
+  still has no per-agent ledger — see the "ledger-writer / acceptNode-inert-clean lap" sliver below.
 - **Design-review worker prompts — FOLLOW-UP (low, latent):** the solo `design_review_contract` branch
   still embeds the next-step advance command directly in its worker-facing prompt (`nextStepCommand.ts:391`)
   — same second-driver hazard already fixed for `design_review_parallel` (`e6b580d0`), and it has the host
@@ -288,8 +275,8 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   `auditStep.ts:96`) restoring ~30s crash recovery. Efficiency-only; folds naturally into D-66/67 slice-3
   (heartbeat-on-long-claims) if that opens.
 
-- **Critical-flow LLM fallback — SHIPPED (`critical_flow_fallback_current` obligation).** Residual (accepted,
-  low): the host submission (`critical-flow-fallback.json`) is a durable leaf input that never re-stales, and
+- **Critical-flow LLM fallback — residual (accepted, low) (`critical_flow_fallback_current` obligation).**
+  The host submission (`critical-flow-fallback.json`) is a durable leaf input that never re-stales, and
   the obligation is satisfied by its PRESENCE alone — so once the host answers (even `{flows:[]}`), the pass is
   permanently suppressed even if the repo later grows and deterministic inference stays below the bar. Matches
   `intent_checkpoint` persistence semantics (a host input that persists). A future enhancement could re-prompt
@@ -354,25 +341,11 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
   a coverage diff (2026-07-07) confirmed 9router's price table adds nothing over models.dev, so skip it.
   Relates [[quota-dispatch-vision]] / [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
   [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
-  - **Phase-0 opencode-free — CODE-COMPLETE (A2 = declared seed + reactive verification, shipped 2026-07-08).**
-    opencode-free is live-verified: base `https://opencode.ai/zen/v1`, public `/models`, free models via
-    `Bearer public` returning `cost:"0"` (design premise held; docs' "API key" is the PAID tier). opencode-free
-    is a pure-config `sources[]` entry (`api_key:"public"` + `cost_per_mtok:0`) — no provider code.
-    - **Increment 1 — declared per-source cost seam → SHIPPED.**
-      `DispatchableSource.cost_per_mtok` → `deriveCostRank` rung 2a (declared 0 = free-first). The design memory's
-      "deriveCostRank prices free ~0 automatically" was FALSE (non-models.dev ids → worst band); this is the real fix.
-    - **Increment 2 — reactive cost verification → SHIPPED (loop-core, full pipeline).**
-      Provider extracts the endpoint-reported cost (opencode's `cost`) → `LaunchFreshSessionResult.observedCostUsd`;
-      dispatcher closures relay it to `RollingDispatchResult`; the rolling engine's `handleResult` demotes a
-      declared-free pool that reports cost>0 (folded into `selectProvider`'s degraded partition, once per pool) +
-      fires a `declared_cost_drift` friction event. `driveRolling` shares ONE demotion set across sub-waves/levels so
-      the demotion + single friction emit span the whole drive (adversarial-review catch — a per-dispatcher set
-      leaked free-first back at each level boundary). Ships `examples/session-config/opencode-free.json` + README.
-      Adversarially reviewed (1 MEDIUM found + fixed) + green (6063 tests). A2 (1+2) complete → arbitrage-tier
-      release unblocked.
-    - **vertex-trial → deferred** (needs operator's GCP $300-trial SA JSON).
-    - **Remaining Phase-0 = env-bound live validations only** (no more code): a real opencode-free run confirming
-      declared-free routing + a live lapsed-free demotion + the `declared_cost_drift` friction event end-to-end.
+  - **Phase-0 opencode-free — env-bound live validation remaining.** opencode-free ships as a pure-config
+    `sources[]` entry (`api_key:"public"`, `cost_per_mtok:0`; see `examples/session-config/opencode-free.json`).
+    **vertex-trial → deferred** (needs operator's GCP $300-trial SA JSON). **Remaining = live validation only**
+    (no more code): a real opencode-free run confirming declared-free routing + a live lapsed-free demotion +
+    the `declared_cost_drift` friction event end-to-end.
 - **Cost↔speed dispatch dial + free-pool maximization.** Generalizes the cost-first router — the
   minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point ON TOP of
   the kept router (does not replace it). Shipped: 1D dial (λ ∈ [0,1], capability a hard floor),

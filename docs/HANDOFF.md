@@ -155,21 +155,6 @@ running repair-proxy backed by a free model.
 1. **Low residuals:** doc-review auto-apply re-asserting a resolved decision after a process restart; the
    two A2b residuals; untracked-exclusion residuals (a–e). All in `docs/backlog.md` → Open bugs.
 
-_(openai-compatible content-inlining + unroutable guard — SHIPPED v0.32.68. Root cause was NOT the
-`include_referenced_files` default (already on); the provider only ever inlined by scavenging path tokens
-from rendered PROSE, and prompts are authored paths-only for tool-using hosts → a single-shot NIM worker
-got no content, fabricated empty, was dropped. Fix: `LaunchFreshSessionInput.referencedFiles` (authoritative
-repo-relative granted read set) inlined deterministically + a refuse-to-dispatch guard when a granted file
-can't be inlined. Audit feeds a new repo-relative `DispatchPlanEntry.file_paths` (NOT the absolute
-`access.read_paths` host-grant — adversarial-review-caught HIGH). Remediate feeds `access.read_paths`.
-[[openai-compatible-content-inlining]].)_
-
-_(Item C — host fan-out quota gate — SHIPPED v0.32.66: `gateHostFanout` + budget-only `fanoutMode` +
-bounded livelock→skip. Item D — empty_grant binding-window reset + progress-aware livelock — SHIPPED
-v0.32.67: `detectHostDispatchWall` surfaces the binding window/reset (gated on a real `budget_exhausted`
-block, not `cap_reached` ledger contention) via `renderHostWallExplanation`; `advanceHostDispatchPause`
-resets the wall-pass counter on a pass that accepted in-process coverage.)_
-
 **Confirming re-run (verification track, not blocking the remainder):** re-run the maximal-coverage audit
 on a fresh Claude window to confirm the shipped fixes hold live, finish the parked self-audit (14/261
 packets, resumable), then hand-label `corpus/<run-id>.labels.json` (the A2 oracle unblock). Recipe below.
