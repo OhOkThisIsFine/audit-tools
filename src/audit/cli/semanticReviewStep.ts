@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { HostModelRosterEntry, ResolvedProviderName, HostDispatchInventory } from "audit-tools/shared";
+import type { HostModelRosterEntry, ResolvedProviderName, HostDispatchInventory, AuditorDescriptor } from "audit-tools/shared";
 import { applyDispatchInventory, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, renderHostWallExplanation } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
@@ -13,7 +13,6 @@ import {
   renderDispatchReviewPrompt,
   renderRollingDispatchPrompt,
   renderSingleTaskFallbackStepPrompt,
-  type HostDispatchDescriptor,
 } from "./prompts.js";
 import { prepareDispatchArtifacts } from "./dispatch.js";
 import { packageRoot } from "./paths.js";
@@ -136,20 +135,19 @@ export async function renderSemanticReviewStep(params: {
   // The current driver's handshake rides the continue-command so a bare re-invocation
   // preserves this invocation's capability instead of falling back to the stored
   // session config (auditor-agnostic robustness — the founding-bug robustness fix).
-  const hostDescriptor: HostDispatchDescriptor = {
-    canDispatchSubagents: params.hostCanDispatch,
-    canRestrictSubagentTools: params.hostCanRestrictSubagentTools,
-    canSelectSubagentModel: params.hostCanSelectSubagentModel,
-    maxActiveSubagents: params.hostMaxActiveSubagents,
-    contextTokens: params.hostContextTokens ?? null,
-    outputTokens: params.hostOutputTokens ?? null,
-    modelRoster: params.hostModelRoster ?? null,
-    modelId: params.hostModelId ?? null,
+  const hostDescriptor: AuditorDescriptor = {
+    self: {
+      can_dispatch_subagents: params.hostCanDispatch,
+      ...(params.hostCanRestrictSubagentTools ? { can_restrict_subagent_tools: true } : {}),
+      ...(params.hostCanSelectSubagentModel ? { can_select_subagent_model: true } : {}),
+      ...(params.hostMaxActiveSubagents != null ? { max_active_subagents: params.hostMaxActiveSubagents } : {}),
+      ...(params.hostContextTokens != null ? { context_tokens: params.hostContextTokens } : {}),
+      ...(params.hostOutputTokens != null ? { output_tokens: params.hostOutputTokens } : {}),
+      ...(params.hostModelRoster != null ? { roster: params.hostModelRoster } : {}),
+      ...(params.hostModelId != null ? { model_id: params.hostModelId } : {}),
+    },
     // 2a-ii: carry the dispatch inventory onto the continue-command this step emits, so
-    // a bare resume preserves this driver's inventory instead of silently dropping it
-    // (2a-i wired the channel + rendering but only cmdNextStep's descriptor populated it;
-    // this dispatch step's descriptor must carry it forward too, or the inventory is lost
-    // after the first dispatch step).
+    // a bare resume preserves this driver's inventory instead of silently dropping it.
     inventory: params.inventory ?? null,
   };
   const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);

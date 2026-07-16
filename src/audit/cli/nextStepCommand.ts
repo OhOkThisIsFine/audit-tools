@@ -71,19 +71,13 @@ import {
   renderEdgeReasoningDispatchPrompt,
   renderEdgeReasoningStepPrompt,
   renderPresentReportPrompt,
-  type HostDispatchDescriptor,
 } from "./prompts.js";
+import type { AuditorDescriptor } from "audit-tools/shared";
 import {
   getArtifactsDir,
   getFlag,
-  getHostContextTokens,
-  getHostMaxActiveSubagents,
-  getHostInventory,
-  getHostModelId,
-  getHostModelRoster,
-  getHostOutputTokens,
+  getAuditorDescriptor,
   getHostProvider,
-  getOptionalBooleanFlag,
   getRootDir,
   getTimeoutMs,
   resolveHostDispatchCapability,
@@ -119,7 +113,7 @@ async function gateHostFanoutOrPause(params: {
   root: string;
   artifactsDir: string;
   sessionConfig: SessionConfig;
-  hostDescriptor: HostDispatchDescriptor;
+  hostDescriptor: AuditorDescriptor;
   continueCommand: string;
   family: HostFanoutFamily;
   units: HostFanoutUnit[];
@@ -130,10 +124,10 @@ async function gateHostFanoutOrPause(params: {
     sessionConfig: params.sessionConfig,
     family: params.family,
     units: params.units,
-    hostActiveSubagentLimit: params.hostDescriptor.maxActiveSubagents,
-    hostContextTokens: params.hostDescriptor.contextTokens,
-    hostOutputTokens: params.hostDescriptor.outputTokens,
-    hostModelId: params.hostDescriptor.modelId,
+    hostActiveSubagentLimit: params.hostDescriptor.self.max_active_subagents ?? null,
+    hostContextTokens: params.hostDescriptor.self.context_tokens ?? null,
+    hostOutputTokens: params.hostDescriptor.self.output_tokens ?? null,
+    hostModelId: params.hostDescriptor.self.model_id ?? null,
   });
   if (!outcome.atWall) return false;
 
@@ -233,21 +227,20 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     applyGuidanceFile(artifactsDir, guidanceFile);
   }
 
-  const hostCanDispatchSubagents = parseHostBooleanFlag(
-    argv,
-    "--host-can-dispatch-subagents",
-  );
-  const hostCanRestrictSubagentTools =
-    getOptionalBooleanFlag(argv, "--host-can-restrict-subagent-tools") ??
-    false;
-  const hostCanSelectSubagentModel =
-    getOptionalBooleanFlag(argv, "--host-can-select-subagent-model") ?? false;
-  const hostMaxActiveSubagents = getHostMaxActiveSubagents(argv);
-  const hostContextTokens = getHostContextTokens(argv);
-  const hostOutputTokens = getHostOutputTokens(argv);
-  const hostModelRoster = getHostModelRoster(argv);
-  const hostModelId = getHostModelId(argv);
-  const hostInventory = getHostInventory(argv);
+  // G1: the whole driver handshake arrives as ONE `--auditor <json>` descriptor;
+  // the flat locals below are derived from `descriptor.self` (minimal downstream
+  // churn — renderSemanticReviewStep / gate still take the individual fields).
+  const auditorDescriptor = getAuditorDescriptor(argv);
+  const auditorSelf = auditorDescriptor?.self ?? {};
+  const hostCanDispatchSubagents = auditorSelf.can_dispatch_subagents;
+  const hostCanRestrictSubagentTools = auditorSelf.can_restrict_subagent_tools ?? false;
+  const hostCanSelectSubagentModel = auditorSelf.can_select_subagent_model ?? false;
+  const hostMaxActiveSubagents = auditorSelf.max_active_subagents ?? null;
+  const hostContextTokens = auditorSelf.context_tokens ?? null;
+  const hostOutputTokens = auditorSelf.output_tokens ?? null;
+  const hostModelRoster = auditorSelf.roster ?? null;
+  const hostModelId = auditorSelf.model_id ?? null;
+  const hostInventory = auditorDescriptor?.inventory ?? null;
   // B1: an explicit --host-provider override is folded onto session-config.json
   // BEFORE load, so the loaded config (and the disk-reloading semanticReviewStep)
   // key the fan-out to the ACTUAL conversation host. Unset ⇒ auto-detected from env.
@@ -292,15 +285,21 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   // bare re-invocation preserves the handshake instead of falling back to the
   // stored session config — the founding-bug robustness fix (a *different* driver
   // entering through its own loader overrides with its own flags).
-  const hostDescriptor: HostDispatchDescriptor = {
-    canDispatchSubagents: hostCanDispatch,
-    canRestrictSubagentTools: hostCanRestrictSubagentTools,
-    canSelectSubagentModel: hostCanSelectSubagentModel,
-    maxActiveSubagents: hostMaxActiveSubagents,
-    contextTokens: hostContextTokens,
-    outputTokens: hostOutputTokens,
-    modelRoster: hostModelRoster,
-    modelId: hostModelId,
+  const hostDescriptor: AuditorDescriptor = {
+    self: {
+      // The RESOLVED capability rides forward (not the raw handshake bit), so a
+      // bare resume preserves it — the founding-bug robustness fix.
+      can_dispatch_subagents: hostCanDispatch,
+      // restrict/select default false; carry only when true so the descriptor stays
+      // minimal and round-trips to the same resolved value (absence ⇒ false).
+      ...(hostCanRestrictSubagentTools ? { can_restrict_subagent_tools: true } : {}),
+      ...(hostCanSelectSubagentModel ? { can_select_subagent_model: true } : {}),
+      ...(hostMaxActiveSubagents != null ? { max_active_subagents: hostMaxActiveSubagents } : {}),
+      ...(hostContextTokens != null ? { context_tokens: hostContextTokens } : {}),
+      ...(hostOutputTokens != null ? { output_tokens: hostOutputTokens } : {}),
+      ...(hostModelRoster != null ? { roster: hostModelRoster } : {}),
+      ...(hostModelId != null ? { model_id: hostModelId } : {}),
+    },
     inventory: hostInventory,
   };
 
@@ -1143,36 +1142,6 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     inventory: hostInventory,
   });
   console.log(JSON.stringify(step, null, 2));
-}
-
-/**
- * Scan argv for a TRUE boolean flag (parity with remediate-code's commander
- * boolean). A bare `<flag>` resolves true and NEVER swallows the next token; the
- * `--no-<flag>` form and the `<flag>=false` spelling resolve false; `<flag>=true`
- * resolves true; absence stays `undefined` so the tristate reaches
- * resolveHostDispatchCapability intact. A non-boolean `<flag>=<other>` value
- * fails loudly. When the flag appears more than once, the last occurrence wins.
- */
-export function parseHostBooleanFlag(
-  argv: string[],
-  flag: string,
-): boolean | undefined {
-  const negated = `--no-${flag.replace(/^--/, "")}`;
-  let value: boolean | undefined;
-  for (const token of argv) {
-    if (token === flag) {
-      value = true;
-    } else if (token === negated) {
-      value = false;
-    } else if (token === `${flag}=true`) {
-      value = true;
-    } else if (token === `${flag}=false`) {
-      value = false;
-    } else if (token.startsWith(`${flag}=`)) {
-      throw new Error(`${flag} must be either true or false.`);
-    }
-  }
-  return value;
 }
 
 /**

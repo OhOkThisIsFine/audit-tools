@@ -289,8 +289,8 @@ export const INSTALL_HOST_DEFINITIONS = {
       });
       await collect(checks, 'antigravity_guide', async () => {
         const content = await readFile(assetPaths.antigravityPlanningGuidePath, 'utf8');
-        if (!content.includes('--host-models') || !content.includes('next-step')) {
-          throw new Error('Antigravity guide must embed the canonical loader body (next-step capability handshake including --host-models).');
+        if (!content.includes('--auditor') || !content.includes('next-step')) {
+          throw new Error('Antigravity guide must embed the canonical loader body (next-step capability handshake including the --auditor descriptor).');
         }
         return {
           summary: 'Antigravity planning guide embeds the canonical loader body with the capability handshake.',

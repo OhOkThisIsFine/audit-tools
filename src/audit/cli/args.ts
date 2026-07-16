@@ -14,8 +14,9 @@ import {
   assertHostProviderName,
   type ProviderName,
   type SessionConfig,
-  type HostModelRosterEntry,
   type HostDispatchInventory,
+  type AuditorDescriptor,
+  type AuditorSelf,
 } from "audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 
@@ -47,23 +48,6 @@ export function getFlag(
 
 export function hasFlag(argv: string[], name: string): boolean {
   return argv.includes(name);
-}
-
-export function getOptionalBooleanFlag(
-  argv: string[],
-  name: string,
-): boolean | undefined {
-  const raw = getFlag(argv, name);
-  if (raw === undefined) {
-    return undefined;
-  }
-  if (raw === "true") {
-    return true;
-  }
-  if (raw === "false") {
-    return false;
-  }
-  throw new Error(`${name} must be either true or false.`);
 }
 
 export function optionalBooleanEnv(value: string | undefined): boolean | undefined {
@@ -246,75 +230,86 @@ export function getHostModel(argv: string[]): string | null {
   return getFlag(argv, "--host-model") ?? null;
 }
 
-export function getHostMaxActiveSubagents(argv: string[]): number | null {
-  return parsePositiveIntegerFlag(argv, "--host-max-active-subagents") ?? null;
-}
-
 /**
- * Context window (input tokens) the host reports for the model it will dispatch
- * subagents to — the dispatch-time capability handshake. Outranks the static
- * model table when sizing packets, so the partition fills the real model's
- * window instead of the conservative 32k default.
+ * Parse the current driver's dispatch-capability handshake, carried as ONE
+ * `--auditor <json>` flag (G1 collapsed the former N `--host-*` scalar flags —
+ * `--host-context-tokens`/`--host-output-tokens`/`--host-models`/`--host-model-id`/
+ * `--host-max-active-subagents`/`--host-inventory` and the three capability
+ * booleans — onto `descriptor.self` + `descriptor.inventory`). Malformed JSON or a
+ * non-object throws loudly (mirrors the retired `--host-inventory` parser) so a
+ * mistyped handshake fails here rather than silently downgrading. `null` when the
+ * flag is absent. The nested `self` is normalized to an object; `inventory` is
+ * normalized to `HostDispatchInventory | null` (absence ⇒ null, preserving the
+ * null-vs-`{}` semantics `applyDispatchInventory` depends on).
+ * [[capability-is-per-auditor-not-per-audit]] [[unified-dispatch-worker-model]]
  */
-export function getHostContextTokens(argv: string[]): number | null {
-  return parsePositiveIntegerFlag(argv, "--host-context-tokens") ?? null;
-}
-
-/** Output-token cap the host reports for its dispatch model (handshake). */
-export function getHostOutputTokens(argv: string[]): number | null {
-  return parsePositiveIntegerFlag(argv, "--host-output-tokens") ?? null;
-}
-
-/**
- * Ordered model roster the host reports at the dispatch handshake
- * (`--host-models`, JSON array, lowest rank first) — the multi-rank
- * generalization of the scalar `--host-context-tokens`/`--host-output-tokens`
- * pair. `rank` values are RELATIVE labels (`small`/`standard`/`deep`) aligned
- * with `model_hint.tier`; windows are discovered, never guessed, and the host
- * never names a model. Malformed input throws (shared parser) so a mistyped
- * handshake fails loudly instead of silently downgrading to the floor.
- */
-export function getHostModelRoster(
-  argv: string[],
-): HostModelRosterEntry[] | null {
-  const raw = getFlag(argv, "--host-models");
-  return raw ? parseHostModelRoster(raw) : null;
-}
-
-/**
- * Opaque model identity the host reports for its dispatch model
- * (`--host-model-id`). Used ONLY as a quota-key segment so quota learning keys
- * on `provider/<id>` instead of `provider/*` when no model name is resolvable —
- * never a window authority, never matched against a name table.
- */
-export function getHostModelId(argv: string[]): string | null {
-  const value = getFlag(argv, "--host-model-id");
-  return value && value.trim().length > 0 ? value.trim() : null;
-}
-
-/**
- * The per-auditor dispatch inventory reported this invocation (`--host-inventory`,
- * a JSON object). The backend/launch set the CURRENT auditor can dispatch to —
- * resolved from the auditor's environment, never the repo session-config
- * ([[capability-is-per-auditor-not-per-audit]]). Malformed JSON / a non-object
- * throws loudly (like `--host-models`) rather than silently degrading. Additive in
- * 2a-i; dispatch consumers read it in 2a-ii. `null` when the flag is absent.
- */
-export function getHostInventory(argv: string[]): HostDispatchInventory | null {
-  const raw = getFlag(argv, "--host-inventory");
+export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
+  const raw = getFlag(argv, "--auditor");
   if (!raw) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
     throw new Error(
-      `--host-inventory must be a JSON object: ${err instanceof Error ? err.message : String(err)}`,
+      `--auditor must be a JSON object: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("--host-inventory must be a JSON object.");
+    throw new Error("--auditor must be a JSON object.");
   }
-  return parsed as HostDispatchInventory;
+  const obj = parsed as Record<string, unknown>;
+  const rawSelf =
+    obj.self && typeof obj.self === "object" && !Array.isArray(obj.self)
+      ? (obj.self as Record<string, unknown>)
+      : {};
+  // Validate each `self` field to exactly the strictness the retired `--host-*`
+  // parsers enforced, so the `--auditor` transport is a faithful collapse — not a
+  // validation downgrade. The roster is re-validated through the SAME shared
+  // `parseHostModelRoster` the `--host-models` flag used (loud throw on a malformed
+  // roster: a mistyped handshake fails at the CLI boundary, never silently deep in
+  // dispatch budget resolution). Scalars mirror `parsePositiveIntegerFlag`
+  // (silent-drop of a non-positive-int, resolving to the conservative default);
+  // booleans/model_id mirror their old parsers (drop a non-boolean / blank id).
+  const self: AuditorSelf = {};
+  if (typeof rawSelf.model_id === "string" && rawSelf.model_id.trim().length > 0) {
+    self.model_id = rawSelf.model_id.trim();
+  }
+  if (rawSelf.roster !== undefined) {
+    self.roster = parseHostModelRoster(JSON.stringify(rawSelf.roster));
+  }
+  const contextTokens = normalizePositiveInteger(rawSelf.context_tokens);
+  if (contextTokens !== undefined) self.context_tokens = contextTokens;
+  const outputTokens = normalizePositiveInteger(rawSelf.output_tokens);
+  if (outputTokens !== undefined) self.output_tokens = outputTokens;
+  const maxActiveSubagents = normalizePositiveInteger(rawSelf.max_active_subagents);
+  if (maxActiveSubagents !== undefined) self.max_active_subagents = maxActiveSubagents;
+  if (typeof rawSelf.can_dispatch_subagents === "boolean") {
+    self.can_dispatch_subagents = rawSelf.can_dispatch_subagents;
+  }
+  if (typeof rawSelf.can_restrict_subagent_tools === "boolean") {
+    self.can_restrict_subagent_tools = rawSelf.can_restrict_subagent_tools;
+  }
+  if (typeof rawSelf.can_select_subagent_model === "boolean") {
+    self.can_select_subagent_model = rawSelf.can_select_subagent_model;
+  }
+  const rawInventory = obj.inventory;
+  if (
+    rawInventory !== undefined &&
+    rawInventory !== null &&
+    (typeof rawInventory !== "object" || Array.isArray(rawInventory))
+  ) {
+    throw new Error("--auditor `inventory` must be a JSON object or null.");
+  }
+  const inventory: HostDispatchInventory | null =
+    rawInventory === undefined
+      ? null
+      : (rawInventory as HostDispatchInventory | null);
+  return {
+    ...(typeof obj.auditor_id === "string" ? { auditor_id: obj.auditor_id } : {}),
+    ...(typeof obj.resolved_at === "number" ? { resolved_at: obj.resolved_at } : {}),
+    self,
+    inventory,
+  };
 }
 
 export function resolveRunProviderName(

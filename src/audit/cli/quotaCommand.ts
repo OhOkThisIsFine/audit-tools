@@ -13,13 +13,9 @@ import {
 import { buildDispatchPool } from "./dispatch/quotaPool.js";
 import {
   getArtifactsDir,
+  getAuditorDescriptor,
   getExplicitProvider,
-  getHostMaxActiveSubagents,
   getHostModel,
-  getHostContextTokens,
-  getHostOutputTokens,
-  getHostModelRoster,
-  getHostModelId,
 } from "./args.js";
 
 export async function cmdQuota(argv: string[]): Promise<void> {
@@ -35,6 +31,8 @@ export async function cmdQuota(argv: string[]): Promise<void> {
   }
   const explicitProvider = getExplicitProvider(argv);
   const hostModel = getHostModel(argv);
+  // G1: driver handshake scalars come off the single `--auditor <json>` descriptor.
+  const self = getAuditorDescriptor(argv)?.self ?? {};
   const providerName = resolveFreshSessionProviderName(
     explicitProvider ?? (sessionConfig.provider === undefined ? "auto" : undefined),
     sessionConfig,
@@ -46,7 +44,7 @@ export async function cmdQuota(argv: string[]): Promise<void> {
   const quotaState = await readQuotaStateOrDegrade("quota command");
   const quotaStateEntry = quotaState.entries[providerModelKey] ?? null;
   const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
-    explicitLimit: getHostMaxActiveSubagents(argv),
+    explicitLimit: self.max_active_subagents ?? null,
     sessionConfig,
   });
 
@@ -64,11 +62,11 @@ export async function cmdQuota(argv: string[]): Promise<void> {
     providerName,
     hostModel,
     queryLimits: undefined,
-    hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),
-    hostContextTokens: getHostContextTokens(argv),
-    hostOutputTokens: getHostOutputTokens(argv),
-    hostModelRoster: getHostModelRoster(argv),
-    hostModelId: getHostModelId(argv),
+    hostActiveSubagentLimit: self.max_active_subagents ?? null,
+    hostContextTokens: self.context_tokens ?? null,
+    hostOutputTokens: self.output_tokens ?? null,
+    hostModelRoster: self.roster ?? null,
+    hostModelId: self.model_id ?? null,
   });
 
   console.log(

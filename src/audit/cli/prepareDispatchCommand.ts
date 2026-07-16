@@ -1,4 +1,4 @@
-import { getArtifactsDir, getExplicitProvider, getFlag, getHostContextTokens, getHostMaxActiveSubagents, getHostModel, getHostModelId, getHostModelRoster, getHostOutputTokens, getRootDir } from "./args.js";
+import { getArtifactsDir, getAuditorDescriptor, getExplicitProvider, getFlag, getHostModel, getRootDir } from "./args.js";
 import {
   createFreshSessionProvider,
   resolveFreshSessionProviderName,
@@ -28,6 +28,8 @@ export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
   );
   const provider = createFreshSessionProvider(providerName, sessionConfig);
   const hostModel = getHostModel(argv) ?? sessionConfig.block_quota?.host_model ?? null;
+  // G1: the driver handshake arrives as one `--auditor <json>`; read the self scalars off it.
+  const self = getAuditorDescriptor(argv)?.self ?? {};
   const result = await prepareDispatchArtifacts({
     packageRoot,
     runId,
@@ -37,11 +39,11 @@ export async function cmdPrepareDispatch(argv: string[]): Promise<void> {
     providerName,
     hostModel,
     queryLimits: provider.queryLimits?.bind(provider),
-    hostActiveSubagentLimit: getHostMaxActiveSubagents(argv),
-    hostContextTokens: getHostContextTokens(argv),
-    hostOutputTokens: getHostOutputTokens(argv),
-    hostModelRoster: getHostModelRoster(argv),
-    hostModelId: getHostModelId(argv),
+    hostActiveSubagentLimit: self.max_active_subagents ?? null,
+    hostContextTokens: self.context_tokens ?? null,
+    hostOutputTokens: self.output_tokens ?? null,
+    hostModelRoster: self.roster ?? null,
+    hostModelId: self.model_id ?? null,
   });
   console.log(JSON.stringify(result, null, 2));
 }

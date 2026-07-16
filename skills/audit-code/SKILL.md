@@ -65,44 +65,47 @@ exactly one next step. This is also the **capability handshake**: report what yo
 can dispatch to *right now* on every `next-step` call so the backend sizes review
 packets to your real model instead of a conservative 32k floor.
 
+The whole handshake is a single `--auditor <json>` flag: one object with a `self`
+field describing the model you drive.
+
 ```bash
-audit-code next-step --host-can-dispatch-subagents --host-models '[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]'
+audit-code next-step --auditor '{"self":{"can_dispatch_subagents":true,"roster":[{"rank":"small","context_tokens":32000,"output_tokens":8000},{"rank":"standard","context_tokens":200000,"output_tokens":32000},{"rank":"deep","context_tokens":200000,"output_tokens":64000}]}}'
 ```
 
 Or with a single dispatch model:
 
 ```bash
-audit-code next-step --host-can-dispatch-subagents --host-context-tokens 200000 --host-output-tokens 32000
+audit-code next-step --auditor '{"self":{"can_dispatch_subagents":true,"context_tokens":200000,"output_tokens":32000}}'
 ```
 
-Key flags:
+Key `self` fields:
 
-- `--host-can-dispatch-subagents` — declare that YOU (an attended conversation host)
-  are driving this step and can fan out subagents. Send it on every `next-step`: it
+- `can_dispatch_subagents` — declare that YOU (an attended conversation host) are
+  driving this step and can fan out subagents. Send it on every `next-step`: it
   makes the backend demote any configured in-process backend (a `codex` /
   `openai-compatible` pool from a prior headless run's session config) to a *source*
   pool so the review fans out across your subagents **and** that backend concurrently,
   instead of the backend monopolizing the frontier. Sending it explicitly overrides a
   stale `host_can_dispatch_subagents:false` left in session config by a headless run.
-  Only a genuinely headless loop (no attended host) passes
-  `--no-host-can-dispatch-subagents` so the backend self-drives.
-- `--host-models` — ordered JSON array (lowest rank first) of models you can dispatch
+  Only a genuinely headless loop (no attended host) sends `"can_dispatch_subagents":false`
+  so the backend self-drives.
+- `roster` — ordered JSON array (lowest rank first) of models you can dispatch
   subagents to *right now*, one entry per relative rank
   (`"small"`, `"standard"`, `"deep"`). Ranks are relative capability labels — never
   report model names to the backend. Each entry may carry an optional opaque
   `model_id` used only to key per-model quota learning.
-- `--host-context-tokens` / `--host-output-tokens` — single-model shorthand. When
-  `--host-models` is also given, the roster wins.
+- `context_tokens` / `output_tokens` — single-model shorthand. When `roster` is also
+  given, the roster wins.
 
 Do **not** report a parallel-subagent count — the backend owns concurrency (its
 token-budget gate plus any hard host cap it can detect, e.g. Codex
 `[agents].max_threads`), and runs uncapped when it detects none. An operator with
-a genuine fixed machine limit may pass `--host-max-active-subagents N` as an
-optional override; it is never a value to guess.
+a genuine fixed machine limit may pass `self.max_active_subagents` as an optional
+override; it is never a value to guess.
 
 When a step prompt tells you to continue, repeat `audit-code next-step` with the
-same capability flags and follow only the newly returned `prompt_path`. Stop when
-the current step prompt tells you to stop.
+same `--auditor` handshake and follow only the newly returned `prompt_path`. Stop
+when the current step prompt tells you to stop.
 
 ## Embedded Prompt Payload
 

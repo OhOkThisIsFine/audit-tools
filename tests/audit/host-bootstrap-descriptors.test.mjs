@@ -165,10 +165,10 @@ test("INV-repo-assets-01: SKILL.md source carries next-step invocation with capa
   const skillPath = join(repoRoot, "skills", "audit-code", "SKILL.md");
   const skill = readFileSync(skillPath, "utf8");
   const REQUIRED_FLAGS = [
-    "--host-max-active-subagents",
-    "--host-models",
-    "--host-context-tokens",
-    "--host-output-tokens",
+    "--auditor",
+    "roster",
+    "context_tokens",
+    "output_tokens",
   ];
   for (const flag of REQUIRED_FLAGS) {
     expect(skill.includes(flag), `SKILL.md must carry capability handshake flag '${flag}' (INV-repo-assets-01)`).toBeTruthy();
@@ -206,10 +206,10 @@ test("INV-repo-assets-04: all three loader assets carry the same capability hand
   const toml = readFileSync(tomlPath, "utf8");
 
   const HANDSHAKE_FLAGS = [
-    "--host-max-active-subagents",
-    "--host-models",
-    "--host-context-tokens",
-    "--host-output-tokens",
+    "--auditor",
+    "roster",
+    "context_tokens",
+    "output_tokens",
   ];
 
   for (const flag of HANDSHAKE_FLAGS) {

@@ -384,7 +384,13 @@ describe("doc ↔ CLI parity for host capability flags (INV-CC-05)", () => {
     // Guards that the parity machinery itself compiles and resolves — this test
     // is meaningful regardless of the loader docs' current wording.
     expect(remediateRegisteredHostFlags().has(F)).toBe(true);
-    expect(auditRegisteredHostFlags().has(F)).toBe(true);
+    // G1: audit collapsed its `--host-*` capability handshake into the single
+    // `--auditor <json>` descriptor, so `--host-can-dispatch-subagents` is no
+    // longer an audit-source literal — audit and remediate deliberately DIVERGE on
+    // the handshake transport until the remediate `--auditor` round-trip (G6). The
+    // audit CLI still keeps `--host-provider` (the quota-attribution override), so
+    // that is the stable audit-side `--host-*` anchor this parity check asserts.
+    expect(auditRegisteredHostFlags().has("--host-provider")).toBe(true);
     for (const path of Object.values(LOADER_DOCS)) {
       expect(existsSync(path)).toBe(true);
     }

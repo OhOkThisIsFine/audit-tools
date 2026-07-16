@@ -57,32 +57,29 @@ test("E1: every IDE host asset embeds the canonical loader body verbatim", () =>
   }
 });
 
-// ── E1: capability handshake (incl. --host-models) in BOTH initial + continuation ─
+// ── E1: capability handshake (the --auditor descriptor) in BOTH initial + continuation ─
 
-test("E1: --host-models appears in BOTH the report and continuation guidance for every IDE asset", () => {
+test("E1: --auditor appears in BOTH the report and continuation guidance for every IDE asset", () => {
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
-    // The asset overall must carry the flag (initial Report block).
-    expect(asset.includes("--host-models"), `${kind} asset must carry --host-models in the capability handshake`).toBeTruthy();
-    // The CONTINUATION guidance ("run ... next-step again with the same
-    // capability flags (...)") must itself list --host-models, so a host that
-    // only reads the continuation block on later turns still reports its roster.
+    // The asset overall must carry the descriptor flag (initial Report block).
+    expect(asset.includes("--auditor"), `${kind} asset must carry --auditor in the capability handshake`).toBeTruthy();
+    // The CONTINUATION guidance ("run ... next-step again with the same --auditor
+    // handshake ...") must itself reference --auditor, so a host that only reads
+    // the continuation block on later turns still reports its roster.
     const continuationMatch = asset.match(
-      /again with[\s\S]*?(`--host-models`)[\s\S]*?prompt_path/,
+      /again with[\s\S]*?(`?--auditor`?)[\s\S]*?prompt_path/,
     );
-    expect(continuationMatch, `${kind} asset continuation section must list --host-models alongside the other capability flags`).toBeTruthy();
+    expect(continuationMatch, `${kind} asset continuation section must reference the --auditor handshake`).toBeTruthy();
   }
 });
 
-test("E1: all four capability flags appear in every IDE asset", () => {
-  const FLAGS = [
-    "--host-max-active-subagents",
-    "--host-models",
-    "--host-context-tokens",
-    "--host-output-tokens",
-  ];
+test("E1: the collapsed handshake keys appear in every IDE asset", () => {
+  // G1 collapsed the former N `--host-*` flags into the single `--auditor <json>`
+  // descriptor; the roster/window/subagent-cap concepts now live as `self` keys.
+  const KEYS = ["--auditor", "roster", "context_tokens", "output_tokens", "max_active_subagents"];
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
-    for (const flag of FLAGS) {
-      expect(asset.includes(flag), `${kind} asset must carry capability flag '${flag}'`).toBeTruthy();
+    for (const key of KEYS) {
+      expect(asset.includes(key), `${kind} asset must carry handshake key '${key}'`).toBeTruthy();
     }
   }
 });

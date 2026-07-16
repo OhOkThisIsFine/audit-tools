@@ -6,8 +6,7 @@ import {
   renderTokenBudgetView,
   buildFrictionTriageBlock,
   type FrictionTriageDecision,
-  type HostModelRosterEntry,
-  type HostDispatchInventory,
+  type AuditorDescriptor,
 } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
@@ -41,85 +40,38 @@ function cliInvocationTokens(): string[] {
 }
 
 /**
- * The current driver's dispatch capability handshake, as parsed from this
- * invocation's `--host-*` flags. Re-emitted onto every continue-command so the
- * descriptor RIDES the command the driver runs to advance — surviving that
- * driver's own steps without the host re-appending the flags each time
- * (auditor-agnostic robustness; the founding capability-inheritance bug was that
- * a bare continue-command dropped the handshake, so a resume fell back to the
- * stored session config). A *different* driver entering through its own loader
- * supplies its own `--host-*` flags, overriding this descriptor.
- * [[capability-is-per-auditor-not-per-audit]]
+ * Render an {@link AuditorDescriptor} back to the single re-parseable `--auditor
+ * <json>` transport (G1 collapsed the former `--host-*` flag bag). Returns `[]`
+ * when the descriptor is undefined OR carries nothing — no declared `self` field,
+ * no inventory, no id/timestamp — so a host with no handshake emits a bare
+ * continue-command exactly as before. Otherwise the whole descriptor is
+ * JSON-serialized; `JSON.stringify` drops `undefined` self fields but keeps
+ * `inventory: null` vs `inventory: {}` distinct — the OPPOSITE-semantics pair
+ * `applyDispatchInventory` depends on (null ⇒ deprecated repo-config fallback;
+ * `{}` ⇒ authoritatively-empty inventory = host-only), so an empty host-only
+ * inventory survives a resume instead of silently re-inheriting the repo's
+ * dispatch fields across one hop.
  */
-export interface HostDispatchDescriptor {
-  canDispatchSubagents?: boolean;
-  canRestrictSubagentTools?: boolean;
-  canSelectSubagentModel?: boolean;
-  maxActiveSubagents?: number | null;
-  contextTokens?: number | null;
-  outputTokens?: number | null;
-  modelRoster?: HostModelRosterEntry[] | null;
-  modelId?: string | null;
-  /**
-   * The per-auditor dispatch inventory (backends/launch blocks/sources) carried on
-   * `--host-inventory`. Additive channel (2a-i): it rides every continue-command so a
-   * bare resume preserves the current driver's inventory; consumers switch to reading
-   * it (over the repo session-config) in 2a-ii. [[unified-dispatch-worker-model]]
-   */
-  inventory?: HostDispatchInventory | null;
-}
-
-/**
- * Render a {@link HostDispatchDescriptor} back to re-parseable `--host-*` flag
- * tokens — only fields that were actually declared this invocation. The numeric /
- * string / roster flags round-trip through their `getHost*` parsers; the boolean
- * capability is pinned explicitly (`--host-can-dispatch-subagents` /
- * `--no-...`); the two prompt-wording booleans (restrict / select) default false,
- * so they are re-emitted only when true (absence resolves to false).
- */
-export function renderHostDescriptorFlags(
-  descriptor: HostDispatchDescriptor | undefined,
+export function renderAuditorDescriptor(
+  descriptor: AuditorDescriptor | undefined,
 ): string[] {
   if (!descriptor) return [];
-  const out: string[] = [];
-  if (descriptor.contextTokens != null)
-    out.push("--host-context-tokens", String(descriptor.contextTokens));
-  if (descriptor.outputTokens != null)
-    out.push("--host-output-tokens", String(descriptor.outputTokens));
-  if (descriptor.maxActiveSubagents != null)
-    out.push("--host-max-active-subagents", String(descriptor.maxActiveSubagents));
-  if (descriptor.modelId != null && descriptor.modelId.length > 0)
-    out.push("--host-model-id", descriptor.modelId);
-  if (descriptor.modelRoster != null && descriptor.modelRoster.length > 0)
-    out.push("--host-models", JSON.stringify(descriptor.modelRoster));
-  // 2a-ii: emit whenever the inventory is non-null — NOT only when non-empty. Under
-  // `applyDispatchInventory` null and `{}` are OPPOSITE semantics (null ⇒ deprecated
-  // repo-config fallback; `{}` ⇒ authoritatively-empty inventory = host-only). If an
-  // empty `{}` were dropped here it would arrive as null on the next resume and silently
-  // re-inherit the repo's dispatch fields — inverting a host-only run back to repo
-  // inheritance across one dispatch hop. Absent inventory reaches here as null and still
-  // emits nothing.
-  if (descriptor.inventory != null)
-    out.push("--host-inventory", JSON.stringify(descriptor.inventory));
-  if (descriptor.canDispatchSubagents !== undefined)
-    out.push(
-      descriptor.canDispatchSubagents
-        ? "--host-can-dispatch-subagents"
-        : "--no-host-can-dispatch-subagents",
-    );
-  // restrict/select parse via `getOptionalBooleanFlag` (the space-separated
-  // `--flag true|false` form that `getFlag` reads), unlike the bare / `--no-`
-  // `--host-can-dispatch-subagents`. Both default false, so re-emit only when true
-  // (absence resolves to false).
-  if (descriptor.canRestrictSubagentTools) out.push("--host-can-restrict-subagent-tools", "true");
-  if (descriptor.canSelectSubagentModel) out.push("--host-can-select-subagent-model", "true");
-  return out;
+  const selfHasField =
+    !!descriptor.self &&
+    Object.values(descriptor.self).some((value) => value !== undefined);
+  const hasContent =
+    selfHasField ||
+    descriptor.inventory != null ||
+    descriptor.auditor_id != null ||
+    descriptor.resolved_at != null;
+  if (!hasContent) return [];
+  return ["--auditor", JSON.stringify(descriptor)];
 }
 
 export function nextStepCommand(
   root: string,
   artifactsDir: string,
-  hostDescriptor?: HostDispatchDescriptor,
+  auditorDescriptor?: AuditorDescriptor,
 ): string {
   return renderCommand([
     ...cliInvocationTokens(),
@@ -128,7 +80,7 @@ export function nextStepCommand(
     root,
     "--artifacts-dir",
     artifactsDir,
-    ...renderHostDescriptorFlags(hostDescriptor),
+    ...renderAuditorDescriptor(auditorDescriptor),
   ]);
 }
 
@@ -194,7 +146,7 @@ export function renderDispatchReviewPrompt(params: {
   hostCanSelectSubagentModel: boolean;
   driverInstruction?: string;
   /** The current driver's handshake, re-emitted onto the continue-command. */
-  hostDescriptor?: HostDispatchDescriptor;
+  hostDescriptor?: AuditorDescriptor;
 }): string {
   const mergeCommand = mergeAndIngestCommand(
     params.artifactsDir,
@@ -376,7 +328,7 @@ export function renderRollingDispatchPrompt(params: {
   hostCanSelectSubagentModel: boolean;
   driverInstruction?: string;
   /** The current driver's handshake, re-emitted onto the continue-command. */
-  hostDescriptor?: HostDispatchDescriptor;
+  hostDescriptor?: AuditorDescriptor;
 }): string {
   const mergeCommand = mergeAndIngestCommand(params.artifactsDir, params.runId);
   const continueCommand = nextStepCommand(params.root, params.artifactsDir, params.hostDescriptor);

@@ -287,6 +287,8 @@ export {
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
 
+export type { AuditorSelf, AuditorDescriptor } from "./types/auditorDescriptor.js";
+
 // OpenCode permission deployment helpers (global scope vs. agent scope)
 export {
   OPENCODE_MANAGED_BROAD_VALUE,

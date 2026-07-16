@@ -194,9 +194,36 @@ describe("host-review dispatch pool for a codex-configured run is keyed to claud
   it("the continue-command re-emits the current driver's handshake (descriptor rides it)", () => {
     const cont = result.allowed_commands.find((c) => /next-step/.test(c));
     expect(cont).toBeTruthy();
-    expect(cont).toContain("--host-context-tokens");
-    expect(cont).toContain("200000");
-    expect(cont).toContain("--host-can-dispatch-subagents");
+    expect(cont).toContain("--auditor");
+
+    // The command string has the format:
+    // ... --auditor "{"self":{...},"inventory":null}"
+    // Extract the JSON that comes after --auditor
+    const auditorIdx = cont.indexOf("--auditor");
+    expect(auditorIdx).toBeGreaterThanOrEqual(0);
+
+    // Find the opening quote
+    const openQuoteIdx = cont.indexOf('"', auditorIdx);
+    expect(openQuoteIdx).toBeGreaterThanOrEqual(0);
+
+    // The JSON string ends at the last quote (we scan backwards from the end)
+    // because the command should end with the JSON string
+    const closeQuoteIdx = cont.lastIndexOf('"');
+    expect(closeQuoteIdx).toBeGreaterThan(openQuoteIdx);
+
+    // Extract the JSON part (between the quotes)
+    const jsonWithEscapes = cont.substring(openQuoteIdx + 1, closeQuoteIdx);
+
+    // Unescape the JSON string (replace \" with ")
+    const jsonStr = jsonWithEscapes.replace(/\\"/g, '"');
+
+    const descriptor = JSON.parse(jsonStr);
+
+    // Verify the handshake values are preserved
+    expect(descriptor.self).toBeDefined();
+    expect(descriptor.self.context_tokens).toBe(200000);
+    expect(descriptor.self.output_tokens).toBe(32000);
+    expect(descriptor.self.can_dispatch_subagents).toBe(true);
   });
 });
 

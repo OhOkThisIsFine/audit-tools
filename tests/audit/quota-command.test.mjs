@@ -72,8 +72,8 @@ const ROSTER = JSON.stringify([
   { rank: "deep", context_tokens: 1000000, output_tokens: 64000 },
 ]);
 
-test("multi-rank --host-models roster shapes the preview and differs from no-roster", async () => {
-  const withRoster = await runQuota(["--host-models", ROSTER]);
+test("multi-rank --auditor roster shapes the preview and differs from no-roster", async () => {
+  const withRoster = await runQuota(["--auditor", JSON.stringify({self: {roster: JSON.parse(ROSTER)}})]);
   const noRoster = await runQuota([]);
 
   const rosterPreview = parsePreview(withRoster.stdout);
@@ -95,7 +95,7 @@ test("multi-rank --host-models roster shapes the preview and differs from no-ros
 });
 
 test("queryLimits undefined does not zero/empty the roster-derived preview", async () => {
-  const { stdout } = await runQuota(["--host-models", ROSTER]);
+  const { stdout } = await runQuota(["--auditor", JSON.stringify({self: {roster: JSON.parse(ROSTER)}})]);
   const preview = parsePreview(stdout);
   expect(preview.pools.length, "pools present without a live provider query").toBe(3);
   expect(preview.context_budget_tokens > 1, "context budget is the roster window, not a zeroed floor").toBeTruthy();
@@ -104,14 +104,19 @@ test("queryLimits undefined does not zero/empty the roster-derived preview", asy
   }
 });
 
-test("malformed --host-models JSON surfaces the shared parser error (not swallowed)", async () => {
+// G1: the audit CLI no longer parses a roster STRING — the whole handshake arrives
+// as one `--auditor <json>` value that getAuditorDescriptor validates. The
+// fail-loudly guarantee is now that a malformed `--auditor` value throws rather
+// than silently downgrading (the same never-swallow intent as the retired
+// `--host-models` parser check).
+test("malformed --auditor JSON throws loudly (not swallowed)", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "quota-cmd-"));
   setQuotaStateDir(stateDir);
   try {
     await assert.rejects(
-      () => cmdQuota(quotaArgv(stateDir, ["--host-models", "{not json"])),
-      /--host-models must be valid JSON/,
-      "malformed roster must throw the getHostModelRoster/parseHostModelRoster error",
+      () => cmdQuota(quotaArgv(stateDir, ["--auditor", "{not json"])),
+      /JSON object/,
+      "malformed --auditor JSON must throw loudly",
     );
   } finally {
     await rm(stateDir, { recursive: true, force: true });
@@ -153,7 +158,7 @@ async function runQuotaKeepDir(argv) {
 }
 
 test("explicit provider is used for capacity preview pools", async () => {
-  const { stdout } = await runQuota(["--provider", "codex", "--host-models", ROSTER]);
+  const { stdout } = await runQuota(["--provider", "codex", "--auditor", JSON.stringify({self: {roster: JSON.parse(ROSTER)}})]);
   const preview = parsePreview(stdout);
 
   expect(preview.pools.length, "roster still creates one pool per rank").toBe(3);

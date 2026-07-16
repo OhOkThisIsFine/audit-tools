@@ -349,7 +349,7 @@ test.concurrent("next-step true emits dispatch_review and prepares dispatch arti
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
-      ["next-step", "--host-can-dispatch-subagents"],
+      ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":true}}'],
     );
     const plan = JSON.parse(await readFile(step.artifact_paths.dispatch_plan, "utf8"));
     const prompt = await readFile(step.prompt_path, "utf8");
@@ -368,7 +368,7 @@ test.concurrent("next-step false emits single_task_fallback and does not prepare
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(
       root,
-      ["next-step", "--no-host-can-dispatch-subagents"],
+      ["next-step", "--auditor", '{"self":{"can_dispatch_subagents":false}}'],
     );
     const prompt = await readFile(step.prompt_path, "utf8");
 

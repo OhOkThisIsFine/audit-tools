@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { prepareDispatchArtifacts, resolveTierBudgets } = await import("../../src/audit/cli/dispatch.ts");
-const { getHostModelRoster } = await import("../../src/audit/cli/args.ts");
+const { getAuditorDescriptor } = await import("../../src/audit/cli/args.ts");
 const { packageRoot } = await import("../../src/audit/cli/paths.ts");
 
 const RUN_ID = "roster-run";
 
-// ── --host-models flag parsing ───────────────────────────────────────────────
+// ── --auditor flag parsing ───────────────────────────────────────────────
 
 const VALID_ROSTER = [
   { rank: "small", context_tokens: 32000, output_tokens: 8000 },
@@ -18,31 +18,45 @@ const VALID_ROSTER = [
   { rank: "deep", context_tokens: 200000, output_tokens: 64000 },
 ];
 
-test("getHostModelRoster parses a valid ordered roster", () => {
-  const argv = ["node", "cli", "--host-models", JSON.stringify(VALID_ROSTER)];
-  expect(getHostModelRoster(argv)).toEqual(VALID_ROSTER);
+test("getAuditorDescriptor parses a valid ordered roster from --auditor", () => {
+  const auditorJson = JSON.stringify({ self: { roster: VALID_ROSTER } });
+  const argv = ["node", "cli", "--auditor", auditorJson];
+  const descriptor = getAuditorDescriptor(argv);
+  expect(descriptor).not.toBe(null);
+  expect(descriptor.self.roster).toEqual(VALID_ROSTER);
 });
 
-test("getHostModelRoster returns null when the flag is absent", () => {
-  expect(getHostModelRoster(["node", "cli"])).toBe(null);
+test("getAuditorDescriptor returns null when the --auditor flag is absent", () => {
+  expect(getAuditorDescriptor(["node", "cli", "next-step"])).toBe(null);
 });
 
-test("getHostModelRoster rejects malformed input", () => {
-  const cases = [
-    "not json",
-    "{}",
-    "[]",
-    JSON.stringify([{ rank: "huge", context_tokens: 1000, output_tokens: 100 }]),
-    JSON.stringify([{ rank: "small", context_tokens: -5, output_tokens: 100 }]),
-    JSON.stringify([{ rank: "small", context_tokens: 1000 }]),
-  ];
-  for (const raw of cases) {
-    assert.throws(
-      () => getHostModelRoster(["node", "cli", "--host-models", raw]),
-      undefined,
-      `should reject: ${raw}`,
-    );
-  }
+test("getAuditorDescriptor rejects malformed JSON in --auditor", () => {
+  assert.throws(
+    () => getAuditorDescriptor(["node", "cli", "--auditor", "{not json"]),
+    (err) => err instanceof Error && /JSON object/i.test(err.message),
+    "should reject malformed JSON",
+  );
+});
+
+// The roster inside `--auditor` is re-validated through the SAME shared
+// parseHostModelRoster the retired `--host-models` flag used, so a semantically
+// malformed roster (valid JSON, bad entries) still fails LOUDLY at the CLI
+// boundary — never silently downgrading to the conservative floor deep in dispatch
+// budget resolution. (Regression guard: G1's transport collapse must not weaken
+// this validation.)
+test("getAuditorDescriptor throws on a semantically malformed roster (schema-validated, not just JSON)", () => {
+  const bad = (roster) => () =>
+    getAuditorDescriptor(["node", "cli", "--auditor", JSON.stringify({ self: { roster } })]);
+  // unknown rank
+  assert.throws(bad([{ rank: "huge", context_tokens: 200000, output_tokens: 32000 }]), /rank must be one of/i);
+  // non-positive context window
+  assert.throws(bad([{ rank: "standard", context_tokens: -1, output_tokens: 32000 }]), /context_tokens must be a positive integer/i);
+  // non-numeric output cap
+  assert.throws(bad([{ rank: "standard", context_tokens: 200000, output_tokens: "lots" }]), /output_tokens must be a positive integer/i);
+  // empty roster array
+  assert.throws(bad([]), /non-empty/i);
+  // a non-array roster (string) is not a valid roster
+  assert.throws(bad("{not json"), /JSON array/i);
 });
 
 // ── tier-budget resolution ───────────────────────────────────────────────────
