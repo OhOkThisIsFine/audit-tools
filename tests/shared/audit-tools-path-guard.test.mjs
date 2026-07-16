@@ -97,11 +97,6 @@ const ALLOWLIST = new Map([
       "MESSAGE shown to the host — display text, not path construction",
   ],
   [
-    "wrapper/audit-code-wrapper-install-hosts.mjs",
-    "pre-dist bootstrap: wrappers run before dist/ exists (fresh install / " +
-      "global bin), so they cannot import the compiled shared path module",
-  ],
-  [
     "wrapper/audit-code-wrapper-lib.mjs",
     "pre-dist bootstrap: wrappers run before dist/ exists, cannot import the " +
       "compiled shared path module",
@@ -109,11 +104,6 @@ const ALLOWLIST = new Map([
   [
     "wrapper/audit-code-wrapper-opencode.mjs",
     "pre-dist bootstrap + opencode permission GLOB patterns ('.audit-tools/**')",
-  ],
-  [
-    "wrapper/remediate-code-wrapper-install-hosts.mjs",
-    "pre-dist bootstrap: wrappers run before dist/ exists, cannot import the " +
-      "compiled shared path module",
   ],
   [
     "wrapper/remediate-code-wrapper-opencode.mjs",
