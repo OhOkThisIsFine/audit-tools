@@ -566,6 +566,11 @@ Standing gotchas worth keeping for any agent (strong or weak):
   NIM endpoint (`llm models` → default `nvidia/nemotron-3-ultra-550b-a55b`). Omit `--model` (auto-select
   works fine) or pass a listed NIM id. Offloading to *Claude Haiku* is a separate lane (Agent tool
   `model: haiku`), unrelated to the `llm` worker CLI. (Hit 2026-07-15.)
+- **Multi-line git commit messages: use a temp file (`git commit -F <file>`), NOT the PowerShell
+  here-string `@'…'@` in the Bash tool.** The Bash tool is Git Bash (POSIX sh) — `git commit -m @'…'@`
+  is parsed as the literal `@` + a bash syntax error at the first `)`, and the commit lands with a
+  mangled/truncated message (recover via `git commit --amend -F <file>`). PowerShell here-strings only
+  work in the PowerShell tool. Write the message to the scratchpad and `-F` it. (Hit 2026-07-15.)
 
 - **After a process restart, `git diff` your instruction files before committing.** A background
   doc-review/hook can silently re-assert a pre-decision version of an instruction doc (e.g. CLAUDE.md,
