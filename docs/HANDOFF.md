@@ -105,13 +105,10 @@ quarantine); the **dispatch emit wrapper + the two quota contracts** (the assemb
 **Before commit 3, consider releasing.** The regression that made the batch un-shippable is fixed, so the
 15 un-released commits are now honest — see the release note below.
 
-### Lap-scoping lesson (the reason the G-series ran ~a dozen laps)
-
-Three of the four remaining G-items evaporated on inspection; the fourth had the wrong shape. Every one had
-file:line evidence attached and read as verified. **Verify the PREMISE of a queued item against HEAD before
-opening a lap on it** — the spec's own decomposition is a lead, not a work order. Full write-ups:
-[`dispatch-fork-assessment-2026-07-16.md`](reviews/dispatch-fork-assessment-2026-07-16.md) (why there was
-no auditor/remediator separation to begin with) and the premise check above.
+**Verify a queued item's PREMISE against HEAD before opening a lap on it** — a spec's decomposition is a
+lead, not a work order ([[grep-the-writers-before-believing-inheritance]]). Records:
+[`dispatch-fork-assessment-2026-07-16.md`](reviews/dispatch-fork-assessment-2026-07-16.md) ·
+[`g4-g5-g6-premise-check-2026-07-16.md`](reviews/g4-g5-g6-premise-check-2026-07-16.md).
 
 **⚠ Deliberate, still current:** autonomous auto-confirm is scoped to the DELTA case only — a first-time
 confirmation (no artifact at all) still pauses for the operator even under `autonomous_mode`.
@@ -123,30 +120,22 @@ installed GLOBAL bins are pre-G1, so a stale host dogfooding this batch has its 
 ignored** (unknown flags → defaults). Don't dogfood the G-series via a stale global bin without
 reinstalling.
 
-### ⛔ NOT SHIPPABLE YET — `main` is RED, and has been for ~a dozen laps
+### ⛔ NOT SHIPPABLE — `main` CI is RED on `smoke:packaged-audit-code`
 
-**CI on `main` is failing and nobody noticed** (`gh run list --branch main` — `ci` and
-`audit-code-test-suite` both red across multiple pushes). Nothing has released since the G-series began, so
-the release gate was never the thing that had to pass. Three separate reds, discovered 2026-07-16:
+`next-step -> blocked` at iteration 0, failing `verify:checks` → `ci` and `verify:release`. **Pre-existing**
+(proved: rebuild `dist/` on a stashed clean `26076e34` → identical failure), so it is not the assembly
+lift's doing. **This is the first item to fix, ahead of commit 3** — nothing releases until it is green.
+Detail + repro + its diagnosability sub-bug: [`backlog.md`](backlog.md).
 
-1. ✅ **FIXED — the capability regression.** From G2 (`59116fe2`) until `d1065655` the batch silently removed
-   remediate's ability to dispatch to any non-self pool (a capability `v0.32.68` had). Not behavior-neutral.
-2. ✅ **FIXED — `check:doc-manifest`** (a `verify:checks` step, so it fails `ci` on EVERY push). Red since
-   `b4e640c0`: a prior lap's dated plan doc was never registered in the routing table. Registered.
-3. ✅ **FIXED — `tests/shared/dispatch-policy-exclusion.test.mjs`** ("the RENDER builder still carries
-   reach"), red on BOTH Node lines since `26076e34`. **An env-dependent test**: it called
-   `buildProviderConfirmationRender` without injecting `detectCommand`, so `discoverProviders` probed the
-   real PATH for the `claude` binary — green on a dev box with Claude Code installed, red on CI (no `claude`
-   ⇒ no `claude-code` pool entry ⇒ `find` → undefined ⇒ "expected undefined to be true"). Now injects the
-   probe. **This is the local-green ≠ CI-green trap in its purest form.**
-4. ⛔ **STILL RED — `smoke:packaged-audit-code`** (a `verify:checks` step → blocks `verify:release`).
-   `next-step -> blocked` at iteration 0. **Pre-existing, NOT from the assembly lift** — proved by rebuilding
-   `dist/` on a stashed clean `26076e34` and getting the identical failure. Needs its own focused lap; see
-   `docs/backlog.md`.
+`ci` and `audit-code-test-suite` had ALSO been red for ~a dozen laps on two other causes (both fixed
+2026-07-16; `audit-code-test-suite` is green again). **Why they hid is the durable part**: the pre-commit
+hook gates only `npm run check`, and laps verify with build + check + vitest — none of which include
+`verify:checks`. Nothing had released since the G-series began, so the gate never ran.
+**End every lap with `gh run list --branch main --limit 3`**, and run `npm run verify:release` before any
+"this is shippable" claim ([[lap-green-must-match-ci-evidence]]).
 
-**So: fix (4), then release.** It is a breaking transport change (likely a minor bump, not patch) and needs
-the global-bin reinstall per the npm-12 notes in Durable traps. **Always run `npm run verify:release`
-locally before tagging** — the local pre-tag gate is only `check`, which is exactly why (2)/(3)/(4) hid.
+When it is green: releasing is a breaking transport change (likely a minor bump, not patch) and needs the
+global-bin reinstall per the npm-12 notes in Durable traps.
 
 **G3+ is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`,
 `costRank.ts`, **`src/shared/quota/`**) → green + independent review + attestation required.
@@ -245,27 +234,24 @@ from slice-1 actually bites; the second-IDE check above is exactly the run that 
 `phase:main` layer-2 asymmetry (slice-1 input) into its design; the lease-TTL lap's ledger-spin follow-up
 (backlog → Open bugs) also folds in here. See the D-66/67 roadmap entry in `docs/backlog.md`.
 
-**D-66/67 slice-1 SHIPPED, slice-2 VERIFIED-CLOSED (not worth building).** Design-of-record + residuals in
-`docs/backlog.md` → "Unify the full rolling-dispatch lifecycle shell"; [[rolling-lifecycle-unify-full-unification-wrong]]
-still governs (full unification is the WRONG endpoint). Only slice-3 (above) remains open.
+**D-66/67 — only slice-3 remains open** (above); the rest is closed and should not be reopened
+([[rolling-lifecycle-unify-full-unification-wrong]] governs: full unification is the WRONG endpoint).
+Residuals: `docs/backlog.md` → "Unify the full rolling-dispatch lifecycle shell".
 
-**External-audit program SHIPPED in full** (V1–V7 + dedup bundle); only low-severity documented residuals
-remain (`docs/backlog.md` → *Open bugs*, "External shared-logic audit … residuals").
+**External-audit program — only low-severity residuals remain** (`docs/backlog.md` → *Open bugs*,
+"External shared-logic audit … residuals").
 
-Rationale: the **loop is the meta-tool**; making it cheaper, convergent, and safe has compounding leverage
-on all downstream work ([[autonomous-pipeline-capstone-spec]]). Loop-infra (T1–T3) and loop-safety tooling
-are COMPLETE end-to-end. With the code tracks closed, the live-validation run above IS the current
-loop-improvement work — it is what gates "redesign before scheduled autonomy" advancing to the scheduled
-audit→remediate→PR capstone.
+Rationale for the ordering: the **loop is the meta-tool**; making it cheaper, convergent, and safe has
+compounding leverage on all downstream work ([[autonomous-pipeline-capstone-spec]]). With the code tracks
+closed, the live-validation run above IS the current loop-improvement work — it gates "redesign before
+scheduled autonomy" advancing to the scheduled audit→remediate→PR capstone.
 
-### Track status (pointers only — detail in `docs/backlog.md`)
-- **T1–T3 loop infra — ✅ COMPLETE.** Self-scaling pipeline, convergence/safety, auto-phasing all shipped.
-- **T4 host-friction inventory:** selective-deepening convergence fix shipped; live validation = part of
-  the run above.
-- **T5 forward tracks:** conceptual design review ✅; routing rethink ✅; admission control ✅ (residual =
-  live validation above + deeper within-turn simultaneity, only if the run shows alternation is the
-  bottleneck); analyzers open only for clippy/rubocop live spawn (needs Rust/Ruby target); CE-004
-  residual is provider-blocked (claude-code host has no constraint endpoint — not a defect).
+### Track status — what is still OPEN (pointers only; detail in `docs/backlog.md`)
+- **T1–T3 loop infra:** nothing open.
+- **T4 host-friction inventory:** live validation only (part of the run above).
+- **T5 forward tracks:** live validation of admission control (+ deeper within-turn simultaneity, only if
+  the run shows alternation is the bottleneck); clippy/rubocop live spawn (needs a Rust/Ruby target). CE-004
+  is provider-blocked (the claude-code host has no constraint endpoint — not a defect).
 - **T6 deferred / waiting:** A2 oracle (unblocked by labeling the run above); A7 manual GUI checklists
   (Antigravity/OpenCode); provider `queryLimits`; narrow prose-staleness; Copilot/Antigravity quota
   endpoint confirmation. Full detail in `docs/backlog.md` → "Deferred / waiting".
