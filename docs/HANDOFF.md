@@ -85,61 +85,53 @@ six dispatchable providers. Multi-IDE isolation falls out for free (each IDE's p
 env), which is why no id is needed. Plan + the refuted alternatives:
 [`docs/reviews/g2-5-source-emitter-plan-2026-07-16.md`](reviews/g2-5-source-emitter-plan-2026-07-16.md).
 
-**▶ IMMEDIATE NEXT = G3 — split the confirmed pool along policy-vs-reach.** Spec:
-[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) → Decomposition G3.
-G2.5's `resolveAmbientSources` is the "freshly-discovered reach" G3 filters over — the decision applies as
-a FILTER, never additively.
-
-**⚠ Recon refuted the earlier framing (2026-07-16) — the spec is corrected; don't re-plan from an old
-draft.** `confirmed_provider_pool` is an **inert slot**: zero producers, zero consumers in `src/` (a
-definition at `src/shared/types/sessionConfig.ts:625`, the `ConfirmedProviderPoolRef` stub at `:539`, a
-stale doc comment at `src/shared/providers/providerConfirmation.ts:243` claiming it is persisted, and two
-type-only tests pinning the empty slot). It is **deleted, not split**. The live reachability-inheritance
-hole is the Gate-0 ARTIFACT `.audit-tools/provider-confirmation.json` — audit's auditor writes discovered
-reach into `ConfirmedPoolEntry` (`capability_tier` / `excluded` / `self_spawn_blocked`), remediate's
-possibly-different auditor reads it verbatim at dispatch (`src/audit/cli/dispatch.ts:575`,
-`src/remediate/steps/dispatch/marshal.ts:410`, both via `readConfirmedCostPositions`), and it sits outside
-`validateRepoSessionIntent`'s boundary entirely. **Owner call (2026-07-16): that artifact re-home folds
-INTO G3**, not G5 — same cut, and splitting it would leave a half-done boundary across two laps. G5 keeps
-the auditor-id stamp + the reactive lies-reachably quarantine.
+**G3 = split the confirmed pool along policy-vs-reach.** Spec:
+[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) → Decomposition G3 (the
+gate's design + the traps that killed four plan drafts and one implementation round). `confirmed_provider_pool`
+is an **inert slot** — deleted (commit C), not split; the live hole was the Gate-0 ARTIFACT, whose re-home
+folds INTO G3 (owner call). G5 keeps the auditor-id stamp + the reactive lies-reachably quarantine.
 
 **Bug 1 — Gate-0 exclusion never wired: ✅ SHIPPED (`c99bcb9c`, loop-core, independently reviewed +
 attested).** Source pools only. Residues (host/primary pools unwired — NOT a simple extension, see the
 backlog entry; absent-artifact fail-open; opencode self-spawn asymmetry) are in `docs/backlog.md`.
 
-**Bug 2 — REFUTED as framed; the real remainder FOLDED INTO G3 (owner call, 2026-07-16).** Verified against
-HEAD: the session config is NOT empty, `sources[]` never enters the roster at all, and the roster comparison
-is NOT structurally broken post-G2. The real (narrower) defect is **descriptor absence** — it bites only
-headless / `openai-compatible` / `opencode` drivers and off-PATH command overrides, never the ordinary
-conversational case. Its correct fix **IS** the G3 cut (cost order + λ are policy; policy must not be gated
-by a reach check), so it ships as G3 commit A′ step 1. Corrected detail: `docs/backlog.md`.
+**Bug 2 — ✅ FIXED in A′ (`043832a5`).** Cost order + λ are POLICY and are no longer gated by a reach check.
 
-**▶ IMMEDIATE NEXT = G3 commit A′.** Plan of record (verified over three adversarial review rounds that
-killed four drafts — read the preamble before touching it):
+**A′ — ✅ SHIPPED (`043832a5`, loop-core, two independent reviews + attested, NOT released).** The gate is
+live: policy ungated from reach (bug 2 fixed), the `autonomous_mode`-keyed reconciliation gate built,
+consume-and-invalidate, `resolveAutonomousMode` lifted to shared (env var now **`AUDIT_TOOLS_AUTONOMOUS`** —
+attendedness is a property of the RUN, so no per-tool name), roster check + field deleted.
+**Round 1 returned BLOCKER** — the gate could never fire (`advanceAudit` re-decided gate-blind, dispatching a
+different executor) and the frozen closure could not clear mid-drain (PRIORITY[0] livelock). Both fixed; the
+gate is now **mutable state threaded by reference, cleared on promotion**, and a red-green-validated
+`advanceAudit` test pins it. Round 2 re-traced both fixes: non-blocking, findings actioned. The durable
+lessons are in the spec's G3 bullets — read them before A″.
+
+**▶ IMMEDIATE NEXT = G3 commit A″** — widen the exclusion grammar to `provider:model`. A **type + parser**
+change, not an extraction: `ConfirmedDispatchPolicy.exclude` is `ResolvedProviderName[]` and
+`parseProviderNameList` membership-checks against `RESOLVED_PROVIDER_NAMES` (it would *reject* a
+`provider:model` string). Budget the ripple: `resolveExcludedProviders` can no longer return
+`Set<ResolvedProviderName>` — it becomes a **matcher over source keys**, across 4 loop-core areas
+(`apiPool.ts:494-501`, `hybridDispatch.ts:61`, `waveScheduling.ts:298`, `nextStep.ts:1141,1975`,
+`nextStepHelpers.ts:1812`). Add `tests/shared/dispatch-policy-exclusion.test.mjs` +
+`tests/shared/dispatchable-sources.test.mjs` to the red-green set (the plan omitted them; they are exactly
+this matcher's blast radius). Plan of record (four refuted drafts in its preamble — read it):
 [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
 
-**⚠ Read the goal first — four drafts died by losing it.** G3's deliverable is the **`autonomous_mode`-keyed
-reconciliation gate** (`spec/unified-dispatch-worker-model.md:193-195`); everything else is debris cleared
-so the gate is expressible. **Roster-staleness is DECIDED, not deferred** — the earlier "sequence is forced:
-make the gate reachable first" framing was refuted: the check's `reconfirm` verdict **reaches no obligation**,
-so it enforces the owner's *"user must confirm model choices"* constraint **not at all**, and it compares the
-*writing* auditor's roster (meaningless cross-auditor). It is a degenerate proxy for the gate — replaced by
-it, with `roster` deleted alongside.
-
-**Commit order: A′ → A″ → B+D → C** (gate live from A′ onward — no unenforced window at any point):
-- **A′** — ungate policy from the reach check (fixes bug 2) + build the gate + consume-and-invalidate the
-  input + lift `resolveAutonomousMode` to shared + delta-only prompt + delete the check and `roster`. One
-  commit: step 1 removes `reconfirm`'s only consumers, so the check's *behavior* dies there, not at the
-  deletion. Gate keys on `model_id ?? provider-name`; seam is `nextStepCommand.ts:316-318`.
-- **A″** — widen the exclusion grammar to `provider:model` (type + parser change; budget the
-  `resolveExcludedProviders` → matcher ripple across 4 loop-core areas).
+**Commit order: ~~A′~~ → A″ → B+D → C** (gate live from A′ onward — no unenforced window at any point):
+- **A″** — widen the exclusion grammar to `provider:model` (see above).
 - **B+D** (merged — the parse gate hard-requires the fields B deletes, so B-then-D self-inflicts the exact
-  silent degrade D exists to fix) — delete write-only reach + loud `schema_version` rejection.
+  silent degrade D exists to fix) — delete write-only reach (`capability_tier` / `self_spawn_blocked` /
+  `excluded` / `reason` / `blended_price_usd_per_mtok`) + loud `schema_version` rejection. Split the
+  PRODUCER (`buildSharedProviderConfirmation` → a render-builder + a persist-builder), NOT the write site —
+  projecting at the write site leaves the reach fields representable on the type.
 - **C** — delete the inert `confirmed_provider_pool` slot.
 
 **⚠ Deliberate intermediate state (A′ → A″ window), not a bug:** A′'s `policy.exclude` is still
 `ResolvedProviderName[]`, so an autonomous exclusion of ONE new NIM model drops **every** NIM source. Blast
 radius ≈ 0 (audit's `autonomous_mode` is brand-new in A′ itself). A″ closes it.
+**Also deliberate:** autonomous auto-confirm is scoped to the DELTA case only — a first-time confirmation
+(no artifact at all) still pauses for the operator even under `autonomous_mode`.
 
 **Spec amended (2026-07-16):** `spec/unified-dispatch-worker-model.md` G3 now carries the gate as the
 deliverable, phases policy's home (artifact until G6, intent thereafter — the panel's Decision (A) stands),
@@ -200,11 +192,9 @@ just don't dogfding G1 via a stale global bin without reinstalling.
   REWORK and killed all three of its load-bearing choices — that review is why the design is what it is.
   NOT loop-core by path (verified against `loopCorePaths.ts`) → no attestation. NO release (inert-window
   batch continues).
-- **G3 (IMMEDIATE NEXT — commit A′)** BUILD the autonomous_mode-keyed reconciliation gate; delete the
-  roster-staleness check it supersedes + the inert `confirmed_provider_pool`; policy stays on the
-  confirmation artifact until G6; pin the exclusion grammar `provider:model`. Reach-now reads the
-  `gatherDispatchableSources` chokepoint — **NOT** `resolveAmbientSources` (blind to undeclared +
-  descriptor-supplied backends). Plan + the four refuted drafts:
+- **G3 — A′ ✅ SHIPPED (`043832a5`); A″ is IMMEDIATE NEXT** (see the top of this doc). The gate is live;
+  what remains is the exclusion grammar (A″), the write-only-reach deletion (B+D), and the inert slot (C).
+  Policy stays on the confirmation artifact until G6. Plan + the four refuted drafts:
   [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
 - **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
   `declared ∩ ambient-verifiable` reach + lies-reachably quarantine). **G6** remediate `--auditor` round-trip.
