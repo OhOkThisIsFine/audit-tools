@@ -148,27 +148,86 @@ follow-on feeder behind the same seam, so if the catalog approach changes the se
   backend) is an **open question** — kind 3 may be a candidate for retirement if kind-1-headless
   subsumes it. Not decided here.
 
+## Greenfield endpoint (owner-approved 2026-07-16, supersedes the SEAM-first phasing below)
+
+A 3-person independent design panel (minimalist / protocol-continuity / adversarial), greenfield
+mandate, converged unanimously; owner approved. Full synthesis:
+[`docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md`](../docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md).
+The 2a-ii `applyDispatchInventory` overlay is the correct RUNTIME math but a transitional half-measure —
+it overlays onto a persisted config that still HAS the dispatch slots. The endpoint deletes the slots.
+
+**ONE cut, applied everywhere — INTENT vs CAPABILITY (vs derived EFFECTIVE):**
+- **INTENT** — repo-persisted, durable, auditor-independent: audit scope/lenses/synthesis/analyzers/
+  design-review/graph + **budgeting policy** (safety_margin, reserved-output fraction, confirm_threshold,
+  max_packets, risk_mass_budget, cost↔throughput λ) + the operator's route **DECISIONS** (exclusions,
+  cost ordering, confirmed flag). Policy names *rules*, never *reachable endpoints*.
+- **CAPABILITY** — per-invocation, per-auditor, off-repo, NEVER inherited: the reachable backend × model
+  × {tools-vs-chat rank, quota headroom, cost} catalog + the driver's own model window(s) / subagent
+  ceiling / launch transports (can-dispatch-subagents, can-proxy). Carried by ONE structured
+  `AuditorDescriptor` (`--auditor <json>`) that rides every invocation.
+- **EFFECTIVE** = `resolve(intent.policy, intent.budgeting, descriptor)` — in-memory only, never a
+  persistable type.
+
+**The one representational move:** split the persisted TYPE. `RepoSessionIntent` (the only thing the
+store reads/writes) has **zero** dispatch/capability fields — they don't exist on the type, so persist-
+back contamination and stale-inheritance are *unrepresentable*, not guarded. Absence of a descriptor
+fails closed to **driver-self-only single-lane direct dispatch** (always safe — the driver is
+definitionally reachable), never to a stored value.
+
+**Never-inherit = three complementary mechanisms:** (1) unrepresentable in the persisted type; (2)
+transient run-state (active-dispatch.json, a confirmed decision's `confirmed_by`) is stamped with
+`auditor_id` — a differing id on resume DISCARDS prior inventory before deciding (checks identity, not
+"we re-sent the flags"); (3) effective routable set = `declared ∩ ambient-verifiable-by-this-process`
+∪ self — a declared lane enters a pool only if this process proves reach (key env present / launcher on
+PATH / proxy port listening / cred readable), never `declared ∪ stored`.
+
+**Resolved decisions:**
+- **confirmed_provider_pool → SPLIT:** persist the operator's route DECISION (exclusions + cost ordering
+  + confirmed flag) as intent; re-resolve the concrete pool per-auditor each invocation and apply the
+  decision as a FILTER over freshly-discovered reach (never additive). Audit→remediate transports zero
+  reachability. Reconciliation when a resuming auditor reaches a backend the operator never confirmed is
+  keyed on `autonomous_mode`: **attended → prompt the delta only** (subset → silent); **autonomous →
+  fail-closed-exclude the new backend + a `newly_reachable_backend` friction event.**
+- **quota/block_quota → SPLIT by "asserts capability vs asserts policy":** windows/host_model/subagent-
+  limit/per-source-quota = capability (descriptor, never persist; per-source quota travels WITH the
+  declared source); safety_margin/thresholds/λ = dimensionless policy (repo intent); learned RPM/TPM =
+  the account-keyed shared ledger (not config at all). Budget = policy × freshly-measured capacity.
+
+**Honest residuals (loud reactive degrade, NOT guarantees):** a host that *lies reachably* (real
+endpoint, overstated window / wrong-account key) is caught only on first oversize/402/tool-corruption →
+quarantine-the-lane + friction. And auditor identity is best-effort — the **`(provider, account)`
+consumption ledger, not auditor identity, is the load-bearing double-grant boundary.**
+
+**Pin early:** the exclusion-key grammar must be reach-independent (an exclusion authored on one auditor
+must mean something to an auditor with a different reachable set) — default `provider:model`, with
+`provider` and endpoint-host as coarser patterns.
+
 ## Decomposition (each loop-core commit: green-at-every-commit + attestation)
 
-1. **Retire the repair-proxy source-pool wiring** as one atomic replace (config field + discovery +
-   Gate-0 fold + capability feed + old spec), with its tests.
-2. **Move dispatch inventory to the handshake — SEAM FIRST (build now), catalog feeder later.**
-   - **2a (seam):** dispatch inventory is handshake-sourced, per-auditor, never-inherited, off-repo;
-     `gatherDispatchableSources` reads the handshake, not the repo config; the repo session-config
-     validator rejects (or ignores + warns) dispatch-inventory fields; empty inventory → host-only
-     (graceful default). This is the unambiguously-correct part.
-   - **2b (catalog feeder, follow-on):** populate the handshake inventory from a per-auditor,
-     identity-keyed home-dir capability catalog (models.dev + `/registry` + quota → `{model,
-     tools/chat rank, quota, cost}`), refreshed, cached. Built behind the 2a seam so a change to the
-     catalog approach never disturbs the seam.
-3. **Wire repair-proxy as a kind-1 launch-transport** — a worker-launch option that points an
-   agentic claude worker's harness at a proxy endpoint (resolved per-auditor), shared by audit
-   review host-fanout and remediate implement. **Must auto-detect availability and degrade to direct
-   dispatch** when there is no proxy or the host cannot redirect its workers — with a test that a
-   proxy-absent / incompatible-host run dispatches directly and never fails.
-4. **Fix C** — cold-start admission (probe-admit ≥1, correct wall labeling, non-empty explains).
-5. **(open) decide kind-3's fate** — keep direct single-shot API pools, or retire in favor of
-   kind-1-headless.
+- **[SHIPPED] commit 1** (`f5bca305`) retire the repair-proxy source-pool wiring; **2a-i** (`c167fbee`)
+  additive `--host-inventory` channel; **2a-ii** (`605d8a0a`) switch the dispatch consumers to READ the
+  handshake via `applyDispatchInventory` (transitional overlay).
+- **G1 — collapse the handshake into ONE `AuditorDescriptor`.** Retire the scattered `--host-model-id /
+  --host-models / --host-context-tokens / --host-output-tokens / --host-max-active-subagents /
+  --host-can-dispatch-subagents / --host-inventory` flag-bag into one structured `--auditor <json>`
+  ({auditor_id, resolved_at, self:{provider,roster,max_active_subagents,can_dispatch_subagents,
+  can_proxy}, sources[]}). It rides every continue-command atomically. No back-compat.
+- **G2 — split the persisted type.** Introduce `RepoSessionIntent` (audit intent + policy + budgeting;
+  NO dispatch/capability fields); the store's read/write signature accepts only it. `resolve(intent,
+  descriptor)` produces the in-memory EFFECTIVE config every consumer reads. Delete the dispatch fields
+  from the persisted type outright (makes contamination unrepresentable — the endpoint of 2a-ii).
+- **G3 — split confirmed_provider_pool** into `DispatchPolicy` (exclusions + cost_order + confirmed flag,
+  on intent) + per-auditor re-resolved reach; the `autonomous_mode`-keyed reconciliation gate; pin the
+  exclusion-key grammar.
+- **G4 — split quota/block_quota** (capability → descriptor; policy → intent; per-source quota travels
+  with the source; delete the redundant repo capability fields). May fold into G2.
+- **G5 — never-inherit enforcement:** auditor-id stamp on transient run-state + `declared ∩ ambient-
+  verifiable` reach intersection + the reactive-degrade quarantine for lies-reachably.
+- **G6 — remediate round-trip:** the descriptor rides remediate's loaders; remediate reads the effective
+  config identically (one shared core).
+- **Retained, orthogonal to the split — commit 3** repair-proxy as a kind-1 launch-transport (auto-
+  detect + degrade to direct). **Commit 4** fix C (host cold-start wall). **Commit 5** decide kind-3's
+  fate.
 
 ## Invariants
 
