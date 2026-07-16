@@ -73,13 +73,18 @@ Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-di
 (`docs/backlog.md` → "Live dogfood: BOTH dispatch paths failed"). Owner-agreed to build the full
 decomposition. **Shipped so far:** commit 1 (`f5bca305`, retire the repair-proxy source-pool
 integration, −606 LOC, reviewed+attested) + commit 2a-i (`c167fbee`, the additive `--host-inventory`
-handshake channel). **Resume at 2a-ii** — the decomposition + the two open decisions live in the spec:
+handshake channel) + **commit 2a-ii (`605d8a0a`, switch the dispatch consumers to READ the handshake
+inventory — loop-core, reviewed+attested).** **Resume at 2a-iii** — the decomposition + the two open
+decisions live in the spec:
 
-- **2a-ii (NEXT, loop-core):** switch the ~50 consumers (`providerFactory.ts`/`apiPool.ts`/provider-
-  confirmation) to read inventory from the `HostDispatchDescriptor.inventory` channel, repo config as
-  deprecated fallback; handle the host-only window (empty inventory → host + auto-detected CLIs). Needs
-  independent review + attestation.
-- **2a-iii:** add the remediate descriptor round-trip (absent today — `remediate/steps/prompts.ts`
+- **2a-ii (SHIPPED `605d8a0a`, loop-core, reviewed+attested):** the dispatch consumers now read inventory
+  from the handshake via a single shared `applyDispatchInventory` overlay (repo config = deprecated
+  fallback; wholesale-authoritative when inventory present → host-only degrades correctly, no repo
+  cross-contamination). Inert until 2a-iii wires the loaders to assemble `--host-inventory` (no host emits
+  it yet → the null-inventory fallback runs = today's behavior byte-for-byte). Independent adversarial
+  review found+fixed 2 defects (provider_confirmation auto-complete persist-leak; empty `{}` inventory
+  round-trip drop). See the 2a-ii commit body.
+- **2a-iii (NEXT, loop-core):** add the remediate descriptor round-trip (absent today — `remediate/steps/prompts.ts`
   `loaderCommand` doesn't re-emit `--host-*`); loaders assemble+pass `--host-inventory`; validator
   rejects/warns repo inventory fields; DELETE the config inventory fields; resolve the 2 decisions
   (confirmed_provider_pool re-validated-not-inherited; quota/block_quota split-field removal).
