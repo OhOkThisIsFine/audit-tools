@@ -182,10 +182,15 @@ transient run-state (active-dispatch.json, a confirmed decision's `confirmed_by`
 PATH / proxy port listening / cred readable), never `declared ∪ stored`.
 
 **Resolved decisions:**
-- **confirmed_provider_pool → SPLIT:** persist the operator's route DECISION (exclusions + cost ordering
-  + confirmed flag) as intent; re-resolve the concrete pool per-auditor each invocation and apply the
-  decision as a FILTER over freshly-discovered reach (never additive). Audit→remediate transports zero
-  reachability. Reconciliation when a resuming auditor reaches a backend the operator never confirmed is
+- **The confirmed pool → SPLIT along policy-vs-reach:** persist the operator's route DECISION (exclusions
+  + cost ordering + confirmed flag) as intent; re-resolve the concrete pool per-auditor each invocation and
+  apply the decision as a FILTER over freshly-discovered reach (never additive). Audit→remediate transports
+  zero reachability. **The cut applies to the confirmation ARTIFACT, not to a session-config field** — the
+  decision is captured transiently (`provider-confirmation.input.json`) and its output persists to
+  `provider-confirmation.json`, which today carries discovered reach (`capability_tier` / `excluded` /
+  `self_spawn_blocked`) written by one auditor and read verbatim by another's dispatch. That artifact is
+  where the reachability inheritance actually happens, so that is where the split lands: the artifact keeps
+  the decision, and reach is re-resolved by whoever is dispatching. Reconciliation when a resuming auditor reaches a backend the operator never confirmed is
   keyed on `autonomous_mode`: **attended → prompt the delta only** (subset → silent); **autonomous →
   fail-closed-exclude the new backend + a `newly_reachable_backend` friction event.**
 - **quota/block_quota → SPLIT by "asserts capability vs asserts policy":** windows/host_model/subagent-
@@ -224,8 +229,9 @@ must mean something to an auditor with a different reachable set) — default `p
   the 6 dispatchable providers ride `sources[]` (their launch config in endpoint+parameters). (b) The
   descriptor's `sources[]` + launch blocks are validated at the `getAuditorDescriptor` parse boundary
   (C1 quota + command-injection), symmetric with the disk-load boundary. `parallel_workers` moved onto
-  `self`. **Honest scope:** `confirmed_provider_pool`/`quota`/`block_quota`/`host_can_dispatch_subagents`
-  remain on the intent type (a HALF-type) → G3/G4/G5. **The deterministic source-emitter (Path A feeder)
+  `self`. **Honest scope:** `quota`/`block_quota`/`host_can_dispatch_subagents` remain live on the intent
+  type (a HALF-type) → G4/G5. (`confirmed_provider_pool` also remains on the type, but it is an inert slot
+  — nothing produces or consumes it; G3 deletes it rather than splitting it.) **The deterministic source-emitter (Path A feeder)
   was SPLIT OUT to G2.5** (owner, 2026-07-16): the type-split already satisfies atomic-replace (the
   descriptor CAN carry sources) and is inert/unreleased, so per the spec's own "seam first, feeder follows"
   the emitter is the immediate-next commit, not bundled.
@@ -271,9 +277,18 @@ must mean something to an auditor with a different reachable set) — default `p
   G2-orphaned `examples/session-config/opencode-free.json`) uses `api_key_env`.
 
   **POPULATE remains open** — the rich catalog lands later behind this same resolve seam.
-- **G3 — split confirmed_provider_pool** into `DispatchPolicy` (exclusions + cost_order + confirmed flag,
-  on intent) + per-auditor re-resolved reach; the `autonomous_mode`-keyed reconciliation gate; pin the
-  exclusion-key grammar.
+- **G3 — split the confirmed pool along policy-vs-reach.** The `confirmed_provider_pool` field named in
+  earlier drafts is an **inert slot** (a definition, a stub ref type, a stale comment, and two tests that
+  pin the empty slot — zero producers, zero consumers); it is deleted, not split. The live cut is the
+  Gate-0 confirmation ARTIFACT: `DispatchPolicy` (exclusions + cost_order + confirmed flag) persists on the
+  intent, and `provider-confirmation.json` stops carrying discovered reach (`capability_tier` / `excluded` /
+  `self_spawn_blocked`) — reach is re-resolved per-auditor and the decision applies as a set-difference
+  FILTER over it, never additively. Plus: the `autonomous_mode`-keyed reconciliation gate (which needs
+  `resolveAutonomousMode` lifted out of `src/remediate/` into the shared core — one core, two draws), and
+  the exclusion-key grammar pinned by EXTRACTING the `provider:model` helper that already exists three
+  times over (reconciling its drifted `"?"` vs `"default"` tail), never by authoring a fourth grammar.
+  The reachability inheritance this closes is the same hole G2 closed on `session-config.json`; G5 then
+  owns the auditor-id stamp + the reactive lies-reachably quarantine on top of it.
 - **G4 — split quota/block_quota** (capability → descriptor; policy → intent; per-source quota travels
   with the source; delete the redundant repo capability fields). May fold into G2.
 - **G5 — never-inherit enforcement:** auditor-id stamp on transient run-state + `declared ∩ ambient-

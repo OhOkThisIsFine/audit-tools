@@ -85,12 +85,40 @@ six dispatchable providers. Multi-IDE isolation falls out for free (each IDE's p
 env), which is why no id is needed. Plan + the refuted alternatives:
 [`docs/reviews/g2-5-source-emitter-plan-2026-07-16.md`](reviews/g2-5-source-emitter-plan-2026-07-16.md).
 
-**▶ IMMEDIATE NEXT = G3** — split `confirmed_provider_pool` into `DispatchPolicy` (exclusions + cost_order
-+ confirmed flag, on intent) + per-auditor re-resolved reach; the `autonomous_mode`-keyed reconciliation
-gate; pin the exclusion-key grammar (default `provider:model`). Spec:
+**▶ IMMEDIATE NEXT = G3 — split the confirmed pool along policy-vs-reach.** Spec:
 [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) → Decomposition G3.
 G2.5's `resolveAmbientSources` is the "freshly-discovered reach" G3 filters over — the decision applies as
 a FILTER, never additively.
+
+**⚠ Recon refuted the earlier framing (2026-07-16) — the spec is corrected; don't re-plan from an old
+draft.** `confirmed_provider_pool` is an **inert slot**: zero producers, zero consumers in `src/` (a
+definition at `src/shared/types/sessionConfig.ts:625`, the `ConfirmedProviderPoolRef` stub at `:539`, a
+stale doc comment at `src/shared/providers/providerConfirmation.ts:243` claiming it is persisted, and two
+type-only tests pinning the empty slot). It is **deleted, not split**. The live reachability-inheritance
+hole is the Gate-0 ARTIFACT `.audit-tools/provider-confirmation.json` — audit's auditor writes discovered
+reach into `ConfirmedPoolEntry` (`capability_tier` / `excluded` / `self_spawn_blocked`), remediate's
+possibly-different auditor reads it verbatim at dispatch (`src/audit/cli/dispatch.ts:575`,
+`src/remediate/steps/dispatch/marshal.ts:410`, both via `readConfirmedCostPositions`), and it sits outside
+`validateRepoSessionIntent`'s boundary entirely. **Owner call (2026-07-16): that artifact re-home folds
+INTO G3**, not G5 — same cut, and splitting it would leave a half-done boundary across two laps. G5 keeps
+the auditor-id stamp + the reactive lies-reachably quarantine.
+
+G3's six pieces: (1) delete the inert slot + its ref stub + 2 tests + the stale comment; (2) add
+`dispatch_policy` to `RepoSessionIntent` with a **positive** shape validator (note the asymmetry — every
+other dispatch key is *rejected* by `DISPATCH_INVENTORY_FIELDS`; this one is *kept*); (3) strip reach out
+of `provider-confirmation.json` so it carries decision only; (4) extract the `provider:model` key helper
+that already exists three times over — `sourceId()` (`auditorSources.ts:89`) and `dispatchSourceKey()`
+(`providerConfirmation.ts:290`, inlined again at `:523`) — and reconcile their **drifted fallback tail
+(`"?"` vs `"default"`, a live id-mismatch bug)**; (5) apply policy as a set-difference at
+`resolveSessionConfig.ts:118`, surfacing the `dropped` that `resolveAmbientSources` returns and
+`resolveSessionConfig` currently discards — mind the null-descriptor short-circuit at `:92` (policy must
+NOT resurrect a pool there); (6) lift `resolveAutonomousMode` out of `src/remediate/steps/nextStep.ts:202`
+into the shared core (audit reads `autonomous_mode` nowhere today, and its env var is `REMEDIATE_*`-named
+→ needs generalizing) and add the reconciliation gate mirroring the `provider_confirmation` step's own
+shape (`src/audit/cli/nextStepCommand.ts:875`), friction via `captureFrictionEvent`.
+
+**G3 is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`, `costRank.ts`)
+→ green + independent review + attestation required.
 
 Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
 → "Greenfield endpoint (owner-approved 2026-07-16)" + Decomposition (memory
