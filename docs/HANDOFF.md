@@ -66,13 +66,29 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — the unified-dispatch-worker-model rework (IN PROGRESS)
+## ▶ IMMEDIATE NEXT — G2.5: the deterministic source-emitter (Path A feeder, split out of G2)
+
+**G2 type-split SHIPPED (`59116fe2`, no release — inert like G1).** `RepoSessionIntent` +
+`resolveSessionConfig(intent, descriptor)` + `validateRepoSessionIntent` make dispatch inventory
+unrepresentable on disk; descriptor reslice (host/IDE launch blocks on `self`, dispatchable backends on
+`sources[]`); `persistHostProvider` retired; remediate `resolve(intent, null)` seam. Independent loop-core
+review (no blocker; 5 findings addressed + attested). Full suite + deadcode gate green.
+
+**▶ IMMEDIATE NEXT = G2.5 — the deterministic source-emitter.** Owner split it OUT of G2 (2026-07-16):
+the type-split already satisfies atomic-replace (the descriptor CAN carry `sources[]`) and is inert, so
+per the spec's own "seam first, feeder follows" the emitter is its own commit. Build: a component
+audit-tools ships (a subcommand the slash loader shells out to BEFORE `next-step`) that reads the
+per-auditor home-dir identity-keyed `catalog-<auditor-id>.json` declaration, performs the `declared ∩
+ambient-verifiable` intersection (key env present / launcher on PATH / cred readable), and prints the
+`--auditor sources[]` JSON — deterministic, NEVER host-LLM prose (the banned host-discretion anti-pattern).
+Spec: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) → Decomposition G2.5.
+**⚠ Deliberate intermediate (NOT a bug):** until G2.5 lands, operator multi-pool sources come only from a
+hand-authored `--auditor` — a repo `session-config.json` can no longer carry `sources`/`provider`/backend
+blocks (rejected at load). Self-only always works. This is the documented inert window, not a regression.
 
 Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
 → "Greenfield endpoint (owner-approved 2026-07-16)" + Decomposition (memory
-[[unified-dispatch-worker-model]]). A 3-person independent design panel (greenfield mandate) converged
-unanimously; **owner approved the greenfield endpoint** — full synthesis in
-[`docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md`](../docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md).
+[[unified-dispatch-worker-model]]).
 
 **The two "open decisions" are RESOLVED (they were one cut — INTENT vs CAPABILITY):**
 - **confirmed_provider_pool → SPLIT:** persist the operator's route DECISION (exclusions + cost order +
@@ -103,23 +119,21 @@ just don't dogfding G1 via a stale global bin without reinstalling.
   (two callers) and is retained. `getAuditorDescriptor` re-validates each `self` field to the retired
   parsers' exact strictness (roster via shared `parseHostModelRoster` — a review-caught drop). Plan doc:
   [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](../docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md).
-- **G2 (IMMEDIATE NEXT — PLANNED + ADVERSARIALLY REVIEWED + owner-approved; ready to BUILD).** Plan:
+- **G2 — ✅ SHIPPED (type-split half, `59116fe2`; NO release — inert).** `RepoSessionIntent` +
+  `resolveSessionConfig(intent, descriptor)` + `validateRepoSessionIntent` (rejects dispatch keys at BOTH
+  read boundaries) + descriptor reslice + `persistHostProvider` retired + remediate `resolve(intent, null)`
+  seam. Scope beyond the plan: the 3 host/IDE launch blocks (`claude_code`/`vscode_task`/`antigravity`) are
+  NOT `DispatchableSource`s → they ride `descriptor.self` (dispatchable backends ride `sources[]`);
+  `parallel_workers` moved onto `self`; descriptor sources/launch-blocks validated at the
+  `getAuditorDescriptor` parse boundary (C1 quota + injection — a review-caught hole). Independent loop-core
+  review: no blocker, 5 findings addressed + attested. Plan doc:
   [`docs/reviews/g2-repo-session-intent-plan-2026-07-16.md`](reviews/g2-repo-session-intent-plan-2026-07-16.md).
-  Split the persisted type (`RepoSessionIntent`, no dispatch INVENTORY fields; `resolve(intent, descriptor)`
-  produces the in-memory EFFECTIVE `SessionConfig`) + fold `provider` into `descriptor.self` + retire
-  `persistHostProvider` (`semanticReviewStep` resolves from the descriptor, no disk re-read). **Owner steer:
-  ideal code / no backcompat.** Two decisions locked: **(a) Path A** — bundle the deterministic
-  source-emitter INTO G2 as ONE atomic commit (so operator multi-pool never goes dark); **(b)** the emitter
-  reads the spec-mandated per-auditor home-dir **identity-keyed** declaration → `declared ∩
-  ambient-verifiable` → `--auditor sources[]` (NOT an env-file; NOT host-LLM prose — that's the banned
-  host-discretion anti-pattern). **Review found 2 blockers now folded into the plan:** the emitter must be a
-  DETERMINISTIC component the slash loader shells out to (Q2); and "unrepresentable" requires the SHARED
-  validator (`src/shared/validation/sessionConfig.ts:494-604`) + remediate's `readValidatedSessionConfig`
-  read-path to reject/strip dispatch keys too — not just the audit-store TS types (Q4). Honest scope: G2 is a
-  **half-type** milestone (`confirmed_provider_pool`/`quota`/`block_quota`/`host_can_dispatch` remain →
-  G3/G4/G5). Recon in plan: ~110 read sites / ~45 fns, most read the EFFECTIVE config (small migration
-  surface — 4 non-overlaying `loadSessionConfig` sites → `resolve()`). Inert like G1 (no release) until host
-  loaders emit inventory; update this launch recipe once the emitter lands.
+  **The Path A source-emitter was SPLIT OUT → G2.5** (owner, 2026-07-16 — see IMMEDIATE NEXT above).
+- **G2.5 (IMMEDIATE NEXT) — the deterministic source-emitter (Path A feeder).** A subcommand the slash
+  loader shells out to before `next-step`: reads the per-auditor home-dir identity-keyed
+  `catalog-<auditor-id>.json` → `declared ∩ ambient-verifiable` → prints `--auditor sources[]`. Deterministic,
+  never host-LLM prose. Until it lands, operator multi-pool sources come only from a hand-authored `--auditor`
+  (the documented inert window — self-only always works). Then update the maximal-coverage launch recipe.
 - **G3** split confirmed_provider_pool (policy on intent + re-resolved reach + autonomous-keyed reconciliation
   + pin the exclusion-key grammar, default `provider:model`).
 - **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
