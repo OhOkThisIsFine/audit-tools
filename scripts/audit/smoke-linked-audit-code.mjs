@@ -136,8 +136,17 @@ async function advanceToDispatchReady(runNextStep, root) {
     ) {
       return step;
     }
+    // Diagnosability: a gate that catches a broken CLI must say WHY —
+    // surface the step's own explanation, not just its kind.
+    const why = [
+      step.progress?.summary && `reason: ${step.progress.summary}`,
+      step.stop_condition && `stop_condition: ${step.stop_condition}`,
+    ]
+      .filter(Boolean)
+      .join("\n  ");
     throw new Error(
-      `advanceToDispatchReady: unexpected step kind '${step.step_kind}' (iteration ${i})`,
+      `advanceToDispatchReady: unexpected step kind '${step.step_kind}' (iteration ${i})` +
+        (why ? `\n  ${why}` : `\n  step: ${JSON.stringify(step)}`),
     );
   }
   throw new Error("next-step did not reach a dispatch-ready step");

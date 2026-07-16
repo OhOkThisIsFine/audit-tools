@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -662,13 +662,9 @@ export async function installBootstrap(argv, options = {}) {
   );
   results.push(await writeGeneratedJson(installManifestPath, installManifest));
 
-  const sessionConfigPath = join(root, '.audit-tools', 'remediation', 'session-config.json');
-  if (!(await fileExists(sessionConfigPath))) {
-    const defaultConfig = { provider: 'worker-command' };
-    await mkdir(dirname(sessionConfigPath), { recursive: true });
-    await writeFile(sessionConfigPath, JSON.stringify(defaultConfig, null, 2) + '\n', 'utf8');
-    results.push({ path: sessionConfigPath, mode: 'created' });
-  }
+  // No session-config seeding: `provider` is per-auditor dispatch inventory and
+  // cannot be persisted on session-config.json (G2); the config is created
+  // empty on demand.
 
   const payload = {
     host,

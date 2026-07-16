@@ -120,21 +120,16 @@ installed GLOBAL bins are pre-G1, so a stale host dogfooding this batch has its 
 ignored** (unknown flags → defaults). Don't dogfood the G-series via a stale global bin without
 reinstalling.
 
-### ⛔ NOT SHIPPABLE — `main` CI is RED on `smoke:packaged-audit-code`
+### Release gate
 
-`next-step -> blocked` at iteration 0, failing `verify:checks` → `ci` and `verify:release`. **Pre-existing**
-(proved: rebuild `dist/` on a stashed clean `26076e34` → identical failure), so it is not the assembly
-lift's doing. **This is the first item to fix, ahead of commit 3** — nothing releases until it is green.
-Detail + repro + its diagnosability sub-bug: [`backlog.md`](backlog.md).
-
-`ci` and `audit-code-test-suite` had ALSO been red for ~a dozen laps on two other causes (both fixed
+`ci` and `audit-code-test-suite` had been red for ~a dozen laps on two other causes (both fixed
 2026-07-16; `audit-code-test-suite` is green again). **Why they hid is the durable part**: the pre-commit
 hook gates only `npm run check`, and laps verify with build + check + vitest — none of which include
 `verify:checks`. Nothing had released since the G-series began, so the gate never ran.
 **End every lap with `gh run list --branch main --limit 3`**, and run `npm run verify:release` before any
 "this is shippable" claim ([[lap-green-must-match-ci-evidence]]).
 
-When it is green: releasing is a breaking transport change (likely a minor bump, not patch) and needs the
+Releasing the G-series is a breaking transport change (likely a minor bump, not patch) and needs the
 global-bin reinstall per the npm-12 notes in Durable traps.
 
 **G3+ is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`,

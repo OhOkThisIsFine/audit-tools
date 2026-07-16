@@ -307,6 +307,9 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       runId: null,
       allowedCommands: [],
       stopCondition: "Report the configuration blocker and stop.",
+      // The blocked step JSON must say WHY on its own — a headless consumer
+      // (release smoke, CI) sees only this contract, not the prompt file.
+      progress: { summary: reason },
       repoRoot: root,
       artifactPaths: {
         operator_handoff: join(artifactsDir, "operator-handoff.json"),
@@ -442,6 +445,8 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       runId: null,
       allowedCommands: [],
       stopCondition: "Report the blocker and stop.",
+      // Same diagnosability contract as the config-blocked step above.
+      progress: { summary: result.reason },
       repoRoot: root,
       artifactPaths: {
         operator_handoff: join(artifactsDir, "operator-handoff.json"),
