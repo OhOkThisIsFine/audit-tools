@@ -561,6 +561,12 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 Standing gotchas worth keeping for any agent (strong or weak):
 
+- **`llm read` / `llm write` are NIM-backed — `--model` must name a NIM catalog id, NOT `haiku`/a Claude id.**
+  `Get-Content x | llm read --model haiku` 404s (`404 page not found`); the backend is an OpenAI-compatible
+  NIM endpoint (`llm models` → default `nvidia/nemotron-3-ultra-550b-a55b`). Omit `--model` (auto-select
+  works fine) or pass a listed NIM id. Offloading to *Claude Haiku* is a separate lane (Agent tool
+  `model: haiku`), unrelated to the `llm` worker CLI. (Hit 2026-07-15.)
+
 - **After a process restart, `git diff` your instruction files before committing.** A background
   doc-review/hook can silently re-assert a pre-decision version of an instruction doc (e.g. CLAUDE.md,
   `project-philosophy.md`), and `git reflog` won't show it (it's a direct file edit, not a git op). Caught

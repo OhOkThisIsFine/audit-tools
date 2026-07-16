@@ -103,10 +103,23 @@ just don't dogfding G1 via a stale global bin without reinstalling.
   (two callers) and is retained. `getAuditorDescriptor` re-validates each `self` field to the retired
   parsers' exact strictness (roster via shared `parseHostModelRoster` — a review-caught drop). Plan doc:
   [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](../docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md).
-- **G2 (IMMEDIATE NEXT)** — split the persisted type (`RepoSessionIntent`, zero dispatch fields →
-  contamination unrepresentable; `resolve(intent, descriptor)`) + fold `provider` into `self` + reslice
-  inventory → `sources`. Also retire the `persistHostProvider` seam (exists only because
-  `semanticReviewStep` re-reads disk, which G2 changes).
+- **G2 (IMMEDIATE NEXT — PLANNED + ADVERSARIALLY REVIEWED + owner-approved; ready to BUILD).** Plan:
+  [`docs/reviews/g2-repo-session-intent-plan-2026-07-16.md`](reviews/g2-repo-session-intent-plan-2026-07-16.md).
+  Split the persisted type (`RepoSessionIntent`, no dispatch INVENTORY fields; `resolve(intent, descriptor)`
+  produces the in-memory EFFECTIVE `SessionConfig`) + fold `provider` into `descriptor.self` + retire
+  `persistHostProvider` (`semanticReviewStep` resolves from the descriptor, no disk re-read). **Owner steer:
+  ideal code / no backcompat.** Two decisions locked: **(a) Path A** — bundle the deterministic
+  source-emitter INTO G2 as ONE atomic commit (so operator multi-pool never goes dark); **(b)** the emitter
+  reads the spec-mandated per-auditor home-dir **identity-keyed** declaration → `declared ∩
+  ambient-verifiable` → `--auditor sources[]` (NOT an env-file; NOT host-LLM prose — that's the banned
+  host-discretion anti-pattern). **Review found 2 blockers now folded into the plan:** the emitter must be a
+  DETERMINISTIC component the slash loader shells out to (Q2); and "unrepresentable" requires the SHARED
+  validator (`src/shared/validation/sessionConfig.ts:494-604`) + remediate's `readValidatedSessionConfig`
+  read-path to reject/strip dispatch keys too — not just the audit-store TS types (Q4). Honest scope: G2 is a
+  **half-type** milestone (`confirmed_provider_pool`/`quota`/`block_quota`/`host_can_dispatch` remain →
+  G3/G4/G5). Recon in plan: ~110 read sites / ~45 fns, most read the EFFECTIVE config (small migration
+  surface — 4 non-overlaying `loadSessionConfig` sites → `resolve()`). Inert like G1 (no release) until host
+  loaders emit inventory; update this launch recipe once the emitter lands.
 - **G3** split confirmed_provider_pool (policy on intent + re-resolved reach + autonomous-keyed reconciliation
   + pin the exclusion-key grammar, default `provider:model`).
 - **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
