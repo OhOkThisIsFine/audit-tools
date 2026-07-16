@@ -66,11 +66,28 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — the bounded forward remainder (quota cluster shipped)
+## ▶ IMMEDIATE NEXT — the unified-dispatch-worker-model rework (IN PROGRESS)
 
-The 2026-07-11 maximal-coverage run and the 2026-07-12 self-audit re-run both surfaced dispatch/quota
-bugs; fixes shipped in the current release (see Live state). What remains is a short, bounded list — work top-to-bottom,
-**full-suite-verify before each loop-core commit**:
+Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
+(memory [[unified-dispatch-worker-model]]). Triggered by the 2026-07-15 repair-proxy dogfood
+(`docs/backlog.md` → "Live dogfood: BOTH dispatch paths failed"). Owner-agreed to build the full
+decomposition. **Shipped so far:** commit 1 (`f5bca305`, retire the repair-proxy source-pool
+integration, −606 LOC, reviewed+attested) + commit 2a-i (`c167fbee`, the additive `--host-inventory`
+handshake channel). **Resume at 2a-ii** — the decomposition + the two open decisions live in the spec:
+
+- **2a-ii (NEXT, loop-core):** switch the ~50 consumers (`providerFactory.ts`/`apiPool.ts`/provider-
+  confirmation) to read inventory from the `HostDispatchDescriptor.inventory` channel, repo config as
+  deprecated fallback; handle the host-only window (empty inventory → host + auto-detected CLIs). Needs
+  independent review + attestation.
+- **2a-iii:** add the remediate descriptor round-trip (absent today — `remediate/steps/prompts.ts`
+  `loaderCommand` doesn't re-emit `--host-*`); loaders assemble+pass `--host-inventory`; validator
+  rejects/warns repo inventory fields; DELETE the config inventory fields; resolve the 2 decisions
+  (confirmed_provider_pool re-validated-not-inherited; quota/block_quota split-field removal).
+- **Commit 3** repair-proxy as a kind-1 launch-transport (auto-detect + degrade to direct). **Commit 4**
+  fix C (host cold-start wall — **needs a clean minimal repro first**, the paused run was inconclusive).
+  **Commit 5** decide kind-3's fate.
+
+## Older track — bounded quota-cluster remainder (secondary, not blocking the rework)
 
 1. **Low residuals:** doc-review auto-apply re-asserting a resolved decision after a process restart; the
    two A2b residuals; untracked-exclusion residuals (a–e). All in `docs/backlog.md` → Open bugs.
