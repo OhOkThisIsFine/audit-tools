@@ -316,9 +316,39 @@ must mean something to an auditor with a different reachable set) — default `p
     `model_id ?? provider-name` — `representativeModelId` knows a model for only 2 of 6 providers, so a
     bare-`model_id` key is blind to a CLI backend appearing on PATH.
 
+  - **The gate's state is MUTABLE per-invocation, threaded by reference — not a value.** REACH-NOW is
+    invocation-stable and expensive (compute once); CONFIRMED changes the instant the confirmation
+    executor promotes, and that executor is the ONLY thing that changes it. A frozen delta therefore stays
+    non-empty after the backends are folded in, and since `provider_confirmation` is `PRIORITY[0]` the
+    obligation re-selects forever (autonomous: re-promote until `advance` throws; attended: re-prompt a
+    delta that is now a lie). **The promotion clears the gate.** Every layer that derives or dispatches
+    must read the CURRENT value — including `advanceAudit`'s own nested drain, which the CLI engine's
+    closure cannot reach: `advanceAudit` re-decides internally and dispatches what IT selects, so a
+    gate-blind decide there sends the run to a different executor and the gate silently never fires.
+  - **The fail-closed write is keyed on `autonomous` INSIDE the executor**, not by its caller's branch —
+    the executor is exported and reachable from `advanceAudit` directly, and a fail-closed exclusion on an
+    attended run silently rules out a backend the operator is being asked about (enforce in tooling).
+  - **Unlink only on real promotion** (`root` present ⇒ the shared artifact — the only one dispatch reads —
+    was actually written). Unlinking a submission that was never promoted destroys the operator's decision
+    unrecoverably.
+
   The reachability inheritance this closes is the same hole G2 closed on `session-config.json`; G5 then
   owns the auditor-id stamp + the reactive lies-reachably quarantine on top of it.
   Plan of record: [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](../docs/reviews/g3-dispatch-policy-plan-2026-07-16.md).
+
+  **A′ LANDED.** Policy ungated from reach (bug 2 fixed: cost order + λ survive a reach shift); the
+  `autonomous_mode`-keyed gate built (delta = `gatherDispatchableSources ∪ discoverProviders` minus the
+  decision, keyed `model_id ?? provider-name`); consume-and-invalidate; `resolveAutonomousMode` lifted to
+  shared (env var now `AUDIT_TOOLS_AUTONOMOUS` — attendedness is a property of the RUN, so it takes no
+  per-tool env name); the roster-staleness check + `roster` deleted. An independent loop-core review
+  returned BLOCKER on the first cut (a gate-blind decide inside `advanceAudit`, and a frozen closure that
+  could not clear mid-drain) — both are why the two bullets above are in this spec.
+  **⚠ Deliberate A′→A″ intermediate state, not a bug:** `policy.exclude` is still `ResolvedProviderName[]`,
+  so an autonomous exclusion of ONE new model drops EVERY source of that provider. Blast radius ≈ 0
+  (audit's `autonomous_mode` is brand-new in A′). A″ closes it.
+  **Autonomous auto-confirm is scoped to the DELTA case only:** a first-time confirmation (no artifact at
+  all) still pauses for the operator even under `autonomous_mode` — auto-confirming a pool nobody has ever
+  seen is a separate decision from reconciling a delta against one they approved.
 - **G4 — split quota/block_quota** (capability → descriptor; policy → intent; per-source quota travels
   with the source; delete the redundant repo capability fields). May fold into G2.
 - **G5 — never-inherit enforcement:** auditor-id stamp on transient run-state + `declared ∩ ambient-

@@ -89,9 +89,10 @@ when there is no operator.
   owns the canonical envelope. Its presence is the "operator has acted" signal that flips the
   gate from *emit the step* to *consume the input*: the deterministic executor then promotes
   the submission into BOTH canonical artifacts — the per-tool `provider_confirmation.json`
-  seam and the shared `provider-confirmation.json` — with the tool-owned roster snapshot +
-  cost annotation. The operator supplies only ordering intent + a model roster; the tool never
-  asks it to hand-author prices, capability flags, or the roster snapshot. The confirmed order
+  seam and the shared `provider-confirmation.json` — with the tool-owned cost annotation, and
+  then DELETES the submission (consume-and-invalidate: a spent input must not auto-satisfy a
+  later reconciliation it never answered). The operator supplies only ordering intent + a model
+  roster; the tool never asks it to hand-author prices or capability flags. The confirmed order
   is persisted on `ConfirmedPoolEntry.cost_order` (provider pools) and `host_model_cost_order`
   (host tiers), both read back at dispatch as rung 1 via a single model-keyed positions map.
   Remediate reads the same persisted confirmation (it has no standalone confirmation step; it

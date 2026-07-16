@@ -2,37 +2,45 @@
  * DC-2 — shared, session-scoped provider confirmation (Gate-0).
  *
  * The design wants ONE provider confirmation spanning an audit→remediate run:
- * the first tool to run writes the confirmed provider pool to a SHARED artifact
- * at `<root>/.audit-tools/provider-confirmation.json` (NOT the per-tool audit
- * artifacts dir); the second tool reads and honors it unless the roster has
- * since changed. "Session" = the shared `.audit-tools` dir for that repo+run, so
- * no new identity scheme is needed.
+ * the first tool to run writes the operator's confirmed route DECISION to a
+ * SHARED artifact at `<root>/.audit-tools/provider-confirmation.json` (NOT the
+ * per-tool audit artifacts dir); the second tool reads and honors it. "Session" =
+ * the shared `.audit-tools` dir for that repo+run, so no new identity scheme is
+ * needed.
  *
- * Two invariants are in tension and are reconciled here by the CE-012 third
- * state:
- *   - INV-DC1-6 (never-block): remediate run standalone with no prior audit must
- *     resolve its provider independently, exactly as today — absence of the
- *     artifact is NOT an error.
- *   - INV-DC2-3 (roster-stale-re-confirm): a confirmation whose discovered roster
- *     no longer matches the current one must NOT be silently honored (it could
- *     pin a provider that has since disappeared) — it must re-confirm.
- * A single `null` return cannot carry both meanings (CE-012). So the accessor
- * returns a THREE-valued result: `null` for absent/malformed (never-block),
- * `{ status: 'confirmed' }` for a fresh honor, and the DISTINCT
- * `{ status: 'reconfirm' }` for roster-stale — so honoring INV-DC2-3 no longer
- * contradicts INV-DC1-6.
+ * **What this artifact carries is POLICY, not reach (G3).** The operator's
+ * decision — exclusions, cost order, λ — is a set of *rules*, valid for any
+ * auditor. What is *reachable* is per-auditor capability and is re-resolved from
+ * live env/PATH at the moment of use, never inherited from whoever wrote this
+ * file. So every read here is reach-free: it returns the persisted decision and
+ * nothing else.
+ *
+ * INV-DC1-6 (never-block) is the only invariant left in tension, and it now
+ * resolves to a plain two-valued read: a remediate run standalone with no prior
+ * audit resolves its provider independently — absence or corruption of the
+ * artifact is NOT an error, it is `null`.
+ *
+ * The former roster-staleness check (and its CE-012 three-valued `reconfirm`
+ * state) is GONE. It compared the *writing* auditor's roster against the reader's
+ * — meaningless cross-auditor by construction — and answered a real event (a
+ * backend the operator never confirmed became reachable) by silently discarding
+ * the operator's cost order and λ, while reaching no obligation at all. The
+ * `autonomous_mode`-keyed reconciliation gate
+ * ({@link computeNewlyReachableBackends}) replaces it: it compares the operator's
+ * DECISION against *this* auditor's freshly-resolved reach, which is well-defined
+ * across auditors, and it actually fires.
  *
  * CE-003 (lockless read races the writer rename): writes go through the shared
  * atomic writer (temp + atomic rename) under `withFileLock`, so a lockless
  * reader always observes either the complete old file or the complete new file —
  * never a torn intermediate.
  *
- * PB-1 (opencode opt-in): the roster is derived from `discoverProviders`, which
- * already withholds a bare-PATH opencode unless it is explicitly configured, so
- * the shared confirmation inherits that opt-in for free.
+ * PB-1 (opencode opt-in): the confirmed pool is derived from `discoverProviders`,
+ * which already withholds a bare-PATH opencode unless it is explicitly
+ * configured, so the shared confirmation inherits that opt-in for free.
  */
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { DispatchableSource, ResolvedProviderName, SessionConfig } from "../types/sessionConfig.js";
 import { PROVIDER_NAMES } from "../types/sessionConfig.js";
@@ -44,6 +52,7 @@ import type { RunLogger } from "../observability/runLog.js";
 import {
   discoverProviders,
   annotateConfirmedPool,
+  representativeModelId,
   type CapabilityTier,
 } from "./providerConfirmation.js";
 import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
@@ -62,8 +71,8 @@ import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "../types/providerConfirmati
 /**
  * Schema version for the shared confirmation artifact. Bumped independently of
  * the per-tool seam contract (PROVIDER_CONFIRMATION_RESULT_VERSION) — this is
- * the cross-tool session artifact, a distinct shape that also carries the
- * roster snapshot used for staleness.
+ * the cross-tool session artifact carrying the operator's route DECISION
+ * (exclusions, cost order, λ), a distinct shape from the seam's pool snapshot.
  */
 export const SHARED_PROVIDER_CONFIRMATION_VERSION = "1.0.0" as const;
 
@@ -91,14 +100,6 @@ export function sharedProviderConfirmationPath(root: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The shared session-level provider confirmation. Single-sourced so both
- * orchestrators read/write exactly the same shape.
- *
- * `roster` is the sorted snapshot of the provider names discovered at write
- * time. Staleness is "the current discovered roster differs from this snapshot"
- * — a provider appearing or disappearing forces a re-confirm.
- */
-/**
  * The operator's explicit route DECISION — reach-free by construction.
  *
  * This is the POLICY half of the Gate-0 confirmation: it names *rules* (which
@@ -110,11 +111,11 @@ export function sharedProviderConfirmationPath(root: string): string {
  * decide another's routing. Self-spawn-blocked is therefore recomputed in the
  * READING process (see {@link resolveExcludedProviders}).
  *
- * Because policy is reach-independent, it stays valid when the discovered roster
- * changes — unlike the cost positions, which are reach-derived and drop out on a
- * `reconfirm`. {@link readConfirmedDispatchPolicy} deliberately does NOT gate on
- * the roster-freshness status for exactly this reason: an exclusion must fail
- * CLOSED (keep excluding) when reach shifts, never fail open.
+ * Because policy is reach-independent, it stays valid when the discovered reach
+ * changes. No read of this artifact gates on a reach check, for exactly that
+ * reason: an exclusion must fail CLOSED (keep excluding) when reach shifts, never
+ * fail open — and neither may the cost order or λ be discarded by a reach event
+ * they do not depend on (G3 step 1).
  */
 export interface ConfirmedDispatchPolicy {
   /** Provider names the operator excluded from the dispatchable pool. */
@@ -163,65 +164,11 @@ export interface SharedProviderConfirmation {
    * (or a headless run) behaves exactly as before.
    */
   dispatch_bias?: number;
-  /**
-   * Sorted snapshot of the provider NAMES discovered when this was written.
-   * Compared against the current discovered roster to detect staleness.
-   */
-  roster: ResolvedProviderName[];
 }
 
-/**
- * Outcome of reading the shared confirmation. THREE-valued (CE-012):
- *   - `null`                       absent or malformed → never-block (INV-DC1-6)
- *   - `{ status: 'confirmed' }`    present + roster matches → honor it
- *   - `{ status: 'reconfirm' }`    present + roster changed → re-confirm (INV-DC2-3)
- */
-export type SharedProviderConfirmationRead =
-  | { status: "confirmed"; confirmation: SharedProviderConfirmation }
-  | {
-      status: "reconfirm";
-      confirmation: SharedProviderConfirmation;
-      reason: string;
-    }
-  | null;
-
-// ---------------------------------------------------------------------------
-// Roster derivation
-// ---------------------------------------------------------------------------
-
-/**
- * The current discovered provider roster: the sorted set of provider names
- * `discoverProviders` surfaces for this session config + environment. PB-1's
- * opencode opt-in is inherited from `discoverProviders` (a bare-PATH opencode is
- * not surfaced unless explicitly configured), so it never spuriously perturbs
- * the roster.
- */
-export function currentProviderRoster(
-  sessionConfig: SessionConfig,
-  env: NodeJS.ProcessEnv = process.env,
-  detectCommand?: (command: string) => boolean,
-): ResolvedProviderName[] {
-  const names = discoverProviders(sessionConfig, env, detectCommand).map(
-    (p) => p.name,
-  );
-  return sortRoster(names);
-}
-
-function sortRoster(names: ResolvedProviderName[]): ResolvedProviderName[] {
-  // Deduplicate + sort so the snapshot is order-insensitive and comparison is a
-  // plain stringified equality.
+function sortNames(names: readonly ResolvedProviderName[]): ResolvedProviderName[] {
+  // Deduplicate + sort so a persisted list is order-insensitive and stable.
   return [...new Set(names)].sort();
-}
-
-function rostersEqual(
-  a: readonly ResolvedProviderName[],
-  b: readonly ResolvedProviderName[],
-): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +268,6 @@ export function buildSharedProviderConfirmation(
       ? { dispatch_bias: clampDispatchBias(input?.dispatch_bias) }
       : {}),
     ...(buildConfirmedDispatchPolicy(exclude, include) ?? {}),
-    roster: sortRoster(discovered.map((p) => p.name)),
   };
 }
 
@@ -337,8 +283,8 @@ function buildConfirmedDispatchPolicy(
   if (exclude.length === 0 && include.length === 0) return undefined;
   return {
     policy: {
-      ...(exclude.length > 0 ? { exclude: sortRoster([...exclude]) } : {}),
-      ...(include.length > 0 ? { include: sortRoster([...include]) } : {}),
+      ...(exclude.length > 0 ? { exclude: sortNames(exclude) } : {}),
+      ...(include.length > 0 ? { include: sortNames(include) } : {}),
     },
   };
 }
@@ -383,6 +329,128 @@ const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.
   (name): name is ResolvedProviderName => name !== "auto",
 );
 
+// ---------------------------------------------------------------------------
+// The reconciliation gate (G3): operator DECISION vs THIS auditor's reach
+// ---------------------------------------------------------------------------
+
+/**
+ * The gate's comparison key for one backend: **the model where it is knowable,
+ * else the coarse provider name.**
+ *
+ * This is the operator-facing exclusion grammar's own provision (`provider:model`,
+ * with `provider` as the coarser pattern — spec/unified-dispatch-worker-model.md).
+ * Model granularity is the POINT, not a refinement: the operator confirms *model*
+ * choices, so a second model under an already-confirmed `openai-compatible` is a
+ * new choice even though it introduces no new provider.
+ *
+ * But a bare-`model_id` key would be worse than useless: `representativeModelId`
+ * knows a model only for `openai-compatible` and `codex` — for claude-code / agy /
+ * opencode / worker-command a CLI backend's model arrives only at the dispatch
+ * handshake. Such a backend would contribute NO key, so installing `agy` on PATH
+ * would leave the delta empty and the gate would silently dispatch it — re-opening
+ * the exact PATH-appearance case the gate exists to catch, blind rather than loud.
+ *
+ * ⚠ This is a THIRD keyspace, deliberately distinct from the quota-ledger pool
+ * identity (`provider[#account]/model`, `buildProviderModelKey`) — an account is
+ * irrelevant to a rule about a backend. Do not unify them.
+ */
+function backendGateKey(
+  modelId: string | undefined,
+  providerName: string,
+): string {
+  return modelId ?? providerName;
+}
+
+/**
+ * The keys of the operator's persisted DECISION — the CONFIRMED half of the gate.
+ *
+ * All three pools contribute, and each is load-bearing: `annotateConfirmedPool`
+ * folds a source away when its model is already claimed by a provider entry, so a
+ * source can be represented ONLY by `provider_pool[].model_id`; and a host tier
+ * appears only in `host_model_cost_order`. Reading fewer than all three would
+ * manufacture a phantom delta for an already-confirmed backend.
+ */
+export function confirmedBackendKeys(
+  confirmation: SharedProviderConfirmation,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const entry of confirmation.provider_pool) {
+    keys.add(backendGateKey(entry.model_id, entry.name));
+  }
+  for (const entry of confirmation.source_pool_cost_order ?? []) {
+    keys.add(backendGateKey(entry.model_id, entry.provider));
+  }
+  for (const entry of confirmation.host_model_cost_order ?? []) {
+    keys.add(entry.model_id);
+  }
+  return keys;
+}
+
+/** One backend in the gate's delta: reachable now, absent from the decision. */
+export interface NewlyReachableBackend {
+  /** The gate key — `model_id ?? provider name`. Stable, operator-facing. */
+  key: string;
+  /**
+   * The backend's provider name. Carried alongside `key` because the two are
+   * consumed at DIFFERENT granularities: the gate compares `key` (model-level — the
+   * point of the gate), while A′'s `policy.exclude` is still
+   * `ResolvedProviderName[]` and can only express a provider-level exclusion.
+   * A″ widens `exclude` to the `provider:model` grammar, after which the autonomous
+   * write keys off `key` and this field collapses into it.
+   */
+  provider: ResolvedProviderName;
+}
+
+/**
+ * DELTA = **REACH-NOW \ CONFIRMED**: the backends this auditor can reach *right
+ * now* that the operator's persisted decision never mentions. Sorted by key, so the
+ * result is stable for prompt rendering + comparison.
+ *
+ * This is a **set difference — a FILTER over fresh reach, never additive.** The
+ * opposite direction (CONFIRMED \ REACH-NOW: a backend the operator confirmed that
+ * this auditor cannot reach) is the harmless *subset* case and is deliberately
+ * silent — it is also why the synthetic `worker-command` entry and
+ * `host_model_cost_order` need no special-casing here.
+ *
+ * @param confirmation - The persisted decision (CONFIRMED).
+ * @param sessionConfig - The EFFECTIVE config, so `representativeModelId` derives
+ *   keys identically to the write side.
+ * @param sources - REACH-NOW's source half. MUST come from the
+ *   `gatherDispatchableSources` chokepoint — the single async source-gather point
+ *   both `buildSourcePools` and the Gate-0 surface consume, so what the operator
+ *   confirms is exactly what routes. Re-deriving it from `resolveAmbientSources`
+ *   would reintroduce the display/dispatch drift that invariant forbids, and is
+ *   structurally blind to descriptor-supplied sources, the demoted primary, and the
+ *   legacy `openai_compatible` fold.
+ * @param env - Process env, for `discoverProviders` (REACH-NOW's provider half).
+ * @param detectCommand - Injectable PATH-detection hook so tests drive discovery
+ *   deterministically instead of shelling out.
+ */
+export function computeNewlyReachableBackends(
+  confirmation: SharedProviderConfirmation,
+  sessionConfig: SessionConfig,
+  sources: readonly DispatchableSource[] = [],
+  env: NodeJS.ProcessEnv = process.env,
+  detectCommand?: (command: string) => boolean,
+): NewlyReachableBackend[] {
+  const confirmed = confirmedBackendKeys(confirmation);
+  const reachNow = new Map<string, ResolvedProviderName>();
+  for (const provider of discoverProviders(sessionConfig, env, detectCommand)) {
+    const key = backendGateKey(
+      representativeModelId(provider.name, sessionConfig),
+      provider.name,
+    );
+    reachNow.set(key, provider.name);
+  }
+  for (const source of sources) {
+    reachNow.set(backendGateKey(source.model, source.provider), source.provider);
+  }
+  return [...reachNow.entries()]
+    .filter(([key]) => !confirmed.has(key))
+    .map(([key, provider]) => ({ key, provider }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
 export function resolveExcludedProviders(
   policy: ConfirmedDispatchPolicy | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
@@ -400,22 +468,16 @@ export function resolveExcludedProviders(
  * Read the operator's confirmed route policy from the shared Gate-0 confirmation.
  *
  * Deliberately reads the artifact DIRECTLY rather than going through
- * {@link readSharedProviderConfirmation}, for two independent reasons — both about
- * not letting a reach concern decide a policy question:
+ * {@link readSharedProviderConfirmation}, so that **a corrupt sibling field cannot
+ * discard the decision**: `parseSharedProviderConfirmation` returns `null` wholesale
+ * on any malformed required field or a `schema_version` mismatch. Routing policy
+ * through it would make an unrelated corruption (or a future version bump) silently
+ * lift the operator's exclusions — failing OPEN on the one field that must fail
+ * closed. Parsing `policy` on its own keeps that blast radius out.
  *
- * 1. **Freshness must not gate policy.** `readSharedProviderConfirmation` degrades a
- *    roster-changed artifact to `reconfirm`, which {@link readConfirmedCostPositions}
- *    treats as "drop everything". That is right for cost positions (they ARE reach-
- *    derived) and wrong for policy: an exclusion is a rule, so a shifted roster must
- *    not silently un-exclude a backend the operator ruled out.
- * 2. **A corrupt sibling field must not discard the decision.**
- *    `parseSharedProviderConfirmation` returns `null` wholesale on any malformed
- *    required field or a `schema_version` mismatch. Routing policy through it would
- *    make an unrelated corruption (or a future version bump) silently lift the
- *    operator's exclusions. Parsing `policy` on its own keeps that blast radius out.
- *
- * It also avoids `currentProviderRoster`'s per-provider `where`/`which` probes, which
- * this function would only compute in order to throw away.
+ * (Before G3 this bypass carried a second rationale — dodging the roster-freshness
+ * gate. That gate is gone: no read of this artifact is reach-gated any more, so the
+ * remaining reason is blast radius alone.)
  *
  * **Honest limit — this is not absolutely fail-closed.** An absent or unparseable
  * artifact yields `null` (no operator policy). That residue is irreducible here: with
@@ -475,12 +537,6 @@ export async function writeSharedProviderConfirmation(
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
-
-function isResolvedProviderNameArray(
-  value: unknown,
-): value is ResolvedProviderName[] {
-  return Array.isArray(value) && value.every((v) => typeof v === "string");
-}
 
 function isConfirmedPoolEntry(value: unknown): value is ConfirmedPoolEntry {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -543,7 +599,6 @@ function parseSharedProviderConfirmation(
   ) {
     return null;
   }
-  if (!isResolvedProviderNameArray(obj.roster)) return null;
   // host_model_cost_order is optional + additive; a malformed value degrades to
   // absent (the field never blocks parsing — INV-DC1-6 never-block spirit).
   const hostModels =
@@ -578,7 +633,6 @@ function parseSharedProviderConfirmation(
       : {}),
     ...(dispatchBias != null ? { dispatch_bias: dispatchBias } : {}),
     ...(policy ? { policy } : {}),
-    roster: obj.roster,
   };
 }
 
@@ -610,19 +664,22 @@ function parseConfirmedDispatchPolicy(
 // ---------------------------------------------------------------------------
 
 /**
- * Read + interpret the shared confirmation for `root`. THREE-valued (CE-012):
+ * Read + parse the shared confirmation for `root`. TWO-valued:
  *
  *   - returns `null` when the artifact is ABSENT or MALFORMED — the caller then
  *     resolves its provider independently, exactly as today (INV-DC1-6
  *     never-block). Absence is the standalone-remediate case and is not an error.
- *   - returns `{ status: 'confirmed', confirmation }` when the artifact is valid
- *     AND the stamped roster still matches the currently-discovered roster — the
- *     caller honors the recorded pool.
- *   - returns `{ status: 'reconfirm', confirmation, reason }` when the artifact
- *     is valid but the roster has CHANGED since it was written (a provider
- *     appeared or disappeared) — a DISTINCT signal so the caller re-confirms
- *     rather than pinning a stale pool (INV-DC2-3). This is the CE-012 third
- *     state that keeps INV-DC2-3 from collapsing into the never-block `null`.
+ *   - returns the parsed confirmation otherwise — the operator's persisted route
+ *     DECISION, honored as-is.
+ *
+ * **Reach-free by construction (G3).** This read does NOT check whether the
+ * reachable backend set still matches whatever the writing auditor saw. It cannot
+ * meaningfully: a *different* auditor legitimately has different reach, so that
+ * comparison was noise cross-auditor — and answering it by discarding the
+ * operator's decision fails OPEN on a policy question. A backend becoming newly
+ * reachable is a real event, handled by the reconciliation gate
+ * ({@link computeNewlyReachableBackends}), which compares the DECISION against
+ * *this* auditor's reach and is keyed on `autonomous_mode`.
  *
  * Never throws: a read/parse failure is treated as absent/malformed → `null`.
  * The read is lockless (no lock needed: the writer's atomic rename guarantees a
@@ -630,38 +687,17 @@ function parseConfirmedDispatchPolicy(
  */
 export async function readSharedProviderConfirmation(
   root: string,
-  sessionConfig: SessionConfig = {},
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<SharedProviderConfirmationRead> {
-  const path = sharedProviderConfirmationPath(root);
-
+): Promise<SharedProviderConfirmation | null> {
   let raw: unknown;
   try {
-    raw = await readJsonFile<unknown>(path);
+    raw = await readJsonFile<unknown>(sharedProviderConfirmationPath(root));
   } catch {
     // Absent (ENOENT) OR unreadable / invalid-JSON both degrade to the
     // never-block path — a missing or corrupt artifact is never an error here.
     return null;
   }
-
-  const confirmation = parseSharedProviderConfirmation(raw);
-  if (confirmation === null) {
-    // Malformed (wrong shape / version drift) → never-block.
-    return null;
-  }
-
-  const current = currentProviderRoster(sessionConfig, env);
-  if (!rostersEqual(confirmation.roster, current)) {
-    return {
-      status: "reconfirm",
-      confirmation,
-      reason:
-        `discovered provider roster changed since confirmation ` +
-        `(was [${confirmation.roster.join(", ")}], now [${current.join(", ")}])`,
-    };
-  }
-
-  return { status: "confirmed", confirmation };
+  // Malformed (wrong shape / version drift) → never-block.
+  return parseSharedProviderConfirmation(raw);
 }
 
 /**
@@ -669,24 +705,27 @@ export async function readSharedProviderConfirmation(
  * spec/cost-first-routing.md) from the shared Gate-0 confirmation as a model-keyed
  * `Map<model_id, cost_order>` for the dispatch build sites. Single-sourced so audit
  * and remediate honor it identically. Best-effort and never throws: an absent
- * `root`, a missing/malformed confirmation, or a roster that has since changed
- * (`reconfirm`) all yield an empty map — dispatch then falls to real price then
- * tier. Only a `confirmed` (roster-fresh) confirmation contributes positions.
+ * `root` or a missing/malformed confirmation yields an empty map — dispatch then
+ * falls to real price then tier.
+ *
+ * **Not gated on reach (G3 step 1).** The cost order is the operator's POLICY —
+ * "the operator may reorder" — so a shift in what happens to be reachable must not
+ * silently discard it. The former roster-freshness gate did exactly that, on the
+ * false premise that these positions are reach-derived; they are not, and it was
+ * the live defect this fixes.
  */
 export async function readConfirmedCostPositions(
   root: string | undefined,
-  sessionConfig: SessionConfig = {},
-  env: NodeJS.ProcessEnv = process.env,
 ): Promise<Map<string, number>> {
   if (!root) return new Map();
-  const read = await readSharedProviderConfirmation(root, sessionConfig, env);
-  if (!read || read.status !== "confirmed") return new Map();
+  const confirmation = await readSharedProviderConfirmation(root);
+  if (!confirmation) return new Map();
   // Provider-pool positions (configured models) PLUS any host-native tiers the
   // operator confirmed at Gate-0 (follow-up c). Both are model-keyed; a host tier
   // and a configured pool thread to dispatch identically. Host entries are already
   // in the single unified cost order, so a plain merge preserves the total order.
-  const positions = resolveConfirmedCostPositions(read.confirmation.provider_pool);
-  for (const entry of read.confirmation.host_model_cost_order ?? []) {
+  const positions = resolveConfirmedCostPositions(confirmation.provider_pool);
+  for (const entry of confirmation.host_model_cost_order ?? []) {
     if (
       entry.model_id &&
       Number.isFinite(entry.cost_order) &&
@@ -699,7 +738,7 @@ export async function readConfirmedCostPositions(
   // position keyed on the source's model id — the SAME model-keyed lookup a repair-proxy
   // dispatch pool resolves against (pool.model = the namespaced `provider/model`). An entry
   // without a model_id is display-only and contributes no dispatch position.
-  for (const entry of read.confirmation.source_pool_cost_order ?? []) {
+  for (const entry of confirmation.source_pool_cost_order ?? []) {
     if (
       entry.model_id &&
       Number.isFinite(entry.cost_order) &&
@@ -715,19 +754,20 @@ export async function readConfirmedCostPositions(
  * Read the operator-confirmed cost↔speed dispatch bias (λ ∈ [0,1]) from the shared
  * Gate-0 confirmation for the dispatch build sites (spec/dispatch-cost-speed-dial.md).
  * Single-sourced so audit and remediate apply the identical operating point.
- * Best-effort and never throws: an absent `root`, a missing/malformed confirmation, a
- * roster that has since changed (`reconfirm`), or an absent field all yield the
- * cost-first default `0`. Only a `confirmed` (roster-fresh) confirmation contributes.
+ * Best-effort and never throws: an absent `root`, a missing/malformed confirmation,
+ * or an absent field all yield the cost-first default `0`.
+ *
+ * **Not gated on reach (G3 step 1)** — λ is the operator's durable operating point
+ * on the cost-vs-throughput frontier, i.e. POLICY. See
+ * {@link readConfirmedCostPositions}.
  */
 export async function readConfirmedDispatchBias(
   root: string | undefined,
-  sessionConfig: SessionConfig = {},
-  env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
   if (!root) return 0;
-  const read = await readSharedProviderConfirmation(root, sessionConfig, env);
-  if (!read || read.status !== "confirmed") return 0;
-  return clampDispatchBias(read.confirmation.dispatch_bias) ?? 0;
+  const confirmation = await readSharedProviderConfirmation(root);
+  if (!confirmation) return 0;
+  return clampDispatchBias(confirmation.dispatch_bias) ?? 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -806,4 +846,29 @@ export async function readProviderConfirmationInput(
     return null;
   }
   return parseProviderConfirmationInput(raw);
+}
+
+/**
+ * Invalidate a CONSUMED Gate-0 input by deleting it — the second half of
+ * consume-and-invalidate, paired here with {@link readProviderConfirmationInput} so
+ * the two cannot drift apart.
+ *
+ * The input's presence is the "operator has acted" signal the gate reads to decide
+ * emit-vs-consume. Once promoted into the canonical artifacts it is SPENT: leaving it
+ * on disk means a later reconciliation delta silently re-consumes a submission that
+ * answered an older question, auto-satisfying the gate instead of asking the
+ * operator. Deleting it is what makes the gate able to fire a second time at all.
+ *
+ * Best-effort and never throws: an already-absent file is the desired end state, and
+ * a failed unlink must not break the in-flight obligation (the promotion itself
+ * already succeeded).
+ */
+export async function unlinkProviderConfirmationInput(
+  artifactsDir: string,
+): Promise<void> {
+  try {
+    await unlink(join(artifactsDir, PROVIDER_CONFIRMATION_INPUT_FILENAME));
+  } catch {
+    // Absent / locked / read-only — nothing to invalidate, or nothing we can do.
+  }
 }

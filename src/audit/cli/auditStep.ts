@@ -21,7 +21,10 @@ import {
   writeCoreArtifacts,
 } from "../io/artifacts.js";
 import { advanceAudit } from "../orchestrator/advance.js";
-import type { AdvanceAuditResult } from "../orchestrator/advanceTypes.js";
+import type {
+  AdvanceAuditResult,
+  ProviderConfirmationGateState,
+} from "../orchestrator/advanceTypes.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { EXECUTOR_RUNNERS } from "../orchestrator/executorRunners.js";
 import { deriveAuditState } from "../orchestrator/state.js";
@@ -92,6 +95,12 @@ export interface RunAuditStepOptions {
    * re-reads the repo config (deprecated fallback).
    */
   sessionConfig?: SessionConfig;
+  /**
+   * G3: the reconciliation gate, forwarded BY REFERENCE to advanceAudit so its nested
+   * drain derives against the live delta and `provider_confirmation_executor` can
+   * fail-closed-exclude (and then clear) it. Absent ⇒ nothing to reconcile.
+   */
+  providerConfirmationGate?: ProviderConfirmationGateState;
 }
 
 // The single cross-process mutex node for BUNDLE MUTATION (multi-agent
@@ -418,6 +427,7 @@ async function executeAdvance(
     since: options.since,
     preferredExecutor: options.preferredExecutor,
     sessionConfig: options.sessionConfig,
+    providerConfirmationGate: options.providerConfirmationGate,
     runLogger,
   });
 

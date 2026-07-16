@@ -6,12 +6,20 @@ import { join } from "node:path";
 // ---------------------------------------------------------------------------
 // DC-2 — shared, session-scoped provider confirmation (Gate-0).
 //
-// The first tool (audit) writes ONE confirmation to the SHARED location
+// The first tool (audit) writes ONE route DECISION to the SHARED location
 // `<root>/.audit-tools/provider-confirmation.json`; the second tool (remediate)
-// reads + honors it. The accessor is THREE-valued (CE-012):
+// reads + honors it. The accessor is TWO-valued:
 //   - absent / malformed → null (INV-DC1-6 never-block: self-resolve)
-//   - present + roster fresh → { status: 'confirmed' } (honor)
-//   - present + roster stale → { status: 'reconfirm' } (INV-DC2-3 re-confirm)
+//   - present           → the parsed decision (honor)
+//
+// G3: the read is REACH-FREE. The former roster-staleness check (and its CE-012
+// three-valued `reconfirm`) is gone — it compared the WRITING auditor's roster
+// against the reader's, which is meaningless cross-auditor, and answered a real
+// event by silently discarding the operator's cost order + λ. INV-DC2-3's real
+// property — a backend the operator never confirmed must NOT be silently honored
+// — now lives in the reconciliation gate (`computeNewlyReachableBackends`), which
+// compares the DECISION against THIS auditor's reach. Those tests are below.
+//
 // Writes are atomic temp-then-rename under withFileLock, so a lockless reader
 // never observes a torn file (CE-003).
 // ---------------------------------------------------------------------------
@@ -20,10 +28,11 @@ const {
   SHARED_PROVIDER_CONFIRMATION_VERSION,
   SHARED_PROVIDER_CONFIRMATION_FILENAME,
   sharedProviderConfirmationPath,
-  currentProviderRoster,
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
   readSharedProviderConfirmation,
+  computeNewlyReachableBackends,
+  confirmedBackendKeys,
 } = await import("audit-tools/shared");
 
 const { runProviderConfirmationAutoComplete } = await import(
@@ -31,8 +40,8 @@ const { runProviderConfirmationAutoComplete } = await import(
 );
 
 // A clean env with no CLAUDECODE/CODEX so the self-spawn guard never perturbs
-// the discovered roster (CLAUDECODE=1 in a Claude session would otherwise change
-// it — the audit-code CLAUDECODE test gotcha).
+// discovery (CLAUDECODE=1 in a Claude session would otherwise change it — the
+// audit-code CLAUDECODE test gotcha).
 const CLEAN_ENV = {};
 
 async function withTempRoot(fn) {
@@ -52,23 +61,27 @@ await test("the shared artifact lives at <root>/.audit-tools/provider-confirmati
   expect(SHARED_PROVIDER_CONFIRMATION_FILENAME).toBe("provider-confirmation.json");
 });
 
-await test("a built confirmation stamps schema_version / session_level / confirmed_at and the roster", () => {
+await test("a built confirmation stamps schema_version / session_level / confirmed_at", () => {
   const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
   expect(built.schema_version).toBe(SHARED_PROVIDER_CONFIRMATION_VERSION);
   expect(built.session_level).toBe(true);
   expect(Date.parse(built.confirmed_at) > 0, "confirmed_at is an ISO-8601 timestamp").toBeTruthy();
-  expect(Array.isArray(built.roster), "carries a roster snapshot").toBeTruthy();
   expect(Array.isArray(built.provider_pool), "carries a provider pool").toBeTruthy();
-  // The roster is sorted + de-duplicated.
-  expect([...built.roster].sort()).toEqual(built.roster);
+});
+
+// G3: the persisted shape carries POLICY, not the writing auditor's reach. The
+// roster snapshot was exactly that inherited-reach field, so its absence is the
+// contract now — a re-added `roster` would resurrect the cross-auditor comparison
+// the gate replaced.
+await test("G3: a built confirmation carries NO roster snapshot (reach is never persisted)", () => {
+  const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
+  expect(built.roster, "the writing auditor's reach must not be persisted").toBe(undefined);
 });
 
 await test("worker-command fallback is always present in the pool (it is never PATH-detected)", () => {
   const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
   const local = built.provider_pool.find((e) => e.name === "worker-command");
   expect(local, "worker-command is always in the confirmed pool").toBeTruthy();
-  // It is the always-available fallback, not part of the discovered roster.
-  expect(!built.roster.includes("worker-command"), "worker-command is not in the PATH roster").toBeTruthy();
 });
 
 // ── cross-tool honor: audit writes, remediate-side reads the same pool ───────
@@ -78,16 +91,14 @@ await test("cross-tool honor: a confirmation written by audit is read + honored 
     const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
     await writeSharedProviderConfirmation(root, built);
 
-    const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
+    const read = await readSharedProviderConfirmation(root);
     expect(read, "a written confirmation is read back, not null").toBeTruthy();
-    expect(read.status, "matching roster → confirmed (honored)").toBe("confirmed");
     // Compare against the JSON-normalized form: writeJsonFile drops keys whose
     // value is `undefined` (a `reason: undefined` entry round-trips without the
     // key), so the durable artifact is the JSON projection of the built pool.
     const persisted = JSON.parse(JSON.stringify(built));
-    expect(read.confirmation.provider_pool).toEqual(persisted.provider_pool);
-    expect(read.confirmation.roster).toEqual(persisted.roster);
-    expect(read.confirmation.session_level).toBe(true);
+    expect(read.provider_pool).toEqual(persisted.provider_pool);
+    expect(read.session_level).toBe(true);
   });
 });
 
@@ -101,8 +112,7 @@ await test("audit's provider-confirmation executor WRITES the shared artifact wh
     );
     expect(onDisk.schema_version).toBe(SHARED_PROVIDER_CONFIRMATION_VERSION);
     expect(onDisk.session_level).toBe(true);
-    const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    expect(read && read.status === "confirmed").toBeTruthy();
+    expect(await readSharedProviderConfirmation(root)).toBeTruthy();
   });
 });
 
@@ -162,8 +172,7 @@ await test("audit's executor without a root does NOT write the shared artifact (
     const result = await runProviderConfirmationAutoComplete({});
     expect(!result.artifacts_written.includes("provider-confirmation.json")).toBeTruthy();
     // Nothing was written under root.
-    const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    expect(read).toBe(null);
+    expect(await readSharedProviderConfirmation(root)).toBe(null);
   });
 });
 
@@ -171,8 +180,7 @@ await test("audit's executor without a root does NOT write the shared artifact (
 
 await test("absent artifact → null (never-block: remediate self-resolves)", async () => {
   await withTempRoot(async (root) => {
-    const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    expect(read).toBe(null);
+    expect(await readSharedProviderConfirmation(root)).toBe(null);
   });
 });
 
@@ -184,75 +192,132 @@ await test("malformed artifacts → null (never-block, never throws)", async () 
     const malformedCases = [
       "not json at all {{{",
       JSON.stringify({}), // missing required fields
-      JSON.stringify({ schema_version: "9.9.9", session_level: true, confirmed_at: "x", provider_pool: [], roster: [] }), // version drift
-      JSON.stringify({ schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION, session_level: false, confirmed_at: "x", provider_pool: [], roster: [] }), // session_level not true
-      JSON.stringify({ schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION, session_level: true, confirmed_at: "x", provider_pool: "nope", roster: [] }), // pool wrong type
+      JSON.stringify({ schema_version: "9.9.9", session_level: true, confirmed_at: "x", provider_pool: [] }), // version drift
+      JSON.stringify({ schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION, session_level: false, confirmed_at: "x", provider_pool: [] }), // session_level not true
+      JSON.stringify({ schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION, session_level: true, confirmed_at: "x", provider_pool: "nope" }), // pool wrong type
       JSON.stringify([1, 2, 3]), // array, not object
     ];
 
     for (const body of malformedCases) {
       await writeFile(p, body, "utf8");
-      const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
+      const read = await readSharedProviderConfirmation(root);
       expect(read, `malformed body should read as null: ${body.slice(0, 40)}`).toBe(null);
     }
   });
 });
 
-// ── roster-stale → reconfirm (INV-DC2-3 / CE-012 third state) ────────────────
-
-await test("roster-stale → a DISTINCT reconfirm signal (not null, not confirmed)", async () => {
+// G3: a confirmation WITHOUT a roster must parse. The old parser hard-required the
+// field, so this is the pin that the required-field gate really went with it —
+// otherwise every post-G3 confirmation would fail its own reader and degrade to
+// "absent" (empty cost positions, λ=0) silently.
+await test("G3: a roster-less confirmation parses (the required-field gate is gone)", async () => {
   await withTempRoot(async (root) => {
-    // Write a valid confirmation whose stored roster deliberately differs from
-    // the current discovered roster (a provider that has since 'disappeared').
-    const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
-    const stale = {
-      ...built,
-      roster: [...new Set([...built.roster, "openai-compatible"])].sort(),
-    };
-    // Guard: the perturbed roster must actually differ from the current one for
-    // this env, otherwise the test would be vacuous.
-    const current = currentProviderRoster({}, CLEAN_ENV);
-    expect(stale.roster, "stored roster must differ from current").not.toEqual(current);
-
-    await writeSharedProviderConfirmation(root, stale);
-    const read = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    expect(read, "stale confirmation is not null").toBeTruthy();
-    expect(read.status, "roster change → reconfirm").toBe("reconfirm");
-    expect(typeof read.reason === "string" && read.reason.length > 0, "carries a reason").toBeTruthy();
-    // The third state is DISTINCT from both null and 'confirmed'.
-    expect(read.status).not.toBe("confirmed");
-    expect(read).not.toBe(null);
-    // The stale confirmation is still surfaced (so a caller can diff it).
-    expect(read.confirmation.roster).toEqual(stale.roster);
+    await mkdir(join(root, ".audit-tools"), { recursive: true });
+    await writeFile(
+      sharedProviderConfirmationPath(root),
+      JSON.stringify({
+        schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
+        session_level: true,
+        confirmed_at: new Date().toISOString(),
+        provider_pool: [{ name: "worker-command", capability_tier: "unknown", excluded: false }],
+      }),
+      "utf8",
+    );
+    const read = await readSharedProviderConfirmation(root);
+    expect(read, "no roster field ⇒ still a valid decision").toBeTruthy();
+    expect(read.provider_pool).toHaveLength(1);
   });
 });
 
-await test("CE-012: roster-stale is distinguishable from absent — they return different shapes", async () => {
-  await withTempRoot(async (root) => {
-    // Absent → null.
-    expect(await readSharedProviderConfirmation(root, {}, CLEAN_ENV)).toBe(null);
+// ── G3: the reconciliation gate (replaces roster-staleness) ──────────────────
 
-    // Present-but-stale → object with status:'reconfirm'.
-    const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
-    await writeSharedProviderConfirmation(root, {
-      ...built,
-      roster: [...new Set([...built.roster, "openai-compatible"])].sort(),
-    });
-    const stale = await readSharedProviderConfirmation(root, {}, CLEAN_ENV);
-    expect(stale, "stale is NOT collapsed into the never-block null").not.toBe(null);
-    expect(stale.status).toBe("reconfirm");
+// The CONFIRMED half. All three pools contribute, and each is load-bearing:
+// `annotateConfirmedPool` folds a source away when a provider entry already claims
+// its model, so a source can be represented ONLY by provider_pool[].model_id.
+await test("G3: confirmed keys span provider_pool + source_pool_cost_order + host_model_cost_order", () => {
+  const keys = confirmedBackendKeys({
+    schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
+    session_level: true,
+    confirmed_at: new Date().toISOString(),
+    provider_pool: [
+      { name: "worker-command", capability_tier: "unknown", excluded: false },
+      { name: "openai-compatible", capability_tier: "capable", excluded: false, model_id: "cfg-model" },
+    ],
+    source_pool_cost_order: [
+      { source_id: "s1", provider: "codex", model_id: "src-model", blended_price_usd_per_mtok: null, cost_order: 0 },
+    ],
+    host_model_cost_order: [
+      { model_id: "host-model", blended_price_usd_per_mtok: null, cost_order: 1 },
+    ],
   });
+  // model where knowable, else the coarse provider name.
+  expect([...keys].sort()).toEqual(
+    ["cfg-model", "host-model", "src-model", "worker-command"],
+  );
+});
+
+await test("G3: a backend the operator confirmed produces an EMPTY delta (no phantom re-prompt)", () => {
+  const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
+  const delta = computeNewlyReachableBackends(built, {}, [], CLEAN_ENV);
+  expect(delta, "reach == what was just confirmed ⇒ nothing to reconcile").toEqual([]);
+});
+
+// The gate's REASON TO EXIST: a source that is reachable now but absent from the
+// decision must surface — this is what the roster check answered by silently
+// discarding the operator's cost order instead.
+await test("G3: a newly-reachable SOURCE appears in the delta, keyed by its model", () => {
+  const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
+  const delta = computeNewlyReachableBackends(
+    built,
+    {},
+    [{ id: "new-nim", provider: "openai-compatible", endpoint: "https://x/v1", model: "brand-new-model" }],
+    CLEAN_ENV,
+  );
+  expect(delta).toEqual([{ key: "brand-new-model", provider: "openai-compatible" }]);
+});
+
+// Model granularity is the POINT, not a refinement: the operator confirms *model*
+// choices, so a SECOND model under an already-confirmed provider is a new choice.
+// A provider-name-granular gate would report an empty delta here and dispatch it.
+await test("G3: a second model of an ALREADY-confirmed provider still deltas (model granularity)", () => {
+  const config = { openai_compatible: { base_url: "https://x/v1", model: "confirmed-model", api_key_env: "K" } };
+  const built = buildSharedProviderConfirmation(config, { K: "public" });
+  const delta = computeNewlyReachableBackends(
+    built,
+    config,
+    [{ id: "second", provider: "openai-compatible", endpoint: "https://x/v1", model: "a-second-model" }],
+    { K: "public" },
+  );
+  expect(delta.map((b) => b.key), "the new MODEL is the delta, not the provider").toEqual([
+    "a-second-model",
+  ]);
+});
+
+// The opposite direction is the harmless SUBSET case and must stay silent — this is
+// why the synthetic `worker-command` entry and host tiers need no special-casing.
+await test("G3: a CONFIRMED backend that is no longer reachable is silent (subset case)", () => {
+  const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
+  const withGhost = {
+    ...built,
+    source_pool_cost_order: [
+      { source_id: "ghost", provider: "codex", model_id: "vanished-model", blended_price_usd_per_mtok: null, cost_order: 0 },
+    ],
+  };
+  const delta = computeNewlyReachableBackends(withGhost, {}, [], CLEAN_ENV);
+  expect(delta, "confirmed-but-unreachable is a subset, not a new backend").toEqual([]);
 });
 
 // ── PB-1: opencode opt-in is inherited from discoverProviders ────────────────
 
-await test("PB-1: a bare-PATH opencode is NOT in the roster unless explicitly configured", () => {
-  // Without opencode config, opencode must never be surfaced into the roster
-  // (discoverProviders withholds a bare-PATH opencode). With a configured
-  // command it would be eligible. We assert the opt-in direction holds for the
+await test("PB-1: a bare-PATH opencode is NOT in the confirmed pool unless explicitly configured", () => {
+  // Without opencode config, opencode must never be surfaced (discoverProviders
+  // withholds a bare-PATH opencode). We assert the opt-in direction holds for the
   // unconfigured case regardless of whether opencode is on PATH.
-  const unconfigured = currentProviderRoster({}, CLEAN_ENV);
-  expect(!unconfigured.includes("opencode"), "bare-PATH opencode is opt-in, not in the roster").toBeTruthy();
+  const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
+  expect(
+    built.provider_pool.some((e) => e.name === "opencode"),
+    "bare-PATH opencode is opt-in, not in the pool",
+  ).toBe(false);
 });
 
 // ── CE-003: concurrent-writer torn read ──────────────────────────────────────
@@ -286,9 +351,6 @@ await test("CE-003: a lockless read never observes a torn file under a concurren
       ],
     });
 
-    // Each lockless read re-derives the roster (PATH probes), so keep the counts
-    // modest — atomicity is a deterministic OS-rename property, not a flaky race
-    // that needs thousands of iterations to surface.
     const writeStorm = (async () => {
       for (let i = 1; i <= 15; i++) {
         await writeSharedProviderConfirmation(root, confFor(i));
@@ -297,16 +359,15 @@ await test("CE-003: a lockless read never observes a torn file under a concurren
 
     const readers = [];
     for (let i = 0; i < 60; i++) {
-      readers.push(readSharedProviderConfirmation(root, {}, CLEAN_ENV));
+      readers.push(readSharedProviderConfirmation(root));
     }
 
     const [, ...readResults] = await Promise.all([writeStorm, ...readers]);
 
     for (const r of readResults) {
       expect(r, "no read saw a torn/invalid file (would parse to null)").not.toBe(null);
-      expect(r.status, "every read observed a complete, fresh-roster confirmation").toBe("confirmed");
-      expect(r.confirmation.schema_version).toBe(SHARED_PROVIDER_CONFIRMATION_VERSION);
-      expect(r.confirmation.session_level).toBe(true);
+      expect(r.schema_version).toBe(SHARED_PROVIDER_CONFIRMATION_VERSION);
+      expect(r.session_level).toBe(true);
     }
   });
 });

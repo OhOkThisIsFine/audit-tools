@@ -102,6 +102,13 @@ export interface DecideNextStepOptions {
    * Defaults to `true`.
    */
   emitStaleness?: boolean;
+  /**
+   * Forwarded to `deriveAuditState` — the G3 reconciliation gate's precomputed
+   * delta. MUST be passed anywhere the selection drives an executor: the obligation
+   * engine's `derive` is gate-aware, so a gate-blind `decideNextStep` here would
+   * disagree with it and dispatch the executor for a DIFFERENT obligation.
+   */
+  newlyReachableBackends?: readonly string[];
 }
 
 export function decideNextStep(
@@ -120,6 +127,9 @@ export function decideNextStep(
   }
   const state = deriveAuditState(bundle, {
     emitStaleness: options.emitStaleness ?? true,
+    ...(options.newlyReachableBackends
+      ? { newlyReachableBackends: options.newlyReachableBackends }
+      : {}),
   });
   const next = findObligation(state.obligations);
 

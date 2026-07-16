@@ -238,8 +238,8 @@ Every other field is optional:
 - `host_models` — reports your own (the host agent's) model roster so those tiers
   are priced from the models.dev dataset and orderable here, not just at dispatch.
 
-You supply only ordering intent plus your model roster. The tool owns the prices,
-the capability flags, and the roster snapshot — you never hand-author those. If a
+You supply only ordering intent plus your model roster. The tool owns the prices
+and the capability flags — you never hand-author those. If a
 provider you use isn't listed, it wasn't auto-detected: it rides the per-auditor
 `--auditor <json>` descriptor (an OpenAI-compatible endpoint or CLI backend as a
 `sources[]` entry, resolved from your environment — NOT `session-config.json`, which
@@ -257,9 +257,13 @@ The shared `.audit-tools/provider-confirmation.json` is written once and reused 
 the rest of the audit→remediate session. A later step, and a subsequent
 `remediate-code` run against the same repo, read and honor that pool without
 prompting again — `remediate-code` has no confirmation step of its own; it consumes
-the audit-side pool. You are only re-prompted if the discovered provider roster
-changes (a provider appears or disappears since it was confirmed), which forces a
-fresh confirmation so a vanished provider is never pinned. If the file is absent
+the audit-side pool. You are re-prompted only when a backend you never confirmed
+becomes reachable — and then the prompt leads with just that delta, not the whole
+table again. A backend that has *disappeared* never re-prompts: it simply drops out
+of reach, which needs no decision from you. On an unattended run (`autonomous_mode`)
+there is nobody to ask, so a newly-reachable backend is **excluded rather than used**
+and a `newly_reachable_backend` friction event records why — confirm or exclude it at
+your next attended gate. If the file is absent
 (for example a standalone remediate run with no prior audit), the run resolves its
 provider independently — absence is never an error.
 

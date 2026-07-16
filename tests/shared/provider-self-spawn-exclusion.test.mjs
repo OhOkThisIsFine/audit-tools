@@ -19,7 +19,6 @@ const {
 } = await import("../../src/shared/providers/providerConfirmation.ts");
 const {
   buildSharedProviderConfirmation,
-  currentProviderRoster,
 } = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
 const {
   isSelfSpawnBlocked,
@@ -132,8 +131,10 @@ test("setCommandExistsForTesting drives discovery deterministically and restores
   try {
     setCommandExistsForTesting(() => true);
     expect(commandExists("definitely-not-a-real-binary-xyz")).toBe(true);
-    const roster = currentProviderRoster({}, {});
-    expect(roster.includes("claude-code"), "injected hook surfaces claude-code").toBeTruthy();
+    // The globally-injected hook (no per-call `detectCommand` passed) reaches
+    // discovery, so a PATH-probed backend surfaces deterministically in CI.
+    const discovered = discoverProviders({}, {}).map((p) => p.name);
+    expect(discovered.includes("claude-code"), "injected hook surfaces claude-code").toBeTruthy();
   } finally {
     setCommandExistsForTesting(null);
   }

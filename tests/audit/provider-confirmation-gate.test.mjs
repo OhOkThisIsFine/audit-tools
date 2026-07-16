@@ -204,16 +204,16 @@ describe("executor consumes seeded operator input (b/c — reorder + host roster
       expect(result.progress_summary).toMatch(/operator/i);
 
       // The shared confirmation carries the host-model cost entry (follow-up c).
-      const read = await readSharedProviderConfirmation(root, NIM_CONFIG);
-      expect(read?.status).toBe("confirmed");
-      const hostEntry = read.confirmation.host_model_cost_order?.find(
+      const read = await readSharedProviderConfirmation(root);
+      expect(read).toBeTruthy();
+      const hostEntry = read.host_model_cost_order?.find(
         (e) => e.model_id === "host-frontier-model",
       );
       expect(hostEntry).toBeTruthy();
 
       // Both tiers thread to dispatch by model_id at their operator-confirmed
       // positions: the host model first (0), then the configured pool's model (1).
-      const positions = await readConfirmedCostPositions(root, NIM_CONFIG);
+      const positions = await readConfirmedCostPositions(root);
       expect(positions.get("host-frontier-model")).toBe(0);
       expect(positions.get("claude-haiku-4-5")).toBe(1);
     } finally {

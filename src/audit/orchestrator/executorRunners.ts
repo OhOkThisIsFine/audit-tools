@@ -87,6 +87,10 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       // pool is built/persisted from the per-auditor inventory, never a re-read of the
       // repo config that would re-leak another auditor's backends into the routed pool.
       options.sessionConfig,
+      // G3: the reconciliation gate, BY REFERENCE — the autonomous path
+      // fail-closed-excludes the delta before it can route, and clears the gate on
+      // promotion so this PRIORITY[0] obligation converges.
+      options.providerConfirmationGate,
     ),
   intake_executor: async (bundle, { options }) =>
     runIntakeExecutor(

@@ -37,12 +37,14 @@ import {
   promotedAuditReportPath,
   shouldDemotePrimaryInProcess,
   withFileLock,
+  type NewlyReachableBackend,
 } from "audit-tools/shared";
 import type { AuditState } from "../types/auditState.js";
 import type { Finding } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import { advanceAudit, type AdvanceAuditResult } from "../orchestrator/advance.js";
+import type { ProviderConfirmationGateState } from "../orchestrator/advanceTypes.js";
 import {
   captureDesignReviewSnapshot,
   isDesignReviewStale,
@@ -269,6 +271,14 @@ export type NextStepParams = {
    * env / true via `resolveHostDispatchCapability` in the fold.
    */
   hostCanDispatch?: boolean;
+  /**
+   * G3 reconciliation gate state, threaded BY REFERENCE from the CLI down to the
+   * executor. The delta is computed ONCE per invocation (it shells out — see
+   * `DeriveAuditStateOptions.newlyReachableBackends`) and CLEARED by the executor on
+   * promotion, so every derivation in the drain reads the current value.
+   * Unset by every non-CLI caller ⇒ presence-only, as before.
+   */
+  providerConfirmationGate?: ProviderConfirmationGateState;
 };
 
 export type TerminalStepResult =
@@ -1066,7 +1076,7 @@ export const HOST_GATE_KINDS: readonly HostGateKind[] = [
  * filesystem-watching host reads.
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "sessionConfig">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "sessionConfig" | "providerConfirmationGate">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -1093,6 +1103,9 @@ export async function executeAndRecord(
       // 2a-ii: the effective dispatch config reaches provider_confirmation_executor,
       // which consumes + persists the confirmed pool from the handshake inventory.
       sessionConfig: params.sessionConfig,
+      // G3: threaded by reference so `advanceAudit`'s OWN nested drain derives
+      // against the same live gate, and the executor's clear is visible to it.
+      providerConfirmationGate: params.providerConfirmationGate,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,
@@ -1295,6 +1308,19 @@ interface AuditNextStepCtx {
   obligationTrail: string[];
 }
 
+/**
+ * The gate's CURRENT delta as bare keys — all the PURE state pass needs (it only
+ * names them in the obligation's reason). Keeps `deriveAuditState` decoupled from the
+ * richer provider-carrying record the autonomous write consumes.
+ *
+ * Read through the shared gate object on every call, never captured by value: the
+ * executor clears it on promotion, and a stale read is exactly the `PRIORITY[0]`
+ * livelock (see {@link ProviderConfirmationGateState}).
+ */
+function gateKeys(gate: ProviderConfirmationGateState | undefined): string[] {
+  return (gate?.newlyReachable ?? []).map((b) => b.key);
+}
+
 /** The engine state audit folds on: the in-memory bundle (reloaded per transition). */
 type AuditEngineState = ArtifactBundle;
 
@@ -1338,7 +1364,13 @@ async function runDeterministicExecutor(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
 ): Promise<AuditOutcome> {
-  const decision = decideNextStep(bundle);
+  // Gate-aware, and that is load-bearing: the obligation engine's `derive` re-opens
+  // `provider_confirmation` on a non-empty G3 delta, so a gate-BLIND decision here
+  // would see it as satisfied, select the next obligation instead, and run the wrong
+  // executor for the one the engine actually picked.
+  const decision = decideNextStep(bundle, {
+    newlyReachableBackends: gateKeys(ctx.params.providerConfirmationGate),
+  });
 
   const noProgress = await checkNoProgressBeforeDispatch({
     index: ctx.iterationRef.value,
@@ -1392,10 +1424,13 @@ async function runDeterministicExecutor(
  */
 function deriveObligationState(
   id: string,
+  gate?: ProviderConfirmationGateState,
 ): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
   return (bundle) => {
     if (bundle.audit_state?.status === "complete") return "satisfied";
-    const state = deriveAuditState(bundle);
+    const state = deriveAuditState(bundle, {
+      newlyReachableBackends: gateKeys(gate),
+    });
     const found = state.obligations.find((o) => o.id === id);
     if (!found) return "satisfied";
     return found.state === "missing" || found.state === "stale"
@@ -1413,7 +1448,9 @@ function deriveObligationState(
  * the executor for the selected id), so the obligation list cannot drift from the
  * priority scan it mirrors.
  */
-export function buildAuditObligations(): AuditObligationDef[] {
+export function buildAuditObligations(
+  gate?: ProviderConfirmationGateState,
+): AuditObligationDef[] {
   const deterministic = (id: string): AuditObligationDef => ({
     id,
     derive: deriveObligationState(id),
@@ -1432,11 +1469,22 @@ export function buildAuditObligations(): AuditObligationDef[] {
     // spec/cost-first-routing.md.
     {
       id: "provider_confirmation",
-      derive: deriveObligationState("provider_confirmation"),
+      derive: deriveObligationState("provider_confirmation", gate),
       execute: async (bundle, ctx): Promise<AuditOutcome> => {
         const input = await readProviderConfirmationInput(ctx.params.artifactsDir);
         if (input) {
           // Operator has submitted → consume it (writes both canonical artifacts).
+          return runDeterministicExecutor(bundle, ctx);
+        }
+        if ((gate?.newlyReachable.length ?? 0) > 0 && gate?.autonomous) {
+          // G3, autonomous: a backend the operator never confirmed became reachable
+          // and there is nobody to ask. Fold to the executor, which fail-closed-
+          // excludes it + records the friction — never emit a prompt no one will read.
+          //
+          // Scoped to the DELTA case deliberately: a first-time confirmation (no
+          // artifact at all) still pauses even under `autonomous_mode`, exactly as
+          // today. Auto-confirming a pool the operator has never once seen is a
+          // separate decision from reconciling a delta against one they approved.
           return runDeterministicExecutor(bundle, ctx);
         }
         // Otherwise pause for the operator — ALWAYS on the interactive CLI path,
@@ -1447,7 +1495,9 @@ export function buildAuditObligations(): AuditObligationDef[] {
           kind: "emit",
           step: {
             kind: "provider_confirmation",
-            state: deriveAuditState(bundle),
+            state: deriveAuditState(bundle, {
+              newlyReachableBackends: gateKeys(gate),
+            }),
             bundle,
           },
         };
@@ -2044,7 +2094,12 @@ export async function runDeterministicForNextStep(
 
   const startBundle = await loadArtifactBundle(params.artifactsDir);
   const outcome = await advance(
-    { priority: PRIORITY, obligations: countTransitions(buildAuditObligations()) },
+    {
+      priority: PRIORITY,
+      obligations: countTransitions(
+        buildAuditObligations(params.providerConfirmationGate),
+      ),
+    },
     startBundle,
     ctx,
   );

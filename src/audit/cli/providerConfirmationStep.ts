@@ -1,4 +1,8 @@
-import type { ConfirmedPoolEntry, SourcePoolDisplayEntry } from "audit-tools/shared";
+import type {
+  ConfirmedPoolEntry,
+  SourcePoolDisplayEntry,
+  NewlyReachableBackend,
+} from "audit-tools/shared";
 import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "audit-tools/shared";
 
 /**
@@ -10,10 +14,10 @@ import { PROVIDER_CONFIRMATION_INPUT_VERSION } from "audit-tools/shared";
  * suggestion verbatim) is what lets the run proceed — its presence is the
  * "operator has acted" signal the gate consumes.
  *
- * The tool owns the roster snapshot + cost annotation: the host supplies only
- * ordering intent + its model roster, and the tool promotes that into both
- * canonical artifacts. So this prompt never asks the host to hand-author prices,
- * capability flags, or the roster snapshot.
+ * The tool owns discovery + the cost annotation: the host supplies only ordering
+ * intent + its model roster, and the tool promotes that into both canonical
+ * artifacts. So this prompt never asks the host to hand-author prices or
+ * capability flags.
  */
 export function renderProviderConfirmationPrompt(opts: {
   /** The tool's suggested pool, already annotated with model_id/price/cost_order. */
@@ -31,6 +35,14 @@ export function renderProviderConfirmationPrompt(opts: {
   inputPath: string;
   /** The exact command to re-invoke once the input is written. */
   continueCommand: string;
+  /**
+   * The G3 reconciliation delta: backends reachable now that the operator's prior
+   * confirmation never mentioned. Non-empty ⇒ this is a RE-confirmation and the
+   * prompt leads with the delta, so the operator answers the new question instead
+   * of re-reading a whole table they already approved. Empty/absent ⇒ the ordinary
+   * first-time gate.
+   */
+  newlyReachable?: readonly NewlyReachableBackend[];
 }): string {
   const sorted = [...opts.providerPool].sort(
     (a, b) => (a.cost_order ?? Number.MAX_SAFE_INTEGER) - (b.cost_order ?? Number.MAX_SAFE_INTEGER),
@@ -72,7 +84,35 @@ export function renderProviderConfirmationPrompt(opts: {
   const hasLegacyOpenAiCompatible = sorted.some((e) => e.name === "openai-compatible");
   const hasCodex = sorted.some((e) => e.name === "codex");
 
+  const newlyReachable = opts.newlyReachable ?? [];
+
   return [
+    ...(newlyReachable.length > 0
+      ? [
+          "# Reconcile Newly-Reachable Backends (Gate-0)",
+          "",
+          "**This is a re-confirmation, not a fresh gate.** You already confirmed a",
+          "route decision for this session. Since then, these backends became",
+          "reachable and your decision says nothing about them — so they are NOT",
+          "dispatchable until you decide:",
+          "",
+          ...newlyReachable.map((b) => `  - **${b.key}**  (provider: ${b.provider})`),
+          "",
+          "Ask the user about **just these** — do not re-litigate the ordering they",
+          "already approved. To accept them into the pool at their suggested",
+          "positions, accept verbatim (write just the `schema_version`). To keep one",
+          "out, name its provider in `exclude`.",
+          "",
+          "> Note: any submission clears this delta — the tool rebuilds the whole",
+          "> confirmation from your input. The list above tells you what changed; it",
+          "> is not a per-backend checklist the tool enforces.",
+          "",
+          "The full pool follows for reference.",
+          "",
+          "---",
+          "",
+        ]
+      : []),
     "# Confirm Provider Cost Ordering (Gate-0)",
     "",
     "Dispatch routes work to the cheapest capable provider first. Below is the",
@@ -168,7 +208,7 @@ export function renderProviderConfirmationPrompt(opts: {
     "  endpoint via `openai_compatible.{base_url,model,api_key_env}`, or a CLI",
     "  backend via its `<name>.command`. A provider detected but self-spawn-blocked",
     "  can be re-included with `include`. Then re-run this step.",
-    "- The tool owns pricing, the roster snapshot, and the capability flags — you",
+    "- The tool owns pricing, discovery, and the capability flags — you",
     "  supply only ordering intent + your model roster.",
     "",
     `Then run: ${opts.continueCommand}`,

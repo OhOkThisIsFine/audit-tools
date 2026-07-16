@@ -67,6 +67,23 @@ export interface DeriveAuditStateOptions {
    * caller keeps the current emit-on-stale behavior).
    */
   emitStaleness?: boolean;
+  /**
+   * The reconciliation gate's PRECOMPUTED delta (G3): backends this auditor can
+   * reach now that the operator's confirmation never mentions. Non-empty ⇒ the
+   * `provider_confirmation` obligation re-opens so the operator reconciles them.
+   *
+   * Precomputed, never derived here, and that is load-bearing: the delta needs
+   * `discoverProviders`, which shells out (`spawnSync("where"/"which")`) ~6 times.
+   * `deriveAuditState` is sync, pure, and called from ~20 sites — three inside the
+   * drain loop with `MAX_DRAIN_STEPS = 64` ⇒ deriving it here would mean 1,100+
+   * process spawns per `next-step`, and would make this function PATH/env-dependent
+   * (every bundle-derives-state test would start shelling out). The CLI computes it
+   * ONCE per invocation and passes it down.
+   *
+   * Absent ⇒ presence-only, exactly as before. That is the right default for the
+   * render/report callers, which are not the gate.
+   */
+  newlyReachableBackends?: readonly string[];
 }
 
 export function deriveAuditState(
@@ -78,10 +95,23 @@ export function deriveAuditState(
     emit: options.emitStaleness ?? true,
   });
 
+  // Gate-0. Presence-only, PLUS the G3 reconciliation gate: a confirmation that
+  // exists but predates a backend this auditor can now reach is NOT satisfied — the
+  // operator confirms model choices, so a backend they never saw must not silently
+  // become dispatchable. The delta is precomputed by the caller (see
+  // `newlyReachableBackends`); absent ⇒ presence-only, as before.
+  const newlyReachable = options.newlyReachableBackends ?? [];
   obligations.push(
     obligation(
       "provider_confirmation",
-      has(bundle.provider_confirmation) ? "satisfied" : "missing",
+      !has(bundle.provider_confirmation)
+        ? "missing"
+        : newlyReachable.length > 0
+          ? "stale"
+          : "satisfied",
+      newlyReachable.length > 0
+        ? `reachable backends the operator never confirmed: ${newlyReachable.join(", ")}`
+        : undefined,
     ),
   );
 

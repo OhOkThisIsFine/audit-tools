@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import type {
   SessionConfig,
   RepoSessionIntent,
+  NewlyReachableBackend,
 } from "audit-tools/shared";
 import {
   resolveSessionConfig,
@@ -15,6 +16,9 @@ import {
   deriveSourcePoolDisplayFromSources,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
+  resolveAutonomousMode,
+  readSharedProviderConfirmation,
+  computeNewlyReachableBackends,
   renderHostWallExplanation,
   PROVIDER_CONFIRMATION_INPUT_FILENAME,
   auditArtifactsDir,
@@ -61,6 +65,7 @@ import {
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { renderProviderConfirmationPrompt } from "./providerConfirmationStep.js";
+import type { ProviderConfirmationGateState } from "../orchestrator/advanceTypes.js";
 import { writeCurrentStep } from "./steps.js";
 import {
   nextStepCommand,
@@ -210,6 +215,47 @@ async function gateHostFanoutOrPause(params: {
   return true;
 }
 
+/**
+ * The G3 reconciliation gate's delta for THIS invocation: backends this auditor can
+ * reach now that the operator's persisted confirmation never mentions.
+ *
+ * Returns `[]` when no confirmation exists — and that early-out is the point, not an
+ * optimization detail. `computeNewlyReachableBackends` calls `discoverProviders`,
+ * which shells out ~6 times; with no confirmation on disk the Gate-0 obligation is
+ * `missing` regardless, so the delta is moot and probing would only add an
+ * unconditional per-`next-step` cost (including on invocations deep in synthesis).
+ * Today those probes run ONLY when the Gate-0 step is emitted; this preserves that.
+ *
+ * REACH-NOW's source half comes from `gatherDispatchableSources` — the documented
+ * chokepoint both `buildSourcePools` and the Gate-0 surface consume, so what the
+ * operator confirms is exactly what routes. Deliberately NOT `resolveAmbientSources`:
+ * that is an INPUT to the chokepoint and is blind to descriptor-supplied sources, the
+ * demoted primary, and the legacy `openai_compatible` fold — three backends that
+ * route without ever appearing in it.
+ */
+async function resolveNewlyReachableBackends(
+  root: string,
+  effectiveConfig: SessionConfig,
+): Promise<NewlyReachableBackend[]> {
+  const confirmation = await readSharedProviderConfirmation(root);
+  if (!confirmation) return [];
+  const primaryProviderName = resolveFreshSessionProviderName(
+    undefined,
+    effectiveConfig,
+    { env: process.env },
+  );
+  const sources = await gatherDispatchableSources(
+    effectiveConfig,
+    primaryProviderName,
+  );
+  return computeNewlyReachableBackends(
+    confirmation,
+    effectiveConfig,
+    sources,
+    process.env,
+  );
+}
+
 export async function cmdNextStep(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
   warnIfNotGitRepo(root);
@@ -315,6 +361,24 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   // in-memory resolve can never write dispatch inventory back into the repo config.
   const effectiveConfig = resolveSessionConfig(intent, hostDescriptor);
 
+  // G3 reconciliation gate — computed ONCE per invocation, here, because it cannot
+  // live inside the pure obligation scan: it needs `discoverProviders` (~6
+  // `spawnSync("where"/"which")`), while `deriveAuditState` is sync and called ~20
+  // times per invocation, three of them inside the drain loop (MAX_DRAIN_STEPS=64).
+  //
+  // Gated on an EXISTING confirmation: with none, the obligation is `missing`
+  // regardless, so the delta is moot — and these probes would otherwise become an
+  // unconditional cost on every next-step, including ones deep in synthesis. Today
+  // they run only when the Gate-0 step is emitted; this keeps that property.
+  //
+  // MUTABLE and shared by reference: the executor clears the delta on promotion, and
+  // both this call's obligation engine AND `advanceAudit`'s nested drain must observe
+  // that — otherwise this `PRIORITY[0]` obligation never converges.
+  const providerConfirmationGate: ProviderConfirmationGateState = {
+    newlyReachable: await resolveNewlyReachableBackends(root, effectiveConfig),
+    autonomous: resolveAutonomousMode({ sessionConfig: effectiveConfig }),
+  };
+
   const result = await runDeterministicForNextStep({
     root,
     artifactsDir,
@@ -342,6 +406,9 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     // configured in-process backend to a source pool (attended) rather than letting it
     // monopolize the frontier — or self-drives it (headless).
     hostCanDispatch,
+    // G3: the reconciliation gate — a non-empty delta re-opens the Gate-0 obligation;
+    // `autonomous` keys the response (prompt the delta vs fail-closed-exclude it).
+    providerConfirmationGate,
   });
 
   if (result.kind === "complete") {
@@ -889,6 +956,9 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
         sourcePools: deriveSourcePoolDisplayFromSources(dispatchSources),
         inputPath,
         continueCommand,
+        // G3: non-empty ⇒ this is a re-confirmation; the prompt leads with the delta
+        // so the operator answers what changed, not the whole table again.
+        newlyReachable: providerConfirmationGate.newlyReachable,
       }),
     });
     console.log(JSON.stringify(step, null, 2));

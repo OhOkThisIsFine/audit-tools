@@ -84,6 +84,7 @@ export type StepBoundaryEventType =
   | "declared_cost_drift"
   | "credit_exhausted"
   | "quota_unclassified"
+  | "newly_reachable_backend"
   | (string & {});
 
 /**
@@ -125,6 +126,10 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // classify it, so the operator must review the verbatim text and (if it's a
   // real quota/billing death) teach the tool a new precise pattern.
   quota_unclassified: "tool_should_decide",
+  // An autonomous run reached a backend the operator never confirmed and, with no
+  // human to ask, fail-closed-excluded it. Same "operator must reconcile" shape as
+  // a cost drift: only they can say whether that backend should route.
+  newly_reachable_backend: "tool_should_decide",
 };
 
 /**
@@ -264,6 +269,54 @@ export function captureCostDriftFriction(
     },
     source,
   );
+}
+
+/**
+ * Route an autonomous fail-closed exclusion of a newly-reachable backend (the G3
+ * reconciliation gate: this auditor can reach a backend the operator's Gate-0
+ * decision never mentions, and no human is present to confirm it) through the
+ * step-boundary chokepoint as a `newly_reachable_backend` fact.
+ *
+ * This is what keeps the autonomous branch LOUD rather than silent. The gate's
+ * whole point is that the operator confirms model choices; when autonomy rules a
+ * backend out on their behalf, they must be able to find out and re-include it at
+ * the next attended gate. One fact per backend, discriminated by its gate key, so
+ * re-derives never double-count and each backend is individually triageable.
+ *
+ * AWAITED, unlike the other reactive captures — deliberately. They fire mid-dispatch,
+ * with a long-running engine still alive to flush them; this one fires at Gate-0, and
+ * the CLI can emit its step and exit immediately after. A dropped write here would
+ * mean the exclusion happened SILENTLY — precisely the failure the gate exists to
+ * prevent — so the caller waits for it. Awaiting is safe: `captureFrictionEvent`
+ * swallows every failure internally, so this can never break the in-flight obligation
+ * (INV-O1-5), which is the property the fire-and-forget style was protecting.
+ */
+export async function captureNewlyReachableBackendFriction(
+  artifactsDir: string,
+  runId: string,
+  backendKeys: readonly string[],
+  source: FrictionCaptureArtifact["tool"],
+): Promise<void> {
+  // Sequential, not Promise.all: the capture merges the whole record under a file
+  // lock, so concurrent appends would contend on the same lock for no gain.
+  for (const key of backendKeys) {
+    await captureStepBoundaryFriction(
+      artifactsDir,
+      runId,
+      {
+        eventType: "newly_reachable_backend",
+        discriminator: key,
+        note:
+          `backend "${key}" is reachable but absent from the operator's confirmed ` +
+          `route decision; this run is autonomous, so it was fail-closed-excluded ` +
+          `rather than dispatched unconfirmed. Confirm or exclude it at the next ` +
+          `attended provider-confirmation gate.`,
+        severity: "medium",
+        area: "dispatch/provider-confirmation",
+      },
+      source,
+    );
+  }
 }
 
 /** Credit-exhaustion facts routed through {@link captureCreditExhaustionFriction}. */

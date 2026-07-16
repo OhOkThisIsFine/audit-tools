@@ -86,6 +86,32 @@ export function resolveRollingEngineFlag(options: {
   return true;
 }
 
+/**
+ * Whether the run is unattended (autonomous). Host-agnostic — ONE flag drives the
+ * whole path. Resolution order: `sessionConfig.autonomous_mode` →
+ * `AUDIT_TOOLS_AUTONOMOUS` env → false (the attended/interactive default, so a gate
+ * halts for a human unless autonomy is explicitly requested).
+ *
+ * Unlike {@link resolveHostDispatchCapability} / {@link resolveRollingEngineFlag},
+ * this takes NO per-tool `envVarName`: attendedness is a property of the RUN, not of
+ * one tool's invocation, and the same pipeline drives audit→remediate end to end. A
+ * run that is unattended for the auditor is unattended for the remediator, so a
+ * per-tool name could only ever encode a contradiction. (Lifted out of
+ * `src/remediate/` for G3's reconciliation gate — audit needs the same flag; the old
+ * `REMEDIATE_AUTONOMOUS` name went with the fork.)
+ */
+export function resolveAutonomousMode(options: {
+  sessionConfig?: { autonomous_mode?: boolean } | null;
+  env?: NodeJS.ProcessEnv;
+} = {}): boolean {
+  const cfg = options.sessionConfig?.autonomous_mode;
+  if (cfg !== undefined) return cfg;
+  const envValue = (options.env ?? process.env).AUDIT_TOOLS_AUTONOMOUS;
+  if (envValue === "true") return true;
+  if (envValue === "false") return false;
+  return false;
+}
+
 export const SESSION_UI_MODES = ["visible", "headless"] as const;
 export type SessionUiMode = (typeof SESSION_UI_MODES)[number];
 

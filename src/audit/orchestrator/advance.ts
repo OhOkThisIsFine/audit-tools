@@ -87,7 +87,15 @@ async function runSingleAdvanceStep(
 ): Promise<AdvanceAuditResult> {
   const log = options.runLogger ?? RunLogger.disabled();
   const correlationId = createCorrelationId();
-  const decision = decideNextStep(bundle, { emitStaleness: false });
+  // Gate-aware, and load-bearing: this decide is what actually picks the runner. The
+  // engine layers above derive `provider_confirmation` WITH the G3 delta, so a
+  // gate-blind decide here would see it satisfied, select the next obligation, and
+  // dispatch the WRONG executor — the gate would never fire at all. Reads the gate's
+  // CURRENT value (it clears on promotion), so the drain converges.
+  const decision = decideNextStep(bundle, {
+    emitStaleness: false,
+    newlyReachableBackends: gateDeltaKeys(options),
+  });
   const forcedExecutor = options.preferredExecutor ?? null;
   const selectedExecutor = forcedExecutor ?? decision.selected_executor;
   const selectedObligation = forcedExecutor
@@ -153,7 +161,10 @@ async function runSingleAdvanceStep(
       note: selectedExecutor,
       duration_ms: Date.now() - executorStartedAt,
     });
-    const state = deriveAuditState(bundle, { emitStaleness: false });
+    const state = deriveAuditState(bundle, {
+      emitStaleness: false,
+      newlyReachableBackends: gateDeltaKeys(options),
+    });
     state.last_executor = selectedExecutor;
     state.last_obligation = selectedObligation ?? undefined;
     return {
@@ -223,8 +234,13 @@ async function runSingleAdvanceStep(
     agent_reflections: bundle.agent_reflections,
     artifact_metadata: metadata,
   };
+  // Gate-aware: this state is what gets PERSISTED as audit_state.json. Deriving it
+  // blind would record `provider_confirmation: satisfied` while the gate still says
+  // otherwise — a report that contradicts the routing decision. Read AFTER the
+  // executor ran, so a promotion's clear is already reflected.
   const updatedState = deriveAuditState(metadataBundle, {
     emitStaleness: false,
+    newlyReachableBackends: gateDeltaKeys(options),
   });
   updatedState.last_executor = selectedExecutor;
   updatedState.last_obligation = selectedObligation ?? undefined;
@@ -331,12 +347,20 @@ type DrainOutcome = ObligationOutcome<ArtifactBundle, AdvanceAuditResult>;
 function deriveObligationState(
   id: string,
   cache: WeakMap<ArtifactBundle, AuditState>,
+  options: AdvanceAuditOptions,
 ): (bundle: ArtifactBundle) => "missing" | "stale" | "satisfied" {
   return (bundle) => {
     if (bundle.audit_state?.status === "complete") return "satisfied";
     let state = cache.get(bundle);
     if (!state) {
-      state = deriveAuditState(bundle, { emitStaleness: false });
+      // The memo is keyed on bundle IDENTITY, which changes at every transition
+      // (`runSingleAdvanceStep` builds a fresh `finalizedBundle`) — and the gate can
+      // only change via a promotion, which is itself a transition. So a cache entry
+      // can never outlive the delta it was derived under.
+      state = deriveAuditState(bundle, {
+        emitStaleness: false,
+        newlyReachableBackends: gateDeltaKeys(options),
+      });
       cache.set(bundle, state);
     }
     const found = state.obligations.find((o) => o.id === id);
@@ -412,12 +436,23 @@ async function runDrainStep(
  */
 function buildDrainObligations(
   cache: WeakMap<ArtifactBundle, AuditState>,
+  options: AdvanceAuditOptions,
 ): DrainObligation[] {
   return PRIORITY.map((id) => ({
     id,
-    derive: deriveObligationState(id, cache),
+    derive: deriveObligationState(id, cache, options),
     execute: runDrainStep,
   }));
+}
+
+/**
+ * The G3 gate's CURRENT delta as bare keys — all `deriveAuditState` needs (it only
+ * names them in the obligation's reason). Read through the shared gate object on
+ * every call, never captured: the executor clears it on promotion, and a stale read
+ * here is exactly the `PRIORITY[0]` livelock.
+ */
+function gateDeltaKeys(options: AdvanceAuditOptions): string[] {
+  return (options.providerConfirmationGate?.newlyReachable ?? []).map((b) => b.key);
 }
 
 /**
@@ -470,7 +505,7 @@ export async function advanceAudit(
     // so no state can leak across advanceAudit calls.
     const deriveCache = new WeakMap<ArtifactBundle, AuditState>();
     const outcome = await advanceObligations(
-      { priority: PRIORITY, obligations: buildDrainObligations(deriveCache) },
+      { priority: PRIORITY, obligations: buildDrainObligations(deriveCache, options) },
       bundle,
       ctx,
       // INVARIANT: the local graceful cap (MAX_DRAIN_STEPS, enforced inside

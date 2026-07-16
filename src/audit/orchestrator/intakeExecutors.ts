@@ -6,10 +6,14 @@ import {
   buildSharedProviderConfirmation,
   writeSharedProviderConfirmation,
   readProviderConfirmationInput,
+  unlinkProviderConfirmationInput,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
   resolveSessionConfig,
+  captureNewlyReachableBackendFriction,
   type SessionConfig,
+  type NewlyReachableBackend,
+  type ProviderConfirmationInput,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { confirmProviders } from "./providerConfirmation.js";
@@ -21,11 +25,20 @@ import {
 import { buildRepoManifestFromFs } from "../extractors/fsIntake.js";
 import { loadIgnoreFile } from "../extractors/ignore.js";
 import type { ExecutorRunResult, ScopeSummary } from "./executorResult.js";
+import type { ProviderConfirmationGateState } from "./advanceTypes.js";
 
 interface PackageJsonShape {
   name?: unknown;
   workspaces?: unknown;
 }
+
+/**
+ * Synthetic run key for Gate-0 friction. The confirmation gate runs BEFORE any run
+ * id exists, and the capture chokepoint keys de-dup on {eventType, runId,
+ * discriminator} — a stable constant here means the real discriminator (the backend
+ * key) does the distinguishing, so a re-derive never double-logs the same backend.
+ */
+const PROVIDER_CONFIRMATION_FRICTION_RUN_KEY = "provider-confirmation";
 
 /**
  * Detect signals that the resolved audit root may be the *wrong* directory.
@@ -118,14 +131,37 @@ function readPackageJson(dir: string): PackageJsonShape | undefined {
  * write that shared artifact (atomic temp-then-rename under a file lock — CE-003)
  * so a subsequent remediate run can read + honor the same pool. The per-tool
  * `provider_confirmation` bundle field (the N-X06 seam contract) is unchanged;
- * the shared artifact is built from the same auto-discovery and carries the
- * roster snapshot remediate's accessor uses for staleness.
+ * the shared artifact carries the operator's reach-free route DECISION.
+ *
+ * G3 — the write half of the reconciliation gate. **This executor never silently
+ * honors a newly-reachable backend.** If it is asked to promote while the gate
+ * carries a delta and there is NO operator submission, it fails CLOSED (persists an
+ * exclusion) and records a `newly_reachable_backend` friction event.
+ *
+ * That rule is deliberately NOT keyed on `autonomous`, and the asymmetry matters:
+ * `autonomous` decides who gets ASKED — the CLI emits the delta prompt on an attended
+ * run and folds straight to this executor on an unattended one — but it can never
+ * make silently including an unconfirmed backend correct. This function is exported
+ * and reachable from `advanceAudit` directly, so the no-silent-honor property is
+ * enforced HERE rather than resting on a caller's branch being right (a caller that
+ * promotes an attended delta without asking IS the bug the gate exists to catch).
+ * Enforce in the tool, never in a caller remembering.
+ *
+ * A first-ever confirmation is unaffected: with no confirmation on disk there is no
+ * decision to reconcile against, so the delta is empty and nothing fails closed.
+ *
+ * The persist is MANDATORY, not incidental: `provider_confirmation` is `PRIORITY[0]`,
+ * so a delta that never clears is a drain LIVELOCK, not a no-op. On a successful
+ * promotion the gate is CLEARED — the rebuild folds every reachable backend into
+ * `provider_pool` (an excluded entry stays IN the pool), so all of REACH-NOW is now
+ * CONFIRMED and the delta is empty by construction.
  */
 export async function runProviderConfirmationAutoComplete(
   bundle: ArtifactBundle,
   root?: string,
   artifactsDir?: string,
   effectiveConfig?: SessionConfig,
+  gate?: ProviderConfirmationGateState,
 ): Promise<ExecutorRunResult> {
   // G2: prefer the EFFECTIVE dispatch config threaded from the next-step drain (the
   // per-auditor descriptor resolved over the repo INTENT). The confirmed pool this
@@ -150,10 +186,29 @@ export async function runProviderConfirmationAutoComplete(
   const input = artifactsDir
     ? await readProviderConfirmationInput(artifactsDir)
     : null;
+  // G3 fail-closed reconciliation: a backend the operator never confirmed must not
+  // become dispatchable merely because it is reachable. Excluding it is the
+  // conservative direction — the run proceeds on the confirmed backends.
+  //
+  // Keyed on `input === null` ALONE, not on `autonomous`: a submission IS the
+  // operator's decision and supersedes (on the attended path the gate prompts the
+  // delta and this promotes their answer), but with NO submission there is no
+  // decision to honor and including the backend would be the silent dispatch the gate
+  // exists to prevent — attended or not. See the header for why this is enforced here
+  // rather than in the caller's branch.
+  //
+  // ⚠ Deliberate A′→A″ intermediate state: `exclude` is still ResolvedProviderName[],
+  // so excluding ONE new model of a multi-model backend drops EVERY source of that
+  // provider. Blast radius ≈ 0 (audit's autonomous_mode is new in this commit); A″
+  // widens the grammar to `provider:model` and this narrows to the exact model.
+  const failClosed = input === null ? [...(gate?.newlyReachable ?? [])] : [];
+  const exclude = [
+    ...new Set([...(input?.exclude ?? []), ...failClosed.map((b) => b.provider)]),
+  ];
   const confirmation = confirmProviders(
     sessionConfig,
     process.env,
-    input?.exclude ?? [],
+    exclude,
     input ?? undefined,
   );
   const artifactsWritten = ["provider_confirmation.json"];
@@ -170,7 +225,7 @@ export async function runProviderConfirmationAutoComplete(
       buildSharedProviderConfirmation(
         sessionConfig,
         process.env,
-        input?.exclude ?? [],
+        exclude,
         input?.include ?? [],
         undefined,
         input ?? undefined,
@@ -178,14 +233,63 @@ export async function runProviderConfirmationAutoComplete(
       ),
     );
     artifactsWritten.push("provider-confirmation.json");
+    // G3: the shared confirmation — the ONLY artifact dispatch reads, and the gate's
+    // CONFIRMED operand — now folds every reachable backend into `provider_pool`. So
+    // the delta is empty by construction and the gate must say so: leaving it set
+    // re-selects this `PRIORITY[0]` obligation on the very next fold (autonomous →
+    // re-promote until `advance` throws; attended → re-prompt a delta that is now a
+    // lie). Cleared HERE, inside `if (root)`, because that is exactly where CONFIRMED
+    // actually changed.
+    if (gate) gate.newlyReachable = [];
+  }
+  // G3 consume-and-INVALIDATE. The input has now been promoted, so it is spent — and
+  // leaving it on disk is what would make the gate never fire at all: a LATER delta
+  // re-opens this obligation, the CLI finds the old submission still sitting there,
+  // routes to this executor instead of emitting the prompt, and folds the
+  // newly-reachable backend into the confirmed pool with `excluded: false` — silently
+  // dispatching a backend the operator never confirmed, the exact negation of the
+  // gate. Unlinking makes a stale submission unable to answer a question it was never
+  // asked.
+  //
+  // Guarded on `root`: without it the shared artifact — the only one dispatch reads —
+  // was never written, so the submission has NOT been promoted anywhere durable.
+  // Deleting it would destroy the operator's decision unrecoverably.
+  if (input && artifactsDir && root) {
+    await unlinkProviderConfirmationInput(artifactsDir);
+  }
+  if (failClosed.length > 0 && artifactsDir) {
+    // Loud, not silent: the operator learns (out of band) that autonomy ruled a
+    // backend out on their behalf, and can re-include it at the next attended gate.
+    // Gate-0 predates any run id, so the facts are discriminated by backend key under
+    // a stable synthetic run key — enough for the de-dup this capture needs.
+    await captureNewlyReachableBackendFriction(
+      artifactsDir,
+      PROVIDER_CONFIRMATION_FRICTION_RUN_KEY,
+      failClosed.map((b) => b.key),
+      "audit-code",
+    );
   }
   return {
     updated: { ...bundle, provider_confirmation: confirmation },
     artifacts_written: artifactsWritten,
-    progress_summary: input
-      ? "Applied operator provider confirmation (cost ordering + host roster)."
-      : "Auto-completed provider confirmation gate (headless).",
+    progress_summary: renderConfirmationSummary(input, failClosed),
   };
+}
+
+function renderConfirmationSummary(
+  input: ProviderConfirmationInput | null,
+  newlyReachable: readonly NewlyReachableBackend[],
+): string {
+  if (newlyReachable.length > 0) {
+    return (
+      `No operator decision covers ${newlyReachable.length} newly-reachable ` +
+      `backend(s), so they were fail-closed-excluded rather than dispatched ` +
+      `unconfirmed (${newlyReachable.map((b) => b.key).join(", ")}).`
+    );
+  }
+  return input
+    ? "Applied operator provider confirmation (cost ordering + host roster)."
+    : "Auto-completed provider confirmation gate (headless).";
 }
 
 export async function runIntakeExecutor(

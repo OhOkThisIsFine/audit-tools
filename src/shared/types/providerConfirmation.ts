@@ -36,7 +36,7 @@ export const PROVIDER_CONFIRMATION_RESULT_VERSION = "1.1.0" as const;
  * plain input; the tool owns the canonical envelope it is promoted into (the
  * per-tool `provider_confirmation.json` seam + the shared
  * `provider-confirmation.json`) — the input/envelope split so the tool stays the
- * sole writer of the roster snapshot + cost annotation.
+ * sole writer of the discovered pool + cost annotation.
  */
 export const PROVIDER_CONFIRMATION_INPUT_VERSION =
   "provider-confirmation-input/v1" as const;
