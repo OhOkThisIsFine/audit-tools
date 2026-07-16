@@ -86,16 +86,27 @@ unanimously; **owner approved the greenfield endpoint** — full synthesis in
 **Shipped:** commit 1 (`f5bca305`, retire the source-pool integration, reviewed+attested) + 2a-i
 (`c167fbee`, additive `--host-inventory` channel) + **2a-ii (`605d8a0a`, switch dispatch consumers to
 READ the handshake via `applyDispatchInventory` — loop-core, reviewed+attested; the correct RUNTIME
-overlay but a transitional half-measure — the repo still HAS the dispatch slots).** Inert until the host
-loaders emit inventory (no host does yet → today's behavior byte-for-byte).
+overlay but a transitional half-measure — the repo still HAS the dispatch slots)** + **G1 (`e7b593ac`,
+collapse the `--host-*` flag-bag into ONE `--auditor <json>` `AuditorDescriptor`; independent-reviewed,
+full-suite green, NO release — inert intermediate; NOT loop-core by path so no attestation).** Inert until
+the host loaders emit inventory (no host does yet → today's behavior byte-for-byte).
+
+**⚠ G1 is a BREAKING transport change, unreleased.** `--host-*` capability flags are GONE from the audit
+CLI (only `--host-provider` / `--host-model` remain). The canonical + derived host assets already emit
+`--auditor`, but the installed GLOBAL bins still emit the old flags — a stale host dogfooding G1 would have
+its handshake SILENTLY IGNORED (unknown flags → defaults). Harmless until the next release picks it up;
+just don't dogfding G1 via a stale global bin without reinstalling.
 
 **Greenfield build sequence (each loop-core: green + independent review + attest):**
-- **G1 (IMMEDIATE NEXT)** — collapse the `--host-*` flag-bag into ONE `--auditor <json>` `AuditorDescriptor`.
-  **Fully reconned + planned:** [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](../docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md)
-  (target shape + exhaustive handshake-surface replace map + asset/guard/test list — the next agent should
-  NOT re-run this recon). Pure transport collapse; audit-only; `--host-provider` + inventory-reslice deferred to G2.
-- **G2** split the persisted type (`RepoSessionIntent`, zero dispatch fields → contamination unrepresentable;
-  `resolve(intent, descriptor)`) + fold `provider` into `self` + reslice inventory → `sources`.
+- **G1 — ✅ SHIPPED (`e7b593ac`).** Scope was larger than the plan documented: `prepare-dispatch` + `quota`
+  (both live subcommands) also read the handshake directly and were converted; `--host-model` was NOT dead
+  (two callers) and is retained. `getAuditorDescriptor` re-validates each `self` field to the retired
+  parsers' exact strictness (roster via shared `parseHostModelRoster` — a review-caught drop). Plan doc:
+  [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](../docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md).
+- **G2 (IMMEDIATE NEXT)** — split the persisted type (`RepoSessionIntent`, zero dispatch fields →
+  contamination unrepresentable; `resolve(intent, descriptor)`) + fold `provider` into `self` + reslice
+  inventory → `sources`. Also retire the `persistHostProvider` seam (exists only because
+  `semanticReviewStep` re-reads disk, which G2 changes).
 - **G3** split confirmed_provider_pool (policy on intent + re-resolved reach + autonomous-keyed reconciliation
   + pin the exclusion-key grammar, default `provider:model`).
 - **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
@@ -103,12 +114,14 @@ loaders emit inventory (no host does yet → today's behavior byte-for-byte).
 - Orthogonal (retained): **commit 3** repair-proxy as a kind-1 launch-transport; **commit 4** fix C (host
   cold-start wall — needs a clean minimal repro first); **commit 5** decide kind-3's fate.
 
-**⚠ Quota / free-dispatch blocker (this session):** owner is burning Claude quota fast; free-worker offload
-is DOWN both ways — `ANTHROPIC_BASE_URL` is real Anthropic (repair-proxy not fronting subagents — needs
-operator env setup) AND the `llm`/NIM completion endpoint times out/returns empty even on a trivial prompt.
-Until one clears, do the greenfield work in-Claude FRUGALLY (no subagent panels — the divergent-design
-phase is done + captured) or wait for the free lane. Fastest quota unblock = owner points `ANTHROPIC_BASE_URL`
-at a running repair-proxy backed by a free model.
+**Quota / offload (as of G1 session):** the free `llm read` lane is BACK (used for G1 recon at zero
+Claude-read cost — the earlier "endpoint times out/returns empty" note was stale). `llm write`/NIM
+completion + `ANTHROPIC_BASE_URL` subagent-fronting were NOT retested. G1's mechanical bulk (5 test-file
+conversions, asset regen) was offloaded to **Haiku subagents** (parent Opus orchestrates + verifies green
++ independent review) — the working pattern when the free write-lane is uncertain. NOTE: a Haiku agent
+weakened one test (malformed-roster assertion → incidental TypeError); ALWAYS review offloaded test diffs
+for assertion quality, not just green. Fastest full unblock still = owner points `ANTHROPIC_BASE_URL` at a
+running repair-proxy backed by a free model.
 
 ## Older track — bounded quota-cluster remainder (secondary, not blocking the rework)
 
