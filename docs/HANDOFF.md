@@ -66,7 +66,7 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — G3: split `confirmed_provider_pool`
+## ▶ IMMEDIATE NEXT — G3 commit B+D (split `confirmed_provider_pool`)
 
 **G2.5 SHIPPED — and it deviates from the spec's sketch, deliberately.** Source resolution is now
 IN-PROCESS: `resolveAmbientSources` (`src/shared/providers/auditorSources.ts`) reads the machine-level
@@ -96,6 +96,7 @@ attested).** Source pools only. Residues (host/primary pools unwired — NOT a s
 backlog entry; absent-artifact fail-open; opencode self-spawn asymmetry) are in `docs/backlog.md`.
 
 **Bug 2 — ✅ FIXED in A′ (`043832a5`).** Cost order + λ are POLICY and are no longer gated by a reach check.
+The bug-1 keyspace caveat (`exclude` naming a provider dropped *every* NIM source) is **RESOLVED in A″**.
 
 **A′ — ✅ SHIPPED (`043832a5`, loop-core, two independent reviews + attested, NOT released).** The gate is
 live: policy ungated from reach (bug 2 fixed), the `autonomous_mode`-keyed reconciliation gate built,
@@ -107,31 +108,32 @@ gate is now **mutable state threaded by reference, cleared on promotion**, and a
 `advanceAudit` test pins it. Round 2 re-traced both fixes: non-blocking, findings actioned. The durable
 lessons are in the spec's G3 bullets — read them before A″.
 
-**▶ IMMEDIATE NEXT = G3 commit A″** — widen the exclusion grammar to `provider:model`. A **type + parser**
-change, not an extraction: `ConfirmedDispatchPolicy.exclude` is `ResolvedProviderName[]` and
-`parseProviderNameList` membership-checks against `RESOLVED_PROVIDER_NAMES` (it would *reject* a
-`provider:model` string). Budget the ripple: `resolveExcludedProviders` can no longer return
-`Set<ResolvedProviderName>` — it becomes a **matcher over source keys**, across 4 loop-core areas
-(`apiPool.ts:494-501`, `hybridDispatch.ts:61`, `waveScheduling.ts:298`, `nextStep.ts:1141,1975`,
-`nextStepHelpers.ts:1812`). Add `tests/shared/dispatch-policy-exclusion.test.mjs` +
-`tests/shared/dispatchable-sources.test.mjs` to the red-green set (the plan omitted them; they are exactly
-this matcher's blast radius). Plan of record (four refuted drafts in its preamble — read it):
+**A″ — ✅ SHIPPED (`e0deb96f`, loop-core, two independent reviews + attested, NOT released).** `exclude` is
+now an OPEN three-tier grammar (`provider:model` / bare `provider` / endpoint-host), disambiguated by the
+head token against the closed provider-name set; `resolveExcludedProviders` → `resolveDispatchExclusion`,
+returning a **matcher over backends**. `NewlyReachableBackend` carries the `exclusion_pattern` that rules
+out exactly it, built beside the gate key so the autonomous write can't drift. No `schema_version` bump —
+an old provider-name `exclude` is a strict subset (verified against `dist`). The A′→A″ intermediate state
+(one NIM model excluded ⇒ every NIM source dropped) is **CLOSED**.
+
+**▶ IMMEDIATE NEXT = G3 commit B+D** (merged — the parse gate hard-requires the fields B deletes, so
+B-then-D self-inflicts the exact silent degrade D exists to fix): delete write-only reach
+(`capability_tier` / `self_spawn_blocked` / `excluded` / `reason` / `blended_price_usd_per_mtok`) from the
+PERSISTED shape + loud `schema_version` rejection. **Split the PRODUCER**
+(`buildSharedProviderConfirmation` → a render-builder + a persist-builder), NOT the write site — projecting
+at the write site leaves the reach fields representable on the type (violates *unrepresentable, not
+guarded*). Update the parse gate (`isConfirmedPoolEntry`) in the SAME commit. Then **C** — delete the inert
+`confirmed_provider_pool` slot. Plan of record (four refuted drafts in its preamble — read it):
 [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
 
-**Commit order: ~~A′~~ → A″ → B+D → C** (gate live from A′ onward — no unenforced window at any point):
-- **A″** — widen the exclusion grammar to `provider:model` (see above).
-- **B+D** (merged — the parse gate hard-requires the fields B deletes, so B-then-D self-inflicts the exact
-  silent degrade D exists to fix) — delete write-only reach (`capability_tier` / `self_spawn_blocked` /
-  `excluded` / `reason` / `blended_price_usd_per_mtok`) + loud `schema_version` rejection. Split the
-  PRODUCER (`buildSharedProviderConfirmation` → a render-builder + a persist-builder), NOT the write site —
-  projecting at the write site leaves the reach fields representable on the type.
-- **C** — delete the inert `confirmed_provider_pool` slot.
+⚠ **B+D touches the Gate-0 RENDER path** — A″ backlogged a display gap there (the sources table has no
+status column; the endpoint tier can't mark a provider-granular entry). `excluded` leaves the persisted
+shape in B+D, so fix that gap on the **render** path, not the artifact field. See `docs/backlog.md`.
 
-**⚠ Deliberate intermediate state (A′ → A″ window), not a bug:** A′'s `policy.exclude` is still
-`ResolvedProviderName[]`, so an autonomous exclusion of ONE new NIM model drops **every** NIM source. Blast
-radius ≈ 0 (audit's `autonomous_mode` is brand-new in A′ itself). A″ closes it.
-**Also deliberate:** autonomous auto-confirm is scoped to the DELTA case only — a first-time confirmation
-(no artifact at all) still pauses for the operator even under `autonomous_mode`.
+**Commit order: ~~A′~~ → ~~A″~~ → B+D → C** (gate live from A′ onward — no unenforced window at any point).
+
+**⚠ Deliberate, still current:** autonomous auto-confirm is scoped to the DELTA case only — a first-time
+confirmation (no artifact at all) still pauses for the operator even under `autonomous_mode`.
 
 **Spec amended (2026-07-16):** `spec/unified-dispatch-worker-model.md` G3 now carries the gate as the
 deliverable, phases policy's home (artifact until G6, intent thereafter — the panel's Decision (A) stands),
@@ -192,10 +194,10 @@ just don't dogfding G1 via a stale global bin without reinstalling.
   REWORK and killed all three of its load-bearing choices — that review is why the design is what it is.
   NOT loop-core by path (verified against `loopCorePaths.ts`) → no attestation. NO release (inert-window
   batch continues).
-- **G3 — A′ ✅ SHIPPED (`043832a5`); A″ is IMMEDIATE NEXT** (see the top of this doc). The gate is live;
-  what remains is the exclusion grammar (A″), the write-only-reach deletion (B+D), and the inert slot (C).
-  Policy stays on the confirmation artifact until G6. Plan + the four refuted drafts:
-  [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
+- **G3 — A′ ✅ (`043832a5`) + A″ ✅ (`e0deb96f`); B+D is IMMEDIATE NEXT** (see the top of this doc). The
+  gate is live and the exclusion grammar is model-granular; what remains is the write-only-reach deletion
+  (B+D) and the inert slot (C). Policy stays on the confirmation artifact until G6. Plan + the four refuted
+  drafts: [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
 - **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
   `declared ∩ ambient-verifiable` reach + lies-reachably quarantine). **G6** remediate `--auditor` round-trip.
 - Orthogonal (retained): **commit 3** repair-proxy as a kind-1 launch-transport; **commit 4** fix C (host
