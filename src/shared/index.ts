@@ -268,6 +268,7 @@ export type {
   DesignReviewConfig,
   AnalyzerSetting,
   SessionConfig,
+  HostDispatchInventory,
 } from "./types/sessionConfig.js";
 export {
   PROVIDER_NAMES,

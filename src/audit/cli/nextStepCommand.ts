@@ -77,6 +77,7 @@ import {
   getFlag,
   getHostContextTokens,
   getHostMaxActiveSubagents,
+  getHostInventory,
   getHostModelId,
   getHostModelRoster,
   getHostOutputTokens,
@@ -245,6 +246,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   const hostOutputTokens = getHostOutputTokens(argv);
   const hostModelRoster = getHostModelRoster(argv);
   const hostModelId = getHostModelId(argv);
+  const hostInventory = getHostInventory(argv);
   // B1: an explicit --host-provider override is folded onto session-config.json
   // BEFORE load, so the loaded config (and the disk-reloading semanticReviewStep)
   // key the fan-out to the ACTUAL conversation host. Unset ⇒ auto-detected from env.
@@ -298,6 +300,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     outputTokens: hostOutputTokens,
     modelRoster: hostModelRoster,
     modelId: hostModelId,
+    inventory: hostInventory,
   };
 
   const result = await runDeterministicForNextStep({

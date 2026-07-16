@@ -620,3 +620,28 @@ export interface SessionConfig {
    */
   confirmed_provider_pool?: ConfirmedProviderPoolRef;
 }
+
+/**
+ * The per-auditor DISPATCH INVENTORY carried on the handshake (`--host-inventory`),
+ * NOT read from the repo session-config. The backend/launch set the CURRENT auditor
+ * can dispatch to — reported fresh per-invocation and never inherited
+ * ([[capability-is-per-auditor-not-per-audit]]). A structured subset of the former
+ * session-config dispatch fields; the repo session-config keeps audit INTENT only.
+ * See `spec/unified-dispatch-worker-model.md`. (Introduced by commit 2a-i as the
+ * additive channel; consumers switch to reading it in 2a-ii.)
+ */
+export interface HostDispatchInventory {
+  provider?: ProviderName;
+  host_provider?: ProviderName;
+  subprocess_template?: SubprocessTemplateConfig;
+  claude_code?: ClaudeCodeConfig;
+  codex?: CodexConfig;
+  opencode?: OpenCodeConfig;
+  openai_compatible?: OpenAiCompatibleConfig;
+  vscode_task?: VSCodeTaskConfig;
+  antigravity?: AntigravityConfig;
+  agy?: AgyConfig;
+  sources?: DispatchableSource[];
+  parallel_workers?: number;
+  rolling_engine?: boolean;
+}

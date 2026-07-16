@@ -15,6 +15,7 @@ import {
   type ProviderName,
   type SessionConfig,
   type HostModelRosterEntry,
+  type HostDispatchInventory,
 } from "audit-tools/shared";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 
@@ -289,6 +290,31 @@ export function getHostModelRoster(
 export function getHostModelId(argv: string[]): string | null {
   const value = getFlag(argv, "--host-model-id");
   return value && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * The per-auditor dispatch inventory reported this invocation (`--host-inventory`,
+ * a JSON object). The backend/launch set the CURRENT auditor can dispatch to —
+ * resolved from the auditor's environment, never the repo session-config
+ * ([[capability-is-per-auditor-not-per-audit]]). Malformed JSON / a non-object
+ * throws loudly (like `--host-models`) rather than silently degrading. Additive in
+ * 2a-i; dispatch consumers read it in 2a-ii. `null` when the flag is absent.
+ */
+export function getHostInventory(argv: string[]): HostDispatchInventory | null {
+  const raw = getFlag(argv, "--host-inventory");
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `--host-inventory must be a JSON object: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("--host-inventory must be a JSON object.");
+  }
+  return parsed as HostDispatchInventory;
 }
 
 export function resolveRunProviderName(

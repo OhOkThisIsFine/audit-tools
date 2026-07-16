@@ -13,6 +13,7 @@ const {
   getHostMaxActiveSubagents,
   getHostModelRoster,
   getHostModelId,
+  getHostInventory,
   getOptionalBooleanFlag,
 } = await import("../../src/audit/cli/args.ts");
 const { parseHostBooleanFlag } = await import("../../src/audit/cli/nextStepCommand.ts");
@@ -76,6 +77,37 @@ describe("host descriptor round-trip", () => {
 
   test("an undefined descriptor renders no flags (bare command)", () => {
     expect(renderHostDescriptorFlags(undefined)).toEqual([]);
+  });
+
+  // 2a-i: the per-auditor dispatch inventory rides the continue-command via
+  // --host-inventory (a JSON object), the same never-inherit channel as the other
+  // --host-* fields. Consumers switch to reading it in 2a-ii.
+  test("a dispatch inventory round-trips through --host-inventory", () => {
+    const inventory = {
+      provider: "claude-code",
+      openai_compatible: { base_url: "https://nim.example/v1", model: "m", api_key_env: "NIM_KEY" },
+      sources: [{ id: "s1", provider: "openai-compatible", endpoint: "https://e/v1", model: "m", api_key: "public", cost_per_mtok: 0 }],
+      parallel_workers: 4,
+      rolling_engine: true,
+    };
+    const argv = renderHostDescriptorFlags({ canDispatchSubagents: true, inventory });
+    expect(argv).toContain("--host-inventory");
+    expect(getHostInventory(argv)).toEqual(inventory);
+  });
+
+  test("an empty / absent inventory emits no --host-inventory flag", () => {
+    expect(renderHostDescriptorFlags({ canDispatchSubagents: true, inventory: {} })).not.toContain(
+      "--host-inventory",
+    );
+    expect(renderHostDescriptorFlags({ canDispatchSubagents: true, inventory: null })).not.toContain(
+      "--host-inventory",
+    );
+    expect(getHostInventory(["next-step"])).toBeNull();
+  });
+
+  test("--host-inventory throws loudly on malformed JSON / a non-object (no silent downgrade)", () => {
+    expect(() => getHostInventory(["--host-inventory", "{not json"])).toThrow(/JSON object/);
+    expect(() => getHostInventory(["--host-inventory", "[1,2]"])).toThrow(/must be a JSON object/);
   });
 
   test("nextStepCommand appends the descriptor flags after the base command", () => {

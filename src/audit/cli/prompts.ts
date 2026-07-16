@@ -7,6 +7,7 @@ import {
   buildFrictionTriageBlock,
   type FrictionTriageDecision,
   type HostModelRosterEntry,
+  type HostDispatchInventory,
 } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
@@ -59,6 +60,13 @@ export interface HostDispatchDescriptor {
   outputTokens?: number | null;
   modelRoster?: HostModelRosterEntry[] | null;
   modelId?: string | null;
+  /**
+   * The per-auditor dispatch inventory (backends/launch blocks/sources) carried on
+   * `--host-inventory`. Additive channel (2a-i): it rides every continue-command so a
+   * bare resume preserves the current driver's inventory; consumers switch to reading
+   * it (over the repo session-config) in 2a-ii. [[unified-dispatch-worker-model]]
+   */
+  inventory?: HostDispatchInventory | null;
 }
 
 /**
@@ -84,6 +92,8 @@ export function renderHostDescriptorFlags(
     out.push("--host-model-id", descriptor.modelId);
   if (descriptor.modelRoster != null && descriptor.modelRoster.length > 0)
     out.push("--host-models", JSON.stringify(descriptor.modelRoster));
+  if (descriptor.inventory != null && Object.keys(descriptor.inventory).length > 0)
+    out.push("--host-inventory", JSON.stringify(descriptor.inventory));
   if (descriptor.canDispatchSubagents !== undefined)
     out.push(
       descriptor.canDispatchSubagents
