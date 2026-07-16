@@ -1399,8 +1399,8 @@ export {
 } from "./types/providerConfirmation.js";
 
 // DC-2 — shared session-level provider confirmation (cross-tool Gate-0 artifact)
-export type { SharedProviderConfirmation, ConfirmedDispatchPolicy, NewlyReachableBackend } from "./providers/sharedProviderConfirmation.js";
-export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveExcludedProviders, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput } from "./providers/sharedProviderConfirmation.js";
+export type { SharedProviderConfirmation, ConfirmedDispatchPolicy, DispatchExclusionPattern, DispatchExclusion, ExcludableBackend, NewlyReachableBackend } from "./providers/sharedProviderConfirmation.js";
+export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveDispatchExclusion, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput } from "./providers/sharedProviderConfirmation.js";
 
 export type {
   EncodedClause,

@@ -96,12 +96,21 @@ export function renderProviderConfirmationPrompt(opts: {
           "reachable and your decision says nothing about them — so they are NOT",
           "dispatchable until you decide:",
           "",
-          ...newlyReachable.map((b) => `  - **${b.key}**  (provider: ${b.provider})`),
+          // The exclusion RULE is rendered beside each backend, not left for the
+          // operator to compose: the grammar is model-granular, so a hand-written
+          // rule is exactly where an operator (or a host relaying for them) drops
+          // the model and rules out the whole provider by accident.
+          ...newlyReachable.map(
+            (b) =>
+              `  - **${b.key}**  (provider: ${b.provider}` +
+              ` — to keep it out: \`"exclude": ["${b.exclusion_pattern}"]\`)`,
+          ),
           "",
           "Ask the user about **just these** — do not re-litigate the ordering they",
           "already approved. To accept them into the pool at their suggested",
           "positions, accept verbatim (write just the `schema_version`). To keep one",
-          "out, name its provider in `exclude`.",
+          "out, name its **exclusion rule** (shown beside it) in `exclude` — that",
+          "rules out exactly that backend, not its siblings.",
           "",
           "> Note: any submission clears this delta — the tool rebuilds the whole",
           "> confirmation from your input. The list above tells you what changed; it",
@@ -181,7 +190,7 @@ export function renderProviderConfirmationPrompt(opts: {
     "{",
     `  "schema_version": "${PROVIDER_CONFIRMATION_INPUT_VERSION}",`,
     '  "cost_order": ["<provider-or-model-key>", "..."],',
-    '  "exclude": ["<provider-name>"],',
+    '  "exclude": ["<provider>:<model>", "<provider>", "<endpoint-host>"],',
     '  "include": ["<self-spawn-blocked provider to opt back in>"],',
     '  "host_models": [{ "model_id": "<your model id>", "tier": "frontier|capable|fast" }],',
     '  "dispatch_bias": 0',
@@ -197,8 +206,14 @@ export function renderProviderConfirmationPrompt(opts: {
     "- `host_models` reports YOUR (the host agent's) model roster so those tiers are",
     "  priced from models.dev and confirmable here — otherwise they are priced only",
     "  at dispatch. Each reported `model_id` can appear in `cost_order`.",
-    "- `exclude` drops a provider from the dispatchable pool; `include` opts a",
-    "  self-spawn-blocked provider back in (advanced — normally leave it excluded).",
+    "- `exclude` drops backends from the dispatchable pool. Each entry is a rule, at",
+    "  whatever granularity you mean: `openai-compatible:gpt-oss-120b` rules out that",
+    "  **model** (leaving the provider's other models routable — prefer this, you are",
+    "  confirming model choices); a bare `codex` rules out the whole **provider**; a",
+    "  bare `integrate.api.nvidia.com` (or `localhost:8000`) rules out every source at",
+    "  that **endpoint host**. A rule that matches nothing is inert.",
+    "  `include` opts a self-spawn-blocked provider back in (advanced — normally",
+    "  leave it excluded).",
     "- `dispatch_bias` (λ ∈ [0,1]) is the cost↔speed operating point: **0 (default) =",
     "  cheapest-first**; **1 = fastest-first** (route to the highest-throughput capable",
     "  pool regardless of price); values between blend the two. Capability is always a",

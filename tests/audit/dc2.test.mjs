@@ -273,7 +273,36 @@ await test("G3: a newly-reachable SOURCE appears in the delta, keyed by its mode
     [{ id: "new-nim", provider: "openai-compatible", endpoint: "https://x/v1", model: "brand-new-model" }],
     CLEAN_ENV,
   );
-  expect(delta).toEqual([{ key: "brand-new-model", provider: "openai-compatible" }]);
+  // A″: the backend carries the exclusion PATTERN that rules out exactly it,
+  // built beside the key it was compared on. The autonomous fail-closed write
+  // persists this verbatim rather than re-deriving it, so the rule cannot drift
+  // from the delta — and at `provider:model` it no longer drops the backend's
+  // sibling models (the A′ intermediate state).
+  expect(delta).toEqual([
+    {
+      key: "brand-new-model",
+      provider: "openai-compatible",
+      exclusion_pattern: "openai-compatible:brand-new-model",
+    },
+  ]);
+});
+
+// A modelless CLI is the case a bare-`model_id` key would miss entirely: it must
+// still delta (keyed by provider), and its rule must be the COARSE provider tier —
+// a `provider:model` rule would never match a backend whose model only arrives at
+// the dispatch handshake, so the gate would fail-closed-exclude and then dispatch
+// it anyway.
+await test("G3/A″: a modelless backend deltas by provider and rules out at the provider tier", () => {
+  const built = buildSharedProviderConfirmation({}, CLEAN_ENV);
+  const delta = computeNewlyReachableBackends(
+    built,
+    {},
+    [{ id: "cli", provider: "opencode" }],
+    CLEAN_ENV,
+  );
+  expect(delta).toEqual([
+    { key: "opencode", provider: "opencode", exclusion_pattern: "opencode" },
+  ]);
 });
 
 // Model granularity is the POINT, not a refinement: the operator confirms *model*

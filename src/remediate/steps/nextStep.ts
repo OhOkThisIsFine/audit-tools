@@ -9,7 +9,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveExcludedProviders, readOptionalJsonFile, readValidatedRepoSessionIntent, resolveSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, resolveSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -1119,7 +1119,7 @@ export async function driveRollingImplementDispatch(
     // gathered reach. Read here because this layer owns `root`; self-spawn-blocked is
     // recomputed against THIS process's env rather than inherited from the auditor
     // that wrote the confirmation.
-    excludedProviders: resolveExcludedProviders(
+    excludedBackends: resolveDispatchExclusion(
       await readConfirmedDispatchPolicy(options.root),
     ),
   });
@@ -1953,7 +1953,7 @@ async function buildImplementDispatchStep(ctx: {
         demotePrimaryInProcess: demoteBackendToSource,
         // The operator's Gate-0 exclusions, applied as a set-difference over freshly
         // gathered reach; self-spawn-blocked recomputed against THIS process's env.
-        excludedProviders: resolveExcludedProviders(
+        excludedBackends: resolveDispatchExclusion(
           await readConfirmedDispatchPolicy(root),
         ),
       });

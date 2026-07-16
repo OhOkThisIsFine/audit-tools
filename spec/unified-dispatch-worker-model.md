@@ -308,9 +308,12 @@ must mean something to an auditor with a different reachable set) — default `p
     shells out via `spawnSync` and cannot live in the sync/pure obligation predicate); and the input file
     must be **consume-and-invalidated** (it is never unlinked today, so a stale submission silently
     auto-confirms the delta).
-  - **The exclusion-key grammar is `provider:model` with `provider` as the coarser pattern** — a **type +
-    parser change** (`ConfirmedDispatchPolicy.exclude` is `ResolvedProviderName[]`; `parseProviderNameList`
-    would reject a `provider:model` string), NOT an extraction of an existing helper. Do not conflate it
+  - **The exclusion-key grammar is `provider:model` with `provider` and endpoint-host as the coarser
+    patterns** — SHIPPED in A″. `ConfirmedDispatchPolicy.exclude` is `DispatchExclusionPattern[]` (an OPEN
+    grammar: an endpoint-host pattern is not a provider name, so `exclude` is kept verbatim rather than
+    membership-checked, and an unmatchable rule is inert); `resolveDispatchExclusion` returns a MATCHER over
+    backends, not a name set. The head token decides the tier against the closed provider-name set, which is
+    what keeps the three forms unambiguous. Do not conflate it
     with the quota-ledger pool identity `provider[#account]/model` or with dispatch's bare-`model_id`
     lookup: **three distinct keyspaces**, deliberately kept distinct. The gate keys on
     `model_id ?? provider-name` — `representativeModelId` knows a model for only 2 of 6 providers, so a

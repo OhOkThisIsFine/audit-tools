@@ -9,6 +9,7 @@ import type {
   DiscoveredRateLimitsInput,
   HostModelRosterEntry,
   CapacityPool,
+  DispatchExclusion,
 } from "audit-tools/shared";
 import { computeDispatchAdmission, createReservationLedger, admissionPoolsFromSummaries } from "audit-tools/shared";
 import {
@@ -295,8 +296,8 @@ export async function buildConfirmedPools(input: {
   hostSession?: HostSessionQuotaSource;
   /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
   demotePrimaryInProcess?: boolean;
-  /** Operator-excluded + locally-self-spawn-blocked providers (`resolveExcludedProviders`). */
-  excludedProviders?: ReadonlySet<string>;
+  /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
+  excludedBackends?: DispatchExclusion;
 }): Promise<CapacityPool[]> {
   // Defect-1: the ACTUAL configured backend (used to build the demoted source pool) vs
   // the HOST-pool identity. When an attended host demotes a headless backend to a source
@@ -340,7 +341,7 @@ export async function buildConfirmedPools(input: {
     quotaSource,
     quotaEntries,
     demotePrimaryInProcess: input.demotePrimaryInProcess,
-    excludedProviders: input.excludedProviders,
+    excludedBackends: input.excludedBackends,
   });
   primaryPools.push(...sourcePools);
 

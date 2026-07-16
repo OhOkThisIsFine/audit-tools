@@ -14,14 +14,20 @@ import { parseProviderModelKey } from "./httpQuotaSource.js";
 import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
 import { deriveLocalAccountId, foldAccountCooldown } from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
+import type { DispatchExclusion } from "../providers/sharedProviderConfirmation.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 import { resolveConversationHostProvider } from "../providers/providerPathGuard.js";
 
 /**
- * The stable id of a dispatchable source — its explicit `id`, or a
- * `${provider}:${model ?? endpoint}` key so two sources of the same provider stay
- * distinct as long as their model/endpoint differ. This is the CapacityPool id and
- * the key learned quota is recorded under.
+ * The stable id of a dispatchable source — its explicit `id`, or the quota-ledger
+ * pool identity `provider[#account]/(model ?? endpoint ?? *)` ({@link buildProviderModelKey})
+ * so two sources of the same provider stay distinct as long as their model/endpoint
+ * differ. This is the CapacityPool id and the key learned quota is recorded under.
+ *
+ * ⚠ Keyspace (1) of three, and NOT the `provider:model` operator exclusion grammar
+ * (`DispatchExclusionPattern`) it superficially resembles — an account is load-bearing
+ * here (the double-grant boundary) and irrelevant to a rule about a backend. Nor is it
+ * the gate's `model_id ?? provider` compare key. Do not unify them.
  */
 export function dispatchableSourceId(source: DispatchableSource, account?: string | null): string {
   if (source.id) return account ? `${source.id}#${account}` : source.id;
@@ -491,9 +497,13 @@ export async function buildSourcePools(params: {
   /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
   demotePrimaryInProcess?: boolean;
   /**
-   * Provider names the operator ruled out at Gate-0, plus any recomputed as
-   * self-spawn-blocked in THIS process (`resolveExcludedProviders`). Applied as a
+   * The backends the operator ruled out at Gate-0, plus any recomputed as
+   * self-spawn-blocked in THIS process (`resolveDispatchExclusion`). Applied as a
    * set-difference over freshly-gathered reach — never additively.
+   *
+   * A matcher rather than a name set because the grammar is MODEL-granular
+   * (`provider:model`): excluding one model of a multi-model backend must leave that
+   * backend's other sources routable, which a provider-name set cannot express.
    *
    * Filtered HERE, on the routing side, rather than inside
    * {@link gatherDispatchableSources}: the gather also feeds the Gate-0 confirmation
@@ -503,14 +513,14 @@ export async function buildSourcePools(params: {
    * Omit ⇒ no filtering (the pool build is unaware of Gate-0), so a caller that has
    * no confirmation to read behaves exactly as before.
    */
-  excludedProviders?: ReadonlySet<string>;
+  excludedBackends?: DispatchExclusion;
 }): Promise<CapacityPool[]> {
   const gathered = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
     demotePrimaryInProcess: params.demotePrimaryInProcess,
   });
-  const excluded = params.excludedProviders;
-  const sources = excluded?.size
-    ? gathered.filter((source) => !excluded.has(source.provider))
+  const excluded = params.excludedBackends;
+  const sources = excluded
+    ? gathered.filter((source) => !excluded.excludes(source))
     : gathered;
   const pools = await Promise.all(
     sources.map((source) =>

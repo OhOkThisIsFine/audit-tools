@@ -133,9 +133,13 @@ predicate flip.
     `descriptor.sources ?? resolveAmbientSources(options).sources`, so with an explicit `--auditor
     sources[]` (the operator escape hatch, spec `:254`) `resolveAmbientSources` **is never called**;
   - **the demoted primary**, synthesized at gather time (`:450-453`);
-  - **the legacy `openai_compatible` fold** (`:454-459`) — `openai-compatible` has no `CLI_PROBES` entry
-    (`providerConfirmation.ts:100-127`), so `discoverProviders` never sees it and it is not in the
-    declaration file either.
+  - **the legacy `openai_compatible` fold** (`:454-459`) — it is not in the declaration file.
+    ⚠ **Correction (A″ review, verified at HEAD):** the original claim here — *"`openai-compatible` has no
+    `CLI_PROBES` entry, so `discoverProviders` never sees it"* — is **FALSE**. `providerConfirmation.ts:196-200`
+    surfaces `openai-compatible` explicitly when it is configured (no PATH probe needed). The plan's REACH-NOW
+    conclusion is unaffected, but do not reason from the retracted clause: it is precisely *because*
+    `openai-compatible` DOES enter `provider_pool` with a `model_id` that a confirmed model is recognized and
+    its siblings still delta.
 
   Draft 4 used `resolveAmbientSources` alone: it deleted the mechanism that observed the event and replaced
   it with one structurally blind to it. Draft 5 added `discoverProviders` but still reconstructed the

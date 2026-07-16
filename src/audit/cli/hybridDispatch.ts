@@ -25,6 +25,7 @@ import {
   buildQuotaSource,
   readQuotaStateOrDegrade,
   type CapacityPool,
+  type DispatchExclusion,
   type QuotaStateEntry,
   type SessionConfig,
 } from "audit-tools/shared";
@@ -58,8 +59,8 @@ export async function buildAuditSourcePools(
   sessionConfig: SessionConfig,
   options?: {
     demotePrimaryInProcess?: boolean;
-    /** Operator-excluded + locally-self-spawn-blocked providers (`resolveExcludedProviders`). */
-    excludedProviders?: ReadonlySet<string>;
+    /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
+    excludedBackends?: DispatchExclusion;
   },
 ): Promise<CapacityPool[]> {
   const primaryProviderName =
@@ -77,7 +78,7 @@ export async function buildAuditSourcePools(
     // backend (codex/opencode/openai-compatible) to a source pool so the host fans out
     // onto it alongside its own subagents instead of the backend monopolizing.
     demotePrimaryInProcess: options?.demotePrimaryInProcess,
-    excludedProviders: options?.excludedProviders,
+    excludedBackends: options?.excludedBackends,
   });
 }
 

@@ -148,7 +148,13 @@ describe("autonomous fail-closed exclusion", () => {
   // A fresh gate per test — it is MUTABLE (the executor clears it), so sharing one
   // between tests would let a promotion in one silently empty the next.
   const autonomousGate = () => ({
-    newlyReachable: [{ key: "brand-new-model", provider: "openai-compatible" }],
+    newlyReachable: [
+      {
+        key: "brand-new-model",
+        provider: "openai-compatible",
+        exclusion_pattern: "openai-compatible:brand-new-model",
+      },
+    ],
     autonomous: true,
   });
 
@@ -159,8 +165,9 @@ describe("autonomous fail-closed exclusion", () => {
       const read = await readSharedProviderConfirmation(root);
       expect(
         read.policy?.exclude,
-        "the unconfirmed backend's provider is ruled out on the operator's behalf",
-      ).toContain("openai-compatible");
+        "the unconfirmed backend is ruled out on the operator's behalf — at MODEL " +
+          "granularity (A″), so the backend's sibling models stay routable",
+      ).toEqual(["openai-compatible:brand-new-model"]);
     });
   });
 
@@ -227,7 +234,7 @@ describe("autonomous fail-closed exclusion", () => {
       expect(
         read.policy?.exclude,
         "no operator decision covers it ⇒ it must not become dispatchable",
-      ).toContain("openai-compatible");
+      ).toContain("openai-compatible:brand-new-model");
     });
   });
 
@@ -248,7 +255,7 @@ describe("autonomous fail-closed exclusion", () => {
       expect(
         read.policy?.exclude,
         "the operator accepted the new backend — the tool must not overrule them",
-      ).not.toContain("openai-compatible");
+      ).not.toContain("openai-compatible:brand-new-model");
     });
   });
 
@@ -333,7 +340,13 @@ describe("gate → obligation → executor selection", () => {
   test("attended + delta + no submission ⇒ EMITS the prompt (does not promote)", async () => {
     await withTempRoot(async (_root, artifactsDir) => {
       const defs = buildAuditObligations({
-        newlyReachable: [{ key: "brand-new-model", provider: "openai-compatible" }],
+        newlyReachable: [
+      {
+        key: "brand-new-model",
+        provider: "openai-compatible",
+        exclusion_pattern: "openai-compatible:brand-new-model",
+      },
+    ],
         autonomous: false,
       });
       const def = defs.find((d) => d.id === "provider_confirmation");
@@ -358,7 +371,13 @@ describe("gate → obligation → executor selection", () => {
       // fold does not abort before proving convergence.
       await writeFile(join(root, "index.js"), "export const x = 1;\n", "utf8");
       const gate = {
-        newlyReachable: [{ key: "brand-new-model", provider: "openai-compatible" }],
+        newlyReachable: [
+      {
+        key: "brand-new-model",
+        provider: "openai-compatible",
+        exclusion_pattern: "openai-compatible:brand-new-model",
+      },
+    ],
         autonomous: true,
       };
       // If the gate never cleared, this PRIORITY[0] obligation would be re-selected
@@ -375,7 +394,7 @@ describe("gate → obligation → executor selection", () => {
       expect(
         read?.policy?.exclude,
         "advanceAudit must thread the gate into its OWN decide, or the gate is dead",
-      ).toContain("openai-compatible");
+      ).toContain("openai-compatible:brand-new-model");
       expect(gate.newlyReachable, "the promotion cleared the delta").toEqual([]);
     });
   });

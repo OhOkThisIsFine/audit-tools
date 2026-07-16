@@ -197,13 +197,18 @@ export async function runProviderConfirmationAutoComplete(
   // exists to prevent — attended or not. See the header for why this is enforced here
   // rather than in the caller's branch.
   //
-  // ⚠ Deliberate A′→A″ intermediate state: `exclude` is still ResolvedProviderName[],
-  // so excluding ONE new model of a multi-model backend drops EVERY source of that
-  // provider. Blast radius ≈ 0 (audit's autonomous_mode is new in this commit); A″
-  // widens the grammar to `provider:model` and this narrows to the exact model.
+  // A″: each backend carries the `DispatchExclusionPattern` that rules out EXACTLY
+  // it — `provider:model` where the model is knowable, else the coarse `provider`
+  // tier for a CLI whose model only arrives at the dispatch handshake. So excluding
+  // one new model of a multi-model backend no longer drops that backend's other
+  // sources. The pattern is built by the gate beside the key it compared, never
+  // re-derived here, so the rule persisted cannot drift from the delta detected.
   const failClosed = input === null ? [...(gate?.newlyReachable ?? [])] : [];
   const exclude = [
-    ...new Set([...(input?.exclude ?? []), ...failClosed.map((b) => b.provider)]),
+    ...new Set([
+      ...(input?.exclude ?? []),
+      ...failClosed.map((b) => b.exclusion_pattern),
+    ]),
   ];
   const confirmation = confirmProviders(
     sessionConfig,

@@ -109,7 +109,7 @@ export function sharedProviderConfirmationPath(root: string): string {
  * because that flag folds in the WRITING auditor's `CLAUDECODE`/`CODEX` env via
  * `isSelfSpawnBlocked` — persisting it would make one auditor's environment
  * decide another's routing. Self-spawn-blocked is therefore recomputed in the
- * READING process (see {@link resolveExcludedProviders}).
+ * READING process (see {@link resolveDispatchExclusion}).
  *
  * Because policy is reach-independent, it stays valid when the discovered reach
  * changes. No read of this artifact gates on a reach check, for exactly that
@@ -118,10 +118,52 @@ export function sharedProviderConfirmationPath(root: string): string {
  * they do not depend on (G3 step 1).
  */
 export interface ConfirmedDispatchPolicy {
-  /** Provider names the operator excluded from the dispatchable pool. */
-  exclude?: ResolvedProviderName[];
+  /**
+   * {@link DispatchExclusionPattern}s the operator ruled out of the dispatchable
+   * pool. Model-granular by default (`provider:model`) — the operator confirms
+   * *model* choices, so excluding one model of a multi-model backend must not drop
+   * the backend's other models.
+   */
+  exclude?: DispatchExclusionPattern[];
   /** Self-spawn-blocked provider names the operator explicitly opted back IN. */
   include?: ResolvedProviderName[];
+}
+
+/**
+ * One rule in the operator's exclusion grammar — **reach-independent by
+ * construction**, so a rule authored on one auditor means the same thing to an
+ * auditor with a different reachable set (spec/unified-dispatch-worker-model.md).
+ *
+ * Three forms, disambiguated by the head token against the CLOSED set of provider
+ * names ({@link RESOLVED_PROVIDER_NAMES}) — so no form can shadow another:
+ *
+ * | Pattern | Head is a provider name? | Matches |
+ * |---|---|---|
+ * | `openai-compatible:gpt-oss-120b` | yes | that provider AND that exact model — the **default** granularity |
+ * | `codex` | yes (no `:`) | every backend of that provider — the coarse provider tier |
+ * | `integrate.api.nvidia.com` / `localhost:8000` | no | every source whose `endpoint` host (and port, when the pattern names one) matches — the coarse endpoint tier |
+ *
+ * ⚠ This is a THIRD keyspace, deliberately distinct from the quota-ledger pool
+ * identity (`provider[#account]/model`, `buildProviderModelKey`): an account is
+ * irrelevant to a rule about a backend. Do not unify them.
+ */
+export type DispatchExclusionPattern = string;
+
+/** A backend an exclusion rule can be evaluated against — structurally a `DispatchableSource`. */
+export interface ExcludableBackend {
+  provider: string;
+  model?: string;
+  endpoint?: string;
+}
+
+/**
+ * The resolved exclusion rule set for THIS process: the operator's persisted
+ * patterns plus every locally self-spawn-blocked provider. Applied as a
+ * set-difference FILTER over freshly-gathered reach, never additively.
+ */
+export interface DispatchExclusion {
+  /** True ⇒ this backend is ruled out and must not become a dispatch pool. */
+  excludes(backend: ExcludableBackend): boolean;
 }
 
 export interface SharedProviderConfirmation {
@@ -129,7 +171,7 @@ export interface SharedProviderConfirmation {
   schema_version: typeof SHARED_PROVIDER_CONFIRMATION_VERSION;
   /**
    * The operator's explicit, reach-free route decision. Read at dispatch by
-   * {@link resolveExcludedProviders} and applied as a set-difference filter over
+   * {@link resolveDispatchExclusion} and applied as a set-difference filter over
    * freshly-discovered reach — never additively. Absent ⇒ no operator exclusions
    * (self-spawn-blocked providers are still excluded, recomputed locally).
    */
@@ -171,6 +213,11 @@ function sortNames(names: readonly ResolvedProviderName[]): ResolvedProviderName
   return [...new Set(names)].sort();
 }
 
+function sortStrings(values: readonly string[]): string[] {
+  // Deduplicate + sort so a persisted list is order-insensitive and stable.
+  return [...new Set(values)].sort();
+}
+
 // ---------------------------------------------------------------------------
 // Build
 // ---------------------------------------------------------------------------
@@ -192,7 +239,10 @@ function sortNames(names: readonly ResolvedProviderName[]): ResolvedProviderName
  *
  * @param sessionConfig - Current session config; may be an empty `{}`.
  * @param env           - Process env snapshot; defaults to `process.env`.
- * @param exclude       - Provider names to pre-exclude (from a prior gate).
+ * @param exclude       - {@link DispatchExclusionPattern}s to pre-exclude (from a
+ *   prior gate). A `provider:model` pattern marks a pool entry excluded only when
+ *   that entry's `representativeModelId` IS that model — the same key the routing
+ *   filter matches on, so display and dispatch cannot disagree.
  * @param include       - Provider names the operator explicitly opts back IN,
  *   overriding the default self-spawn-blocked exclusion for those names.
  * @param detectCommand - Injectable PATH-detection hook, forwarded to
@@ -208,15 +258,32 @@ function sortNames(names: readonly ResolvedProviderName[]): ResolvedProviderName
 export function buildSharedProviderConfirmation(
   sessionConfig: SessionConfig = {},
   env: NodeJS.ProcessEnv = process.env,
-  exclude: ResolvedProviderName[] = [],
+  exclude: DispatchExclusionPattern[] = [],
   include: ResolvedProviderName[] = [],
   detectCommand?: (command: string) => boolean,
   input?: ProviderConfirmationInput,
   sources: DispatchableSource[] = [],
 ): SharedProviderConfirmation {
   const discovered = discoverProviders(sessionConfig, env, detectCommand);
-  const excludeSet = new Set<ResolvedProviderName>(exclude);
+  const operatorExcluded = buildExclusion(exclude);
   const includeSet = new Set<ResolvedProviderName>(include);
+  // Evaluate a pool entry against the operator's rules at the SAME key the routing
+  // filter uses — `representativeModelId` is what `computeNewlyReachableBackends`
+  // and `annotateConfirmedPool` key a provider by, so a `provider:model` rule marks
+  // exactly the entry it will later filter.
+  //
+  // ⚠ The provider + model tiers ONLY. `provider_pool` is provider-granular and an
+  // entry has no endpoint, so an endpoint-host rule can never mark one — that tier
+  // addresses SOURCES, which this pool does not enumerate. The direction is safe
+  // (the rule is still honored at `buildSourcePools`; the Gate-0 table merely
+  // under-reports it as "included"), but it is a real display/routing gap and it is
+  // NOT closed here. Backlog: the Gate-0 sources table carries no status column at
+  // all, so no tier is reflected for a source today.
+  const ruledOut = (name: ResolvedProviderName): boolean =>
+    operatorExcluded.excludes({
+      provider: name,
+      model: representativeModelId(name, sessionConfig),
+    });
 
   const pool: ConfirmedPoolEntry[] = [];
 
@@ -226,7 +293,7 @@ export function buildSharedProviderConfirmation(
     pool.push({
       name: "worker-command",
       capability_tier: "unknown" satisfies CapabilityTier,
-      excluded: excludeSet.has("worker-command"),
+      excluded: ruledOut("worker-command"),
       reason: "always-available fallback; no PATH detection required",
     });
   }
@@ -238,8 +305,7 @@ export function buildSharedProviderConfirmation(
     // consumers never have to parse `reason`.
     const blocked = provider.selfSpawnBlocked === true;
     const operatorIncluded = includeSet.has(provider.name);
-    const excluded =
-      excludeSet.has(provider.name) || (blocked && !operatorIncluded);
+    const excluded = ruledOut(provider.name) || (blocked && !operatorIncluded);
     pool.push({
       name: provider.name,
       capability_tier: provider.capabilityTier,
@@ -277,42 +343,47 @@ export function buildSharedProviderConfirmation(
  * (so the field stays absent rather than persisting an empty shell).
  */
 function buildConfirmedDispatchPolicy(
-  exclude: readonly ResolvedProviderName[],
+  exclude: readonly DispatchExclusionPattern[],
   include: readonly ResolvedProviderName[],
 ): { policy: ConfirmedDispatchPolicy } | undefined {
   if (exclude.length === 0 && include.length === 0) return undefined;
   return {
     policy: {
-      ...(exclude.length > 0 ? { exclude: sortNames(exclude) } : {}),
+      ...(exclude.length > 0 ? { exclude: sortStrings(exclude) } : {}),
       ...(include.length > 0 ? { include: sortNames(include) } : {}),
     },
   };
 }
 
 /**
- * The dispatchable-pool exclusion set for THIS process: the operator's explicit
- * exclusions, plus every provider that is self-spawn-blocked *in this process's
- * env* and was not explicitly opted back in.
+ * Keep every non-empty pattern verbatim — **no membership check.** Unlike
+ * {@link parseProviderNameList}, this list is an open grammar: a pattern whose head
+ * is not a provider name is a legitimate endpoint-host rule, so "unknown ⇒ drop"
+ * would silently delete the operator's endpoint tier. An unmatchable pattern is
+ * inert (it simply matches nothing), which is the safe direction for a filter.
  *
- * Reach is recomputed here rather than read from the artifact's derived `excluded`
- * flag — that flag encodes the WRITING auditor's env, and an auditor for whom a
- * provider is perfectly spawnable must not inherit another's block. The operator's
- * decision is inherited (it is a rule); the reach assessment is not.
- *
- * ⚠ **This set is only safe to apply to SOURCE pools.** Inside any agent session it
- * ALWAYS contains that agent (`CLAUDECODE` ⇒ `claude-code`, `CODEX` ⇒ `codex`) — i.e.
- * the conversation host itself. Applying it to HOST pools would zero out dispatch
- * entirely: the driver would exclude itself. It is harmless at `buildSourcePools`
- * only because a host can never BE a source — `claude-code` is structurally absent
- * from `DISPATCHABLE_SOURCE_PROVIDERS`, so in a Claude Code session the filter is a
- * no-op. Honoring an operator exclusion of the host/primary provider therefore is NOT
- * a matter of passing this set to the host-pool builder; it needs a separate decision
- * about what excluding your own driver should even mean.
+ * Returns `undefined` for a non-array or an all-empty array, so the field stays
+ * absent rather than persisting an empty shell.
  */
+function parseExclusionPatterns(
+  value: unknown,
+): DispatchExclusionPattern[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const patterns = value.filter(
+    (v): v is string => typeof v === "string" && v.trim().length > 0,
+  );
+  return patterns.length > 0 ? patterns.map((p) => p.trim()) : undefined;
+}
+
 /**
  * Keep only real provider names, dropping anything unknown. Returns `undefined` for a
  * non-array or an array with no recognizable name, so an unknown entry degrades that
  * entry — never the whole list.
+ *
+ * Retained for `include` ONLY: that list opts a *self-spawn-blocked provider* back in,
+ * and self-spawn-blockedness is a property of a provider (`isSelfSpawnBlocked` keys on
+ * the provider name), so its keyspace is genuinely the closed name set — not the open
+ * exclusion grammar.
  */
 function parseProviderNameList(
   value: unknown,
@@ -390,15 +461,29 @@ export function confirmedBackendKeys(
 export interface NewlyReachableBackend {
   /** The gate key — `model_id ?? provider name`. Stable, operator-facing. */
   key: string;
-  /**
-   * The backend's provider name. Carried alongside `key` because the two are
-   * consumed at DIFFERENT granularities: the gate compares `key` (model-level — the
-   * point of the gate), while A′'s `policy.exclude` is still
-   * `ResolvedProviderName[]` and can only express a provider-level exclusion.
-   * A″ widens `exclude` to the `provider:model` grammar, after which the autonomous
-   * write keys off `key` and this field collapses into it.
-   */
+  /** The backend's provider name. Display only — the prompt names it beside `key`. */
   provider: ResolvedProviderName;
+  /**
+   * The {@link DispatchExclusionPattern} that rules out **exactly this backend** —
+   * `provider:model` where the model is knowable, else the coarse `provider` tier.
+   * Built HERE rather than re-derived by the autonomous fail-closed write, so the
+   * rule the gate persists cannot drift from the key the gate compared.
+   */
+  exclusion_pattern: DispatchExclusionPattern;
+}
+
+/**
+ * The pattern that rules out one backend at the finest granularity its model is
+ * knowable at. The inverse of {@link backendGateKey}, and deliberately adjacent to
+ * it: a `provider:model` rule matches only when the routing filter sees that exact
+ * model, so a backend whose model arrives at the dispatch handshake (a CLI) must be
+ * ruled out at the coarse `provider` tier or the rule would never match.
+ */
+function backendExclusionPattern(
+  modelId: string | undefined,
+  providerName: string,
+): DispatchExclusionPattern {
+  return modelId ? `${providerName}:${modelId}` : providerName;
 }
 
 /**
@@ -434,34 +519,158 @@ export function computeNewlyReachableBackends(
   detectCommand?: (command: string) => boolean,
 ): NewlyReachableBackend[] {
   const confirmed = confirmedBackendKeys(confirmation);
-  const reachNow = new Map<string, ResolvedProviderName>();
+  const reachNow = new Map<string, NewlyReachableBackend>();
+  const record = (
+    modelId: string | undefined,
+    provider: ResolvedProviderName,
+  ): void => {
+    reachNow.set(backendGateKey(modelId, provider), {
+      key: backendGateKey(modelId, provider),
+      provider,
+      exclusion_pattern: backendExclusionPattern(modelId, provider),
+    });
+  };
   for (const provider of discoverProviders(sessionConfig, env, detectCommand)) {
-    const key = backendGateKey(
-      representativeModelId(provider.name, sessionConfig),
-      provider.name,
-    );
-    reachNow.set(key, provider.name);
+    record(representativeModelId(provider.name, sessionConfig), provider.name);
   }
   for (const source of sources) {
-    reachNow.set(backendGateKey(source.model, source.provider), source.provider);
+    record(source.model, source.provider);
   }
-  return [...reachNow.entries()]
-    .filter(([key]) => !confirmed.has(key))
-    .map(([key, provider]) => ({ key, provider }))
+  return [...reachNow.values()]
+    .filter((backend) => !confirmed.has(backend.key))
     .sort((a, b) => a.key.localeCompare(b.key));
 }
 
-export function resolveExcludedProviders(
+/**
+ * The dispatchable-pool exclusion rules for THIS process: the operator's explicit
+ * {@link DispatchExclusionPattern}s, plus every provider that is self-spawn-blocked
+ * *in this process's env* and was not explicitly opted back in.
+ *
+ * Reach is recomputed here rather than read from the artifact's derived `excluded`
+ * flag — that flag encodes the WRITING auditor's env, and an auditor for whom a
+ * provider is perfectly spawnable must not inherit another's block. The operator's
+ * decision is inherited (it is a rule); the reach assessment is not.
+ *
+ * ⚠ **These rules are only safe to apply to SOURCE pools.** Inside any agent session
+ * the self-spawn half ALWAYS names that agent (`CLAUDECODE` ⇒ `claude-code`, `CODEX`
+ * ⇒ `codex`) — i.e. the conversation host itself. Applying them to HOST pools would
+ * zero out dispatch entirely: the driver would exclude itself. It is harmless at
+ * `buildSourcePools` only because a host can never BE a source — `claude-code` is
+ * structurally absent from `DISPATCHABLE_SOURCE_PROVIDERS`, so in a Claude Code
+ * session the filter is a no-op. Honoring an operator exclusion of the host/primary
+ * provider therefore is NOT a matter of passing these rules to the host-pool builder;
+ * it needs a separate decision about what excluding your own driver should even mean.
+ */
+export function resolveDispatchExclusion(
   policy: ConfirmedDispatchPolicy | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
-): Set<ResolvedProviderName> {
+): DispatchExclusion {
   const included = new Set(policy?.include ?? []);
-  const excluded = new Set<ResolvedProviderName>(policy?.exclude ?? []);
-  for (const name of RESOLVED_PROVIDER_NAMES) {
-    if (included.has(name)) continue;
-    if (isSelfSpawnBlocked(name, env)) excluded.add(name);
+  // The local reach half: a self-spawn-blocked provider is ruled out at PROVIDER
+  // granularity (blockedness is a property of the provider, not of one of its
+  // models), recomputed against THIS process's env rather than inherited.
+  const blocked = RESOLVED_PROVIDER_NAMES.filter(
+    (name) => !included.has(name) && isSelfSpawnBlocked(name, env),
+  );
+  return buildExclusion([...(policy?.exclude ?? []), ...blocked]);
+}
+
+/**
+ * The pure-policy matcher: the operator's patterns and nothing else. Split out
+ * because the Gate-0 pool BUILDER must evaluate the operator's rules WITHOUT the
+ * local self-spawn fold — it derives `self_spawn_blocked` from `discoverProviders`
+ * on its own and would otherwise conflate the two into one indistinguishable
+ * `excluded` verdict.
+ */
+function buildExclusion(
+  patterns: readonly DispatchExclusionPattern[],
+): DispatchExclusion {
+  const rules = patterns.map(parseExclusionRule);
+  return { excludes: (backend) => rules.some((rule) => ruleMatches(rule, backend)) };
+}
+
+/**
+ * One parsed exclusion rule. The `kind` is decided by the head token against the
+ * CLOSED provider-name set, which is what makes the grammar unambiguous: a bare
+ * `codex` can only ever be the provider tier, and `localhost:8000` can only ever be
+ * the endpoint tier, because `localhost` is not a provider name.
+ */
+type ExclusionRule =
+  | { kind: "provider"; provider: string }
+  | { kind: "provider_model"; provider: string; model: string }
+  | { kind: "endpoint"; host: string };
+
+function parseExclusionRule(pattern: DispatchExclusionPattern): ExclusionRule {
+  const colon = pattern.indexOf(":");
+  if (colon === -1) {
+    return isResolvedProviderName(pattern)
+      ? { kind: "provider", provider: pattern }
+      : { kind: "endpoint", host: pattern.toLowerCase() };
   }
-  return excluded;
+  const head = pattern.slice(0, colon);
+  const tail = pattern.slice(colon + 1);
+  if (!isResolvedProviderName(head)) {
+    return { kind: "endpoint", host: pattern.toLowerCase() };
+  }
+  // The head decides the tier — an empty tail does NOT demote a provider-name head
+  // to the endpoint tier. `codex:` reads as "codex, every model"; classifying it as
+  // an (unmatchable) endpoint rule would silently drop the operator's intent, and
+  // the head-decides rule this type documents would not actually hold.
+  return tail.length > 0
+    ? { kind: "provider_model", provider: head, model: tail }
+    : { kind: "provider", provider: head };
+}
+
+function isResolvedProviderName(value: string): boolean {
+  return RESOLVED_PROVIDER_NAMES.includes(value as ResolvedProviderName);
+}
+
+function ruleMatches(rule: ExclusionRule, backend: ExcludableBackend): boolean {
+  switch (rule.kind) {
+    case "provider":
+      return backend.provider === rule.provider;
+    case "provider_model":
+      // A model-granular rule matches ONLY that model. A backend of the same
+      // provider carrying no model (a CLI whose model arrives at the dispatch
+      // handshake) is NOT matched: the operator ruled out one model, not the
+      // backend — the coarse `provider` tier is how they rule out the backend.
+      return backend.provider === rule.provider && backend.model === rule.model;
+    case "endpoint":
+      return endpointHosts(backend.endpoint).includes(rule.host);
+  }
+}
+
+/**
+ * The forms of a source endpoint an operator pattern may name: `hostname` (port-
+ * agnostic — `integrate.api.nvidia.com` rules out that host on any port) and
+ * `host:port` (port-specific — `localhost:8000` rules out one of several local
+ * endpoints). Both are offered so the pattern's own specificity decides.
+ *
+ * An endpoint that is not a URL (a CLI launcher command) degrades to the raw
+ * lowercased string, which then only ever matches an identical literal pattern —
+ * never a false positive against a real host.
+ *
+ * ⚠ The authority check is load-bearing, not defensive: `new URL()` accepts ANY
+ * scheme-shaped string, so it does NOT throw on `localhost:8000` (protocol
+ * `localhost:`) or on a Windows command path like `C:\tools\codex.cmd` (protocol
+ * `c:`) — both parse to an EMPTY hostname. Relying on the `catch` alone would
+ * therefore silently yield no hosts for exactly those endpoints, making an
+ * operator's literal-identical rule match nothing.
+ */
+function endpointHosts(endpoint: string | undefined): string[] {
+  if (!endpoint) return [];
+  const raw = endpoint.toLowerCase();
+  if (endpoint.includes("//")) {
+    try {
+      const url = new URL(endpoint);
+      if (url.hostname.length > 0) {
+        return [url.hostname.toLowerCase(), url.host.toLowerCase()];
+      }
+    } catch {
+      // Not a URL after all — fall through to the raw literal.
+    }
+  }
+  return [raw];
 }
 
 /**
@@ -482,7 +691,7 @@ export function resolveExcludedProviders(
  * **Honest limit — this is not absolutely fail-closed.** An absent or unparseable
  * artifact yields `null` (no operator policy). That residue is irreducible here: with
  * no readable decision on disk there is nothing to fail closed ON. Self-spawn-blocked
- * providers are still excluded locally by {@link resolveExcludedProviders}, which
+ * providers are still excluded locally by {@link resolveDispatchExclusion}, which
  * needs no artifact.
  */
 export async function readConfirmedDispatchPolicy(
@@ -648,9 +857,12 @@ function parseConfirmedDispatchPolicy(
     return undefined;
   }
   const obj = value as Record<string, unknown>;
-  // Membership-checked, not just `typeof === "string"`: this field now decides
-  // routing, so an unknown name must not type-assert its way into the filter.
-  const exclude = parseProviderNameList(obj.exclude);
+  // `exclude` is the OPEN exclusion grammar (a pattern's head need not be a provider
+  // name — the endpoint tier's never is), so it is kept verbatim; an unmatchable
+  // pattern is inert, which is the safe direction for a filter. `include` is the
+  // CLOSED provider-name set and stays membership-checked, so an unknown name cannot
+  // type-assert its way into overriding a self-spawn block.
+  const exclude = parseExclusionPatterns(obj.exclude);
   const include = parseProviderNameList(obj.include);
   if (!exclude?.length && !include?.length) return undefined;
   return {
@@ -798,9 +1010,10 @@ export function parseProviderConfirmationInput(
       ? (v as string[])
       : undefined;
   const costOrder = stringArray(obj.cost_order);
-  const exclude = stringArray(obj.exclude) as
-    | ResolvedProviderName[]
-    | undefined;
+  // No cast: `exclude` is the OPEN exclusion grammar, so asserting the operator's
+  // raw strings into the closed provider-name union would be a lie — and the exact
+  // type-assert-your-way-in move the policy parser refuses for `include`.
+  const exclude = stringArray(obj.exclude);
   const include = stringArray(obj.include) as
     | ResolvedProviderName[]
     | undefined;

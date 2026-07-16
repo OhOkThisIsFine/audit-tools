@@ -170,7 +170,7 @@ import {
   readSettledPools,
   addSettledPool,
   readConfirmedDispatchPolicy,
-  resolveExcludedProviders,
+  resolveDispatchExclusion,
 } from "audit-tools/shared";
 import { resolveHostDispatchCapability } from "./args.js";
 
@@ -1859,7 +1859,7 @@ async function runHostDelegationObligation(
   // gathered reach. Read here (not inside the pool build) because policy lives on the
   // root-scoped confirmation and this is the layer that owns `root`. Self-spawn-blocked
   // is recomputed against THIS process's env, never inherited from the writing auditor.
-  const auditExcludedProviders = resolveExcludedProviders(
+  const auditExcludedBackends = resolveDispatchExclusion(
     await readConfirmedDispatchPolicy(ctx.params.root),
   );
   const auditSourcePools = await buildAuditSourcePools(hybridCfg, {
@@ -1870,7 +1870,7 @@ async function runHostDelegationObligation(
       sessionConfig: hybridCfg,
       hostCanDispatch,
     }),
-    excludedProviders: auditExcludedProviders,
+    excludedBackends: auditExcludedBackends,
   });
   if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditSourcePools.length > 0) {
     const pending = buildPendingAuditTasks(bundle);

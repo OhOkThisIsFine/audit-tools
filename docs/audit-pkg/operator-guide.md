@@ -218,7 +218,7 @@ Every other field is optional:
 {
   "schema_version": "provider-confirmation-input/v1",
   "cost_order": ["<provider-or-model-key>", "..."],
-  "exclude": ["<provider-name>"],
+  "exclude": ["<provider>:<model>", "<provider>", "<endpoint-host>"],
   "include": ["<self-spawn-blocked provider to opt back in>"],
   "host_models": [{ "model_id": "<your model id>", "tier": "frontier|capable|fast" }]
 }
@@ -229,7 +229,19 @@ Every other field is optional:
   report in `host_models`. Keys you omit keep their suggested relative order,
   appended after the ones you name; unrecognized keys are ignored. Omit it to accept
   the suggested order.
-- `exclude` — drops a provider from the dispatchable pool.
+- `exclude` — drops backends from the dispatchable pool. Each entry is a rule, at
+  whatever granularity you mean:
+  - `openai-compatible:gpt-oss-120b` — that **model** of that provider, leaving the
+    provider's other models routable. This is the granularity to reach for: you are
+    confirming model choices, so ruling out one model of a multi-model backend
+    should not rule out the backend.
+  - `codex` — the whole **provider**, every model of it.
+  - `integrate.api.nvidia.com` (or `localhost:8000` to pin a port) — every source at
+    that **endpoint host**.
+
+  A rule is a durable decision, not a reachability claim: it keeps applying on a
+  later run and on a different machine, whatever is reachable there. A rule that
+  matches nothing is simply inert.
 - `include` — opts a self-spawn-blocked provider back in. A CLI provider detected
   while you are already inside a session of that same agent (`claude-code` under
   `CLAUDECODE`, `codex` under `CODEX`) is excluded by default so the run can't

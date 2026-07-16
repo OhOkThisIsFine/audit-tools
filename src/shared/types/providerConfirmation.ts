@@ -72,8 +72,14 @@ export interface ProviderConfirmationInput {
    * both provider pools and host models so one total cost order drives dispatch.
    */
   cost_order?: string[];
-  /** Provider names to exclude from the dispatchable pool. */
-  exclude?: ResolvedProviderName[];
+  /**
+   * Exclusion patterns ruling backends out of the dispatchable pool
+   * (`DispatchExclusionPattern`): `provider:model` (the default granularity — the
+   * operator confirms *model* choices), the coarser bare `provider`, or an
+   * endpoint host. Kept verbatim: the grammar is open, so an unrecognized pattern
+   * is inert rather than dropped.
+   */
+  exclude?: string[];
   /** Self-spawn-blocked provider names the operator opts back IN. */
   include?: ResolvedProviderName[];
   /**

@@ -221,3 +221,60 @@ describe("executor consumes seeded operator input (b/c — reorder + host roster
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// A″ — the delta prompt must hand the operator the exclusion RULE, not make them
+// compose it. The grammar is model-granular, so a hand-written rule is exactly
+// where the model gets dropped and the whole provider ruled out by accident —
+// the A′ bug, relocated from the type into the prompt text. Enforce in the tool,
+// never in the operator (or a relaying host) remembering the grammar.
+// ---------------------------------------------------------------------------
+describe("renderProviderConfirmationPrompt — the newly-reachable delta (A″)", () => {
+  const prompt = renderProviderConfirmationPrompt({
+    providerPool: [
+      { name: "openai-compatible", capability_tier: "capable", excluded: false, cost_order: 0 },
+    ],
+    inputPath: "/repo/.audit-tools/provider-confirmation.input.json",
+    continueCommand: "audit-code next-step --root /repo",
+    newlyReachable: [
+      {
+        key: "brand-new-model",
+        provider: "openai-compatible",
+        exclusion_pattern: "openai-compatible:brand-new-model",
+      },
+    ],
+  });
+
+  test("leads with the delta and names the backend", () => {
+    expect(prompt).toContain("brand-new-model");
+  });
+
+  test("renders the model-granular rule verbatim, ready to paste", () => {
+    // Not just the provider name: a bare `openai-compatible` here would tell the
+    // operator to rule out every model of the backend to keep ONE out.
+    expect(prompt).toContain('"exclude": ["openai-compatible:brand-new-model"]');
+  });
+
+  test("a modelless CLI gets the coarse provider rule (its model is unknowable here)", () => {
+    const cli = renderProviderConfirmationPrompt({
+      providerPool: [{ name: "opencode", capability_tier: "unknown", excluded: false, cost_order: 0 }],
+      inputPath: "/repo/in.json",
+      continueCommand: "audit-code next-step --root /repo",
+      newlyReachable: [
+        { key: "opencode", provider: "opencode", exclusion_pattern: "opencode" },
+      ],
+    });
+    expect(cli).toContain('"exclude": ["opencode"]');
+  });
+
+  test("no delta ⇒ no delta section (the ordinary first-time gate is unchanged)", () => {
+    const plain = renderProviderConfirmationPrompt({
+      providerPool: [
+        { name: "openai-compatible", capability_tier: "capable", excluded: false, cost_order: 0 },
+      ],
+      inputPath: "/repo/in.json",
+      continueCommand: "audit-code next-step --root /repo",
+    });
+    expect(plain).not.toContain("became");
+  });
+});
