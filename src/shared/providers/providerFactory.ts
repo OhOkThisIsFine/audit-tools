@@ -49,6 +49,12 @@ function hasConfiguredAgy(config: AgyConfig | undefined): boolean {
  * API key is resolved (and degrades) at launch — env presence is intentionally
  * not probed here, mirroring how the agentic providers don't read credentials
  * during resolution.
+ *
+ * NOT contradicted by `providers/auditorSources.ts`, which DOES probe env presence:
+ * that asks a different question. This function asks "is this backend CONFIGURED?"
+ * during launch-time resolution; `verifySourceReach` asks "can this process PROVE it
+ * reaches this declared lane?" before admitting it to the dispatch pool. A configured-
+ * but-unreachable backend still degrades at launch exactly as documented here.
  */
 export function hasConfiguredOpenAiCompatible(
   config: SessionConfig["openai_compatible"],

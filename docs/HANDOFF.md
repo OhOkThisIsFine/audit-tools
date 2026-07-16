@@ -66,25 +66,31 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — G2.5: the deterministic source-emitter (Path A feeder, split out of G2)
+## ▶ IMMEDIATE NEXT — G3: split `confirmed_provider_pool`
 
-**G2 type-split SHIPPED (`59116fe2`, no release — inert like G1).** `RepoSessionIntent` +
-`resolveSessionConfig(intent, descriptor)` + `validateRepoSessionIntent` make dispatch inventory
-unrepresentable on disk; descriptor reslice (host/IDE launch blocks on `self`, dispatchable backends on
-`sources[]`); `persistHostProvider` retired; remediate `resolve(intent, null)` seam. Independent loop-core
-review (no blocker; 5 findings addressed + attested). Full suite + deadcode gate green.
+**G2.5 SHIPPED — and it deviates from the spec's sketch, deliberately.** Source resolution is now
+IN-PROCESS: `resolveAmbientSources` (`src/shared/providers/auditorSources.ts`) reads the machine-level
+`~/.audit-code/sources-declared.json` declaration, intersects `declared ∩ ambient-verifiable`, and feeds
+`resolveSessionConfig`. **No subcommand, no shell-out, no `auditor_id`, no host merge** — `sources[]`
+never travels through the host at all. The inert window is CLOSED: operator multi-pool works from the
+declaration file (see the launch recipe below).
 
-**▶ IMMEDIATE NEXT = G2.5 — the deterministic source-emitter.** Owner split it OUT of G2 (2026-07-16):
-the type-split already satisfies atomic-replace (the descriptor CAN carry `sources[]`) and is inert, so
-per the spec's own "seam first, feeder follows" the emitter is its own commit. Build: a component
-audit-tools ships (a subcommand the slash loader shells out to BEFORE `next-step`) that reads the
-per-auditor home-dir identity-keyed `catalog-<auditor-id>.json` declaration, performs the `declared ∩
-ambient-verifiable` intersection (key env present / launcher on PATH / cred readable), and prints the
-`--auditor sources[]` JSON — deterministic, NEVER host-LLM prose (the banned host-discretion anti-pattern).
-Spec: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) → Decomposition G2.5.
-**⚠ Deliberate intermediate (NOT a bug):** until G2.5 lands, operator multi-pool sources come only from a
-hand-authored `--auditor` — a repo `session-config.json` can no longer carry `sources`/`provider`/backend
-blocks (rejected at load). Self-only always works. This is the documented inert window, not a regression.
+Why the deviation (full rationale in the spec's G2.5 bullet + the plan doc): the sketch's host-merge step
+was the banned host-discretion anti-pattern in a new costume (a fumbled merge ⇒ silently-empty pool ⇒ zero
+dispatch), and it conflated POPULATE (expensive, cacheable) with RESOLVE (local, cheap, must run at the
+moment of use). The clinching argument is correctness, not cost: `openAiCompatibleProvider` reads its key
+from `process.env` AT LAUNCH, so resolving in-process makes the reach check and the launch read the same
+env — they cannot disagree. Verified precondition: no host-exclusive credential case exists for any of the
+six dispatchable providers. Multi-IDE isolation falls out for free (each IDE's process inherits its own
+env), which is why no id is needed. Plan + the refuted alternatives:
+[`docs/reviews/g2-5-source-emitter-plan-2026-07-16.md`](reviews/g2-5-source-emitter-plan-2026-07-16.md).
+
+**▶ IMMEDIATE NEXT = G3** — split `confirmed_provider_pool` into `DispatchPolicy` (exclusions + cost_order
++ confirmed flag, on intent) + per-auditor re-resolved reach; the `autonomous_mode`-keyed reconciliation
+gate; pin the exclusion-key grammar (default `provider:model`). Spec:
+[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) → Decomposition G3.
+G2.5's `resolveAmbientSources` is the "freshly-discovered reach" G3 filters over — the decision applies as
+a FILTER, never additively.
 
 Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
 → "Greenfield endpoint (owner-approved 2026-07-16)" + Decomposition (memory
@@ -129,13 +135,18 @@ just don't dogfding G1 via a stale global bin without reinstalling.
   review: no blocker, 5 findings addressed + attested. Plan doc:
   [`docs/reviews/g2-repo-session-intent-plan-2026-07-16.md`](reviews/g2-repo-session-intent-plan-2026-07-16.md).
   **The Path A source-emitter was SPLIT OUT → G2.5** (owner, 2026-07-16 — see IMMEDIATE NEXT above).
-- **G2.5 (IMMEDIATE NEXT) — the deterministic source-emitter (Path A feeder).** A subcommand the slash
-  loader shells out to before `next-step`: reads the per-auditor home-dir identity-keyed
-  `catalog-<auditor-id>.json` → `declared ∩ ambient-verifiable` → prints `--auditor sources[]`. Deterministic,
-  never host-LLM prose. Until it lands, operator multi-pool sources come only from a hand-authored `--auditor`
-  (the documented inert window — self-only always works). Then update the maximal-coverage launch recipe.
-- **G3** split confirmed_provider_pool (policy on intent + re-resolved reach + autonomous-keyed reconciliation
-  + pin the exclusion-key grammar, default `provider:model`).
+- **G2.5 — ✅ SHIPPED. Deviated from the plan, deliberately + recorded.** In-process
+  `resolveAmbientSources` instead of a shell-out emitter; no `auditor_id` (multi-IDE isolation falls out
+  of per-process env inheritance); inline `api_key` refused as not-ambient-verifiable; the weak
+  `validateDispatchableSources` strengthened at the ONE shared site (both boundaries gain it); the
+  G2-orphaned `examples/session-config/opencode-free.json` migrated →
+  `examples/catalog/sources-declared.json`. An independent adversarial review of the FIRST plan returned
+  REWORK and killed all three of its load-bearing choices — that review is why the design is what it is.
+  NOT loop-core by path (verified against `loopCorePaths.ts`) → no attestation. NO release (inert-window
+  batch continues).
+- **G3 (IMMEDIATE NEXT)** split confirmed_provider_pool (policy on intent + re-resolved reach + autonomous-keyed
+  reconciliation + pin the exclusion-key grammar, default `provider:model`). G2.5's `resolveAmbientSources`
+  is the reach it filters over.
 - **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
   `declared ∩ ambient-verifiable` reach + lies-reachably quarantine). **G6** remediate `--auditor` round-trip.
 - Orthogonal (retained): **commit 3** repair-proxy as a kind-1 launch-transport; **commit 4** fix C (host
@@ -171,15 +182,21 @@ LARGER metered target is available, prefer it — **size is what forces the quot
 never exhausts a window and validates none of the wall items. On audit-tools, compensate with a deep
 ceiling so the frontier is large.
 
-**Configure (before launch).** The run's session config must register every source pool so the
-multi-pool machinery lights up:
-1. An `openai_compatible` NIM block — operator-supplied `base_url` / `model` / `api_key_env` (never
-   hardcoded). This exercises the openai-compatible dispatch pool + CE-004 first-emit conformance.
-2. The **opencode-free** source entry — copy from `examples/session-config/opencode-free.json`
-   (`api_key: "public"`, `cost_per_mtok: 0`). This exercises arbitrage Phase-0: declared-free routing +
-   the `declared_cost_drift` demotion if the free tier ever bills.
+**Configure (before launch).** Source pools are declared **off-repo** now (G2 removed `sources` /
+`provider` / per-backend blocks from the session config; G2.5 resolves them from a machine-level
+declaration). Write `~/.audit-code/sources-declared.json` — start from
+`examples/catalog/sources-declared.json`:
+1. A NIM entry — operator-supplied `endpoint` / `model` / `api_key_env` (never hardcoded). Exercises the
+   openai-compatible dispatch pool + CE-004 first-emit conformance.
+2. The **opencode-free** entry (`cost_per_mtok: 0`, `api_key_env: OPENCODE_ZEN_API_KEY=public`).
+   Exercises arbitrage Phase-0: declared-free routing + the `declared_cost_drift` demotion if the free
+   tier ever bills.
 3. Codex needs nothing — the CLI is auto-detected. No `--root`/provider/model flags anywhere
    (conversation-first; a needed manual flag is a bug — report it, don't work around it).
+
+⚠ **Export the key env vars in the shell that launches the IDE.** G2.5 admits a lane only if the
+audit-tools process can PROVE reach — an `api_key_env` pointing at an unset var is dropped with a reason,
+by design. If a pool is missing from Gate-0, that is the mechanism working; check the env, not the config.
 
 **Launch.** `/audit-code` in the conversation. At the interactive Gate-0 `provider_confirmation`,
 confirm the priced roster shows **host + codex + NIM + opencode-free**; accept the proposed lens set;

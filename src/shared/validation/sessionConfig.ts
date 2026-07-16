@@ -119,9 +119,25 @@ function validateQuotaModelLimits(
 }
 
 /**
+ * The `DispatchableSource` fields that must be strings when present — every one is
+ * read by the ambient-reach probe (`providers/auditorSources.ts`) and/or the launch
+ * path, so a non-string here coerces to nonsense downstream rather than failing.
+ */
+const DISPATCHABLE_SOURCE_STRING_FIELDS = [
+  "id",
+  "endpoint",
+  "model",
+  "api_key_env",
+  "api_key",
+  "credentials_path",
+  "account",
+] as const;
+
+/**
  * Validate `sessionConfig.sources[]` — the explicit dispatchable-source pool
- * list. Shape-guards each entry's provider and (the C1 concern) its `quota`,
- * which is now the single source of truth for a source pool's admission budget.
+ * list. Shape-guards each entry's provider, its string fields, and (the C1 concern)
+ * its `quota`, which is now the single source of truth for a source pool's admission
+ * budget.
  */
 function validateDispatchableSources(
   value: unknown,
@@ -152,6 +168,19 @@ function validateDispatchableSources(
         `${path}.provider`,
         `provider must be one of: ${Array.from(VALID_DISPATCHABLE_SOURCE_PROVIDERS).join(", ")}.`,
       );
+    }
+    // The string fields the ambient-reach probe and the launch path both READ. Left
+    // unchecked, `{"api_key_env": {"a":1}}` passed here and `env[{...}]` coerced to
+    // "[object Object]" downstream. Guarded at this ONE shared site so both boundaries
+    // (disk-load and the `--auditor` parse boundary) gain it.
+    for (const field of DISPATCHABLE_SOURCE_STRING_FIELDS) {
+      const value = source[field];
+      if (value !== undefined && typeof value !== "string") {
+        pushIssue(issues, `${path}.${field}`, `${field} must be a string.`);
+      }
+    }
+    if (source.parameters !== undefined && !isRecord(source.parameters)) {
+      pushIssue(issues, `${path}.parameters`, "parameters must be a JSON object.");
     }
     if (source.quota !== undefined) {
       validateQuotaModelLimits(source.quota, `${path}.quota`, issues);

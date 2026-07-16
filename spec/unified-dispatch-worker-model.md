@@ -229,12 +229,48 @@ must mean something to an auditor with a different reachable set) — default `p
   was SPLIT OUT to G2.5** (owner, 2026-07-16): the type-split already satisfies atomic-replace (the
   descriptor CAN carry sources) and is inert/unreleased, so per the spec's own "seam first, feeder follows"
   the emitter is the immediate-next commit, not bundled.
-- **G2.5 — the deterministic source-emitter (Path A feeder).** A component audit-tools ships (a subcommand
-  the slash loader shells out to before `next-step`) that reads the per-auditor home-dir identity-keyed
-  `catalog-<auditor-id>.json` declaration, performs the `declared ∩ ambient-verifiable` intersection, and
-  prints the `--auditor sources[]` JSON — so operator multi-pool (NIM/opencode) is populated deterministically,
-  never by host-LLM prose (the banned host-discretion anti-pattern). Until it lands, multi-pool sources come
-  only from a hand-authored `--auditor`.
+- **G2.5 — deterministic source RESOLUTION (Path A feeder). SHIPPED, and it deviates from the sketch this
+  bullet used to carry.** The original plan — a subcommand the slash loader shells out to before `next-step`,
+  printing `sources[]` for the host to merge into `--auditor` — was **not built**, for two reasons:
+  - **The host merge is the banned anti-pattern in a new costume.** An LLM hand-composing `{self, sources}`
+    JSON is exactly the host-discretion the commit exists to kill. A fumbled merge ⇒ empty `sources[]` ⇒
+    fail-closed to driver-self-only ⇒ **zero dispatch** — the 2026-07-15 dogfood failure one layer up, and
+    silently (an empty pool is indistinguishable from an unreachable machine).
+  - **The sketch conflated POPULATE with RESOLVE.** *Populate* (query models.dev / live quota / `/registry`
+    → the rich catalog) is expensive, network-bound, and genuinely wants a cache — that is what "a speed
+    optimization behind the handshake" is for. *Resolve* (intersect declaration with right-now ambient
+    reach) is local, cheap, and **must run at the moment of use to be correct**. Bundling them forced
+    resolve onto populate's schedule and out through the host.
+
+  **What shipped instead: RESOLVE, in-process.** `resolveAmbientSources` (`src/shared/providers/
+  auditorSources.ts`) reads the operator's **machine-level** `~/.audit-code/sources-declared.json`
+  declaration, intersects `declared ∩ ambient-verifiable`, and feeds `resolveSessionConfig`. `sources[]`
+  never travels through the host. An explicit `--auditor sources[]` still wins (operator escape hatch).
+  Plan + full rationale: [`docs/reviews/g2-5-source-emitter-plan-2026-07-16.md`](../docs/reviews/g2-5-source-emitter-plan-2026-07-16.md).
+
+  **Why in-process is a CORRECTNESS property, not an optimization:** `openAiCompatibleProvider` reads its
+  key from `process.env` **at launch**. Resolving in-process makes the reach check and the launch read the
+  SAME env — they cannot disagree. A host relay opens a gap between what was promised and what is true at
+  the moment of use. Verified precondition: **no host-exclusive credential case exists** — all six
+  dispatchable providers take their credential from an env var, a home-dir file, an inline config value, or
+  the CLI's own ambient auth; `stripClaudeCodeEnv` strips only `CLAUDECODE`/`CLAUDE_CODE*`; repo-wide grep
+  for keychain/SecretStorage/CredentialManager returns two comments and zero implementation. The two
+  providers that touch host-exclusive stores (Copilot, Antigravity) are excluded from
+  `DISPATCHABLE_SOURCE_PROVIDERS` by design.
+
+  **No `auditor_id`, deliberately.** The multi-IDE case needs none: each IDE spawns its own audit-tools
+  process, which inherits THAT IDE's env, so each intersects the same declaration against its own real
+  reach. Nothing shared ⇒ nothing to contaminate. The id remains G5's, where it is actually enforced. The
+  declaration is named `sources-declared.json`, NOT `catalog-<auditor-id>.json` — that name stays reserved
+  for the POPULATE cache, so a later `readDeclaration` can't become a direct cache read by filename
+  collision.
+
+  **Inline `api_key` is refused** as not ambient-verifiable: possession ≠ reach, it is the one shape an
+  operator can always choose (making the rule opt-out by construction), and its only catcher — the reactive
+  `lies reachably` quarantine — is G5. `examples/catalog/sources-declared.json` (migrated from the
+  G2-orphaned `examples/session-config/opencode-free.json`) uses `api_key_env`.
+
+  **POPULATE remains open** — the rich catalog lands later behind this same resolve seam.
 - **G3 — split confirmed_provider_pool** into `DispatchPolicy` (exclusions + cost_order + confirmed flag,
   on intent) + per-auditor re-resolved reach; the `autonomous_mode`-keyed reconciliation gate; pin the
   exclusion-key grammar.
