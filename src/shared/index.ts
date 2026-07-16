@@ -286,11 +286,13 @@ export {
   DISPATCH_INVENTORY_FIELDS,
 } from "./types/sessionConfig.js";
 export { resolveSessionConfig } from "./config/resolveSessionConfig.js";
+export type { ResolveSessionConfigOptions } from "./config/resolveSessionConfig.js";
 
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
 
 export type { AuditorSelf, AuditorDescriptor } from "./types/auditorDescriptor.js";
+export { ambientAuditorDescriptor } from "./types/auditorDescriptor.js";
 
 // OpenCode permission deployment helpers (global scope vs. agent scope)
 export {
@@ -1107,6 +1109,12 @@ export {
   buildHostModelPool,
   buildHostModelPools,
 } from "./quota/apiPool.js";
+
+// The host-pool ASSEMBLY core — the single `(session, auditor identity) → host CapacityPool[]`
+// entry both draws call. Replaces audit's `buildDispatchPool` preamble and remediate's
+// `buildHostPoolPreamble`, which were the same eight steps in the same order.
+export { buildHostPoolPreamble } from "./quota/hostPool.js";
+export type { HostPoolPreamble } from "./quota/hostPool.js";
 export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,

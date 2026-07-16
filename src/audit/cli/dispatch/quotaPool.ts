@@ -1,7 +1,7 @@
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   writeJsonFile,
-  buildHostModelPools,
+  buildHostPoolPreamble,
   computeDispatchAdmission,
   createReservationLedger,
   admissionPoolsFromSummaries,
@@ -15,18 +15,11 @@ import type {
   AdmissionPool,
   DispatchAdmission,
 } from "audit-tools/shared";
-import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource";
-import {
-  HostSessionQuotaSource,
-  type HostSessionEscalation,
-} from "audit-tools/shared/quota/hostSessionQuotaSource";
+import type { HostSessionQuotaSource } from "audit-tools/shared/quota/hostSessionQuotaSource";
+import { type HostSessionEscalation } from "audit-tools/shared/quota/hostSessionQuotaSource";
 import { resolveFreshSessionProviderName } from "../../providers/index.js";
 import {
   computeDispatchCapacity,
-  buildProviderModelKey,
-  resolveHostModel,
-  readQuotaStateOrDegrade,
-  resolveHostActiveSubagentLimit,
   lookupDiscoveredLimits,
   mergeDiscoveredLimits,
   summarizeDispatchCapacityPools,
@@ -116,43 +109,51 @@ export async function buildDispatchPool(params: {
       sessionConfig.provider === undefined ? "auto" : undefined,
       sessionConfig,
     );
-  const hostModel = resolveHostModel({
-    providerName: quotaProviderName,
-    sessionConfig,
-    explicitModel: params.hostModel,
-    envVar: "AUDIT_CODE_HOST_MODEL",
-  });
-  // Quota-key identity: the resolved model name when one exists, else the
-  // host's opaque `--host-model-id` (a key segment ONLY — never a window
-  // authority), else null → `provider/*`. Per-roster-rank `model_id` overrides
-  // per pool below.
-  const quotaModelKeySegment = hostModel ?? params.hostModelId ?? null;
-  const quotaProviderKey = buildProviderModelKey(quotaProviderName, quotaModelKeySegment);
-  const quotaState = await readQuotaStateOrDegrade("audit dispatch pool build");
-  const hostConcurrencyLimit = resolveHostActiveSubagentLimit({
-    explicitLimit: hostActiveSubagentLimit,
-    sessionConfig,
-  });
-  const providerLimits: DiscoveredRateLimits | null =
-    await queryLimits?.(hostModel)
-      .then((r) => r ? { ...r, source: "provider_query" } : null)
-      .catch(() => null)
-    ?? null;
-  // PREPEND the host-session fixed-window source keyed on the host pool's own
-  // (provider, model) key, so the operator's account-level session wall is a
-  // first-class PRE-WALL source: graduated remaining_pct → LOW/CRITICAL throttle
-  // before a hard 429, paused → cooldown. It gates on the exact key, passing
-  // through for every other pool, so it never masks the proactive/learned sources.
-  const hostSession = new HostSessionQuotaSource({
-    providerModelKey: quotaProviderKey,
-    onEscalation: params.onEscalation,
-  });
-  const quotaSource = buildQuotaSource({ hostSession });
 
-  // The capability handshake limits are merged FIRST so they outrank the
-  // queried and cached limits for context/output (the discovered-capability
-  // rung then sizes the partition to the real window). RPM/TPM stay null in
-  // the capability entry and fill from the queried/cached sources.
+  // Audit's per-tool limits enrichment, layered over the shared assembly core's capability
+  // window: the queried provider limits + the learned-cache entry. The capability handshake
+  // stays FIRST so it outranks both for context/output (the discovered-capability rung then
+  // sizes the partition to the real window); RPM/TPM are null in the capability entry and
+  // fill from the queried/cached sources. `queryLimits` is memoized on the FIRST call — it
+  // is keyed on the scalar host model, so one query serves every roster rank exactly as
+  // before the lift (the pre-lift code called it once, outside the per-rank resolve).
+  let providerLimitsPromise: Promise<DiscoveredRateLimits | null> | undefined;
+  const getProviderLimits = (hostModel: string | null): Promise<DiscoveredRateLimits | null> => {
+    providerLimitsPromise ??=
+      queryLimits?.(hostModel)
+        .then((r) => (r ? ({ ...r, source: "provider_query" } as DiscoveredRateLimits) : null))
+        .catch(() => null) ?? Promise.resolve(null);
+    return providerLimitsPromise;
+  };
+
+  const preamble = await buildHostPoolPreamble({
+    sessionConfig,
+    providerName: quotaProviderName,
+    explicitHostModel: params.hostModel,
+    hostModelId: params.hostModelId,
+    envPrefix: "AUDIT_CODE",
+    quotaStateLabel: "audit dispatch pool build",
+    hostActiveSubagentLimit,
+    hostContextTokens: params.hostContextTokens,
+    hostOutputTokens: params.hostOutputTokens,
+    roster: params.hostModelRoster,
+    ...(params.onEscalation ? { onEscalation: params.onEscalation } : {}),
+    enrichDiscoveredLimits: async (capability, { poolKey, hostModel }) => {
+      const dispatchCachedLimits = await lookupDiscoveredLimits(poolKey).catch(() => null);
+      const providerLimits = await getProviderLimits(hostModel);
+      // Re-stamp the capability's provenance. The shared core emits the numeric
+      // `DiscoveredRateLimitsInput` (no `source` — nothing in limit RESOLUTION reads it;
+      // `resolveLimits` derives `source: "discovered_capability"` itself). Audit's
+      // `DiscoveredRateLimits` carries `source` as a required provenance tag, so stamp it
+      // here rather than casting a value that lacks the field — same value as pre-lift.
+      const stamped: DiscoveredRateLimits | null = capability
+        ? { ...capability, source: "host_capability" }
+        : null;
+      return mergeDiscoveredLimits(stamped, providerLimits, dispatchCachedLimits);
+    },
+  });
+  const { pools, hostModel, hostSession } = preamble;
+
   const probeBudget = (pool: CapacityPool): number => {
     const probe = computeDispatchCapacity({
       pools: [pool],
@@ -163,52 +164,9 @@ export async function buildDispatchPool(params: {
     return Math.max(1, limits.context_tokens - limits.output_tokens);
   };
 
-  // Single-window capability limits (scalar handshake / nothing reported) — defined
-  // before `resolve` so the single-pool path can fall back to it.
-  const hostCapabilityLimits: DiscoveredRateLimits | null =
-    params.hostContextTokens != null || params.hostOutputTokens != null
-      ? {
-          context_tokens: params.hostContextTokens ?? null,
-          output_tokens: params.hostOutputTokens ?? null,
-          source: "host_capability",
-        }
-      : null;
-
-  // The per-tool resolve for the SHARED host-pool-from-roster core: audit's pool key
-  // (quotaProviderKey for the single pool; per-rank model_id for a roster) and its
-  // richer discovered-limits — the capability handshake merged FIRST (so it outranks
-  // context/output) with the queried + learned-cache limits.
-  const resolve = async (entry: HostModelRosterEntry | null) => {
-    const poolKey = entry?.model_id
-      ? buildProviderModelKey(quotaProviderName, entry.model_id)
-      : quotaProviderKey;
-    const dispatchCachedLimits = await lookupDiscoveredLimits(poolKey).catch(() => null);
-    const capability: DiscoveredRateLimits | null = entry
-      ? {
-          context_tokens: entry.context_tokens,
-          output_tokens: entry.output_tokens,
-          source: "host_capability",
-        }
-      : hostCapabilityLimits;
-    return {
-      poolKey,
-      discoveredLimits: mergeDiscoveredLimits(capability, providerLimits, dispatchCachedLimits),
-    };
-  };
-
-  const roster = params.hostModelRoster ?? null;
-  const pools = await buildHostModelPools({
-    providerName: quotaProviderName,
-    hostModel,
-    hostConcurrencyLimit,
-    quotaSource,
-    quotaEntries: quotaState.entries,
-    roster,
-    resolve,
-  });
-
   // Audit-specific budget layer on the shared pools: per-tier budgets from a roster,
   // else the single pool's budget shared across every tier.
+  const roster = params.hostModelRoster ?? null;
   if (roster && roster.length > 0) {
     const perRank = new Map<DispatchModelTier, number>();
     for (const pool of pools) {

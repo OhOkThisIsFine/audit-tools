@@ -10,6 +10,7 @@ import {
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
   resolveSessionConfig,
+  ambientAuditorDescriptor,
   captureNewlyReachableBackendFriction,
   type SessionConfig,
   type NewlyReachableBackend,
@@ -167,17 +168,19 @@ export async function runProviderConfirmationAutoComplete(
   // per-auditor descriptor resolved over the repo INTENT). The confirmed pool this
   // executor builds + persists is what routes for the whole session, so it MUST reflect
   // the current auditor's descriptor, not a re-read of the repo config
-  // (spec/unified-dispatch-worker-model.md). Fall back to the repo INTENT resolved to
-  // driver-self-only (`resolveSessionConfig(intent, null)`) only when no effective config
-  // was threaded — e.g. the legacy headless advance-audit entrypoint, which carries no
-  // handshake. Degrade to the empty permissive default when it is absent/unreadable —
-  // pricing is best-effort and must never block confirmation.
+  // (spec/unified-dispatch-worker-model.md). Fall back to the repo INTENT resolved against
+  // the AMBIENT descriptor when no effective config was threaded — e.g. the legacy headless
+  // advance-audit entrypoint, which carries no handshake but still HAS an environment, so
+  // its reachable lanes must appear in the confirmed roster (what the operator confirms is
+  // what routes). A `null` descriptor here would hide a declared+reachable backend from
+  // Gate-0 entirely. Degrade to the empty permissive default when the config is
+  // absent/unreadable — pricing is best-effort and must never block confirmation.
   const sessionConfig: SessionConfig =
     effectiveConfig ??
     (artifactsDir
       ? resolveSessionConfig(
           await loadSessionConfig(artifactsDir).catch(() => ({})),
-          null,
+          ambientAuditorDescriptor(),
         )
       : {});
   // Interactive Gate-0: the host may have submitted an operator ordering + host

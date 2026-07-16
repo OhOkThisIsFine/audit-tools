@@ -92,3 +92,31 @@ export interface AuditorDescriptor {
    */
   sources?: DispatchableSource[];
 }
+
+/**
+ * The descriptor for a driver that had NO host handshake — it can report nothing
+ * about itself, but it still has an environment.
+ *
+ * The descriptor's fields split along a verified line, and this helper is that line
+ * made explicit:
+ * - **ENVIRONMENT-class** (`sources[]`, provider identity, dispatch capability) — the
+ *   backends THIS PROCESS can spawn. Resolved in-process; a handshake was never
+ *   needed for them (`resolveAmbientSources`: `declared ∩ ambient-verifiable`).
+ * - **HOST-SELF-class** (`model_id` / `context_tokens` / `output_tokens` / `roster`) —
+ *   "I am model X with an N-token window." Genuinely unknowable to a spawned CLI: the
+ *   running agent's model identity is not on PATH, not an env var, not a file. Absent
+ *   here, so the host pool sizes to the conservative floor. That is a fidelity
+ *   degradation, never a block.
+ *
+ * ⚠ NOT interchangeable with a `null` descriptor. `resolveSessionConfig(intent, null)`
+ * FAILS CLOSED to driver-self-only — "resolve no pool at all" — and short-circuits
+ * before ambient resolution. This says "resolve my pool from ambient reach; I just
+ * can't tell you about myself." Remediate passing `null` (it has no `--auditor` flag)
+ * is what made it dispatch with NO pool — an un-released capability regression vs
+ * v0.32.68, where `sources[]` was read straight off disk. Returns a FRESH object per
+ * call so no caller can mutate a shared literal.
+ * [[capability-is-per-auditor-not-per-audit]]
+ */
+export function ambientAuditorDescriptor(): AuditorDescriptor {
+  return { self: {} };
+}

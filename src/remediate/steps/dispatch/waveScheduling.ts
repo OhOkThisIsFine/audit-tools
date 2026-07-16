@@ -6,22 +6,20 @@ import type {
   BackoffState,
   ResolvedProviderName,
   DispatchCapacityPoolSummary,
-  DiscoveredRateLimitsInput,
   HostModelRosterEntry,
   CapacityPool,
   DispatchExclusion,
+  HostPoolPreamble,
 } from "audit-tools/shared";
 import { computeDispatchAdmission, createReservationLedger, admissionPoolsFromSummaries } from "audit-tools/shared";
 import {
-  buildQuotaSource,
-  HostSessionQuotaSource,
-  compareTier,
+  buildHostPoolPreamble,
   buildSourcePools,
-  buildHostModelPools,
   resolveHostProviderName,
   resolveConversationHostProvider,
   isDemotableInProcessProvider,
 } from "audit-tools/shared";
+import type { HostSessionQuotaSource } from "audit-tools/shared";
 import {
   REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION,
   type DispatchPhase,
@@ -30,8 +28,6 @@ import {
 import {
   computeDispatchCapacity,
   resolveHostActiveSubagentLimit,
-  readQuotaStateOrDegrade,
-  buildProviderModelKey,
   computeBackoffCooldownMs,
   summarizeDispatchCapacityPools,
 } from "../../quota/index.js";
@@ -97,27 +93,17 @@ export function resolveHostConcurrencyLimit(options: {
 }
 
 /**
- * Most-capable rank first, so the largest pending items land on the rank with
- * the largest window. Ordering comes from the single shared tier-rank authority
- * (`compareTier`, negated for descending) — no local {small,standard,deep} copy.
+ * Remediate's draw over the SHARED host-pool assembly core
+ * ({@link buildHostPoolPreamble} in `audit-tools/shared`): resolve this mode's provider
+ * identity, then let the shared core do the eight-step assembly. The local copy of that
+ * preamble is GONE — it and audit's `buildDispatchPool` preamble were the same steps in
+ * the same order (including a byte-identical quota-key derivation), which is a fork, not
+ * a domain-forced divergence ([[dissolve-auditor-remediator-distinction]]).
+ *
+ * Per-mode here: the provider default, and the `REMEDIATE_CODE` env namespace (matching
+ * `quota/hostLimits.ts`, which already parameterizes exactly this axis).
  */
-function sortRosterMostCapableFirst(
-  roster: HostModelRosterEntry[],
-): HostModelRosterEntry[] {
-  return [...roster].sort((a, b) => compareTier(b.rank, a.rank));
-}
-
-/**
- * The host-pool construction preamble shared by `scheduleWave` and
- * `buildConfirmedPools` — single-sourced so the two cannot drift on how they
- * resolve the provider/model identity, the host concurrency limit, the
- * capability window, the learned quota entries, the quota source, and the
- * per-rank host-model pools. Both consumers were maintaining a byte-identical
- * copy of this block; a change to (say) the quota-key segment had to be made in
- * both places or the dispatcher and the rolling driver would size pools
- * differently. Returns the resolved identity/limits AND the built primary pools.
- */
-interface HostPoolPreambleInput {
+async function buildRemediateHostPools(input: {
   sessionConfig: SessionConfig | null;
   providerName?: ResolvedProviderName;
   hostModel?: string | null;
@@ -129,124 +115,38 @@ interface HostPoolPreambleInput {
   env?: NodeJS.ProcessEnv;
   /** Optional retained host-session source (the rolling driver threads its own). */
   hostSession?: HostSessionQuotaSource;
-}
-
-interface HostPoolPreamble {
-  sessionConfig: SessionConfig;
-  providerName: ResolvedProviderName;
-  hostModel: string | null;
-  quotaModelKeySegment: string | null;
-  roster: HostModelRosterEntry[] | null;
-  hostLimit: HostConcurrencyLimit | null;
-  hostContextTokens: number | null;
-  hostOutputTokens: number | null;
-  hostCapabilityLimits: DiscoveredRateLimitsInput | null;
-  quotaEntries: Record<string, QuotaStateEntry>;
-  quotaSource: ReturnType<typeof buildQuotaSource>;
-  primaryPools: CapacityPool[];
-}
-
-async function buildHostPoolPreamble(
-  input: HostPoolPreambleInput,
-): Promise<HostPoolPreamble> {
+}): Promise<HostPoolPreamble & { sessionConfig: SessionConfig }> {
   const sessionConfig = input.sessionConfig ?? {};
   const providerName =
     input.providerName ??
     (sessionConfig as { provider?: ResolvedProviderName }).provider ??
     "claude-code";
-  const hostModel =
-    input.hostModel ??
-    (sessionConfig as { block_quota?: { host_model?: string | null } }).block_quota
-      ?.host_model ??
-    null;
-  // Quota-key identity: resolved model name, else the host's opaque id, else
-  // null → `provider/*`. Per-roster-rank `model_id` overrides per pool below.
-  const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
-  const roster = input.hostModels?.length
-    ? sortRosterMostCapableFirst(input.hostModels)
-    : null;
-
-  const hostLimit = resolveHostConcurrencyLimit({
-    hostMaxConcurrent: input.hostMaxConcurrent,
-    sessionConfig,
-    env: input.env,
-  });
-
-  // The capability handshake: the host reported its dispatch model's real
-  // context/output window this session (the roster's most capable entry under
-  // the multi-rank handshake). Carried into the pool's discoveredLimits so the
-  // shared discovered_capability rung sizes the budget to the real window
-  // instead of the conservative 32k floor. RPM/TPM stay null and fill from the
-  // learned quota state.
-  const hostContextTokens = input.hostContextTokens ?? roster?.[0]?.context_tokens ?? null;
-  const hostOutputTokens = input.hostOutputTokens ?? roster?.[0]?.output_tokens ?? null;
-  const hostCapabilityLimits: DiscoveredRateLimitsInput | null =
-    hostContextTokens != null || hostOutputTokens != null
-      ? { context_tokens: hostContextTokens, output_tokens: hostOutputTokens }
-      : null;
-
-  const quotaEntries: Record<string, QuotaStateEntry> = (
-    await readQuotaStateOrDegrade("waveScheduler")
-  ).entries;
-
-  // The proactive quota snapshot (Claude OAuth source, then learned) so the
-  // scheduler can throttle/cooldown from live remaining quota — mirrors
-  // audit-code's buildDispatchPool. PREPEND the host-session source keyed on
-  // this host pool's own (provider, model) key — first-class PRE-WALL source
-  // (graduated remaining_pct → LOW/CRITICAL throttle before a 429), gating on the
-  // exact key so it never masks the proactive/learned sources.
-  const quotaSource = buildQuotaSource({
-    hostSession:
-      input.hostSession ??
-      new HostSessionQuotaSource({
-        providerModelKey: buildProviderModelKey(providerName, quotaModelKeySegment),
-      }),
-  });
-
-  // One capacity pool per reported roster rank (most capable first), each with
-  // its own discovered window and quota key; a single pool for the scalar/absent
-  // handshake. Built via the shared host-pool-from-roster core so the pool shape
-  // + account-keyed pool ids can't drift across the two consumers.
-  const primaryPools = await buildHostModelPools({
-    providerName,
-    hostModel,
-    hostConcurrencyLimit: hostLimit,
-    quotaSource,
-    quotaEntries,
-    roster,
-    resolve: (entry) => ({
-      poolKey: buildProviderModelKey(providerName, entry?.model_id ?? quotaModelKeySegment),
-      discoveredLimits: entry
-        ? { context_tokens: entry.context_tokens, output_tokens: entry.output_tokens }
-        : hostCapabilityLimits,
-    }),
-  });
-
-  return {
+  const preamble = await buildHostPoolPreamble({
     sessionConfig,
     providerName,
-    hostModel,
-    quotaModelKeySegment,
-    roster,
-    hostLimit,
-    hostContextTokens,
-    hostOutputTokens,
-    hostCapabilityLimits,
-    quotaEntries,
-    quotaSource,
-    primaryPools,
-  };
+    explicitHostModel: input.hostModel,
+    hostModelId: input.hostModelId,
+    envPrefix: "REMEDIATE_CODE",
+    quotaStateLabel: "waveScheduler",
+    hostActiveSubagentLimit: input.hostMaxConcurrent,
+    hostContextTokens: input.hostContextTokens,
+    hostOutputTokens: input.hostOutputTokens,
+    roster: input.hostModels,
+    ...(input.env ? { env: input.env } : {}),
+    ...(input.hostSession ? { hostSession: input.hostSession } : {}),
+  });
+  return { ...preamble, sessionConfig };
 }
 
 export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveScheduleResult> {
   const sessionConfig = input.sessionConfig ?? {};
 
-  // ONE scheduling track: always build the host pool preamble and let the shared
+  // ONE scheduling track: always build the host pools and let the shared
   // capacity/admission compute concurrency from live quota + real signals. There
   // is no naive/quota-off branch — quota self-monitoring is not switchable. When
   // the quota source is blind (no live snapshot) the wave stays governed by real
   // signals only and is surfaced loudly at the dispatch site (marshal.ts).
-  const preamble = await buildHostPoolPreamble({
+  const preamble = await buildRemediateHostPools({
     sessionConfig: input.sessionConfig,
     providerName: input.providerName,
     hostModel: input.hostModel,
@@ -258,7 +158,7 @@ export async function scheduleWave(input: ScheduleWaveInput): Promise<WaveSchedu
     env: input.env,
   });
   const capacity = computeDispatchCapacity({
-    pools: preamble.primaryPools,
+    pools: preamble.pools,
     sessionConfig,
     pendingItemTokens: normalizeSlotTokens(input.estimatedSlotTokens, input.itemCount),
   });
@@ -313,10 +213,10 @@ export async function buildConfirmedPools(input: {
     ? resolveConversationHostProvider({ sessionConfig: input.sessionConfig })
     : actualProviderName;
 
-  // Resolve identity/limits and build the per-rank host-model pools via the
-  // SAME preamble `scheduleWave` uses — the two no longer keep parallel copies.
-  const { sessionConfig, quotaSource, quotaEntries, primaryPools } =
-    await buildHostPoolPreamble({
+  // Resolve identity/limits and build the per-rank host-model pools via the SAME
+  // shared assembly core `scheduleWave` uses — and that audit uses.
+  const { sessionConfig, quotaSource, quotaEntries, pools: primaryPools } =
+    await buildRemediateHostPools({
       sessionConfig: input.sessionConfig,
       providerName: hostProviderName,
       hostMaxConcurrent: input.hostMaxConcurrent,
@@ -324,8 +224,8 @@ export async function buildConfirmedPools(input: {
       hostOutputTokens: input.hostOutputTokens,
       hostModels: input.hostModels,
       hostModelId: input.hostModelId,
-      env: input.env,
-      hostSession: input.hostSession,
+      ...(input.env ? { env: input.env } : {}),
+      ...(input.hostSession ? { hostSession: input.hostSession } : {}),
     });
 
   // Every configured dispatchable backend source (any non-IDE source: NIM/vLLM API,

@@ -1,3 +1,4 @@
+import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -9,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, resolveSessionConfig, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -1773,19 +1774,13 @@ async function buildImplementDispatchStep(ctx: {
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, options, store } = ctx;
 
-    // G2: the disk config is a RepoSessionIntent (no dispatch inventory). Resolve it to
-    // driver-self-only (`resolveSessionConfig(intent, null)`) — remediate carries no
-    // `--auditor` descriptor yet (that round-trip is G6), so its disk-configured dispatch
-    // backends are intentionally unavailable until then; a programmatic `options.sessionConfig`
-    // (tests / the audit→remediate handoff) is a full effective config and bypasses the seam.
-    const loadedIntent =
-      (await readValidatedRepoSessionIntent(
-        join(root, ".remediation-artifacts", "session-config.json"),
-      )) ??
-      (await readValidatedRepoSessionIntent(join(root, "session-config.json")));
-    const loadedSessionConfig =
-      options.sessionConfig ??
-      (loadedIntent ? resolveSessionConfig(loadedIntent, null) : undefined);
+    // The effective config comes from the single remediate loader — always resolved
+    // against the ambient descriptor (see there for why `null` is not an option).
+    const loadedSessionConfig = await loadRemediateSessionConfig({
+      root,
+      override: options.sessionConfig,
+      artifactsFirst: true,
+    });
     // B1: fold the `--host-provider` override onto `host_provider` so every
     // downstream host resolver keys the fan-out to the ACTUAL conversation host.
     // "auto" is treated as unset (fall through to env auto-detection).
@@ -3214,16 +3209,11 @@ async function handleReadyIntakeContractPipeline(
   // flag. Threaded into the contract pipeline so the adversarial 'critique' /
   // 'critic' prompts MANDATE an independent sub-agent reviewer when the host can
   // dispatch one (fail-safe: mandate by default).
-  const loadedIntentForDispatch =
-    (await readValidatedRepoSessionIntent(
-      join(root, ".remediation-artifacts", "session-config.json"),
-    )) ??
-    (await readValidatedRepoSessionIntent(join(root, "session-config.json")));
-  const sessionConfigForDispatch =
-    options?.sessionConfig ??
-    (loadedIntentForDispatch
-      ? resolveSessionConfig(loadedIntentForDispatch, null)
-      : undefined);
+  const sessionConfigForDispatch = await loadRemediateSessionConfig({
+    root,
+    override: options?.sessionConfig,
+    artifactsFirst: true,
+  });
   const hostCanDispatchSubagents = resolveHostDispatchCapability({
     hostCanDispatchSubagents: options?.hostCanDispatchSubagents,
     sessionConfig: sessionConfigForDispatch,

@@ -40,6 +40,7 @@ import {
   type CounterexampleReport,
   captureStepBoundaryFriction,
 } from "audit-tools/shared";
+import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { counterexampleFingerprint } from "../contractPipeline/counterexampleFingerprint.js";
 import {
   CP_ARTIFACT_NAMES,
@@ -1648,15 +1649,13 @@ ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
     // Concurrency cap from the shared scheduler: session config is loaded from
     // the same path decideNextStep uses, env + on-disk learned quota feed the
     // same wave-sizing implement dispatch consumes. itemCount = module count.
-    // G2: scheduleWave sizes concurrency from dispatch fields, so resolve the disk
-    // INTENT to driver-self-only (remediate has no `--auditor` descriptor yet — G6). A
-    // programmatic `options.sessionConfig` (effective) bypasses the seam.
-    const intentForSchedule = await readValidatedRepoSessionIntent(
-      join(root, "session-config.json"),
-    );
-    const sessionConfig =
-      options.sessionConfig ??
-      (intentForSchedule ? resolveSessionConfig(intentForSchedule, null) : undefined);
+    // scheduleWave sizes concurrency from dispatch fields, so load the effective config
+    // through the single remediate loader (always the ambient descriptor — see there).
+    const sessionConfig = await loadRemediateSessionConfig({
+      root,
+      override: options.sessionConfig,
+      artifactsFirst: false,
+    });
     const schedule: WaveScheduleResult = await scheduleWave({
       sessionConfig: sessionConfig ?? null,
       itemCount: modules.length,

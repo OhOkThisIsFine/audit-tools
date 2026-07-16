@@ -36,9 +36,16 @@ const DISPATCHABLE_PROVIDER_SET: ReadonlySet<string> = new Set(
  *   with no resolved backends. The driver is definitionally reachable and
  *   self-launches; there is NO stored dispatch value to fall back to. This is the
  *   deliberate G2 behavior change from `applyDispatchInventory(cfg, null) ⇒ cfg`.
- *   Ambient resolution deliberately does NOT apply here: a null descriptor means no
- *   handshake happened at all, and widening that path to dispatch is G6's call
- *   (remediate's `resolve(intent, null)` seam), not G2.5's.
+ *   Ambient resolution deliberately does NOT apply here — `null` means "resolve NO
+ *   pool", which is a stronger statement than "no handshake happened".
+ *
+ *   ⚠ A caller that HAS no handshake but DOES have an environment wants
+ *   {@link ambientAuditorDescriptor}, NOT `null`. Passing `null` there is a silent
+ *   capability loss: it short-circuits before {@link resolveAmbientSources}, so a
+ *   declared + reachable lane never becomes a pool. Remediate did exactly that at all
+ *   three of its dispatch sites and consequently could not dispatch to any non-self
+ *   pool; it now routes through `loadRemediateSessionConfig`, which always supplies the
+ *   ambient descriptor.
  * - `descriptor` present → the driver's `self.provider` becomes the effective
  *   provider + conversation-host attribution key; its own host/IDE launch blocks
  *   (`claude_code` / `vscode_task` / `antigravity`) overlay; and `sources[]` becomes

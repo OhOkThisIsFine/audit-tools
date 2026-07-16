@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readJsonFile, writeJsonFile, computeDispatchCapacity, resolveSessionConfig } from "audit-tools/shared";
+import { readJsonFile, writeJsonFile, computeDispatchCapacity, resolveSessionConfig, ambientAuditorDescriptor } from "audit-tools/shared";
 import type {
   SessionConfig,
   CapacityPool,
@@ -222,12 +222,15 @@ export async function prepareDispatchArtifacts(params: {
   // provider command, non-boolean dangerously_skip_permissions, …); swallowing it
   // here would build the dispatch against an attacker-influenced config. Matches
   // the sibling callers, which all let the error propagate.
-  // Callers pass the already-RESOLVED effective config; the fallback (no descriptor in
-  // scope here) resolves the repo INTENT to driver-self-only so it can never leak repo
-  // dispatch fields (which the store no longer persists anyway).
+  // Callers pass the already-RESOLVED effective config; the fallback (no handshake in
+  // scope here) resolves the repo INTENT against the AMBIENT descriptor. It still cannot
+  // leak repo dispatch fields (the store no longer persists them) — the pool comes from
+  // `declared ∩ ambient-verifiable`, this process's own reach. A `null` descriptor here
+  // would fail closed to driver-self-only and silently drop a declared+reachable lane,
+  // which is the capability loss remediate suffered at its three sites.
   const sessionConfig: SessionConfig =
     params.sessionConfig ??
-    resolveSessionConfig(await loadSessionConfig(artifactsDir), null);
+    resolveSessionConfig(await loadSessionConfig(artifactsDir), ambientAuditorDescriptor());
   const lensDefsPath = join(params.packageRoot, "dispatch", "lens-definitions.json");
   const lensDefs = await readJsonFile<Record<string, { description: string; do_not_report: string }>>(lensDefsPath);
 
