@@ -103,22 +103,33 @@ possibly-different auditor reads it verbatim at dispatch (`src/audit/cli/dispatc
 INTO G3**, not G5 — same cut, and splitting it would leave a half-done boundary across two laps. G5 keeps
 the auditor-id stamp + the reactive lies-reachably quarantine.
 
-G3's six pieces: (1) delete the inert slot + its ref stub + 2 tests + the stale comment; (2) add
-`dispatch_policy` to `RepoSessionIntent` with a **positive** shape validator (note the asymmetry — every
-other dispatch key is *rejected* by `DISPATCH_INVENTORY_FIELDS`; this one is *kept*); (3) strip reach out
-of `provider-confirmation.json` so it carries decision only; (4) extract the `provider:model` key helper
-that already exists three times over — `sourceId()` (`auditorSources.ts:89`) and `dispatchSourceKey()`
-(`providerConfirmation.ts:290`, inlined again at `:523`) — and reconcile their **drifted fallback tail
-(`"?"` vs `"default"`, a live id-mismatch bug)**; (5) apply policy as a set-difference at
-`resolveSessionConfig.ts:118`, surfacing the `dropped` that `resolveAmbientSources` returns and
-`resolveSessionConfig` currently discards — mind the null-descriptor short-circuit at `:92` (policy must
-NOT resurrect a pool there); (6) lift `resolveAutonomousMode` out of `src/remediate/steps/nextStep.ts:202`
-into the shared core (audit reads `autonomous_mode` nowhere today, and its env var is `REMEDIATE_*`-named
-→ needs generalizing) and add the reconciliation gate mirroring the `provider_confirmation` step's own
-shape (`src/audit/cli/nextStepCommand.ts:875`), friction via `captureFrictionEvent`.
+**Owner call (2026-07-16): BUGS FIRST, then the split.** Two live bugs surfaced; ship them against a tree
+whose behavior is correct, then do the policy/reach split.
 
-**G3 is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`, `costRank.ts`)
-→ green + independent review + attestation required.
+- **Bug 1 — Gate-0 exclusion never wired: ✅ SHIPPED (`c99bcb9c`, loop-core, independently reviewed +
+  attested).** Source pools only. Residues (host/primary pools unwired — NOT a simple extension, see the
+  backlog entry; absent-artifact fail-open; opencode self-spawn asymmetry) are in `docs/backlog.md`.
+- **▶ Bug 2 — remediate may discard the confirmed cost order + λ on every dispatch: UNVERIFIED, verify
+  before fixing.** `marshal.ts:410,416` read with `waveOptions?.sessionConfig ?? {}`; both route through
+  `readSharedProviderConfirmation:475`, which re-derives `currentProviderRoster(sessionConfig, env)` and
+  returns `reconfirm` on mismatch → empty positions + λ=0. Config-derived providers (`openai_compatible`,
+  `sources[]`) are invisible under `{}`, so remediate's roster *should* differ from audit's whenever one is
+  configured. **The premise is NOT verified** — a background agent tasked with confirming it was lost, and
+  post-G2 the dispatch-inventory fields no longer live on the persisted intent, which may mean the roster
+  comparison is structurally broken for BOTH tools. Verify against source before writing a fix; do not
+  assume. Detail in `docs/backlog.md`.
+- **Then G3 proper (the split).** The verified plan + everything deferred into it (roster-staleness
+  decision, gate reachability, key-grammar extraction, `resolveAutonomousMode` lift, `schema_version`
+  story) is in [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
+
+**⚠ Roster-staleness is DEFERRED, not decided** — the owner's constraint is *"we also need the user to
+confirm model choices."* Deleting the check would let a newly-reachable model route unconfirmed, and the
+reconciliation gate that would enforce confirmation is **itself unreachable on resume** (`provider_confirmation`
+is a presence-only obligation, `state.ts:83`, with no staleness edge in `spec/audit/dependency-map.md:166`).
+**Sequence is forced: make the gate reachable FIRST, then decide staleness.**
+
+**G3 is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`, `costRank.ts`,
+**`src/shared/quota/`**) → green + independent review + attestation required.
 
 Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
 → "Greenfield endpoint (owner-approved 2026-07-16)" + Decomposition (memory
