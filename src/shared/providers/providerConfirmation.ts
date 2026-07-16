@@ -5,7 +5,6 @@ import type {
 } from "../types/sessionConfig.js";
 import type { FreshSessionProvider, ProviderRateLimits } from "./types.js";
 import {
-  resolveFreshSessionProviderName,
   hasConfiguredOpenAiCompatible,
   hasConfiguredOpenCode,
 } from "./providerFactory.js";
@@ -36,18 +35,10 @@ export interface DiscoveredProvider {
    * already inside an active session of that same agent (claude-code while
    * `CLAUDECODE` is set, codex while `CODEX` is set). The Gate-0 confirmation
    * EXCLUDES a self-spawn-blocked provider from the dispatchable pool unless the
-   * operator explicitly includes it — a free-text `reason` string is advisory
-   * only and must never be the thing a downstream consumer parses to make that
-   * security decision.
+   * operator explicitly includes it. This FLAG is the security signal — a
+   * downstream consumer must never parse free text to make that decision.
    */
   selfSpawnBlocked?: boolean;
-  reason?: string;
-}
-
-export interface ConfirmedProviderPool {
-  providers: DiscoveredProvider[];
-  excluded: ResolvedProviderName[];
-  addedUndetected: DiscoveredProvider[];
 }
 
 // ---------------------------------------------------------------------------
@@ -132,8 +123,7 @@ const CLI_PROBES: CliProbe[] = [
 
 /**
  * Probe PATH for each known CLI and return a DiscoveredProvider entry for each
- * detected tool. Uses `resolveFreshSessionProviderName` to honour session-config
- * overrides when determining which CLI name to probe.
+ * detected tool. Session-config `command` overrides decide which binary is probed.
  *
  * @param sessionConfig - Current session config (may be empty `{}`).
  * @param env           - Process env snapshot; defaults to `process.env`.
@@ -165,17 +155,10 @@ export function discoverProviders(
       continue;
     }
 
-    // Self-spawn guard: mirror providerFactory — don't surface claude-code when
-    // already inside a claude-code session, codex when inside codex, etc.
-    const resolvedName = resolveFreshSessionProviderName("auto", sessionConfig, {
-      env,
-      commandExists: (cmd: string) => cmd === command,
-    });
-
     // Machine-readable self-spawn-blocked flag, derived from the single-sourced
     // guard. A self-spawn-blocked provider is still SURFACED (the operator may
     // override) but carries the flag so Gate-0 can EXCLUDE it from the
-    // dispatchable pool without parsing the advisory `reason` string.
+    // dispatchable pool without parsing free text.
     const blocked = isSelfSpawnBlocked(probe.providerName, env);
 
     discovered.push({
@@ -184,11 +167,6 @@ export function discoverProviders(
       capabilityTier: defaultCapabilityTier(probe.providerName),
       detected: true,
       selfSpawnBlocked: blocked,
-      reason: blocked
-        ? `detected on PATH but cannot self-spawn from within an active ${probe.providerName} session`
-        : resolvedName === probe.providerName
-          ? undefined
-          : `detected on PATH; auto-resolution may prefer a higher-priority provider`,
     });
   }
 
@@ -202,7 +180,6 @@ export function discoverProviders(
       command: sessionConfig.openai_compatible?.model,
       capabilityTier: defaultCapabilityTier("openai-compatible"),
       detected: true,
-      reason: "configured background API pool (base_url + model); not PATH-probed",
     });
   }
 
@@ -238,14 +215,6 @@ export async function queryProviderQuota(
   }
 }
 
-/**
- * Apply user selections to the discovered pool, returning a ConfirmedProviderPool
- * suitable for persistence in SessionConfig.confirmed_provider_pool.
- *
- * @param discovered      - Output of `discoverProviders`.
- * @param exclude         - Provider names to remove from the pool.
- * @param addUndetected   - Manually specified providers not found on PATH.
- */
 /**
  * The representative model id a provider is priced/ordered by at Gate-0 (cost-first
  * routing; spec/cost-first-routing.md). Only the providers that carry a configured
@@ -437,24 +406,6 @@ export function annotateConfirmedPoolCost(
   sessionConfig: SessionConfig,
 ): ConfirmedPoolEntry[] {
   return annotateConfirmedPool(pool, sessionConfig).provider_pool;
-}
-
-export function applyProviderConfirmationSelections(
-  discovered: DiscoveredProvider[],
-  exclude: ResolvedProviderName[],
-  addUndetected: DiscoveredProvider[],
-): ConfirmedProviderPool {
-  const excludeSet = new Set<ResolvedProviderName>(exclude);
-  const filtered = discovered.filter((p) => !excludeSet.has(p.name));
-  const undetectedNormalized = addUndetected.map((p) => ({
-    ...p,
-    detected: false,
-  }));
-  return {
-    providers: [...filtered, ...undetectedNormalized],
-    excluded: exclude,
-    addedUndetected: undetectedNormalized,
-  };
 }
 
 // ---------------------------------------------------------------------------

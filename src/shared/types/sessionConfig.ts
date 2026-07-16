@@ -557,17 +557,6 @@ export interface DesignReviewConfig {
   perspective_tier?: DispatchModelTier;
 }
 
-/**
- * Forward-declared shape for ConfirmedProviderPool so SessionConfig does not
- * take a hard dependency on the providerConfirmation module (which imports from
- * this file). The authoritative definition lives in providers/providerConfirmation.ts.
- */
-export interface ConfirmedProviderPoolRef {
-  providers: unknown[];
-  excluded: string[];
-  addedUndetected: unknown[];
-}
-
 export interface SessionConfig {
   provider?: ProviderName;
   /**
@@ -641,14 +630,6 @@ export interface SessionConfig {
   dispatch?: DispatchConfig;
   /** Optional design-review tuning (focused reading list budget). */
   design_review?: DesignReviewConfig;
-  /**
-   * Confirmed provider pool persisted after Gate-0 confirmation. Carries the
-   * operator-validated set of available providers across the audit→remediate
-   * session (INV-S03). Typed as ConfirmedProviderPoolRef here to avoid a
-   * circular import; the full ConfirmedProviderPool type lives in
-   * providers/providerConfirmation.ts.
-   */
-  confirmed_provider_pool?: ConfirmedProviderPoolRef;
 }
 
 /**
@@ -697,10 +678,11 @@ export type RepoDispatchConfig = Omit<DispatchConfig, "rolling_engine">;
  * across auditors ([[capability-is-per-auditor-not-per-audit]],
  * `spec/unified-dispatch-worker-model.md`, G2).
  *
- * Honest scope (G2): `confirmed_provider_pool` / `quota` / `block_quota` /
- * `host_can_dispatch_subagents` are ALSO capability but remain on the intent type until
- * G3/G4/G5 — so this is a HALF-type (inventory removed; the other capability fields still
- * present). The "zero dispatch/capability fields" endpoint is reached only after G4/G5.
+ * Honest scope: `quota` / `block_quota` / `host_can_dispatch_subagents` are ALSO capability
+ * but remain on the intent type until G4/G5 — so this is a HALF-type (inventory removed;
+ * the other capability fields still present). The "zero dispatch/capability fields" endpoint
+ * is reached only after G4/G5. (`confirmed_provider_pool` was an inert slot and is GONE as
+ * of G3 commit C.)
  */
 export type RepoSessionIntent = Omit<
   SessionConfig,

@@ -54,7 +54,6 @@ export function confirmProviders(
       name: "worker-command",
       capability_tier: "unknown",
       excluded: excludeSet.has("worker-command"),
-      reason: "always-available fallback; no PATH detection required",
     });
   }
 
@@ -63,7 +62,6 @@ export function confirmProviders(
       name: provider.name,
       capability_tier: provider.capabilityTier,
       excluded: excludeSet.has(provider.name),
-      reason: provider.reason,
     });
   }
 

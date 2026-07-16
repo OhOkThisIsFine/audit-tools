@@ -18,7 +18,7 @@ const {
   discoverProviders,
 } = await import("../../src/shared/providers/providerConfirmation.ts");
 const {
-  buildSharedProviderConfirmation,
+  buildProviderConfirmationRender,
 } = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
 const {
   isSelfSpawnBlocked,
@@ -59,9 +59,15 @@ test("discoverProviders stamps a machine-readable selfSpawnBlocked flag", () => 
 });
 
 // ── exclusion from the confirmed pool ────────────────────────────────────────
+//
+// B+D: the reach half (`excluded` / `self_spawn_blocked` / `capability_tier`) is a
+// RENDER concern — it is what the operator must SEE at Gate-0 — and is deliberately
+// NOT persisted, so these drive `buildProviderConfirmationRender`. The persisted
+// counterpart is pinned separately (`buildSharedProviderConfirmation` must NOT emit
+// any of it).
 
 test("a self-spawn-blocked provider is EXCLUDED from the confirmed pool by default", () => {
-  const built = buildSharedProviderConfirmation(
+  const built = buildProviderConfirmationRender(
     {},
     { CLAUDECODE: "1" },
     [],
@@ -75,7 +81,7 @@ test("a self-spawn-blocked provider is EXCLUDED from the confirmed pool by defau
 });
 
 test("a NON-blocked provider stays included in the confirmed pool", () => {
-  const built = buildSharedProviderConfirmation({}, {}, [], [], detectAll);
+  const built = buildProviderConfirmationRender({}, {}, [], [], detectAll);
   const claude = built.provider_pool.find((e) => e.name === "claude-code");
   expect(claude).toBeTruthy();
   expect(claude.excluded, "claude-code is dispatchable outside a CLAUDECODE session").toBe(false);
@@ -83,7 +89,7 @@ test("a NON-blocked provider stays included in the confirmed pool", () => {
 });
 
 test("the operator can explicitly re-include a self-spawn-blocked provider", () => {
-  const built = buildSharedProviderConfirmation(
+  const built = buildProviderConfirmationRender(
     {},
     { CLAUDECODE: "1" },
     [],
@@ -98,7 +104,7 @@ test("the operator can explicitly re-include a self-spawn-blocked provider", () 
 });
 
 test("an operator exclude always wins over an include", () => {
-  const built = buildSharedProviderConfirmation(
+  const built = buildProviderConfirmationRender(
     {},
     { CLAUDECODE: "1" },
     ["claude-code"],
@@ -113,7 +119,7 @@ test("an operator exclude always wins over an include", () => {
 // ── always-available worker-command fallback ───────────────────────────────
 
 test("worker-command fallback is ALWAYS retained, even inside a blocked session", () => {
-  const built = buildSharedProviderConfirmation(
+  const built = buildProviderConfirmationRender(
     {},
     { CLAUDECODE: "1", CODEX: "1" },
     [],

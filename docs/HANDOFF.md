@@ -23,14 +23,13 @@
   confirmed). New **design of record: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
   (ONE core, three worker KINDS; repair-proxy = kind-1 launch-transport; per-auditor handshake inventory;
   retire the source-pool wiring). The old `spec/repair-proxy-dispatch-integration.md` is retired with the code.
-  Memory [[unified-dispatch-worker-model]]. **▶ Next = the decomposition in the new spec** (retire source-pool
-  wiring → move inventory to the handshake → wire repair-proxy as a kind-1 transport → fix C cold-start wall);
-  each a loop-core commit (green + attestation). Full dogfood findings: `docs/backlog.md` → "Live dogfood:
-  BOTH dispatch paths failed".
+  Memory [[unified-dispatch-worker-model]]. The decomposition's inventory/handshake half is DONE through G3;
+  what remains (incl. the repair-proxy kind-1 transport that was the original goal) is an open worth-it call —
+  see ▶ IMMEDIATE NEXT. Full dogfood findings: `docs/backlog.md` → "Live dogfood: BOTH dispatch paths failed".
 - **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
   and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
   inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
-  (pre-existing, env-sensitive, spawned as a separate task) — not this branch's doing.
+  (pre-existing + env-sensitive; re-proved on a stashed clean HEAD during the G3 A″ lap) — never a branch's doing.
 - **Local env note:** the box runs npm 12.0.0 — it blocks dependency install scripts by default and can
   emit object-shaped `npm pack --json`; smokes are fixed, but see `docs/backlog.md` → Durable traps
   before any manual `npm install -g` / packaged-install work.
@@ -66,151 +65,58 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — G3 commit B+D (split `confirmed_provider_pool`)
+## ▶ IMMEDIATE NEXT — G4 (or: stop here — see "Is the rest worth it?")
 
-**G2.5 SHIPPED — and it deviates from the spec's sketch, deliberately.** Source resolution is now
-IN-PROCESS: `resolveAmbientSources` (`src/shared/providers/auditorSources.ts`) reads the machine-level
-`~/.audit-code/sources-declared.json` declaration, intersects `declared ∩ ambient-verifiable`, and feeds
-`resolveSessionConfig`. **No subcommand, no shell-out, no `auditor_id`, no host merge** — `sources[]`
-never travels through the host at all. The inert window is CLOSED: operator multi-pool works from the
-declaration file (see the launch recipe below).
-
-Why the deviation (full rationale in the spec's G2.5 bullet + the plan doc): the sketch's host-merge step
-was the banned host-discretion anti-pattern in a new costume (a fumbled merge ⇒ silently-empty pool ⇒ zero
-dispatch), and it conflated POPULATE (expensive, cacheable) with RESOLVE (local, cheap, must run at the
-moment of use). The clinching argument is correctness, not cost: `openAiCompatibleProvider` reads its key
-from `process.env` AT LAUNCH, so resolving in-process makes the reach check and the launch read the same
-env — they cannot disagree. Verified precondition: no host-exclusive credential case exists for any of the
-six dispatchable providers. Multi-IDE isolation falls out for free (each IDE's process inherits its own
-env), which is why no id is needed. Plan + the refuted alternatives:
-[`docs/reviews/g2-5-source-emitter-plan-2026-07-16.md`](reviews/g2-5-source-emitter-plan-2026-07-16.md).
-
-**G3 = split the confirmed pool along policy-vs-reach.** Spec:
-[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) → Decomposition G3 (the
-gate's design + the traps that killed four plan drafts and one implementation round). `confirmed_provider_pool`
-is an **inert slot** — deleted (commit C), not split; the live hole was the Gate-0 ARTIFACT, whose re-home
-folds INTO G3 (owner call). G5 keeps the auditor-id stamp + the reactive lies-reachably quarantine.
-
-**Bug 1 — Gate-0 exclusion never wired: ✅ SHIPPED (`c99bcb9c`, loop-core, independently reviewed +
-attested).** Source pools only. Residues (host/primary pools unwired — NOT a simple extension, see the
-backlog entry; absent-artifact fail-open; opencode self-spawn asymmetry) are in `docs/backlog.md`.
-
-**Bug 2 — ✅ FIXED in A′ (`043832a5`).** Cost order + λ are POLICY and are no longer gated by a reach check.
-The bug-1 keyspace caveat (`exclude` naming a provider dropped *every* NIM source) is **RESOLVED in A″**.
-
-**A′ — ✅ SHIPPED (`043832a5`, loop-core, two independent reviews + attested, NOT released).** The gate is
-live: policy ungated from reach (bug 2 fixed), the `autonomous_mode`-keyed reconciliation gate built,
-consume-and-invalidate, `resolveAutonomousMode` lifted to shared (env var now **`AUDIT_TOOLS_AUTONOMOUS`** —
-attendedness is a property of the RUN, so no per-tool name), roster check + field deleted.
-**Round 1 returned BLOCKER** — the gate could never fire (`advanceAudit` re-decided gate-blind, dispatching a
-different executor) and the frozen closure could not clear mid-drain (PRIORITY[0] livelock). Both fixed; the
-gate is now **mutable state threaded by reference, cleared on promotion**, and a red-green-validated
-`advanceAudit` test pins it. Round 2 re-traced both fixes: non-blocking, findings actioned. The durable
-lessons are in the spec's G3 bullets — read them before A″.
-
-**A″ — ✅ SHIPPED (`e0deb96f`, loop-core, two independent reviews + attested, NOT released).** `exclude` is
-now an OPEN three-tier grammar (`provider:model` / bare `provider` / endpoint-host), disambiguated by the
-head token against the closed provider-name set; `resolveExcludedProviders` → `resolveDispatchExclusion`,
-returning a **matcher over backends**. `NewlyReachableBackend` carries the `exclusion_pattern` that rules
-out exactly it, built beside the gate key so the autonomous write can't drift. No `schema_version` bump —
-an old provider-name `exclude` is a strict subset (verified against `dist`). The A′→A″ intermediate state
-(one NIM model excluded ⇒ every NIM source dropped) is **CLOSED**.
-
-**▶ IMMEDIATE NEXT = G3 commit B+D** (merged — the parse gate hard-requires the fields B deletes, so
-B-then-D self-inflicts the exact silent degrade D exists to fix): delete write-only reach
-(`capability_tier` / `self_spawn_blocked` / `excluded` / `reason` / `blended_price_usd_per_mtok`) from the
-PERSISTED shape + loud `schema_version` rejection. **Split the PRODUCER**
-(`buildSharedProviderConfirmation` → a render-builder + a persist-builder), NOT the write site — projecting
-at the write site leaves the reach fields representable on the type (violates *unrepresentable, not
-guarded*). Update the parse gate (`isConfirmedPoolEntry`) in the SAME commit. Then **C** — delete the inert
-`confirmed_provider_pool` slot. Plan of record (four refuted drafts in its preamble — read it):
+**G3 is COMPLETE** (A′ `043832a5` · A″ `e0deb96f` · B+D+C this lap). The confirmed pool is split along
+policy-vs-reach: the artifact carries the operator's DECISION only (exclusions in an open three-tier
+`provider:model` grammar, cost order, λ), reach is re-resolved per-auditor and applied as a
+set-difference FILTER, and the `autonomous_mode`-keyed reconciliation gate is live. Per-commit detail is
+in `git log` + the spec's Decomposition (NOT restated here — this doc is the open-work roadmap).
+Design of record: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)
+→ Decomposition G3. Plan + its four refuted drafts (dated record):
 [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
 
-⚠ **B+D touches the Gate-0 RENDER path** — A″ backlogged a display gap there (the sources table has no
-status column; the endpoint tier can't mark a provider-granular entry). `excluded` leaves the persisted
-shape in B+D, so fix that gap on the **render** path, not the artifact field. See `docs/backlog.md`.
+### ⚠ Is the rest of the G-series worth it? — OPEN OWNER CALL, ask before starting G4
 
-**Commit order: ~~A′~~ → ~~A″~~ → B+D → C** (gate live from A′ onward — no unenforced window at any point).
+The rework began as the repair-proxy dogfood fix and has run ~a dozen laps (commit 1 → 2a-i/ii → G1 →
+G2 → G2.5 → G3 A′/A″/B+D/C). The remaining items are NOT obviously worth the same ceremony, and the
+owner has flagged the total cost. Assess each on its own merits BEFORE opening a lap:
+- **G4** split quota/block_quota by capability-vs-policy. The spec itself says it "may fold into G2" —
+  check whether G2 already covered it rather than assuming it's outstanding.
+- **G5** never-inherit enforcement (auditor-id stamp + `declared ∩ ambient-verifiable` reach +
+  lies-reachably quarantine). NOTE: G2.5 established that multi-IDE isolation falls out of per-process
+  env inheritance with NO `auditor_id` — so G5's premise needs re-verification, not implementation.
+- **G6** remediate `--auditor` round-trip. This is what unphases policy's home (artifact → intent).
+- Orthogonal: **commit 3** repair-proxy as a kind-1 launch-transport (the ORIGINAL goal of the whole
+  rework — arguably the only remaining item with a live user-facing payoff); **commit 4** fix C (host
+  cold-start wall, needs a clean minimal repro); **commit 5** decide kind-3's fate.
 
 **⚠ Deliberate, still current:** autonomous auto-confirm is scoped to the DELTA case only — a first-time
 confirmation (no artifact at all) still pauses for the operator even under `autonomous_mode`.
 
-**Spec amended (2026-07-16):** `spec/unified-dispatch-worker-model.md` G3 now carries the gate as the
-deliverable, phases policy's home (artifact until G6, intent thereafter — the panel's Decision (A) stands),
-and records the operand/seam/grammar traps. Don't re-plan G3 from any older draft.
+**⚠ NOTHING IN THE G-SERIES IS RELEASED — deliberate, and G1 is a BREAKING transport change.** The audit
+CLI's `--host-*` capability flags are GONE (one `--auditor <json>` descriptor replaces them) and a repo
+`session-config.json` can no longer carry `provider`/`sources`/backend blocks (rejected at load). The
+installed GLOBAL bins are pre-G1, so a stale host dogfooding this batch has its handshake **silently
+ignored** (unknown flags → defaults). Don't dogfood the G-series via a stale global bin without
+reinstalling. Publish is deferred until the sequence reaches a coherent shippable point — see the
+worth-it call above.
 
-**G3 is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`, `costRank.ts`,
-**`src/shared/quota/`**) → green + independent review + attestation required.
+**G3+ is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`,
+`costRank.ts`, **`src/shared/quota/`**) → green + independent review + attestation required.
 
 Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
 → "Greenfield endpoint (owner-approved 2026-07-16)" + Decomposition (memory
-[[unified-dispatch-worker-model]]).
+[[unified-dispatch-worker-model]]). Shipped G-series detail lives in `git log` + that Decomposition's
+`[SHIPPED]` markers — deliberately NOT narrated here. Per-step plan docs (dated records, with their
+refuted drafts) are in `docs/reviews/g{1,2,2-5,3}-*.md`.
 
-**The two "open decisions" are RESOLVED (they were one cut — INTENT vs CAPABILITY):**
-- **confirmed_provider_pool → SPLIT:** persist the operator's route DECISION (exclusions + cost order +
-  confirmed flag) as intent; re-resolve the concrete pool per-auditor + apply the decision as a filter;
-  reconciliation on a newly-reachable backend is `autonomous_mode`-keyed (attended → prompt the delta;
-  autonomous → fail-closed-exclude + friction).
-- **quota/block_quota → SPLIT** by "asserts capability vs asserts policy": windows/host_model/subagent-
-  limit/per-source-quota = capability (handshake, never persist); safety_margin/thresholds/λ = policy
-  (repo); learned rpm/tpm = the account-keyed ledger (not config).
-
-**Shipped:** commit 1 (`f5bca305`, retire the source-pool integration, reviewed+attested) + 2a-i
-(`c167fbee`, additive `--host-inventory` channel) + **2a-ii (`605d8a0a`, switch dispatch consumers to
-READ the handshake via `applyDispatchInventory` — loop-core, reviewed+attested; the correct RUNTIME
-overlay but a transitional half-measure — the repo still HAS the dispatch slots)** + **G1 (`e7b593ac`,
-collapse the `--host-*` flag-bag into ONE `--auditor <json>` `AuditorDescriptor`; independent-reviewed,
-full-suite green, NO release — inert intermediate; NOT loop-core by path so no attestation).** Inert until
-the host loaders emit inventory (no host does yet → today's behavior byte-for-byte).
-
-**⚠ G1 is a BREAKING transport change, unreleased.** `--host-*` capability flags are GONE from the audit
-CLI (only `--host-provider` / `--host-model` remain). The canonical + derived host assets already emit
-`--auditor`, but the installed GLOBAL bins still emit the old flags — a stale host dogfooding G1 would have
-its handshake SILENTLY IGNORED (unknown flags → defaults). Harmless until the next release picks it up;
-just don't dogfding G1 via a stale global bin without reinstalling.
-
-**Greenfield build sequence (each loop-core: green + independent review + attest):**
-- **G1 — ✅ SHIPPED (`e7b593ac`).** Scope was larger than the plan documented: `prepare-dispatch` + `quota`
-  (both live subcommands) also read the handshake directly and were converted; `--host-model` was NOT dead
-  (two callers) and is retained. `getAuditorDescriptor` re-validates each `self` field to the retired
-  parsers' exact strictness (roster via shared `parseHostModelRoster` — a review-caught drop). Plan doc:
-  [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](../docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md).
-- **G2 — ✅ SHIPPED (type-split half, `59116fe2`; NO release — inert).** `RepoSessionIntent` +
-  `resolveSessionConfig(intent, descriptor)` + `validateRepoSessionIntent` (rejects dispatch keys at BOTH
-  read boundaries) + descriptor reslice + `persistHostProvider` retired + remediate `resolve(intent, null)`
-  seam. Scope beyond the plan: the 3 host/IDE launch blocks (`claude_code`/`vscode_task`/`antigravity`) are
-  NOT `DispatchableSource`s → they ride `descriptor.self` (dispatchable backends ride `sources[]`);
-  `parallel_workers` moved onto `self`; descriptor sources/launch-blocks validated at the
-  `getAuditorDescriptor` parse boundary (C1 quota + injection — a review-caught hole). Independent loop-core
-  review: no blocker, 5 findings addressed + attested. Plan doc:
-  [`docs/reviews/g2-repo-session-intent-plan-2026-07-16.md`](reviews/g2-repo-session-intent-plan-2026-07-16.md).
-  **The Path A source-emitter was SPLIT OUT → G2.5** (owner, 2026-07-16 — see IMMEDIATE NEXT above).
-- **G2.5 — ✅ SHIPPED. Deviated from the plan, deliberately + recorded.** In-process
-  `resolveAmbientSources` instead of a shell-out emitter; no `auditor_id` (multi-IDE isolation falls out
-  of per-process env inheritance); inline `api_key` refused as not-ambient-verifiable; the weak
-  `validateDispatchableSources` strengthened at the ONE shared site (both boundaries gain it); the
-  G2-orphaned `examples/session-config/opencode-free.json` migrated →
-  `examples/catalog/sources-declared.json`. An independent adversarial review of the FIRST plan returned
-  REWORK and killed all three of its load-bearing choices — that review is why the design is what it is.
-  NOT loop-core by path (verified against `loopCorePaths.ts`) → no attestation. NO release (inert-window
-  batch continues).
-- **G3 — A′ ✅ (`043832a5`) + A″ ✅ (`e0deb96f`); B+D is IMMEDIATE NEXT** (see the top of this doc). The
-  gate is live and the exclusion grammar is model-granular; what remains is the write-only-reach deletion
-  (B+D) and the inert slot (C). Policy stays on the confirmation artifact until G6. Plan + the four refuted
-  drafts: [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
-- **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
-  `declared ∩ ambient-verifiable` reach + lies-reachably quarantine). **G6** remediate `--auditor` round-trip.
-- Orthogonal (retained): **commit 3** repair-proxy as a kind-1 launch-transport; **commit 4** fix C (host
-  cold-start wall — needs a clean minimal repro first); **commit 5** decide kind-3's fate.
-
-**Quota / offload (as of G1 session):** the free `llm read` lane is BACK (used for G1 recon at zero
-Claude-read cost — the earlier "endpoint times out/returns empty" note was stale). `llm write`/NIM
-completion + `ANTHROPIC_BASE_URL` subagent-fronting were NOT retested. G1's mechanical bulk (5 test-file
-conversions, asset regen) was offloaded to **Haiku subagents** (parent Opus orchestrates + verifies green
-+ independent review) — the working pattern when the free write-lane is uncertain. NOTE: a Haiku agent
-weakened one test (malformed-roster assertion → incidental TypeError); ALWAYS review offloaded test diffs
-for assertion quality, not just green. Fastest full unblock still = owner points `ANTHROPIC_BASE_URL` at a
-running repair-proxy backed by a free model.
+**Offload lanes (as of the G3 session):** the free `llm read` lane works (zero Claude-read cost for recon).
+`llm write`/NIM completion + `ANTHROPIC_BASE_URL` subagent-fronting are UNRETESTED. Mechanical bulk offloads
+cleanly to **Haiku subagents** (parent orchestrates + verifies green + independent review) — but ALWAYS
+review offloaded test diffs for assertion QUALITY, not just green (a Haiku agent once weakened a test to an
+incidental TypeError). Fastest full unblock: point `ANTHROPIC_BASE_URL` at a running repair-proxy on a free
+model.
 
 ## Older track — bounded quota-cluster remainder (secondary, not blocking the rework)
 

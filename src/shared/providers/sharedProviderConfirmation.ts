@@ -58,6 +58,7 @@ import {
 import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
 import type {
   ConfirmedPoolEntry,
+  PersistedPoolEntry,
   HostModelCostEntry,
   SourcePoolCostEntry,
   ProviderConfirmationInput,
@@ -180,8 +181,12 @@ export interface SharedProviderConfirmation {
   session_level: true;
   /** ISO-8601 timestamp of when the pool was confirmed. */
   confirmed_at: string;
-  /** Confirmed provider pool, with exclusion flags. */
-  provider_pool: ConfirmedPoolEntry[];
+  /**
+   * The confirmed provider pool as PERSISTED — decision only, no reach (G3 B+D).
+   * See {@link PersistedPoolEntry}: the reach half is deliberately unrepresentable
+   * here, so one auditor's environment can never route another's.
+   */
+  provider_pool: PersistedPoolEntry[];
   /**
    * Host self-reported model tiers with their operator-confirmed cost positions
    * (follow-up c). Merged into the model-keyed dispatch positions map by
@@ -206,6 +211,45 @@ export interface SharedProviderConfirmation {
    * (or a headless run) behaves exactly as before.
    */
   dispatch_bias?: number;
+}
+
+/**
+ * The Gate-0 confirmation as RENDERED to the operator — identical to the persisted
+ * {@link SharedProviderConfirmation} except that `provider_pool` carries the FULL
+ * {@link ConfirmedPoolEntry} (this auditor's freshly-derived reach: tier, price, why
+ * a backend is excluded). This shape exists ONLY in memory; it never reaches disk.
+ */
+export interface RenderedProviderConfirmation
+  extends Omit<SharedProviderConfirmation, "provider_pool"> {
+  provider_pool: ConfirmedPoolEntry[];
+}
+
+/**
+ * Project the render DTO down to what actually gets PERSISTED: the operator's
+ * decision, with this auditor's reach assessment dropped (G3 B+D).
+ *
+ * The PRODUCER is split — not the write site. `writeSharedProviderConfirmation`
+ * receives an already-typed value, so projecting THERE would leave the reach fields
+ * representable on the persisted type and a future caller could put them back.
+ * Projecting here makes the persisted shape carry no reach BY CONSTRUCTION.
+ */
+export function buildSharedProviderConfirmation(
+  ...args: Parameters<typeof buildProviderConfirmationRender>
+): SharedProviderConfirmation {
+  const rendered = buildProviderConfirmationRender(...args);
+  return {
+    ...rendered,
+    provider_pool: rendered.provider_pool.map(toPersistedPoolEntry),
+  };
+}
+
+/** The decision half of one pool entry. Reach is dropped, never persisted. */
+function toPersistedPoolEntry(entry: ConfirmedPoolEntry): PersistedPoolEntry {
+  return {
+    name: entry.name,
+    ...(entry.model_id !== undefined ? { model_id: entry.model_id } : {}),
+    ...(entry.cost_order !== undefined ? { cost_order: entry.cost_order } : {}),
+  };
 }
 
 function sortNames(names: readonly ResolvedProviderName[]): ResolvedProviderName[] {
@@ -255,7 +299,7 @@ function sortStrings(values: readonly string[]): string[] {
  *   passed via the dedicated params above (the executor forwards them from the
  *   same input), so this arg governs ordering + host roster only.
  */
-export function buildSharedProviderConfirmation(
+export function buildProviderConfirmationRender(
   sessionConfig: SessionConfig = {},
   env: NodeJS.ProcessEnv = process.env,
   exclude: DispatchExclusionPattern[] = [],
@@ -263,7 +307,7 @@ export function buildSharedProviderConfirmation(
   detectCommand?: (command: string) => boolean,
   input?: ProviderConfirmationInput,
   sources: DispatchableSource[] = [],
-): SharedProviderConfirmation {
+): RenderedProviderConfirmation {
   const discovered = discoverProviders(sessionConfig, env, detectCommand);
   const operatorExcluded = buildExclusion(exclude);
   const includeSet = new Set<ResolvedProviderName>(include);
@@ -294,15 +338,13 @@ export function buildSharedProviderConfirmation(
       name: "worker-command",
       capability_tier: "unknown" satisfies CapabilityTier,
       excluded: ruledOut("worker-command"),
-      reason: "always-available fallback; no PATH detection required",
     });
   }
 
   for (const provider of discovered) {
     // Self-spawn-blocked providers are excluded from the dispatchable pool by
     // default; the operator can opt one back in via `include`. An operator-named
-    // `exclude` always wins. The machine-readable flag rides along so downstream
-    // consumers never have to parse `reason`.
+    // `exclude` always wins.
     const blocked = provider.selfSpawnBlocked === true;
     const operatorIncluded = includeSet.has(provider.name);
     const excluded = ruledOut(provider.name) || (blocked && !operatorIncluded);
@@ -311,7 +353,6 @@ export function buildSharedProviderConfirmation(
       capability_tier: provider.capabilityTier,
       excluded,
       ...(blocked ? { self_spawn_blocked: true } : {}),
-      reason: provider.reason,
     });
   }
 
@@ -324,6 +365,8 @@ export function buildSharedProviderConfirmation(
     session_level: true,
     confirmed_at: new Date().toISOString(),
     provider_pool: annotated.provider_pool,
+    // NOTE: the FULL entries. This is the render DTO; `buildSharedProviderConfirmation`
+    // projects them to `PersistedPoolEntry[]` on the way to disk.
     ...(annotated.host_model_cost_order.length > 0
       ? { host_model_cost_order: annotated.host_model_cost_order }
       : {}),
@@ -747,16 +790,21 @@ export async function writeSharedProviderConfirmation(
 // Validation
 // ---------------------------------------------------------------------------
 
-function isConfirmedPoolEntry(value: unknown): value is ConfirmedPoolEntry {
+/**
+ * The persisted pool entry's gate: `name` ONLY.
+ *
+ * B+D: this gate previously hard-required `capability_tier` AND `excluded` — the
+ * exact reach fields B removes from the persisted shape. That coupling is why B and
+ * D are ONE commit: a post-B artifact failing a pre-B gate parses to `null`, which
+ * degrades SILENTLY to empty cost positions and λ=0. Requiring only `name` also
+ * makes the gate forward-tolerant of a confirmation written before B (its extra
+ * reach fields are simply ignored on read, never re-persisted).
+ */
+function isPersistedPoolEntry(value: unknown): value is PersistedPoolEntry {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.name === "string" &&
-    typeof obj.capability_tier === "string" &&
-    typeof obj.excluded === "boolean"
-  );
+  return typeof (value as Record<string, unknown>).name === "string";
 }
 
 function isHostModelCostEntry(value: unknown): value is HostModelCostEntry {
@@ -804,7 +852,7 @@ function parseSharedProviderConfirmation(
   if (typeof obj.confirmed_at !== "string") return null;
   if (
     !Array.isArray(obj.provider_pool) ||
-    !obj.provider_pool.every(isConfirmedPoolEntry)
+    !obj.provider_pool.every(isPersistedPoolEntry)
   ) {
     return null;
   }
@@ -833,7 +881,7 @@ function parseSharedProviderConfirmation(
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
     confirmed_at: obj.confirmed_at,
-    provider_pool: obj.provider_pool as ConfirmedPoolEntry[],
+    provider_pool: obj.provider_pool as PersistedPoolEntry[],
     ...(hostModels && hostModels.length > 0
       ? { host_model_cost_order: hostModels }
       : {}),
@@ -908,8 +956,47 @@ export async function readSharedProviderConfirmation(
     // never-block path — a missing or corrupt artifact is never an error here.
     return null;
   }
-  // Malformed (wrong shape / version drift) → never-block.
-  return parseSharedProviderConfirmation(raw);
+  // Malformed (wrong shape / version drift) → never-block, but never SILENT (D).
+  const parsed = parseSharedProviderConfirmation(raw);
+  if (parsed === null) warnConfirmationRejected(raw, root);
+  return parsed;
+}
+
+/**
+ * D — loud rejection. `null` from the parser is indistinguishable at the call sites
+ * from "no confirmation exists", and every consumer treats that as "no operator
+ * decision": empty cost positions, λ=0, no exclusions. So a `schema_version` bump —
+ * or any shape drift — would SILENTLY discard the operator's whole route decision
+ * and quietly re-route the run. Absence is legitimately silent; a file that EXISTS
+ * and was rejected is not.
+ *
+ * A warning, not a throw: INV-DC1-6 (never-block) is the standing invariant here —
+ * the same loud-degrade shape as `readQuotaStateOrDegrade` and the blind-dispatch
+ * warning. Reached only on the rejection path, so it cannot become hot.
+ */
+function warnConfirmationRejected(raw: unknown, root: string): void {
+  const version =
+    raw !== null && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>).schema_version
+      : undefined;
+  const why =
+    version !== undefined && version !== SHARED_PROVIDER_CONFIRMATION_VERSION
+      ? `schema_version "${String(version)}" != expected "${SHARED_PROVIDER_CONFIRMATION_VERSION}"`
+      : "malformed shape";
+  // Scoped to what the rejection ACTUALLY discards. Exclusions deliberately survive:
+  // `readConfirmedDispatchPolicy` bypasses this parser (and its version check) and reads
+  // `policy` straight off the raw JSON, so an exclusion keeps failing CLOSED through a
+  // schema drift — the correct direction, and the reason this message must NOT claim the
+  // pool is unfiltered. Saying otherwise sends the operator hunting a routing change that
+  // did not happen.
+  process.stderr.write(
+    `WARNING: ignoring the provider confirmation at ${sharedProviderConfirmationPath(root)} ` +
+      `(${why}). The operator's confirmed COST ORDER and DISPATCH BIAS are NOT being applied ` +
+      `to this run — dispatch falls back to price-then-tier at the default bias. ` +
+      `(Exclusions are read separately and still apply.) Re-run the provider-confirmation ` +
+      `gate to rewrite it.
+`,
+  );
 }
 
 /**

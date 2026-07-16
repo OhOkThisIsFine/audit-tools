@@ -12,7 +12,7 @@ import type {
 import {
   resolveSessionConfig,
   applyGuidanceFile,
-  buildSharedProviderConfirmation,
+  buildProviderConfirmationRender,
   deriveSourcePoolDisplayFromSources,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
@@ -930,7 +930,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       env: process.env,
     });
     const dispatchSources = await gatherDispatchableSources(effectiveConfig, primaryProviderName);
-    const suggested = buildSharedProviderConfirmation(
+    const suggested = buildProviderConfirmationRender(
       effectiveConfig,
       process.env,
       [],

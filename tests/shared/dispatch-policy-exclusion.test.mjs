@@ -23,6 +23,7 @@ import { test, expect, describe } from "vitest";
 
 const {
   buildSharedProviderConfirmation,
+  buildProviderConfirmationRender,
   resolveDispatchExclusion,
 } = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
 
@@ -70,8 +71,10 @@ describe("the operator's explicit decision is persisted reach-free", () => {
     // not.
     const config = { openai_compatible: { model: "model-a", base_url: "https://x.invalid" } };
 
-    const hit = buildSharedProviderConfirmation(config, {}, ["openai-compatible:model-a"]);
-    const miss = buildSharedProviderConfirmation(config, {}, ["openai-compatible:model-z"]);
+    // The `excluded` MARK is a render concern (B+D: never persisted), so this
+    // drives the render builder — the persisted shape carries no such field.
+    const hit = buildProviderConfirmationRender(config, {}, ["openai-compatible:model-a"]);
+    const miss = buildProviderConfirmationRender(config, {}, ["openai-compatible:model-z"]);
 
     const entryOf = (c) => c.provider_pool.find((e) => e.name === "openai-compatible");
     expect(entryOf(hit)?.excluded).toBe(true);
@@ -242,7 +245,7 @@ describe("the exclusion grammar — provider / provider:model / endpoint", () =>
 // ---------------------------------------------------------------------------
 
 const { buildSourcePools } = await import("../../src/shared/quota/apiPool.ts");
-const { writeSharedProviderConfirmation, readConfirmedDispatchPolicy } =
+const { writeSharedProviderConfirmation, readConfirmedDispatchPolicy, readSharedProviderConfirmation } =
   await import("../../src/shared/providers/sharedProviderConfirmation.ts");
 
 const STUB_QUOTA = { name: "stub", async queryCurrentUsage() { return null; } };
@@ -414,5 +417,188 @@ describe("the call sites stay wired (guard — the filter is worthless unwired)"
     expect(source).toContain("readConfirmedDispatchPolicy");
     expect(source).toContain("resolveDispatchExclusion(");
     expect(source).toMatch(/excludedBackends:/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B+D — reach never reaches disk, and a rejection is never silent.
+//
+// The bug this closes: the artifact carried the WRITING auditor's reach
+// assessment (`capability_tier` / `self_spawn_blocked` / `excluded` /
+// `blended_price_usd_per_mtok`), which a DIFFERENT auditor then read verbatim at
+// dispatch. Reach is per-auditor capability; only the DECISION is inheritable.
+// Enforced by TYPE via a producer split, not by a projection at the write site —
+// so the fields cannot be put back by a future caller.
+// ---------------------------------------------------------------------------
+
+const REACH_FIELDS = [
+  "capability_tier",
+  "self_spawn_blocked",
+  "excluded",
+  "reason",
+  "blended_price_usd_per_mtok",
+];
+
+describe("B+D — the persisted shape carries the decision, never the reach", () => {
+  test("the persist builder emits NO reach field on any pool entry", () => {
+    // Built from inside a claude-code session, so the writer genuinely HAS a
+    // reach assessment to leak (claude-code is self-spawn-blocked for it).
+    const persisted = buildSharedProviderConfirmation({}, { CLAUDECODE: "1" });
+
+    expect(persisted.provider_pool.length).toBeGreaterThan(0);
+    for (const entry of persisted.provider_pool) {
+      for (const field of REACH_FIELDS) {
+        expect(entry, `${entry.name} must not persist "${field}"`).not.toHaveProperty(field);
+      }
+      expect(Object.keys(entry).every((k) => ["name", "model_id", "cost_order"].includes(k))).toBe(true);
+    }
+  });
+
+  test("…and the SERIALIZED bytes carry none either", async () => {
+    // The type is the guard, but the artifact is what another auditor reads.
+    const root = await mkdtemp(join(tmpdir(), "persist-reach-"));
+    await writeSharedProviderConfirmation(
+      root,
+      buildSharedProviderConfirmation({}, { CLAUDECODE: "1" }),
+    );
+    const bytes = await readFile(
+      join(root, ".audit-tools", "provider-confirmation.json"),
+      "utf8",
+    );
+    for (const field of REACH_FIELDS) {
+      expect(bytes, `"${field}" must not reach disk`).not.toContain(field);
+    }
+  });
+
+  test("the RENDER builder still carries reach — the operator must SEE it", () => {
+    // The other half of the split: dropping reach from the render DTO would blind
+    // the operator at Gate-0 (they could no longer see WHY a backend is excluded).
+    const rendered = buildProviderConfirmationRender({}, { CLAUDECODE: "1" });
+    const claude = rendered.provider_pool.find((e) => e.name === "claude-code");
+
+    expect(claude?.excluded).toBe(true);
+    expect(claude?.self_spawn_blocked).toBe(true);
+    expect(claude?.capability_tier).toBeTruthy();
+  });
+
+  test("a pre-B artifact still parses — its extra reach fields are ignored, not fatal", async () => {
+    // Forward-tolerance: the gate requires `name` only. An artifact written before
+    // B+D must not fail the gate (that would be the silent degrade D exists to fix).
+    const root = await mkdtemp(join(tmpdir(), "persist-legacy-"));
+    await writeSharedProviderConfirmation(root, {
+      ...buildSharedProviderConfirmation({}, {}, ["opencode"], []),
+      provider_pool: [
+        { name: "codex", capability_tier: "capable", excluded: false, reason: "legacy", model_id: "m1", cost_order: 0 },
+      ],
+    });
+
+    expect(await readConfirmedDispatchPolicy(root)).toEqual({ exclude: ["opencode"] });
+  });
+});
+
+describe("B+D — a rejected confirmation is LOUD, never silent", () => {
+  const rejectedFor = async (confirmation) => {
+    const root = await mkdtemp(join(tmpdir(), "reject-"));
+    await writeSharedProviderConfirmation(root, confirmation);
+    const written = [];
+    const original = process.stderr.write;
+    process.stderr.write = (chunk) => { written.push(String(chunk)); return true; };
+    try {
+      await readSharedProviderConfirmation(root);
+    } finally {
+      process.stderr.write = original;
+    }
+    return written.join("");
+  };
+
+  test("a schema_version drift warns, naming the version and the consequence", async () => {
+    // `null` is indistinguishable from "no confirmation exists" at every call site,
+    // and every consumer reads that as "no operator decision": empty cost order,
+    // λ=0, and — worst — the A′ reconciliation gate goes BLIND. Silently.
+    const warning = await rejectedFor({
+      ...buildSharedProviderConfirmation({}, {}, ["opencode"], []),
+      schema_version: "9.9.9",
+    });
+
+    expect(warning).toContain("9.9.9");
+    expect(warning).toContain("1.0.0");
+    expect(warning.toLowerCase()).toContain("not being applied");
+  });
+
+  test("a malformed pool warns too", async () => {
+    const warning = await rejectedFor({
+      ...buildSharedProviderConfirmation({}, {}),
+      provider_pool: [{ oops: true }],
+    });
+
+    expect(warning.toLowerCase()).toContain("malformed");
+  });
+
+  test("an ABSENT confirmation is silent — absence is legitimate, not a degrade", async () => {
+    const root = await mkdtemp(join(tmpdir(), "absent-"));
+    const written = [];
+    const original = process.stderr.write;
+    process.stderr.write = (chunk) => { written.push(String(chunk)); return true; };
+    try {
+      expect(await readSharedProviderConfirmation(root)).toBeNull();
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(written.join("")).toBe("");
+  });
+});
+
+describe("B+D — the two builders stay wired to the right call sites", () => {
+  // The render and persist builders take IDENTICAL parameter lists and differ by one
+  // word. `PersistedPoolEntry` brands the reach half `never`, so a swap is a TYPE
+  // error — but only at the write site's own boundary. These pin the wiring itself,
+  // because the behavioral tests above call the builders directly and would stay
+  // green if a call site were swapped.
+  test("the PERSIST site (intakeExecutors) uses the persist builder, not the render one", async () => {
+    const source = await readFile(
+      new URL("../../src/audit/orchestrator/intakeExecutors.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("buildSharedProviderConfirmation(");
+    expect(
+      source,
+      "persisting the render DTO would write the writing auditor's reach for another auditor to inherit — the exact bug B+D removes",
+    ).not.toContain("buildProviderConfirmationRender");
+  });
+
+  test("the RENDER site (nextStepCommand) uses the render builder", async () => {
+    const source = await readFile(
+      new URL("../../src/audit/cli/nextStepCommand.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("buildProviderConfirmationRender(");
+    expect(
+      source,
+      "rendering the persisted projection would blind the operator: no tier, no price, no reason a backend is excluded",
+    ).not.toContain("buildSharedProviderConfirmation(");
+  });
+});
+
+describe("B+D — reach is UNREPRESENTABLE on the persisted type, not merely omitted", () => {
+  // Two independent reviews proved the original split did NOT achieve this: a
+  // structural subset means `ConfirmedPoolEntry` assigns cleanly to
+  // `PersistedPoolEntry` (excess-property checks fire only on fresh literals), so
+  // `writeSharedProviderConfirmation(root, renderedDTO)` typechecked and leaked the
+  // whole reach half to disk. The `?: never` brands are what close it. Nothing else
+  // pins them, so deleting them would silently re-open the hole.
+  test("the persisted type brands every reach field `never`", async () => {
+    const source = await readFile(
+      new URL("../../src/shared/types/providerConfirmation.ts", import.meta.url),
+      "utf8",
+    );
+    const persisted = source.slice(
+      source.indexOf("export interface PersistedPoolEntry"),
+      source.indexOf("export interface ConfirmedPoolEntry"),
+    );
+    for (const field of REACH_FIELDS) {
+      expect(persisted, `PersistedPoolEntry must brand "${field}" as never`).toContain(
+        `${field}?: never;`,
+      );
+    }
   });
 });

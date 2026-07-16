@@ -188,9 +188,9 @@ PATH / proxy port listening / cred readable), never `declared ∪ stored`.
   invocation and apply the decision as a FILTER over freshly-discovered reach (never additive).
   Audit→remediate transports zero reachability. **The cut applies to the confirmation ARTIFACT, not to a session-config field** — the
   decision is captured transiently (`provider-confirmation.input.json`) and its output persists to
-  `provider-confirmation.json`, which today carries discovered reach (`capability_tier` / `excluded` /
+  `provider-confirmation.json`, which USED to carry discovered reach (`capability_tier` / `excluded` /
   `self_spawn_blocked`) written by one auditor and read verbatim by another's dispatch. That artifact is
-  where the reachability inheritance actually happens, so that is where the split lands: the artifact keeps
+  where the reachability inheritance actually happened, so that is where the split landed: the artifact keeps
   the decision, and reach is re-resolved by whoever is dispatching. Reconciliation when a resuming auditor reaches a backend the operator never confirmed is
   keyed on `autonomous_mode`: **attended → prompt the delta only** (subset → silent); **autonomous →
   fail-closed-exclude the new backend + a `newly_reachable_backend` friction event.**
@@ -231,8 +231,8 @@ must mean something to an auditor with a different reachable set) — default `p
   descriptor's `sources[]` + launch blocks are validated at the `getAuditorDescriptor` parse boundary
   (C1 quota + command-injection), symmetric with the disk-load boundary. `parallel_workers` moved onto
   `self`. **Honest scope:** `quota`/`block_quota`/`host_can_dispatch_subagents` remain live on the intent
-  type (a HALF-type) → G4/G5. (`confirmed_provider_pool` also remains on the type, but it is an inert slot
-  — nothing produces or consumes it; G3 deletes it rather than splitting it.) **The deterministic source-emitter (Path A feeder)
+  type (a HALF-type) → G4/G5. (`confirmed_provider_pool` was an inert slot — nothing produced or consumed
+  it — and G3 commit C DELETED it rather than splitting it.) **The deterministic source-emitter (Path A feeder)
   was SPLIT OUT to G2.5** (owner, 2026-07-16): the type-split already satisfies atomic-replace (the
   descriptor CAN carry sources) and is inert/unreleased, so per the spec's own "seam first, feeder follows"
   the emitter is the immediate-next commit, not bundled.
@@ -291,9 +291,16 @@ must mean something to an auditor with a different reachable set) — default `p
     on the confirmation artifact — the only cross-tool decision channel.** (A draft proposing to collapse
     the artifact into the intent was refuted on exactly this; a later draft proposing to strike the
     intent-carried endpoint from this spec was refuted too. Both are phases of one design, not rivals.)
-  - `provider-confirmation.json` stops carrying discovered reach (`capability_tier` / `excluded` /
-    `self_spawn_blocked` / `reason` / `roster`) — reach is re-resolved per-auditor and the decision applies
-    as a set-difference FILTER over it, never additively.
+  - **[SHIPPED — B+D]** `provider-confirmation.json` no longer carries discovered reach (`capability_tier` /
+    `excluded` / `self_spawn_blocked` / `reason` / `blended_price_usd_per_mtok` / `roster`) — reach is
+    re-resolved per-auditor and the decision applies as a set-difference FILTER over it, never additively.
+    Enforced by TYPE, not by discipline: the PRODUCER is split (`buildProviderConfirmationRender` → the full
+    in-memory DTO the operator is shown; `buildSharedProviderConfirmation` → projects to the narrow
+    `PersistedPoolEntry`), so reach is *unrepresentable* on the persisted shape rather than merely omitted by
+    a careful write site. The parse gate narrowed to `name` in the SAME commit (it hard-required the very
+    fields B removes ⇒ a post-B artifact would have failed a pre-B gate → `null` → silent degrade). A
+    rejected confirmation now warns LOUDLY: `null` is indistinguishable from "absent" at every call site, so
+    a version drift would otherwise silently discard the operator's decision AND blind the A′ gate.
   - **The `autonomous_mode`-keyed reconciliation gate** (needs `resolveAutonomousMode` lifted out of
     `src/remediate/` into the shared core — one core, two draws). **The roster-staleness check is NOT this
     gate and cannot become it:** it detects the right event but responds by silently discarding the

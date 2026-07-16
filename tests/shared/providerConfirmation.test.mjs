@@ -3,7 +3,6 @@ import { test, expect } from "vitest";
 const {
   discoverProviders,
   queryProviderQuota,
-  applyProviderConfirmationSelections,
 } = await import("../../src/shared/providers/providerConfirmation.ts");
 
 // ---------------------------------------------------------------------------
@@ -23,29 +22,22 @@ test("discoverProviders returns entry for claude-code when 'claude' found on PAT
   }
 });
 
-test("discoverProviders assigns correct capability tiers for well-known names", async () => {
-  // Import the module under test again so we can inspect tier assignment logic
-  // by calling applyProviderConfirmationSelections with synthetic entries.
-  const { applyProviderConfirmationSelections: apply } = await import("../../src/shared/providers/providerConfirmation.ts");
+test("discoverProviders assigns the documented capability tier per provider", () => {
+  // Was vacuous: it built synthetic entries and asserted their OWN literals back,
+  // driving no product code, while importing the (now-deleted)
+  // applyProviderConfirmationSelections purely for show. Drive the real discovery.
+  const discovered = discoverProviders({}, {}, () => true);
+  const tierOf = Object.fromEntries(discovered.map((p) => [p.name, p.capabilityTier]));
 
-  // Build synthetic discovered entries and verify tier values match the spec.
-  const syntheticProviders = [
-    { name: "claude-code", command: "claude", capabilityTier: "frontier", detected: true },
-    { name: "opencode",    command: "opencode", capabilityTier: "capable", detected: true },
-    { name: "codex",       command: "codex",    capabilityTier: "capable", detected: true },
-    { name: "worker-command", command: undefined, capabilityTier: "unknown", detected: false },
-  ];
-
-  for (const p of syntheticProviders) {
-    expect(["frontier", "capable", "fast", "unknown"].includes(p.capabilityTier), `unexpected tier ${p.capabilityTier} for ${p.name}`).toBeTruthy();
+  expect(tierOf["claude-code"]).toBe("frontier");
+  expect(tierOf["codex"]).toBe("capable");
+  // worker-command is the always-available fallback and is never PATH-probed, so
+  // discovery does not surface it; the pool builder adds it. Its tier is asserted
+  // there (provider-self-spawn-exclusion.test.mjs).
+  for (const p of discovered) {
+    expect(["frontier", "capable", "fast", "unknown"], `unexpected tier for ${p.name}`)
+      .toContain(p.capabilityTier);
   }
-
-  // Verify tiers match expected mapping
-  const tierMap = Object.fromEntries(syntheticProviders.map(p => [p.name, p.capabilityTier]));
-  expect(tierMap["claude-code"]).toBe("frontier");
-  expect(tierMap["opencode"]).toBe("capable");
-  expect(tierMap["codex"]).toBe("capable");
-  expect(tierMap["worker-command"]).toBe("unknown");
 });
 
 test("discoverProviders surfaces openai-compatible when configured (config-gated, not PATH-probed)", () => {
@@ -74,53 +66,6 @@ test("PB-1: discoverProviders does NOT surface a bare-PATH opencode without expl
   // in the test environment — the gate `continue`s before pushing the entry.
   const result = discoverProviders({}, {});
   expect(result.some((p) => p.name === "opencode"), "bare-PATH opencode must NOT appear without opencode.* config").toBe(false);
-});
-
-// ---------------------------------------------------------------------------
-// applyProviderConfirmationSelections
-// ---------------------------------------------------------------------------
-
-test("applyProviderConfirmationSelections filters excluded providers", () => {
-  const pool = [
-    { name: "claude-code", command: "claude", capabilityTier: "frontier", detected: true },
-    { name: "codex",       command: "codex",  capabilityTier: "capable",  detected: true },
-    { name: "opencode",    command: "opencode", capabilityTier: "capable", detected: true },
-  ];
-
-  const result = applyProviderConfirmationSelections(pool, ["codex"], []);
-  const names = result.providers.map(p => p.name);
-
-  expect(!names.includes("codex"), "codex should be excluded").toBeTruthy();
-  expect(names.includes("claude-code"), "claude-code should be preserved").toBeTruthy();
-  expect(names.includes("opencode"), "opencode should be preserved").toBeTruthy();
-  expect(result.excluded).toEqual(["codex"]);
-});
-
-test("applyProviderConfirmationSelections preserves non-excluded providers", () => {
-  const pool = [
-    { name: "claude-code", command: "claude", capabilityTier: "frontier", detected: true },
-    { name: "opencode",    command: "opencode", capabilityTier: "capable", detected: true },
-  ];
-
-  const result = applyProviderConfirmationSelections(pool, [], []);
-  expect(result.providers.length).toBe(2);
-  expect(result.excluded).toEqual([]);
-});
-
-test("applyProviderConfirmationSelections appends addUndetected providers with detected:false", () => {
-  const pool = [
-    { name: "claude-code", command: "claude", capabilityTier: "frontier", detected: true },
-  ];
-  const undetected = [
-    { name: "codex", command: "codex", capabilityTier: "capable", detected: true }, // detected flag gets overridden
-  ];
-
-  const result = applyProviderConfirmationSelections(pool, [], undetected);
-  const added = result.providers.find(p => p.name === "codex");
-  expect(added, "codex should appear in confirmed pool").toBeTruthy();
-  expect(added.detected, "addUndetected entries should have detected:false").toBe(false);
-  expect(result.addedUndetected.length).toBe(1);
-  expect(result.addedUndetected[0].detected).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -229,27 +174,4 @@ test("OBS-9a9091ad: queryProviderQuota does NOT invoke the injected log on succe
   );
   expect(result).toEqual({ requests_per_minute: 60 });
   expect(logged.length, "log must not fire when the query succeeds").toBe(0);
-});
-
-// ---------------------------------------------------------------------------
-// SessionConfig type compatibility (compile-time; verified via build)
-// ---------------------------------------------------------------------------
-
-test("SessionConfig accepts confirmed_provider_pool field", () => {
-  /** @type {import("../../src/shared/types/sessionConfig.ts").SessionConfig} */
-  const config = {
-    provider: "claude-code",
-    confirmed_provider_pool: {
-      providers: [],
-      excluded: [],
-      addedUndetected: [],
-    },
-  };
-  expect(config.confirmed_provider_pool !== undefined).toBeTruthy();
-});
-
-test("SessionConfig confirmed_provider_pool is optional", () => {
-  /** @type {import("../../src/shared/types/sessionConfig.ts").SessionConfig} */
-  const config = { provider: "opencode" };
-  expect(config.confirmed_provider_pool).toBe(undefined);
 });

@@ -93,7 +93,8 @@ when there is no operator.
   then DELETES the submission (consume-and-invalidate: a spent input must not auto-satisfy a
   later reconciliation it never answered). The operator supplies only ordering intent + a model
   roster; the tool never asks it to hand-author prices or capability flags. The confirmed order
-  is persisted on `ConfirmedPoolEntry.cost_order` (provider pools) and `host_model_cost_order`
+  is persisted on `PersistedPoolEntry.cost_order` (provider pools — `ConfirmedPoolEntry` is the
+  in-memory Gate-0 render DTO and by design never reaches disk) and `host_model_cost_order`
   (host tiers), both read back at dispatch as rung 1 via a single model-keyed positions map.
   Remediate reads the same persisted confirmation (it has no standalone confirmation step; it
   consumes the audit-side pool).

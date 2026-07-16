@@ -154,6 +154,61 @@ export interface SourcePoolCostEntry {
 // ---------------------------------------------------------------------------
 
 /** One entry in the confirmed provider pool. */
+/**
+ * One entry of the PERSISTED confirmed pool — the operator's DECISION, and nothing
+ * else (G3 B+D).
+ *
+ * Deliberately a strict subset of {@link ConfirmedPoolEntry}: the reach half
+ * (`capability_tier` / `self_spawn_blocked` / `excluded` / `reason` /
+ * `blended_price_usd_per_mtok`) is the WRITING auditor's assessment of its own
+ * environment and must never be inherited by a reading auditor — reach is
+ * re-resolved per-auditor at the moment of use. Those fields live only on the
+ * in-memory render DTO, which never reaches disk.
+ *
+ * This is enforced by TYPE, not by a projection at the write site: if the persisted
+ * field were typed `ConfirmedPoolEntry[]`, `writeJsonFile` would serialize the reach
+ * fields regardless of intent. Unrepresentable, not guarded.
+ */
+export interface PersistedPoolEntry {
+  /** Canonical provider name. Half of the gate's `model_id ?? name` compare key. */
+  name: ResolvedProviderName;
+  /**
+   * The reach half, branded `never` so it is genuinely UNREPRESENTABLE here.
+   *
+   * ⚠ These are load-bearing, not documentation. `PersistedPoolEntry` is otherwise a
+   * structural SUBSET of {@link ConfirmedPoolEntry}, and TypeScript's excess-property
+   * check fires only on fresh object literals — so without these, a `ConfirmedPoolEntry`
+   * (or a `RenderedProviderConfirmation`) assigns cleanly to the persisted type and the
+   * writer's whole reach assessment serializes to disk with NO compiler signal. An
+   * independent review proved exactly that against this file. The two builders take
+   * identical parameter lists and differ by one word, so a swapped call site is a real
+   * hazard; this is what makes the swap a type error instead of a silent leak.
+   */
+  capability_tier?: never;
+  self_spawn_blocked?: never;
+  excluded?: never;
+  reason?: never;
+  blended_price_usd_per_mtok?: never;
+  /**
+   * Representative model id this entry is priced/ordered by. The dispatch
+   * cost-position key, and the finer half of the gate's compare key. Absent when the
+   * model is not knowable at confirmation time (a CLI backend's model arrives only
+   * at the dispatch handshake).
+   */
+  model_id?: string;
+  /**
+   * Operator-confirmed 0-based cost position (rung 1 of costRank). Lower routes
+   * first. Read back at dispatch via `resolveConfirmedCostPositions`.
+   */
+  cost_order?: number;
+}
+
+/**
+ * The FULL in-memory pool entry — the Gate-0 RENDER DTO. Carries the persisted
+ * decision ({@link PersistedPoolEntry}) plus this auditor's freshly-derived reach,
+ * which the operator needs to SEE (tier, price, why a backend is excluded) but which
+ * must never be persisted for another auditor to inherit.
+ */
 export interface ConfirmedPoolEntry {
   /** Canonical provider name. */
   name: ResolvedProviderName;
@@ -170,11 +225,9 @@ export interface ConfirmedPoolEntry {
    * active session of that same agent (claude-code under `CLAUDECODE`, codex
    * under `CODEX`). Such an entry is `excluded: true` by default — and so out of
    * the dispatchable pool — unless the operator explicitly re-includes it. This
-   * flag is the security signal; `reason` is advisory text only.
+   * flag is the security signal.
    */
   self_spawn_blocked?: boolean;
-  /** Optional reason for exclusion or detection restriction. */
-  reason?: string;
   /**
    * Representative model id this entry is priced/ordered by (cost-first routing;
    * spec/cost-first-routing.md). For a configured API pool it is the configured
