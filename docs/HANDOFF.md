@@ -103,30 +103,47 @@ possibly-different auditor reads it verbatim at dispatch (`src/audit/cli/dispatc
 INTO G3**, not G5 — same cut, and splitting it would leave a half-done boundary across two laps. G5 keeps
 the auditor-id stamp + the reactive lies-reachably quarantine.
 
-**Owner call (2026-07-16): BUGS FIRST, then the split.** Two live bugs surfaced; ship them against a tree
-whose behavior is correct, then do the policy/reach split.
+**Bug 1 — Gate-0 exclusion never wired: ✅ SHIPPED (`c99bcb9c`, loop-core, independently reviewed +
+attested).** Source pools only. Residues (host/primary pools unwired — NOT a simple extension, see the
+backlog entry; absent-artifact fail-open; opencode self-spawn asymmetry) are in `docs/backlog.md`.
 
-- **Bug 1 — Gate-0 exclusion never wired: ✅ SHIPPED (`c99bcb9c`, loop-core, independently reviewed +
-  attested).** Source pools only. Residues (host/primary pools unwired — NOT a simple extension, see the
-  backlog entry; absent-artifact fail-open; opencode self-spawn asymmetry) are in `docs/backlog.md`.
-- **▶ Bug 2 — remediate may discard the confirmed cost order + λ on every dispatch: UNVERIFIED, verify
-  before fixing.** `marshal.ts:410,416` read with `waveOptions?.sessionConfig ?? {}`; both route through
-  `readSharedProviderConfirmation:475`, which re-derives `currentProviderRoster(sessionConfig, env)` and
-  returns `reconfirm` on mismatch → empty positions + λ=0. Config-derived providers (`openai_compatible`,
-  `sources[]`) are invisible under `{}`, so remediate's roster *should* differ from audit's whenever one is
-  configured. **The premise is NOT verified** — a background agent tasked with confirming it was lost, and
-  post-G2 the dispatch-inventory fields no longer live on the persisted intent, which may mean the roster
-  comparison is structurally broken for BOTH tools. Verify against source before writing a fix; do not
-  assume. Detail in `docs/backlog.md`.
-- **Then G3 proper (the split).** The verified plan + everything deferred into it (roster-staleness
-  decision, gate reachability, key-grammar extraction, `resolveAutonomousMode` lift, `schema_version`
-  story) is in [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
+**Bug 2 — REFUTED as framed; the real remainder FOLDED INTO G3 (owner call, 2026-07-16).** Verified against
+HEAD: the session config is NOT empty, `sources[]` never enters the roster at all, and the roster comparison
+is NOT structurally broken post-G2. The real (narrower) defect is **descriptor absence** — it bites only
+headless / `openai-compatible` / `opencode` drivers and off-PATH command overrides, never the ordinary
+conversational case. Its correct fix **IS** the G3 cut (cost order + λ are policy; policy must not be gated
+by a reach check), so it ships as G3 commit A′ step 1. Corrected detail: `docs/backlog.md`.
 
-**⚠ Roster-staleness is DEFERRED, not decided** — the owner's constraint is *"we also need the user to
-confirm model choices."* Deleting the check would let a newly-reachable model route unconfirmed, and the
-reconciliation gate that would enforce confirmation is **itself unreachable on resume** (`provider_confirmation`
-is a presence-only obligation, `state.ts:83`, with no staleness edge in `spec/audit/dependency-map.md:166`).
-**Sequence is forced: make the gate reachable FIRST, then decide staleness.**
+**▶ IMMEDIATE NEXT = G3 commit A′.** Plan of record (verified over three adversarial review rounds that
+killed four drafts — read the preamble before touching it):
+[`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
+
+**⚠ Read the goal first — four drafts died by losing it.** G3's deliverable is the **`autonomous_mode`-keyed
+reconciliation gate** (`spec/unified-dispatch-worker-model.md:193-195`); everything else is debris cleared
+so the gate is expressible. **Roster-staleness is DECIDED, not deferred** — the earlier "sequence is forced:
+make the gate reachable first" framing was refuted: the check's `reconfirm` verdict **reaches no obligation**,
+so it enforces the owner's *"user must confirm model choices"* constraint **not at all**, and it compares the
+*writing* auditor's roster (meaningless cross-auditor). It is a degenerate proxy for the gate — replaced by
+it, with `roster` deleted alongside.
+
+**Commit order: A′ → A″ → B+D → C** (gate live from A′ onward — no unenforced window at any point):
+- **A′** — ungate policy from the reach check (fixes bug 2) + build the gate + consume-and-invalidate the
+  input + lift `resolveAutonomousMode` to shared + delta-only prompt + delete the check and `roster`. One
+  commit: step 1 removes `reconfirm`'s only consumers, so the check's *behavior* dies there, not at the
+  deletion. Gate keys on `model_id ?? provider-name`; seam is `nextStepCommand.ts:316-318`.
+- **A″** — widen the exclusion grammar to `provider:model` (type + parser change; budget the
+  `resolveExcludedProviders` → matcher ripple across 4 loop-core areas).
+- **B+D** (merged — the parse gate hard-requires the fields B deletes, so B-then-D self-inflicts the exact
+  silent degrade D exists to fix) — delete write-only reach + loud `schema_version` rejection.
+- **C** — delete the inert `confirmed_provider_pool` slot.
+
+**⚠ Deliberate intermediate state (A′ → A″ window), not a bug:** A′'s `policy.exclude` is still
+`ResolvedProviderName[]`, so an autonomous exclusion of ONE new NIM model drops **every** NIM source. Blast
+radius ≈ 0 (audit's `autonomous_mode` is brand-new in A′ itself). A″ closes it.
+
+**Spec amended (2026-07-16):** `spec/unified-dispatch-worker-model.md` G3 now carries the gate as the
+deliverable, phases policy's home (artifact until G6, intent thereafter — the panel's Decision (A) stands),
+and records the operand/seam/grammar traps. Don't re-plan G3 from any older draft.
 
 **G3 is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`, `costRank.ts`,
 **`src/shared/quota/`**) → green + independent review + attestation required.
@@ -183,9 +200,12 @@ just don't dogfding G1 via a stale global bin without reinstalling.
   REWORK and killed all three of its load-bearing choices — that review is why the design is what it is.
   NOT loop-core by path (verified against `loopCorePaths.ts`) → no attestation. NO release (inert-window
   batch continues).
-- **G3 (IMMEDIATE NEXT)** split confirmed_provider_pool (policy on intent + re-resolved reach + autonomous-keyed
-  reconciliation + pin the exclusion-key grammar, default `provider:model`). G2.5's `resolveAmbientSources`
-  is the reach it filters over.
+- **G3 (IMMEDIATE NEXT — commit A′)** BUILD the autonomous_mode-keyed reconciliation gate; delete the
+  roster-staleness check it supersedes + the inert `confirmed_provider_pool`; policy stays on the
+  confirmation artifact until G6; pin the exclusion grammar `provider:model`. Reach-now reads the
+  `gatherDispatchableSources` chokepoint — **NOT** `resolveAmbientSources` (blind to undeclared +
+  descriptor-supplied backends). Plan + the four refuted drafts:
+  [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
 - **G4** split quota/block_quota (may fold into G2). **G5** never-inherit enforcement (auditor-id stamp +
   `declared ∩ ambient-verifiable` reach + lies-reachably quarantine). **G6** remediate `--auditor` round-trip.
 - Orthogonal (retained): **commit 3** repair-proxy as a kind-1 launch-transport; **commit 4** fix C (host
