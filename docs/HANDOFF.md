@@ -65,31 +65,43 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — G4 (or: stop here — see "Is the rest worth it?")
+## ▶ IMMEDIATE NEXT — commit 3 (repair-proxy kind-1), the original goal
 
-**G3 is COMPLETE** (A′ `043832a5` · A″ `e0deb96f` · B+D+C this lap). The confirmed pool is split along
-policy-vs-reach: the artifact carries the operator's DECISION only (exclusions in an open three-tier
-`provider:model` grammar, cost order, λ), reach is re-resolved per-auditor and applied as a
-set-difference FILTER, and the `autonomous_mode`-keyed reconciliation gate is live. Per-commit detail is
-in `git log` + the spec's Decomposition (NOT restated here — this doc is the open-work roadmap).
-Design of record: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)
-→ Decomposition G3. Plan + its four refuted drafts (dated record):
-[`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](reviews/g3-dispatch-policy-plan-2026-07-16.md).
+**The G-series is DONE as a sequence. G4/G5/G6 are closed or dissolved — do not open them as laps.**
+The 2026-07-16 lap (`d1065655`) reframed the whole remainder by asking why dispatch was forked at all:
 
-### ⚠ Is the rest of the G-series worth it? — OPEN OWNER CALL, ask before starting G4
+- **The dispatch ENGINE was already shared** (`driveRolling`, rolling engine, capacity, admission,
+  scheduler, `estimateTokensFromBytes`, `buildHostModelPools`). Only the ASSEMBLY wrapper was forked, and
+  it is now single-sourced in `src/shared/quota/hostPool.ts`; both local preambles are deleted.
+- **G6 is CLOSED, and its shape was wrong.** "Wire `--auditor` into remediate too" accepts the fork. The
+  descriptor splits along a verified line — environment-class resolves in-process, host-self-class is
+  unknowable to a spawned CLI — so remediate's pool came back via `ambientAuditorDescriptor()` +
+  `loadRemediateSessionConfig`, no flag round-trip. **This also fixed an un-released REGRESSION**: from G2
+  until that lap, remediate dispatched with NO pool at all.
+- **G4 is CLOSED as not-implemented** — premise refuted across three passes (nothing WRITES
+  `quota`/`block_quota`; `model_id` is opaque-by-design, not a peer of `host_model`). What remains is a
+  judgment call, NOT a task: `block_quota.host_model` is an operator hint that persists into a run driven by
+  a different auditor. **Owner call** — [`docs/reviews/g4-g5-g6-premise-check-2026-07-16.md`](reviews/g4-g5-g6-premise-check-2026-07-16.md).
+- **G5 is DOWN to one clause** (the lies-reachably quarantine); the other two are shipped (G2.5) or dead
+  (the auditor-id stamp is a write-only field whose premise G2.5 disproved). Backlog-tracked.
 
-The rework began as the repair-proxy dogfood fix and has run ~a dozen laps (commit 1 → 2a-i/ii → G1 →
-G2 → G2.5 → G3 A′/A″/B+D/C). The remaining items are NOT obviously worth the same ceremony, and the
-owner has flagged the total cost. Assess each on its own merits BEFORE opening a lap:
-- **G4** split quota/block_quota by capability-vs-policy. The spec itself says it "may fold into G2" —
-  check whether G2 already covered it rather than assuming it's outstanding.
-- **G5** never-inherit enforcement (auditor-id stamp + `declared ∩ ambient-verifiable` reach +
-  lies-reachably quarantine). NOTE: G2.5 established that multi-IDE isolation falls out of per-process
-  env inheritance with NO `auditor_id` — so G5's premise needs re-verification, not implementation.
-- **G6** remediate `--auditor` round-trip. This is what unphases policy's home (artifact → intent).
-- Orthogonal: **commit 3** repair-proxy as a kind-1 launch-transport (the ORIGINAL goal of the whole
-  rework — arguably the only remaining item with a live user-facing payoff); **commit 4** fix C (host
-  cold-start wall, needs a clean minimal repro); **commit 5** decide kind-3's fate.
+**So the next item is `commit 3` — repair-proxy as a kind-1 launch-transport.** It is the ORIGINAL goal of
+the entire rework (the dogfood that planned 430 tasks and dispatched zero) and the only remaining item with
+a live user-facing payoff. Design of record:
+[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) (memory
+[[unified-dispatch-worker-model]]). Also orthogonal + open: **commit 4** fix C (host cold-start wall, needs
+a clean minimal repro); **commit 5** decide kind-3's fate.
+
+**Before commit 3, consider releasing.** The regression that made the batch un-shippable is fixed, so the
+15 un-released commits are now honest — see the release note below.
+
+### Lap-scoping lesson (the reason the G-series ran ~a dozen laps)
+
+Three of the four remaining G-items evaporated on inspection; the fourth had the wrong shape. Every one had
+file:line evidence attached and read as verified. **Verify the PREMISE of a queued item against HEAD before
+opening a lap on it** — the spec's own decomposition is a lead, not a work order. Full write-ups:
+[`dispatch-fork-assessment-2026-07-16.md`](reviews/dispatch-fork-assessment-2026-07-16.md) (why there was
+no auditor/remediator separation to begin with) and the premise check above.
 
 **⚠ Deliberate, still current:** autonomous auto-confirm is scoped to the DELTA case only — a first-time
 confirmation (no artifact at all) still pauses for the operator even under `autonomous_mode`.
@@ -99,8 +111,13 @@ CLI's `--host-*` capability flags are GONE (one `--auditor <json>` descriptor re
 `session-config.json` can no longer carry `provider`/`sources`/backend blocks (rejected at load). The
 installed GLOBAL bins are pre-G1, so a stale host dogfooding this batch has its handshake **silently
 ignored** (unknown flags → defaults). Don't dogfood the G-series via a stale global bin without
-reinstalling. Publish is deferred until the sequence reaches a coherent shippable point — see the
-worth-it call above.
+reinstalling.
+
+**The batch is now SHIPPABLE — the blocker is gone.** It was not behavior-neutral: from G2 (`59116fe2`)
+until `d1065655` it silently removed remediate's ability to dispatch to any non-self pool (a capability
+`v0.32.68` had). That is fixed, so the sequence has reached a coherent point. **Releasing is a live option
+and probably the right next move** — it is a breaking transport change (likely a minor bump, not patch),
+and it needs the global-bin reinstall per the npm-12 notes in Durable traps.
 
 **G3+ is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`,
 `costRank.ts`, **`src/shared/quota/`**) → green + independent review + attestation required.
