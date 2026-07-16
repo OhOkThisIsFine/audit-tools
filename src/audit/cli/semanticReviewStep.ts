@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { HostModelRosterEntry, ResolvedProviderName } from "audit-tools/shared";
-import { classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, renderHostWallExplanation } from "audit-tools/shared";
+import type { HostModelRosterEntry, ResolvedProviderName, HostDispatchInventory } from "audit-tools/shared";
+import { applyDispatchInventory, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, renderHostWallExplanation } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { createFreshSessionProvider } from "../providers/index.js";
@@ -40,6 +40,14 @@ export async function renderSemanticReviewStep(params: {
   hostModelRoster?: HostModelRosterEntry[] | null;
   /** Opaque model identity for the quota key when no model name resolves. */
   hostModelId?: string | null;
+  /**
+   * 2a-ii: the per-auditor dispatch inventory reported this invocation
+   * (`--host-inventory`). Overlaid onto the disk-loaded session-config below so the
+   * host-review dispatch pool/provider come from the handshake, not the repo config
+   * (spec/unified-dispatch-worker-model.md). `null`/absent ⇒ the repo config is used
+   * unchanged (deprecated fallback).
+   */
+  inventory?: HostDispatchInventory | null;
   hostCanRestrictSubagentTools: boolean;
   hostCanSelectSubagentModel: boolean;
   /** Which executor selected this step; controls prompt variant. */
@@ -93,7 +101,14 @@ export async function renderSemanticReviewStep(params: {
   // the dispatch path run against an attacker-influenced config. Matches every
   // sibling caller (advanceAuditCommand/nextStepCommand/prepareDispatchCommand/
   // quotaCommand), which all let the error propagate.
-  const sessionConfig = await loadSessionConfig(artifactsDir);
+  // 2a-ii: overlay the per-auditor handshake inventory onto the freshly-loaded
+  // (and re-validated, fail-closed) repo config, so the host-review dispatch
+  // provider/pool below read the inventory, not the repo's dispatch fields. Inert
+  // (returns the disk config unchanged) when no `--host-inventory` was reported.
+  const sessionConfig = applyDispatchInventory(
+    await loadSessionConfig(artifactsDir),
+    params.inventory,
+  );
   // The host-review dispatch pool is keyed to the CURRENT driver's identity, never
   // an inherited headless-backend `sessionConfig.provider` (the founding capability-
   // inheritance bug): a run started under `provider: codex` and resumed by a Claude
@@ -130,6 +145,12 @@ export async function renderSemanticReviewStep(params: {
     outputTokens: params.hostOutputTokens ?? null,
     modelRoster: params.hostModelRoster ?? null,
     modelId: params.hostModelId ?? null,
+    // 2a-ii: carry the dispatch inventory onto the continue-command this step emits, so
+    // a bare resume preserves this driver's inventory instead of silently dropping it
+    // (2a-i wired the channel + rendering but only cmdNextStep's descriptor populated it;
+    // this dispatch step's descriptor must carry it forward too, or the inventory is lost
+    // after the first dispatch step).
+    inventory: params.inventory ?? null,
   };
   const continueCommand = nextStepCommand(root, artifactsDir, hostDescriptor);
 

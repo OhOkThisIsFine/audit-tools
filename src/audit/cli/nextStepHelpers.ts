@@ -1060,7 +1060,7 @@ export const HOST_GATE_KINDS: readonly HostGateKind[] = [
  * filesystem-watching host reads.
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "sessionConfig">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -1084,6 +1084,9 @@ export async function executeAndRecord(
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
       externalAcquisition: params.externalAcquisition,
       since: params.since,
+      // 2a-ii: the effective dispatch config reaches provider_confirmation_executor,
+      // which consumes + persists the confirmed pool from the handshake inventory.
+      sessionConfig: params.sessionConfig,
     });
     await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
       iteration: index + 1,

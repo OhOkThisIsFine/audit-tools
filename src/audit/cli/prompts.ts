@@ -92,7 +92,14 @@ export function renderHostDescriptorFlags(
     out.push("--host-model-id", descriptor.modelId);
   if (descriptor.modelRoster != null && descriptor.modelRoster.length > 0)
     out.push("--host-models", JSON.stringify(descriptor.modelRoster));
-  if (descriptor.inventory != null && Object.keys(descriptor.inventory).length > 0)
+  // 2a-ii: emit whenever the inventory is non-null — NOT only when non-empty. Under
+  // `applyDispatchInventory` null and `{}` are OPPOSITE semantics (null ⇒ deprecated
+  // repo-config fallback; `{}` ⇒ authoritatively-empty inventory = host-only). If an
+  // empty `{}` were dropped here it would arrive as null on the next resume and silently
+  // re-inherit the repo's dispatch fields — inverting a host-only run back to repo
+  // inheritance across one dispatch hop. Absent inventory reaches here as null and still
+  // emits nothing.
+  if (descriptor.inventory != null)
     out.push("--host-inventory", JSON.stringify(descriptor.inventory));
   if (descriptor.canDispatchSubagents !== undefined)
     out.push(

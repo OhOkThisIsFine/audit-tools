@@ -95,14 +95,20 @@ describe("host descriptor round-trip", () => {
     expect(getHostInventory(argv)).toEqual(inventory);
   });
 
-  test("an empty / absent inventory emits no --host-inventory flag", () => {
-    expect(renderHostDescriptorFlags({ canDispatchSubagents: true, inventory: {} })).not.toContain(
-      "--host-inventory",
-    );
+  // 2a-ii: null (absent) and `{}` (authoritatively-empty) are OPPOSITE semantics for
+  // `applyDispatchInventory` (null ⇒ repo-config fallback; `{}` ⇒ host-only wholesale-
+  // strip), so an empty `{}` MUST round-trip and NOT collapse to null on resume.
+  test("absent inventory (null) emits no --host-inventory flag", () => {
     expect(renderHostDescriptorFlags({ canDispatchSubagents: true, inventory: null })).not.toContain(
       "--host-inventory",
     );
     expect(getHostInventory(["next-step"])).toBeNull();
+  });
+
+  test("an empty `{}` inventory round-trips as `{}` (host-only), NOT dropped to null", () => {
+    const argv = renderHostDescriptorFlags({ canDispatchSubagents: true, inventory: {} });
+    expect(argv).toContain("--host-inventory");
+    expect(getHostInventory(argv)).toEqual({});
   });
 
   test("--host-inventory throws loudly on malformed JSON / a non-object (no silent downgrade)", () => {

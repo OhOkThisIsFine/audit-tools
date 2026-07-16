@@ -14,6 +14,7 @@ import {
   CharterDeltaSubmissionSchema,
   ClarificationAnswersSubmissionSchema,
   SystemicChallengeSubmissionSchema,
+  type SessionConfig,
 } from "audit-tools/shared";
 import {
   loadArtifactBundle,
@@ -84,6 +85,13 @@ export interface RunAuditStepOptions {
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   since?: string;
   runLog?: boolean;
+  /**
+   * 2a-ii: the EFFECTIVE dispatch config (handshake inventory overlaid onto the repo
+   * config), forwarded to advanceAudit so dispatch-inventory-reading executors
+   * (provider_confirmation) build/persist from the inventory. Absent ⇒ the executor
+   * re-reads the repo config (deprecated fallback).
+   */
+  sessionConfig?: SessionConfig;
 }
 
 // The single cross-process mutex node for BUNDLE MUTATION (multi-agent
@@ -409,6 +417,7 @@ async function executeAdvance(
     externalAcquisition: options.externalAcquisition,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
+    sessionConfig: options.sessionConfig,
     runLogger,
   });
 

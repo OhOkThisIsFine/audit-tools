@@ -8,6 +8,7 @@ import type {
   SessionConfig,
 } from "audit-tools/shared";
 import {
+  applyDispatchInventory,
   applyGuidanceFile,
   buildSharedProviderConfirmation,
   deriveSourcePoolDisplayFromSources,
@@ -303,6 +304,19 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     inventory: hostInventory,
   };
 
+  // 2a-ii: the EFFECTIVE dispatch config every dispatch/provider consumer reads —
+  // the per-auditor handshake inventory overlaid onto the repo session-config
+  // (spec/unified-dispatch-worker-model.md). `applyDispatchInventory` returns the
+  // repo config UNCHANGED when no `--host-inventory` was reported (today's every
+  // host, until 2a-iii wires the loaders) — the deprecated repo-config fallback —
+  // and otherwise takes the inventory as authoritative WHOLESALE (no repo dispatch
+  // fields leak). Intent fields (synthesis/analyzers/graph/quota/…) are identical to
+  // `sessionConfig`, so the raw config below stays correct for those reads; only the
+  // DISPATCH consumers switch to the effective config. Persistence is untouched — the
+  // config store re-reads disk under lock, so an in-memory overlay can never write
+  // inventory back into the repo config.
+  const effectiveConfig = applyDispatchInventory(sessionConfig, hostInventory);
+
   const result = await runDeterministicForNextStep({
     root,
     artifactsDir,
@@ -321,7 +335,11 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       analyzers: sessionConfig.analyzers,
     },
     since: getFlag(argv, "--since"),
-    sessionConfig,
+    // 2a-ii: the fold's dispatch reads (buildAuditSourcePools / driveRollingAuditDispatch
+    // / planHybridDispatch / resolvesToInProcessDispatchProvider) key off this, so they
+    // see the per-auditor handshake inventory, not the repo config. Intent reads folded
+    // in here are identical either way (the overlay preserves every intent field).
+    sessionConfig: effectiveConfig,
     // Defect-1: the resolved attended/headless discriminator, so the fold demotes a
     // configured in-process backend to a source pool (attended) rather than letting it
     // monopolize the frontier — or self-drives it (headless).
@@ -397,7 +415,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       await gateHostFanoutOrPause({
         root,
         artifactsDir,
-        sessionConfig,
+        sessionConfig: effectiveConfig,
         hostDescriptor,
         continueCommand,
         bundle: result.bundle,
@@ -498,7 +516,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       await gateHostFanoutOrPause({
         root,
         artifactsDir,
-        sessionConfig,
+        sessionConfig: effectiveConfig,
         hostDescriptor,
         continueCommand,
         bundle: result.bundle,
@@ -565,7 +583,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       await gateHostFanoutOrPause({
         root,
         artifactsDir,
-        sessionConfig,
+        sessionConfig: effectiveConfig,
         hostDescriptor,
         continueCommand,
         bundle: result.bundle,
@@ -633,7 +651,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       await gateHostFanoutOrPause({
         root,
         artifactsDir,
-        sessionConfig,
+        sessionConfig: effectiveConfig,
         hostDescriptor,
         continueCommand,
         bundle: result.bundle,
@@ -796,7 +814,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       await gateHostFanoutOrPause({
         root,
         artifactsDir,
-        sessionConfig,
+        sessionConfig: effectiveConfig,
         hostDescriptor,
         continueCommand,
         bundle: result.bundle,
@@ -839,15 +857,16 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     // The tool's suggested pool (price-ascending). Built from the SAME discovery +
     // annotation the executor will use, so what the operator sees is what routes
     // if they accept it verbatim.
-    // Gate-0 source fold: expand every dispatchable source pool (explicit sources[] +
-    // repair-proxy /registry) so the suggested ordering + roster the operator sees is
-    // exactly what routes. Fail-open — a registry outage yields [] (no source pools).
-    const primaryProviderName = resolveFreshSessionProviderName(undefined, sessionConfig, {
+    // Gate-0 source fold: expand every dispatchable source pool (the explicit
+    // `sources[]`) so the suggested ordering + roster the operator sees is exactly what
+    // routes. 2a-ii: read the EFFECTIVE config so the confirmed roster reflects the
+    // per-auditor handshake inventory, not the repo config.
+    const primaryProviderName = resolveFreshSessionProviderName(undefined, effectiveConfig, {
       env: process.env,
     });
-    const dispatchSources = await gatherDispatchableSources(sessionConfig, primaryProviderName);
+    const dispatchSources = await gatherDispatchableSources(effectiveConfig, primaryProviderName);
     const suggested = buildSharedProviderConfirmation(
-      sessionConfig,
+      effectiveConfig,
       process.env,
       [],
       [],
@@ -1117,6 +1136,11 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     hostCanSelectSubagentModel,
     selectedExecutor: result.selectedExecutor,
     inProcessMadeProgress: result.inProcessMadeProgress,
+    // 2a-ii: the per-auditor handshake inventory. renderSemanticReviewStep re-reads
+    // (and re-validates, fail-closed) the config from disk for its host-review
+    // dispatch, so it overlays the inventory over THAT config itself — and rides it
+    // on the continue-command it emits so a bare resume preserves it.
+    inventory: hostInventory,
   });
   console.log(JSON.stringify(step, null, 2));
 }

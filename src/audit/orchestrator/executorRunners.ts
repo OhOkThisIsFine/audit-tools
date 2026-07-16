@@ -79,7 +79,15 @@ function requireRoot(root: string | undefined, executorName: string): string {
  */
 export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   provider_confirmation_executor: async (bundle, { options }) =>
-    runProviderConfirmationAutoComplete(bundle, options.root, options.artifactsDir),
+    runProviderConfirmationAutoComplete(
+      bundle,
+      options.root,
+      options.artifactsDir,
+      // 2a-ii: the effective dispatch config (handshake inventory) — so the confirmed
+      // pool is built/persisted from the per-auditor inventory, never a re-read of the
+      // repo config that would re-leak another auditor's backends into the routed pool.
+      options.sessionConfig,
+    ),
   intake_executor: async (bundle, { options }) =>
     runIntakeExecutor(
       bundle,

@@ -645,3 +645,77 @@ export interface HostDispatchInventory {
   parallel_workers?: number;
   rolling_engine?: boolean;
 }
+
+/**
+ * The flat SessionConfig fields that constitute DISPATCH INVENTORY (the per-auditor
+ * backend/launch set), as opposed to audit INTENT. Single-sourced so the overlay
+ * ({@link applyDispatchInventory}) and any future validator/stripper cannot drift on
+ * which fields are inventory vs intent. `rolling_engine` is deliberately absent: it is
+ * flat on {@link HostDispatchInventory} but nested at `dispatch.rolling_engine` on
+ * SessionConfig, so the overlay reconciles it separately.
+ */
+export const DISPATCH_INVENTORY_FIELDS = [
+  "provider",
+  "host_provider",
+  "subprocess_template",
+  "claude_code",
+  "codex",
+  "opencode",
+  "openai_compatible",
+  "vscode_task",
+  "antigravity",
+  "agy",
+  "sources",
+  "parallel_workers",
+] as const satisfies readonly (keyof HostDispatchInventory & keyof SessionConfig)[];
+
+/**
+ * Overlay the per-auditor dispatch inventory (reported this invocation via the
+ * `--host-inventory` handshake) onto the repo session-config, returning the EFFECTIVE
+ * config the dispatch/provider consumers read. The repo session-config carries audit
+ * INTENT only; the dispatch backend/launch set comes from the per-auditor handshake,
+ * never inherited across auditors ([[capability-is-per-auditor-not-per-audit]],
+ * `spec/unified-dispatch-worker-model.md`, commit 2a-ii).
+ *
+ * - `inventory == null` (no `--host-inventory` this invocation — every current host,
+ *   until 2a-iii wires the loaders to assemble it) → the repo session-config is returned
+ *   UNCHANGED: the deprecated repo-config fallback, i.e. today's behavior byte-for-byte.
+ * - `inventory` present → it is AUTHORITATIVE WHOLESALE: every repo dispatch field is
+ *   dropped and replaced by the inventory's, so a partial host inventory (e.g. a
+ *   host-only `{ provider: "claude-code" }`) degrades to host + auto-detected CLIs rather
+ *   than leaking the repo's `sources` / backend blocks (the cross-contamination this
+ *   rework kills — this is NOT a per-field `inventory.x ?? repo.x` fallback).
+ *
+ * Every INTENT field (synthesis / analyzers / graph / quota / block_quota / design_review
+ * / …) is preserved identically. `rolling_engine` is overlaid onto `dispatch.rolling_engine`
+ * while the other `dispatch.*` intent fields (confirm_threshold / max_packets / …) are kept.
+ * Pure — never mutates its input.
+ */
+export function applyDispatchInventory(
+  sessionConfig: SessionConfig,
+  inventory: HostDispatchInventory | null | undefined,
+): SessionConfig {
+  if (inventory == null) return sessionConfig;
+  const effective: SessionConfig = { ...sessionConfig };
+  // Wholesale-authoritative: strip every repo dispatch field first, so an inventory that
+  // does not report a field cannot leak the repo's stale value for it.
+  const eff = effective as Record<string, unknown>;
+  const inv = inventory as Record<string, unknown>;
+  for (const field of DISPATCH_INVENTORY_FIELDS) delete eff[field];
+  for (const field of DISPATCH_INVENTORY_FIELDS) {
+    if (inv[field] !== undefined) eff[field] = inv[field];
+  }
+  // rolling_engine is flat on the inventory, nested under `dispatch` on the config:
+  // overlay only that key, preserving the other dispatch.* INTENT fields.
+  const dispatchIntent: DispatchConfig = { ...sessionConfig.dispatch };
+  delete dispatchIntent.rolling_engine;
+  if (inventory.rolling_engine !== undefined) {
+    dispatchIntent.rolling_engine = inventory.rolling_engine;
+  }
+  if (Object.keys(dispatchIntent).length > 0) {
+    effective.dispatch = dispatchIntent;
+  } else {
+    delete effective.dispatch;
+  }
+  return effective;
+}

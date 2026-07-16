@@ -106,6 +106,51 @@ await test("audit's provider-confirmation executor WRITES the shared artifact wh
   });
 });
 
+// 2a-ii (adversarial-review Finding A): the executor CONSUMES + PERSISTS the routed
+// pool, so it must build from the EFFECTIVE dispatch config (the per-auditor handshake
+// inventory threaded in as the 4th arg) — NOT a re-read of the repo session-config,
+// which would persist another auditor's backends into the shared, session-level pool.
+await test("the executor persists from the EFFECTIVE config, not a disk re-read (no cross-contamination)", async () => {
+  await withTempRoot(async (root) => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    // Repo config on disk carries a source the current auditor did NOT report.
+    // (`id` becomes the durable source_id in the persisted cost order.)
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify({
+        sources: [{ id: "repo-disk-src", provider: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+      }),
+    );
+    // The per-auditor handshake inventory (effective config) reports a DIFFERENT source.
+    const effectiveConfig = {
+      sources: [{ id: "handshake-src", provider: "openai-compatible", endpoint: "https://h/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+    };
+    await runProviderConfirmationAutoComplete({}, root, artifactsDir, effectiveConfig);
+    const persisted = await readFile(sharedProviderConfirmationPath(root), "utf8");
+    expect(persisted, "the handshake source is what routes").toContain("handshake-src");
+    expect(persisted, "the repo-disk source must NOT leak into the persisted pool").not.toContain("repo-disk-src");
+  });
+});
+
+// The deprecated fallback: with no effective config threaded (the legacy headless
+// advance-audit entrypoint, which carries no handshake), the repo config IS read.
+await test("without an effective config the executor falls back to the repo config on disk", async () => {
+  await withTempRoot(async (root) => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    await writeFile(
+      join(artifactsDir, "session-config.json"),
+      JSON.stringify({
+        sources: [{ id: "repo-disk-src", provider: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+      }),
+    );
+    await runProviderConfirmationAutoComplete({}, root, artifactsDir);
+    const persisted = await readFile(sharedProviderConfirmationPath(root), "utf8");
+    expect(persisted, "the repo config is the deprecated fallback source").toContain("repo-disk-src");
+  });
+});
+
 await test("audit's executor without a root does NOT write the shared artifact (headless, root-less)", async () => {
   await withTempRoot(async (root) => {
     const result = await runProviderConfirmationAutoComplete({});

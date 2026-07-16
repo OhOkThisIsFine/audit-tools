@@ -3,7 +3,7 @@ import type { AuditState } from "../types/auditState.js";
 import type { AuditResult } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
 import type { ExternalAnalyzerResults } from "../types/externalAnalyzer.js";
-import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, CharterDeltaSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult } from "audit-tools/shared";
+import type { AnalyzerSetting, SynthesisNarrative, RunLogger, CharterSubmission, CharterDeltaSubmission, ClarificationAnswersSubmission, SystemicChallengeSubmission, CriticalFlowFallbackResult, SessionConfig } from "audit-tools/shared";
 import type { EdgeReasoningResults } from "./edgeReasoning.js";
 import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
 
@@ -65,6 +65,16 @@ export interface AdvanceAuditOptions {
   since?: string;
   preferredExecutor?: string;
   runLogger?: RunLogger;
+  /**
+   * 2a-ii: the EFFECTIVE dispatch config (per-auditor handshake inventory overlaid
+   * onto the repo config; `applyDispatchInventory`). Threaded so the executors that
+   * read dispatch inventory — `provider_confirmation_executor`, which CONSUMES the
+   * operator confirmation and PERSISTS the routed pool — build/persist from the
+   * inventory, not a re-read of the raw repo config. Absent ⇒ the executor falls back
+   * to `loadSessionConfig` (the deprecated repo-config path).
+   * See `spec/unified-dispatch-worker-model.md`.
+   */
+  sessionConfig?: SessionConfig;
 }
 
 export interface AdvanceAuditResult {

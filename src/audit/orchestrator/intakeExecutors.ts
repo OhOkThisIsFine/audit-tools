@@ -8,6 +8,7 @@ import {
   readProviderConfirmationInput,
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
+  type SessionConfig,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { confirmProviders } from "./providerConfirmation.js";
@@ -123,14 +124,20 @@ export async function runProviderConfirmationAutoComplete(
   bundle: ArtifactBundle,
   root?: string,
   artifactsDir?: string,
+  effectiveConfig?: SessionConfig,
 ): Promise<ExecutorRunResult> {
-  // Load the real session config so a configured API/CLI model is priceable at
-  // Gate-0 (cost-first routing; spec/cost-first-routing.md). Degrade to the empty
-  // permissive default when it is absent/unreadable — pricing is best-effort and
-  // must never block confirmation.
-  const sessionConfig = artifactsDir
-    ? await loadSessionConfig(artifactsDir).catch(() => ({}))
-    : {};
+  // 2a-ii: prefer the EFFECTIVE dispatch config threaded from the next-step drain
+  // (the per-auditor handshake inventory overlaid onto the repo config). The confirmed
+  // pool this executor builds + persists is what routes for the whole session, so it
+  // MUST reflect the current auditor's inventory, not a re-read of the repo config that
+  // would re-leak another auditor's `sources`/backends (spec/unified-dispatch-worker-model.md).
+  // Fall back to loading the repo config (the deprecated path) only when no effective
+  // config was threaded — e.g. the legacy headless advance-audit entrypoint, which
+  // carries no handshake. Degrade to the empty permissive default when it is
+  // absent/unreadable — pricing is best-effort and must never block confirmation.
+  const sessionConfig: SessionConfig =
+    effectiveConfig ??
+    (artifactsDir ? await loadSessionConfig(artifactsDir).catch(() => ({})) : {});
   // Interactive Gate-0: the host may have submitted an operator ordering + host
   // roster to `provider-confirmation.input.json` (spec/cost-first-routing.md).
   // Absent ⇒ the tool's price-ascending suggestion (headless / no-operator path).
@@ -145,9 +152,9 @@ export async function runProviderConfirmationAutoComplete(
   );
   const artifactsWritten = ["provider_confirmation.json"];
   if (root) {
-    // Gate-0 source fold: expand every dispatchable source pool (explicit sources[] +
-    // repair-proxy /registry) so the confirmed cost ordering the operator approves is
-    // exactly what routes. Fail-open — a registry outage yields [] (no source pools).
+    // Gate-0 source fold: expand every dispatchable source pool (the explicit
+    // `sources[]`) so the confirmed cost ordering the operator approves is exactly
+    // what routes.
     const primaryProviderName = resolveFreshSessionProviderName(undefined, sessionConfig, {
       env: process.env,
     });

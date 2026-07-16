@@ -280,6 +280,8 @@ export {
   resolveHostDispatchCapability,
   resolveRollingEngineFlag,
   assertHostProviderName,
+  applyDispatchInventory,
+  DISPATCH_INVENTORY_FIELDS,
 } from "./types/sessionConfig.js";
 
 // Contracts
