@@ -1,14 +1,20 @@
 # Unified dispatch worker model
 
-Design of record. **Supersedes the retired `repair-proxy-dispatch-integration.md`** (deleted with the
-source-pool wiring) — that spec modelled repair-proxy as a cost-ranked openai-compatible *source pool*, which the
-2026-07-15 dogfood proved is the wrong abstraction (a host-driven audit planned 430 tasks and
-dispatched zero). This spec replaces it.
+Design of record for how dispatch reaches a model. Supersedes the retired
+`repair-proxy-dispatch-integration.md`, which modelled repair-proxy as a cost-ranked
+openai-compatible *source pool* — the wrong abstraction (repair-proxy is a tool-repair
+**transport**, not a backend).
+
+**Scope note.** This is a concept doc: the durable model, its invariants, and the constraints
+that are easy to get wrong. It carries no build sequence, no per-commit status, and no dated
+narrative — what shipped is in `git log`; what is open and in what order is in
+[`docs/HANDOFF.md`](../docs/HANDOFF.md) (sequencing) and [`docs/backlog.md`](../docs/backlog.md)
+(per-item detail).
 
 ## Principle
 
-There is ONE shared dispatch core (audit and remediate are two draws of it —
-[[dissolve-auditor-remediator-distinction]]). The core dispatches **work nodes** to **workers**.
+There is ONE shared dispatch core; audit and remediate are two **draws** of it
+([[dissolve-auditor-remediator-distinction]]). The core dispatches **work nodes** to **workers**.
 A worker is one of three *kinds*, distinguished by how it reaches a model and whether it can use
 tools. Backend diversity (running on a non-Claude model) is a property of the **worker kind and the
 current auditor's environment** — never of the repo, the run, or a "provider pool" the tool
@@ -28,7 +34,7 @@ any audit review packet whose granted files exceed the inline caps) requires an 
 (kind 1 or 2). Single-shot workers (kind 3) can only take self-contained packets that inline within
 the caps — that is their permanent ceiling, not a bug to fix.
 
-## repair-proxy's role — the category-1 launch-transport
+## repair-proxy — the kind-1 launch transport
 
 repair-proxy is a **loopback base-URL-redirect proxy for the Anthropic `/v1/messages` wire
 protocol** whose core function is **validating/repairing a model's tool calls** so a weaker backend
@@ -42,343 +48,238 @@ work. Therefore:
 - **remediate implement is the case that justifies repair-proxy** — those workers Read/Edit/Bash/run
   tests, so a weaker backend's tool calls are exactly what repair-proxy fixes.
 - **audit review host-fanout** uses the same lane (agentic claude subagents reading source + emitting
-  findings); the repair value is dormant only because current audit review *can* also be done
-  single-shot, where there are no tool calls.
-- Same mechanism, two owner uses: (a) continue working in Claude Desktop past a usage wall by
-  invisibly routing to a backend until quota resets; (b) dispatch — proxy the dispatched claude
-  subagents. Both are kind-1.
+  findings); the repair value is dormant only because audit review *can* also be done single-shot,
+  where there are no tool calls.
+- Same mechanism, two owner uses: (a) continue working past a usage wall by invisibly routing to a
+  backend until quota resets; (b) dispatch — proxy the dispatched claude subagents. Both are kind-1.
 
-### Graceful degradation — repair-proxy is OPTIONAL, never required
+**What it cannot serve, and why that is structural.** Routing **kind-3** workers through the OpenAI
+front bypasses repair entirely (JSON emitters make no tool calls; that front does no repair) — it adds
+nothing over talking to the backend directly. It cannot serve **kind-2 (CLI)** workers either: codex
+speaks OpenAI on its own config, agy speaks Gemini and repair-proxy has no Gemini front. They are their
+own harnesses with their own backends — orthogonal. The boundary is the wire protocol: repair-proxy
+serves `/v1/messages`, `/v1/chat/completions`, `/registry`; codex/agy are spawned as subprocesses via
+`spawnLoggedCommand` and never redirected.
+
+### Graceful degradation — OPTIONAL, never required
 
 repair-proxy is an *enhancement* to kind-1 workers, not a dependency. It is **auto-detected per
 auditor** (conversation-first — no manual flag), and its absence degrades cleanly to **direct
 dispatch**:
 
-- **No proxy on the machine** (nothing listening / not installed) → kind-1 workers run **directly on
-  Claude** (the normal host fan-out). The run proceeds unchanged; it simply forgoes backend diversity
-  via the proxy.
-- **Incompatible host** — a host that cannot redirect its spawned workers' harness through a proxy.
-  Only harnesses that honor `ANTHROPIC_BASE_URL` for the workers they spawn (Claude Desktop, the
-  `claude` CLI with an isolated `CLAUDE_CONFIG_DIR`) can use the proxy transport; a host that spawns
-  its subagents on Claude directly (with no control over their base URL) simply reports no
-  proxy-transport capability in the handshake → **direct dispatch**.
+- **No proxy on the machine** → kind-1 workers run directly on Claude (the normal host fan-out). The
+  run proceeds unchanged; it forgoes backend diversity via the proxy.
+- **Incompatible host** — only harnesses that honor `ANTHROPIC_BASE_URL` for the workers they spawn
+  (Claude Desktop, the `claude` CLI with an isolated `CLAUDE_CONFIG_DIR`) can use the proxy transport.
+  A host that spawns its subagents on Claude directly reports no proxy-transport capability in the
+  handshake → direct dispatch.
 
-The dispatch core NEVER assumes repair-proxy exists, NEVER requires a compatible IDE, and NEVER
-fails a run for its absence. Whether the auditor can proxy its workers is one more per-auditor
-handshake capability (present or absent), resolved at dispatch — exactly like every other
-environment-discovered capability ([[enforce-robustness-in-tooling-not-host-discretion]]).
+The dispatch core NEVER assumes repair-proxy exists, NEVER requires a compatible IDE, and NEVER fails
+a run for its absence. Whether the auditor can proxy its workers is one more per-auditor handshake
+capability, present or absent, resolved at dispatch — exactly like every other environment-discovered
+capability ([[enforce-robustness-in-tooling-not-host-discretion]]).
 
-### What repair-proxy CANNOT serve (verified 2026-07-15)
+## The one cut — INTENT vs CAPABILITY vs EFFECTIVE
 
-The single-shot-openai-front *source-pool* wiring routed **kind-3** workers through repair-proxy's
-OpenAI front — bypassing repair entirely (JSON emitters make no tool calls; the OpenAI front does no
-repair) and failing before any POST (no key on the loopback source; audit packets over the inline
-caps). It added nothing over talking to NIM directly.
+Applied everywhere:
 
-repair-proxy also cannot serve **kind-2 (CLI)** workers: codex speaks OpenAI and runs on its own
-config (already pointed at the headroom proxy); agy speaks Gemini and repair-proxy has no Gemini
-front. They are their own harnesses with their own backends — orthogonal to repair-proxy. (Wire-
-protocol boundary verified: repair-proxy serves only `/v1/messages`, `/v1/chat/completions`,
-`/registry`; codex/agy are spawned as subprocesses via `spawnLoggedCommand`, never redirected.)
+- **INTENT** — repo-persisted, durable, auditor-independent: audit scope/lenses/synthesis/analyzers/
+  design-review/graph + **budgeting policy** (safety_margin, reserved-output fraction,
+  confirm_threshold, max_packets, risk_mass_budget, cost↔throughput λ) + the operator's route
+  **DECISIONS** (exclusions, cost ordering, confirmed flag). Policy names *rules*, never *reachable
+  endpoints*.
+- **CAPABILITY** — per-invocation, per-auditor, off-repo, NEVER inherited: the reachable backend ×
+  model × {tools-vs-chat rank, quota headroom, cost} catalog + the driver's own model window(s) /
+  subagent ceiling / launch transports. Carried by ONE structured `AuditorDescriptor`
+  (`--auditor <json>`) that rides every invocation.
+- **EFFECTIVE** = `resolve(intent, descriptor)` — in-memory only, never a persistable type.
 
-## Per-auditor inventory / capability catalog (the handshake, "A")
+**The representational move:** the persisted TYPE is split. `RepoSessionIntent` (the only thing the
+store reads/writes) carries no dispatch/capability fields — they do not exist on the type, so
+persist-back contamination and stale inheritance are *unrepresentable*, not guarded. Enforced at BOTH
+read boundaries by a validator, not by TS alone.
 
-The auditor's dispatchable backend/model set is not a handful of config scalars — it is a **capability
-catalog**: every reachable provider × its available models × `{capability rank (tools vs chat), quota
-headroom, cost}`. The **tools-vs-chat** axis is the worker-kind router (tool-capable → agentic kind-1/2;
-chat-only → single-shot kind-3).
+**The tools-vs-chat axis is the worker-kind router** (tool-capable → agentic kind-1/2; chat-only →
+single-shot kind-3). The catalog is not a handful of config scalars; it is a capability catalog.
 
-**Where it lives (owner-decided 2026-07-15, reluctantly — "iffy but no better alternative"):**
+**Where capability lives, and where it must not:**
 
 - **NOT the repo.** Two auditors on one repo have different catalogs → a repo-stored inventory
-  cross-contaminates. (This is the coupling the whole rework kills.)
-- **NOT env vars.** A live model/capability/quota/cost catalog is too rich/dynamic for flat scalars.
-- **Per-auditor, in the auditor's home dir**, dynamically built by querying what THIS auditor can
-  reach — reusing existing machinery: the `models.dev` snapshot (windows/price), the live quota
-  sources (headroom per provider), CLI detection, and repair-proxy's `/registry` (which survives as a
-  per-auditor *discovery feeder* — which backend models are reachable through the proxy + capability
-  rank — NOT as a repo source-pool).
+  cross-contaminates. This is the coupling the whole model exists to kill.
+- **NOT env vars.** A live model/capability/quota/cost catalog is too rich for flat scalars.
+- **Per-auditor**, built by querying what THIS auditor can reach, reusing existing machinery: the
+  `models.dev` snapshot (windows/price), live quota sources (headroom), CLI detection, and
+  repair-proxy's `/registry` as a per-auditor *discovery feeder* — never a repo source-pool.
 
-**The governing invariant — handshake-reported, NEVER inherited (extends [[capability-is-per-auditor-not-per-audit]]).**
-The catalog is **reported fresh via the handshake by whoever drives the current step**, and the tool
-NEVER reuses a stored catalog from a previous or different auditor. This is the *same rule* that
-already governs the quota/window half; here it extends to the full model catalog.
+### The descriptor splits along ENVIRONMENT vs SELF
 
-- **The same-machine multi-IDE handoff** (start on Claude Desktop, finish on another IDE on the same
-  computer — the owner's stated worry) is exactly what this prevents: the second IDE drives step N+1
-  and reports ITS OWN catalog; nothing from Desktop's session leaks in, even though they share a
-  machine. If the second IDE can't reach a backend the first could (e.g. can't proxy), remaining work
-  degrades to direct dispatch — never corruption.
-- **The home-dir cache is keyed by auditor IDENTITY** (`catalog-<auditor-id>.json`), never a single
-  shared file — so two IDEs on one machine hold separate caches and cannot cross-contaminate. The
-  cache is a speed optimization *behind* the handshake, never a source the tool reads directly or
-  inherits.
+Not every field is knowable the same way, and conflating them is a live bug source:
 
-The repo session-config carries audit **intent** only (scope / lenses / policy / synthesis /
-design-review depth); it carries NO dispatch **inventory** (`provider` / `sources` / `repair_proxy` /
-per-provider backend blocks).
+- **Environment-class** (`sources[]`, provider identity, dispatch capability) — the backends THIS
+  PROCESS spawns. **Resolved in-process; no handshake is needed or wanted.**
+- **Self-class** (`model_id`, `context_tokens`, `output_tokens`, `roster`) — "I am model X with an
+  N-token window." **Genuinely unknowable to a spawned CLI**: the running agent's model identity is
+  not on PATH, not an env var, not a file. Irreducibly handshake-reported. Absent ⇒ the conservative
+  floor — a fidelity degradation, never a block.
 
-**Phased build (respecting the owner's iffiness — don't over-build the catalog up front).** The
-unambiguously-correct part is the SEAM: dispatch inventory is handshake-sourced + per-auditor +
-never-inherited + off-repo, degrading to host-only when empty. Build that first; the rich catalog
-*population* (query-all-providers → capability/quota/cost → identity-keyed home-dir cache) is a
-follow-on feeder behind the same seam, so if the catalog approach changes the seam still stands.
+A caller with no handshake but a real environment therefore wants an **ambient descriptor**, not a
+null one. Null means "resolve NO pool" — a strictly stronger statement, and passing it where ambient
+was meant is a silent capability loss ([[silent-fail-closed-on-one-draw]]).
 
-## What this retires
+## Source resolution — in-process, by construction
 
-- The repair-proxy-as-source-pool integration: `SessionConfig.repair_proxy`, `/registry` discovery
-  (`expandRepairProxySources`, `repairProxyRegistry.ts`), the Gate-0 repair-proxy cost fold
-  (`gatherDispatchableSources` repair-proxy branch + capability feed), and
-  `spec/repair-proxy-dispatch-integration.md`.
-- The bugs **B1** (repair-proxy loopback source has no key) and **B2** (single-shot worker can't
-  inline large audit packets) dissolve with that wiring — they were defects *in* the retired path,
-  not problems to fix.
-- Dispatch-inventory fields move off the repo session-config onto the per-invocation handshake.
+The effective routable set is `declared ∩ ambient-verifiable-by-this-process` ∪ self. A declared lane
+enters a pool only if this process proves reach (key env present / launcher on PATH / proxy port
+listening / cred readable) — never `declared ∪ stored`. The declaration is machine-level and operator-
+owned; an explicit descriptor-supplied `sources[]` still wins (the operator's escape hatch).
 
-## Retained / adjacent
+**In-process is a CORRECTNESS property, not an optimization.** A provider reads its key from
+`process.env` **at launch**. Resolving in-process makes the reach check and the launch read the SAME
+env — they cannot disagree. Relaying through the host opens a gap between what was promised and what
+is true at the moment of use. The precondition holds: no host-exclusive credential case exists — every
+dispatchable provider takes its credential from an env var, a home-dir file, an inline config value, or
+the CLI's own ambient auth. The two providers that touch host-exclusive stores (Copilot, Antigravity)
+are excluded from the dispatchable set by design.
 
-- **C — host cold-start admission wall.** A host at 56% session remaining (percent-only claude-oauth,
-  no learned tokens-per-percent slope) granted 0 packets and emitted "session limit is exhausted"
-  with an empty `admission.explains[]`. This bites the **kind-1 host-fanout path regardless** of the
-  repair-proxy work, so it stays on the fix list: cold start must admit ≥1 (probe), must not label
-  56%-remaining "exhausted", and must never emit a 0-grant with empty `explains`.
-  ([[claude-usage-endpoint-body-shape]].)
-- **Direct single-shot API pools (kind 3)** remain a legitimate lane for self-contained packets, but
-  their value versus a proxied `claude -p` (kind 1, which adds file access + tool-repair for the same
-  backend) is an **open question** — kind 3 may be a candidate for retirement if kind-1-headless
-  subsumes it. Not decided here.
+**POPULATE and RESOLVE are different operations — do not bundle them.** *Populate* (query models.dev /
+live quota / `/registry` → the rich catalog) is expensive, network-bound, and genuinely wants a cache.
+*Resolve* (intersect the declaration with right-now ambient reach) is local, cheap, and **must run at
+the moment of use to be correct**. Bundling them forces resolve onto populate's schedule — and, if the
+merge is handed back to the host, straight into the host-discretion anti-pattern: an LLM hand-composing
+`{self, sources}` JSON, whose failure mode is an empty pool indistinguishable from an unreachable
+machine. Populate lands behind the resolve seam, never in front of it.
 
-## Greenfield endpoint (owner-approved 2026-07-16, supersedes the SEAM-first phasing below)
+**Inline `api_key` is refused** as not ambient-verifiable: possession ≠ reach, and it is the one shape
+an operator can always choose, which would make the rule opt-out by construction. Its only catcher is
+the reactive lies-reachably quarantine.
 
-A 3-person independent design panel (minimalist / protocol-continuity / adversarial), greenfield
-mandate, converged unanimously; owner approved. Full synthesis:
-[`docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md`](../docs/reviews/dispatch-inventory-greenfield-design-2026-07-16.md).
-The 2a-ii `applyDispatchInventory` overlay is the correct RUNTIME math but a transitional half-measure —
-it overlays onto a persisted config that still HAS the dispatch slots. The endpoint deletes the slots.
+**No auditor id is needed for multi-IDE isolation.** Each IDE spawns its own process, which inherits
+THAT IDE's env, so each intersects the same declaration against its own real reach. Nothing is shared,
+so nothing can contaminate. An id is only meaningful for shared *transient run-state*, which is where
+never-inherit enforcement (below) puts it — and the load-bearing double-grant boundary is the
+`(provider, account)` consumption ledger, not auditor identity.
 
-**ONE cut, applied everywhere — INTENT vs CAPABILITY (vs derived EFFECTIVE):**
-- **INTENT** — repo-persisted, durable, auditor-independent: audit scope/lenses/synthesis/analyzers/
-  design-review/graph + **budgeting policy** (safety_margin, reserved-output fraction, confirm_threshold,
-  max_packets, risk_mass_budget, cost↔throughput λ) + the operator's route **DECISIONS** (exclusions,
-  cost ordering, confirmed flag). Policy names *rules*, never *reachable endpoints*.
-- **CAPABILITY** — per-invocation, per-auditor, off-repo, NEVER inherited: the reachable backend × model
-  × {tools-vs-chat rank, quota headroom, cost} catalog + the driver's own model window(s) / subagent
-  ceiling / launch transports (can-dispatch-subagents, can-proxy). Carried by ONE structured
-  `AuditorDescriptor` (`--auditor <json>`) that rides every invocation.
-- **EFFECTIVE** = `resolve(intent.policy, intent.budgeting, descriptor)` — in-memory only, never a
-  persistable type.
+## Never-inherit — three complementary mechanisms
 
-**The one representational move:** split the persisted TYPE. `RepoSessionIntent` (the only thing the
-store reads/writes) has **zero** dispatch/capability fields — they don't exist on the type, so persist-
-back contamination and stale-inheritance are *unrepresentable*, not guarded. Absence of a descriptor
-fails closed to **driver-self-only single-lane direct dispatch** (always safe — the driver is
-definitionally reachable), never to a stored value.
+1. **Unrepresentable in the persisted type** (the cut above).
+2. **Transient run-state is stamped** with the auditor's identity; a differing id on resume DISCARDS
+   prior inventory before deciding — checks identity, not "we re-sent the flags."
+3. **`declared ∩ ambient-verifiable-by-this-process` ∪ self** (source resolution above).
 
-**Never-inherit = three complementary mechanisms:** (1) unrepresentable in the persisted type; (2)
-transient run-state (active-dispatch.json, a confirmed decision's `confirmed_by`) is stamped with
-`auditor_id` — a differing id on resume DISCARDS prior inventory before deciding (checks identity, not
-"we re-sent the flags"); (3) effective routable set = `declared ∩ ambient-verifiable-by-this-process`
-∪ self — a declared lane enters a pool only if this process proves reach (key env present / launcher on
-PATH / proxy port listening / cred readable), never `declared ∪ stored`.
+## Resolved decisions
 
-**Resolved decisions:**
-- **The confirmed pool → SPLIT along policy-vs-reach:** persist the operator's route DECISION (exclusions
-  + cost ordering + confirmed flag) as intent (**phased — it rides the confirmation artifact until G6
-  unifies the intent read path; see Decomposition G3**); re-resolve the concrete pool per-auditor each
-  invocation and apply the decision as a FILTER over freshly-discovered reach (never additive).
-  Audit→remediate transports zero reachability. **The cut applies to the confirmation ARTIFACT, not to a session-config field** — the
-  decision is captured transiently (`provider-confirmation.input.json`) and its output persists to
-  `provider-confirmation.json`, which USED to carry discovered reach (`capability_tier` / `excluded` /
-  `self_spawn_blocked`) written by one auditor and read verbatim by another's dispatch. That artifact is
-  where the reachability inheritance actually happened, so that is where the split landed: the artifact keeps
-  the decision, and reach is re-resolved by whoever is dispatching. Reconciliation when a resuming auditor reaches a backend the operator never confirmed is
-  keyed on `autonomous_mode`: **attended → prompt the delta only** (subset → silent); **autonomous →
-  fail-closed-exclude the new backend + a `newly_reachable_backend` friction event.**
-- **quota/block_quota → SPLIT by "asserts capability vs asserts policy":** windows/host_model/subagent-
-  limit/per-source-quota = capability (descriptor, never persist; per-source quota travels WITH the
-  declared source); safety_margin/thresholds/λ = dimensionless policy (repo intent); learned RPM/TPM =
-  the account-keyed shared ledger (not config at all). Budget = policy × freshly-measured capacity.
+**The confirmed pool → SPLIT along policy-vs-reach.** Persist the operator's route DECISION
+(exclusions + cost ordering + confirmed flag); re-resolve the concrete pool per-auditor each
+invocation; apply the decision as a **set-difference FILTER** over freshly-discovered reach, never
+additively. Audit→remediate transports zero reachability.
 
-**Honest residuals (loud reactive degrade, NOT guarantees):** a host that *lies reachably* (real
-endpoint, overstated window / wrong-account key) is caught only on first oversize/402/tool-corruption →
-quarantine-the-lane + friction. And auditor identity is best-effort — the **`(provider, account)`
-consumption ledger, not auditor identity, is the load-bearing double-grant boundary.**
+The cut applies to the confirmation **ARTIFACT**, not to a session-config field: that artifact is where
+reachability inheritance actually happened (one auditor wrote discovered reach, another's dispatch read
+it verbatim), so that is where the split belongs. Enforced by TYPE, not discipline — the PRODUCER is
+split (a full in-memory DTO for what the operator is shown; a narrow projection for what persists), so
+reach is *unrepresentable* on the persisted shape rather than omitted by a careful write site.
 
-**Pin early:** the exclusion-key grammar must be reach-independent (an exclusion authored on one auditor
-must mean something to an auditor with a different reachable set) — default `provider:model`, with
-`provider` and endpoint-host as coarser patterns.
+**Policy's home is PHASED, and the phase gate is real.** The endpoint stands: the policy (exclusions +
+cost_order + confirmed flag) belongs on the **intent**. It is not *reachable* while audit and remediate
+read the intent from **disjoint paths** — policy on the intent would not transport audit→remediate.
+Until those read paths unify, policy persists on the confirmation artifact, the only cross-tool decision
+channel. (Two drafts have died here: one proposing to collapse the artifact into the intent, one
+proposing to strike the intent-carried endpoint. They are phases of one design, not rivals.)
 
-## Decomposition (each loop-core commit: green-at-every-commit + attestation)
+**quota/block_quota → SPLIT by "asserts capability vs asserts policy":** windows / host_model /
+subagent-limit / per-source-quota = capability (descriptor, never persisted; per-source quota travels
+WITH the declared source); safety_margin / thresholds / λ = dimensionless policy (repo intent); learned
+RPM/TPM = the account-keyed shared ledger, not config at all. Budget = policy × freshly-measured
+capacity.
 
-- **[SHIPPED] commit 1** (`f5bca305`) retire the repair-proxy source-pool wiring; **2a-i** (`c167fbee`)
-  additive `--host-inventory` channel; **2a-ii** (`605d8a0a`) switch the dispatch consumers to READ the
-  handshake via `applyDispatchInventory` (transitional overlay).
-- **G1 — collapse the handshake into ONE `AuditorDescriptor`.** Retire the scattered `--host-model-id /
-  --host-models / --host-context-tokens / --host-output-tokens / --host-max-active-subagents /
-  --host-can-dispatch-subagents / --host-inventory` flag-bag into one structured `--auditor <json>`
-  ({auditor_id, resolved_at, self:{provider,roster,max_active_subagents,can_dispatch_subagents,
-  can_proxy}, sources[]}). It rides every continue-command atomically. No back-compat.
-- **[SHIPPED — type-split half] G2 — split the persisted type.** `RepoSessionIntent` (audit intent +
-  policy + budgeting; the `DISPATCH_INVENTORY_FIELDS` + `dispatch.rolling_engine` removed) is the only
-  thing the store reads/writes; `resolveSessionConfig(intent, descriptor)` (`src/shared/config/`) produces
-  the in-memory EFFECTIVE config every consumer reads. Dispatch fields are unrepresentable on disk —
-  enforced mechanically by `validateRepoSessionIntent` at BOTH read boundaries (audit `loadSessionConfig`,
-  remediate `readValidatedRepoSessionIntent`), not TS-only. Null descriptor fails closed to driver-self-only
-  (the deliberate change from `applyDispatchInventory(cfg,null)⇒cfg`). Two refinements beyond the sketch:
-  (a) the 3 host/IDE launch blocks (`claude_code`/`vscode_task`/`antigravity`) are NOT `DispatchableSource`s,
-  so they ride `descriptor.self.{claude_code,vscode_task,antigravity}` (the driver's own launch transport);
-  the 6 dispatchable providers ride `sources[]` (their launch config in endpoint+parameters). (b) The
-  descriptor's `sources[]` + launch blocks are validated at the `getAuditorDescriptor` parse boundary
-  (C1 quota + command-injection), symmetric with the disk-load boundary. `parallel_workers` moved onto
-  `self`. **Honest scope:** `quota`/`block_quota`/`host_can_dispatch_subagents` remain live on the intent
-  type (a HALF-type) → G4/G5. (`confirmed_provider_pool` was an inert slot — nothing produced or consumed
-  it — and G3 commit C DELETED it rather than splitting it.) **The deterministic source-emitter (Path A feeder)
-  was SPLIT OUT to G2.5** (owner, 2026-07-16): the type-split already satisfies atomic-replace (the
-  descriptor CAN carry sources) and is inert/unreleased, so per the spec's own "seam first, feeder follows"
-  the emitter is the immediate-next commit, not bundled.
-- **G2.5 — deterministic source RESOLUTION (Path A feeder). SHIPPED, and it deviates from the sketch this
-  bullet used to carry.** The original plan — a subcommand the slash loader shells out to before `next-step`,
-  printing `sources[]` for the host to merge into `--auditor` — was **not built**, for two reasons:
-  - **The host merge is the banned anti-pattern in a new costume.** An LLM hand-composing `{self, sources}`
-    JSON is exactly the host-discretion the commit exists to kill. A fumbled merge ⇒ empty `sources[]` ⇒
-    fail-closed to driver-self-only ⇒ **zero dispatch** — the 2026-07-15 dogfood failure one layer up, and
-    silently (an empty pool is indistinguishable from an unreachable machine).
-  - **The sketch conflated POPULATE with RESOLVE.** *Populate* (query models.dev / live quota / `/registry`
-    → the rich catalog) is expensive, network-bound, and genuinely wants a cache — that is what "a speed
-    optimization behind the handshake" is for. *Resolve* (intersect declaration with right-now ambient
-    reach) is local, cheap, and **must run at the moment of use to be correct**. Bundling them forced
-    resolve onto populate's schedule and out through the host.
+⚠ **This split is narrower than it looks, and the difference matters.** Nothing *writes*
+`quota`/`block_quota` — they are operator-authored. An operator-authored override keyed by MODEL NAME
+(a model's window is the same for every auditor) is legitimately inherited and legitimately outranks
+discovery; that is an escape hatch, not contamination. Only a field asserting **who the current auditor
+is** is capability. Before moving a field here, grep who WRITES it
+([[grep-the-writers-before-believing-inheritance]]).
 
-  **What shipped instead: RESOLVE, in-process.** `resolveAmbientSources` (`src/shared/providers/
-  auditorSources.ts`) reads the operator's **machine-level** `~/.audit-code/sources-declared.json`
-  declaration, intersects `declared ∩ ambient-verifiable`, and feeds `resolveSessionConfig`. `sources[]`
-  never travels through the host. An explicit `--auditor sources[]` still wins (operator escape hatch).
-  Plan + full rationale: [`docs/reviews/g2-5-source-emitter-plan-2026-07-16.md`](../docs/reviews/g2-5-source-emitter-plan-2026-07-16.md).
+## The reconciliation gate
 
-  **Why in-process is a CORRECTNESS property, not an optimization:** `openAiCompatibleProvider` reads its
-  key from `process.env` **at launch**. Resolving in-process makes the reach check and the launch read the
-  SAME env — they cannot disagree. A host relay opens a gap between what was promised and what is true at
-  the moment of use. Verified precondition: **no host-exclusive credential case exists** — all six
-  dispatchable providers take their credential from an env var, a home-dir file, an inline config value, or
-  the CLI's own ambient auth; `stripClaudeCodeEnv` strips only `CLAUDECODE`/`CLAUDE_CODE*`; repo-wide grep
-  for keychain/SecretStorage/CredentialManager returns two comments and zero implementation. The two
-  providers that touch host-exclusive stores (Copilot, Antigravity) are excluded from
-  `DISPATCHABLE_SOURCE_PROVIDERS` by design.
+When a resuming auditor reaches a backend the operator never confirmed, reconciliation is keyed on
+`autonomous_mode`: **attended → prompt the delta only** (a subset → silent); **autonomous →
+fail-closed-exclude the new backend + a friction event**.
 
-  **No `auditor_id`, deliberately.** The multi-IDE case needs none: each IDE spawns its own audit-tools
-  process, which inherits THAT IDE's env, so each intersects the same declaration against its own real
-  reach. Nothing shared ⇒ nothing to contaminate. The id remains G5's, where it is actually enforced. The
-  declaration is named `sources-declared.json`, NOT `catalog-<auditor-id>.json` — that name stays reserved
-  for the POPULATE cache, so a later `readDeclaration` can't become a direct cache read by filename
-  collision.
+**Autonomous auto-confirm is scoped to the DELTA case only.** A first-time confirmation (no artifact at
+all) still pauses for the operator even under `autonomous_mode` — auto-confirming a pool nobody has ever
+seen is a different decision from reconciling a delta against one they approved.
 
-  **Inline `api_key` is refused** as not ambient-verifiable: possession ≠ reach, it is the one shape an
-  operator can always choose (making the rule opt-out by construction), and its only catcher — the reactive
-  `lies reachably` quarantine — is G5. `examples/catalog/sources-declared.json` (migrated from the
-  G2-orphaned `examples/session-config/opencode-free.json`) uses `api_key_env`.
+**The gate's operands are part of the design, not an implementation detail.** Three drafts specced a
+gate that would never have fired ([[gate-must-be-traced-not-designed]]):
 
-  **POPULATE remains open** — the rich catalog lands later behind this same resolve seam.
-- **G3 — split the confirmed pool along policy-vs-reach. The deliverable is the RECONCILIATION GATE**
-  (above, "Resolved decisions") — everything else is debris cleared so the gate is expressible. The
-  `confirmed_provider_pool` field named in earlier drafts is an **inert slot** (a definition, a stub ref
-  type, a stale comment, and two tests that pin the empty slot — zero producers, zero consumers); it is
-  deleted, not split. The live cut is the Gate-0 confirmation ARTIFACT.
-  - **Policy's home is PHASED.** The endpoint stands: `DispatchPolicy` (exclusions + cost_order + confirmed
-    flag) belongs on the **intent** — the panel's unanimous Decision (A). But it is not *reachable* until
-    **G6** unifies remediate's intent read path: audit reads `<artifactsDir>/session-config.json` and
-    remediate reads `<root>/.remediation-artifacts/session-config.json ?? <root>/session-config.json` —
-    **disjoint**, so policy on the intent would not transport audit→remediate. **Until G6, policy persists
-    on the confirmation artifact — the only cross-tool decision channel.** (A draft proposing to collapse
-    the artifact into the intent was refuted on exactly this; a later draft proposing to strike the
-    intent-carried endpoint from this spec was refuted too. Both are phases of one design, not rivals.)
-  - **[SHIPPED — B+D]** `provider-confirmation.json` no longer carries discovered reach (`capability_tier` /
-    `excluded` / `self_spawn_blocked` / `reason` / `blended_price_usd_per_mtok` / `roster`) — reach is
-    re-resolved per-auditor and the decision applies as a set-difference FILTER over it, never additively.
-    Enforced by TYPE, not by discipline: the PRODUCER is split (`buildProviderConfirmationRender` → the full
-    in-memory DTO the operator is shown; `buildSharedProviderConfirmation` → projects to the narrow
-    `PersistedPoolEntry`), so reach is *unrepresentable* on the persisted shape rather than merely omitted by
-    a careful write site. The parse gate narrowed to `name` in the SAME commit (it hard-required the very
-    fields B removes ⇒ a post-B artifact would have failed a pre-B gate → `null` → silent degrade). A
-    rejected confirmation now warns LOUDLY: `null` is indistinguishable from "absent" at every call site, so
-    a version drift would otherwise silently discard the operator's decision AND blind the A′ gate.
-  - **The `autonomous_mode`-keyed reconciliation gate** (needs `resolveAutonomousMode` lifted out of
-    `src/remediate/` into the shared core — one core, two draws). **The roster-staleness check is NOT this
-    gate and cannot become it:** it detects the right event but responds by silently discarding the
-    operator's cost order + λ, its `reconfirm` verdict reaches no obligation (so it enforces nothing), and
-    it compares the *writing* auditor's roster — meaningless cross-auditor. The gate compares the confirmed
-    **decision** (policy, legitimately inherited) against **this** auditor's fresh reach. The check is
-    replaced, and `roster` dies with it.
-  - **The gate's operands are part of the design, not an implementation detail** — three drafts specced a
-    gate that would not have fired. Reach-now must read the documented chokepoint
-    `gatherDispatchableSources` (never `resolveAmbientSources`, which is blind to undeclared and
-    descriptor-supplied backends); the delta must be precomputed once per invocation (`discoverProviders`
-    shells out via `spawnSync` and cannot live in the sync/pure obligation predicate); and the input file
-    must be **consume-and-invalidated** (it is never unlinked today, so a stale submission silently
-    auto-confirms the delta).
-  - **The exclusion-key grammar is `provider:model` with `provider` and endpoint-host as the coarser
-    patterns** — SHIPPED in A″. `ConfirmedDispatchPolicy.exclude` is `DispatchExclusionPattern[]` (an OPEN
-    grammar: an endpoint-host pattern is not a provider name, so `exclude` is kept verbatim rather than
-    membership-checked, and an unmatchable rule is inert); `resolveDispatchExclusion` returns a MATCHER over
-    backends, not a name set. The head token decides the tier against the closed provider-name set, which is
-    what keeps the three forms unambiguous. Do not conflate it
-    with the quota-ledger pool identity `provider[#account]/model` or with dispatch's bare-`model_id`
-    lookup: **three distinct keyspaces**, deliberately kept distinct. The gate keys on
-    `model_id ?? provider-name` — `representativeModelId` knows a model for only 2 of 6 providers, so a
-    bare-`model_id` key is blind to a CLI backend appearing on PATH.
+- **Reach-now must read the documented gather chokepoint**, never the ambient resolver alone — the
+  latter is blind to undeclared and descriptor-supplied backends.
+- **The delta must be precomputed once per invocation.** Discovery shells out and cannot live inside a
+  sync/pure obligation predicate.
+- **The submission must be consume-and-invalidated**, or a stale submission silently auto-confirms the
+  delta. **Unlink only on real promotion** — unlinking a submission that was never promoted destroys
+  the operator's decision unrecoverably.
+- **The gate's state is MUTABLE per-invocation, threaded by reference — not a value.** Reach-now is
+  invocation-stable and expensive (compute once); the confirmed decision changes the instant the
+  confirmation executor promotes, and **the promotion clears the gate**. A frozen delta stays non-empty
+  after the backends fold in, and since provider-confirmation is the highest-priority obligation, the
+  gate re-selects forever (autonomous: re-promote until it throws; attended: re-prompt a delta that is
+  now a lie). Every layer that derives or dispatches must read the CURRENT value — including the
+  orchestrator's own nested drain, which re-decides internally: a gate-blind decide there sends the run
+  to a different executor and the gate silently never fires ([[gate-state-must-be-mutable-not-frozen]]).
+- **The fail-closed write is keyed on `autonomous` INSIDE the executor**, not by its caller's branch.
+  The executor is exported and reachable directly, and a fail-closed exclusion on an attended run
+  silently rules out a backend the operator is being asked about (enforce in tooling).
 
-  - **The gate's state is MUTABLE per-invocation, threaded by reference — not a value.** REACH-NOW is
-    invocation-stable and expensive (compute once); CONFIRMED changes the instant the confirmation
-    executor promotes, and that executor is the ONLY thing that changes it. A frozen delta therefore stays
-    non-empty after the backends are folded in, and since `provider_confirmation` is `PRIORITY[0]` the
-    obligation re-selects forever (autonomous: re-promote until `advance` throws; attended: re-prompt a
-    delta that is now a lie). **The promotion clears the gate.** Every layer that derives or dispatches
-    must read the CURRENT value — including `advanceAudit`'s own nested drain, which the CLI engine's
-    closure cannot reach: `advanceAudit` re-decides internally and dispatches what IT selects, so a
-    gate-blind decide there sends the run to a different executor and the gate silently never fires.
-  - **The fail-closed write is keyed on `autonomous` INSIDE the executor**, not by its caller's branch —
-    the executor is exported and reachable from `advanceAudit` directly, and a fail-closed exclusion on an
-    attended run silently rules out a backend the operator is being asked about (enforce in tooling).
-  - **Unlink only on real promotion** (`root` present ⇒ the shared artifact — the only one dispatch reads —
-    was actually written). Unlinking a submission that was never promoted destroys the operator's decision
-    unrecoverably.
+**A roster-staleness check is NOT this gate and cannot become one.** It detects the right event but
+responds by discarding the operator's cost order + λ; its verdict reaches no obligation, so it enforces
+nothing; and it compares the *writing* auditor's roster — meaningless cross-auditor. The gate compares
+the confirmed **decision** (policy, legitimately inherited) against **this** auditor's fresh reach.
 
-  The reachability inheritance this closes is the same hole G2 closed on `session-config.json`; G5 then
-  owns the auditor-id stamp + the reactive lies-reachably quarantine on top of it.
-  Plan of record: [`docs/reviews/g3-dispatch-policy-plan-2026-07-16.md`](../docs/reviews/g3-dispatch-policy-plan-2026-07-16.md).
+## The exclusion grammar — and three distinct keyspaces
 
-  **A′ LANDED.** Policy ungated from reach (bug 2 fixed: cost order + λ survive a reach shift); the
-  `autonomous_mode`-keyed gate built (delta = `gatherDispatchableSources ∪ discoverProviders` minus the
-  decision, keyed `model_id ?? provider-name`); consume-and-invalidate; `resolveAutonomousMode` lifted to
-  shared (env var now `AUDIT_TOOLS_AUTONOMOUS` — attendedness is a property of the RUN, so it takes no
-  per-tool env name); the roster-staleness check + `roster` deleted. An independent loop-core review
-  returned BLOCKER on the first cut (a gate-blind decide inside `advanceAudit`, and a frozen closure that
-  could not clear mid-drain) — both are why the two bullets above are in this spec.
-  **⚠ Deliberate A′→A″ intermediate state, not a bug:** `policy.exclude` is still `ResolvedProviderName[]`,
-  so an autonomous exclusion of ONE new model drops EVERY source of that provider. Blast radius ≈ 0
-  (audit's `autonomous_mode` is brand-new in A′). A″ closes it.
-  **Autonomous auto-confirm is scoped to the DELTA case only:** a first-time confirmation (no artifact at
-  all) still pauses for the operator even under `autonomous_mode` — auto-confirming a pool nobody has ever
-  seen is a separate decision from reconciling a delta against one they approved.
-- **G4 — split quota/block_quota** (capability → descriptor; policy → intent; per-source quota travels
-  with the source; delete the redundant repo capability fields). May fold into G2.
-- **G5 — never-inherit enforcement:** auditor-id stamp on transient run-state + `declared ∩ ambient-
-  verifiable` reach intersection + the reactive-degrade quarantine for lies-reachably.
-- **G6 — remediate round-trip:** the descriptor rides remediate's loaders; remediate reads the effective
-  config identically (one shared core).
-- **Retained, orthogonal to the split — commit 3** repair-proxy as a kind-1 launch-transport (auto-
-  detect + degrade to direct). **Commit 4** fix C (host cold-start wall). **Commit 5** decide kind-3's
-  fate.
+The exclusion key must be **reach-independent**: an exclusion authored on one auditor must mean
+something to an auditor with a different reachable set. The grammar is `provider:model`, with
+`provider` and endpoint-host as coarser patterns. It is an **OPEN** grammar — an endpoint-host pattern
+is not a provider name, so rules are kept verbatim rather than membership-checked, and an unmatchable
+rule is inert. The head token decides the tier against the closed provider-name set, which is what keeps
+the three forms unambiguous. Resolution returns a **matcher over backends**, not a name set — model
+granularity is the point: excluding one model of a multi-model backend must leave its siblings routable.
+
+**Do not conflate three keyspaces** ([[exclusion-grammar-open-not-closed]]):
+
+| Keyspace | Shape | Account is | Used for |
+|---|---|---|---|
+| quota-ledger pool identity | `provider[#account]/model` | **load-bearing** (the double-grant boundary) | pool ids, learned quota |
+| operator exclusion pattern | `provider:model` (open, 3 tiers) | irrelevant | route decisions |
+| gate compare key | `model_id ?? provider` | irrelevant | delta detection |
+
+The gate keys on `model_id ?? provider-name` rather than a bare `model_id` because a representative
+model id is known for only some providers — a bare-`model_id` key is blind to a CLI backend appearing
+on PATH.
+
+## Honest residuals — loud reactive degrade, NOT guarantees
+
+- A host that **lies reachably** (real endpoint, overstated window, wrong-account key) is caught only
+  on first oversize/402/tool-corruption → quarantine-the-lane + friction.
+- **Auditor identity is best-effort.** The `(provider, account)` consumption ledger, not auditor
+  identity, is the load-bearing double-grant boundary.
 
 ## Invariants
 
-- Backend diversity is a property of the **worker kind + the current auditor's environment**, never
-  a repo-stored cost-ranked "provider pool."
-- repair-proxy serves **only kind-1** (agentic claude-harness workers); its value is tool-call
-  repair, so a worker that makes no tool calls (kind 3) gains nothing, and a worker on a foreign wire
-  protocol (kind 2) cannot use it.
+- Backend diversity is a property of the **worker kind + the current auditor's environment**, never a
+  repo-stored cost-ranked "provider pool."
+- repair-proxy serves **only kind-1** (agentic claude-harness workers); its value is tool-call repair,
+  so a worker that makes no tool calls (kind 3) gains nothing, and a worker on a foreign wire protocol
+  (kind 2) cannot use it.
 - Dispatch inventory is resolved **per-auditor per-invocation**; the repo session-config holds intent
   only.
-- **repair-proxy is optional and auto-detected; its absence — no proxy on the machine, or a host that
-  cannot redirect its workers' harness (not Claude Desktop / `claude` CLI) — degrades cleanly to
-  direct dispatch.** Never a hard dependency, never a required flag, never a run failure. Proxy-
-  transport is just one more present-or-absent per-auditor handshake capability.
+- **repair-proxy is optional and auto-detected**; its absence degrades cleanly to direct dispatch.
+  Never a hard dependency, never a required flag, never a run failure.
+- **Pool ASSEMBLY is one shared function with per-mode policy hooks**, not two mirrored copies. The
+  engine (drive loop, capacity, admission, scheduling, token estimation) is single-sourced; assembly is
+  too. Legitimately per-mode = a genuinely different INPUT draw or the terminal/result-routing adapter —
+  never the algorithm ([[dispatch-engine-shared-assembly-was-forked]]).
+- A refactor that removes a capability from the shared core **must restore it for EVERY draw, or fail
+  loudly for the draws it drops**. A silent fail-closed on one half of "one core, two draws" is
+  indistinguishable from working ([[silent-fail-closed-on-one-draw]]).

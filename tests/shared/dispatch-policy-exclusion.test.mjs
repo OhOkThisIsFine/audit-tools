@@ -473,9 +473,25 @@ describe("B+D — the persisted shape carries the decision, never the reach", ()
   test("the RENDER builder still carries reach — the operator must SEE it", () => {
     // The other half of the split: dropping reach from the render DTO would blind
     // the operator at Gate-0 (they could no longer see WHY a backend is excluded).
-    const rendered = buildProviderConfirmationRender({}, { CLAUDECODE: "1" });
+    //
+    // `detectCommand` is INJECTED. Without it, `discoverProviders` probes the real
+    // PATH for the `claude` binary — so this test passed on a dev box with Claude Code
+    // installed and FAILED on CI (no `claude` on PATH ⇒ no `claude-code` pool entry ⇒
+    // `find` returns undefined ⇒ "expected undefined to be true"). The subject here is
+    // the render DTO's SHAPE, not what happens to be installed on the runner.
+    const rendered = buildProviderConfirmationRender(
+      {},
+      { CLAUDECODE: "1" },
+      [],
+      [],
+      () => true,
+    );
     const claude = rendered.provider_pool.find((e) => e.name === "claude-code");
 
+    // Assert the entry resolved before reading through it — `claude?.excluded` on an
+    // absent entry yields undefined, which is how the env-dependence hid as a
+    // confusing "expected undefined to be true" instead of "no such pool entry".
+    expect(claude).toBeDefined();
     expect(claude?.excluded).toBe(true);
     expect(claude?.self_spawn_blocked).toBe(true);
     expect(claude?.capability_tier).toBeTruthy();

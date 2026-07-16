@@ -73,11 +73,17 @@ The 2026-07-16 lap (`d1065655`) reframed the whole remainder by asking why dispa
 - **The dispatch ENGINE was already shared** (`driveRolling`, rolling engine, capacity, admission,
   scheduler, `estimateTokensFromBytes`, `buildHostModelPools`). Only the ASSEMBLY wrapper was forked, and
   it is now single-sourced in `src/shared/quota/hostPool.ts`; both local preambles are deleted.
-- **G6 is CLOSED, and its shape was wrong.** "Wire `--auditor` into remediate too" accepts the fork. The
-  descriptor splits along a verified line — environment-class resolves in-process, host-self-class is
-  unknowable to a spawned CLI — so remediate's pool came back via `ambientAuditorDescriptor()` +
-  `loadRemediateSessionConfig`, no flag round-trip. **This also fixed an un-released REGRESSION**: from G2
-  until that lap, remediate dispatched with NO pool at all.
+- **G6 is HALF closed — and the open half is the one that matters for policy.** Its *descriptor* half is
+  done, and its shape was wrong: "wire `--auditor` into remediate too" accepts the fork. The descriptor
+  splits along a verified line — environment-class resolves in-process, host-self-class is unknowable to a
+  spawned CLI — so remediate's pool came back via `ambientAuditorDescriptor()` + `loadRemediateSessionConfig`,
+  no flag round-trip. **That fixed an un-released REGRESSION**: from G2 until that lap remediate dispatched
+  with NO pool at all. **⚠ The READ-PATH half is still open and was deliberately NOT touched:** audit reads
+  `<artifactsDir>/session-config.json`, remediate reads
+  `<root>/.remediation-artifacts/session-config.json ?? <root>/session-config.json` — still **disjoint**
+  (preserved verbatim behind `loadRemediateSessionConfig`'s `artifactsFirst`, since unifying them silently
+  would change which config a run reads). **So policy still rides the confirmation artifact, exactly as the
+  spec's phasing says** — the intent-carried endpoint remains blocked. That unification is the real G6.
 - **G4 is CLOSED as not-implemented** — premise refuted across three passes (nothing WRITES
   `quota`/`block_quota`; `model_id` is opaque-by-design, not a peer of `host_model`). What remains is a
   judgment call, NOT a task: `block_quota.host_model` is an operator hint that persists into a run driven by
@@ -89,8 +95,12 @@ The 2026-07-16 lap (`d1065655`) reframed the whole remainder by asking why dispa
 the entire rework (the dogfood that planned 430 tasks and dispatched zero) and the only remaining item with
 a live user-facing payoff. Design of record:
 [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) (memory
-[[unified-dispatch-worker-model]]). Also orthogonal + open: **commit 4** fix C (host cold-start wall, needs
-a clean minimal repro); **commit 5** decide kind-3's fate.
+[[unified-dispatch-worker-model]]).
+
+Also open, each on its own merits (detail in [`backlog.md`](backlog.md)): **G6 read-path unification** (the
+half above — it unphases policy's home onto the intent); **G5's one surviving clause** (lies-reachably
+quarantine); the **dispatch emit wrapper + the two quota contracts** (the assembly fork's remainder);
+**commit 4** fix C (host cold-start wall, needs a clean minimal repro); **commit 5** decide kind-3's fate.
 
 **Before commit 3, consider releasing.** The regression that made the batch un-shippable is fixed, so the
 15 un-released commits are now honest — see the release note below.
@@ -113,20 +123,41 @@ installed GLOBAL bins are pre-G1, so a stale host dogfooding this batch has its 
 ignored** (unknown flags → defaults). Don't dogfood the G-series via a stale global bin without
 reinstalling.
 
-**The batch is now SHIPPABLE — the blocker is gone.** It was not behavior-neutral: from G2 (`59116fe2`)
-until `d1065655` it silently removed remediate's ability to dispatch to any non-self pool (a capability
-`v0.32.68` had). That is fixed, so the sequence has reached a coherent point. **Releasing is a live option
-and probably the right next move** — it is a breaking transport change (likely a minor bump, not patch),
-and it needs the global-bin reinstall per the npm-12 notes in Durable traps.
+### ⛔ NOT SHIPPABLE YET — `main` is RED, and has been for ~a dozen laps
+
+**CI on `main` is failing and nobody noticed** (`gh run list --branch main` — `ci` and
+`audit-code-test-suite` both red across multiple pushes). Nothing has released since the G-series began, so
+the release gate was never the thing that had to pass. Three separate reds, discovered 2026-07-16:
+
+1. ✅ **FIXED — the capability regression.** From G2 (`59116fe2`) until `d1065655` the batch silently removed
+   remediate's ability to dispatch to any non-self pool (a capability `v0.32.68` had). Not behavior-neutral.
+2. ✅ **FIXED — `check:doc-manifest`** (a `verify:checks` step, so it fails `ci` on EVERY push). Red since
+   `b4e640c0`: a prior lap's dated plan doc was never registered in the routing table. Registered.
+3. ✅ **FIXED — `tests/shared/dispatch-policy-exclusion.test.mjs`** ("the RENDER builder still carries
+   reach"), red on BOTH Node lines since `26076e34`. **An env-dependent test**: it called
+   `buildProviderConfirmationRender` without injecting `detectCommand`, so `discoverProviders` probed the
+   real PATH for the `claude` binary — green on a dev box with Claude Code installed, red on CI (no `claude`
+   ⇒ no `claude-code` pool entry ⇒ `find` → undefined ⇒ "expected undefined to be true"). Now injects the
+   probe. **This is the local-green ≠ CI-green trap in its purest form.**
+4. ⛔ **STILL RED — `smoke:packaged-audit-code`** (a `verify:checks` step → blocks `verify:release`).
+   `next-step -> blocked` at iteration 0. **Pre-existing, NOT from the assembly lift** — proved by rebuilding
+   `dist/` on a stashed clean `26076e34` and getting the identical failure. Needs its own focused lap; see
+   `docs/backlog.md`.
+
+**So: fix (4), then release.** It is a breaking transport change (likely a minor bump, not patch) and needs
+the global-bin reinstall per the npm-12 notes in Durable traps. **Always run `npm run verify:release`
+locally before tagging** — the local pre-tag gate is only `check`, which is exactly why (2)/(3)/(4) hid.
 
 **G3+ is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`,
 `costRank.ts`, **`src/shared/quota/`**) → green + independent review + attestation required.
 
 Design of record: **[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
-→ "Greenfield endpoint (owner-approved 2026-07-16)" + Decomposition (memory
-[[unified-dispatch-worker-model]]). Shipped G-series detail lives in `git log` + that Decomposition's
-`[SHIPPED]` markers — deliberately NOT narrated here. Per-step plan docs (dated records, with their
-refuted drafts) are in `docs/reviews/g{1,2,2-5,3}-*.md`.
+(memory [[unified-dispatch-worker-model]]) — now a purely timeless concept doc. Its per-commit
+Decomposition (pinned SHAs, `[SHIPPED]` markers, the A′/A″ narrative) was RETIRED: a build sequence with
+status markers is a plan-of-record living in a concept doc, and it is what made a stale plan read as a work
+order for a dozen laps. **Shipped detail is `git log`; open sequencing is THIS doc; per-item detail is
+`backlog.md`.** Per-step plan docs (dated records, with their refuted drafts) remain in
+`docs/reviews/g{1,2,2-5,3}-*.md` and are registered as excluded in the routing table.
 
 **Offload lanes (as of the G3 session):** the free `llm read` lane works (zero Claude-read cost for recon).
 `llm write`/NIM completion + `ANTHROPIC_BASE_URL` subagent-fronting are UNRETESTED. Mechanical bulk offloads
