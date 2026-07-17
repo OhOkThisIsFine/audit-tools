@@ -102,8 +102,6 @@ half above — it unphases policy's home onto the intent); **G5's one surviving 
 quarantine); the **dispatch emit wrapper + the two quota contracts** (the assembly fork's remainder);
 **commit 4** fix C (host cold-start wall, needs a clean minimal repro); **commit 5** decide kind-3's fate.
 
-**Before commit 3, consider releasing.** The regression that made the batch un-shippable is fixed, so the
-15 un-released commits are now honest — see the release note below.
 
 **Verify a queued item's PREMISE against HEAD before opening a lap on it** — a spec's decomposition is a
 lead, not a work order ([[grep-the-writers-before-believing-inheritance]]). Records:
@@ -113,24 +111,22 @@ lead, not a work order ([[grep-the-writers-before-believing-inheritance]]). Reco
 **⚠ Deliberate, still current:** autonomous auto-confirm is scoped to the DELTA case only — a first-time
 confirmation (no artifact at all) still pauses for the operator even under `autonomous_mode`.
 
-**⚠ NOTHING IN THE G-SERIES IS RELEASED — deliberate, and G1 is a BREAKING transport change.** The audit
-CLI's `--host-*` capability flags are GONE (one `--auditor <json>` descriptor replaces them) and a repo
-`session-config.json` can no longer carry `provider`/`sources`/backend blocks (rejected at load). The
-installed GLOBAL bins are pre-G1, so a stale host dogfooding this batch has its handshake **silently
-ignored** (unknown flags → defaults). Don't dogfood the G-series via a stale global bin without
-reinstalling.
+**The G-series RELEASED as v0.33.0 (2026-07-16), global bins reinstalled.** Breaking transport recap for
+any stale environment: the audit CLI's `--host-*` capability flags are GONE (one `--auditor <json>`
+descriptor replaces them) and a repo `session-config.json` can no longer carry `provider`/`sources`/backend
+blocks (rejected at load). A pre-G1 global bin silently ignores the new handshake — reinstall before
+dogfooding.
 
-### Release gate
+### Release gate — the durable lesson
 
-`ci` and `audit-code-test-suite` had been red for ~a dozen laps on two other causes (both fixed
-2026-07-16; `audit-code-test-suite` is green again). **Why they hid is the durable part**: the pre-commit
-hook gates only `npm run check`, and laps verify with build + check + vitest — none of which include
-`verify:checks`. Nothing had released since the G-series began, so the gate never ran.
-**End every lap with `gh run list --branch main --limit 3`**, and run `npm run verify:release` before any
-"this is shippable" claim ([[lap-green-must-match-ci-evidence]]).
-
-Releasing the G-series is a breaking transport change (likely a minor bump, not patch) and needs the
-global-bin reinstall per the npm-12 notes in Durable traps.
+`ci` and `audit-code-test-suite` were red for ~a dozen laps while every lap reported "green": the
+pre-commit hook gates only `npm run check`, and laps verified with build + check + vitest — none of which
+include `verify:checks`. **End every lap by checking CI on main** (the generic `gh run list` endpoint has
+been flaky; the per-workflow endpoint `gh api "repos/…/actions/workflows/<wf>.yml/runs?per_page=3"` always
+worked), and run `npm run verify:release` before any "this is shippable" claim
+([[lap-green-must-match-ci-evidence]]). Corollary from the v0.33.0 lap: a local full-suite run with "N
+failed" must be resolved to NAMED files before attributing it to the known-flaky baseline — one of the
+"baseline" failures was a real regression CI caught in shard 4/4.
 
 **G3+ is loop-core** (`intakeExecutors.ts`, `dispatch.ts`, `marshal.ts`, `steps/nextStep.ts`,
 `costRank.ts`, **`src/shared/quota/`**) → green + independent review + attestation required.
