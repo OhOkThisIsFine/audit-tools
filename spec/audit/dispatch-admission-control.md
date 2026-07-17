@@ -174,7 +174,7 @@ ordering matters).
   run is headless (`host_can_dispatch_subagents:false` — no attended dispatcher). The
   discriminator is the existing `host_can_dispatch_subagents` boolean, not a new
   driver-identity field — driver identity for quota already rides the
-  `HostDispatchDescriptor` (above). The host-pool identity is decoupled from the demoted
+  `AuditorDescriptor` (above). The host-pool identity is decoupled from the demoted
   source: the host pool keys to the conversation host (claude-code) while the backend's own
   source pool keys to the backend. The demotion itself is additionally gated by a same-agent
   guard (`shouldDemotePrimaryInProcess`): when the resolved conversation-host provider equals

@@ -230,7 +230,8 @@ end-of-sprint-cleanup-standing-step)*
   logic AND independently re-verify the target symbol's own type/shape. Narrow scope is the top churn driver.
 - **Log friction the moment you hit it** — full friction walk each loop lap; log all three categories
   (ambiguous-direction / tool-should-decide / inefficient-feeding) durably to backlog, unprompted; don't
-  trust the empty mechanical set. *(Only "log friction" is homed in `CLAUDE.md`; "disambiguation completes
+  trust the empty mechanical set. *(Only "log friction" is homed in `CLAUDE.md` → Known friction &
+  deferred fixes; "disambiguation completes
   or leaves" and "front-load broad search" are memory-only. Memory: disambiguation-completes-or-leaves,
   front-load-broad-search-before-contract-authoring, log-all-friction-categories-every-lap)*
 

@@ -140,7 +140,7 @@ touch this file.
 > synthesis, quota policy, budgeting, timeouts. The dispatch **backend/launch set**
 > (`provider`, `host_provider`, `sources[]`, the per-backend blocks
 > `codex`/`opencode`/`openai_compatible`/`vscode_task`/`antigravity`/`agy`/
-> `subprocess_template`/`claude_code`, `parallel_workers`, `dispatch.rolling_engine`)
+> `subprocess_template`/`claude_code`/`claude_worker`, `parallel_workers`, `dispatch.rolling_engine`)
 > is per-auditor CAPABILITY: it rides the per-invocation `--auditor <json>` descriptor,
 > resolved from the auditor's own environment, never inherited across auditors. Writing
 > any of those keys into `session-config.json` is rejected at load

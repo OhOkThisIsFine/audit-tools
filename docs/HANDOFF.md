@@ -24,8 +24,8 @@
   (ONE core, three worker KINDS; repair-proxy = kind-1 launch-transport; per-auditor handshake inventory;
   retire the source-pool wiring). The old `spec/repair-proxy-dispatch-integration.md` is retired with the code.
   Memory [[unified-dispatch-worker-model]]. The decomposition's inventory/handshake half is DONE through G3;
-  what remains (incl. the repair-proxy kind-1 transport that was the original goal) is an open worth-it call —
-  see ▶ IMMEDIATE NEXT. Full dogfood findings: `docs/backlog.md` → "Live dogfood: BOTH dispatch paths failed".
+  the kind-1 transport itself shipped 2026-07-16 and was dogfooded — see ▶ IMMEDIATE NEXT for the three
+  open feedback gaps. Full dogfood findings: `docs/backlog.md` → "Live dogfood: BOTH dispatch paths failed".
 - **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
   and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
   inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
@@ -111,10 +111,9 @@ The 2026-07-16 lap (`d1065655`) reframed the whole remainder by asking why dispa
 - **G5 is DOWN to one clause** (the lies-reachably quarantine); the other two are shipped (G2.5) or dead
   (the auditor-id stamp is a write-only field whose premise G2.5 disproved). Backlog-tracked.
 
-**So the next item is `commit 3` — repair-proxy as a kind-1 launch-transport.** It is the ORIGINAL goal of
-the entire rework (the dogfood that planned 430 tasks and dispatched zero) and the only remaining item with
-a live user-facing payoff. Design of record:
-[`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) (memory
+**Commit 3 SHIPPED 2026-07-16** (repair-proxy as a kind-1 launch-transport — 3a `9f4cf8f1`, 3b `dd47e8da`,
+3c `860920c1`) and was dogfooded the same day; see ▶ IMMEDIATE NEXT above for current status. Design of
+record: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md) (memory
 [[unified-dispatch-worker-model]]).
 
 Also open, each on its own merits (detail in [`backlog.md`](backlog.md)): **G6 read-path unification** (the

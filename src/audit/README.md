@@ -10,7 +10,7 @@ picks the highest-priority unsatisfied obligation, runs one bounded unit, persis
 - `decompose/` — structure-layer decomposition (overlay-and-delta operator over behavior-graph + intent
   sources), emitting `structure_decomposition.json` and the two non-co-localization findings.
 - `adapters/` — normalize external analyzer output (semgrep / eslint / npm-audit / ast-grep / CodeQL / clippy / rubocop / coverage-summary) to shared contracts.
-- `providers/` — thin wiring layer (claude-code, opencode, agy) over the shared `FreshSessionProvider` backends in
+- `providers/` — thin wiring layer (claude-code, claude-worker, opencode, agy) over the shared `FreshSessionProvider` backends in
   `audit-tools/shared` (codex, openai-compatible, subprocess-template, vscode-task, antigravity, worker-command).
 - `clarification/` — Phase D charter-clarification/triangulation loop: blast radius, attention
   dial, VOI-ranked question queue, risk gate over the queue.
