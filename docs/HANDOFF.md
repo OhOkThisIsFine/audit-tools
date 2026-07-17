@@ -65,7 +65,25 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — commit 3 (repair-proxy kind-1), the original goal
+## ▶ IMMEDIATE NEXT — dogfood the claude-worker lane, then the Agent-tool carrier
+
+**Commit 3 SHIPPED 2026-07-16 (3a `9f4cf8f1`, 3b `dd47e8da`, 3c `860920c1` — un-released).** The
+claude-worker lane is end-to-end: declared `repair_proxy` in `~/.audit-code/sources-declared.json` →
+populate cache → Gate-0 roster → per-packet admission → isolated proxied `claude -p` spawn with the
+namespace model composed at launch. Plan + adversarial-review record:
+[`commit3-proxy-kind1-transport-plan-2026-07-16.md`](reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md).
+Next, in order:
+1. **Owner-attended dogfood**: run the proxy, declare the lane, drive a real audit/remediate dispatch
+   through it (the 430-tasks-zero-dispatched dogfood is the benchmark to beat). Residual watch-items
+   are in `backlog.md` → "claude-worker lane residuals".
+2. **Agent-tool carrier restart test**: from a Desktop session launched under
+   `ANTHROPIC_BASE_URL=<proxy>`, test whether a `.claude/agents/*.md` frontmatter `model:` string
+   rides verbatim to `/v1/messages` (agent defs load at session start — untestable mid-session).
+   If yes: the host fan-out half (reads `self.proxy_transport`, stamps per-packet model strings into
+   dispatch plans) is the follow-on commit.
+3. **Release** the batch (contains loop-core dispatch changes — minor bump).
+
+## Prior track — the G-series (closed)
 
 **The G-series is DONE as a sequence. G4/G5/G6 are closed or dissolved — do not open them as laps.**
 The 2026-07-16 lap (`d1065655`) reframed the whole remainder by asking why dispatch was forked at all:
