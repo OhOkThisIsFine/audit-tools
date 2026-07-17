@@ -65,17 +65,19 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — dogfood the claude-worker lane, then the Agent-tool carrier
+## ▶ IMMEDIATE NEXT — close the dogfood's three feedback gaps, then the Agent-tool carrier
 
-**Commit 3 SHIPPED 2026-07-16 (3a `9f4cf8f1`, 3b `dd47e8da`, 3c `860920c1` — un-released).** The
-claude-worker lane is end-to-end: declared `repair_proxy` in `~/.audit-code/sources-declared.json` →
-populate cache → Gate-0 roster → per-packet admission → isolated proxied `claude -p` spawn with the
-namespace model composed at launch. Plan + adversarial-review record:
-[`commit3-proxy-kind1-transport-plan-2026-07-16.md`](reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md).
+**The claude-worker dogfood RAN 2026-07-16** — transport proven end-to-end (480 proxied
+`/v1/messages` across all 4 free pools; spawn/routing/harvest/pause all live), **0/119 packets
+succeeded** on three named feedback gaps. Record:
+[`claude-worker-lane-dogfood-2026-07-16.md`](reviews/claude-worker-lane-dogfood-2026-07-16.md).
+Four expansion/classification defects found by the run were fixed same-day (`bebd69f2`, `b6a5f0ea`
+— un-released, on top of the un-released 3a/3b/3c). The paused run
+`20260717T062404401Z_audit_tasks_completed_001` is resumable to re-test once the gaps close.
 Next, in order:
-1. **Owner-attended dogfood**: run the proxy, declare the lane, drive a real audit/remediate dispatch
-   through it (the 430-tasks-zero-dispatched dogfood is the benchmark to beat). Residual watch-items
-   are in `backlog.md` → "claude-worker lane residuals".
+1. **Close the three feedback gaps** (backlog → "claude-worker lane dogfood feedback gaps", HIGH):
+   per-backend packet sizing (groq 413 class) · backend-429 → pool pacing/cooldown · populate-time
+   model verification (kimi 404 class). Loop-core work — full pipeline + attestation.
 2. **Agent-tool carrier restart test**: from a Desktop session launched under
    `ANTHROPIC_BASE_URL=<proxy>`, test whether a `.claude/agents/*.md` frontmatter `model:` string
    rides verbatim to `/v1/messages` (agent defs load at session start — untestable mid-session).
