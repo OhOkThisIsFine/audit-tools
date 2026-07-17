@@ -78,8 +78,19 @@ context-cap fit-aware (`quota.context_tokens`, stamped from the registry at popu
 probes each top-K model and drops definite 404s. Accepted residuals: backlog → "claude-worker lane
 feedback-gap residuals". The batch RELEASED as v0.33.1 (2026-07-17, with the hermeticity fix); bins
 reinstalled. Next, in order:
-1. **Re-dogfood**: resume `20260717T062404401Z_audit_tasks_completed_001` (or fresh run) against a
-   live proxy — the backlog residual entry's ⬇ watch line is the pass/fail checklist.
+1. ~~**Re-dogfood**~~ **DONE 2026-07-17 — the "planned N, dispatched 0" was the liveness-probe cold-drop,
+   NOT an unbuilt host fan-out.** The probe (`auditorSources.ts`) aborted at 750ms with no retry, and the
+   proxy's first `/registry` after its catalog TTL lapses does a blocking upstream fan-probe (>750ms) → a
+   healthy lane dropped on the run's FIRST resolution → 0 pools → host-only → 0 dispatched. **Fixed both
+   sides + shipped:** repair-proxy `catalog.ts` `/registry` now stale-while-revalidate; audit-tools probe
+   retries at an escalating budget. Everything else was already built (pool≠transport is coded; dispatch is
+   already pool-availability-driven, `rolling_engine` defaults true). **Verified:** 8 pools resolve (was 0),
+   fresh Gate-0 roster lists them routable, a real dispatch through the proxy to a FREE model returned a
+   correct finding. Records: `docs/reviews/repair-proxy-dispatch-diagnosis-2026-07-17.md` +
+   `host-fanout-proxy-dispatch-design-2026-07-17.md`; memory [[repair-proxy-dispatch-unblocked-probe-fix]].
+   **Remaining (do next): full live-run confirmation** — drive a real audit to its task-dispatch wave and
+   confirm `packet_too_large` routes oversized packets away from small-context pools (raw `claude -p` on
+   groq/gpt-oss-120b hit 413; real dispatch sizes packets per-pool — verify it holds live).
 2. **Agent-tool carrier restart test**: from a Desktop session launched under
    `ANTHROPIC_BASE_URL=<proxy>`, test whether a `.claude/agents/*.md` frontmatter `model:` string
    rides verbatim to `/v1/messages` (agent defs load at session start — untestable mid-session).

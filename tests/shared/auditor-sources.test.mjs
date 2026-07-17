@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  probeReachableWithEscalation,
   readSourceDeclaration,
   resolveAmbientSources,
   resolveSourceDeclarationPath,
@@ -234,5 +235,37 @@ describe("resolveSessionConfig — the G2.5 wiring", () => {
     const effective = resolveSessionConfig(rich, { self: {} }, { env: {} });
     expect(effective.synthesis).toEqual({ enabled: true });
     expect(effective.dispatch).toEqual({ max_packets: 4 });
+  });
+});
+
+describe("probeReachableWithEscalation", () => {
+  it("returns true on the first (cheap) attempt without escalating", () => {
+    const budgets = [];
+    const ok = probeReachableWithEscalation((ms) => {
+      budgets.push(ms);
+      return true;
+    }, [1000, 4000]);
+    expect(ok).toBe(true);
+    expect(budgets).toEqual([1000]); // warm proxy: no second attempt
+  });
+
+  it("retries at a larger budget when the first attempt fails (cold-probe survival)", () => {
+    const budgets = [];
+    const ok = probeReachableWithEscalation((ms) => {
+      budgets.push(ms);
+      return ms >= 4000; // first (1s) attempt times out; second (4s) succeeds
+    }, [1000, 4000]);
+    expect(ok).toBe(true);
+    expect(budgets).toEqual([1000, 4000]); // a healthy lane is NOT dropped on one cold probe
+  });
+
+  it("returns false only after every budget fails (genuinely-dead endpoint)", () => {
+    const budgets = [];
+    const ok = probeReachableWithEscalation((ms) => {
+      budgets.push(ms);
+      return false;
+    }, [1000, 4000]);
+    expect(ok).toBe(false);
+    expect(budgets).toEqual([1000, 4000]);
   });
 });

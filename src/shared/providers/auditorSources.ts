@@ -100,20 +100,49 @@ function defaultReadDeclarationFile(path: string): string | null {
 }
 
 /**
- * Default {@link AmbientSourceDeps.probeHttpReachable}: a short-timeout
- * `GET <url>` run in a hidden node child so the check stays SYNCHRONOUS (resolve is
- * sync by design — see the populate/resolve split) without blocking the event loop
- * machinery this process owns. Exit 0 ⇔ HTTP 2xx within the 750ms budget.
+ * Default {@link AmbientSourceDeps.probeHttpReachable}: a `GET <url>` run in a hidden
+ * node child so the check stays SYNCHRONOUS (resolve is sync by design — see the
+ * populate/resolve split) without blocking the event loop machinery this process owns.
+ * Exit 0 ⇔ HTTP 2xx within the attempt budget.
+ *
+ * TWO bounded attempts with escalating budgets: a healthy declared lane must NOT be
+ * dropped for the whole invocation on a single cold probe. Warm, a proxy's `/registry`
+ * answers in ~25ms and the first (1s) attempt passes; a COLD proxy whose model catalog
+ * is being (re)built synchronously can exceed a short budget, so a second, longer (4s)
+ * attempt covers it. (The proxy side also serves `/registry` stale-while-revalidate so
+ * this is rare — but the run's FIRST probe is exactly when a drop is most costly, so the
+ * retry is kept as defense in depth.) A genuinely-dead endpoint costs both budgets once,
+ * at run start, for one lane — acceptable.
  */
+/**
+ * Escalating-budget reachability: try `probeOnce` at each budget in order, returning
+ * true on the first success. The retry (not the spawn) is the load-bearing property —
+ * a healthy lane must survive a slow first attempt — so it is factored out here to be
+ * unit-testable without spawning. `budgets` is ordered small→large so the common warm
+ * case exits on the first, cheap attempt.
+ */
+export function probeReachableWithEscalation(
+  probeOnce: (budgetMs: number) => boolean,
+  budgets: readonly number[] = [1_000, 4_000],
+): boolean {
+  for (const budgetMs of budgets) {
+    if (probeOnce(budgetMs)) return true;
+  }
+  return false;
+}
+
 function defaultProbeHttpReachable(url: string): boolean {
-  const script =
-    "const [url] = process.argv.slice(1);" +
-    "fetch(url, { signal: AbortSignal.timeout(750) })" +
-    ".then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1));";
-  const result = spawnSyncHidden(process.execPath, ["-e", script, url], {
-    timeout: 2_000,
-  });
-  return result.status === 0;
+  const probeOnce = (budgetMs: number): boolean => {
+    const script =
+      "const [url, ms] = process.argv.slice(1);" +
+      "fetch(url, { signal: AbortSignal.timeout(Number(ms)) })" +
+      ".then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1));";
+    const result = spawnSyncHidden(process.execPath, ["-e", script, url, String(budgetMs)], {
+      timeout: budgetMs + 1_500,
+    });
+    return result.status === 0;
+  };
+  return probeReachableWithEscalation(probeOnce);
 }
 
 /** The source's stable id, matching `DispatchableSource.id`'s documented default. */
