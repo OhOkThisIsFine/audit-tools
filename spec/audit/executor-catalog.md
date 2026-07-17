@@ -38,7 +38,7 @@ is currently **unreachable** — its obligation (`friction_capture_current`) is
 not in `deriveAuditState`'s priority chain, so the engine never selects it; the
 actual friction triage fires from the `present_report` terminal step
 (`decideAuditFrictionCloseout`, called from `nextStepHelpers.ts`/
-`nextStepCommand.ts`) instead.
+`executorRunners.ts`) instead.
 
 ## Executors
 

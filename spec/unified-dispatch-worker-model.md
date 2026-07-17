@@ -25,7 +25,7 @@ cost-ranks. Dispatch inventory is resolved **per-auditor at dispatch time**, ext
 
 | Kind | Reaches a model via | Tools / file access | Backend diversity via | repair-proxy |
 |---|---|---|---|---|
-| **Claude-harness agentic** — the host and its `claude` subagents (host fan-out); `claude -p` when headless | the Anthropic `/v1/messages` wire protocol, redirectable by `ANTHROPIC_BASE_URL` | full (Read/Edit/Bash) | pointing the harness at a proxy → backend | ✅ **its lane** |
+| **Claude-harness agentic** — the host and its `claude` subagents (host fan-out); `claude -p` when headless, shipped as the `claude-worker` provider (`CLAUDE_WORKER_PROVIDER_NAME`) | the Anthropic `/v1/messages` wire protocol, redirectable by `ANTHROPIC_BASE_URL` | full (Read/Edit/Bash) | pointing the harness at a proxy → backend | ✅ **its lane** |
 | **CLI agentic** — codex, agy (spawned subprocess harnesses) | the CLI's own model provider (OpenAI / Gemini), its own config | full | *being a different agent* | ❌ own harness/backend |
 | **Single-shot API** — NIM / opencode / vLLM direct | a direct `POST /chat/completions`, one shot | **none** (no tool loop) | *is* the backend | ❌ nothing to repair |
 
@@ -46,7 +46,13 @@ backend through it — the tool-repair keeps the backend's malformed tool calls 
 work. Therefore:
 
 - **remediate implement is the case that justifies repair-proxy** — those workers Read/Edit/Bash/run
-  tests, so a weaker backend's tool calls are exactly what repair-proxy fixes.
+  tests, so a weaker backend's tool calls are exactly what repair-proxy fixes. The concrete class that
+  runs this lane is the `claude-worker` provider: it spawns `claude -p` with a required
+  `ANTHROPIC_BASE_URL` overlay onto repair-proxy and a `<backend_provider>/<model>` routing namespace,
+  so a proxied `claude-worker` is a full agentic worker on a free backend (a host-subagent-equivalent,
+  off Anthropic quota). Its pool/quota identity keys on the real `backend_provider[#account]/model`, never
+  on `claude-worker` itself — the transport never enters the quota key (see
+  [`cross-provider-quota-matrix.md`](cross-provider-quota-matrix.md)).
 - **audit review host-fanout** uses the same lane (agentic claude subagents reading source + emitting
   findings); the repair value is dormant only because audit review *can* also be done single-shot,
   where there are no tool calls.

@@ -12,8 +12,9 @@
   (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
 - **The maximal-coverage validation run's dispatch/quota fix cluster shipped in the current release.**
-  All major code tracks remain complete (see Track status below). Next is the bounded forward remainder
-  below + a confirming re-run.
+  The remaining open work is ▶ IMMEDIATE NEXT below (the live-run confirmation) + the bounded forward
+  remainder; authoritative per-track status is in the Track status section (the older T1–T6 quota-cluster
+  numbering, all closed — not a claim about the open dogfood gap, which ▶ IMMEDIATE NEXT owns).
 - **repair-proxy dispatch integration — SUPERSEDED (the source-pool model was wrong); reworking to the
   unified worker model.** The owner-attended dogfood ran 2026-07-15 and proved the integration is the wrong
   abstraction: a host-driven `/audit-code` planned 430 tasks and dispatched **zero** (repair-proxy sources
@@ -183,8 +184,9 @@ model.
    two A2b residuals; untracked-exclusion residuals (a–e). All in `docs/backlog.md` → Open bugs.
 
 **Confirming re-run (verification track, not blocking the remainder):** re-run the maximal-coverage audit
-on a fresh Claude window to confirm the shipped fixes hold live, finish the parked self-audit (14/261
-packets, resumable), then hand-label `corpus/<run-id>.labels.json` (the A2 oracle unblock). Recipe below.
+on a fresh Claude window to confirm the shipped fixes hold live — the earlier parked runs cannot be
+resumed usefully (their capacity pools froze at creation, pre-probe-fix), so a fresh run is required —
+then hand-label `corpus/<run-id>.labels.json` (the A2 oracle unblock). Recipe below.
 
 <details><summary>Reusable launch recipe for the maximal-coverage validation run</summary>
 
