@@ -24,8 +24,9 @@
   (ONE core, three worker KINDS; repair-proxy = kind-1 launch-transport; per-auditor handshake inventory;
   retire the source-pool wiring). The old `spec/repair-proxy-dispatch-integration.md` is retired with the code.
   Memory [[unified-dispatch-worker-model]]. The decomposition's inventory/handshake half is DONE through G3;
-  the kind-1 transport itself shipped 2026-07-16 and was dogfooded — see ▶ IMMEDIATE NEXT for the three
-  open feedback gaps. Full dogfood findings: `docs/backlog.md` → "Live dogfood: BOTH dispatch paths failed".
+  the kind-1 transport shipped 2026-07-16, was dogfooded, and its three feedback gaps CLOSED 2026-07-17
+  — all RELEASED as v0.33.1 (with the `AUDIT_CODE_STATE_DIR` hermeticity fix), global bins reinstalled.
+  See ▶ IMMEDIATE NEXT for the re-dogfood.
 - **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
   and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
   inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
@@ -75,7 +76,8 @@ nonzero-exit worker's 429/404/413 text was never scanned); two new outcomes `mod
 cooldown, livelock-strand guards); the capacity fold + coordinator claim walk are per-pool
 context-cap fit-aware (`quota.context_tokens`, stamped from the registry at populate); populate
 probes each top-K model and drops definite 404s. Accepted residuals: backlog → "claude-worker lane
-feedback-gap residuals". Next, in order:
+feedback-gap residuals". The batch RELEASED as v0.33.1 (2026-07-17, with the hermeticity fix); bins
+reinstalled. Next, in order:
 1. **Re-dogfood**: resume `20260717T062404401Z_audit_tasks_completed_001` (or fresh run) against a
    live proxy — the backlog residual entry's ⬇ watch line is the pass/fail checklist.
 2. **Agent-tool carrier restart test**: from a Desktop session launched under
@@ -83,7 +85,6 @@ feedback-gap residuals". Next, in order:
    rides verbatim to `/v1/messages` (agent defs load at session start — untestable mid-session).
    If yes: the host fan-out half (reads `self.proxy_transport`, stamps per-packet model strings into
    dispatch plans) is the follow-on commit.
-3. **Release** the batch (contains loop-core dispatch changes — minor bump).
 
 ## Prior track — the G-series (closed)
 
