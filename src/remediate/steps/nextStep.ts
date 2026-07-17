@@ -968,6 +968,10 @@ const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
   "subprocess-template",
   "worker-command",
   "agy",
+  // The proxied isolated Claude-harness worker (commit 3b/3c) — headless in-process
+  // launch from its claude-worker source (mirrors audit's IN_PROCESS_AUDIT_PROVIDERS;
+  // both draws must classify the new worker kind or its pools confirm but never route).
+  "claude-worker",
 ]);
 
 function resolvesToInProcessDispatchProvider(

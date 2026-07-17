@@ -41,6 +41,11 @@ const IN_PROCESS_AUDIT_PROVIDERS: ReadonlySet<string> = new Set([
   "openai-compatible",
   "codex",
   "opencode",
+  // The proxied isolated Claude-harness worker (commit 3b/3c): launched in-process
+  // from its claude-worker source — without this entry the lane's pools build and
+  // confirm at Gate-0 but the hybrid split routes them nothing (2026-07-16 dogfood:
+  // 313 packets all bound to the walled host pool, zero dispatched).
+  "claude-worker",
 ]);
 
 /** Whether a confirmed pool is one audit launches in-process as a review worker. */

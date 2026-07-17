@@ -54,6 +54,32 @@ function settledStore() {
   return { readSettled: () => set, onSettle: (p) => set.add(p), set };
 }
 
+test("audit hybrid: a claude-worker pool is an in-process pool and receives partition work", async () => {
+  // Live dogfood 2026-07-16: the claude-worker lane shipped confirmable (Gate-0 fold,
+  // backend-keyed pools, launch transport) but UNDRIVABLE — isInProcessAuditPool did
+  // not classify `claude-worker`, so the hybrid split assigned the free lanes nothing
+  // and all 313 packets fell to the walled host pool (zero dispatched).
+  expect(isInProcessAuditPool({ providerName: "claude-worker" })).toBe(true);
+  const dir = mkdtempSync(join(tmpdir(), "audit-hyb-cw-"));
+  try {
+    const registry = new ClaimRegistry(join(dir, "claims.json"));
+    const store = settledStore();
+    const part = await planHybridDispatch({
+      isInProcess: isInProcessAuditPool,
+      frontier: tasks(6),
+      pools: [nimPool({ id: "nim/z-ai/glm-5.2", providerName: "claude-worker" })],
+      sessionConfig: SESSION,
+      claimRegistry: registry,
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+    });
+    expect(part.inProcess.length > 0).toBeTruthy();
+    expect(part.inProcess.every((a) => a.providerName === "claude-worker")).toBeTruthy();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("audit hybrid: the NIM partition is claimed + capacity-bounded; all on the NIM pool", async () => {
   const dir = mkdtempSync(join(tmpdir(), "audit-hyb-"));
   try {
