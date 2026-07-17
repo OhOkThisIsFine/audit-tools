@@ -86,6 +86,26 @@ function finiteNonNegative(value: unknown): number | undefined {
 }
 
 /**
+ * Best-effort "higher = better" score for ranking. A flat `score` wins; otherwise
+ * the live repair-proxy's `capability` block supplies someone-else-maintained
+ * relative-capability RANKS (`composite_rank`, then `arena_rank`; lower = better,
+ * so negated). A model with none stays unscored and ranks last — capability-less
+ * registry rows are frequently non-chat models (TTS, embeddings) that cannot serve
+ * as agentic workers.
+ */
+function deriveScore(entry: Record<string, unknown>): number | null {
+  if (typeof entry.score === "number" && Number.isFinite(entry.score)) {
+    return entry.score;
+  }
+  const capability = entry.capability;
+  if (capability === null || typeof capability !== "object") return null;
+  const rank =
+    finiteNonNegative((capability as Record<string, unknown>).composite_rank) ??
+    finiteNonNegative((capability as Record<string, unknown>).arena_rank);
+  return rank === undefined ? null : -rank;
+}
+
+/**
  * Tolerantly extract `{provider, model, score, price}` rows from a registry payload,
  * keeping only entries this process could actually dispatch through: `reachable` AND
  * `has_key` must be literally `true` (the proxy's own liveness/credential verdicts).
@@ -93,15 +113,31 @@ function finiteNonNegative(value: unknown): number | undefined {
  * a half-broken registry degrades to a smaller expansion, not a failed populate.
  */
 function extractRegistryModels(payload: unknown): RegistryModel[] {
-  // The registry is providers × live models; tolerate either a flat entry array or a
-  // `{providers|models|entries: [...]}` wrapper, and per-provider nested `models`.
-  const container = Array.isArray(payload)
-    ? payload
-    : payload !== null && typeof payload === "object"
-      ? (["providers", "models", "entries"]
-          .map((key) => (payload as Record<string, unknown>)[key])
-          .find(Array.isArray) as unknown[] | undefined)
-      : undefined;
+  // The registry is providers × live models; tolerate a flat entry array, a
+  // `{providers|models|entries: [...]}` wrapper, or the live repair-proxy's
+  // provider-MAP form (`providers: {<name>: {has_key, reachable, models: [...]}}`
+  // — the name is the key, so it is folded into each entry as `name`), plus
+  // per-provider nested `models` in every form.
+  let container: unknown[] | undefined;
+  if (Array.isArray(payload)) {
+    container = payload;
+  } else if (payload !== null && typeof payload === "object") {
+    for (const key of ["providers", "models", "entries"]) {
+      const wrapped = (payload as Record<string, unknown>)[key];
+      if (Array.isArray(wrapped)) {
+        container = wrapped;
+        break;
+      }
+      if (wrapped !== null && typeof wrapped === "object") {
+        container = Object.entries(wrapped).map(([name, entry]) =>
+          entry !== null && typeof entry === "object"
+            ? { name, ...(entry as Record<string, unknown>) }
+            : entry,
+        );
+        break;
+      }
+    }
+  }
   if (!Array.isArray(container)) return [];
 
   const models: RegistryModel[] = [];
@@ -109,11 +145,10 @@ function extractRegistryModels(payload: unknown): RegistryModel[] {
     if (typeof provider !== "string" || provider.trim().length === 0) return;
     if (typeof model !== "string" || model.trim().length === 0) return;
     if (entry.reachable !== true || entry.has_key !== true) return;
-    const score = entry.score;
     models.push({
       provider: provider.trim(),
       model: model.trim(),
-      score: typeof score === "number" && Number.isFinite(score) ? score : null,
+      score: deriveScore(entry),
       costPerMtok:
         finiteNonNegative(entry.cost_per_mtok) ??
         finiteNonNegative(entry.price_per_mtok) ??
@@ -160,7 +195,13 @@ function expandSources(
   options: { endpoint: string; topK: number; costPerMtok?: number },
 ): DispatchableSource[] {
   const byProvider = new Map<string, RegistryModel[]>();
+  // Dedup by (provider, model): live registries list some models twice, and one
+  // pool identity must expand to exactly one source (first row wins).
+  const seen = new Set<string>();
   for (const model of models) {
+    const identity = `${model.provider}/${model.model}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
     const bucket = byProvider.get(model.provider) ?? [];
     bucket.push(model);
     byProvider.set(model.provider, bucket);

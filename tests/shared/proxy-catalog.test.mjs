@@ -163,6 +163,87 @@ describe("populateProxyCatalog — expansion", () => {
     ]);
   });
 
+  it("tolerates the provider-MAP registry shape the live repair-proxy emits", async () => {
+    // The real `GET /registry` body: `providers` is an OBJECT keyed by provider
+    // name (not an array), with per-provider `has_key`/`reachable` verdicts and a
+    // `models: [{id, ...}]` list. Observed live 2026-07-16 (first claude-worker
+    // dogfood): the array-only extractor read this as zero models and wrote an
+    // empty expansion.
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir: tempHome(),
+      fetchImpl: registryFetch({
+        generated_at: "2026-07-17T05:04:49.497Z",
+        routing: { default: "nim/z-ai/glm-5.2" },
+        providers: {
+          nim: {
+            base: "https://integrate.api.nvidia.com/v1",
+            kind: "openai",
+            authEnv: "NVIDIA_API_KEY",
+            has_key: true,
+            reachable: true,
+            models: [{ id: "z-ai/glm-5.2", score: 0.9 }, { id: "meta/llama-4" }],
+          },
+          mistral: {
+            has_key: false,
+            reachable: true,
+            models: [{ id: "keyless/model" }],
+          },
+        },
+      }),
+    });
+    expect(result.sources.map((s) => s.model).sort()).toEqual([
+      "meta/llama-4",
+      "z-ai/glm-5.2",
+    ]);
+    expect(result.sources.every((s) => s.backend_provider === "nim")).toBe(true);
+  });
+
+  it("ranks by the registry's capability block when no flat score exists", async () => {
+    // Live repair-proxy model rows carry `capability: {composite_rank, arena_rank,
+    // arena_rating, ...}` (models.dev/arena sync), not a flat `score`. Rank by
+    // composite_rank, falling back to arena_rank (both: lower = better); models with
+    // neither rank as unscored (last) — otherwise top-K degrades to alphabetical and
+    // picks TTS/embedding models as agentic workers (observed live 2026-07-16).
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir: tempHome(),
+      topK: 2,
+      fetchImpl: registryFetch({
+        providers: {
+          nim: {
+            has_key: true,
+            reachable: true,
+            models: [
+              { id: "aaa/alphabetical-first", capability: null },
+              { id: "mid/model", capability: { composite_rank: 200, arena_rating: 1300 } },
+              { id: "best/model", capability: { composite_rank: 46, arena_rating: 1456 } },
+              { id: "rated-only/model", capability: { composite_rank: null, arena_rating: 1400 } },
+            ],
+          },
+        },
+      }),
+    });
+    expect(result.sources.map((s) => s.model)).toEqual(["best/model", "mid/model"]);
+  });
+
+  it("dedups duplicate registry rows — one (provider, model) identity, one source", async () => {
+    // The live mistral registry lists some models twice; without dedup the
+    // expansion emits two identical claude-worker sources for one pool identity
+    // (observed live 2026-07-16 — the same map-clobber hazard as the declared
+    // intra-duplicates residual).
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir: tempHome(),
+      topK: 3,
+      fetchImpl: registryFetch([NIM_A, NIM_A, NIM_B]),
+    });
+    expect(result.sources.map((s) => s.model)).toEqual([
+      "z-ai/glm-5.2",
+      "meta/llama-4",
+    ]);
+  });
+
   it("strips a trailing slash from the endpoint before composing the url + sources", async () => {
     const result = await populateProxyCatalog({
       endpoint: `${PROXY}/`,
