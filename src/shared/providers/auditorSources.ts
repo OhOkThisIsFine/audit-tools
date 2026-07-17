@@ -5,7 +5,11 @@ import { join } from "node:path";
 import type { DispatchableSource } from "../types/sessionConfig.js";
 import { spawnSyncHidden } from "../tooling/exec.js";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
-import { readProxyCatalog } from "./proxyCatalog.js";
+import {
+  populateProxyCatalog,
+  readProxyCatalog,
+  type PopulateProxyCatalogResult,
+} from "./proxyCatalog.js";
 import { commandExists } from "./providerPathGuard.js";
 
 /**
@@ -234,6 +238,71 @@ export function readRepairProxyDeclaration(
 }
 
 /**
+ * The default populate fetch: time-boxed so a routable-but-dead proxy cannot hang a
+ * `next-step` at the Gate-0 build (network-tolerant means bounded, not just caught).
+ */
+const populateFetchWithTimeout: typeof fetch = (input, init) =>
+  fetch(input, { ...init, signal: AbortSignal.timeout(5_000) });
+
+/**
+ * POPULATE the declared repair-proxy lane (plan §populate-vs-resolve): read the
+ * machine declaration's `repair_proxy` block and, when present, fetch its registry
+ * into the machine-level populate cache ({@link populateProxyCatalog}). This is the
+ * network half the resolve path must never run — call it at Gate-0 build time (once
+ * per run) or on explicit refresh, NEVER from `resolveAmbientSources`.
+ *
+ * "Present + reachable" gating is the fetch itself: the registry GET is both the
+ * liveness proof and the payload, so a separate pre-probe would only double the
+ * network. Never throws: no declared lane ⇒ `null`; a failed/unreachable fetch ⇒
+ * `{written:false, reason}` and any prior cache is left untouched — the lane then
+ * resolves from the existing cache or unexpanded with its own `dropped[]` reason,
+ * degrading Gate-0, never blocking it.
+ */
+export async function populateDeclaredProxyCatalog(
+  deps: AmbientSourceDeps & { fetchImpl?: typeof fetch } = {},
+): Promise<PopulateProxyCatalogResult | null> {
+  const { declaration } = readRepairProxyDeclaration(deps);
+  if (declaration === null) return null;
+  return populateProxyCatalog({
+    endpoint: declaration.endpoint,
+    ...(declaration.top_k !== undefined ? { topK: declaration.top_k } : {}),
+    ...(declaration.cost_per_mtok !== undefined
+      ? { costPerMtok: declaration.cost_per_mtok }
+      : {}),
+    fetchImpl: deps.fetchImpl ?? populateFetchWithTimeout,
+    ...(deps.homeDir !== undefined ? { homeDir: deps.homeDir } : {}),
+  });
+}
+
+/**
+ * Populate the proxy catalog ONLY when the resolve half would otherwise drop the
+ * lane for it: a `repair_proxy` is declared but the cache is absent or was fetched
+ * from a different endpoint. Bounded by construction — after one success the cache
+ * exists and this is a cheap read — so a draw with no Gate-0 build moment (remediate)
+ * can call it on every config load without a per-load network fetch. Freshness
+ * (TTL / explicit refresh) is deliberately NOT this function's job (backlog).
+ * [[silent-fail-closed-on-one-draw]] — both draws must trigger populate, not just audit.
+ */
+export async function populateProxyCatalogIfMissing(
+  deps: AmbientSourceDeps & { fetchImpl?: typeof fetch } = {},
+): Promise<PopulateProxyCatalogResult | null> {
+  const { declaration } = readRepairProxyDeclaration(deps);
+  if (declaration === null) return null;
+  const cache = readProxyCatalog(deps);
+  if (
+    cache !== null &&
+    cache.endpoint.replace(/\/+$/u, "") === declaration.endpoint
+  ) {
+    return {
+      sources: cache.sources,
+      written: false,
+      reason: "populate cache already present",
+    };
+  }
+  return populateDeclaredProxyCatalog(deps);
+}
+
+/**
  * Can THIS process prove it can reach this declared source?
  *
  * The spec's rule is `declared ∩ ambient-verifiable-by-this-process` — a declared lane
@@ -459,5 +528,25 @@ function resolveRepairProxyLane(
     });
     return;
   }
-  sources.push(...catalog.sources);
+  // Declared-wins dedup: an expanded lane whose (backend_provider, model)
+  // identity a DECLARED source already covers is skipped, so one pool identity
+  // never maps to two sources (the launch bridge's pool→source map is 1:1 by
+  // assumption — a duplicate would arbitrate the transport by silent map-order
+  // clobber). The operator's explicit lane always beats auto-expansion; routing
+  // through the proxy for that model is still available by declaring the
+  // claude-worker source explicitly.
+  const declaredIdentities = new Set(
+    sources.map((s) => `${s.backend_provider ?? s.provider}/${s.model ?? ""}`),
+  );
+  for (const expanded of catalog.sources) {
+    const identity = `${expanded.backend_provider ?? expanded.provider}/${expanded.model ?? ""}`;
+    if (declaredIdentities.has(identity)) {
+      dropped.push({
+        id: sourceId(expanded),
+        reason: `expanded lane skipped — a declared source already covers backend identity "${identity}" (declared wins over registry expansion).`,
+      });
+      continue;
+    }
+    sources.push(expanded);
+  }
 }

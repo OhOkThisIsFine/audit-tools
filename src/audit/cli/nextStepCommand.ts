@@ -17,6 +17,7 @@ import {
   gatherDispatchableSources,
   resolveFreshSessionProviderName,
   resolveAutonomousMode,
+  populateDeclaredProxyCatalog,
   readSharedProviderConfirmation,
   computeNewlyReachableBackends,
   renderHostWallExplanation,
@@ -345,6 +346,10 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       // minimal and round-trips to the same resolved value (absence ⇒ false).
       ...(hostCanRestrictSubagentTools ? { can_restrict_subagent_tools: true } : {}),
       ...(hostCanSelectSubagentModel ? { can_select_subagent_model: true } : {}),
+      // Proxy-fronted host bit (3c, no consumer this commit): re-emitted so it rides
+      // continue-commands like the other capability booleans (carry only when true;
+      // absence ⇒ false round-trips identically).
+      ...(auditorSelf.proxy_transport ? { proxy_transport: true } : {}),
       ...(hostMaxActiveSubagents != null ? { max_active_subagents: hostMaxActiveSubagents } : {}),
       ...(hostContextTokens != null ? { context_tokens: hostContextTokens } : {}),
       ...(hostOutputTokens != null ? { output_tokens: hostOutputTokens } : {}),
@@ -362,6 +367,26 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   // graph/quota/…) are preserved identically; only the DISPATCH consumers switch to the
   // effective config. Persistence is untouched — the store reads/writes intent only, so an
   // in-memory resolve can never write dispatch inventory back into the repo config.
+  // 3c POPULATE trigger (plan §populate-vs-resolve): with no Gate-0 confirmation on
+  // disk yet, THIS invocation is the provider-confirmation build — refresh the
+  // repair-proxy populate cache NOW, before the effective config resolves, so this
+  // same invocation's `resolveAmbientSources` reads the fresh expansion and the
+  // roster the operator confirms includes the proxied lane. Gated on the machine
+  // declaration's `repair_proxy` block (no lane declared ⇒ no network) and — via the
+  // confirmation-absent check — run once per run, never per next-step. Confirmed
+  // runs re-populate only on explicit refresh. Network-tolerant: a failed populate
+  // degrades to a stderr warning (the lane then resolves from the existing cache or
+  // unexpanded, with its own dropped[] reason) — it never blocks Gate-0.
+  if ((await readSharedProviderConfirmation(root)) === null) {
+    const populated = await populateDeclaredProxyCatalog().catch(() => null);
+    if (populated !== null && !populated.written) {
+      process.stderr.write(
+        `WARNING: repair-proxy registry populate did not refresh the catalog cache ` +
+          `(${populated.reason ?? "unknown reason"}). The proxied lane resolves from ` +
+          `any existing cache, or stays unexpanded for this run.\n`,
+      );
+    }
+  }
   const effectiveConfig = resolveSessionConfig(intent, hostDescriptor);
 
   // G3 reconciliation gate — computed ONCE per invocation, here, because it cannot

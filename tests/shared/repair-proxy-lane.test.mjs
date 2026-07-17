@@ -7,13 +7,21 @@
  * case. Plan: docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const {
+  populateDeclaredProxyCatalog,
+  populateProxyCatalogIfMissing,
   readRepairProxyDeclaration,
   resolveAmbientSources,
   verifySourceReach,
 } = await import("../../src/shared/providers/auditorSources.ts");
+const { readProxyCatalog } = await import(
+  "../../src/shared/providers/proxyCatalog.ts"
+);
 
 const PROXY = "http://127.0.0.1:8791";
 
@@ -191,6 +199,91 @@ describe("resolveAmbientSources — the repair-proxy lane", () => {
   });
 });
 
+describe("populateDeclaredProxyCatalog — the Gate-0 POPULATE trigger (3c)", () => {
+  const tmpDirs = [];
+  afterEach(() => {
+    while (tmpDirs.length) {
+      try { rmSync(tmpDirs.pop(), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+  function tmpHome() {
+    const dir = mkdtempSync(join(tmpdir(), "gate0-populate-"));
+    tmpDirs.push(dir);
+    return dir;
+  }
+  /** A minimal registry payload with two reachable+keyed nim models. */
+  const REGISTRY = [
+    { provider: "nim", model: "z-ai/glm-5.2", reachable: true, has_key: true, score: 9 },
+    { provider: "nim", model: "meta/llama-4", reachable: true, has_key: true, score: 5 },
+  ];
+  const okFetch = async () => ({ ok: true, json: async () => REGISTRY });
+
+  it("no repair_proxy declared ⇒ null, and the network is never touched", async () => {
+    let fetched = 0;
+    const result = await populateDeclaredProxyCatalog({
+      ...deps({ declaration: { sources: [] } }),
+      fetchImpl: async () => {
+        fetched += 1;
+        return { ok: true, json: async () => [] };
+      },
+    });
+    expect(result).toBeNull();
+    expect(fetched).toBe(0);
+  });
+
+  it("declared + fetch failure ⇒ degrade with a reason, never a throw, prior cache untouched", async () => {
+    const home = tmpHome();
+    const result = await populateDeclaredProxyCatalog({
+      ...deps({ declaration: { repair_proxy: { endpoint: PROXY } } }),
+      homeDir: home,
+      fetchImpl: async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    });
+    expect(result?.written).toBe(false);
+    expect(result?.reason).toContain("ECONNREFUSED");
+    // Nothing was written — the (absent) prior cache stays absent.
+    expect(readProxyCatalog({ homeDir: home })).toBeNull();
+  });
+
+  it("declared + HTTP error ⇒ degrade with the status in the reason", async () => {
+    const result = await populateDeclaredProxyCatalog({
+      ...deps({ declaration: { repair_proxy: { endpoint: PROXY } } }),
+      homeDir: tmpHome(),
+      fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }),
+    });
+    expect(result?.written).toBe(false);
+    expect(result?.reason).toContain("503");
+  });
+
+  it("declared + reachable registry ⇒ writes the cache the RESOLVE half then reads", async () => {
+    const home = tmpHome();
+    const result = await populateDeclaredProxyCatalog({
+      ...deps({
+        declaration: { repair_proxy: { endpoint: PROXY, top_k: 1, cost_per_mtok: 0 } },
+      }),
+      homeDir: home,
+      fetchImpl: okFetch,
+    });
+    expect(result?.written).toBe(true);
+    const catalog = readProxyCatalog({ homeDir: home });
+    expect(catalog?.endpoint).toBe(PROXY);
+    // top_k=1 caps the expansion to the best-scored nim model; the declared
+    // cost_per_mtok (free-to-operator axis) wins over any registry price.
+    expect(catalog?.sources).toEqual([
+      {
+        id: "claude-worker:nim/z-ai/glm-5.2",
+        provider: "claude-worker",
+        endpoint: PROXY,
+        backend_provider: "nim",
+        model: "z-ai/glm-5.2",
+        worker_kind: "agentic",
+        cost_per_mtok: 0,
+      },
+    ]);
+  });
+});
+
 describe("verifySourceReach — claude-worker", () => {
   it("requires endpoint and model", () => {
     expect(
@@ -221,5 +314,83 @@ describe("verifySourceReach — claude-worker", () => {
     const down = verifySourceReach(source, deps({ probe: () => false }));
     expect(down.verified).toBe(false);
     expect(down.reason).toContain("liveness");
+  });
+});
+
+describe("declared-wins dedup + missing-only populate (3c MUST-FIX round)", () => {
+  const declaration = { repair_proxy: { endpoint: PROXY } };
+
+  it("an expanded lane whose backend identity a DECLARED source covers is skipped with a reason (declared wins)", () => {
+    // Direct NIM lane declaring the same backend identity as the expansion.
+    const direct = {
+      id: "nim-direct",
+      provider: "openai-compatible",
+      endpoint: "https://integrate.api.nvidia.com/v1",
+      backend_provider: "nim",
+      model: "z-ai/glm-5.2",
+      api_key_env: "NIM_KEY",
+    };
+    const result = resolveAmbientSources(
+      deps({
+        declaration: { sources: [direct], repair_proxy: { endpoint: PROXY } },
+        probe: () => true,
+        catalog: cache(),
+        env: { NIM_KEY: "k" },
+      }),
+    );
+    // ONE source survives — the declared direct lane; the expansion is dropped
+    // loudly, so the pool→source map stays 1:1 (no transport map-clobber).
+    expect(result.sources).toEqual([direct]);
+    const skip = result.dropped.find((d) => d.reason.includes("declared wins"));
+    expect(skip).toBeDefined();
+    expect(skip.reason).toContain("nim/z-ai/glm-5.2");
+  });
+
+  it("an expanded lane with a DIFFERENT backend identity still folds alongside declared sources", () => {
+    const direct = {
+      id: "nim-direct",
+      provider: "openai-compatible",
+      endpoint: "https://integrate.api.nvidia.com/v1",
+      backend_provider: "nim",
+      model: "other/model",
+      api_key_env: "NIM_KEY",
+    };
+    const result = resolveAmbientSources(
+      deps({
+        declaration: { sources: [direct], repair_proxy: { endpoint: PROXY } },
+        probe: () => true,
+        catalog: cache(),
+        env: { NIM_KEY: "k" },
+      }),
+    );
+    expect(result.sources).toEqual([direct, EXPANDED]);
+  });
+
+  it("populateProxyCatalogIfMissing: fresh matching cache ⇒ NO fetch, reports already-present", async () => {
+    let fetched = 0;
+    const result = await populateProxyCatalogIfMissing({
+      ...deps({ declaration, catalog: cache() }),
+      fetchImpl: () => {
+        fetched += 1;
+        throw new Error("must not fetch");
+      },
+    });
+    expect(fetched).toBe(0);
+    expect(result.written).toBe(false);
+    expect(result.reason).toContain("already present");
+    expect(result.sources).toEqual([EXPANDED]);
+  });
+
+  it("populateProxyCatalogIfMissing: no declaration ⇒ null, no fetch", async () => {
+    let fetched = 0;
+    const result = await populateProxyCatalogIfMissing({
+      ...deps({}),
+      fetchImpl: () => {
+        fetched += 1;
+        throw new Error("must not fetch");
+      },
+    });
+    expect(fetched).toBe(0);
+    expect(result).toBeNull();
   });
 });

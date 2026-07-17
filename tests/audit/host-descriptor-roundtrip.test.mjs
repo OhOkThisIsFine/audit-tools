@@ -61,6 +61,26 @@ describe("auditor descriptor round-trip", () => {
     expect(parsed.self.can_dispatch_subagents).toBe(true);
   });
 
+  test("proxy_transport parses as a boolean and silent-drops a non-boolean (3c descriptor bit)", () => {
+    // "This host's own subagents are proxy-fronted" — no consumer this commit; the
+    // bit must simply survive the handshake like the other capability booleans.
+    const argv = renderAuditorDescriptor({
+      self: { can_dispatch_subagents: true, proxy_transport: true },
+    });
+    expect(getAuditorDescriptor(argv).self.proxy_transport).toBe(true);
+    // Silent-drop of a non-boolean, matching the other boolean fields' parsers.
+    const mangled = getAuditorDescriptor([
+      "--auditor",
+      JSON.stringify({ self: { proxy_transport: "yes" } }),
+    ]);
+    expect(mangled.self.proxy_transport).toBeUndefined();
+    // Absent ⇒ undefined (defaults false downstream).
+    const absent = getAuditorDescriptor(
+      renderAuditorDescriptor({ self: { can_dispatch_subagents: true } }),
+    );
+    expect(absent.self.proxy_transport).toBeUndefined();
+  });
+
   test("can_dispatch_subagents:false round-trips through the JSON boolean", () => {
     const argv = renderAuditorDescriptor({ self: { can_dispatch_subagents: false } });
     expect(getAuditorDescriptor(argv).self.can_dispatch_subagents).toBe(false);

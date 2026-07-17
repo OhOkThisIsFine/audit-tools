@@ -186,6 +186,68 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
   expect(dispatchableSourceId(two[0])).not.toBe(dispatchableSourceId(two[1]));
 });
 
+// ── Commit 3c: transport-agnostic quota identity (backend_provider keying) ──
+// Plan: docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md §"Identity &
+// quota keying" — the transport NEVER enters the ledger/pool identity; the key is
+// `backend_provider[#account]/model`.
+
+test("3c red-green: proxied claude-worker lane + direct lane to the SAME backend dedup to ONE pool identity", async () => {
+  // Direct lane: an operator-declared OpenAI-compatible endpoint that IS NIM. The
+  // operator asserts the backend identity via `backend_provider` — without it the
+  // tool cannot know a generic openai-compatible endpoint is the same backend the
+  // proxy routes to, and the two lanes legitimately stay distinct pools.
+  const direct = {
+    provider: "openai-compatible",
+    endpoint: "https://integrate.api.nvidia.com/v1",
+    model: "z-ai/glm-5.2",
+    api_key_env: "NVIDIA_API_KEY",
+    backend_provider: "nim",
+    account: "X",
+  };
+  // Proxied lane: the populate-cache expansion (claude-worker transport, carrying
+  // the transport-shaped explicit id the cache stamps).
+  const proxied = {
+    id: "claude-worker:nim/z-ai/glm-5.2",
+    provider: "claude-worker",
+    endpoint: "http://127.0.0.1:8791",
+    backend_provider: "nim",
+    model: "z-ai/glm-5.2",
+    worker_kind: "agentic",
+    account: "X",
+  };
+  // The ledger key is `backend_provider[#account]/model` for BOTH lanes.
+  expect(dispatchableSourceId(direct, "X")).toBe("nim#X/z-ai/glm-5.2");
+  expect(dispatchableSourceId(proxied, "X")).toBe("nim#X/z-ai/glm-5.2");
+  // And the CapacityPool ids (the admission/ledger identity) collide to ONE.
+  const directPool = await buildSourcePool({ source: direct, quotaSource: STUB_QUOTA, quotaEntries: {} });
+  const proxiedPool = await buildSourcePool({ source: proxied, quotaSource: STUB_QUOTA, quotaEntries: {} });
+  expect(directPool.id).toBe(proxiedPool.id);
+  expect(directPool.id).toBe("nim#X/z-ai/glm-5.2");
+});
+
+test("3c: the transport never enters the identity — backend keying outranks the transport-shaped explicit id", () => {
+  const proxied = {
+    id: "claude-worker:nim/z-ai/glm-5.2",
+    provider: "claude-worker",
+    endpoint: "http://127.0.0.1:8791",
+    backend_provider: "nim",
+    model: "z-ai/glm-5.2",
+  };
+  // Honoring the populate-stamped id would re-split the identity the field merges.
+  expect(dispatchableSourceId(proxied)).toBe("nim/z-ai/glm-5.2");
+  expect(dispatchableSourceId(proxied)).not.toContain("claude-worker");
+  // The declared `account` folds in even when the caller passes none (the gather-time
+  // dedup path), so two same-backend lanes on DIFFERENT accounts stay distinct pools.
+  expect(dispatchableSourceId({ ...proxied, account: "X" })).toBe("nim#X/z-ai/glm-5.2");
+});
+
+test("3c: a source WITHOUT backend_provider keeps the existing id/provider keying (no behavior change)", () => {
+  expect(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" })).toBe("nim-A");
+  expect(dispatchableSourceId({ provider: "openai-compatible", model: "m1" })).toBe(
+    "openai-compatible/m1",
+  );
+});
+
 // ── Defect-1: demote the primary in-process backend to a source (attended host) ──
 
 test("isDemotableInProcessProvider: only the API/CLI worker backends demote", () => {

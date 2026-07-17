@@ -269,8 +269,10 @@ function dispatchSourceKey(source: DispatchableSource): string {
  * would let one entry's `cost_order` silently overwrite the other's. The prefix is internal
  * only; the emitted `source_id` + the operator `cost_order` keyspace are unaffected.
  */
+const SOURCE_CANDIDATE_KEY_PREFIX = "source::";
+
 function sourceCandidateKey(source: DispatchableSource): string {
-  return `source::${dispatchSourceKey(source)}`;
+  return `${SOURCE_CANDIDATE_KEY_PREFIX}${dispatchSourceKey(source)}`;
 }
 
 /**
@@ -289,10 +291,26 @@ function resolveFinalCostOrder(
     return new Map(suggested.map((c) => [c.key, c.suggested_order]));
   }
   const knownKeys = new Set(candidates.map((c) => c.key));
+  // Display keyspace ≡ match keyspace (backlog: source pools were displayed as
+  // orderable but silently ignored). A source candidate is keyed
+  // `source::<id>` internally (collision-proofing against provider names / host
+  // model ids in this shared position map) but the Gate-0 prompt DISPLAYS it under
+  // its bare id — so the bare id must match too. An exact candidate key always
+  // wins the token: a bare alias never shadows a genuine provider/model key, which
+  // preserves exactly the collision-safety the prefix exists for.
+  const bareSourceAliases = new Map<string, string>();
+  for (const key of knownKeys) {
+    if (!key.startsWith(SOURCE_CANDIDATE_KEY_PREFIX)) continue;
+    const bare = key.slice(SOURCE_CANDIDATE_KEY_PREFIX.length);
+    if (!knownKeys.has(bare) && !bareSourceAliases.has(bare)) {
+      bareSourceAliases.set(bare, key);
+    }
+  }
   const seen = new Set<string>();
   const orderedNamed: string[] = [];
-  for (const key of operatorOrder) {
-    if (knownKeys.has(key) && !seen.has(key)) {
+  for (const token of operatorOrder) {
+    const key = knownKeys.has(token) ? token : bareSourceAliases.get(token);
+    if (key !== undefined && !seen.has(key)) {
       seen.add(key);
       orderedNamed.push(key);
     }

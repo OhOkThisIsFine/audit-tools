@@ -250,6 +250,65 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
     expect(byId["rp/strong"]).toBeLessThan(byId["rp/weak"]);
   });
 
+  test("3c red-green: an operator cost_order naming the DISPLAYED bare source id reorders that source", () => {
+    // Backlog "Gate-0 source pools are displayed as orderable but are silently
+    // ignored": candidates are keyed `source::<id>` internally, but the Gate-0
+    // prompt displays sources under their BARE id — so naming the displayed id
+    // must match (display keyspace ≡ match keyspace).
+    const sources = [
+      { id: "rp/cheap", provider: "openai-compatible", model: "prov/cheap", cost_per_mtok: 1 },
+      { id: "rp/pricey", provider: "openai-compatible", model: "prov/pricey", cost_per_mtok: 9 },
+    ];
+    const input = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      // The operator names the DISPLAYED ids, demoting the cheap source.
+      cost_order: ["rp/pricey", "rp/cheap"],
+    };
+    const { source_pool_cost_order } = annotateConfirmedPool(basePool, {}, input, sources);
+    const byId = Object.fromEntries(source_pool_cost_order.map((e) => [e.source_id, e.cost_order]));
+    expect(byId["rp/pricey"]).toBe(0);
+    expect(byId["rp/cheap"]).toBe(1);
+  });
+
+  test("3c: the internal source::<id> form is still accepted (either keyspace matches)", () => {
+    const sources = [
+      { id: "rp/cheap", provider: "openai-compatible", model: "prov/cheap", cost_per_mtok: 1 },
+      { id: "rp/pricey", provider: "openai-compatible", model: "prov/pricey", cost_per_mtok: 9 },
+    ];
+    const input = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      cost_order: ["source::rp/pricey", "source::rp/cheap"],
+    };
+    const { source_pool_cost_order } = annotateConfirmedPool(basePool, {}, input, sources);
+    const byId = Object.fromEntries(source_pool_cost_order.map((e) => [e.source_id, e.cost_order]));
+    expect(byId["rp/pricey"]).toBe(0);
+    expect(byId["rp/cheap"]).toBe(1);
+  });
+
+  test("3c: a bare source id that collides with a provider-name key does NOT shadow the provider", () => {
+    // The `source::` prefix exists to collision-proof the shared keyspace; the bare
+    // alias must not undo that. A source whose id equals a provider name maps the
+    // exact keys as written: the bare token addresses the PROVIDER, the prefixed
+    // form addresses the source.
+    const sources = [
+      { id: "worker-command", provider: "openai-compatible", model: "prov/odd", cost_per_mtok: 9 },
+    ];
+    const input = {
+      schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
+      cost_order: ["worker-command"],
+    };
+    const { provider_pool, source_pool_cost_order } = annotateConfirmedPool(
+      basePool,
+      {},
+      input,
+      sources,
+    );
+    // The provider entry took position 0 (exact key wins the bare token)…
+    expect(provider_pool.find((e) => e.name === "worker-command").cost_order).toBe(0);
+    // …and the colliding source kept its suggested (appended) position, not 0.
+    expect(source_pool_cost_order[0].cost_order).not.toBe(0);
+  });
+
   test("no sources → empty source_pool_cost_order (headless / no-source path unchanged)", () => {
     const { source_pool_cost_order } = annotateConfirmedPool(basePool, NIM_CONFIG);
     expect(source_pool_cost_order).toEqual([]);

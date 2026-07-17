@@ -30,6 +30,23 @@ import { resolveConversationHostProvider } from "../providers/providerPathGuard.
  * the gate's `model_id ?? provider` compare key. Do not unify them.
  */
 export function dispatchableSourceId(source: DispatchableSource, account?: string | null): string {
+  // Transport-fronted lane (3c): the transport NEVER enters the quota identity. A
+  // source declaring `backend_provider` keys on the BACKEND actually serving it —
+  // `backend_provider[#account]/model` — so a proxied `claude-worker` lane and a
+  // direct lane to the same backend DEDUP to ONE CapacityPool / ledger entry (the
+  // `(provider, account)` double-grant boundary). This deliberately outranks an
+  // explicit `id`: the populate cache stamps transport-shaped ids
+  // (`claude-worker:<backend>/<model>`), and honoring them would re-split the
+  // identity the field exists to merge. The declared `account` folds in even when
+  // the caller resolves none, so two same-backend lanes on different accounts stay
+  // distinct (the gather-time dedup path passes no account).
+  if (source.backend_provider) {
+    return buildProviderModelKey(
+      source.backend_provider,
+      source.model ?? source.endpoint ?? null,
+      account ?? source.account ?? null,
+    );
+  }
   if (source.id) return account ? `${source.id}#${account}` : source.id;
   return buildProviderModelKey(source.provider, source.model ?? source.endpoint ?? null, account);
 }

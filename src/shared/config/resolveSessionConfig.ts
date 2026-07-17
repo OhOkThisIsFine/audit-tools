@@ -1,12 +1,14 @@
 import type { AuditorDescriptor } from "../types/auditorDescriptor.js";
 import {
   DISPATCHABLE_SOURCE_PROVIDERS,
+  type DispatchableSource,
   type RepoSessionIntent,
   type SessionConfig,
 } from "../types/sessionConfig.js";
 import { sourceProviderConfig } from "../quota/apiPool.js";
 import {
   type AmbientSourceDeps,
+  type DroppedSource,
   resolveAmbientSources,
 } from "../providers/auditorSources.js";
 
@@ -14,9 +16,12 @@ import {
  * The ambient probes the G2.5 source resolution reads. Production passes nothing —
  * every probe defaults to the real environment (`process.env`, real PATH, real home
  * dir), which is the point: the reach check must read the SAME env the provider reads
- * at launch. Tests inject.
+ * at launch. Tests inject. `onDroppedSources` overrides the default stderr report
+ * for declared-but-unresolved lanes (the reasons must be loud at every draw).
  */
-export type ResolveSessionConfigOptions = AmbientSourceDeps;
+export type ResolveSessionConfigOptions = AmbientSourceDeps & {
+  onDroppedSources?: (dropped: DroppedSource[]) => void;
+};
 
 const DISPATCHABLE_PROVIDER_SET: ReadonlySet<string> = new Set(
   DISPATCHABLE_SOURCE_PROVIDERS,
@@ -108,7 +113,29 @@ export function resolveSessionConfig(
   // `declared ∩ ambient-verifiable`, resolved IN-PROCESS (G2.5). An explicit
   // hand-authored `--auditor sources[]` still wins — it is the operator's escape
   // hatch and the only way to force a lane this process cannot prove.
-  const sources = descriptor.sources ?? resolveAmbientSources(options).sources;
+  let sources: DispatchableSource[];
+  if (descriptor.sources) {
+    sources = descriptor.sources;
+  } else {
+    const ambient = resolveAmbientSources(options);
+    // A dropped lane must be LOUD at every draw — the reasons existed since G2.5
+    // but were discarded here, so a declared-but-unresolvable lane was silently
+    // absent (the [[silent-fail-closed-on-one-draw]] class). Default = stderr;
+    // callers with a better channel inject `onDroppedSources`.
+    if (ambient.dropped.length > 0) {
+      const report =
+        options?.onDroppedSources ??
+        ((dropped: DroppedSource[]) => {
+          for (const d of dropped) {
+            process.stderr.write(
+              `[audit-tools] declared source "${d.id}" not resolved: ${d.reason}\n`,
+            );
+          }
+        });
+      report(ambient.dropped);
+    }
+    sources = ambient.sources;
+  }
   if (sources.length > 0) {
     effective.sources = sources;
     if (self.provider && DISPATCHABLE_PROVIDER_SET.has(self.provider)) {
