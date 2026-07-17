@@ -1,9 +1,9 @@
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   setQuotaStateDir,
 } from "./quota/index.js";
+import { resolveAuditCodeStateDir } from "audit-tools/shared";
 
 import {
   DIRECT_CLI_DEFAULTS,
@@ -60,7 +60,7 @@ export const cliTestUtils = {
 };
 
 async function main(argv: string[]): Promise<void> {
-  setQuotaStateDir(join(homedir(), ".audit-code"));
+  setQuotaStateDir(resolveAuditCodeStateDir());
   const command = argv[2] ?? "sample-run";
   switch (command) {
     case "sample-run":

@@ -28,6 +28,7 @@ import type { ValidationIssue } from "audit-tools/shared";
 import {
   applyGuidanceFile,
   setQuotaStateDir,
+  resolveStateDir,
   parseHostModelRoster,
   assertHostProviderName,
   type ProviderName,
@@ -513,7 +514,7 @@ export function parseProgram(argv: string[]): void {
 
 // Only parse argv when run directly; skip when imported as a module (e.g. in tests).
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  setQuotaStateDir(join(homedir(), ".remediate-code"));
+  setQuotaStateDir(resolveStateDir(".remediate-code"));
   parseProgram(process.argv);
 }
 

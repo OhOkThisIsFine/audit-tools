@@ -70,7 +70,7 @@ function spawnWrapper(args, options = {}) {
   const stderrRef = { value: "" };
   const child = spawn(process.execPath, [wrapperPath, ...args], {
     cwd: options.cwd ?? repoRoot,
-    env: cleanEnv,
+    env: { ...cleanEnv, ...(options.env ?? {}) },
     stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
   if (options.input !== undefined) {
@@ -1842,4 +1842,48 @@ test.concurrent("buildMergedOpenCodeProjectConfig migrates a pre-hardening bash 
   const editDenyExisting = { permission: { edit: { "*": "deny" } } };
   const mergedEditDeny = buildMergedOpenCodeProjectConfig(editDenyExisting, "/tmp/repo");
   expect(mergedEditDeny.permission.edit["*"], "user '*': 'deny' on edit is preserved (agent-scope merge keeps existing wildcard)").toBe("deny");
+});
+
+// Machine-global state-dir hermeticity (docs/backlog.md "Machine-global
+// ~/.audit-code state leaks into EVERY e2e test", 2026-07-17): a spawned CLI
+// must resolve sources-declared.json from AUDIT_CODE_STATE_DIR, never the
+// box's live ~/.audit-code. The fake declaration's source fails its PATH reach
+// probe, so the CLI proves WHICH declaration it read via the dropped-source
+// stderr report — red without the env override (the fake source never
+// surfaces), green with it.
+test("AUDIT_CODE_STATE_DIR redirects the machine-global state dir for a spawned CLI", async () => {
+  await withTempRepo(async (root) => {
+    const stateDir = await mkdtemp(join(tmpdir(), "audit-code-fake-state-"));
+    try {
+      await writeFile(
+        join(stateDir, "sources-declared.json"),
+        JSON.stringify(
+          {
+            sources: [
+              {
+                id: "hermetic-fake-source",
+                provider: "codex",
+                endpoint: "audit-tools-hermeticity-missing-cmd",
+              },
+            ],
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      const { stderr } = await runWrapper(["next-step", ...AUDITOR_ARGS], {
+        cwd: root,
+        env: { AUDIT_CODE_STATE_DIR: stateDir },
+      });
+      expect(
+        stderr,
+        "the CLI must read the FAKE state dir's declaration (dropped-source report)",
+      ).toContain('declared source "hermetic-fake-source" not resolved');
+      expect(stderr).toContain(
+        'launcher "audit-tools-hermeticity-missing-cmd" is not on PATH',
+      );
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 });

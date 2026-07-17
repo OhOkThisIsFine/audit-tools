@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "../shared/hermetic-state-dir.mjs";
 import { spawnSync } from "child_process";
 import { readFileSync, mkdtempSync, rmSync } from "fs";
 import { dirname, join } from "path";

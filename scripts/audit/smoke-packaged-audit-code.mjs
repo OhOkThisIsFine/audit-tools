@@ -1,3 +1,4 @@
+import "../shared/hermetic-state-dir.mjs";
 import assert from "node:assert/strict";
 import {
   mkdtemp,

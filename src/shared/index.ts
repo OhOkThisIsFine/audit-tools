@@ -547,6 +547,15 @@ export {
   writeTextFile,
 } from "./io/json.js";
 
+// IO: machine-global state dir (~/.audit-code / ~/.remediate-code) — the single
+// path source every reader/writer of that state resolves through, honoring the
+// AUDIT_CODE_STATE_DIR hermeticity override.
+export {
+  STATE_DIR_ENV_VAR,
+  resolveStateDir,
+  resolveAuditCodeStateDir,
+} from "./io/stateDir.js";
+
 // IO: generic locked JSON store — single-sources the read-under-lock →
 // validate → atomic-write cycle plus the below-stale lock-timeout derivation
 // shared by the audit session-config mutator and the remediate StateStore.

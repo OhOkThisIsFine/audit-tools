@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { writeJsonFile } from "../io/json.js";
+import { resolveAuditCodeStateDir } from "../io/stateDir.js";
 import type { DispatchableSource } from "../types/sessionConfig.js";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
 
@@ -23,9 +23,6 @@ import { validateSessionConfig } from "../validation/sessionConfig.js";
  */
 export const PROXY_CATALOG_FILENAME = "catalog-cache.json";
 
-/** `~/.audit-code` — the established home-dir state dir (mirrors `auditorSources.ts`). */
-const STATE_DIR_NAME = ".audit-code";
-
 /** Top-K models expanded per backend provider when the operator declares no `top_k`. */
 export const DEFAULT_PROXY_TOP_K = 3;
 
@@ -42,9 +39,9 @@ export const POPULATE_PROBE_CONCURRENCY = 4;
  */
 export const POPULATE_CACHE_FRESH_TTL_MS = 10 * 60_000;
 
-/** Resolve the populate-cache path for this machine. */
+/** Resolve the populate-cache path for this machine (state dir via `io/stateDir.ts`). */
 export function resolveProxyCatalogPath(homeDir?: string): string {
-  return join(homeDir ?? homedir(), STATE_DIR_NAME, PROXY_CATALOG_FILENAME);
+  return join(resolveAuditCodeStateDir(homeDir), PROXY_CATALOG_FILENAME);
 }
 
 /** The on-disk cache shape: expansion + when it was fetched (staleness policy later). */

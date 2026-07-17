@@ -1,8 +1,8 @@
 import { accessSync, constants, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { DispatchableSource } from "../types/sessionConfig.js";
+import { resolveAuditCodeStateDir } from "../io/stateDir.js";
 import { spawnSyncHidden } from "../tooling/exec.js";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
 import {
@@ -26,8 +26,6 @@ import { commandExists } from "./providerPathGuard.js";
  */
 export const SOURCE_DECLARATION_FILENAME = "sources-declared.json";
 
-/** `~/.audit-code` — the established home-dir state dir (`src/audit/cli.ts` puts quota state here). */
-const STATE_DIR_NAME = ".audit-code";
 
 /** A declared source that did NOT survive the ambient-reach intersection. */
 export interface DroppedSource {
@@ -123,9 +121,9 @@ function sourceId(source: DispatchableSource): string {
   return source.id ?? `${source.provider}:${source.model ?? source.endpoint ?? "?"}`;
 }
 
-/** Resolve the declaration file path for this machine. */
+/** Resolve the declaration file path for this machine (state dir via `io/stateDir.ts`). */
 export function resolveSourceDeclarationPath(homeDir?: string): string {
-  return join(homeDir ?? homedir(), STATE_DIR_NAME, SOURCE_DECLARATION_FILENAME);
+  return join(resolveAuditCodeStateDir(homeDir), SOURCE_DECLARATION_FILENAME);
 }
 
 /**

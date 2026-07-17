@@ -18,6 +18,10 @@ export default defineConfig({
       "tests/audit/**/*.test.mjs",
       "tests/shared/**/*.test.mjs",
     ],
+    // Machine-global state-dir hermeticity: point AUDIT_CODE_STATE_DIR at a
+    // per-worker temp dir so no test (in-process or spawned CLI) reads/writes the
+    // box's live ~/.audit-code. See tests/helpers/state-dir-setup.mjs.
+    setupFiles: ["tests/helpers/state-dir-setup.mjs"],
     // Always-on timing profile: default console reporter + the standing per-file
     // timing reporter (scripts/shared/vitest-timing-reporter.mjs) that persists a
     // ledger under .audit-tools-profile/ and a CI job-summary table. Profiling the
