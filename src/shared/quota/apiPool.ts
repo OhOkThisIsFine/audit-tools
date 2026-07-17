@@ -102,10 +102,19 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
       // worker-command takes no construction config (host-dispatch default).
       return {};
     case "claude-worker":
-      // No flat SessionConfig block: the proxied isolated worker launches FROM the
-      // source itself ({endpoint = proxy url, backend_provider, model}) via the
-      // ClaudeWorkerProvider launch-bridge branch (commit 3b).
-      return {};
+      // The proxied isolated worker launches FROM the source itself: endpoint = the
+      // repair-proxy url ClaudeWorkerProvider fronts the spawn with, and
+      // backend_provider + model compose the `--model <backend_provider>/<model>`
+      // namespace argv at launch. `parameters` may carry the launcher tuning
+      // (command / prompt_flag / extra_args / dangerously_skip_permissions).
+      return {
+        claude_worker: {
+          endpoint: source.endpoint,
+          backend_provider: source.backend_provider,
+          model: source.model,
+          ...p,
+        },
+      };
     case "agy":
       return {
         agy: {

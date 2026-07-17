@@ -249,6 +249,7 @@ export type {
   SessionUiMode,
   SubprocessTemplateConfig,
   ClaudeCodeConfig,
+  ClaudeWorkerConfig,
   CodexConfig,
   OpenCodeConfig,
   OpenAiCompatibleConfig,
@@ -863,6 +864,13 @@ export {
   CLAUDE_CODE_PROVIDER_NAME,
   buildActiveClaudeCodeSessionMessage,
 } from "./providers/claudeCodeProvider.js";
+export type { ClaudeWorkerProviderOptions } from "./providers/claudeWorkerProvider.js";
+export {
+  ClaudeWorkerProvider,
+  CLAUDE_WORKER_PROVIDER_NAME,
+  CLAUDE_WORKER_DUMMY_API_KEY,
+  claudeWorkerTrustProjectKey,
+} from "./providers/claudeWorkerProvider.js";
 export {
   OpenCodeProvider,
   OPENCODE_PROVIDER_NAME,

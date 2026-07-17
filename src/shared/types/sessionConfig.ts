@@ -141,6 +141,35 @@ export interface OpenCodeConfig {
 }
 
 /**
+ * claude-worker launch config — the proxied, ISOLATED Claude-harness worker
+ * (`claude -p` fronted by the repair-proxy). Unlike the other provider blocks this
+ * is never operator-persisted: it is COMPOSED AT LAUNCH by `sourceProviderConfig`
+ * from the {@link DispatchableSource} itself (`endpoint` = the proxy url,
+ * `backend_provider` + `model` compose the `--model <backend_provider>/<model>`
+ * namespace argv), so the fields mirror the source. All three routing fields are
+ * constructor invariants of `ClaudeWorkerProvider` — optional here only because
+ * config shapes are uniformly partial; construction throws loudly when any is
+ * missing/empty (an in-session isolated spawn with NO proxy endpoint must be
+ * impossible).
+ */
+export interface ClaudeWorkerConfig {
+  /** The repair-proxy base url the spawn is fronted with (`ANTHROPIC_BASE_URL`). REQUIRED at construction. */
+  endpoint?: string;
+  /** The backend provider the proxy routes to (namespace segment, e.g. `"nim"`). REQUIRED at construction. */
+  backend_provider?: string;
+  /** Backend-native model id (namespace segment, e.g. `"z-ai/glm-5.2"`). REQUIRED at construction. */
+  model?: string;
+  /** Launcher on PATH (default "claude"). */
+  command?: string;
+  /** Prompt flag (default "-p"; the prompt itself is piped via stdin). */
+  prompt_flag?: string;
+  /** Extra argv appended after the managed flags. */
+  extra_args?: string[];
+  /** Skip permission prompts (`--dangerously-skip-permissions`). Explicit value wins over the per-orchestrator default. */
+  dangerously_skip_permissions?: boolean;
+}
+
+/**
  * Codex CLI backend config. Codex is a headless coding CLI (like claude-code):
  * the non-interactive entrypoint is `codex exec`, which reads the rendered prompt
  * from stdin and runs to completion editing files (verified against codex-cli
@@ -266,6 +295,7 @@ export interface AgyConfig {
 export const PROVIDER_SECTION_KEYS = {
   "subprocess-template": "subprocess_template",
   "claude-code": "claude_code",
+  "claude-worker": "claude_worker",
   codex: "codex",
   opencode: "opencode",
   "openai-compatible": "openai_compatible",
@@ -649,6 +679,12 @@ export interface SessionConfig {
   autonomous_mode?: boolean;
   subprocess_template?: SubprocessTemplateConfig;
   claude_code?: ClaudeCodeConfig;
+  /**
+   * claude-worker launch block. Never persisted / operator-authored: composed at
+   * launch by `sourceProviderConfig` from a `claude-worker` {@link DispatchableSource}
+   * so the factory can build the isolated proxied worker FROM that source.
+   */
+  claude_worker?: ClaudeWorkerConfig;
   codex?: CodexConfig;
   opencode?: OpenCodeConfig;
   openai_compatible?: OpenAiCompatibleConfig;
@@ -701,6 +737,7 @@ export const DISPATCH_INVENTORY_FIELDS = [
   "host_provider",
   "subprocess_template",
   "claude_code",
+  "claude_worker",
   "codex",
   "opencode",
   "openai_compatible",

@@ -7,6 +7,7 @@ import type {
   ResolvedProviderName,
   SessionConfig,
   ClaudeCodeConfig,
+  ClaudeWorkerConfig,
   CodexConfig,
   OpenCodeConfig,
   AgyConfig,
@@ -149,7 +150,13 @@ function getAutoProviderContext(
 }
 
 interface ProviderPriorityRule {
-  name: ResolvedProviderName;
+  /**
+   * `claude-worker` is excluded AT THE TYPE: it is the source-pool-only proxied
+   * worker class, launched exclusively FROM a `claude-worker` DispatchableSource
+   * via `withSourceConfig` — auto-resolution must never be able to pick it, so a
+   * rule naming it is unrepresentable rather than a review obligation.
+   */
+  name: Exclude<ResolvedProviderName, "claude-worker">;
   comment: string;
   predicate: (ctx: AutoProviderContext) => boolean;
 }
@@ -365,6 +372,14 @@ export interface FreshSessionProviderDeps {
   createClaudeCodeProvider: (
     config: ClaudeCodeConfig | undefined,
   ) => FreshSessionProvider;
+  /**
+   * The proxied isolated Claude-harness worker (commit 3b). Injected like
+   * claude-code so each orchestrator carries only its skip-permissions default;
+   * the class body is single-sourced in shared (`ClaudeWorkerProvider`).
+   */
+  createClaudeWorkerProvider: (
+    config: ClaudeWorkerConfig | undefined,
+  ) => FreshSessionProvider;
   createOpenCodeProvider: (
     config: OpenCodeConfig | undefined,
   ) => FreshSessionProvider;
@@ -449,12 +464,11 @@ function constructProvider(
     case "worker-command":
       return new WorkerCommandProvider();
     case "claude-worker":
-      // Contract lands in 3a; the launch transport (ClaudeWorkerProvider — isolated
-      // `claude -p` spawn fronted by the repair-proxy) is commit 3b. Loud, not silent:
-      // a claude-worker source must be un-launchable until the transport exists.
-      throw new Error(
-        "claude-worker has no launch transport yet — ClaudeWorkerProvider lands in commit 3b (docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md).",
-      );
+      // The proxied isolated Claude-harness worker (commit 3b). The config block is
+      // composed at launch by `sourceProviderConfig` from the claude-worker source
+      // itself; construction throws loudly when endpoint/backend_provider/model are
+      // missing (isolation is the class's constructor invariant, not a guard).
+      return deps.createClaudeWorkerProvider(sessionConfig.claude_worker);
     case "subprocess-template":
       if (!sessionConfig.subprocess_template?.command_template?.length) {
         throw new Error(

@@ -8,6 +8,7 @@ import type {
   SessionConfig,
 } from "audit-tools/shared";
 import { createClaudeCodeProvider } from "./claudeCodeProvider.js";
+import { createClaudeWorkerProvider } from "./claudeWorkerProvider.js";
 import { createOpenCodeProvider } from "./opencodeProvider.js";
 import { createAgyProvider } from "./agyProvider.js";
 
@@ -37,6 +38,7 @@ export function createFreshSessionProvider(
   return createSharedFreshSessionProvider(name, sessionConfig, {
     orchestratorName: "audit-code",
     createClaudeCodeProvider: (config) => createClaudeCodeProvider(config),
+    createClaudeWorkerProvider: (config) => createClaudeWorkerProvider(config),
     createOpenCodeProvider: (config) => createOpenCodeProvider(config),
     createAgyProvider: (config) => createAgyProvider(config),
   });

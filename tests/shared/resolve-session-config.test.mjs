@@ -105,12 +105,13 @@ describe("resolveSessionConfig", () => {
     expect(eff.dispatch).toEqual({ confirm_threshold: 5 });
   });
 
-  test("DISPATCH_INVENTORY_FIELDS lists the 12 flat fields (rolling_engine handled separately)", () => {
+  test("DISPATCH_INVENTORY_FIELDS lists the 13 flat fields (rolling_engine handled separately)", () => {
     expect([...DISPATCH_INVENTORY_FIELDS].sort()).toEqual(
       [
         "agy",
         "antigravity",
         "claude_code",
+        "claude_worker",
         "codex",
         "host_provider",
         "openai_compatible",
