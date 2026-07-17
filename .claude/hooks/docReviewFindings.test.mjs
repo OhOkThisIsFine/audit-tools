@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
   extractOpenText,
   parseOpenItems,
+  renderOpenItemsMarkdown,
   collectOpenItems,
   SUMMARY_MAX,
   FILE,
@@ -45,13 +46,18 @@ test('parseOpenItems tracks sections + strips the id token', () => {
     '- [AF-1] first, no header yet\n' +
       '## Instruction edits\n' +
       '- [D-5]   spaced   summary  \n' +
-      'a continuation line (dropped)\n' +
+      'a continuation line (folded into body)\n' +
       '* [D-6] bullet-star form',
   );
   assert.deepEqual(items, [
-    { section: 'Open items', id: 'AF-1', summary: 'first, no header yet' },
-    { section: 'Instruction edits', id: 'D-5', summary: 'spaced summary' },
-    { section: 'Instruction edits', id: 'D-6', summary: 'bullet-star form' },
+    { section: 'Open items', id: 'AF-1', summary: 'first, no header yet', body: 'first, no header yet' },
+    {
+      section: 'Instruction edits',
+      id: 'D-5',
+      summary: 'spaced summary',
+      body: 'spaced summary a continuation line (folded into body)',
+    },
+    { section: 'Instruction edits', id: 'D-6', summary: 'bullet-star form', body: 'bullet-star form' },
   ]);
 });
 

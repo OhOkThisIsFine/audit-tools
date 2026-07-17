@@ -96,28 +96,76 @@ export function extractOpenText(body) {
   return open;
 }
 
-// Parse the OPEN block into item-keyed (section, id, summary) triples in document
-// order. A `## header` line opens a section; blank/continuation lines are dropped
-// (the digest is item-keyed). Items before any header get the "Open items" section.
+// Parse the OPEN block into item-keyed (section, id, summary, body) records in
+// document order. A `## header` line opens a section; a `- [id] …` line opens an
+// item; subsequent non-item, non-header, non-blank lines are the item's WRAPPED
+// CONTINUATION prose (the contract writes one logical item per bullet, hard-wrapped)
+// and are folded into `body` joined by single spaces. `summary` stays the
+// first-line-only, SUMMARY_MAX-truncated form the resolve command's `--list`
+// renders; `body` is the full item text the surface hook's decision table needs.
+// Items before any header get the "Open items" section.
 export function parseOpenItems(openText) {
   const items = [];
   let section = 'Open items';
+  let current = null;
   for (const raw of (openText || '').split(/\r?\n/)) {
     const line = raw.trimEnd();
     if (/^#{2,}\s/.test(line)) {
       section = line.replace(/^#+\s*/, '');
+      current = null;
       continue;
     }
     const id = parseItemId(line);
-    if (!id) continue;
-    let summary = line
-      .replace(/^\s*[-*]\s*\[[^\]]+\]\s*/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (summary.length > SUMMARY_MAX) summary = summary.slice(0, SUMMARY_MAX - 1).trimEnd() + '…';
-    items.push({ section, id, summary });
+    if (id) {
+      const firstLine = line
+        .replace(/^\s*[-*]\s*\[[^\]]+\]\s*/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      let summary = firstLine;
+      if (summary.length > SUMMARY_MAX) summary = summary.slice(0, SUMMARY_MAX - 1).trimEnd() + '…';
+      current = { section, id, summary, body: firstLine };
+      items.push(current);
+      continue;
+    }
+    const continuation = line.replace(/\s+/g, ' ').trim();
+    if (current && continuation.length > 0) {
+      current.body += ' ' + continuation;
+    } else if (continuation.length === 0) {
+      // A blank line ends the current item's continuation run (contract items are
+      // single bullets; a paragraph break means we're between items/prose).
+      current = null;
+    }
   }
   return items;
+}
+
+// Render the open items as per-section markdown TABLES carrying each item's FULL
+// body, so the operator can decide every item from the surfaced text alone — no
+// `git show` round-trip. Single-sourced here so the surface hook's rendering and
+// any future consumer (e.g. a `--table` flag on the resolve command) cannot drift.
+// Table cells cannot hold raw pipes or newlines: pipes are escaped and bodies are
+// already single-line by the parse's continuation fold.
+export function renderOpenItemsMarkdown(items) {
+  const sections = [];
+  for (const it of items) {
+    let section = sections.find((s) => s.title === it.section);
+    if (!section) {
+      section = { title: it.section, items: [] };
+      sections.push(section);
+    }
+    section.items.push(it);
+  }
+  const out = [];
+  for (const section of sections) {
+    if (section.items.length === 0) continue;
+    out.push('', `### ${section.title} (${section.items.length})`, '');
+    out.push('| ID | Item |', '| --- | --- |');
+    for (const it of section.items) {
+      const cell = (it.body || it.summary || '').replace(/\|/g, '\\|');
+      out.push(`| ${it.id} | ${cell} |`);
+    }
+  }
+  return out.join('\n');
 }
 
 // Convenience: discover remotes, read findings (NO fetch — the surface hook already
