@@ -1,4 +1,10 @@
-import { detectRateLimitFromChannel, detectCreditExhaustionFromChannel, detectQuotaSuspicious } from "../quota/errorParsing.js";
+import {
+  detectRateLimitFromChannel,
+  detectCreditExhaustionFromChannel,
+  detectModelUnavailableFromChannel,
+  detectRequestTooLargeFromChannel,
+  detectQuotaSuspicious,
+} from "../quota/errorParsing.js";
 import { appendTokenUsageLine } from "../io/tokenUsageLedger.js";
 import { readOptionalJsonFile, readOptionalTextFile } from "../io/json.js";
 import type { LaunchFreshSessionResult } from "../providers/types.js";
@@ -29,6 +35,117 @@ export interface ProviderLaunchFinalizeContext<TPacket> {
 }
 
 /**
+ * Classify a worker's failure text by scanning stderr and stdout in order for known
+ * quota/API-error patterns. Reused identically by both not-accepted (exit ≠ 0) and
+ * accepted-but-no-result-file branches so they cannot drift.
+ *
+ * **Scan order (load-bearing — F4 requires stderr request-too-large BEFORE rate-limit
+ * so a combined "413 ... retry rate limit" cannot cooldown-poison a healthy pool):**
+ *  1. stderr: credit-exhaustion (permanent, no reset timer)
+ *  2. stderr: request-too-large (per-packet sizing fault, no cooldown)
+ *  3. stderr: model-unavailable (404, permanent pool exclusion)
+ *  4. stderr: rate-limit (transient 429)
+ *  5. stdout: credit-exhaustion
+ *  6. stdout: request-too-large
+ *  7. stdout: model-unavailable
+ *  8. stdout: rate-limit
+ *  9. TIER 2 `detectQuotaSuspicious` over both channels combined (fallback pre-filter)
+ *
+ * Returns the corresponding RollingDispatchResult fragment or null if no match.
+ */
+function classifyFailureChannels<TPacket>(
+  packet: RollingDispatchPacket<TPacket>,
+  stderrText: string,
+  stdoutText: string,
+): Omit<RollingDispatchResult<TPacket>, "packet"> | null {
+  // Stderr TIER 1: credit exhaustion (permanent, checked first — must never fall through to rate-limit)
+  const stderrCreditCheck = detectCreditExhaustionFromChannel("error", stderrText);
+  if (stderrCreditCheck.isCreditExhausted) {
+    return {
+      outcome: "credit_exhausted",
+      creditExhaustion: { channel: "error", text: stderrText, rawMatch: stderrCreditCheck.rawMatch },
+    };
+  }
+
+  // Stderr TIER 1: request-too-large (F4 — must be checked BEFORE rate-limit to prevent cooldown-poisoning)
+  const stderrTooLargeCheck = detectRequestTooLargeFromChannel("error", stderrText);
+  if (stderrTooLargeCheck.isRequestTooLarge) {
+    return {
+      outcome: "packet_too_large",
+      packetTooLarge: { channel: "error", text: stderrText, rawMatch: stderrTooLargeCheck.rawMatch },
+    };
+  }
+
+  // Stderr TIER 1: model-unavailable (permanent pool exclusion, checked before rate-limit)
+  const stderrModelUnavailableCheck = detectModelUnavailableFromChannel("error", stderrText);
+  if (stderrModelUnavailableCheck.isModelUnavailable) {
+    return {
+      outcome: "model_unavailable",
+      modelUnavailable: { channel: "error", text: stderrText, rawMatch: stderrModelUnavailableCheck.rawMatch },
+    };
+  }
+
+  // Stderr TIER 1: rate-limit (transient, applies cooldown)
+  const stderrLimitCheck = detectRateLimitFromChannel("error", stderrText);
+  if (stderrLimitCheck.isRateLimited) {
+    return {
+      outcome: "rate_limited",
+      rateLimit: { channel: "error", text: stderrText },
+    };
+  }
+
+  // Stdout TIER 1: credit exhaustion (some providers report to stdout instead)
+  const stdoutCreditCheck = detectCreditExhaustionFromChannel("status", stdoutText);
+  if (stdoutCreditCheck.isCreditExhausted) {
+    return {
+      outcome: "credit_exhausted",
+      creditExhaustion: { channel: "status", text: stdoutText, rawMatch: stdoutCreditCheck.rawMatch },
+    };
+  }
+
+  // Stdout TIER 1: request-too-large
+  const stdoutTooLargeCheck = detectRequestTooLargeFromChannel("status", stdoutText);
+  if (stdoutTooLargeCheck.isRequestTooLarge) {
+    return {
+      outcome: "packet_too_large",
+      packetTooLarge: { channel: "status", text: stdoutText, rawMatch: stdoutTooLargeCheck.rawMatch },
+    };
+  }
+
+  // Stdout TIER 1: model-unavailable
+  const stdoutModelUnavailableCheck = detectModelUnavailableFromChannel("status", stdoutText);
+  if (stdoutModelUnavailableCheck.isModelUnavailable) {
+    return {
+      outcome: "model_unavailable",
+      modelUnavailable: { channel: "status", text: stdoutText, rawMatch: stdoutModelUnavailableCheck.rawMatch },
+    };
+  }
+
+  // Stdout TIER 1: rate-limit
+  const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
+  if (stdoutLimitCheck.isRateLimited) {
+    return {
+      outcome: "rate_limited",
+      rateLimit: { channel: "status", text: stdoutText },
+    };
+  }
+
+  // TIER 2 (Slice A2b): broad pre-filter on combined channels (fallback for unclassified quota-suspicious text)
+  const combinedText = [stderrText, stdoutText].filter((t) => t.length > 0).join("\n");
+  if (combinedText.length > 0 && detectQuotaSuspicious(combinedText)) {
+    return {
+      outcome: "quota_unclassified",
+      quotaUnclassified: {
+        channel: stderrText.length > 0 ? "error" : "status",
+        text: combinedText,
+      },
+    };
+  }
+
+  return null;
+}
+
+/**
  * The shared launch-result finalize tail run by BOTH per-packet dispatchers
  * (audit `makeAuditProviderPacketDispatcher`, remediate `makeProviderNodeDispatcher`)
  * once `provider.launch(...)` returns. Everything here is provider/domain-neutral,
@@ -38,7 +155,8 @@ export interface ProviderLaunchFinalizeContext<TPacket> {
  * read-only-vs-git-mutating / AuditResult-vs-ImplementWorkerResult divergences.
  *
  * In order:
- *  1. not-accepted → error;
+ *  1. not-accepted → classify the failure text via the shared `classifyFailureChannels`
+ *     helper (mirrors the accepted-but-no-result-file branch so both cannot drift);
  *  2. channel-isolated credit-exhaustion (TIER 1) then session-limit (TIER 1)
  *     detection on stderr (CE-003) → credit_exhausted / non-consuming
  *     rate_limited re-queue (the result file is never scanned for these strings);
@@ -59,43 +177,33 @@ export async function finalizeProviderLaunchResult<TPacket>(
   ctx: ProviderLaunchFinalizeContext<TPacket>,
 ): Promise<RollingDispatchResult<TPacket>> {
   const { packet } = ctx;
+
+  // Read both channels for classification (reused by both not-accepted and accepted-but-no-result branches)
+  //
+  // DELIBERATE semantic change (2026-07-17, gap-fix lap): an ACCEPTED launch whose
+  // result file landed + parses is a SUCCESS even if a channel carries limit text —
+  // an agentic worker that retried through transient 429s and still delivered must
+  // not have its completed work discarded and re-run (the old order scanned stderr
+  // before the result read and re-queued such packets). Channel classification now
+  // applies only when the launch was rejected or no result landed; result CONTENT
+  // is still never scanned (CE-003) and is adjudicated by the merge downstream.
+  const stderrText = (await readOptionalTextFile(ctx.stderrPath)) ?? "";
+  const stdoutText = (await readOptionalTextFile(ctx.stdoutPath)) ?? "";
+
+  // The not-accepted branch NOW runs the channel classifier BEFORE returning error.
+  // This fixes the dogfood gap: a nonzero-exit worker's 429/404/413 text is now scanned.
   if (!launch.accepted) {
+    const classification = classifyFailureChannels(packet, stderrText, stdoutText);
+    if (classification) {
+      return { packet, ...classification };
+    }
+    // No classification matched — return the original error
     return {
       packet,
       outcome: "error",
       error: new Error(
         launch.error ?? `provider ${ctx.providerName} rejected ${ctx.entityLabel}`,
       ),
-    };
-  }
-
-  // Channel-isolated session-limit detection (CE-003): only the error/status channel
-  // (stderr) is inspected — the result file is never scanned for limit strings, so a
-  // healthy result quoting a limit never triggers a re-queue.
-  const stderrText = (await readOptionalTextFile(ctx.stderrPath)) ?? "";
-
-  // Credit exhaustion (out of prepaid usage credits) is checked FIRST and is
-  // architecturally distinct from a rate limit: it carries no reset time, so a
-  // positive match here must never fall through to the resettable rate_limited
-  // path below. Same channel isolation (CE-003) applies — only stderr, never the
-  // consumed result file.
-  const creditCheck = detectCreditExhaustionFromChannel("error", stderrText);
-  if (creditCheck.isCreditExhausted) {
-    return {
-      packet,
-      outcome: "credit_exhausted",
-      creditExhaustion: { channel: "error", text: stderrText, rawMatch: creditCheck.rawMatch },
-    };
-  }
-
-  const limitCheck = detectRateLimitFromChannel("error", stderrText);
-  if (limitCheck.isRateLimited) {
-    // Non-consuming re-queue: the rolling engine drops the provider and puts this
-    // packet back into the pending pool so it retries once the cooldown passes.
-    return {
-      packet,
-      outcome: "rate_limited",
-      rateLimit: { channel: "error", text: stderrText },
     };
   }
 
@@ -109,46 +217,11 @@ export async function finalizeProviderLaunchResult<TPacket>(
   // Contents are adjudicated by the deterministic merge downstream.
   const result = await readOptionalJsonFile<unknown>(ctx.resultPath);
   if (!result) {
-    // Also check stdout for a session-limit / credit-exhaustion message before
-    // reporting as error (some providers write their status to stdout, not stderr).
-    const stdoutText = (await readOptionalTextFile(ctx.stdoutPath)) ?? "";
-    const stdoutCreditCheck = detectCreditExhaustionFromChannel("status", stdoutText);
-    if (stdoutCreditCheck.isCreditExhausted) {
-      return {
-        packet,
-        outcome: "credit_exhausted",
-        creditExhaustion: { channel: "status", text: stdoutText, rawMatch: stdoutCreditCheck.rawMatch },
-      };
-    }
-    const stdoutLimitCheck = detectRateLimitFromChannel("status", stdoutText);
-    if (stdoutLimitCheck.isRateLimited) {
-      return {
-        packet,
-        outcome: "rate_limited",
-        rateLimit: { channel: "status", text: stdoutText },
-      };
-    }
-
-    // TIER 2 (Slice A2b): neither channel matched a PRECISE credit/rate-limit
-    // pattern. Before falling through to a silent, unclassified raw `error` —
-    // the exact "worker AND dispatcher both die raw" failure mode
-    // credit-exhaustion detection fixed, but only for text it recognizes — run
-    // the deliberately broad `detectQuotaSuspicious` pre-filter across BOTH
-    // channels combined. A positive match here degrades CONSERVATIVELY
-    // (re-queue with a reversible cooldown, the pool is never permanently
-    // excluded — see the `quota_unclassified` branch in rollingDispatch.ts) and
-    // carries the verbatim text so the operator can classify it and improve the
-    // pattern set, instead of a silent death with no signal at all.
-    const combinedText = [stderrText, stdoutText].filter((t) => t.length > 0).join("\n");
-    if (combinedText.length > 0 && detectQuotaSuspicious(combinedText)) {
-      return {
-        packet,
-        outcome: "quota_unclassified",
-        quotaUnclassified: {
-          channel: stderrText.length > 0 ? "error" : "status",
-          text: combinedText,
-        },
-      };
+    // No result file landed — reuse the same channel classifier so both branches cannot drift.
+    // Channel isolation (CE-003) is preserved: result channel is never scanned.
+    const classification = classifyFailureChannels(packet, stderrText, stdoutText);
+    if (classification) {
+      return { packet, ...classification };
     }
 
     return {

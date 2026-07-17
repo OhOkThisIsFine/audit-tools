@@ -44,7 +44,15 @@ export interface RollingDispatchEnginePacket<TPacket = unknown> {
 /** Outcome returned after each packet completes. */
 export interface RollingDispatchEngineResult<TPacket = unknown> {
   packet: RollingDispatchEnginePacket<TPacket>;
-  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted" | "quota_unclassified";
+  outcome:
+    | "success"
+    | "rate_limited"
+    | "timeout"
+    | "error"
+    | "credit_exhausted"
+    | "model_unavailable"
+    | "packet_too_large"
+    | "quota_unclassified";
   actualTokens?: number;
   error?: unknown;
   /**
@@ -60,6 +68,18 @@ export interface RollingDispatchEngineResult<TPacket = unknown> {
    * above). Absent on non-credit_exhausted outcomes.
    */
   creditExhaustion?: { channel: "error" | "status" | "result"; text: string; rawMatch: string | null };
+  /**
+   * Worker ERROR/STATUS channel evidence that classified a `model_unavailable`
+   * outcome (HTTP 404, model not found — permanent pool exclusion). Absent on
+   * non-model_unavailable outcomes.
+   */
+  modelUnavailable?: { channel: "error" | "status" | "result"; text: string; rawMatch: string | null };
+  /**
+   * Worker ERROR/STATUS channel evidence that classified a `packet_too_large`
+   * outcome (HTTP 413, request/payload too large — per-packet sizing fault).
+   * Absent on non-packet_too_large outcomes.
+   */
+  packetTooLarge?: { channel: "error" | "status" | "result"; text: string; rawMatch: string | null };
   /**
    * Worker ERROR/STATUS channel VERBATIM evidence that classified a
    * `quota_unclassified` outcome (Slice A2b, TIER 2): the broad
@@ -141,4 +161,21 @@ export interface RollingDispatchEngineContract<TPacket = unknown> {
    * happens).
    */
   onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
+  /**
+   * Model-unavailable exclusion (HTTP 404 class — the model is not served by
+   * this provider; availability analog of cost drift): invoked once per pool
+   * the first time a `model_unavailable` result lands, after the engine has
+   * already permanently excluded the pool from this run's admissible set. The
+   * consumer wires it to friction emission. Optional — omit to leave the
+   * exclusion silent (no friction, exclusion still happens).
+   */
+  onModelUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Packet-too-large (HTTP 413 class — a per-packet sizing fault): invoked once
+   * per (packet, pool) pair, after the engine has already recorded the
+   * per-packet pool skip (the pool is NOT excluded and no cooldown applies).
+   * The consumer wires it to friction emission. Optional — omit to leave the
+   * skip silent (no friction, skip still happens).
+   */
+  onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
 }

@@ -308,6 +308,10 @@ export async function buildSourcePool(params: {
     // null (uncapped) — never 0, which would ceiling the pool to zero in-flight and
     // wedge the rolling engine, and would also violate the summary schema's min(1).
     concurrencyCap: positiveIntCapOrNull(source.quota?.max_concurrent),
+    // Endpoint-declared per-request context-token cap (from source.quota.context_tokens).
+    // null/absent = unknown cap → no fit filtering. A non-positive / non-finite value
+    // degrades to null (no finer signal).
+    contextCapTokens: positiveIntCapOrNull(source.quota?.context_tokens),
     // Operator-declared a-priori $/Mtok for this endpoint → the admission cost rank
     // (rung 2, authoritative over the models.dev catalog). 0 = declared-free → routes
     // first. null when unset/invalid ⇒ falls through to the catalog price / tier.

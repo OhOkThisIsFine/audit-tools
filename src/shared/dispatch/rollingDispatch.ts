@@ -58,6 +58,7 @@
 
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { CapacityPool, PartialCompletionTerminal } from "../quota/capacity.js";
+import { AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "../quota/capacity.js";
 import type { QuotaStateEntry, QuotaState, WaveSchedule } from "../quota/types.js";
 import {
   scheduleWave,
@@ -105,7 +106,15 @@ export interface RollingDispatchPacket<TPacket> {
 /** Outcome of dispatching a single packet. */
 export interface RollingDispatchResult<TPacket> {
   packet: RollingDispatchPacket<TPacket>;
-  outcome: "success" | "rate_limited" | "timeout" | "error" | "credit_exhausted" | "quota_unclassified";
+  outcome:
+    | "success"
+    | "rate_limited"
+    | "timeout"
+    | "error"
+    | "credit_exhausted"
+    | "model_unavailable"
+    | "packet_too_large"
+    | "quota_unclassified";
   /** Actual tokens consumed, if the provider reports it. */
   actualTokens?: number;
   /**
@@ -149,6 +158,28 @@ export interface RollingDispatchResult<TPacket> {
    * credit_exhausted outcomes.
    */
   creditExhaustion?: {
+    channel: WorkerOutputChannel;
+    text: string;
+    rawMatch: string | null;
+  };
+  /**
+   * The worker ERROR/STATUS channel evidence that classified a `model_unavailable`
+   * outcome (HTTP 404, model not found — permanent pool exclusion, the model is not
+   * served by this provider). Carried so the consumer's `onModelUnavailable` hook can
+   * surface it as reviewable friction. Absent on non-model_unavailable outcomes.
+   */
+  modelUnavailable?: {
+    channel: WorkerOutputChannel;
+    text: string;
+    rawMatch: string | null;
+  };
+  /**
+   * The worker ERROR/STATUS channel evidence that classified a `packet_too_large`
+   * outcome (HTTP 413, request/payload too large — a per-packet sizing fault for
+   * this particular pool). Carried so the consumer's `onPacketTooLarge` hook can
+   * surface it as reviewable friction. Absent on non-packet_too_large outcomes.
+   */
+  packetTooLarge?: {
     channel: WorkerOutputChannel;
     text: string;
     rawMatch: string | null;
@@ -251,6 +282,24 @@ export interface RollingDispatchState<TPacket> {
    * documented follow-up (docs/backlog.md) — bounded efficiency only, not a safety gap.
    */
   quotaUnclassifiedPoolIds: Set<string>;
+  /**
+   * Pool ids permanently excluded after a `model_unavailable` result (HTTP 404, the
+   * model is not served by this provider). Monotonic within a run — a pool is never
+   * re-added — mirrors `exhaustedPoolIds` behavior for credit exhaustion but carries
+   * availability semantics instead of billing semantics. Unlike exhausted-pool
+   * re-routing (a timed backoff), a 404 has no reset condition: once a model is
+   * unavailable, the pool is gone for the run.
+   */
+  modelUnavailablePoolIds: Set<string>;
+  /**
+   * Packet id → set of pool ids that 413'd this packet. When a `packet_too_large`
+   * result lands, a pool is never permanently excluded from the whole run (unlike
+   * credit_exhausted or model_unavailable); instead, ONLY THIS PACKET is skipped for
+   * THIS POOL on the next selection pass. Other packets freely bind to the pool, and
+   * this packet retries on any other pool. Discriminator is (packetId, poolId) — each
+   * distinct pair is a separate sizing fault signal.
+   */
+  oversizedPacketPools: Map<string, Set<string>>;
 }
 
 /** Consumer-provided configuration for the rolling dispatcher. */
@@ -294,6 +343,30 @@ export interface RollingDispatchConfig<TPacket> {
    * friction emitted, exclusion still happens).
    */
   onCreditExhausted?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Model unavailable (HTTP 404, model not found — permanent pool exclusion):
+   * invoked once per pool the FIRST time a `model_unavailable` result lands for it —
+   * the model is not served by this provider and the pool is permanently excluded from
+   * this run's admissible set (monotonic `modelUnavailablePoolIds` — never a timed
+   * cooldown). The consumer wires it to friction emission. Best-effort — a throwing
+   * hook never aborts dispatch. Omit to leave the exclusion silent (no friction
+   * emitted, exclusion still happens).
+   */
+  onModelUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Packet too large (HTTP 413, payload/request too large — per-packet sizing fault):
+   * invoked every time a `packet_too_large` result lands — the pool is NOT permanently
+   * excluded (unlike model_unavailable or credit_exhausted); only THIS PACKET is
+   * skipped for THIS POOL on re-selection. Each (packet,pool) pair is distinct signal,
+   * so the hook fires per distinct pair, not per pool. The consumer wires it to
+   * friction emission. Best-effort — a throwing hook never aborts dispatch. Omit to
+   * leave the re-queue silent (no friction, re-queue still happens).
+   */
+  onPacketTooLarge?: (info: {
+    poolId: string;
+    packetId: string;
+    rawMatch: string | null;
+  }) => void;
   /**
    * Quota-unclassified harvest (Slice A2b, TIER 2): invoked once per pool the
    * FIRST time a `quota_unclassified` result lands for it — a worker death whose
@@ -535,6 +608,7 @@ export function selectProvider<TPacket>(
   exhaustedPoolIds: ReadonlySet<string> = new Set(),
   pausedPoolResetAt: ReadonlyMap<string, number> = new Map(),
   costDemotedPoolIds: ReadonlySet<string> = new Set(),
+  oversizedPacketPools: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
   now: number = Date.now(),
 ): ProviderSlot | null {
   const complexity = scorePacketComplexity(packet);
@@ -547,6 +621,23 @@ export function selectProvider<TPacket>(
   const isPausedNow = (poolId: string): boolean => {
     const resetAt = pausedPoolResetAt.get(poolId);
     return resetAt != null && now < resetAt;
+  };
+
+  // Packet-too-large skip (F4): this packet has been rejected as too large by some
+  // pools (HTTP 413). Skip those pools for THIS PACKET only — other packets freely
+  // bind to them. Allows packet to retry on a different pool.
+  const isTooLargeForThisPacket = (poolId: string): boolean => {
+    const tooLargePools = oversizedPacketPools.get(packet.id);
+    return tooLargePools != null && tooLargePools.has(poolId);
+  };
+
+  // Context-fit skip (U2): this packet does not fit within a pool's declared context cap
+  // (plus harness overhead). Skip pools that cannot fit the packet. A pool with unknown
+  // context cap (null) always fits. This is the selection-time guard; partition-time fit
+  // checking in hybridDispatch ensures every in-process assignment is guaranteed to fit.
+  const doesNotFitContext = (pool: CapacityPool): boolean => {
+    if (pool.contextCapTokens == null) return false; // unknown cap → always fits
+    return packet.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS > pool.contextCapTokens;
   };
 
   // Ask scheduleWave whether each pool can accept one more slot, accounting for
@@ -606,7 +697,13 @@ export function selectProvider<TPacket>(
   };
 
   const evaluated = confirmedPools
-    .filter((p) => !exhaustedPoolIds.has(p.id) && !isPausedNow(p.id))
+    .filter(
+      (p) =>
+        !exhaustedPoolIds.has(p.id) &&
+        !isPausedNow(p.id) &&
+        !isTooLargeForThisPacket(p.id) &&
+        !doesNotFitContext(p),
+    )
     .map((pool) => ({ pool, schedule: scheduleForPool(pool) }));
 
   // Single ordering pass (INV-QD-14 proactive spill), in priority order — quota
@@ -679,6 +776,8 @@ export function createRollingDispatcher<TPacket>(
     onResult,
     onCostDrift,
     onCreditExhausted,
+    onModelUnavailable,
+    onPacketTooLarge,
     onQuotaUnclassified,
     costDemotedPoolIds: injectedCostDemotedPoolIds,
     isPacketEscalated,
@@ -699,6 +798,8 @@ export function createRollingDispatcher<TPacket>(
     // + levels; a standalone dispatcher owns a fresh per-instance set.
     costDemotedPoolIds: injectedCostDemotedPoolIds ?? new Set(),
     quotaUnclassifiedPoolIds: new Set(),
+    modelUnavailablePoolIds: new Set(),
+    oversizedPacketPools: new Map(),
   };
 
   const inFlightTracker = new InFlightTokenTracker();
@@ -926,6 +1027,9 @@ export function createRollingDispatcher<TPacket>(
     // cooldown is a TIMED reset; credit exhaustion has none. The permanent-for-
     // the-run exclusion lives entirely in the in-memory exhaustedPoolIds set
     // below, never in the persisted quota-state cooldown.
+    // model_unavailable and packet_too_large record as 'error' — no cooldown
+    // semantics. A 404 is permanent (model not served), a 413 is a per-packet
+    // sizing fault; neither carries reset timing.
     // quota_unclassified records as 'rate_limited' — NOT 'error' — precisely so
     // recordWaveOutcomeUnsafe DOES apply its exponential-backoff cooldown_until
     // (state.ts:412-430). That reversible, timed cooldown IS the "conservative
@@ -936,6 +1040,8 @@ export function createRollingDispatcher<TPacket>(
       : result.outcome === "rate_limited" ? "rate_limited"
       : result.outcome === "error" ? "error"
       : result.outcome === "credit_exhausted" ? "error"
+      : result.outcome === "model_unavailable" ? "error"
+      : result.outcome === "packet_too_large" ? "error"
       : result.outcome === "quota_unclassified" ? "rate_limited"
       : "timeout" as const;
 
@@ -1073,6 +1179,117 @@ export function createRollingDispatcher<TPacket>(
             kind: "rolling_dispatch_requeue_credit_exhausted",
             packet_id: packet.id,
             exhausted_pool_id: providerSlot.poolId,
+          }) + "\n",
+        );
+      } catch {
+        // Observability must never abort a run.
+      }
+      return;
+    }
+
+    // Model unavailable (HTTP 404, model not found): the model is not served by
+    // this provider, so the pool is permanently excluded from this run's admissible
+    // set (monotonic modelUnavailablePoolIds). Unlike rate_limited/credit_exhausted
+    // (which carry reset/operator-action semantics), a 404 is permanent: the model
+    // simply doesn't exist at this provider. The pool is added to exhaustedPoolIds
+    // and the packet is re-queued so a different pool absorbs it. If this was the
+    // last admissible pool, the run degrades to the SAME empty_pool / quota_paused
+    // stranding path (INV-QD-07).
+    if (result.outcome === "model_unavailable") {
+      // Fire the hook only the FIRST time a given pool hits model-unavailable
+      // (mirrors the `firstForPool` gate on `onCreditExhausted`).
+      const firstForPool = !state.modelUnavailablePoolIds.has(providerSlot.poolId);
+      state.modelUnavailablePoolIds.add(providerSlot.poolId);
+      // Add to exhaustedPoolIds so selectProvider skips it (permanent exclusion for the run)
+      state.exhaustedPoolIds.add(providerSlot.poolId);
+      if (firstForPool) {
+        try {
+          onModelUnavailable?.({
+            poolId: providerSlot.poolId,
+            rawMatch: result.modelUnavailable?.rawMatch ?? null,
+          });
+        } catch {
+          // Best-effort: a throwing friction hook must never abort dispatch.
+        }
+      }
+      if (!state.completedIds.has(packet.id) && !state.pendingQueue.some((q) => q.id === packet.id)) {
+        state.pendingQueue.unshift(packet);
+      }
+      try {
+        process.stderr.write(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            kind: "rolling_dispatch_requeue_model_unavailable",
+            packet_id: packet.id,
+            exhausted_pool_id: providerSlot.poolId,
+          }) + "\n",
+        );
+      } catch {
+        // Observability must never abort a run.
+      }
+      return;
+    }
+
+    // Packet too large (HTTP 413, payload/request too large): a per-packet sizing
+    // fault for this particular (packet, pool) combination. UNLIKE model_unavailable
+    // or credit_exhausted, the pool is NOT permanently excluded — only THIS PACKET
+    // is skipped for THIS POOL on the next selection pass. The packet is re-queued
+    // to retry on a different pool. The pool remains available for other packets
+    // whose payload might fit.
+    if (result.outcome === "packet_too_large") {
+      // Track this (packet, pool) pair so selectProvider skips it on re-selection
+      if (!state.oversizedPacketPools.has(packet.id)) {
+        state.oversizedPacketPools.set(packet.id, new Set());
+      }
+      state.oversizedPacketPools.get(packet.id)!.add(providerSlot.poolId);
+      // Fire the hook every time this outcome lands (unlike model_unavailable which
+      // fires once per pool — each (packet,pool) pair is distinct signal).
+      try {
+        onPacketTooLarge?.({
+          poolId: providerSlot.poolId,
+          packetId: packet.id,
+          rawMatch: result.packetTooLarge?.rawMatch ?? null,
+        });
+      } catch {
+        // Best-effort: a throwing friction hook must never abort dispatch.
+      }
+      // Livelock guard: a 413 skip is PERMANENT for the (packet, pool) pair (a
+      // packet never shrinks), so a packet whose skip-set now covers EVERY
+      // non-excluded pool can never dispatch again — re-queueing it would spin
+      // the dispatch loop forever (noPoolCanAcceptNow is pool-level and never
+      // fires for a per-packet condition). Strand it LOUD instead. A merely
+      // PAUSED pool still counts as potentially-available only if the packet
+      // has not 413'd it — pauses reset, 413s don't.
+      const skipSet = state.oversizedPacketPools.get(packet.id)!;
+      const anyPoolCouldEverTake = confirmedPools.some(
+        (p) => !state.exhaustedPoolIds.has(p.id) && !skipSet.has(p.id),
+      );
+      if (!anyPoolCouldEverTake) {
+        if (!state.completedIds.has(packet.id)) state.strandedIds.add(packet.id);
+        try {
+          process.stderr.write(
+            JSON.stringify({
+              ts: new Date().toISOString(),
+              kind: "rolling_dispatch_stranded_packet_too_large_all_pools",
+              packet_id: packet.id,
+              skipped_pool_ids: [...skipSet].sort(),
+            }) + "\n",
+          );
+        } catch {
+          // Observability must never abort a run.
+        }
+        return;
+      }
+      if (!state.completedIds.has(packet.id) && !state.pendingQueue.some((q) => q.id === packet.id)) {
+        state.pendingQueue.unshift(packet);
+      }
+      try {
+        process.stderr.write(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            kind: "rolling_dispatch_requeue_packet_too_large",
+            packet_id: packet.id,
+            pool_id: providerSlot.poolId,
           }) + "\n",
         );
       } catch {
@@ -1259,7 +1476,8 @@ export function createRollingDispatcher<TPacket>(
     let forcedUsed = false;
     for (const packet of getDispatchablePackets()) {
       // selectProvider skips pools in exhaustedPoolIds, so a re-queued packet
-      // re-routes to a surviving pool (INV-QD-07).
+      // re-routes to a surviving pool (INV-QD-07). It also skips pools in
+      // oversizedPacketPools for THIS PACKET if it's been rejected as too large.
       const slot = selectProvider(
         packet,
         confirmedPools,
@@ -1269,6 +1487,7 @@ export function createRollingDispatcher<TPacket>(
         state.exhaustedPoolIds,
         state.pausedPoolResetAt,
         state.costDemotedPoolIds,
+        state.oversizedPacketPools,
         Date.now(),
       );
 
@@ -1344,6 +1563,44 @@ export function createRollingDispatcher<TPacket>(
         if (noPoolCanAcceptNow(Date.now())) {
           strandPending();
           break;
+        }
+        // Per-packet never-dispatchable strand (U2/F1, distinct from the
+        // pool-level check above): a packet is PERMANENTLY unselectable when
+        // every confirmed pool is exhausted, in the packet's 413 skip-set, or
+        // fit-excluded by a declared context cap — none of which reset. Without
+        // this, a fit-excluded packet on otherwise-healthy pools spins the 50ms
+        // wait tick forever (the pool-level guard never fires for a per-packet
+        // condition). A merely PAUSED pool that fits still counts as
+        // future-possible — pauses reset, caps don't.
+        const neverDispatchable = state.pendingQueue.filter((p) => {
+          const skipSet = state.oversizedPacketPools.get(p.id);
+          return confirmedPools.every(
+            (pool) =>
+              state.exhaustedPoolIds.has(pool.id) ||
+              (skipSet?.has(pool.id) ?? false) ||
+              (pool.contextCapTokens != null &&
+                p.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS >
+                  pool.contextCapTokens),
+          );
+        });
+        if (neverDispatchable.length > 0) {
+          for (const p of neverDispatchable) {
+            if (!state.completedIds.has(p.id)) state.strandedIds.add(p.id);
+          }
+          const strandedIdSet = new Set(neverDispatchable.map((p) => p.id));
+          state.pendingQueue = state.pendingQueue.filter((p) => !strandedIdSet.has(p.id));
+          try {
+            process.stderr.write(
+              JSON.stringify({
+                ts: new Date().toISOString(),
+                kind: "rolling_dispatch_stranded_no_fitting_pool",
+                packet_ids: [...strandedIdSet].sort(),
+              }) + "\n",
+            );
+          } catch {
+            // Observability must never abort a run.
+          }
+          continue;
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 50));
         continue;

@@ -135,3 +135,32 @@ test("computeDispatchCapacity rejects an empty pool list", () => {
     /at least one capacity pool/i,
   );
 });
+
+test("a pool's contextCapTokens is carried through the allocation AND the serialized summary", () => {
+  // U2 context-fit gate: source pools carry a per-request context-token cap that
+  // gates packet fitting. It must survive both in-memory (audit reads the allocation)
+  // and serialization (remediate reads the summary) so selection-time fit checking
+  // works correctly. null/absent = unknown cap → no fit filtering.
+  const capacity = computeDispatchCapacity({
+    pools: [hostPool("worker", { hostConcurrencyLimit: null, contextCapTokens: 32000 })],
+    sessionConfig: {},
+    pendingItemTokens: [10000],
+  });
+  expect(capacity.pools[0].contextCapTokens, "allocation echoes the context cap").toBe(32000);
+  const summaries = summarizeDispatchCapacityPools(capacity);
+  expect(summaries[0].context_cap_tokens, "summary serializes the context cap").toBe(32000);
+});
+
+test("contextCapTokens: null (unknown) is absent from allocation and summary when unset", () => {
+  // When contextCapTokens is null/absent, it is not included in the allocation or
+  // summary (optional spread semantics). The fit-check code treats undefined and
+  // null equivalently as "no cap → always fits".
+  const capacity = computeDispatchCapacity({
+    pools: [hostPool("unknown", { hostConcurrencyLimit: null, contextCapTokens: null })],
+    sessionConfig: {},
+    pendingItemTokens: [10000],
+  });
+  expect(capacity.pools[0].contextCapTokens).toBeUndefined();
+  const summaries = summarizeDispatchCapacityPools(capacity);
+  expect(summaries[0].context_cap_tokens).toBeUndefined();
+});

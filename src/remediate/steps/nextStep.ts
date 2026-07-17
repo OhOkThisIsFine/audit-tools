@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -752,6 +752,20 @@ export interface DriveRollingDispatchOptions {
    * silent.
    */
   onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
+  /**
+   * Model-unavailable exclusion (HTTP 404 class): invoked once per pool when a
+   * `model_unavailable` result lands, after the shared driver has already
+   * permanently excluded the pool for the run. Forwarded to the shared driver;
+   * the caller wires it to friction. Omit to leave the exclusion silent.
+   */
+  onModelUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Packet-too-large (HTTP 413 class, per-packet sizing fault): invoked once per
+   * (packet, pool) pair after the shared driver records the per-packet pool skip
+   * (no exclusion, no cooldown). Forwarded to the shared driver; the caller
+   * wires it to friction. Omit to leave the skip silent.
+   */
+  onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
 }
 
 export interface DriveRollingDispatchResult {
@@ -853,6 +867,8 @@ export async function driveRollingDispatch(
     ...(options.onCostDrift ? { onCostDrift: options.onCostDrift } : {}),
     ...(options.onCreditExhausted ? { onCreditExhausted: options.onCreditExhausted } : {}),
     ...(options.onQuotaUnclassified ? { onQuotaUnclassified: options.onQuotaUnclassified } : {}),
+    ...(options.onModelUnavailable ? { onModelUnavailable: options.onModelUnavailable } : {}),
+    ...(options.onPacketTooLarge ? { onPacketTooLarge: options.onPacketTooLarge } : {}),
     // Single-flight (CE-001) is enforced by the unified driver.
     rebuildBetweenLevels: options.rebuildSharedBetweenLevels,
     // Host-session escalation: feed recordLimit (write) at the rate_limited observation
@@ -1274,6 +1290,17 @@ export async function driveRollingImplementDispatch(
     // classify it and improve errorParsing.ts's pattern set.
     onQuotaUnclassified: (info) => {
       captureQuotaUnclassifiedFriction(artifactsDir, runId, info, "remediate-code");
+    },
+    // Model-unavailable exclusion (availability analog of cost drift): the engine
+    // has already permanently excluded the 404ing pool; surface it so the operator
+    // reconciles the stale registry row (registry rows are leads, not reach).
+    onModelUnavailable: (info) => {
+      captureModelUnavailableFriction(artifactsDir, runId, info, "remediate-code");
+    },
+    // Packet-too-large (per-packet sizing fault, HTTP 413): the engine skips THIS
+    // pool for THIS packet only — no exclusion, no cooldown; surface each pair.
+    onPacketTooLarge: (info) => {
+      capturePacketTooLargeFriction(artifactsDir, runId, info, "remediate-code");
     },
   });
 
@@ -2029,6 +2056,8 @@ async function buildImplementDispatchStep(ctx: {
               (n) =>
                 n.outcome === "rate_limited" ||
                 n.outcome === "credit_exhausted" ||
+                n.outcome === "model_unavailable" ||
+                n.outcome === "packet_too_large" ||
                 n.outcome === "quota_unclassified",
             )
             .map((n) => n.block_id),
@@ -2050,7 +2079,7 @@ async function buildImplementDispatchStep(ctx: {
             {
               eventType: "quota_escalation",
               discriminator: blockId,
-              note: "A-8 hybrid in-process node rate-limited / credit-exhausted / quota-unclassified; its backend pool was settled for this run.",
+              note: "A-8 hybrid in-process node rate-limited / credit-exhausted / model-unavailable / packet-too-large / quota-unclassified; its backend pool was settled for this run.",
               severity: "high",
               category: "trap",
               area: "dispatch/quota",

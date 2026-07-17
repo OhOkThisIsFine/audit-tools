@@ -83,6 +83,8 @@ export type StepBoundaryEventType =
   | "node_quarantine"
   | "declared_cost_drift"
   | "credit_exhausted"
+  | "model_unavailable"
+  | "packet_too_large"
   | "quota_unclassified"
   | "newly_reachable_backend"
   | (string & {});
@@ -121,6 +123,12 @@ const STEP_BOUNDARY_CATEGORY: Record<string, FrictionCategory> = {
   // A credit-exhausted pool needs an operator action (top up credits) before it
   // can ever serve again — same "operator must reconcile" shape as a cost drift.
   credit_exhausted: "tool_should_decide",
+  // A model-unavailable (404) pool is not served by this provider — operator must
+  // either remove it from declared backends or investigate provider availability.
+  model_unavailable: "tool_should_decide",
+  // A packet-too-large (413) fault is a per-packet sizing issue (this packet/pool pair).
+  // Operator should investigate packet content size or pool limits.
+  packet_too_large: "tool_should_decide",
   // A quota-unclassified death is exactly "the host had to remember/notice
   // something the tool should guarantee" — the tool COULD NOT confidently
   // classify it, so the operator must review the verbatim text and (if it's a
@@ -476,6 +484,84 @@ export function captureQuotaUnclassifiedFriction(
         `pool was NOT permanently excluded). Classify it and consider adding a pattern to errorParsing.ts. ` +
         `Verbatim (secret-scrubbed): "${verbatim}"`,
       severity: "high",
+      area: "dispatch/quota",
+    },
+    source,
+  );
+}
+
+/** Model-unavailable facts routed through {@link captureModelUnavailableFriction}. */
+export interface ModelUnavailableInfo {
+  poolId: string;
+  rawMatch: string | null;
+}
+
+/**
+ * Route a model-unavailable exclusion (HTTP 404, model not found — the model is not
+ * served by this provider and the pool is permanently excluded from this run's
+ * admissible set) through the step-boundary chokepoint as a `model_unavailable` fact.
+ * Both orchestrators' rolling dispatch wiring (`onModelUnavailable`) is byte-identical
+ * apart from the trailing `source` tool tag; this single-sources the
+ * eventType/note/severity/area template so they cannot drift. Fire-and-forget, like
+ * {@link captureCreditExhaustionFriction} — never awaited by the caller.
+ */
+export function captureModelUnavailableFriction(
+  artifactsDir: string,
+  runId: string,
+  info: ModelUnavailableInfo,
+  source: FrictionCaptureArtifact["tool"],
+): void {
+  void captureStepBoundaryFriction(
+    artifactsDir,
+    runId,
+    {
+      eventType: "model_unavailable",
+      discriminator: info.poolId,
+      note:
+        `pool "${info.poolId}" reported model not found (HTTP 404)` +
+        (info.rawMatch ? ` (matched: "${info.rawMatch}")` : "") +
+        ` — the model is not served by this provider and the pool is permanently ` +
+        `excluded from this run's admissible set. Verify the provider serves this model or remove it from declared backends.`,
+      severity: "high",
+      area: "dispatch/quota",
+    },
+    source,
+  );
+}
+
+/** Packet-too-large facts routed through {@link capturePacketTooLargeFriction}. */
+export interface PacketTooLargeInfo {
+  poolId: string;
+  packetId: string;
+  rawMatch: string | null;
+}
+
+/**
+ * Route a packet-too-large failure (HTTP 413, payload/request too large — a per-packet
+ * sizing fault for this particular pool) through the step-boundary chokepoint as a
+ * `packet_too_large` fact. Unlike model_unavailable, the pool is NOT permanently
+ * excluded (only THIS PACKET skips THIS POOL on re-selection). Mirrors
+ * {@link captureCreditExhaustionFriction}'s single-source-the-template shape but fires
+ * EVERY time (each (packet,pool) pair is distinct signal), never awaited by the caller.
+ */
+export function capturePacketTooLargeFriction(
+  artifactsDir: string,
+  runId: string,
+  info: PacketTooLargeInfo,
+  source: FrictionCaptureArtifact["tool"],
+): void {
+  void captureStepBoundaryFriction(
+    artifactsDir,
+    runId,
+    {
+      eventType: "packet_too_large",
+      discriminator: `${info.packetId}:${info.poolId}`,
+      note:
+        `packet "${info.packetId}" rejected as too large (HTTP 413) by pool "${info.poolId}"` +
+        (info.rawMatch ? ` (matched: "${info.rawMatch}")` : "") +
+        ` — this pool is skipped for THIS PACKET only; the packet will retry on other pools. ` +
+        `Investigate packet content size or pool request-size limits.`,
+      severity: "medium",
       area: "dispatch/quota",
     },
     source,

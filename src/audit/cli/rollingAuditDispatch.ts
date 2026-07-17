@@ -39,6 +39,8 @@ import {
   captureCostDriftFriction,
   captureCreditExhaustionFriction,
   captureQuotaUnclassifiedFriction,
+  captureModelUnavailableFriction,
+  capturePacketTooLargeFriction,
   resolveHostProviderName,
   resolveConversationHostProvider,
   resolveRollingEngineFlag,
@@ -521,6 +523,19 @@ export async function driveRollingAuditDispatch(params: {
       // classify it and improve errorParsing.ts's pattern set.
       onQuotaUnclassified: (info) => {
         captureQuotaUnclassifiedFriction(artifactsDir, runId, info, "audit-code");
+      },
+      // Model-unavailable exclusion (availability analog of cost drift): the
+      // engine has already permanently excluded the 404ing pool from this run's
+      // admissible set; surface it so the operator reconciles the stale registry
+      // row (registry capability data is a lead, not reach).
+      onModelUnavailable: (info) => {
+        captureModelUnavailableFriction(artifactsDir, runId, info, "audit-code");
+      },
+      // Packet-too-large (per-packet sizing fault, HTTP 413): the engine skips
+      // THIS pool for THIS packet only — no exclusion, no cooldown; surface each
+      // (packet,pool) pair so partition-time sizing can be reconciled.
+      onPacketTooLarge: (info) => {
+        capturePacketTooLargeFriction(artifactsDir, runId, info, "audit-code");
       },
     },
     dispatchPacket,

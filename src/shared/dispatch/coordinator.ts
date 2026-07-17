@@ -45,7 +45,11 @@
  */
 
 import type { CapacityPool, PartialCompletionTerminal } from "../quota/capacity.js";
-import { computeDispatchCapacity, buildEmptyPoolTerminal } from "../quota/capacity.js";
+import {
+  computeDispatchCapacity,
+  buildEmptyPoolTerminal,
+  AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS,
+} from "../quota/capacity.js";
 import type { SessionConfig } from "../types/sessionConfig.js";
 import type { SettledExclusionSet } from "../rolling/pausedState.js";
 import type { ClaimRegistry } from "../quota/claimRegistry.js";
@@ -119,6 +123,17 @@ export interface HybridSpillCoordinatorOptions {
   onSettle?: (poolId: string) => void | Promise<void>;
 }
 
+/**
+ * Whether a node fits a pool's declared per-request/context token cap, including
+ * the agentic-harness overhead a CLI worker adds on top of the packet prompt.
+ * A pool with no declared cap (null/absent — host pools, undeclared sources) is
+ * always admissible: unknown means no fit filtering, the status quo.
+ */
+function nodeContextFits(node: FrontierNode, pool: CapacityPool): boolean {
+  if (pool.contextCapTokens == null) return true;
+  return node.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS <= pool.contextCapTokens;
+}
+
 // ---------------------------------------------------------------------------
 // HybridSpillCoordinator
 // ---------------------------------------------------------------------------
@@ -182,7 +197,13 @@ export class HybridSpillCoordinator {
 
     const poolById = new Map(active.map((p) => [p.id, p]));
     const assignments: NodeAssignment[] = [];
-    let cursor = 0;
+    // Per-pool packet-fit gate (U2): the claim walk consumes a shared queue with a
+    // FIRST-FIT scan instead of a linear cursor, so a node too large for THIS pool's
+    // declared context cap stays available for a later (larger or cap-less) pool in
+    // the same walk — the claim itself is the fit guarantee (a node is never claimed
+    // to a pool it cannot fit; post-hoc repartitioning would strand the claim on the
+    // wrong pool id).
+    const unassigned = [...ordered];
 
     for (const alloc of capacity.pools) {
       const pool = poolById.get(alloc.pool_id);
@@ -190,9 +211,16 @@ export class HybridSpillCoordinator {
       // that is not in the active (non-settled) set.
       if (!pool) continue;
       let placed = 0;
-      while (placed < alloc.slots && cursor < ordered.length) {
-        const node = ordered[cursor]!;
-        cursor += 1;
+      let scan = 0;
+      while (placed < alloc.slots && scan < unassigned.length) {
+        const node = unassigned[scan]!;
+        if (!nodeContextFits(node, pool)) {
+          // Too large for this pool — leave it queued for a later pool this walk
+          // (or unclaimed for the next cycle); the slot stays open for the next node.
+          scan += 1;
+          continue;
+        }
+        unassigned.splice(scan, 1);
         // Claim BEFORE returning the node in any assignment (CE-001). A node
         // another driver already holds is skipped — it is theirs to run — and the
         // slot is freed for the next node so capacity is not wasted on a contested id.
@@ -207,7 +235,33 @@ export class HybridSpillCoordinator {
         });
         placed += 1;
       }
-      if (cursor >= ordered.length) break;
+      if (unassigned.length === 0) break;
+    }
+
+    // Loud never-fits surface (spec F1): a node whose size exceeds EVERY active
+    // pool's declared cap can never be claimed by this coordinator — re-offering
+    // is correct only while a cap-less (host) pool may appear; silent re-offer
+    // against a fixed all-capped pool set would look like an idle wedge. One
+    // structured line per plan so the caller/operator can see exactly which
+    // nodes are unplaceable and why.
+    const neverFits = unassigned.filter((n) =>
+      active.every((p) => !nodeContextFits(n, p)),
+    );
+    if (neverFits.length > 0) {
+      try {
+        process.stderr.write(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            kind: "hybrid_dispatch_node_never_fits",
+            node_ids: neverFits.map((n) => n.id).sort(),
+            active_pool_caps: active
+              .map((p) => ({ pool_id: p.id, context_cap_tokens: p.contextCapTokens ?? null }))
+              .sort((a, b) => a.pool_id.localeCompare(b.pool_id)),
+          }) + "\n",
+        );
+      } catch {
+        // Observability must never abort a plan.
+      }
     }
 
     return assignments;

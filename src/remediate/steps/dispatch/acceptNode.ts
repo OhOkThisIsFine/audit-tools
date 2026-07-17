@@ -38,7 +38,15 @@ import {
 import { enforceAcceptWriteScope } from "./writeScope.js";
 
 /** Worker transport outcome (mirrors shared `RollingDispatchResult["outcome"]`). */
-export type NodeWorkerOutcome = "success" | "error" | "rate_limited" | "timeout" | "credit_exhausted" | "quota_unclassified";
+export type NodeWorkerOutcome =
+  | "success"
+  | "error"
+  | "rate_limited"
+  | "timeout"
+  | "credit_exhausted"
+  | "model_unavailable"
+  | "packet_too_large"
+  | "quota_unclassified";
 
 export interface AcceptNodeWorktreeParams {
   root: string;

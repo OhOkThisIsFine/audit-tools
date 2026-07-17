@@ -29,6 +29,19 @@ const STATE_DIR_NAME = ".audit-code";
 /** Top-K models expanded per backend provider when the operator declares no `top_k`. */
 export const DEFAULT_PROXY_TOP_K = 3;
 
+/** Timeout (ms) for populate-time model verification probes. */
+export const POPULATE_PROBE_TIMEOUT_MS = 3000;
+
+/** Concurrency limit for populate-time model verification probes. */
+export const POPULATE_PROBE_CONCURRENCY = 4;
+
+/**
+ * A same-endpoint cache younger than this skips the registry fetch + probes
+ * entirely (see the freshness short-circuit in {@link populateProxyCatalog}).
+ * Refresh throttle only — read-side staleness policy is a separate concern.
+ */
+export const POPULATE_CACHE_FRESH_TTL_MS = 10 * 60_000;
+
 /** Resolve the populate-cache path for this machine. */
 export function resolveProxyCatalogPath(homeDir?: string): string {
   return join(homeDir ?? homedir(), STATE_DIR_NAME, PROXY_CATALOG_FILENAME);
@@ -50,6 +63,7 @@ interface RegistryModel {
   model: string;
   score: number | null;
   costPerMtok: number | undefined;
+  contextTokens: number | undefined;
 }
 
 export interface PopulateProxyCatalogOptions {
@@ -77,6 +91,8 @@ export interface PopulateProxyCatalogResult {
   written: boolean;
   /** Operator-facing explanation when the registry could not be fetched/parsed. */
   reason?: string;
+  /** Models dropped during probe verification, with reasons. */
+  dropped: Array<{ id: string; reason: string }>;
 }
 
 function finiteNonNegative(value: unknown): number | undefined {
@@ -103,6 +119,26 @@ function deriveScore(entry: Record<string, unknown>): number | null {
     finiteNonNegative((capability as Record<string, unknown>).composite_rank) ??
     finiteNonNegative((capability as Record<string, unknown>).arena_rank);
   return rank === undefined ? null : -rank;
+}
+
+/**
+ * Tolerantly extract context-window field from a registry entry or its nested
+ * `capability` block. Checks for `context_length`, `context_tokens`, `max_context`,
+ * `context_window` (first finite positive number wins).
+ */
+function deriveContextTokens(entry: Record<string, unknown>): number | undefined {
+  for (const key of ["context_length", "context_tokens", "max_context", "context_window"]) {
+    const value = finiteNonNegative((entry as Record<string, unknown>)[key]);
+    if (value !== undefined) return value;
+  }
+  const capability = entry.capability;
+  if (capability !== null && typeof capability === "object") {
+    for (const key of ["context_length", "context_tokens", "max_context", "context_window"]) {
+      const value = finiteNonNegative((capability as Record<string, unknown>)[key]);
+      if (value !== undefined) return value;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -153,6 +189,7 @@ function extractRegistryModels(payload: unknown): RegistryModel[] {
         finiteNonNegative(entry.cost_per_mtok) ??
         finiteNonNegative(entry.price_per_mtok) ??
         finiteNonNegative(entry.price),
+      contextTokens: deriveContextTokens(entry),
     });
   };
   for (const raw of container) {
@@ -230,10 +267,105 @@ function expandSources(
         model: model.model,
         worker_kind: "agentic",
         ...(cost !== undefined ? { cost_per_mtok: cost } : {}),
+        ...(model.contextTokens !== undefined
+          ? { quota: { context_tokens: model.contextTokens } }
+          : {}),
       });
     }
   }
   return sources;
+}
+
+/**
+ * Probe a single source to verify the model is actually reachable.
+ * Returns { dropped: true, reason } if the model should be excluded (404/unavailable),
+ * or { dropped: false } to keep the source.
+ */
+async function probeSource(
+  source: DispatchableSource,
+  endpoint: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<{ dropped: boolean; reason?: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`${endpoint}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "x-api-key": "audit-tools-populate-probe",
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: `${source.backend_provider}/${source.model}`,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+      signal: controller.signal,
+    });
+
+    // Check for 404 or model-not-found patterns
+    if (response.status === 404) {
+      return { dropped: true, reason: "HTTP 404" };
+    }
+    if (response.status >= 400) {
+      let bodyText = "";
+      try {
+        bodyText = await response.text();
+      } catch {
+        // If body read fails, just use status code
+      }
+      const patterns = [/model_not_found/i, /\bmay not exist\b/i, /no such model/i];
+      if (patterns.some((p) => p.test(bodyText))) {
+        return { dropped: true, reason: `HTTP ${response.status} (model unavailable)` };
+      }
+    }
+
+    // 200, 401, 429, 5xx, etc. → keep the source
+    return { dropped: false };
+  } catch (error) {
+    // Transport failure (timeout, network error) → fail-open, keep the source
+    return { dropped: false };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Run probes with bounded concurrency using a simple worker pool.
+ */
+async function probeSourcesWithConcurrency(
+  sources: DispatchableSource[],
+  endpoint: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+  concurrency: number,
+): Promise<Array<{ source: DispatchableSource; dropped: boolean; reason?: string }>> {
+  const results: Array<{ source: DispatchableSource; dropped: boolean; reason?: string }> = [];
+  let index = 0;
+
+  const worker = async () => {
+    while (index < sources.length) {
+      const currentIndex = index++;
+      const source = sources[currentIndex];
+      const probeResult = await probeSource(source, endpoint, fetchImpl, timeoutMs);
+      results[currentIndex] = {
+        source,
+        dropped: probeResult.dropped,
+        reason: probeResult.reason,
+      };
+    }
+  };
+
+  const workers = Array(Math.min(concurrency, sources.length))
+    .fill(null)
+    .map(() => worker());
+
+  await Promise.all(workers);
+  // results is index-assigned (results[currentIndex] = ...), so it is already in
+  // the sources' order regardless of probe completion order.
+  return results;
 }
 
 /**
@@ -250,6 +382,34 @@ export async function populateProxyCatalog(
 ): Promise<PopulateProxyCatalogResult> {
   const endpoint = options.endpoint.replace(/\/+$/u, "");
   const doFetch = options.fetchImpl ?? fetch;
+
+  // Freshness short-circuit: the populate trigger fires on EVERY
+  // confirmation-absent next-step (nextStepCommand.ts), and populate now carries
+  // live per-model probes — real `/v1/messages` POSTs through the proxy that cost
+  // seconds of wall AND burn free-tier rate quota. A same-endpoint cache younger
+  // than the TTL answers instead (measured 2026-07-17: per-invocation populate
+  // was ~5.6s live, which alone pushed the e2e wrapper tests past their
+  // timeouts). This is a REFRESH throttle, not staleness acceptance — the
+  // no-TTL-on-READ residual (backlog: catalog accepted arbitrarily stale by
+  // resolve) is unchanged.
+  const cached = readProxyCatalog({ homeDir: options.homeDir });
+  if (cached && cached.endpoint === endpoint) {
+    const nowMs = (options.now?.() ?? new Date()).getTime();
+    const fetchedMs = Date.parse(cached.fetched_at);
+    if (
+      Number.isFinite(fetchedMs) &&
+      nowMs - fetchedMs >= 0 &&
+      nowMs - fetchedMs < POPULATE_CACHE_FRESH_TTL_MS
+    ) {
+      return {
+        sources: cached.sources,
+        written: false,
+        reason: `cache is fresh (fetched ${Math.round((nowMs - fetchedMs) / 1000)}s ago); refresh skipped.`,
+        dropped: [],
+      };
+    }
+  }
+
   let payload: unknown;
   try {
     const response = await doFetch(`${endpoint}/registry`);
@@ -258,6 +418,7 @@ export async function populateProxyCatalog(
         sources: [],
         written: false,
         reason: `GET ${endpoint}/registry returned HTTP ${response.status}.`,
+        dropped: [],
       };
     }
     payload = await response.json();
@@ -266,13 +427,38 @@ export async function populateProxyCatalog(
       sources: [],
       written: false,
       reason: `GET ${endpoint}/registry failed: ${error instanceof Error ? error.message : String(error)}.`,
+      dropped: [],
     };
   }
-  const sources = expandSources(extractRegistryModels(payload), {
+  let sources = expandSources(extractRegistryModels(payload), {
     endpoint,
     topK: options.topK ?? DEFAULT_PROXY_TOP_K,
     costPerMtok: options.costPerMtok,
   });
+
+  // Probe each source to verify reachability
+  const probeResults = await probeSourcesWithConcurrency(
+    sources,
+    endpoint,
+    doFetch,
+    POPULATE_PROBE_TIMEOUT_MS,
+    POPULATE_PROBE_CONCURRENCY,
+  );
+
+  const dropped: Array<{ id: string; reason: string }> = [];
+  sources = probeResults
+    .filter((result) => {
+      if (result.dropped) {
+        dropped.push({
+          id: result.source.id ?? `claude-worker:${result.source.backend_provider}/${result.source.model}`,
+          reason: result.reason ?? "model unavailable",
+        });
+        return false;
+      }
+      return true;
+    })
+    .map((result) => result.source);
+
   const catalog: ProxyCatalog = {
     fetched_at: (options.now?.() ?? new Date()).toISOString(),
     endpoint,
@@ -287,9 +473,10 @@ export async function populateProxyCatalog(
       sources,
       written: false,
       reason: `could not write ${path}: ${error instanceof Error ? error.message : String(error)}.`,
+      dropped,
     };
   }
-  return { sources, written: true };
+  return { sources, written: true, dropped };
 }
 
 export interface ReadProxyCatalogDeps {

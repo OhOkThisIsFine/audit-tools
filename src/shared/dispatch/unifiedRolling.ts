@@ -170,6 +170,22 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
    * friction emission carrying the verbatim text. Omit to leave it silent.
    */
   onQuotaUnclassified?: (info: { poolId: string; text: string }) => void;
+  /**
+   * Model-unavailable exclusion: invoked once per pool the first time a
+   * `model_unavailable` result lands (HTTP 404 class — the model is not served by
+   * this provider). The engine has already permanently excluded the pool for the
+   * run. Forwarded to the engine; the consumer wires it to friction emission.
+   * Omit to leave the exclusion silent.
+   */
+  onModelUnavailable?: (info: { poolId: string; rawMatch: string | null }) => void;
+  /**
+   * Packet-too-large signal: invoked once per (packet, pool) pair on a
+   * `packet_too_large` result (HTTP 413 class — a per-packet sizing fault). The
+   * engine has already recorded the per-packet pool skip; the pool is NOT
+   * excluded and no cooldown applies. Forwarded to the engine; the consumer
+   * wires it to friction emission. Omit to leave it silent.
+   */
+  onPacketTooLarge?: (info: { poolId: string; packetId: string; rawMatch: string | null }) => void;
   /** Engine escalation hooks (host-session rate-limit accrual + strand-not-requeue read). */
   recordRateLimit?: (packet: RollingDispatchPacket<TPayload>, result: RollingDispatchResult<TPayload>) => void;
   isPacketEscalated?: (packetId: string) => boolean;
@@ -280,6 +296,8 @@ export async function driveRolling<TItem, TPayload>(
         ...(config.onCostDrift ? { onCostDrift: config.onCostDrift } : {}),
         ...(config.onCreditExhausted ? { onCreditExhausted: config.onCreditExhausted } : {}),
         ...(config.onQuotaUnclassified ? { onQuotaUnclassified: config.onQuotaUnclassified } : {}),
+        ...(config.onModelUnavailable ? { onModelUnavailable: config.onModelUnavailable } : {}),
+        ...(config.onPacketTooLarge ? { onPacketTooLarge: config.onPacketTooLarge } : {}),
         costDemotedPoolIds,
         onResult: (result) => {
           out.allResults.push(result);

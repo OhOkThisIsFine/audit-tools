@@ -623,6 +623,8 @@ export type {
   CostDriftInfo,
   CreditExhaustionInfo,
   QuotaUnclassifiedInfo,
+  ModelUnavailableInfo,
+  PacketTooLargeInfo,
 } from "./friction/stepBoundaryCapture.js";
 export {
   captureStepBoundaryFriction,
@@ -630,6 +632,8 @@ export {
   captureCostDriftFriction,
   captureCreditExhaustionFriction,
   captureQuotaUnclassifiedFriction,
+  captureModelUnavailableFriction,
+  capturePacketTooLargeFriction,
   captureNewlyReachableBackendFriction,
 } from "./friction/stepBoundaryCapture.js";
 export { emitBlindDispatchFrictionIfBlind } from "./friction/blindDispatchFriction.js";
@@ -1082,6 +1086,7 @@ export type {
 export { HostModelRosterEntrySchema } from "./quota/scheduler.js";
 export { renderDispatchDriverInstruction } from "./quota/dispatchDriverPrompt.js";
 export {
+  AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS,
   computeDispatchCapacity,
   summarizeDispatchCapacityPools,
   detectLivelock,

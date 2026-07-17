@@ -822,6 +822,7 @@ test("selectProvider — skips a pool paused until a future reset (pause-honor, 
     new Set(),
     pausedMap,
     new Set(),
+    new Map(), // oversizedPacketPools
     now,
   );
   expect(slot !== null).toBeTruthy();
@@ -843,6 +844,7 @@ test("selectProvider — a pool whose reset has already passed is eligible again
     new Set(),
     pausedMap,
     new Set(),
+    new Map(), // oversizedPacketPools
     now,
   );
   expect(slot !== null, "past-reset pool is re-eligible").toBeTruthy();
@@ -1461,3 +1463,135 @@ test("scorePacketComplexity — returns packet.complexity field", () => {
   expect(scorePacketComplexity(packet)).toBe(0.75);
 });
 
+
+// ---------------------------------------------------------------------------
+// packet_too_large — per-packet pool skip + all-pools-strand livelock guard
+// (2026-07-17 gap-fix lap; RED pre-fix: an all-pools-413 packet re-queued
+// forever because noPoolCanAcceptNow is pool-level and never fires for a
+// per-packet condition)
+// ---------------------------------------------------------------------------
+
+test("createRollingDispatcher — packet_too_large on the ONLY pool strands the packet (never spins), pool stays usable for other packets", async () => {
+  await setupTmpQuotaDir();
+  const big = makePacket("p-big");
+  const small = makePacket("p-small");
+  const dispatched = [];
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => {
+      dispatched.push(packet.id);
+      if (packet.id === "p-big") {
+        return {
+          packet,
+          outcome: "packet_too_large",
+          packetTooLarge: { channel: "status", text: "Request too large (max 32MB).", rawMatch: "Request too large" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+  });
+
+  dispatcher.enqueue([big, small]);
+  const results = await dispatcher.run();
+
+  // p-big was dispatched exactly once (no infinite re-queue spin), p-small succeeded.
+  expect(dispatched.filter((id) => id === "p-big").length).toBe(1);
+  const smallResult = results.find((r) => r.packet.id === "p-small");
+  expect(smallResult?.outcome).toBe("success");
+});
+
+test("createRollingDispatcher — packet_too_large with a SECOND pool re-queues and succeeds there; hook fires with the pair", async () => {
+  await setupTmpQuotaDir();
+  const pkt = makePacket("p-413");
+  const attempts = [];
+  const hookCalls = [];
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-a"), makePool("pool-b")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      attempts.push(slot.poolId);
+      if (slot.poolId === "pool-a") {
+        return {
+          packet,
+          outcome: "packet_too_large",
+          packetTooLarge: { channel: "status", text: "HTTP 413", rawMatch: "413" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+    onPacketTooLarge: (info) => hookCalls.push(info),
+  });
+
+  dispatcher.enqueue([pkt]);
+  const results = await dispatcher.run();
+
+  const finalResult = results.find((r) => r.packet.id === "p-413" && r.outcome === "success");
+  expect(finalResult, "packet retried on the second pool and succeeded").toBeTruthy();
+  expect(attempts.includes("pool-b"), "second pool attempted").toBeTruthy();
+  expect(hookCalls.length).toBe(1);
+  expect(hookCalls[0]).toMatchObject({ poolId: "pool-a", packetId: "p-413" });
+});
+
+test("createRollingDispatcher — model_unavailable excludes the pool for the run and fires the hook once", async () => {
+  await setupTmpQuotaDir();
+  const p1 = makePacket("p-1");
+  const p2 = makePacket("p-2");
+  const hookCalls = [];
+  const attempts = [];
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [makePool("pool-404"), makePool("pool-ok")],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      attempts.push([packet.id, slot.poolId]);
+      if (slot.poolId === "pool-404") {
+        return {
+          packet,
+          outcome: "model_unavailable",
+          modelUnavailable: { channel: "status", text: "It may not exist", rawMatch: "may not exist" },
+        };
+      }
+      return { packet, outcome: "success" };
+    },
+    onModelUnavailable: (info) => hookCalls.push(info),
+  });
+
+  dispatcher.enqueue([p1, p2]);
+  const results = await dispatcher.run();
+
+  const successes = results.filter((r) => r.outcome === "success");
+  expect(successes.length, "both packets eventually succeed on the surviving pool").toBe(2);
+  expect(hookCalls.length, "hook fires once per pool, not per packet").toBe(1);
+  expect(hookCalls[0].poolId).toBe("pool-404");
+  const attemptsOn404After = attempts.filter(([, poolId]) => poolId === "pool-404");
+  expect(attemptsOn404After.length <= 2, "excluded pool never re-attempted after exclusion").toBeTruthy();
+});
+
+test("createRollingDispatcher — a packet that fits NO pool's declared context cap strands loud instead of spinning (never-dispatchable guard)", async () => {
+  await setupTmpQuotaDir();
+  // 30k cap; packet 20k + 15k harness overhead = 35k > cap → permanently unselectable.
+  const big = { ...makePacket("p-nofit"), estimatedTokens: 20_000 };
+  const small = makePacket("p-fits");
+  const dispatched = [];
+
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [{ ...makePool("pool-capped"), contextCapTokens: 30_000 }],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet) => {
+      dispatched.push(packet.id);
+      return { packet, outcome: "success" };
+    },
+  });
+
+  dispatcher.enqueue([big, small]);
+  const results = await dispatcher.run();
+
+  expect(dispatched, "only the fitting packet dispatches").toEqual(["p-fits"]);
+  expect(results.length).toBe(1);
+  const terminal = dispatcher.getTerminal();
+  expect(terminal, "stranded packet surfaces via the terminal").toBeTruthy();
+  expect(terminal.stranded_ids).toContain("p-nofit");
+});

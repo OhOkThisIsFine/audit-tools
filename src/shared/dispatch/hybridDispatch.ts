@@ -63,6 +63,12 @@ export interface HybridDispatchInput {
  * claiming each node to exactly one pool, and partition the claimed assignments by the
  * caller's in-process classification.
  *
+ * Per-pool packet-fit gate (U2): fit is enforced INSIDE the coordinator's claim walk
+ * (`nodeContextFits` in coordinator.ts) — a node is never CLAIMED to a pool whose
+ * declared context cap (plus agentic-harness overhead) it exceeds, so every assignment
+ * returned here is fit-guaranteed by construction. Repartitioning after the claim would
+ * strand the claim on the wrong pool id; that is why the gate is not here.
+ *
  * Behaviour falls out of the pool set with no special-casing:
  *  - host-only pools → every node lands in `host`; `inProcess` empty.
  *  - backend-only pools → every node lands in `inProcess`; `host` empty.

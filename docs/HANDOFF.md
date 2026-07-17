@@ -65,19 +65,19 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — close the dogfood's three feedback gaps, then the Agent-tool carrier
+## ▶ IMMEDIATE NEXT — re-dogfood the lane, then the Agent-tool carrier
 
-**The claude-worker dogfood RAN 2026-07-16** — transport proven end-to-end (480 proxied
-`/v1/messages` across all 4 free pools; spawn/routing/harvest/pause all live), **0/119 packets
-succeeded** on three named feedback gaps. Record:
-[`claude-worker-lane-dogfood-2026-07-16.md`](reviews/claude-worker-lane-dogfood-2026-07-16.md).
-Four expansion/classification defects found by the run were fixed same-day (`bebd69f2`, `b6a5f0ea`
-— un-released, on top of the un-released 3a/3b/3c). The paused run
-`20260717T062404401Z_audit_tasks_completed_001` is resumable to re-test once the gaps close.
-Next, in order:
-1. **Close the three feedback gaps** (backlog → "claude-worker lane dogfood feedback gaps", HIGH):
-   per-backend packet sizing (groq 413 class) · backend-429 → pool pacing/cooldown · populate-time
-   model verification (kimi 404 class). Loop-core work — full pipeline + attestation.
+**The three feedback gaps SHIPPED 2026-07-17** (plan + verified ground truth:
+[`claude-worker-feedback-gaps-plan-2026-07-17.md`](reviews/claude-worker-feedback-gaps-plan-2026-07-17.md)):
+the not-accepted launch branch now runs the full three-tier classifier (the dogfood root cause — a
+nonzero-exit worker's 429/404/413 text was never scanned); two new outcomes `model_unavailable`
+(pool exclusion, availability analog of cost drift) + `packet_too_large` (per-packet pool skip, no
+cooldown, livelock-strand guards); the capacity fold + coordinator claim walk are per-pool
+context-cap fit-aware (`quota.context_tokens`, stamped from the registry at populate); populate
+probes each top-K model and drops definite 404s. Accepted residuals: backlog → "claude-worker lane
+feedback-gap residuals". Next, in order:
+1. **Re-dogfood**: resume `20260717T062404401Z_audit_tasks_completed_001` (or fresh run) against a
+   live proxy — the backlog residual entry's ⬇ watch line is the pass/fail checklist.
 2. **Agent-tool carrier restart test**: from a Desktop session launched under
    `ANTHROPIC_BASE_URL=<proxy>`, test whether a `.claude/agents/*.md` frontmatter `model:` string
    rides verbatim to `/v1/messages` (agent defs load at session start — untestable mid-session).

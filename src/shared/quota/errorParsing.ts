@@ -189,6 +189,112 @@ export function detectCreditExhaustionFromChannel(
   return detectCreditExhaustionError(text);
 }
 
+/** Detection result for the model-unavailable error class (404 / not found). */
+export interface ModelUnavailableDetectionResult {
+  isModelUnavailable: boolean;
+  rawMatch: string | null;
+}
+
+// Model-unavailable patterns (HTTP 404, "not found", "may not exist", etc.).
+// Distinct from rate limits and credit exhaustion — a 404 is permanent for the
+// run (the model is not served by this provider) and should trigger pool
+// exclusion without cooldown.
+const MODEL_UNAVAILABLE_PATTERNS = [
+  /\b404\b/,
+  /model_not_found/i,
+  /\bmay not exist\b/i,
+  /no such model/i,
+  /does not exist or you do not have access/i,
+];
+
+/**
+ * Detect a model-unavailable condition (HTTP 404, "not found" class) — distinct
+ * from {@link detectRateLimitError}: a positive result here means the model is
+ * not served by this provider and the pool should be excluded for the run
+ * (never re-queued to this pool, but other pools/packets unaffected).
+ */
+export function detectModelUnavailableError(
+  text: string,
+): ModelUnavailableDetectionResult {
+  for (const pattern of MODEL_UNAVAILABLE_PATTERNS) {
+    const match = pattern.exec(text);
+    if (match) {
+      return { isModelUnavailable: true, rawMatch: match[0] };
+    }
+  }
+
+  return { isModelUnavailable: false, rawMatch: null };
+}
+
+/**
+ * Channel-isolated model-unavailable detection (mirrors
+ * {@link detectRateLimitFromChannel}): only the worker's `error`/`status`
+ * channel is inspected, never the consumed `result` channel, so a healthy
+ * AuditResult that merely quotes a not-found string can never trip it.
+ */
+export function detectModelUnavailableFromChannel(
+  channel: WorkerOutputChannel,
+  text: string,
+): ModelUnavailableDetectionResult {
+  if (channel === "result") {
+    return { isModelUnavailable: false, rawMatch: null };
+  }
+  return detectModelUnavailableError(text);
+}
+
+/** Detection result for the request-too-large error class (HTTP 413). */
+export interface RequestTooLargeDetectionResult {
+  isRequestTooLarge: boolean;
+  rawMatch: string | null;
+}
+
+// Request-too-large patterns (HTTP 413, "request too large", "payload too large", etc.).
+// Distinct from rate limits and credit exhaustion — a 413 indicates a packet
+// sizing fault (for this particular packet/pool combination) and should trigger
+// a per-packet skip for that pool without cooldown.
+const REQUEST_TOO_LARGE_PATTERNS = [
+  /request too large/i,
+  /\b413\b/,
+  /payload too large/i,
+  /content too long/i,
+];
+
+/**
+ * Detect a request-too-large condition (HTTP 413, "request too large" class) —
+ * distinct from {@link detectRateLimitError}: a positive result here means the
+ * packet is too large for this particular pool and should skip that pool
+ * (without cooldown; a sizing fault must not cool a healthy pool), but other
+ * packets and pools are unaffected.
+ */
+export function detectRequestTooLargeError(
+  text: string,
+): RequestTooLargeDetectionResult {
+  for (const pattern of REQUEST_TOO_LARGE_PATTERNS) {
+    const match = pattern.exec(text);
+    if (match) {
+      return { isRequestTooLarge: true, rawMatch: match[0] };
+    }
+  }
+
+  return { isRequestTooLarge: false, rawMatch: null };
+}
+
+/**
+ * Channel-isolated request-too-large detection (mirrors
+ * {@link detectRateLimitFromChannel}): only the worker's `error`/`status`
+ * channel is inspected, never the consumed `result` channel, so a healthy
+ * AuditResult that merely quotes a too-large string can never trip it.
+ */
+export function detectRequestTooLargeFromChannel(
+  channel: WorkerOutputChannel,
+  text: string,
+): RequestTooLargeDetectionResult {
+  if (channel === "result") {
+    return { isRequestTooLarge: false, rawMatch: null };
+  }
+  return detectRequestTooLargeError(text);
+}
+
 // Slice A2b (TIER 2 of the three-tier classifier — see rollingDispatch.ts's
 // header doc for the full design): a deliberately BROAD, routing-only
 // pre-filter for "does this text merely SMELL quota/billing-related?". Neither

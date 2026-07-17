@@ -297,6 +297,7 @@ export async function populateProxyCatalogIfMissing(
       sources: cache.sources,
       written: false,
       reason: "populate cache already present",
+      dropped: [],
     };
   }
   return populateDeclaredProxyCatalog(deps);

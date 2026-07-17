@@ -4,6 +4,10 @@ const {
   detectRateLimitError,
   detectCreditExhaustionError,
   detectCreditExhaustionFromChannel,
+  detectModelUnavailableError,
+  detectModelUnavailableFromChannel,
+  detectRequestTooLargeError,
+  detectRequestTooLargeFromChannel,
   detectQuotaSuspicious,
 } = await import("../../src/shared/quota/errorParsing.ts");
 const { ClaudeCodeErrorParser } = await import("../../src/shared/quota/errorParsers/claudeCodeErrorParser.ts");
@@ -206,4 +210,104 @@ test("detectQuotaSuspicious: is a superset — every precise credit/rate-limit m
   const rateText = "429 Too Many Requests";
   expect(detectRateLimitError(rateText).isRateLimited).toBe(true);
   expect(detectQuotaSuspicious(rateText)).toBe(true);
+});
+
+// Backlog HIGH (2026-07-17) — model-unavailable error class (404 / not found).
+// A provider that returns 404 for a model has no reset timer — the model is not
+// served by that provider. detectModelUnavailableError must recognize it as a
+// DISTINCT class from detectRateLimitError, never both, never neither.
+
+test("detectModelUnavailableError: recognizes exact dogfood-run model-unavailable string (verbatim fixture)", () => {
+  const dogfoodText =
+    "There's an issue with the selected model (nim/moonshotai/kimi-k2.6). It may not exist or you may not have access to it. Run --model to pick a different model.";
+  expect(detectModelUnavailableError(dogfoodText).isModelUnavailable).toBe(true);
+  expect(detectModelUnavailableError(dogfoodText).rawMatch).toContain("may not exist");
+});
+
+test("detectModelUnavailableError: recognizes all MODEL_UNAVAILABLE_PATTERNS", () => {
+  expect(detectModelUnavailableError("HTTP 404 Not Found").isModelUnavailable).toBe(true);
+  expect(detectModelUnavailableError("model_not_found").isModelUnavailable).toBe(true);
+  expect(detectModelUnavailableError("This model may not exist or you may not have access to it.").isModelUnavailable).toBe(true);
+  expect(detectModelUnavailableError("no such model available").isModelUnavailable).toBe(true);
+  expect(detectModelUnavailableError("does not exist or you do not have access").isModelUnavailable).toBe(true);
+});
+
+test("detectModelUnavailableError: a 404 is NOT classified as rate-limited", () => {
+  const notFoundText = "HTTP 404 Not Found: model does not exist or you do not have access";
+  expect(detectModelUnavailableError(notFoundText).isModelUnavailable).toBe(true);
+  expect(detectRateLimitError(notFoundText).isRateLimited).toBe(false);
+});
+
+test("detectModelUnavailableFromChannel: channel-isolated (CE-003 parallel) — only error/status trip it, never result", () => {
+  const text = "This model may not exist or you may not have access to it.";
+  expect(detectModelUnavailableFromChannel("error", text).isModelUnavailable).toBe(true);
+  expect(detectModelUnavailableFromChannel("status", text).isModelUnavailable).toBe(true);
+  // A healthy AuditResult that merely QUOTES a model-unavailable string must never trip it via the result channel.
+  expect(detectModelUnavailableFromChannel("result", text).isModelUnavailable).toBe(false);
+});
+
+// Backlog HIGH (2026-07-17) — request-too-large error class (413).
+// A packet that is too large for a particular pool indicates a sizing fault
+// (not a permanent issue like credit exhaustion or model unavailability).
+// detectRequestTooLargeError must recognize it as a DISTINCT class.
+
+test("detectRequestTooLargeError: recognizes exact dogfood-run request-too-large string (verbatim fixture)", () => {
+  const dogfoodText = "Request too large (max 32MB). Try with a smaller file.";
+  expect(detectRequestTooLargeError(dogfoodText).isRequestTooLarge).toBe(true);
+  expect(detectRequestTooLargeError(dogfoodText).rawMatch).toContain("Request too large");
+});
+
+test("detectRequestTooLargeError: recognizes all REQUEST_TOO_LARGE_PATTERNS", () => {
+  expect(detectRequestTooLargeError("request too large for this endpoint").isRequestTooLarge).toBe(true);
+  expect(detectRequestTooLargeError("HTTP 413 Payload Too Large").isRequestTooLarge).toBe(true);
+  expect(detectRequestTooLargeError("payload too large").isRequestTooLarge).toBe(true);
+  expect(detectRequestTooLargeError("content too long").isRequestTooLarge).toBe(true);
+});
+
+test("detectRequestTooLargeError: a 413 is NOT classified as rate-limited or model-unavailable", () => {
+  const tooLargeText = "Request too large (max 32MB). Try with a smaller file.";
+  expect(detectRequestTooLargeError(tooLargeText).isRequestTooLarge).toBe(true);
+  expect(detectRateLimitError(tooLargeText).isRateLimited).toBe(false);
+  expect(detectModelUnavailableError(tooLargeText).isModelUnavailable).toBe(false);
+});
+
+test("detectRequestTooLargeError: a 413 is NOT matched by detectQuotaSuspicious (cross-exclusivity)", () => {
+  const tooLargeText = "Request too large (max 32MB). Try with a smaller file.";
+  expect(detectRequestTooLargeError(tooLargeText).isRequestTooLarge).toBe(true);
+  // Confirmed by spec F4: detectQuotaSuspicious does NOT match the groq 413 text.
+  expect(detectQuotaSuspicious(tooLargeText)).toBe(false);
+});
+
+test("detectRequestTooLargeFromChannel: channel-isolated (CE-003 parallel) — only error/status trip it, never result", () => {
+  const text = "payload too large";
+  expect(detectRequestTooLargeFromChannel("error", text).isRequestTooLarge).toBe(true);
+  expect(detectRequestTooLargeFromChannel("status", text).isRequestTooLarge).toBe(true);
+  // A healthy AuditResult that merely quotes a too-large string must never trip it via the result channel.
+  expect(detectRequestTooLargeFromChannel("result", text).isRequestTooLarge).toBe(false);
+});
+
+// Cross-exclusivity: the three TIER-1 detectors must be disjoint.
+test("TIER-1 detectors are mutually exclusive: rate-limit dogfood string", () => {
+  const rateText = 'API Error: Request rejected (429) · openai backend HTTP 429: {"status":429,"title":"Too Many Requests"}';
+  expect(detectRateLimitError(rateText).isRateLimited).toBe(true);
+  expect(detectModelUnavailableError(rateText).isModelUnavailable).toBe(false);
+  expect(detectRequestTooLargeError(rateText).isRequestTooLarge).toBe(false);
+  expect(detectCreditExhaustionError(rateText).isCreditExhausted).toBe(false);
+});
+
+test("TIER-1 detectors are mutually exclusive: model-unavailable dogfood string", () => {
+  const notFoundText =
+    "There's an issue with the selected model (nim/moonshotai/kimi-k2.6). It may not exist or you may not have access to it. Run --model to pick a different model.";
+  expect(detectRateLimitError(notFoundText).isRateLimited).toBe(false);
+  expect(detectModelUnavailableError(notFoundText).isModelUnavailable).toBe(true);
+  expect(detectRequestTooLargeError(notFoundText).isRequestTooLarge).toBe(false);
+  expect(detectCreditExhaustionError(notFoundText).isCreditExhausted).toBe(false);
+});
+
+test("TIER-1 detectors are mutually exclusive: request-too-large dogfood string", () => {
+  const tooLargeText = "Request too large (max 32MB). Try with a smaller file.";
+  expect(detectRateLimitError(tooLargeText).isRateLimited).toBe(false);
+  expect(detectModelUnavailableError(tooLargeText).isModelUnavailable).toBe(false);
+  expect(detectRequestTooLargeError(tooLargeText).isRequestTooLarge).toBe(true);
+  expect(detectCreditExhaustionError(tooLargeText).isCreditExhausted).toBe(false);
 });

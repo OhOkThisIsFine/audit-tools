@@ -136,3 +136,88 @@ test("audit hybrid: in-process provider classification (host / IDE / worker-comm
   // Excluded for audit (it IS audit's conventional host-dispatch default).
   expect(isInProcessAuditPool({ providerName: "worker-command" })).toBe(false);
 });
+
+// Per-pool packet-fit gate (U2, 2026-07-17 gap-fix lap): fit is enforced inside the
+// coordinator's claim walk — a node is never CLAIMED to a pool whose declared
+// contextCapTokens (plus agentic-harness overhead) it exceeds. RED on pre-fix HEAD:
+// the old linear-cursor walk claimed largest-first onto whichever pool had slots,
+// so the oversized node landed on the capped pool and 413'd at dispatch.
+test("audit hybrid: an oversized node is never claimed to a capped pool — it lands on the cap-less pool", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hybrid-fit-"));
+  try {
+    const registry = new ClaimRegistry(join(dir, "claims.json"));
+    const store = settledStore();
+    const capped = nimPool({
+      id: "pool/groq",
+      contextCapTokens: 30_000,
+      quotaSourceSnapshot: snapshot(0.95),
+    });
+    const capless = nimPool({ id: "pool/host", providerName: "claude-code" });
+    // 20k tokens + 15k harness overhead = 35k > groq's 30k cap → must not claim to groq.
+    const big = [{ id: "task-big", estimatedTokens: 20_000 }];
+    const { inProcess, host, coordinator } = await planHybridDispatch({
+      frontier: big,
+      pools: [capped, capless],
+      sessionConfig: SESSION,
+      claimRegistry: registry,
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: isInProcessAuditPool,
+    });
+    const all = [...inProcess, ...host];
+    expect(all.length).toBe(1);
+    expect(all[0].poolId).toBe("pool/host");
+    for (const a of all) await coordinator.release(a);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("audit hybrid: a small node still claims to the capped pool (fit gate does not over-filter)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hybrid-fit-small-"));
+  try {
+    const registry = new ClaimRegistry(join(dir, "claims.json"));
+    const store = settledStore();
+    const capped = nimPool({ id: "pool/groq", contextCapTokens: 30_000 });
+    const small = [{ id: "task-small", estimatedTokens: 1_000 }];
+    const { inProcess, host, coordinator } = await planHybridDispatch({
+      frontier: small,
+      pools: [capped],
+      sessionConfig: SESSION,
+      claimRegistry: registry,
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: isInProcessAuditPool,
+    });
+    const all = [...inProcess, ...host];
+    expect(all.length).toBe(1);
+    expect(all[0].poolId).toBe("pool/groq");
+    for (const a of all) await coordinator.release(a);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("audit hybrid: a node that fits NO active pool is left unclaimed (re-offered), never mis-claimed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hybrid-fit-none-"));
+  try {
+    const registry = new ClaimRegistry(join(dir, "claims.json"));
+    const store = settledStore();
+    const cappedA = nimPool({ id: "pool/groq", contextCapTokens: 20_000 });
+    const cappedB = nimPool({ id: "pool/nim-small", contextCapTokens: 25_000 });
+    const big = [{ id: "task-huge", estimatedTokens: 50_000 }];
+    const { inProcess, host } = await planHybridDispatch({
+      frontier: big,
+      pools: [cappedA, cappedB],
+      sessionConfig: SESSION,
+      claimRegistry: registry,
+      readSettled: store.readSettled,
+      onSettle: store.onSettle,
+      isInProcess: isInProcessAuditPool,
+    });
+    expect(inProcess.length).toBe(0);
+    expect(host.length).toBe(0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

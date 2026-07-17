@@ -22,6 +22,14 @@ import { QuotaCoverageStatusSchema } from "./coverage.js";
 import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
 
 /**
+ * Rough estimate of the agentic-CLI harness's own system-prompt/tool overhead
+ * added on top of the packet prompt. Applied when fit-checking a packet against
+ * a pool's contextCapTokens to ensure the pool's context window can fit both the
+ * packet and the harness.
+ */
+export const AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000;
+
+/**
  * Reason a partial-completion terminal fired on the dispatch engine.
  * - `empty_pool`: no capacity pools are available (pool list is empty or every
  *   pool reports zero slots) and the engine cannot dispatch remaining items.
@@ -187,6 +195,14 @@ export interface CapacityPool {
    */
   concurrencyCap?: number | null;
   /**
+   * Endpoint-declared per-request/context token cap (from `source.quota.context_tokens`
+   * or populate-stamped registry data). null/absent = unknown cap → no fit filtering.
+   * Used at packet→pool binding to skip pools whose context window cannot fit the packet
+   * plus the agentic-worker harness overhead. Applied only for `worker_kind: "agentic"`
+   * sources; single-shot sources keep their own inline caps.
+   */
+  contextCapTokens?: number | null;
+  /**
    * Operator-declared a-priori `$/Mtok` for this pool's endpoint (from
    * `source.cost_per_mtok`). Carried through unfolded to the summary → the admission
    * cost rank (rung 2, authoritative over the models.dev catalog); `0` = declared-free
@@ -282,6 +298,12 @@ export interface PoolDispatchAllocation {
    */
   declaredCapabilityRank?: number | null;
   /**
+   * Echo of {@link CapacityPool.contextCapTokens} — the pool's endpoint-declared
+   * per-request context-token cap. Carried through unfolded so selection-time fit
+   * checking can skip pools that don't fit the packet; never affects the slot math here.
+   */
+  contextCapTokens?: number | null;
+  /**
    * True when this pool is the conversation host's own pool (no backing
    * {@link CapacityPool.source}), false for a configured backend source. Carried so
    * the throughput axis of the cost↔speed dial can tell a hardware-parallel source
@@ -361,6 +383,12 @@ export const DispatchCapacityPoolSummarySchema = z
      * capability tiebreak among cost-equal, same-tier pools. Absent ⇒ tier ordinal only.
      */
     capability_rank: z.number().nullable().optional(),
+    /**
+     * Endpoint-declared per-request context-token cap for this pool (from source.quota.context_tokens;
+     * see CapacityPool.contextCapTokens). Carried so selection-time fit checking can skip
+     * pools that don't fit the packet; never affects the slot math here.
+     */
+    context_cap_tokens: z.number().int().min(1).nullable().optional(),
   })
   .strict();
 export type DispatchCapacityPoolSummary = z.infer<
@@ -493,21 +521,43 @@ export function computeDispatchCapacity(
   if (pendingTokens.length === 0) {
     allocations.push(schedulePool(input.pools[0]!, input.sessionConfig, []));
   } else {
-    let cursor = 0;
+    // Per-pool packet-fit gate (U2): a pool with a declared context cap is only
+    // ever scheduled over the items that FIT it (item + agentic-harness overhead
+    // ≤ cap), so its slot count never claims work it would 413. The remaining
+    // list therefore can no longer be a contiguous cursor over the sorted array —
+    // an unfitting item must stay pending for a later (larger or cap-less) pool.
+    let remainingList = pendingTokens;
     for (const pool of input.pools) {
-      if (cursor >= pendingTokens.length) break;
+      if (remainingList.length === 0) break;
       if (remainingGlobalBudget !== null && remainingGlobalBudget <= 0) break;
 
-      const remaining = pendingTokens.slice(cursor);
+      const cap = pool.contextCapTokens;
+      const fitting =
+        cap == null
+          ? remainingList
+          : remainingList.filter(
+              (t) => t + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS <= cap,
+            );
+      if (fitting.length === 0) continue;
+
       const allocation = schedulePoolConverging(
         pool,
         input.sessionConfig,
-        remaining,
+        fitting,
         remainingGlobalBudget,
       );
 
       allocations.push(allocation);
-      cursor += allocation.slots;
+      // Remove the items this pool took: the first `slots` of ITS fitting subset
+      // (both lists are sorted descending, so this is the largest-fitting-first
+      // layout the claim walk mirrors).
+      const taken = fitting.slice(0, allocation.slots);
+      const next = [...remainingList];
+      for (const t of taken) {
+        const i = next.indexOf(t);
+        if (i !== -1) next.splice(i, 1);
+      }
+      remainingList = next;
       if (remainingGlobalBudget !== null) {
         remainingGlobalBudget -= allocation.slots;
       }
@@ -648,6 +698,7 @@ function schedulePool(
     ...(pool.concurrencyCap != null ? { concurrencyCap: pool.concurrencyCap } : {}),
     ...(pool.declaredCostPerMtok != null ? { declaredCostPerMtok: pool.declaredCostPerMtok } : {}),
     ...(pool.declaredCapabilityRank != null ? { declaredCapabilityRank: pool.declaredCapabilityRank } : {}),
+    ...(pool.contextCapTokens != null ? { contextCapTokens: pool.contextCapTokens } : {}),
   };
 }
 
@@ -693,5 +744,6 @@ export function summarizeDispatchCapacityPools(
     ...(allocation.concurrencyCap != null ? { concurrency_cap: allocation.concurrencyCap } : {}),
     ...(allocation.declaredCostPerMtok != null ? { declared_cost_per_mtok: allocation.declaredCostPerMtok } : {}),
     ...(allocation.declaredCapabilityRank != null ? { capability_rank: allocation.declaredCapabilityRank } : {}),
+    ...(allocation.contextCapTokens != null ? { context_cap_tokens: allocation.contextCapTokens } : {}),
   }));
 }
