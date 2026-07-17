@@ -78,10 +78,17 @@ test("resolveRollingEngineFlag: distinct env var names stay independent (no cros
 
 // ── assertHostProviderName (Tier D) ─────────────────────────────────────────
 
-test("assertHostProviderName: accepts every known ProviderName without throwing", () => {
+test("assertHostProviderName: accepts every host-capable ProviderName without throwing", () => {
   for (const name of PROVIDER_NAMES) {
+    if (name === "claude-worker") continue;
     expect(() => assertHostProviderName(name)).not.toThrow();
   }
+});
+
+test("assertHostProviderName: rejects claude-worker — a dispatch worker class can never be the driving host (quota-attribution key)", () => {
+  expect(() => assertHostProviderName("claude-worker")).toThrow(
+    /--host-provider must be one of:.*got "claude-worker"/,
+  );
 });
 
 test("assertHostProviderName: rejects an unknown value with the shared message", () => {

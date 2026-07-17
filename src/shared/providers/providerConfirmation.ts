@@ -70,6 +70,9 @@ function defaultCapabilityTier(name: ResolvedProviderName): CapabilityTier {
     case "vscode-task":
     case "antigravity":
     case "agy":
+    case "claude-worker":
+      // Proxied non-Claude backend behind the Claude harness — ranks strictly below
+      // the host tier by default (the operator promotes deliberately; plan §risks).
       return "capable";
     case "worker-command":
       return "unknown";

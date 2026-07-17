@@ -48,8 +48,13 @@ describe("PROVIDER_NAMES contains the expected provider strings", () => {
     expect(PROVIDER_NAMES.includes("agy")).toBeTruthy();
   });
 
-  it("has exactly 10 entries", () => {
-    expect(PROVIDER_NAMES.length).toBe(10);
+  it("contains 'claude-worker'", () => {
+    // The proxied isolated worker class (commit 3a) — NOT the conversation host.
+    expect(PROVIDER_NAMES.includes("claude-worker")).toBeTruthy();
+  });
+
+  it("has exactly 11 entries", () => {
+    expect(PROVIDER_NAMES.length).toBe(11);
   });
 });
 

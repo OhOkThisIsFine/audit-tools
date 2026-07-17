@@ -448,6 +448,13 @@ function constructProvider(
   switch (providerName) {
     case "worker-command":
       return new WorkerCommandProvider();
+    case "claude-worker":
+      // Contract lands in 3a; the launch transport (ClaudeWorkerProvider — isolated
+      // `claude -p` spawn fronted by the repair-proxy) is commit 3b. Loud, not silent:
+      // a claude-worker source must be un-launchable until the transport exists.
+      throw new Error(
+        "claude-worker has no launch transport yet — ClaudeWorkerProvider lands in commit 3b (docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md).",
+      );
     case "subprocess-template":
       if (!sessionConfig.subprocess_template?.command_template?.length) {
         throw new Error(

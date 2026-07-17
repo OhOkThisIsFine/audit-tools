@@ -6,6 +6,7 @@ export const PROVIDER_NAMES = [
   "worker-command",
   "subprocess-template",
   "claude-code",
+  "claude-worker",
   "codex",
   "opencode",
   "openai-compatible",
@@ -26,9 +27,16 @@ export type ResolvedProviderName = Exclude<ProviderName, "auto">;
 export function assertHostProviderName(
   value: string,
 ): asserts value is ProviderName {
-  if (!(PROVIDER_NAMES as readonly string[]).includes(value)) {
+  // claude-worker is the proxied dispatch WORKER class — it can never be the
+  // conversation host driving a run, and host_provider is a quota-ATTRIBUTION
+  // key, so admitting it here would mis-charge fan-out to a worker identity.
+  if (
+    value === "claude-worker" ||
+    !(PROVIDER_NAMES as readonly string[]).includes(value)
+  ) {
+    const hostNames = PROVIDER_NAMES.filter((n) => n !== "claude-worker");
     throw new Error(
-      `--host-provider must be one of: ${PROVIDER_NAMES.join(", ")} (got "${value}")`,
+      `--host-provider must be one of: ${hostNames.join(", ")} (got "${value}")`,
     );
   }
 }
@@ -271,6 +279,13 @@ export const PROVIDER_SECTION_KEYS = {
  * conversation host (`claude-code`) and the IDE-bound providers (`vscode-task` /
  * `antigravity`), which are driven through their host/IDE, not as a generic
  * dispatchable source with an endpoint + parameters.
+ *
+ * `claude-worker` is NOT the conversation host: it is the proxied, ISOLATED
+ * Claude-harness worker class — a `claude -p` spawn fronted by the repair-proxy
+ * (`endpoint` = the proxy url, `--model <backend_provider>/<model>` composed at
+ * launch). Every self-spawn / Gate-0 refusal layer keys on `claude-code` and never
+ * sees this name, so the host guards stay byte-identical
+ * (docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md).
  */
 export const DISPATCHABLE_SOURCE_PROVIDERS = [
   "openai-compatible",
@@ -279,9 +294,35 @@ export const DISPATCHABLE_SOURCE_PROVIDERS = [
   "worker-command",
   "subprocess-template",
   "agy",
+  "claude-worker",
 ] as const;
 export type DispatchableSourceProvider =
   (typeof DISPATCHABLE_SOURCE_PROVIDERS)[number];
+
+/**
+ * The worker-kind axis of the unified dispatch worker model
+ * (`spec/unified-dispatch-worker-model.md`): an `agentic` worker drives a tool-using
+ * harness inside the node's worktree (Read/Edit/Bash — packet references files by
+ * path); a `single_shot` worker is one HTTP round-trip with no tools (packet content
+ * must be INLINED). Launch-side enforcement keys on this; admission `capable()`
+ * consumption is follow-on.
+ */
+export const WORKER_KINDS = ["agentic", "single_shot"] as const;
+export type WorkerKind = (typeof WORKER_KINDS)[number];
+
+/**
+ * Derive a source's {@link WorkerKind}. An explicit `worker_kind` on the source wins
+ * (the declarable override for the genuinely-ambiguous case); otherwise the provider
+ * determines it — every harness-driving backend (claude-worker / codex / agy /
+ * opencode / worker-command / subprocess-template) is `agentic`; `openai-compatible`
+ * is the lone `single_shot` (one `/chat/completions` round-trip, no tools).
+ */
+export function deriveWorkerKind(
+  source: Pick<DispatchableSource, "provider" | "worker_kind">,
+): WorkerKind {
+  if (source.worker_kind !== undefined) return source.worker_kind;
+  return source.provider === "openai-compatible" ? "single_shot" : "agentic";
+}
 
 /**
  * A generic dispatchable backend source — the uniform shape the dispatch engine
@@ -316,6 +357,20 @@ export interface DispatchableSource {
   api_key_env?: string;
   /** Inline API key (discouraged — prefer `api_key_env`). */
   api_key?: string;
+  /**
+   * Worker-kind override (see {@link WorkerKind} / {@link deriveWorkerKind}).
+   * Normally DERIVED from the provider — declare it only where genuinely ambiguous.
+   */
+  worker_kind?: WorkerKind;
+  /**
+   * The BACKEND provider actually serving this source when a transport fronts it
+   * (`claude-worker`: the repair-proxy routes to e.g. `"nim"`). The transport NEVER
+   * enters the identity: the quota/ledger key stays
+   * `backend_provider[#account]/model`, so a proxied lane and a direct lane to the
+   * same backend dedup to ONE quota identity. The namespace string
+   * `<backend_provider>/<model>` is composed AT LAUNCH for argv only, never stored.
+   */
+  backend_provider?: string;
   /**
    * Backend-specific extra parameters, merged into the provider's config block:
    * `temperature` / `headers` / `max_output_tokens` / `response_format_json` /

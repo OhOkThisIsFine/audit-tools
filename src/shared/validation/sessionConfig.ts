@@ -20,6 +20,7 @@ import {
   DISPATCH_INVENTORY_FIELDS,
   PROVIDER_NAMES,
   SESSION_UI_MODES,
+  WORKER_KINDS,
   type AnalyzerSetting,
   type ProviderName,
   type RepoSessionIntent,
@@ -131,7 +132,10 @@ const DISPATCHABLE_SOURCE_STRING_FIELDS = [
   "api_key",
   "credentials_path",
   "account",
+  "backend_provider",
 ] as const;
+
+const VALID_WORKER_KINDS = new Set<string>(WORKER_KINDS);
 
 /**
  * Validate `sessionConfig.sources[]` — the explicit dispatchable-source pool
@@ -177,6 +181,46 @@ function validateDispatchableSources(
       const value = source[field];
       if (value !== undefined && typeof value !== "string") {
         pushIssue(issues, `${path}.${field}`, `${field} must be a string.`);
+      }
+    }
+    // `backend_provider` is a quota-ledger KEY segment (`backend_provider[#account]/model`);
+    // an empty string would silently mint a nameless pool identity.
+    if (
+      typeof source.backend_provider === "string" &&
+      source.backend_provider.trim().length === 0
+    ) {
+      pushIssue(
+        issues,
+        `${path}.backend_provider`,
+        "backend_provider must be a non-empty string when provided.",
+      );
+    }
+    if (
+      source.worker_kind !== undefined &&
+      (typeof source.worker_kind !== "string" ||
+        !VALID_WORKER_KINDS.has(source.worker_kind))
+    ) {
+      pushIssue(
+        issues,
+        `${path}.worker_kind`,
+        `worker_kind must be one of: ${WORKER_KINDS.join(", ")}.`,
+      );
+    }
+    // A claude-worker source IS the proxied spawn: without the proxy url there is
+    // nothing to front the isolated `claude -p` (endpoint is a constructor invariant
+    // in 3b), and without a model there is no namespace route to compose.
+    if (provider === "claude-worker") {
+      for (const field of ["endpoint", "model"] as const) {
+        const entry = source[field];
+        if (typeof entry !== "string" || entry.trim().length === 0) {
+          pushIssue(
+            issues,
+            `${path}.${field}`,
+            `${field} is required for a claude-worker source (${
+              field === "endpoint" ? "the repair-proxy url" : "the backend-native model id"
+            }).`,
+          );
+        }
       }
     }
     if (source.parameters !== undefined && !isRecord(source.parameters)) {
