@@ -1,0 +1,30 @@
+{
+  "self": {
+    "provider": "claude-code",
+    "context_tokens": 200000,
+    "output_tokens": 32000,
+    "can_dispatch_subagents": true
+  },
+  "sources": [
+    {
+      "id": "nim-primary",
+      "provider": "openai-compatible",
+      "endpoint": "https://integrate.api.nvidia.com/v1",
+      "model": "openai/gpt-oss-120b",
+      "api_key_env": "NVIDIA_API_KEY",
+      "quota": {
+        "context_tokens": 128000,
+        "output_tokens": 16000,
+        "requests_per_minute": 40,
+        "max_concurrent": 4
+      }
+    },
+    {
+      "id": "codex-cli",
+      "provider": "codex",
+      "parameters": {
+        "sandbox_mode": "workspace-write"
+      }
+    }
+  ]
+}

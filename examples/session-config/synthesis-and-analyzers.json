@@ -1,0 +1,19 @@
+{
+  "synthesis": {
+    "narrative": true
+  },
+  "analyzers": {
+    "knip": "auto",
+    "eslint": "repo",
+    "semgrep": "skip"
+  },
+  "external_acquisition": {
+    "enabled": true
+  },
+  "observability": {
+    "run_log": true
+  },
+  "graph": {
+    "llm_edge_reasoning": false
+  }
+}

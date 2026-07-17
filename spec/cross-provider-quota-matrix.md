@@ -217,8 +217,8 @@ proactively — **`skainguyen1412/antigravity-usage`** (its README states a "Dua
 **Language Server** first, then the Google **Cloud Code API** fallback — i.e. exactly the two routes above),
 **`fuelcheck`** ("Gemini 3.1 Pro: 62% remaining (resets in 3h 14m)"), **Antigravity Cockpit**, and
 **`steipete/CodexBar` #1178**. So the future-proof Gemini-family `QuotaSource` is **Antigravity (CLI)**, not
-gemini-cli — reuse the §3 local-LS/cloudcode-pa recipe. SHIPPED (as a same-mechanism alias, not a new source):
-`agy` is aliased into the existing `AntigravityQuotaSource` (`ANTIGRAVITY_PROVIDER_NAMES =
+gemini-cli — reuse the §3 local-LS/cloudcode-pa recipe. `agy` is a same-mechanism alias, not a new source:
+it is aliased into the existing `AntigravityQuotaSource` (`ANTIGRAVITY_PROVIDER_NAMES =
 new Set(["antigravity","agy"])` in `src/shared/quota/antigravityQuotaSource.ts`), which reads only
 `state.vscdb` / `ANTIGRAVITY_ACCESS_TOKEN` — the IDE credential path. The earlier build caveat (the CLI's
 token store likely differs from the IDE's `state.vscdb`) was **bypassed by aliasing, not addressed**: it

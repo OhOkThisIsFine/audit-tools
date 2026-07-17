@@ -1,0 +1,20 @@
+{
+  "autonomous_mode": false,
+  "quota": {
+    "safety_margin": 0.15,
+    "default_context_tokens": 180000,
+    "reserved_output_tokens": 32000
+  },
+  "dispatch": {
+    "confirm_threshold": 10,
+    "max_packets": 40,
+    "routing_tiers": {
+      "deep_at": 0.7,
+      "standard_at": 0.35
+    }
+  },
+  "design_review": {
+    "conceptual_depth": "deep",
+    "perspectives": 3
+  }
+}

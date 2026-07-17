@@ -1,0 +1,13 @@
+{
+  "self": {
+    "provider": "claude-code",
+    "model_id": "host-model-id",
+    "context_tokens": 200000,
+    "output_tokens": 32000,
+    "max_active_subagents": 6,
+    "parallel_workers": 4,
+    "can_dispatch_subagents": true,
+    "can_restrict_subagent_tools": true,
+    "can_select_subagent_model": true
+  }
+}

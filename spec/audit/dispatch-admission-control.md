@@ -184,24 +184,24 @@ ordering matters).
   only when the two providers differ does demotion produce two genuinely distinct,
   non-aliasing pools.
 
-## What changes
+## Where the pieces live
 
-- **Remove the reported concurrency number.** The operator override for the
+- **There is no reported concurrency number.** The operator override for the
   in-flight subagent cap (the `--auditor` descriptor's `self.max_active_subagents`
-  field, formerly the standalone `--host-max-active-subagents` flag) is demoted
-  to an explicit operator-only hard cap (one pool's optional in-flight cap),
+  field, formerly the standalone `--host-max-active-subagents` flag) is an
+  explicit operator-only hard cap (one pool's optional in-flight cap),
   never the primary source and never an LLM's answer to "how many?".
-- **Add the shared reservation ledger** alongside the learned-quota store
+- **The shared reservation ledger** sits alongside the learned-quota store
   (`readQuotaState`/`recordWaveOutcome`), same `withFileLock`, keyed by
-  `resourceKey`. The dispatch-quota schema already anticipates it
-  (`in_flight_tokens`, `remaining_token_budget`).
-- **Audit reaches parity with remediate.** Both resolve driver identity through
+  `resourceKey` (the dispatch-quota schema's `in_flight_tokens`,
+  `remaining_token_budget`).
+- **Audit and remediate are at parity.** Both resolve driver identity through
   the shared `resolveHostProviderName`: remediate calls it directly
   (`src/remediate/steps/nextStep.ts`); audit calls it via the thin
   `resolveHostDispatchProviderName` wrapper (`src/audit/cli/rollingAuditDispatch.ts`),
   which falls back to it once the in-process-dispatch case is ruled out.
-- **`max_concurrent_agents` becomes emergent** — the dispatch prompt drives the
-  admission loop, not a precomputed cap.
+- **There is no precomputed `max_concurrent_agents`** — the dispatch prompt drives
+  the admission loop; fan-out width is emergent.
 
 This is the ClaimRegistry / HybridSpillCoordinator lineage generalized: the
 ClaimRegistry already coordinates *task* claiming across agents; this adds *quota*
@@ -361,7 +361,7 @@ so there the operative budget is the declared-cap output envelope
 and the reactive 429 floor — the ledger prevents co-located double-counting but never
 gates on an absolute token ceiling (see *Host-path admission shape*).
 
-## Validation criteria (how we'd know it works)
+## Observable invariants
 
 - A flagless resume by a *different* auditor never sizes against or charges the
   original auditor's quota (the founding bug).
@@ -373,15 +373,6 @@ gates on an absolute token ceiling (see *Host-path admission shape*).
   admission back down; the run pauses gracefully rather than crashing.
 - The dispatch-quota artifact explains every admission well enough that a human
   can reconstruct why the fan-out was the width it was.
-
-## Migration
-
-Atomic-replace ordering (invariant): the new admission loop + reservation ledger
-and the deletion of the precomputed `max_concurrent_agents` scalar ship as one
-change, not add-then-delete across commits. Tests to update/add:
-`tests/audit/quota-scheduler.test.mjs`, `seam-host-only-next-step`,
-`dispatch-*`; a new test for "different-auditor resume never inherits the
-started-provider's quota", and a co-located double-run overshoot test.
 
 ## Relationship to existing machinery
 

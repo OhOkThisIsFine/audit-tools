@@ -13,7 +13,10 @@ and this document is never edited to record what has or hasn't shipped.
 provider_confirmation       [user gate]
   → intake
   → batch_deterministic     [auto_fix → syntax_resolved → external_analyzers
-                             → structure_artifacts → graph_enrichment → design_assessment
+                             → structure_artifacts]
+  → critical_flow_fallback  [host_delegation, conditional — only when deterministic flow
+                             inference falls below the confidence bar]
+  → batch_deterministic     [graph_enrichment → design_assessment
                              → structure_decomposition]
   → intent_checkpoint       [user gate]
   → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling]

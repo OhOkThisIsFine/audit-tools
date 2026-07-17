@@ -41,7 +41,7 @@ Critique / counterexample scrutiny scales with the assessed risk/complexity:
 
 **Floor is *light*, never *off*.** Nothing — including pre-vetted structured-audit findings — gets
 zero scrutiny, because remediation legitimately catches upstream (audit) errors. The
-structured-audit lean path now runs one bounded light adversarial pass before proceeding
+structured-audit lean path runs one bounded light adversarial pass before proceeding
 (`interpretLeanLightReviewVerdict` in `src/remediate/riskSignal.ts`), escalating to the full
 pipeline on any concern — a mandatory light-review floor, not a zero-scrutiny fork.
 

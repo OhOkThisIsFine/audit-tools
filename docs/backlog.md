@@ -93,7 +93,7 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 - **Provider cost ordering does not consult quota before suggesting order — quota-blocked providers still appear first (2026-07-13 audit-gate review).** The Gate-0 `suggestCostOrdering()` sorts purely by $/Mtok and tier; no quota headroom (remaining budget, rate-limit state, cold-start cap) is factored. A quota-saturated provider is still listed first, misleading the operator. Fix: pre-query quota state and demote/flag exhausted pools in the suggested order. [[quota-before-cost-ordering]]
 - **Provider tiering is per-provider, not per-model/effort — wrong granularity for multi-model backends (2026-07-13 audit-gate review).** The `capabilityTier` is pegged to the provider type (e.g., all claude-code → frontier, all codex → capable). A provider offering both frontier and fast models (e.g., openai-compatible with multiple models) assigns all its models the same tier. Fix: tier per `(provider, model, effort)` tuple, sourced from models.dev or declared config. [[per-model-tiering]]
 - **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
-- **Design (orchestrator-dispatch coupling): the dispatch system tries too hard to force specific assignments of nodes/packets to sources (2026-07-13, forward-track).** The current dispatch system/coordinator pre-assigns specific nodes to specific pools up-front, creating rigid bindings. Shift to the originally-intended model: decouple the `ClaimRegistry` so claims are pool-agnostic locks (simply checking out a node/task for an orchestrator, not binding it to a `poolId`), and move quota reservations to a **Just-in-Time (JIT)** model. The dispatch planner's role should be simplified to feeding the orchestrator clear, real-time metadata of each source's current quota headroom, rate limits (RPM/TPM), and capabilities, allowing the orchestrator to dynamically select and reserve quota JIT right before calling the provider. [[relax-dispatch-source-forcing]]
+- **Design (orchestrator-dispatch coupling): pool-agnostic claims + JIT quota reservation — spec'd, unbuilt (2026-07-13; promoted to concept spec 2026-07-16, forward-track).** Design of record: [`spec/dispatch-jit-claims.md`](../spec/dispatch-jit-claims.md) (claim = exclusivity not routing; planner = live capability feed; quota reserved at launch moment). Build remainder: the ClaimRegistry lock-split (drop `poolId` from claims), JIT reservation on the launch path, host-path convergence with the rolling engine. [[relax-dispatch-source-forcing]]
 - **Never-dispatched anti-cascade retry (deferred, needs clean repro) [[synth-scopeless-nodes-doomed-run]].**
   A planned-but-not-driven node (no `task.json` written before launch) still terminal-blocks its whole
   downstream subtree (INV-RS-01) instead of retrying bounded-PENDING. Diagnosability (distinguishing
@@ -577,11 +577,13 @@ Standing gotchas worth keeping for any agent (strong or weak):
   NIM endpoint (`llm models` → default `nvidia/nemotron-3-ultra-550b-a55b`). Omit `--model` (auto-select
   works fine) or pass a listed NIM id. Offloading to *Claude Haiku* is a separate lane (Agent tool
   `model: haiku`), unrelated to the `llm` worker CLI. (Hit 2026-07-15.)
-- **Multi-line git commit messages: use a temp file (`git commit -F <file>`), NOT the PowerShell
-  here-string `@'…'@` in the Bash tool.** The Bash tool is Git Bash (POSIX sh) — `git commit -m @'…'@`
-  is parsed as the literal `@` + a bash syntax error at the first `)`, and the commit lands with a
-  mangled/truncated message (recover via `git commit --amend -F <file>`). PowerShell here-strings only
-  work in the PowerShell tool. Write the message to the scratchpad and `-F` it. (Hit 2026-07-15.)
+- **The Bash tool is POSIX sh, NOT PowerShell — for any multi-line commit/PR body, use a temp file
+  (`git commit -F <file>`), never a PowerShell here-string `@'…'@`.** `git commit -m @'…'@` in the Bash
+  tool is parsed as literal `@` characters + a bash syntax error at the first `)`, and the commit lands
+  with a mangled/truncated message or literal `@` top-and-bottom of the body (recover via
+  `git commit --amend -F <file>`). PowerShell here-strings only work in the PowerShell tool. Write the
+  message to the scratchpad and `-F` it (single-line messages via `-m "…"` are fine). Applies to every
+  native exe called from the Bash tool, not just git. (Hit 2026-07-15, twice in one lap.)
 
 - **After a process restart, `git diff` your instruction files before committing.** A background
   doc-review/hook can silently re-assert a pre-decision version of an instruction doc (e.g. CLAUDE.md,
@@ -656,11 +658,6 @@ Standing gotchas worth keeping for any agent (strong or weak):
   bare `**/<name>/` — an unanchored glob (e.g. `**/friction/`) regenerates on every `ensure`/postinstall and
   can shadow a same-named SOURCE dir (`src/shared/friction/`), which a file-level edit can't fix. (`.audit-code/`
   is fine — distinct name, no source collision.)
-- **The Bash tool is POSIX sh, NOT PowerShell — a PowerShell here-string (`@'…'@`) in a `git commit -m`
-  becomes literal `@` characters** top-and-bottom of the message (`@\n<body>\n@`), silently corrupting the
-  subject line. Seen twice in one lap (both caught pre-push, amended). For any MULTI-LINE commit/PR body,
-  write the message to a temp file and use `git commit -F <file>` (single-line messages via `-m "…"` are
-  fine). Applies to every native exe called from the Bash tool, not just git.
 - **Wall-clock peak-concurrency tests are latency-fragile.** The rolling-driver integration tests assert
   `peak == N` by dispatching N nodes with a short `setTimeout` and reading the max simultaneous in-flight
   count. Any change that adds per-dispatch latency on the dispatch path (e.g. the reservation-ledger's

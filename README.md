@@ -140,6 +140,10 @@ a summary before anything is committed.
 8. **Synthesize** — consolidates everything into `audit-findings.json` + `audit-report.md`,
    then layers on a narrative (themes, executive summary, top risks).
 
+The numbering is a conceptual grouping, not the literal execution sequence — the authoritative
+order is the `PRIORITY` array in `src/audit/orchestrator/nextStep.ts`, which interleaves some
+steps (e.g. deterministic subsystem clustering runs before the intent checkpoint).
+
 **remediate-code:**
 
 1. **Confirm providers** — same session-level provider check as audit-code.
@@ -159,6 +163,9 @@ a summary before anything is committed.
 7. **Close** — previews the file list and commit message for your confirmation (unless
    pre-authorized), then runs the closing action and writes `remediation-outcomes.json` +
    `remediation-report.md`.
+
+The numbering is a conceptual grouping, not the literal execution sequence — the authoritative
+order is `decideNextStep` in `src/remediate/steps/nextStep.ts`, which interleaves some steps.
 
 ### CLI (backend / fallback)
 

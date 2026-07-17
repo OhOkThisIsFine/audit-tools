@@ -169,7 +169,7 @@ machinery (deterministic grounding, block derivation, file-hash integrity,
 verify-before-merge) — it does not skip traceability or verification, only the
 expensive negotiation phases. The fast path runs a mandatory light adversarial
 pass (`interpretLeanLightReviewVerdict`) before proceeding, escalating to the
-full pipeline on any concern — no longer a bare skip. Treat this section's
+full pipeline on any concern — never a bare skip. Treat this section's
 "both paths run the [full] pipeline" as the default; the lean fast path is the
 sanctioned, narrowly-scoped exception, not a contradiction of the rationale
 above.

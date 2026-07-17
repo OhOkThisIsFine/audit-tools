@@ -57,9 +57,11 @@ LLM judgment *strongly* lifts quality → use the LLM, bounded and recorded; (3)
 in tooling *must* be. Rules (1)/(2) choose *who* does the work; rule (3) constrains *how* the result is
 guaranteed.
 - **LLM always in the loop.** Conversation-first ⇒ the host agent is always the provider; never gate LLM
-  review behind "if a provider exists."
+  review behind "if a provider exists." *(home: `CLAUDE.md` → Conventions & invariants)*
 - **Resolve toward the durable contract.** LLM-vs-deterministic → deterministic; graph/language →
-  language-neutral. *(home: `CLAUDE.md` → Concepts; memory: right-tool-not-deterministic-dogma)*
+  language-neutral. *(home: `CLAUDE.md` → Preferences & standing decisions)*
+
+*(home: `CLAUDE.md` → Concepts; memory: right-tool-not-deterministic-dogma)*
 
 ## A3. Enforce robustness in tooling, never host discretion
 
@@ -77,7 +79,8 @@ or contract-abstracted, never baked in. The named rules are *instances of one pr
 - **Model/provider/IDE agnostic:** discover model identities / windows / prices dynamically, or consume a
   *synced, not-forked* someone-else-maintained table (e.g. `models.dev`); never a table *we* hand-maintain
   as a primary source — that hand-maintained table is the bug (`KNOWN_MODEL_LIMITS` was retired for it).
-  Tiering routes by *relative* advertised capability, never a named-model→tier map. (Home: `CLAUDE.md`'s
+  Tiering routes by *relative* advertised capability, never a named-model→tier map. (Home: `CLAUDE.md` →
+  Conventions & invariants — the "never make *us* hand-maintain a model/price/limit table" bullet, whose
   fuller statement wins on the nuance.)
 - **Language-neutral by contract:** graph edges `from`/`to`/`kind` (+optional `direction`/`confidence`/
   `reason`); new analyzers *enrich* shared artifacts, never fork planning.
@@ -179,7 +182,7 @@ ship process. They'd change if the developer or workflow changed; they don't des
 **The agent owns the ship pipeline** — commit → push → merge → publish → verify-live → reinstall global
 bins, end-to-end by default. Never park at the push/publish boundary. Hand back only for destructive
 ambiguity. Encoded in the `/ship` skill (CRLF clean-tree guard, allow-scripts
-postinstall, release-CI-is-the-real-signal). *(home: `CLAUDE.md`; global `~/.claude/CLAUDE.md`; memory:
+postinstall, release-CI-is-the-real-signal). *(home: `CLAUDE.md` → Release & publish; global `~/.claude/CLAUDE.md`; memory:
 agent-owns-ship-pipeline)*
 
 ## B3. Code & repo discipline

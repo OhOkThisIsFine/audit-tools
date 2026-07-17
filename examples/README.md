@@ -17,12 +17,19 @@ This directory holds:
 Review packets are never persisted — they're partitioned JIT at dispatch (see `CLAUDE.md`) — so there
 is no example for them.
 
-`session-config/` holds example `session-config.json` files for several providers (`claude-code`,
-`opencode`, `worker-command`, `subprocess-template`, `vscode-task`, plus `auto` and per-model
-variants). The remaining backends — `codex`, `openai-compatible`, `antigravity`, `agy` — are configured the
-same way (a `<provider>` block under the provider key; see the config shapes in
-`src/shared/types/sessionConfig.ts` and the provider notes in the repo `CLAUDE.md`); example files for
-them are not yet bundled here.
+Configuration splits across three shapes, one per home (the INTENT/CAPABILITY cut in
+`spec/unified-dispatch-worker-model.md`):
+
+- **`session-config/`** — repo-persisted **intent only** (`RepoSessionIntent`): scope, synthesis,
+  analyzers, quota *policy*. Dispatch-inventory fields (`provider`, `sources`, per-backend launch
+  blocks) are rejected at load — they are per-auditor capability and never live in the repo. Every
+  fixture here is validated by `tests/shared/examples-session-config.test.mjs`, so an example that
+  stops loading fails the suite.
+- **`auditor-descriptor/`** — the per-invocation `--auditor <json>` handshake: `self` (the driving
+  agent's provider identity, model scalars, subagent capabilities) plus optional explicit `sources[]`
+  (the operator's escape hatch — normally sources resolve ambiently instead).
+- **`catalog/sources-declared.json`** — the machine-level declaration (`~/.audit-code/sources-declared.json`)
+  of backends this box owns, including the optional `repair_proxy` lane; see below.
 
 ### `../catalog/sources-declared.json` — a free dispatch pool (arbitrage tier, Phase 0)
 

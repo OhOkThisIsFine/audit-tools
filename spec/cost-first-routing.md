@@ -83,6 +83,14 @@ when there is no operator.
 - **The tool prices each candidate** via `resolveModelStatics`, computes the blended $/Mtok,
   and **suggests an ordering** (ascending price, capability tiebreak). Unknown-price
   candidates are flagged and placed last within their tier.
+- **Dispatchable sources fold into the SAME unified ordering** — configured `sources[]` pools and
+  ambient expansions (NIM/opencode endpoints, claude-worker lanes from the repair-proxy registry)
+  are ranked alongside provider/host candidates, not in a separate list. Source candidates are
+  keyed under a `source::` namespace internally so a source id can never collide with a provider
+  name, but the operator's `cost_order` may name a source by its **displayed bare id** — the bare
+  form is an accepted alias (exact candidate keys always win a token). Declared cost wins pricing
+  precedence for a source (`sources[].cost_per_mtok`, the operator's cost-relationship to the
+  backend — e.g. a genuinely-free tier); registry/catalog list price is the fallback.
 - **The operator confirms or reorders — input/envelope split.** The host writes a plain
   `provider-confirmation.input.json` (schema `provider-confirmation-input/v1`: an optional
   `cost_order` list of provider/model keys, `exclude`/`include`, and `host_models`); the tool

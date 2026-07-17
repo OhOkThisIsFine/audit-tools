@@ -57,6 +57,15 @@ function familyKey(token) {
     // Two-letter+ area invariant: INV-<AREA>-<NN>  →  INV-<AREA> (INV-RS-01 → INV-RS).
     const area = /^INV-([A-Za-z]{2,})-\d+$/.exec(token);
     if (area) return `INV-${area[1]}`;
+    // Mixed-alnum area: a letter run WITH an embedded trailing digit
+    // (INV-DC1-6 → INV-DC1, INV-DC2-3 → INV-DC2). Distinct from the
+    // single-letter redesign-module shape below (which requires exactly one
+    // leading letter), so DC1/DC2 stay their own families.
+    const mixed = /^INV-([A-Za-z]{2,}\d+)(?:-\d+)?$/.exec(token);
+    if (mixed) return `INV-${mixed[1]}`;
+    // Long descriptive area with no trailing digit
+    // (INV-BROKER-CLASSIFY-SINGLE-SOURCE): the whole token IS the family.
+    if (/^INV-[A-Z]{2,}(?:-[A-Z]{2,})+$/.test(token)) return token;
     // Redesign single-letter module: the <letter><digits> node id IS the family, so
     // O1/O2/o3/S03/S04/S05/X06 stay DISTINCT (INV-O1-1 → INV-O1, INV-o3-3 → INV-o3,
     // INV-S05 → INV-S05). Case-preserving so lowercase `INV-o3` resolves.
@@ -80,7 +89,9 @@ function familyKey(token) {
 const TOKEN_RE = new RegExp(
   [
     "\\bINV-[A-Za-z]{2,}-\\d+\\b", // INV-RS-01 (two-letter+ area invariant)
+    "\\bINV-[A-Za-z]{2,}\\d+(?:-\\d+)?\\b", // INV-DC1-6 (mixed-alnum area: letter run with embedded digit)
     "\\bINV-[A-Za-z]\\d+(?:-\\d+)?\\b", // INV-O1-1, INV-o3-3, INV-S05, INV-X06 (single-letter redesign module; case-preserving)
+    "\\bINV-[A-Z]{2,}(?:-[A-Z]{2,})+\\b", // INV-BROKER-CLASSIFY-SINGLE-SOURCE (descriptive all-caps area, no trailing digit)
     "\\bCE-\\d{3}\\b", // CE-003
     "\\bSEAM-[A-Za-z][A-Za-z-]*\\b", // SEAM-rolling-stranding
     "\\bN-[A-Z]+\\d+\\b", // N-R13, N-CE301
