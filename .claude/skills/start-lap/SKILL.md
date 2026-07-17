@@ -74,7 +74,7 @@ instruction-file edits; those are the owner's call.
 
 ## 6. Hand back — oriented + begin the next item
 
-Terse digest (caveman mode): current live version + released-vs-local delta, sync result (N commits
+Terse digest: current live version + released-vs-local delta, sync result (N commits
 pulled / already current / stranded on branch X), a one-line skim of what shipped since (step 4), the
 **immediate next item** from HANDOFF's roadmap with its backlog home, and any open doc-review items
 awaiting the owner. Then **start on that next item** — risk-tier it first
