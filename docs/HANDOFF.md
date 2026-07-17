@@ -89,10 +89,19 @@ reinstalled. Next, in order:
    fresh Gate-0 roster lists them routable, a real dispatch through the proxy to a FREE model returned a
    correct finding. Records: `docs/reviews/repair-proxy-dispatch-diagnosis-2026-07-17.md` +
    `host-fanout-proxy-dispatch-design-2026-07-17.md`; memory [[repair-proxy-dispatch-unblocked-probe-fix]].
-   **Remaining (do next): full live-run confirmation** — drive a real audit to its task-dispatch wave and
-   confirm `packet_too_large` routes oversized packets away from small-context pools (raw `claude -p` on
-   groq/gpt-oss-120b hit 413; real dispatch sizes packets per-pool — verify it holds live).
-2. **Agent-tool carrier restart test**: from a Desktop session launched under
+   **Live-run confirmation DONE 2026-07-17 — DEFINITIVE NEGATIVE, and it corrects the claim above.** A fresh
+   conversation-first `/audit-code` self-audit reached the `dispatch_review` wave with `resolveAmbientSources`
+   returning **7 claude-worker pools** (proxy warm, 6ms) — but the wave's `capacity_pools` came back
+   **host-only** (`claude-code/*`), 1 packet admitted / 78 `cap_reached`. So "dispatch is already
+   pool-availability-driven" is **FALSE for the conversation-first default path**: a bare `{}`
+   `session-config.json` + unset `AUDIT_CODE_ROLLING_ENGINE` never arms the in-process rolling hybrid (needs
+   rolling_engine AND an explicit in-process backend provider), so the resolved source pools are never folded
+   in. The probe fix was necessary but NOT sufficient. `packet_too_large` routing could not be exercised at
+   all — no small pools resolve into a conversation-first wave. Finding logged: backlog → "Conversation-first
+   `/audit-code` dispatches HOST-ONLY…"; memory correction in [[repair-proxy-dispatch-unblocked-probe-fix]].
+   **⇒ The conversation-first host fan-out to the proxy pools is the confirmed UNBUILT follow-on (step 2), not
+   a nicety.** (Owner decision 2026-07-17: don't dogfood host-only; build the fan-out.)
+2. **Agent-tool carrier restart test** (now the critical path, not optional): from a Desktop session launched under
    `ANTHROPIC_BASE_URL=<proxy>`, test whether a `.claude/agents/*.md` frontmatter `model:` string
    rides verbatim to `/v1/messages` (agent defs load at session start — untestable mid-session).
    If yes: the host fan-out half (reads `self.proxy_transport`, stamps per-packet model strings into
