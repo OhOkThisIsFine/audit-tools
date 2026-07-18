@@ -632,6 +632,13 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 Standing gotchas worth keeping for any agent (strong or weak):
 
+- **`check:doc-manifest` only sees TRACKED files — a new doc passes locally pre-commit, then fails CI
+  (2026-07-18).** Wrote a new `docs/reviews/*.md`, ran `npm run verify:checks` green, committed, and the
+  release run's `gate` job failed on exactly that file ("stray doc not in the canonical manifest"). The
+  checker enumerates git-tracked docs, so an untracked new doc is invisible to it — the local gate is
+  green *because* the file isn't staged yet. **`git add` the doc BEFORE running `verify:checks`**, or the
+  gate is testing a different tree than CI will. Cost one burned release tag (v0.33.8 → forward-bump).
+  Generalizes [[lap-green-must-match-ci-evidence]]: same command, different tree ⇒ different answer.
 - **LiteLLM on Windows dies at startup without `PYTHONIOENCODING=utf-8` (2026-07-18).** The proxy's
   startup banner contains non-cp1252 characters, so `show_banner()` raises
   `UnicodeEncodeError: 'charmap' codec can't encode…` and FastAPI reports only
