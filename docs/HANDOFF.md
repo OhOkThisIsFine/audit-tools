@@ -55,29 +55,20 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — re-dogfood the collapsed routing with brand-neutral proxy contract live
+## ▶ IMMEDIATE NEXT — three-track forward: LiteLLM proxy live + ranker contract + Gate-0 ordering fallback
 
-**The unified-routing collapse + repair-proxy retirement are COMPLETE (2026-07-18).** Steps A–G + H1/H3/H5 landed 2026-07-17;
-**H2+H4 landed 2026-07-18 as three attested loop-core commits** (design of record:
-[`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md);
-plan + all four review records: [`h2-h4-collapse-plan-2026-07-18.md`](reviews/h2-h4-collapse-plan-2026-07-18.md)):
-`c9bd3505` capability floor enforced IN the engine's per-packet selection (+ honest `packet_oversized`
-plan-only display); `52c8337f` partition-scoped rolling implement drive (pool attribution,
-`exhausted_pool_ids`, terminal/merge suppression); `2af221cd` the atomic collapse — both
-headless-vs-hybrid branch pairs deleted, ONE fan-out over the eligible pool set (headless = "no
-attended host in the set"; audit host = coverage-driven complement, never a coordinator claimant),
-demote machinery + `executeInProcessPartition` deleted, `dedupHostAndSourcePools` is the one
-same-agent rule (backend identity, directional accounts, draw policy), primary fold unconditional
-with agy/subprocess-template/worker-command synthesis, `resolveHostDispatchProviderName` hoisted to
-shared. Blessed semantics + deliberate routing changes recorded in the plan doc; residual pins in
-backlog ("H2+H4 collapse residual pins"). Routing criteria (owner): capability floor ∧ available ∧
-quota/rate headroom ∧ agentic-capable ∧ context-fit; λ orders the eligible; host is just a pool. **Separately shipped in v0.33.7: repair-proxy retired, replaced by brand-neutral proxy contract** (`proxyCatalog.ts` adapter for discovery + liveness probe; generic `proxy` block replaces legacy `repair_proxy`; plan/review record [`litellm-swap-plan-2026-07-18.md`](reviews/litellm-swap-plan-2026-07-18.md); CI green, published).
+**The unified-routing collapse + repair-proxy retirement are COMPLETE (2026-07-18).** v0.33.7 shipped with the brand-neutral proxy contract (`proxyCatalog.ts` adapter for discovery + liveness probe; generic `proxy` block replaces legacy `repair_proxy`; CI green, published). **Single biggest remaining risk: the swap has never been exercised against a live proxy.** Forward work is three parallel tracks:
 
-Next item:
-**Re-dogfood a fresh conversation-first self-audit** (backlog → RESOLVED entry's ⬇ watch line, plus
-   the collapse + proxy swap: an attended run fans host + primary + NIM concurrently; small pools take fitting
-   packets, oversized packets skip (no 413), a 429 on pool A leaves pool B dispatchable, zero-grants
-   render their honest cause, a floored packet never lands on a bottom-band pool; observe the generic `proxy` block resolving, liveness via `/health/liveliness`, and score-less pools failing open at the capability floor).
+**Track 1 — Deploy LiteLLM, validate the proxy swap live (deployment + validation):**
+Stand up a local LiteLLM proxy (`litellm --config config.yaml`, port 4000) with an `openai-compatible` backend (NIM, vLLM, etc.) configured. Point `~/.audit-code/sources-declared.json` at it via the generic `proxy` block (endpoint, api_key_env, optional model list). Validate end-to-end: `/v1/models` roster discovery, `/model/info` enrichment parsing (costs, context caps), `/health/liveliness` liveness check, auth threading when master_key is set, `--model` routing verbatim to workers, and the roster-only degradation when enrichment is absent. **Closes the "never run against a live proxy" gap.**
+
+**Track 2 — Ranker contract (separate project, not audit-tools code):**
+Design the contract: what a model ranker PRODUCES and where audit-tools READS it. Natural home: alongside `~/.audit-code/sources-declared.json`, a machine-level file keyed by pool identity `backend_provider[#account]/model` with `rank` and `tier` optional per model. audit-tools consumes it if present (none of its routing code changes if the ranker isn't running). Property to hold: audit-tools stays agnostic — swapping the ranker, or having no ranker, changes zero audit-tools code.
+
+**Track 3 — Ranking-absent fallback: Gate-0 operator-confirmed priority order (Gate-0 UX enhancement):**
+Gate-0 already persists a `cost_order` from operator input + has all dispatch wiring to honor it. What's missing: when NO EXTERNAL RANKS exist, Gate-0 should surface a **fallback priority order** (default: tier-based: frontier > capable > fast > unknown) and explicitly show the operator that `cost_order` is their **DISPATCH PRIORITY** (not inclusion; that's `exclude[]`/`include[]`). Operator can accept the suggested order, reorder it manually, or exclude pools — all persist to the shared confirmation. Make dispatch routing explicit about the ordering-vs-exclusion distinction, and name any design question as an owner call rather than deciding it yourself.
+
+**Next ordering:** (1) re-dogfood the collapsed routing — now able to run against a live proxy, so tracks 1 + the dogfood combine naturally; (2) track 1 LiteLLM install/config + live swap validation; (3) track 2 ranker contract design; (4) track 3 Gate-0 UX for priority order. See `docs/backlog.md` → *Open tracks* for detail.
 
 ## Prior track — the G-series (closed)
 
