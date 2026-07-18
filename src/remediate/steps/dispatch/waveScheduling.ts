@@ -11,7 +11,7 @@ import type {
   DispatchExclusion,
   HostPoolPreamble,
 } from "audit-tools/shared";
-import { computeDispatchAdmission, createReservationLedger, admissionPoolsFromSummaries, assembleDispatchQuota } from "audit-tools/shared";
+import { createReservationLedger, admissionPoolsFromSummaries, assembleDispatchQuota } from "audit-tools/shared";
 import {
   buildHostPoolPreamble,
   buildSourcePools,

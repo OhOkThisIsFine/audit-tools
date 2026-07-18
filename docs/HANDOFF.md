@@ -67,46 +67,34 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — unified dispatch routing (in flight: steps A+F landed, B/D/E/C/G/H remain)
+## ▶ IMMEDIATE NEXT — finish the unified-routing collapse (H2+H4), then re-dogfood
 
-**The `proxy_transport` host-fanout build is RETIRED — premise refuted by ground truth** (2026-07-17).
-Investigating before building it: the conversation-first run's OWN artifacts show the proxy pools ARE
-folded into the wave (`buildAuditSourcePools` returns 3 pools; in-process repro confirms) — they drove,
-413/429'd, then got COLLECTIVELY settled onto a walled host. The design doc's "sources never folded in /
-need a `proxy_transport` trigger" was wrong; so was the live-run note's "config doesn't arm the hybrid"
-(rolling_engine defaults true; the hybrid gate needs only pools>0). Full diagnosis:
-[`host-fanout-premise-refuted-2026-07-17.md`](reviews/host-fanout-premise-refuted-2026-07-17.md).
+**The unified ONE-routing-decision rebuild LANDED 2026-07-17** (design of record + per-step review
+records: [`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md);
+premise refutation: [`host-fanout-premise-refuted-2026-07-17.md`](reviews/host-fanout-premise-refuted-2026-07-17.md)).
+The `proxy_transport`-trigger plan was retired — the run's own artifacts refuted it (pools WERE folded
+in; the real chain was null context caps → 413/429 → collective settle → walled-host collapse). Landed
+as 6 attested loop-core commits: **A** never-null effective context window per pool; **B** one fit
+predicate on both dispatch paths; **F** `large_packet` category abandoned; **D** settle per-pool +
+reason-aware; **E** honest host wall (item C CLOSED — cause-classified zero-grants, structural
+fit-mismatch skips first-pass); **C** per-packet capability floor (relative banding, fail-open + note,
+populate stamps `capability_rank`); **G** packer/fit consistency (real per-task estimates into the
+hybrid frontier; override packer budget honors the agentic overhead); **H1** `proxy_transport` deleted;
+**H3** one shared in-process worker classifier (+ `provider:"claude-worker"` rejected at validation);
+**H5** one dispatch-quota contract (`dispatch-quota/v1`) + one emit core. Routing criteria (owner):
+capability floor ∧ available ∧ quota/rate headroom ∧ agentic-capable ∧ context-fit; λ orders the
+eligible; host is just a pool.
 
-**Real root cause (source-verified):** the fit-check is silently NO-OP'd — a source pool's
-`contextCapTokens` was `null` (registry exposed no context field; stamp has no fallback), and `null` means
-"always fits," so every fit gate passed oversized packets → 413 → non-`complete` drive → `nextStepHelpers.ts:1947`
-settles ALL source pools → frontier collapses to a host the wall mislabels "exhausted."
-
-**Direction (owner, "go all in"): collapse dispatch to ONE routing decision** — per packet, pick a pool
-that meets the packet's capability floor ∧ is available ∧ has quota/rate headroom ∧ is agentic-capable ∧
-whose context window holds the packet; order by the λ dial; the host is just one pool. Delete
-`proxy_transport`, the headless-vs-hybrid split, the three `IN_PROCESS_*` sets, demote-to-source.
-**Design of record + owner-confirmed decisions + the 5-step sequence:**
-[`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md).
-Owner decisions (confirmed): capability_rank stamped at populate from the registry `capability_source`
-(BFCL+LMArena composite_rank) + models.dev `tool_call`/`reasoning` + RELATIVE tier→floor; fail-open on
-unknown capability with a low-confidence note; all 5 steps this push.
-
-**Progress (this session):**
-- ✅ **Step A** (`eaef2f0d`) — `resolveSourceContextWindowTokens`: NON-NULL effective window
-  (declared → models.dev backend window → `DEFAULT_CONTEXT_TOKENS`) stamped in `buildSourcePool`; the fit
-  gates stop no-op'ing. Red-green + middle-rung tests; independent review + attestation.
-- ✅ **Step F** (`ca15ecde`) — abandoned the `large_packet` advisory (headroom, not a packet property);
-  `largeFileMode` kept.
-- ⏭ **Remaining (per the design doc, sequenced):** **B** one fit predicate on BOTH paths (host-admission
-  uses `resolved_limits`/`fanoutMode:+Infinity`, not the per-pool window — unify + drop the infinity);
-  **D** settle per-pool + reason-aware (kill the collective settle on a non-complete drive); **E** honest
-  host wall (no false "exhausted" on a no-pool-fits zero-grant — item C); **C** capability floor via the
-  `capable` predicate hook + stamp `capability_rank` at populate; **G** packet composition flexes to the
-  target pool's window (generalize `fitPacketsToTierBudgets`; packer core untouched); **H** the structural
-  collapse (branches, the three sets, demote, unify the two quota contracts + emit wrappers).
-- Commits A+F are on local `main`, **un-pushed** (mid-build — ship the whole collapse together, not a
-  partial unified-routing to npm). Full-suite + CI verification pending build completion.
+Next, in order:
+1. **H2+H4 — the collapse remainder** (backlog → "H2+H4"; full spec in the design doc's "H — progress"):
+   one fan-out over the eligible pool set (headless/hybrid branch pair deleted), demote retired,
+   source pools into unified admission (capability floor reaches the engine path). Loop-core FOCUSED-LAP.
+2. **Re-dogfood a fresh conversation-first self-audit** (backlog → RESOLVED entry's ⬇ watch line):
+   small pools take fitting packets, oversized packets skip (no 413), a 429 on pool A leaves pool B
+   dispatchable, zero-grants render their honest cause.
+3. **LiteLLM swap groundwork** (owner is replacing repair-proxy; backlog → "LiteLLM replaces
+   repair-proxy"): proxy-agnostic populate adapter before any deeper `/registry` coupling.
+   [[litellm-replaces-repair-proxy]]
 
 ## Prior track — the G-series (closed)
 
