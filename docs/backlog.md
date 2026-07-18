@@ -78,6 +78,20 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   Epoch AI (CC-BY, updated daily) is the vendorable fallback layer if a legally-clean local snapshot is
   wanted. Still an owner call: which layers to build, and whether to fix the unranked+free composition
   independently of any ranker ever landing.
+  **PLAN WRITTEN + ADVERSARIALLY REVIEWED 2026-07-18** →
+  [`docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md)
+  (v2; the review refuted three v1 claims — read v2, not a summary). Owner decisions taken: fix the
+  composition BEFORE re-dogfooding; no-capability-evidence must be PINNED DOWN (LLM judgment or operator
+  ask), never silently routed around; ranker via OpenRouter. **⚠ Implementation is BLOCKED on one
+  unanswered owner question:** the review established the fix's scope is narrower than pitched — it stops
+  unranked pools failing open into `deep` eligibility, but does NOT stop a cheap weak pool winning
+  `standard` work (`costFirstCmp`, `admissionLoop.ts:397`, has costRank dominating absolutely; λ defaults
+  to 0 — cost-first working as designed). Owner was asked whether the narrower scope is still what they
+  wanted and had not answered when the sprint closed. Broader behavior = a change to ORDERING, not
+  eligibility, needing its own scoping.
+  **Note the symptom had THREE mechanisms; only one is in scope:** (1) unranked ⇒ fail-open ⇒ `deep`
+  eligible [the plan]; (2) `cost_per_mtok: 0` sorts first among eligible [by design, not a bug];
+  (3) `top_k` truncates alphabetically [resolved by the ranker, nothing to sort by today].
 - **Are `dropped[]` reasons actually SURFACED to the operator at Gate-0? (2026-07-18, medium,
   from the LiteLLM live-validation lap.)** The whole declared-reach design leans on "never silently
   discarded — every drop carries an operator-facing reason", and the reasons are good. But this lap

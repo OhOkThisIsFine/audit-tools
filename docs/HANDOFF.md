@@ -55,9 +55,42 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — three-track forward: LiteLLM proxy live + ranker contract + Gate-0 ordering fallback
+## ▶ IMMEDIATE NEXT — implement the capability-evidence obligation (plan ready, ONE owner call open)
 
-**The unified-routing collapse + repair-proxy retirement are COMPLETE (2026-07-18).** v0.33.7 shipped with the brand-neutral proxy contract (`proxyCatalog.ts` adapter for discovery + liveness probe; generic `proxy` block replaces legacy `repair_proxy`; CI green, published). **Single biggest remaining risk: the swap has never been exercised against a live proxy.** Forward work is three parallel tracks:
+**⚠ BLOCKED ON AN UNANSWERED OWNER QUESTION — do not start coding until it is answered.**
+The plan is written and adversarially reviewed:
+[`docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md)
+(v2 — the review REFUTED three v1 claims; read it, not a summary).
+
+**The open question:** the review established the fix's scope is NARROWER than it was pitched as. It stops
+unranked pools failing open into **`deep`** eligibility. It does **not** stop a cheap weak pool winning
+`standard` work — `costFirstCmp` (`admissionLoop.ts:397`) has `costRank` dominating absolutely with
+capability only a tiebreak, and λ defaults to 0. That is cost-first routing working as designed. Owner was
+asked whether the corrected, narrower scope is still what they wanted, **and had not answered when the
+sprint closed.** If yes → implement as planned. If they wanted weak pools de-prioritized generally →
+that is a change to ORDERING, not eligibility, and needs its own scoping.
+
+**Owner decisions taken 2026-07-18** (these are settled, do not re-litigate): (1) fix the composition
+BEFORE re-dogfooding; (2) a pool with no capability evidence must be **pinned down** by LLM judgment or by
+asking the operator — never silently routed around; (3) build a ranker via **OpenRouter**.
+
+**Loop-core** (`src/shared/dispatch/`) → green + independent review + attestation required. The v2 plan
+deliberately keeps `bandOf`/banding logic byte-identical to shrink that surface to data plumbing.
+
+**Then, in order:** (2) the ranker — OpenRouter `/api/v1/models` runtime-fetch →
+LiteLLM `model_info`, which `proxyCatalog.ts:159` already ingests, so **zero audit-tools code change**
+(survey: [`docs/model-capability-ranking-sources.md`](model-capability-ranking-sources.md); the scores are
+Artificial Analysis data and AA forbids redistribution, so runtime-fetch is the pattern, NOT a vendored
+snapshot — and the sign inverts, `agentic_index` is higher-better while `capability_rank` is lower-better);
+(3) re-dogfood a conversation-first self-audit through the live proxy — validates both of the above plus
+Track 1's leftovers (dispatch under a real wave, quota at the proxy); (4) Track 3 Gate-0 priority-order UX
+(two named owner calls — see backlog).
+
+---
+
+### Prior context — the three-track forward (Track 1 now closed)
+
+**The unified-routing collapse + repair-proxy retirement are COMPLETE (2026-07-18).** v0.33.7 shipped with the brand-neutral proxy contract (`proxyCatalog.ts` adapter for discovery + liveness probe; generic `proxy` block replaces legacy `repair_proxy`; CI green, published).
 
 **Track 1 — Deploy LiteLLM, validate the proxy swap live — ✅ DONE 2026-07-18.**
 LiteLLM 1.91.1 stood up on `127.0.0.1:4000` fronting NVIDIA NIM (9 aliases across tiers); all five
@@ -76,11 +109,11 @@ Design the contract: what a model ranker PRODUCES and where audit-tools READS it
 **Track 3 — Ranking-absent fallback: Gate-0 operator-confirmed priority order (Gate-0 UX enhancement):**
 Gate-0 already persists a `cost_order` from operator input + has all dispatch wiring to honor it. What's missing: when NO EXTERNAL RANKS exist, Gate-0 should surface a **fallback priority order** (default: tier-based: frontier > capable > fast > unknown) and explicitly show the operator that `cost_order` is their **DISPATCH PRIORITY** (not inclusion; that's `exclude[]`/`include[]`). Operator can accept the suggested order, reorder it manually, or exclude pools — all persist to the shared confirmation. Make dispatch routing explicit about the ordering-vs-exclusion distinction, and name any design question as an owner call rather than deciding it yourself.
 
-**Next ordering:** (1) **re-dogfood the collapsed routing against the now-live proxy** — this is the
-immediate next item; the proxy is configured and validated, so a real audit wave through it is the
-remaining unknown (it also covers Track 1's two leftovers: dispatch under load + quota at the proxy);
-(2) track 3 Gate-0 UX for priority order (has two named owner calls — see backlog); (3) track 2 ranker
-contract design. See `docs/backlog.md` → *Open tracks* for detail.
+**Ordering superseded 2026-07-18** — see ▶ IMMEDIATE NEXT above, which owner decisions re-sequenced.
+Track 2's "design the contract" framing is also superseded: the consuming seam already exists
+(`proxyCatalog.ts:159` ingests `capability_rank` from `/model/info`, and LiteLLM permits arbitrary
+`model_info` keys), so the remaining work is producing the numbers, not designing where they land.
+See `docs/backlog.md` → *Open tracks* for detail.
 
 ## Prior track — the G-series (closed)
 
