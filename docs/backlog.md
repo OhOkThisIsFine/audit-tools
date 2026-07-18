@@ -64,6 +64,20 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   `capability_rank` from `/model/info` and `:352` rides it to the floor, and LiteLLM permits arbitrary
   `model_info` keys — so a ranker can feed this today with zero audit-tools code change. That reduces
   Track 2 from "design the contract" to "decide what produces the numbers" (owner call).
+  **Source survey DONE 2026-07-18** → [`docs/model-capability-ranking-sources.md`](model-capability-ranking-sources.md).
+  Leading shape: OpenRouter `/api/v1/models` carries `benchmarks.artificial_analysis.agentic_index`
+  (verified live: 9/9 of the NIM roster covered, joined by exact `id` else `hugging_face_id` — no fuzzy
+  matching), fetched at RUNTIME by the ranker and written into LiteLLM `model_info`, which
+  `proxyCatalog.ts:159` already ingests. **Nobody redistributes anything** — it becomes the operator's own
+  local proxy config — which sidesteps the one hard blocker (the scores are Artificial Analysis data;
+  AA's free tier forbids redistribution, so the models.dev vendoring pattern does NOT transfer).
+  Two implementation traps: (1) **sign convention is inverted** — `proxyCatalog.ts:350` documents
+  `capability_rank` as LOWER = better, `agentic_index` is HIGHER = better; getting this backwards
+  silently inverts routing, so it needs a test; (2) `agentic_index` is undocumented in OpenRouter's
+  schema and present on only 104/344 models → must degrade cleanly to the fail-open path on absence.
+  Epoch AI (CC-BY, updated daily) is the vendorable fallback layer if a legally-clean local snapshot is
+  wanted. Still an owner call: which layers to build, and whether to fix the unranked+free composition
+  independently of any ranker ever landing.
 - **Are `dropped[]` reasons actually SURFACED to the operator at Gate-0? (2026-07-18, medium,
   from the LiteLLM live-validation lap.)** The whole declared-reach design leans on "never silently
   discarded — every drop carries an operator-facing reason", and the reasons are good. But this lap
