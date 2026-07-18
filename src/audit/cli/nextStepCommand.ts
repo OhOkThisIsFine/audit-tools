@@ -361,10 +361,6 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
       // minimal and round-trips to the same resolved value (absence ⇒ false).
       ...(hostCanRestrictSubagentTools ? { can_restrict_subagent_tools: true } : {}),
       ...(hostCanSelectSubagentModel ? { can_select_subagent_model: true } : {}),
-      // Proxy-fronted host bit (3c, no consumer this commit): re-emitted so it rides
-      // continue-commands like the other capability booleans (carry only when true;
-      // absence ⇒ false round-trips identically).
-      ...(auditorSelf.proxy_transport ? { proxy_transport: true } : {}),
       ...(hostMaxActiveSubagents != null ? { max_active_subagents: hostMaxActiveSubagents } : {}),
       ...(hostContextTokens != null ? { context_tokens: hostContextTokens } : {}),
       ...(hostOutputTokens != null ? { output_tokens: hostOutputTokens } : {}),
@@ -1262,7 +1258,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
  * Provider-agnostic headless audit-dispatch driver for the gated provider-matrix
  * live e2e (`tests/audit/provider-matrix-dispatch-e2e.test.mjs`). With
  * `rolling_engine` ON and any in-process dispatch provider
- * (`IN_PROCESS_DISPATCH_PROVIDERS`: openai-compatible / codex / opencode),
+ * (the shared `isHeadlessPrimaryProvider` predicate),
  * `runDeterministicForNextStep` routes the `audit_tasks_completed` review through
  * the in-process rolling engine (`driveRollingAuditDispatch`), which launches the
  * real backend per packet. One bounded review result landing in

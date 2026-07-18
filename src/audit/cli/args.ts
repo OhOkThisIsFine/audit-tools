@@ -302,9 +302,6 @@ export function getAuditorDescriptor(argv: string[]): AuditorDescriptor | null {
   if (typeof rawSelf.can_select_subagent_model === "boolean") {
     self.can_select_subagent_model = rawSelf.can_select_subagent_model;
   }
-  if (typeof rawSelf.proxy_transport === "boolean") {
-    self.proxy_transport = rawSelf.proxy_transport;
-  }
   // The driver's OWN launch transport (only the host/IDE providers that are NOT
   // generic dispatchable sources). Passed through structurally like the retired
   // inventory blocks; deep-validated downstream by the session-config validator when

@@ -311,7 +311,7 @@ describe("buildDispatchQuota", () => {
     // every candidate is listed and the host in-flight cap is SURFACED (declared_cap),
     // which replaces the removed `max_concurrent_agents` scalar.
     const quota = await buildDispatchQuota("RUN-123", "document", schedule, mkPackets(10), false);
-    expect(quota.contract_version).toBe("remediate-code-dispatch-quota/v1alpha3");
+    expect(quota.contract_version).toBe("dispatch-quota/v1"); // H5: the ONE shared contract
     expect(quota.run_id).toBe("RUN-123");
     expect(quota.phase).toBe("document");
     // The old scalar is gone; the admission block carries the granted set + declared cap.

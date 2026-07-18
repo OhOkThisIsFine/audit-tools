@@ -6,6 +6,7 @@ import {
   createReservationLedger,
   admissionPoolsFromSummaries,
   buildCapabilityFloorCapable,
+  assembleDispatchQuota,
 } from "audit-tools/shared";
 import type {
   ProviderRateLimits,
@@ -24,7 +25,6 @@ import {
   lookupDiscoveredLimits,
   mergeDiscoveredLimits,
   summarizeDispatchCapacityPools,
-  DISPATCH_QUOTA_V1ALPHA3,
 } from "../../quota/index.js";
 import type {
   CapacityPool,
@@ -336,35 +336,36 @@ export async function finalizeDispatchQuota(params: {
     failOpenSeen.add(key);
     params.onCapabilityFailOpen?.(info);
   });
-  const admission = await computeDispatchAdmission({
-    packets: params.packets,
+  // H5: the admission math + contract shape live in the shared emit core; this
+  // wrapper keeps only audit's assembly policy (capacity fold, fanout/capable,
+  // roster/tier extensions).
+  const dispatchQuota = await assembleDispatchQuota({
+    runId,
     pools: admissionPools,
+    packets: params.packets,
     outputCap: waveSchedule.resolved_limits.output_tokens,
     grantLeases: params.grantLeases !== false,
     ledger: createReservationLedger(),
     capable,
     ...(params.dispatchBias != null ? { dispatchBias: params.dispatchBias } : {}),
+    base: {
+      model: hostModel,
+      resolved_limits: waveSchedule.resolved_limits,
+      confidence: waveSchedule.confidence,
+      source: waveSchedule.source,
+      host_concurrency_limit: waveSchedule.host_concurrency_limit,
+      cooldown_until: dispatchCapacity.cooldown_until,
+      binding_cap: dispatchCapacity.binding_cap,
+      capacity_pools: summarizeDispatchCapacityPools(dispatchCapacity),
+      ...(params.hostModelRoster?.length
+        ? { host_model_roster: params.hostModelRoster }
+        : {}),
+      ...(params.tierBudgets ? { tier_budgets: params.tierBudgets } : {}),
+      quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
+      backoff_state: null,
+    },
   });
-
-  const dispatchQuota: DispatchQuota = {
-    contract_version: DISPATCH_QUOTA_V1ALPHA3,
-    run_id: runId,
-    model: hostModel,
-    resolved_limits: waveSchedule.resolved_limits,
-    confidence: waveSchedule.confidence,
-    source: waveSchedule.source,
-    host_concurrency_limit: waveSchedule.host_concurrency_limit,
-    admission,
-    cooldown_until: dispatchCapacity.cooldown_until,
-    binding_cap: dispatchCapacity.binding_cap,
-    capacity_pools: summarizeDispatchCapacityPools(dispatchCapacity),
-    ...(params.hostModelRoster?.length
-      ? { host_model_roster: params.hostModelRoster }
-      : {}),
-    ...(params.tierBudgets ? { tier_budgets: params.tierBudgets } : {}),
-    quota_source_snapshot: waveSchedule.quota_source_snapshot ?? null,
-    backoff_state: null,
-  };
+  const admission = dispatchQuota.admission;
   const dispatchQuotaPath = join(runDir, "dispatch-quota.json");
   await writeJsonFile(dispatchQuotaPath, dispatchQuota);
   return { dispatchQuota, dispatchQuotaPath, waveSchedule, dispatchCapacity, admission };

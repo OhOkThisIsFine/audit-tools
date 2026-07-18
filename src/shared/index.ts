@@ -1407,6 +1407,9 @@ export type { HybridDispatchPartition, HybridDispatchInput } from "./dispatch/hy
 // Cross-cycle settled-pool store (DC-4): a spilled-then-exhausted pool the coordinator
 // excludes from future splits so stranded work falls back to the host pool.
 export { readSettledPools, addSettledPool, isPoolSettlingOutcome } from "./dispatch/settledPools.js";
+export { isInProcessWorkerProvider, isHeadlessPrimaryProvider } from "./providers/inProcessWorkers.js";
+export { DISPATCH_QUOTA_CONTRACT_VERSION, DispatchQuotaContractSchema, assembleDispatchQuota } from "./dispatch/dispatchQuotaContract.js";
+export type { DispatchQuotaContract } from "./dispatch/dispatchQuotaContract.js";
 
 // Versioned seam contracts (N-X06) — pinned interface types + version constants
 export type {

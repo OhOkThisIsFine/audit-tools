@@ -98,6 +98,31 @@ partition core does not change (owner caution honored — the delicate union-fin
 the budget SOURCE and the re-fit's keying change). A packet is N tasks; a smaller-context pool takes a
 packet of fewer tasks — that falls out of re-fitting to the pool's window, not a packer rewrite.
 
+### H — progress (2026-07-17 session): H1+H3+H5 LANDED; H2+H4 are the remainder
+- ✅ **H1** `proxy_transport` deleted (type/parse/re-emit/tests — was parse→re-emit only, zero consumers).
+- ✅ **H3** the three `IN_PROCESS_*` sets → ONE shared module `src/shared/providers/inProcessWorkers.ts`
+  with two DISTINCT predicates: `isInProcessWorkerProvider(provider, {commandWorkers?})` (pool drivable
+  as a per-item worker; base + command-shaped under remediate policy) and `isHeadlessPrimaryProvider`
+  (can be the self-driving primary; never `claude-worker`). Deliberate deltas: audit-hybrid gains `agy`
+  (closes the drift); remediate-primary drops `claude-worker` (unreachable anyway). Drift-guard test
+  `tests/shared/in-process-workers.test.mjs`.
+- ✅ **H5** ONE dispatch-quota contract + emit core: `src/shared/dispatch/dispatchQuotaContract.ts`
+  (`dispatch-quota/v1`, zod strict, per-mode optional extensions `host_model_roster`/`tier_budgets`
+  (audit) + `phase`/`estimated_wave_tokens` (remediate)) + `assembleDispatchQuota` (admission math +
+  contract assembly, once). Audit `DispatchQuota`/`DispatchQuotaSchema` and remediate
+  `RemediationDispatchQuota` are thin ALIASES; both old version literals deleted (no back-compat read of
+  v1alpha3 files — one user, ideal-code rule; an in-flight old run re-plans).
+- ⏳ **H2 (remainder):** collapse the headless-vs-hybrid branch pair (audit `nextStepHelpers.ts:1757`/
+  `:1875`; remediate `nextStep.ts:~1903`/`:~1936`) into ONE fan-out over the eligible pool set with the
+  host as a member pool. The headless case degenerates to "the eligible set contains no attended host";
+  the hybrid case to "it does". Also the C-review F4 follow-on lands here: source pools enter unified
+  admission (the capability floor then gates the engine path too, and `grantLeases:false` stops
+  bypassing `capable`).
+- ⏳ **H4 (remainder):** retire `shouldDemotePrimaryInProcess` (`apiPool.ts:376`) — with host-as-a-pool
+  there is no "demotion"; the same-agent guard becomes the existing pool-identity dedup
+  (`dispatchableSourceId` keys on backend+account). Ships in the SAME commit as H2 (atomic replace —
+  the demote flag is what the branch pair conditions on).
+
 ### H. Delete the mode distinctions (the structural collapse)
 - **`proxy_transport`** — dead handshake bit, no consumer (`args.ts:305`, `nextStepCommand.ts:352`). Delete.
 - **Headless-vs-hybrid branch** (`nextStepHelpers.ts:1757`/`1875`; remediate `nextStep.ts:1903`/`1936`) —

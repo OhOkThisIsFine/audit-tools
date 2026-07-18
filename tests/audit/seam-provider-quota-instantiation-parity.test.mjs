@@ -223,7 +223,6 @@ test("remediate-code quota/index does not export auditor-only symbols", () => {
     "GenericHeaderExtractor",
     "ClaudeCodeHeaderExtractor",
     "getHeaderExtractorForProvider",
-    "DISPATCH_QUOTA_V1ALPHA3",
     "resolveHostModel",
   ];
   for (const sym of auditorOnly) {
@@ -231,12 +230,14 @@ test("remediate-code quota/index does not export auditor-only symbols", () => {
   }
 });
 
+// H5: DISPATCH_QUOTA_V1ALPHA3 is deliberately GONE from these lists — the
+// dispatch-quota contract is now the ONE shared dispatch-quota/v1 (aliased by both
+// draws), so it is no longer an auditor-only symbol; parity is the point.
 test("audit-code quota/index exports auditor-specific symbols absent from shared", () => {
   const auditorOnly = [
     "lookupDiscoveredLimits",
     "updateDiscoveredLimits",
     "extractRateLimitHeaders",
-    "DISPATCH_QUOTA_V1ALPHA3",
   ];
   for (const sym of auditorOnly) {
     expect(sym in auditQuota, `audit-code quota/index should export auditor-specific symbol: ${sym}`).toBeTruthy();

@@ -48,14 +48,6 @@ export interface AuditorSelf {
   /** Host can select subagent model (was `--host-can-select-subagent-model`). */
   can_select_subagent_model?: boolean;
   /**
-   * This host's own subagents are proxy-fronted (the session was started behind the
-   * repair-proxy, so anything the host spawns through its Agent tool inherits that
-   * front). Consumed by the FUTURE Agent-tool carrier — nothing reads it this
-   * commit; it rides the handshake so a proxy-fronted session can declare itself
-   * (docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md §Descriptor).
-   */
-  proxy_transport?: boolean;
-  /**
    * The driver's OWN launch transport, for the host/IDE providers that are NOT
    * generic dispatchable sources ({@link DispatchableSource} excludes exactly
    * `claude-code`/`vscode-task`/`antigravity`, which are driven through their

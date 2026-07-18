@@ -506,7 +506,7 @@ describe("M5 dispatch broker — HostSessionQuotaSource wired (inv-2(b), inv-5, 
 // path so concurrency/token/rate come ONLY from the M5-BROKER chokepoint
 // (computeDispatchCapacity → scheduleWave), floor+mechanism come ONLY from the
 // single classifyProvider struct (CE-005), and no dispatch path re-derives a
-// floor at the IN_PROCESS_DISPATCH_PROVIDERS / resolvesToInProcessDispatchProvider
+// floor at the the shared in-process worker predicate (inProcessWorkers.ts) / resolvesToInProcessDispatchProvider
 // site or reaches around the broker to a provider. These guards LOCK the wiring
 // against drift (enforce-in-tooling, OBL-m5-wiring-inv-1/4/5/8/9/12).
 // ===========================================================================
@@ -590,7 +590,7 @@ describe("M5-WIRING convergence — floor+mechanism from the single classifyProv
     expect(local.driverMechanism).toBe("in_process_slot_pull");
   });
 
-  it("the IN_PROCESS_DISPATCH_PROVIDERS site selects a MECHANISM only — it never re-derives a concurrency floor", () => {
+  it("the the shared in-process worker predicate (inProcessWorkers.ts) site selects a MECHANISM only — it never re-derives a concurrency floor", () => {
     // resolvesToInProcessDispatchProvider is a pure Set-membership mechanism gate;
     // it must NOT read or compute a concurrency floor (the floor lives ONLY on the
     // classifyProvider struct, CE-005). Guard both orchestrators' sites.

@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, isHeadlessPrimaryProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -966,45 +966,25 @@ export interface DriveRollingImplementDispatchResult {
 }
 
 /**
- * Backends the orchestrator can drive IN-PROCESS as the per-node implement worker
- * via `driveRollingImplementDispatch` (it resolves + launches the provider with each
- * node's worktree-rooted prompt, cwd-confined to that worktree). The conversation
- * host (claude-code) and IDE-bound providers (vscode-task / antigravity) are
- * excluded: claude-code self-blocks inside a session, and the IDE providers have no
- * headless invocation. "auto" is intentionally absent — auto-resolution stays on the
- * conversation host-subagent default, so the in-process driver is opt-in via an
- * EXPLICIT backend provider in session config. When one is set, it takes precedence
- * over the host-subagent driver: an operator who configured a backend (e.g. a NIM
- * pool for headless autonomy) wants it to do the implement work, not the host.
+ * Whether session config names an EXPLICIT backend the orchestrator self-drives as
+ * the per-node implement worker — the shared `isHeadlessPrimaryProvider` predicate
+ * (H3), remediate policy: command-shaped primaries allowed (implement nodes carry
+ * per-node worker commands). The conversation host (claude-code) and IDE-bound
+ * providers stay excluded; "auto" stays on the conversation host-subagent default.
  */
-const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
-  "openai-compatible",
-  "codex",
-  "opencode",
-  "subprocess-template",
-  "worker-command",
-  "agy",
-  // The proxied isolated Claude-harness worker (commit 3b/3c) — headless in-process
-  // launch from its claude-worker source (mirrors audit's IN_PROCESS_AUDIT_PROVIDERS;
-  // both draws must classify the new worker kind or its pools confirm but never route).
-  "claude-worker",
-]);
-
 function resolvesToInProcessDispatchProvider(
   sessionConfig: SessionConfig | null | undefined,
 ): boolean {
-  const provider = sessionConfig?.provider;
-  return provider !== undefined && IN_PROCESS_DISPATCH_PROVIDERS.has(provider);
+  return isHeadlessPrimaryProvider(sessionConfig?.provider, { commandWorkers: true });
 }
 
 /**
  * Whether a confirmed pool is one the orchestrator launches IN-PROCESS this cycle
- * (vs. the conversation host's subagent pool). The remediate classification for the
- * shared `planHybridDispatch` split — single-sourced off the same provider set
- * `resolvesToInProcessDispatchProvider` uses.
+ * (vs. the conversation host's subagent pool) — the shared
+ * `isInProcessWorkerProvider` predicate (H3), same remediate policy.
  */
 function isInProcessPool(pool: { providerName: string }): boolean {
-  return IN_PROCESS_DISPATCH_PROVIDERS.has(pool.providerName);
+  return isInProcessWorkerProvider(pool.providerName, { commandWorkers: true });
 }
 
 /**

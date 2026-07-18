@@ -587,6 +587,19 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
         "provider",
         `Unsupported provider "${provider}". Expected one of: ${Array.from(VALID_PROVIDERS).join(", ")}.`,
       );
+    } else if (provider === "claude-worker") {
+      // H3 (review finding): claude-worker is a dispatch-WORKER class only — it can
+      // serve packets from a source pool but can never be the run's primary/self
+      // provider. Before this guard a hand-written `provider: "claude-worker"` slipped
+      // past load and silently mis-keyed the host fan-out to a worker-class identity
+      // (the headless predicate rightly refuses it, so nothing would self-drive
+      // either). Loud at the boundary, per enforce-in-tooling.
+      pushIssue(
+        issues,
+        "provider",
+        `"claude-worker" is a dispatch-worker class only and cannot be the session's primary provider — ` +
+          `declare it as a source pool (sources[] / the proxy lane) instead.`,
+      );
     }
   }
 

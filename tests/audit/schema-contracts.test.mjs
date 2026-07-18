@@ -262,7 +262,7 @@ test("dispatch quota accepts a single-pool schedule", () => {
   accepts(
     DispatchQuotaSchema,
     {
-      contract_version: "audit-code-dispatch-quota/v1alpha3",
+      contract_version: "dispatch-quota/v1",
       run_id: "PLAN-1",
       model: "test-model",
       resolved_limits: {
@@ -284,7 +284,7 @@ test("dispatch quota accepts a single-pool schedule", () => {
 
 test("dispatch quota accepts a null cooldown and rejects a bad enum", () => {
   const base = {
-    contract_version: "audit-code-dispatch-quota/v1alpha3",
+    contract_version: "dispatch-quota/v1",
     run_id: "PLAN-1",
     model: "test-model",
     resolved_limits: {
@@ -320,7 +320,7 @@ test("dispatch quota accepts multi-pool capacity summaries", () => {
   accepts(
     DispatchQuotaSchema,
     {
-      contract_version: "audit-code-dispatch-quota/v1alpha3",
+      contract_version: "dispatch-quota/v1",
       run_id: "PLAN-1",
       model: "primary-model",
       resolved_limits: {

@@ -44,6 +44,7 @@ import {
   resolveHostProviderName,
   resolveConversationHostProvider,
   resolveRollingEngineFlag,
+  isHeadlessPrimaryProvider,
   type ResolvedProviderName,
 } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
@@ -87,38 +88,16 @@ function workerResultOutputSchema(): Record<string, unknown> | null {
 }
 
 /**
- * Backends the orchestrator can drive IN-PROCESS as the per-packet review worker
- * via `driveRollingAuditDispatch` (it resolves + launches the provider headless
- * against the repo root). Restricted to the SELF-CONTAINED headless backends whose
- * launch needs only the packet prompt: the API-driven `openai-compatible` (the
- * validated NIM path) and the headless CLIs `codex` / `opencode` (which build their
- * own invocation from the prompt). Deliberately NARROWER than remediate's set:
- * `worker-command` / `subprocess-template` are excluded because they require a
- * per-worker `worker_command` that a read-only review packet does not carry, and
- * `worker-command` is audit's conventional host-dispatch default provider (so
- * routing it in-process would hijack the host-subagent `dispatch_review` path). The
- * conversation host (claude-code) and IDE backends (vscode-task / antigravity) are
- * excluded for the same reasons as remediate. "auto" is intentionally absent, so
- * the in-process driver is opt-in via an EXPLICIT headless backend in session
- * config; when one is set it takes precedence over the host-subagent dispatch step.
- */
-const IN_PROCESS_DISPATCH_PROVIDERS: ReadonlySet<string> = new Set([
-  "openai-compatible",
-  "codex",
-  "opencode",
-  "agy",
-]);
-
-/**
  * Whether session config names an EXPLICIT backend provider the orchestrator can
- * drive in-process as the per-packet review worker. The mirror of remediate's
- * `resolvesToInProcessDispatchProvider`.
+ * drive in-process as the per-packet review worker — the shared
+ * `isHeadlessPrimaryProvider` predicate (H3), audit policy: no command-shaped
+ * primaries (a read-only review packet carries no `worker_command`, and
+ * `worker-command` is audit's conventional host-dispatch default).
  */
 export function resolvesToInProcessDispatchProvider(
   sessionConfig: SessionConfig | null | undefined,
 ): boolean {
-  const provider = sessionConfig?.provider;
-  return provider !== undefined && IN_PROCESS_DISPATCH_PROVIDERS.has(provider);
+  return isHeadlessPrimaryProvider(sessionConfig?.provider);
 }
 
 /**

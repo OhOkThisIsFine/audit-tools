@@ -21,6 +21,7 @@
 import { join } from "node:path";
 import {
   ClaimRegistry,
+  isInProcessWorkerProvider,
   buildSourcePools,
   buildQuotaSource,
   readQuotaStateOrDegrade,
@@ -31,26 +32,14 @@ import {
 } from "audit-tools/shared";
 
 /**
- * Backends audit can drive IN-PROCESS as the per-packet review worker. Narrower than
- * remediate's set: `worker-command` / `subprocess-template` are excluded (a read-only
- * review packet carries no per-worker command, and `worker-command` is audit's
- * conventional host-dispatch default). The host (`claude-code`) and IDE backends are
- * the batch host-review path, never in-process.
+ * Whether a confirmed pool is one audit launches in-process as a review worker —
+ * the shared `isInProcessWorkerProvider` predicate (H3), audit policy: no
+ * command-shaped workers (a read-only review packet carries no per-worker command,
+ * and `worker-command` is audit's conventional host-dispatch default). The host
+ * (`claude-code`) and IDE backends are the batch host-review path, never in-process.
  */
-const IN_PROCESS_AUDIT_PROVIDERS: ReadonlySet<string> = new Set([
-  "openai-compatible",
-  "codex",
-  "opencode",
-  // The proxied isolated Claude-harness worker (commit 3b/3c): launched in-process
-  // from its claude-worker source — without this entry the lane's pools build and
-  // confirm at Gate-0 but the hybrid split routes them nothing (2026-07-16 dogfood:
-  // 313 packets all bound to the walled host pool, zero dispatched).
-  "claude-worker",
-]);
-
-/** Whether a confirmed pool is one audit launches in-process as a review worker. */
 export function isInProcessAuditPool(pool: { providerName: string }): boolean {
-  return IN_PROCESS_AUDIT_PROVIDERS.has(pool.providerName);
+  return isInProcessWorkerProvider(pool.providerName);
 }
 
 /**

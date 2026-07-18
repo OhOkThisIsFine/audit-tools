@@ -11,7 +11,7 @@ import type {
   DispatchExclusion,
   HostPoolPreamble,
 } from "audit-tools/shared";
-import { computeDispatchAdmission, createReservationLedger, admissionPoolsFromSummaries } from "audit-tools/shared";
+import { computeDispatchAdmission, createReservationLedger, admissionPoolsFromSummaries, assembleDispatchQuota } from "audit-tools/shared";
 import {
   buildHostPoolPreamble,
   buildSourcePools,
@@ -21,7 +21,6 @@ import {
 } from "audit-tools/shared";
 import type { HostSessionQuotaSource } from "audit-tools/shared";
 import {
-  REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION,
   type DispatchPhase,
   type RemediationDispatchQuota,
 } from "../types.js";
@@ -283,34 +282,30 @@ export async function buildDispatchQuota(
     };
   }
 
-  // Admission control: instead of a computed `max_concurrent_agents`, GRANT the
-  // affordable admitted set (cost-first-capable, ledger-leased). Per-packet reservation
-  // = input estimate + output envelope (declared output cap; the learned ratio refines
-  // it once a provider reports usage — dormant on the always-on claude-code host).
-  const admission = await computeDispatchAdmission({
-    packets: admissionPackets,
+  // H5: the admission math + contract shape live in the shared emit core; this
+  // wrapper keeps only remediate's assembly policy (precomputed schedule, phase,
+  // estimated_wave_tokens).
+  return assembleDispatchQuota({
+    runId,
     pools: admissionPoolsFromSummaries(schedule.capacity_pools ?? [], confirmedCostPositions),
+    packets: admissionPackets,
     outputCap: schedule.resolved_limits.output_tokens,
     grantLeases,
     ledger: createReservationLedger(),
     ...(dispatchBias != null ? { dispatchBias } : {}),
+    base: {
+      phase,
+      host_concurrency_limit: schedule.host_concurrency_limit,
+      estimated_wave_tokens: schedule.estimated_wave_tokens,
+      model: schedule.model,
+      confidence: schedule.confidence,
+      source: schedule.source,
+      resolved_limits: schedule.resolved_limits,
+      cooldown_until: schedule.cooldown_until,
+      binding_cap: schedule.binding_cap ?? "none",
+      capacity_pools: schedule.capacity_pools,
+      quota_source_snapshot: schedule.quota_source_snapshot ?? null,
+      backoff_state: backoffState,
+    },
   });
-
-  return {
-    contract_version: REMEDIATION_DISPATCH_QUOTA_CONTRACT_VERSION,
-    run_id: runId,
-    phase,
-    host_concurrency_limit: schedule.host_concurrency_limit,
-    admission,
-    estimated_wave_tokens: schedule.estimated_wave_tokens,
-    model: schedule.model,
-    confidence: schedule.confidence,
-    source: schedule.source,
-    resolved_limits: schedule.resolved_limits,
-    cooldown_until: schedule.cooldown_until,
-    binding_cap: schedule.binding_cap ?? "none",
-    capacity_pools: schedule.capacity_pools,
-    quota_source_snapshot: schedule.quota_source_snapshot ?? null,
-    backoff_state: backoffState,
-  };
 }
