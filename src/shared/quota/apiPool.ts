@@ -14,6 +14,8 @@ import { parseProviderModelKey } from "./httpQuotaSource.js";
 import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
 import { deriveLocalAccountId, foldAccountCooldown } from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
+import { resolveModelStatics } from "./modelStatics.js";
+import { DEFAULT_CONTEXT_TOKENS } from "../tokens.js";
 import type { DispatchExclusion } from "../providers/sharedProviderConfirmation.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
 import { resolveConversationHostProvider } from "../providers/providerPathGuard.js";
@@ -60,6 +62,33 @@ export function dispatchableSourceId(source: DispatchableSource, account?: strin
 function positiveIntCapOrNull(value: number | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 1) return null;
   return Math.floor(value);
+}
+
+/**
+ * The effective per-request context window (tokens) for a dispatchable source — a
+ * positive integer that is NEVER null. This is the invariant that makes context-fit
+ * gating REAL: a `null` cap meant "unknown ⇒ always fits", which silently no-op'd
+ * every fit gate for a proxy pool whose registry entry carried no context field (the
+ * 2026-07-17 host-only-collapse root cause — oversized packets were dispatched and
+ * 413'd instead of being skipped). Fallback chain:
+ *   1. operator/registry-declared `quota.context_tokens` (the stamp populate sets),
+ *   2. else the BACKEND model's models.dev window (`resolveModelStatics(model,
+ *      backend_provider ?? provider)` — a synced, someone-else-maintained table),
+ *   3. else the blind `DEFAULT_CONTEXT_TOKENS` floor.
+ * Single-sourced (exported) so it stays the one fit-window resolver as the host-admission
+ * path is unified onto the same per-pool window (a subsequent step); today only
+ * `buildSourcePool` stamps it — host-model pools remain always-fits until that unification.
+ */
+export function resolveSourceContextWindowTokens(source: DispatchableSource): number {
+  const declared = positiveIntCapOrNull(source.quota?.context_tokens);
+  if (declared !== null) return declared;
+  const statics = resolveModelStatics(
+    source.model ?? null,
+    source.backend_provider ?? source.provider,
+  );
+  const fromCatalog = positiveIntCapOrNull(statics?.context_tokens);
+  if (fromCatalog !== null) return fromCatalog;
+  return DEFAULT_CONTEXT_TOKENS;
 }
 
 /**
@@ -308,10 +337,12 @@ export async function buildSourcePool(params: {
     // null (uncapped) — never 0, which would ceiling the pool to zero in-flight and
     // wedge the rolling engine, and would also violate the summary schema's min(1).
     concurrencyCap: positiveIntCapOrNull(source.quota?.max_concurrent),
-    // Endpoint-declared per-request context-token cap (from source.quota.context_tokens).
-    // null/absent = unknown cap → no fit filtering. A non-positive / non-finite value
-    // degrades to null (no finer signal).
-    contextCapTokens: positiveIntCapOrNull(source.quota?.context_tokens),
+    // Effective per-request context window — NEVER null (declared quota.context_tokens
+    // → backend model's models.dev window → DEFAULT_CONTEXT_TOKENS). A null cap used to
+    // mean "always fits", which no-op'd every fit gate for a registry pool carrying no
+    // context field; resolving to a concrete window means an oversized packet is skipped,
+    // not 413'd. See resolveSourceContextWindowTokens.
+    contextCapTokens: resolveSourceContextWindowTokens(source),
     // Operator-declared a-priori $/Mtok for this endpoint → the admission cost rank
     // (rung 2, authoritative over the models.dev catalog). 0 = declared-free → routes
     // first. null when unset/invalid ⇒ falls through to the catalog price / tier.
