@@ -57,18 +57,20 @@
 
 ## ▶ IMMEDIATE NEXT — implement the capability-evidence obligation (plan ready, ONE owner call open)
 
-**⚠ BLOCKED ON AN UNANSWERED OWNER QUESTION — do not start coding until it is answered.**
-The plan is written and adversarially reviewed:
+**UNBLOCKED — implement it.** Plan, written and adversarially reviewed:
 [`docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md)
-(v2 — the review REFUTED three v1 claims; read it, not a summary).
+(v2 + owner clarification — the review REFUTED three v1 claims; read it, not a summary).
 
-**The open question:** the review established the fix's scope is NARROWER than it was pitched as. It stops
-unranked pools failing open into **`deep`** eligibility. It does **not** stop a cheap weak pool winning
-`standard` work — `costFirstCmp` (`admissionLoop.ts:397`) has `costRank` dominating absolutely with
-capability only a tiebreak, and λ defaults to 0. That is cost-first routing working as designed. Owner was
-asked whether the corrected, narrower scope is still what they wanted, **and had not answered when the
-sprint closed.** If yes → implement as planned. If they wanted weak pools de-prioritized generally →
-that is a change to ORDERING, not eligibility, and needs its own scoping.
+**The scope question that briefly blocked this is WITHDRAWN (owner, 2026-07-18):** because the gate
+FORCES every pool to be pinned, there is no unranked pool at dispatch time, so the fail-open branch stops
+being the operative path. With all pools scored, `FLOOR_MAX_BAND.standard = 1` excludes the bottom tercile
+from `standard` as well as `deep` — a weak pool is pushed down to `small` work by ELIGIBILITY, no ordering
+change needed. Most of what v2 called out-of-scope arrives as a consequence of this plan.
+
+**Deferred residue, NOT forgotten:** banding is **relative** — `band <= Math.max(FLOOR_MAX_BAND[tier],
+bestAvailableBand)` admits the best available pool however bad it is. If every pool is weak, `deep` work
+still goes to the least-weak one. Forcing rankings guarantees the ORDERING, not that anyone is good
+enough. Whether an ABSOLUTE floor is wanted needs live data from a ranked run first.
 
 **Owner decisions taken 2026-07-18** (these are settled, do not re-litigate): (1) fix the composition
 BEFORE re-dogfooding; (2) a pool with no capability evidence must be **pinned down** by LLM judgment or by

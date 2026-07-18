@@ -24,13 +24,32 @@ dominates absolutely, capability is only a tiebreak, and λ defaults to 0. After
 pool **still wins `standard` work on price**. That is cost-first routing working as designed
 (cheapest *eligible*), not a bug — but the plan must not claim to fix it.
 
-Three distinct mechanisms produced the observed symptom. Only the first is in scope:
+Three distinct mechanisms produced the observed symptom:
 
 | # | Mechanism | Status |
 |---|---|---|
 | 1 | unranked ⇒ fail-open ⇒ eligible for `deep` | **THIS PLAN** |
-| 2 | `cost_per_mtok: 0` ⇒ sorts first among eligible | by design; out of scope |
+| 2 | `cost_per_mtok: 0` ⇒ sorts first among eligible | by design; **largely obviated — see below** |
 | 3 | `top_k` truncates alphabetically (no score to sort by) | resolved by the ranker, not here |
+
+### Owner clarification (2026-07-18): forcing rankings obviates most of mechanism 2
+
+**Because the gate FORCES every pool to be pinned, there is no unranked pool at dispatch time** — the
+fail-open branch stops being the operative path. Consequence the v2 scope note missed: with all pools
+scored, `scoreBand` terciles them and `FLOOR_MAX_BAND.standard = 1` means the **bottom tercile is
+excluded from `standard` too**, not only from `deep`. A weak free pool is pushed down to `small` work by
+ELIGIBILITY, with no change to ordering. So most of what v2 declared out-of-scope arrives as a
+consequence of this plan rather than needing a separate ordering change.
+
+**The scope question is therefore withdrawn and implementation is UNBLOCKED.**
+
+**Residue — a DIFFERENT failure mode, deliberately not solved here.** Banding is **relative**: terciles
+are computed over the pools actually present, and `band <= Math.max(FLOOR_MAX_BAND[tier],
+bestAvailableBand)` (`:334`) deliberately admits the best available pool however bad it is (the
+anti-`no_capable_pool` guard). **So if every pool is weak, ranking them all still routes `deep` work to
+the least-weak one.** Forcing rankings guarantees you know the ORDERING; it does not guarantee anyone is
+good enough. Whether an ABSOLUTE capability floor is wanted is a genuine open question — but it wants
+live data from a ranked run first, so it is explicitly deferred, not forgotten.
 
 ## Design
 

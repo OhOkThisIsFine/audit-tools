@@ -82,15 +82,15 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   [`docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md)
   (v2; the review refuted three v1 claims — read v2, not a summary). Owner decisions taken: fix the
   composition BEFORE re-dogfooding; no-capability-evidence must be PINNED DOWN (LLM judgment or operator
-  ask), never silently routed around; ranker via OpenRouter. **⚠ Implementation is BLOCKED on one
-  unanswered owner question:** the review established the fix's scope is narrower than pitched — it stops
-  unranked pools failing open into `deep` eligibility, but does NOT stop a cheap weak pool winning
-  `standard` work (`costFirstCmp`, `admissionLoop.ts:397`, has costRank dominating absolutely; λ defaults
-  to 0 — cost-first working as designed). Owner was asked whether the narrower scope is still what they
-  wanted and had not answered when the sprint closed. Broader behavior = a change to ORDERING, not
-  eligibility, needing its own scoping.
-  **Note the symptom had THREE mechanisms; only one is in scope:** (1) unranked ⇒ fail-open ⇒ `deep`
-  eligible [the plan]; (2) `cost_per_mtok: 0` sorts first among eligible [by design, not a bug];
+  ask), never silently routed around; ranker via OpenRouter. **UNBLOCKED 2026-07-18 — implement it.** The scope question is withdrawn: because the gate
+  FORCES pinning, there is no unranked pool at dispatch time, and with all pools scored
+  `FLOOR_MAX_BAND.standard = 1` excludes the bottom tercile from `standard` as well as `deep` — a weak
+  pool drops to `small` work by ELIGIBILITY, no ordering change needed. **Deferred residue:** banding is
+  RELATIVE (`band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand)`), so if every pool is weak,
+  `deep` still routes to the least-weak one. Forcing rankings guarantees the ordering, not that anyone
+  is good enough — whether an ABSOLUTE floor is wanted needs live data from a ranked run first.
+  **The symptom had THREE mechanisms:** (1) unranked ⇒ fail-open ⇒ `deep`
+  eligible [the plan]; (2) `cost_per_mtok: 0` sorts first among eligible [by design; largely obviated once every pool is ranked];
   (3) `top_k` truncates alphabetically [resolved by the ranker, nothing to sort by today].
 - **Are `dropped[]` reasons actually SURFACED to the operator at Gate-0? (2026-07-18, medium,
   from the LiteLLM live-validation lap.)** The whole declared-reach design leans on "never silently
