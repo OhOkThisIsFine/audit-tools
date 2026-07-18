@@ -67,32 +67,30 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — finish the unified-routing collapse (H2+H4), then re-dogfood
+## ▶ IMMEDIATE NEXT — re-dogfood the collapsed routing, then LiteLLM groundwork
 
-**The unified ONE-routing-decision rebuild LANDED 2026-07-17** (design of record + per-step review
-records: [`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md);
-premise refutation: [`host-fanout-premise-refuted-2026-07-17.md`](reviews/host-fanout-premise-refuted-2026-07-17.md)).
-The `proxy_transport`-trigger plan was retired — the run's own artifacts refuted it (pools WERE folded
-in; the real chain was null context caps → 413/429 → collective settle → walled-host collapse). Landed
-as 6 attested loop-core commits: **A** never-null effective context window per pool; **B** one fit
-predicate on both dispatch paths; **F** `large_packet` category abandoned; **D** settle per-pool +
-reason-aware; **E** honest host wall (item C CLOSED — cause-classified zero-grants, structural
-fit-mismatch skips first-pass); **C** per-packet capability floor (relative banding, fail-open + note,
-populate stamps `capability_rank`); **G** packer/fit consistency (real per-task estimates into the
-hybrid frontier; override packer budget honors the agentic overhead); **H1** `proxy_transport` deleted;
-**H3** one shared in-process worker classifier (+ `provider:"claude-worker"` rejected at validation);
-**H5** one dispatch-quota contract (`dispatch-quota/v1`) + one emit core. Routing criteria (owner):
-capability floor ∧ available ∧ quota/rate headroom ∧ agentic-capable ∧ context-fit; λ orders the
-eligible; host is just a pool.
+**The unified-routing collapse is COMPLETE (2026-07-18).** Steps A–G + H1/H3/H5 landed 2026-07-17;
+**H2+H4 landed 2026-07-18 as three attested loop-core commits** (design of record:
+[`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md);
+plan + all four review records: [`h2-h4-collapse-plan-2026-07-18.md`](reviews/h2-h4-collapse-plan-2026-07-18.md)):
+`c9bd3505` capability floor enforced IN the engine's per-packet selection (+ honest `packet_oversized`
+plan-only display); `52c8337f` partition-scoped rolling implement drive (pool attribution,
+`exhausted_pool_ids`, terminal/merge suppression); `2af221cd` the atomic collapse — both
+headless-vs-hybrid branch pairs deleted, ONE fan-out over the eligible pool set (headless = "no
+attended host in the set"; audit host = coverage-driven complement, never a coordinator claimant),
+demote machinery + `executeInProcessPartition` deleted, `dedupHostAndSourcePools` is the one
+same-agent rule (backend identity, directional accounts, draw policy), primary fold unconditional
+with agy/subprocess-template/worker-command synthesis, `resolveHostDispatchProviderName` hoisted to
+shared. Blessed semantics + deliberate routing changes recorded in the plan doc; residual pins in
+backlog ("H2+H4 collapse residual pins"). Routing criteria (owner): capability floor ∧ available ∧
+quota/rate headroom ∧ agentic-capable ∧ context-fit; λ orders the eligible; host is just a pool.
 
 Next, in order:
-1. **H2+H4 — the collapse remainder** (backlog → "H2+H4"; full spec in the design doc's "H — progress"):
-   one fan-out over the eligible pool set (headless/hybrid branch pair deleted), demote retired,
-   source pools into unified admission (capability floor reaches the engine path). Loop-core FOCUSED-LAP.
-2. **Re-dogfood a fresh conversation-first self-audit** (backlog → RESOLVED entry's ⬇ watch line):
-   small pools take fitting packets, oversized packets skip (no 413), a 429 on pool A leaves pool B
-   dispatchable, zero-grants render their honest cause.
-3. **LiteLLM swap groundwork** (owner is replacing repair-proxy; backlog → "LiteLLM replaces
+1. **Re-dogfood a fresh conversation-first self-audit** (backlog → RESOLVED entry's ⬇ watch line, plus
+   the collapse: an attended run fans host + primary + NIM concurrently; small pools take fitting
+   packets, oversized packets skip (no 413), a 429 on pool A leaves pool B dispatchable, zero-grants
+   render their honest cause, a floored packet never lands on a bottom-band pool).
+2. **LiteLLM swap groundwork** (owner is replacing repair-proxy; backlog → "LiteLLM replaces
    repair-proxy"): proxy-agnostic populate adapter before any deeper `/registry` coupling.
    [[litellm-replaces-repair-proxy]]
 
