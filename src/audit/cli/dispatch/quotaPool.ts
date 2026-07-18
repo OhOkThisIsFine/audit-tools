@@ -273,28 +273,42 @@ export async function finalizeDispatchQuota(params: {
   // remediate cannot drift on how a capacity pool maps to an admission pool — audit
   // summarizes its dispatch capacity, remediate passes its `capacity_pools`, both feed
   // the SAME builder (budget, declaredCap, costRank rung-1, capability, throughput).
+  const poolSummaries = summarizeDispatchCapacityPools(dispatchCapacity);
   const admissionPools: AdmissionPool[] = admissionPoolsFromSummaries(
-    summarizeDispatchCapacityPools(dispatchCapacity),
+    poolSummaries,
     params.confirmedCostPositions,
-  ).map((pool) =>
+  ).map((pool, i) =>
     // Fan-out mode: budget-only gating so an atomic panel dispatches whenever its
     // tokens fit the session budget, and pauses only on a genuine budget/cooldown
-    // wall. Three relaxations vs the packet path, all because fan-out is HOST-ONLY
+    // wall. Two relaxations vs the packet path, both because fan-out is HOST-ONLY
     // (the subagents run on the conversation host — there is no alternative pool to
     // route to): (1) `calibrating:false` drops the cold-start probe clamp that would
     // livelock a panel larger than the probe; (2) `declaredCap:null` drops the
     // concurrency cap (the host serializes subagents past its cap — a concurrency
-    // shortfall is not an affordability wall); (3) `capacityTokens:+Infinity` drops
-    // the context-FIT gate — with only the host pool there is nowhere else to route a
-    // large prompt, the host runs it on its OWN model window (not the tool's
-    // conservative blind 32k default), so a context-fit block here would
-    // permanently-wall a panel the host can actually run.
+    // shortfall is not an affordability wall). The former third relaxation
+    // (`capacityTokens:+Infinity` unconditionally) is NARROWED (unified-routing
+    // step B): the fit gate walls only on a KNOWN window. A real resolved window
+    // (confidence medium/high — explicit config, discovered capability) gates
+    // honestly: a panel that genuinely cannot fit the host's model window blocks
+    // instead of dispatching a guaranteed-overflow prompt. But a LOW-confidence
+    // window (blind `default`/`provider_default` floor — 32k is fabricated, not
+    // knowledge) keeps the always-fits escape: with no alternative pool, a
+    // fabricated wall is a permanent livelock on a panel the host can actually run.
     params.fanoutMode
       ? {
           ...pool,
           calibrating: false,
           declaredCap: null,
-          capacityTokens: Number.POSITIVE_INFINITY,
+          // Hardened (B review F2): the escape ALSO requires the pool to carry no
+          // real per-pool window — a source pool with a stamped context_cap_tokens
+          // has knowledge regardless of the resolved-limits confidence, and
+          // discarding it would readmit the 413 class step A closed. Mechanical,
+          // not call-site-convention (fan-out is host-only today, but the guard
+          // must not depend on that staying true).
+          ...(poolSummaries[i]?.confidence === "low" &&
+          poolSummaries[i]?.context_cap_tokens == null
+            ? { capacityTokens: Number.POSITIVE_INFINITY }
+            : {}),
         }
       : pool,
   );

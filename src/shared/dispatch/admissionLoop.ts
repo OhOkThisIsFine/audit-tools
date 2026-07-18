@@ -139,7 +139,13 @@ export function admissionPoolsFromSummaries(
       hostActiveSubagents: pool.host_concurrency_limit?.active_subagents,
       sourceConcurrencyCap: pool.concurrency_cap,
     }),
-    capacityTokens: pool.resolved_limits.context_tokens,
+    // ONE fit predicate on both dispatch paths (unified-routing step B): a source
+    // pool's own effective window (`context_cap_tokens`, non-null since step A)
+    // outranks the wave's resolved limits — previously the host-admission path gated
+    // every pool against the HOST's window, so a small-context source pool admitted
+    // packets it could never serve (413 instead of skip). Host pools carry no
+    // `context_cap_tokens` and fall through to their real resolved window.
+    capacityTokens: pool.context_cap_tokens ?? pool.resolved_limits.context_tokens,
     calibrating: pool.calibrating === true,
   }));
 }

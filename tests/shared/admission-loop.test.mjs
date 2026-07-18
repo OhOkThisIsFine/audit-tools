@@ -509,3 +509,57 @@ test("deriveThroughputConcurrency: source uncapped ⇒ +Inf, source capped ⇒ c
   expect(deriveThroughputConcurrency({ isConversationHost: true, hostActiveSubagents: null })).toBe(1);
   expect(deriveThroughputConcurrency({ isConversationHost: true, hostActiveSubagents: 4 })).toBe(4);
 });
+
+// ── Unified-routing step B: ONE fit predicate on both paths ──────────────────
+// The host-admission path used to gate every pool against the WAVE's resolved
+// window (`resolved_limits.context_tokens`), never the pool's own effective window
+// — so a small-context source pool admitted packets it could never serve (413
+// instead of a skip). RED before the fix (capacityTokens === resolved window for a
+// capped source summary); GREEN after (context_cap_tokens outranks it).
+test("admissionPoolsFromSummaries: a source pool's own context_cap_tokens outranks the wave's resolved window", async () => {
+  const { admissionPoolsFromSummaries } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const base = {
+    slots: 1,
+    model: null,
+    confidence: "low",
+    source: "default",
+    resolved_limits: { context_tokens: 200_000, output_tokens: 8_000 },
+    host_concurrency_limit: null,
+    cooldown_until: null,
+    estimated_wave_tokens: 0,
+    binding_cap: "none",
+  };
+  const pools = admissionPoolsFromSummaries([
+    // A small-context backend source: its own window must gate, not the wave's.
+    { ...base, pool_id: "groq/small-model", is_conversation_host: false, context_cap_tokens: 16_000 },
+    // A host pool (never stamps context_cap_tokens): falls to its resolved window.
+    { ...base, pool_id: "claude-code/*", is_conversation_host: true },
+  ]);
+  const byId = Object.fromEntries(pools.map((p) => [p.poolId, p]));
+  expect(byId["groq/small-model"].capacityTokens).toBe(16_000);
+  expect(byId["claude-code/*"].capacityTokens).toBe(200_000);
+});
+
+test("end-to-end: an oversized packet is NOT admitted to a small-window source pool on the host-admission path", async () => {
+  const { admissionPoolsFromSummaries } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  const base = {
+    slots: 4,
+    model: null,
+    confidence: "low",
+    source: "default",
+    resolved_limits: { context_tokens: 200_000, output_tokens: 8_000 },
+    host_concurrency_limit: null,
+    cooldown_until: null,
+    estimated_wave_tokens: 0,
+    binding_cap: "none",
+  };
+  const pools = admissionPoolsFromSummaries([
+    // Free small pool sorts first on cost — but a 40k packet must NOT land on its 16k window.
+    { ...base, pool_id: "groq/small-model", is_conversation_host: false, context_cap_tokens: 16_000, declared_cost_per_mtok: 0 },
+    { ...base, pool_id: "claude-code/*", is_conversation_host: true },
+  ]);
+  const res = await admitBatch({ packets: [pkt("big", 40_000)], pools, ledger });
+  expect(res.granted.length).toBe(1);
+  expect(res.granted[0].pool_id).toBe("claude-code/*");
+});

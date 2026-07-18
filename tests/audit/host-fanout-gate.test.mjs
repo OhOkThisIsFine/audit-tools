@@ -139,6 +139,29 @@ describe("gateHostFanout — item C host fan-out quota gate", () => {
     }
   });
 
+  test("a KNOWN (discovered) window DOES fit-gate a fan-out panel — only a blind window keeps always-fits (step B)", async () => {
+    // Counterpart of the blind-host pin above: when the host's window is real
+    // knowledge (discovered capability, not the fabricated low-confidence floor),
+    // a panel that cannot fit it must wall honestly instead of dispatching a
+    // guaranteed-overflow prompt. One fit predicate, every path.
+    const dir = await tmp("host-fanout-known-");
+    setQuotaStateDir(await tmp("host-fanout-state-"));
+    try {
+      const outcome = await gateHostFanout({
+        artifactsDir: dir,
+        sessionConfig: {},
+        family: "design_review",
+        // ~600KB prompt (~150k tokens) against a REAL discovered 32k window.
+        units: [{ id: "big", estInputBytes: 600_000 }],
+        hostContextTokens: 32_000,
+      });
+      expect(outcome.atWall).toBe(true);
+      expect(outcome.grantedCount).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("re-gating a family reconciles the prior grant's leases — no accumulation / leak", async () => {
     const dir = await tmp("host-fanout-regate-");
     setQuotaStateDir(await tmp("host-fanout-state-"));

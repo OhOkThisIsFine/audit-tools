@@ -75,9 +75,11 @@ function positiveIntCapOrNull(value: number | undefined): number | null {
  *   2. else the BACKEND model's models.dev window (`resolveModelStatics(model,
  *      backend_provider ?? provider)` — a synced, someone-else-maintained table),
  *   3. else the blind `DEFAULT_CONTEXT_TOKENS` floor.
- * Single-sourced (exported) so it stays the one fit-window resolver as the host-admission
- * path is unified onto the same per-pool window (a subsequent step); today only
- * `buildSourcePool` stamps it — host-model pools remain always-fits until that unification.
+ * Single-sourced (exported) as the one fit-window resolver. Only `buildSourcePool`
+ * stamps it — host-model pools carry no `contextCapTokens` and gate (on the admission
+ * path) against their own per-pool `resolved_limits` window instead; the admission
+ * builder folds the two (`context_cap_tokens ?? resolved_limits.context_tokens`) so
+ * BOTH pool classes share one fit predicate (unified-routing step B).
  */
 export function resolveSourceContextWindowTokens(source: DispatchableSource): number {
   const declared = positiveIntCapOrNull(source.quota?.context_tokens);
