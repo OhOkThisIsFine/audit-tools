@@ -8,9 +8,9 @@
     "grep": "allow",
     "edit": {
       "*": "ask",
-      ".remediate-code/**": "allow",
-      ".audit-tools/**": "allow",
       ".audit-code/**": "allow",
+      ".audit-tools/**": "allow",
+      ".remediate-code/**": "allow",
       ".audit-artifacts/**": "allow",
       "audit-report.md": "allow"
     },
