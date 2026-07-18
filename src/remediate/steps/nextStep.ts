@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, isHeadlessPrimaryProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, isHeadlessPrimaryProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -697,6 +697,12 @@ export interface DriveRollingDispatchOptions {
   rebuildSharedBetweenLevels: () => Promise<void>;
   /** Per-node estimated input tokens (defaults to a flat overhead estimate). */
   estimateTokens?: (block: RemediationBlock) => number;
+  /**
+   * A block's capability floor — its dispatch tier (F4), stamped onto the engine
+   * packet as `requiredTier` so packet→pool selection never binds the node below
+   * it. Omit/undefined ⇒ no floor for that block.
+   */
+  tierForBlock?: (block: RemediationBlock) => DispatchModelTier | undefined;
   /** Quota state dir for `recordWaveOutcome` (defaults to leaving it unset). */
   quotaStateDir?: string;
   /**
@@ -855,12 +861,16 @@ export async function driveRollingDispatch(
         ...(continuity > 0 ? { continuity } : {}),
       };
     },
-    toPacket: (b) => ({
-      id: b.block_id,
-      payload: { block_id: b.block_id },
-      estimatedTokens: estimateTokens(b),
-      complexity: 0.5,
-    }),
+    toPacket: (b) => {
+      const requiredTier = options.tierForBlock?.(b);
+      return {
+        id: b.block_id,
+        payload: { block_id: b.block_id },
+        estimatedTokens: estimateTokens(b),
+        complexity: 0.5,
+        ...(requiredTier ? { requiredTier } : {}),
+      };
+    },
     dispatchPacket: async (packet, slot) =>
       options.dispatchNode(blockById.get(packet.payload.block_id)!, slot),
     ...(options.root !== undefined ? { root: options.root } : {}),
@@ -1073,6 +1083,14 @@ export async function driveRollingImplementDispatch(
       .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
       .map((i) => [i.block_id, i.access?.read_paths ?? []]),
   );
+  // Per-block capability floor from the plan's model hints (F4) — the same tier
+  // the contract's admission packets carry, so the engine's packet→pool
+  // selection enforces what the contract displays.
+  const tierByBlock = new Map<string, DispatchModelTier>(
+    plan.items
+      .filter((i): i is typeof i & { block_id: string } => typeof i.block_id === "string")
+      .flatMap((i) => (i.model_hint ? [[i.block_id, i.model_hint.tier] as const] : [])),
+  );
 
   // The RETAINED host-session source: threaded through pool sizing AND the
   // dispatcher's escalation hooks so the bounded re-limit chain (recordLimit →
@@ -1250,6 +1268,7 @@ export async function driveRollingImplementDispatch(
     continuityScores,
     scopeForBlock: (block) =>
       writePathsByBlock.get(block.block_id) ?? block.touched_files ?? [],
+    tierForBlock: (block) => tierByBlock.get(block.block_id),
     // Reactive cost verification: a declared-free source pool observed charging has
     // been demoted by the engine; surface it as reviewable friction so the operator
     // reconciles the stale `cost_per_mtok:0` (single step-boundary chokepoint).

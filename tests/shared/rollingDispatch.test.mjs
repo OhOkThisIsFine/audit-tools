@@ -1595,3 +1595,99 @@ test("createRollingDispatcher — a packet that fits NO pool's declared context 
   expect(terminal, "stranded packet surfaces via the terminal").toBeTruthy();
   expect(terminal.stranded_ids).toContain("p-nofit");
 });
+
+// ---------------------------------------------------------------------------
+// Capability floor (F4) — enforced at packet→pool selection
+//
+// The floor previously lived only in the host-path admission contract; the
+// engine selected by preference order alone, so a low-complexity deep-floor
+// packet landed on the LEAST-capable pool. These are red on that HEAD
+// semantics: selection (not a contract file) must refuse the incapable pool.
+// ---------------------------------------------------------------------------
+
+test("selectProvider — a floor-carrying packet is never bound to a pool below its capability floor (F4)", async () => {
+  await setupTmpQuotaDir();
+  // complexity 0.2 → the preference order alone picks the LEAST-capable pool,
+  // which is exactly the pool the deep floor must exclude (red on HEAD).
+  const packet = { ...makePacket("p1", { complexity: 0.2 }), requiredTier: "deep" };
+  const deep = makePool("deep-pool", { rank: "deep" });
+  const small = makePool("small-pool", { rank: "small" });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [deep, small], tracker, {}, unlimitedSession());
+  expect(slot !== null).toBeTruthy();
+  expect(
+    slot.poolId,
+    "a deep-floor packet must never select the bottom-band pool, whatever the preference order says",
+  ).toBe("deep-pool");
+});
+
+test("selectProvider — the floor is RELATIVE: an all-bottom-band pool set stays eligible (never fail-closed)", async () => {
+  await setupTmpQuotaDir();
+  const packet = { ...makePacket("p1", { complexity: 0.2 }), requiredTier: "deep" };
+  const small = makePool("small-pool", { rank: "small" });
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [small], tracker, {}, unlimitedSession());
+  expect(slot !== null, "deep means 'most capable band AVAILABLE' — never an empty set").toBeTruthy();
+  expect(slot.poolId).toBe("small-pool");
+});
+
+test("selectProvider — unknown capability fails OPEN: rank-less pools stay eligible for a floor-carrying packet (F4)", async () => {
+  await setupTmpQuotaDir();
+  const packet = { ...makePacket("p1", { complexity: 0.2 }), requiredTier: "deep" };
+  // No `rank`, no declared capability score anywhere — the floor has no signal and
+  // must never block (a fail-closed regression here would strand every floored
+  // packet on capability-blind pool sets, e.g. LiteLLM-fronted pools).
+  const blindA = makePool("blind-a");
+  const blindB = makePool("blind-b");
+  const tracker = new InFlightTokenTracker();
+  const slot = selectProvider(packet, [blindA, blindB], tracker, {}, unlimitedSession());
+  expect(slot !== null, "unknown capability is never a refusal").toBeTruthy();
+});
+
+test("createRollingDispatcher — an engine drive dispatches a floor-carrying packet only to the capable pool (F4)", async () => {
+  await setupTmpQuotaDir();
+  const seen = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      makePool("deep-pool", { rank: "deep" }),
+      makePool("small-pool", { rank: "small" }),
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      seen.push(slot.poolId);
+      return { packet, outcome: "success" };
+    },
+  });
+  dispatcher.enqueue([{ ...makePacket("p1", { complexity: 0.2 }), requiredTier: "deep" }]);
+  const results = await dispatcher.run();
+  expect(results.length).toBe(1);
+  expect(results[0].outcome).toBe("success");
+  expect(seen, "the packet must be DISPATCHED to the capable pool only").toEqual(["deep-pool"]);
+});
+
+test("createRollingDispatcher — a floor-stranded packet strands (empty_pool) instead of spinning when its only capable pool exhausts (F4 liveness)", async () => {
+  await setupTmpQuotaDir();
+  // The deep pool rate-limits away; the surviving small pool is below the deep
+  // packet's floor (relative floor banded over the FULL confirmed set) — the
+  // packet must strand via the terminal, not spin the wait tick forever and not
+  // land on the incapable pool.
+  const seen = [];
+  const dispatcher = createRollingDispatcher({
+    confirmedPools: [
+      makePool("deep-pool", { rank: "deep" }),
+      makePool("small-pool", { rank: "small" }),
+    ],
+    sessionConfig: unlimitedSession(),
+    dispatchPacket: async (packet, slot) => {
+      seen.push(slot.poolId);
+      return { packet, outcome: "rate_limited" };
+    },
+  });
+  dispatcher.enqueue([{ ...makePacket("p1", { complexity: 0.9 }), requiredTier: "deep" }]);
+  const results = await dispatcher.run();
+  expect(seen.every((id) => id === "deep-pool"), "never dispatched to the below-floor pool").toBeTruthy();
+  expect(results.filter((r) => r.outcome === "success").length).toBe(0);
+  const terminal = dispatcher.getTerminal();
+  expect(terminal, "the floor-stranded packet surfaces via the partial-completion terminal").not.toBe(null);
+  expect(terminal.stranded_ids).toEqual(["p1"]);
+});

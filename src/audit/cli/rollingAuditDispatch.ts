@@ -457,6 +457,9 @@ export async function driveRollingAuditDispatch(params: {
       payload: entry,
       estimatedTokens: entry.complexity.estimated_tokens,
       complexity: packetComplexityScore(entry),
+      // F4: the packet's capability floor rides into the engine — the same
+      // risk/complexity-derived tier the plan entry (and admission) carries.
+      ...(entry.model_hint ? { requiredTier: entry.model_hint.tier } : {}),
     }),
   );
 

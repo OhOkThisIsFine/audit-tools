@@ -11,7 +11,13 @@ import type {
   DispatchExclusion,
   HostPoolPreamble,
 } from "audit-tools/shared";
-import { createReservationLedger, admissionPoolsFromSummaries, assembleDispatchQuota } from "audit-tools/shared";
+import {
+  createReservationLedger,
+  admissionPoolsFromSummaries,
+  assembleDispatchQuota,
+  buildCapabilityFloorCapable,
+} from "audit-tools/shared";
+import type { DispatchModelTier } from "audit-tools/shared";
 import {
   buildHostPoolPreamble,
   buildSourcePools,
@@ -251,7 +257,7 @@ export async function buildDispatchQuota(
   runId: string,
   phase: DispatchPhase,
   schedule: WaveScheduleResult,
-  admissionPackets: { id: string; inputTokens: number; complexity: number }[],
+  admissionPackets: { id: string; inputTokens: number; complexity: number; requiredTier?: DispatchModelTier }[],
   /**
    * Whether to LEASE the granted set against the shared reservation ledger. The
    * host-subagent path passes `true` (the host dispatches the grant across processes,
@@ -285,13 +291,17 @@ export async function buildDispatchQuota(
   // H5: the admission math + contract shape live in the shared emit core; this
   // wrapper keeps only remediate's assembly policy (precomputed schedule, phase,
   // estimated_wave_tokens).
+  const pools = admissionPoolsFromSummaries(schedule.capacity_pools ?? [], confirmedCostPositions);
   return assembleDispatchQuota({
     runId,
-    pools: admissionPoolsFromSummaries(schedule.capacity_pools ?? [], confirmedCostPositions),
+    pools,
     packets: admissionPackets,
     outputCap: schedule.resolved_limits.output_tokens,
     grantLeases,
     ledger: createReservationLedger(),
+    // F4 parity with audit's finalizeDispatchQuota: size-fit AND each packet's
+    // RELATIVE capability floor over this batch's pool set (fail-open on unknown).
+    capable: buildCapabilityFloorCapable(pools),
     ...(dispatchBias != null ? { dispatchBias } : {}),
     base: {
       phase,

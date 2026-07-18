@@ -388,7 +388,14 @@ export async function prepareImplementDispatch(
     .filter((p): p is { item: DispatchPlanItem & { block_id: string }; inputTokens: number } =>
       typeof p.item.block_id === "string",
     )
-    .map((p) => ({ id: p.item.block_id, inputTokens: p.inputTokens, complexity: 0.5 }));
+    .map((p) => ({
+      id: p.item.block_id,
+      inputTokens: p.inputTokens,
+      complexity: 0.5,
+      // F4: the node's capability floor rides into admission — the same tier the
+      // dispatch plan item already carries (`buildImplementModelHint`).
+      ...(p.item.model_hint ? { requiredTier: p.item.model_hint.tier } : {}),
+    }));
   process.stderr.write(
     `[remediate-code] dispatch: implement ${items.length} item(s) ` +
       `source=${schedule.source} cap=${schedule.binding_cap ?? "none"}\n`,

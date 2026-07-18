@@ -457,6 +457,51 @@ describe("driveRollingDispatch: shared rebuild between levels + single-flight (C
   });
 });
 
+describe("driveRollingDispatch: capability floor enforced in the engine (F4)", () => {
+  it("dispatches a floor-carrying node to the capable pool even when the incapable pool is healthier", async () => {
+    // The capable (deep-band) pool carries an active cooldown, so pre-F4 the
+    // engine's proactive spill (INV-QD-14) routed the node to the healthy
+    // bottom-band pool — exactly the pool the deep floor must exclude. Red on
+    // that HEAD semantics: the assertion is on the DISPATCHED pool, not a file.
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const pools: CapacityPool[] = [
+      {
+        id: "deep-pool",
+        providerName: "openai-compatible",
+        hostModel: null,
+        hostConcurrencyLimit: null,
+        rank: "deep",
+        quotaStateEntry: { cooldown_until: future, consecutive_429_count: 1 },
+      } as unknown as CapacityPool,
+      {
+        id: "small-pool",
+        providerName: "openai-compatible",
+        hostModel: null,
+        hostConcurrencyLimit: null,
+        rank: "small",
+      } as unknown as CapacityPool,
+    ];
+    const seen: string[] = [];
+    const result = await driveRollingDispatch([[block("A", ["FA"])]], {
+      confirmedPools: pools,
+      sessionConfig: { quota: { safety_margin: 1.0 } } as SessionConfig,
+      dispatchNode: async (b, slot: ProviderSlot) => {
+        seen.push(slot.poolId);
+        return {
+          packet: { id: b.block_id, payload: { block_id: b.block_id }, estimatedTokens: 1, complexity: 0.5 },
+          outcome: "success" as const,
+        };
+      },
+      rebuildSharedBetweenLevels: async () => {},
+      // The remediate draw's floor (driveRollingImplementDispatch feeds this from
+      // the dispatch plan's per-node model_hint).
+      tierForBlock: () => "deep",
+    });
+    expect(result.levels[0]!.results).toHaveLength(1);
+    expect(seen, "a deep-floor node must dispatch on the capable pool, degraded or not").toEqual(["deep-pool"]);
+  });
+});
+
 // ===========================================================================
 // INV-RS-10: tool-owned final gate (non-vacuous, plan-independent, env-scrubbed)
 // CE-001 (build-free per-package, single-flight) + CE-002 (runtime residual)

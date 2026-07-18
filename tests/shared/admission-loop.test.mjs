@@ -723,3 +723,61 @@ test("capability floor: no banded pools ⇒ inert floor, NO fail-open notes", as
   expect(res.granted.length).toBe(1);
   expect(failOpens).toEqual([]); // inert floor → nothing to flag
 });
+
+// ── F4: grantLeases:false (plan-only / in-process engine path) still applies the
+// structural predicates. On HEAD this path granted EVERY candidate before the
+// capable gate ever ran ("granted before admitBatch"), so the contract displayed
+// grants the engine would refuse — the write-only-contract class. Now the
+// plan-only grant filters through the same capable (capability floor ∘ size-fit)
+// predicate and explains each skip.
+test("F4: grantLeases:false filters candidates through capable and explains the skip (no_capable_pool)", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  // Pool A: top band (capabilityRank 2 → band 0) but a tiny window — fails size-fit
+  // for every packet here. Pool B: bottom band (capabilityRank 0 → band 2), huge
+  // window. A "deep" packet therefore has NO capable pool: A fails fit, B fails the
+  // floor (best available band is 0 via A, so band 2 is below a deep floor).
+  const tinyDeep = pool("deep#a/m", { costRank: 2, capabilityRank: 2, capacityTokens: 1 });
+  const bigSmall = pool("small#a/m", { costRank: 0, capabilityRank: 0, capacityTokens: Infinity });
+  const pools = [tinyDeep, bigSmall];
+  const res = await computeDispatchAdmission({
+    packets: [
+      { id: "hard", inputTokens: 5000, complexity: 1, requiredTier: "deep" },
+      { id: "easy", inputTokens: 5000, complexity: 0.2 },
+    ],
+    pools,
+    outputCap: 1000,
+    grantLeases: false,
+    ledger,
+    capable: buildCapabilityFloorCapable(pools),
+  });
+  // The floor-less packet still plans onto the fitting pool; the deep packet is
+  // NOT displayed as granted, and the skip is explained.
+  expect(res.granted_packet_ids).toEqual(["easy"]);
+  expect(res.leases).toEqual([]); // plan-only: never leases
+  expect(res.explains).toEqual([
+    expect.objectContaining({
+      packet_id: "hard",
+      admitted: false,
+      // The deep packet's only floor-capable pool can't fit its envelope — the
+      // skip is labeled as the SIZE fact it is (the relative floor alone can
+      // never refuse every pool, so `no_capable_pool` is unreachable here).
+      reason: "packet_oversized",
+      pool_id: null,
+    }),
+  ]);
+});
+
+test("F4: grantLeases:false with an EMPTY pool set grants all — absent capacity summary is not a refusal", async () => {
+  const ledger = await freshLedger();
+  const res = await computeDispatchAdmission({
+    packets: [{ id: "p1", inputTokens: 5000, complexity: 0.5 }],
+    pools: [],
+    outputCap: 1000,
+    grantLeases: false,
+    ledger,
+  });
+  expect(res.granted_packet_ids).toEqual(["p1"]);
+  expect(res.leases).toEqual([]);
+  expect(res.explains).toEqual([]);
+});

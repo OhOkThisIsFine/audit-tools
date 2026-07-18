@@ -187,7 +187,7 @@ export const AdmissionExplainSchema = z
     pool_id: z.string().nullable(),
     resource_key: z.string().nullable(),
     admitted: z.boolean(),
-    reason: z.enum(["admitted", "no_capable_pool", "budget_exhausted", "cap_reached"]),
+    reason: z.enum(["admitted", "no_capable_pool", "budget_exhausted", "cap_reached", "packet_oversized"]),
     /** Present on an admit attempt against a real pool (budget headroom before it). */
     headroom_before: z.number().optional(),
     outstanding_before: z.number().optional(),
@@ -332,6 +332,49 @@ export function buildCapabilityFloorCapable(
       return true;
     }
     return band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand);
+  };
+}
+
+/**
+ * The in-process engine's draw over the ONE capability-floor implementation
+ * ({@link buildCapabilityFloorCapable}) — adapts the engine's `CapacityPool` shape
+ * (F4) via the same signals the admission summaries carry (`rank` → tier ordinal,
+ * `declaredCapabilityRank` → raw score), so the engine and the host path band
+ * pools identically and cannot drift. Size-fit stays the engine's own
+ * `doesNotFitContext` gate, so the stub's `capacityTokens` is +Infinity (inert
+ * here). Fail-open all the way down: an unknown pool id, like unknown capability,
+ * never blocks.
+ */
+export function buildCapacityPoolCapabilityFloor(
+  pools: readonly {
+    id: string;
+    rank?: DispatchModelTier;
+    declaredCapabilityRank?: number | null;
+  }[],
+  onFailOpen?: (info: { poolId: string; packetId: string; requiredTier: DispatchModelTier }) => void,
+): (poolId: string, packet: { id: string; requiredTier?: DispatchModelTier }) => boolean {
+  const stubs: AdmissionPool[] = pools.map((p) => ({
+    poolId: p.id,
+    resourceKey: p.id,
+    budget: Number.POSITIVE_INFINITY,
+    declaredCap: null,
+    costRank: 0,
+    capabilityRank: tierRank(p.rank),
+    capabilityScore: p.declaredCapabilityRank ?? null,
+    throughputConcurrency: Number.POSITIVE_INFINITY,
+    capacityTokens: Number.POSITIVE_INFINITY,
+  }));
+  const byId = new Map(stubs.map((s) => [s.poolId, s]));
+  const floor = buildCapabilityFloorCapable(stubs, onFailOpen);
+  return (poolId, packet) => {
+    const stub = byId.get(poolId);
+    if (!stub) return true; // pool outside the banded set — no signal, fail open
+    return floor(stub, {
+      id: packet.id,
+      cost: 0,
+      complexity: 0,
+      ...(packet.requiredTier ? { requiredTier: packet.requiredTier } : {}),
+    });
   };
 }
 
@@ -568,7 +611,56 @@ export async function computeDispatchAdmission(input: {
     null,
   );
   if (!input.grantLeases) {
-    return { granted_packet_ids: candidates.map((c) => c.id), declared_cap: declaredCap, leases: [], explains: [] };
+    // Plan-only path (in-process engine — it admits + leases per packet itself).
+    // No leases, but the capability FLOOR still applies (F4): the contract must not
+    // display a grant the engine's floor will refuse to dispatch. Floor ONLY — size
+    // fit stays the engine's own `doesNotFitContext` gate (declared per-pool caps),
+    // so a size refusal is never mislabeled `no_capable_pool` here. Residual (named,
+    // display-only): the engine can still size-refuse a displayed grant onto a
+    // capped pool; the packet remains dispatchable to uncapped pools.
+    // An EMPTY pool set means no capacity summary reached admission, not "nothing
+    // is capable" — grant all, as before the floor existed.
+    if (input.pools.length === 0) {
+      return {
+        granted_packet_ids: candidates.map((c) => c.id),
+        declared_cap: declaredCap,
+        leases: [],
+        explains: [],
+      };
+    }
+    // Same-pool conjunction of the two per-packet engine axes: capability floor
+    // (banded over size-neutralized stubs, mirroring
+    // `buildCapacityPoolCapabilityFloor`) ∧ envelope fit (`defaultCapable`). Built
+    // here from the pools — never `input.capable`, whose composed predicate can't
+    // separate the axes. The RELATIVE floor never refuses every pool (fail-open +
+    // the best band is always eligible), so a total refusal is always a size fact:
+    // labeled `packet_oversized`, never `no_capable_pool` (which would misread a
+    // sizing problem as a capability one — adversarial-review F1).
+    const sizeNeutralPools = input.pools.map((p) => ({
+      ...p,
+      capacityTokens: Number.POSITIVE_INFINITY,
+    }));
+    const floorOnly = buildCapabilityFloorCapable(sizeNeutralPools);
+    const grantedIds: string[] = [];
+    const explains: AdmissionExplain[] = [];
+    for (const candidate of candidates) {
+      const granted = input.pools.some(
+        (pool, i) => floorOnly(sizeNeutralPools[i]!, candidate) && defaultCapable(pool, candidate),
+      );
+      if (granted) {
+        grantedIds.push(candidate.id);
+      } else {
+        explains.push({
+          packet_id: candidate.id,
+          pool_id: null,
+          resource_key: null,
+          admitted: false,
+          reason: "packet_oversized",
+          cost: candidate.cost,
+        });
+      }
+    }
+    return { granted_packet_ids: grantedIds, declared_cap: declaredCap, leases: [], explains };
   }
   const admit = await admitBatch({
     packets: candidates,

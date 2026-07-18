@@ -79,6 +79,8 @@ import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { deriveLocalAccountId, foldAccountCooldown } from "../quota/accountId.js";
 import { tierRank } from "./tierRank.js";
+import { buildCapacityPoolCapabilityFloor } from "./admissionLoop.js";
+import type { DispatchModelTier } from "../types/stepContract.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -101,6 +103,14 @@ export interface RollingDispatchPacket<TPacket> {
    * 0 = lowest complexity — routed to the least-capable pool first.
    */
   complexity: number;
+  /**
+   * Minimum-capability floor for this packet — its dispatch tier (F4). Enforced
+   * at packet→pool selection through the shared relative floor
+   * (`buildCapacityPoolCapabilityFloor`): an incapable pool is never SELECTED.
+   * Absent ⇒ no floor. Unknown pool capability fails open (owner decision
+   * 2026-07-17), never fail-closed.
+   */
+  requiredTier?: DispatchModelTier;
 }
 
 /** Outcome of dispatching a single packet. */
@@ -597,6 +607,11 @@ function isPoolQuotaDegraded(schedule: WaveSchedule, budgetTokens: number): bool
  * dispatchable, but spilled to the fallback group behind healthy pools so they
  * lose their free-first preference.
  *
+ * Pools below a packet's `requiredTier` capability floor are skipped for that
+ * packet (F4 — the engine-side enforcement point). The floor is RELATIVE over the
+ * confirmed pool set and fails open on unknown capability, so on its own it never
+ * manufactures an empty candidate set.
+ *
  * Returns null if no eligible pool currently has quota headroom.
  */
 export function selectProvider<TPacket>(
@@ -610,7 +625,15 @@ export function selectProvider<TPacket>(
   costDemotedPoolIds: ReadonlySet<string> = new Set(),
   oversizedPacketPools: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
   now: number = Date.now(),
+  // Capability floor (F4): a pool below the packet's `requiredTier` floor is never
+  // selected. Optional so direct callers still get enforcement (built below over
+  // the confirmed set); the dispatcher passes its own once-built, observed instance.
+  capable?: (
+    poolId: string,
+    packet: { id: string; requiredTier?: DispatchModelTier },
+  ) => boolean,
 ): ProviderSlot | null {
+  const capableFn = capable ?? buildCapacityPoolCapabilityFloor(confirmedPools);
   const complexity = scorePacketComplexity(packet);
   const highComplexity = complexity >= 0.5;
 
@@ -702,7 +725,8 @@ export function selectProvider<TPacket>(
         !exhaustedPoolIds.has(p.id) &&
         !isPausedNow(p.id) &&
         !isTooLargeForThisPacket(p.id) &&
-        !doesNotFitContext(p),
+        !doesNotFitContext(p) &&
+        capableFn(p.id, packet),
     )
     .map((pool) => ({ pool, schedule: scheduleForPool(pool) }));
 
@@ -806,6 +830,20 @@ export function createRollingDispatcher<TPacket>(
   const allResults: RollingDispatchResult<TPacket>[] = [];
   // Per-pool in-flight count for optional maxConcurrentPerPool cap.
   const inFlightPerPool: Map<string, number> = new Map();
+
+  // Capability floor (F4), banded ONCE per dispatcher over the confirmed pool set.
+  // Fail-open on unknown capability is deliberate but must be observable: each
+  // (pool, packet) fail-open is noted once so low-confidence routing is never silent.
+  const capabilityFailOpenSeen = new Set<string>();
+  const capable = buildCapacityPoolCapabilityFloor(confirmedPools, (info) => {
+    const key = `${info.poolId}\u0000${info.packetId}`;
+    if (capabilityFailOpenSeen.has(key)) return;
+    capabilityFailOpenSeen.add(key);
+    process.stderr.write(
+      `[rolling-dispatch] capability fail-open: packet ${info.packetId} (tier ` +
+        `${info.requiredTier}) kept eligible on pool ${info.poolId} with unknown capability\n`,
+    );
+  });
 
   // Token-budget slope learning (per pool): remember the last-observed
   // remaining_pct per window label and the tokens dispatched since that reading,
@@ -1489,6 +1527,7 @@ export function createRollingDispatcher<TPacket>(
         state.costDemotedPoolIds,
         state.oversizedPacketPools,
         Date.now(),
+        capable,
       );
 
       if (slot === null) continue;
@@ -1567,11 +1606,12 @@ export function createRollingDispatcher<TPacket>(
         // Per-packet never-dispatchable strand (U2/F1, distinct from the
         // pool-level check above): a packet is PERMANENTLY unselectable when
         // every confirmed pool is exhausted, in the packet's 413 skip-set, or
-        // fit-excluded by a declared context cap — none of which reset. Without
-        // this, a fit-excluded packet on otherwise-healthy pools spins the 50ms
-        // wait tick forever (the pool-level guard never fires for a per-packet
-        // condition). A merely PAUSED pool that fits still counts as
-        // future-possible — pauses reset, caps don't.
+        // fit-excluded by a declared context cap, or below its capability floor
+        // (F4) — none of which reset. Without this, a fit-excluded packet on
+        // otherwise-healthy pools spins the 50ms wait tick forever (the
+        // pool-level guard never fires for a per-packet condition). A merely
+        // PAUSED pool that fits still counts as future-possible — pauses reset,
+        // caps and floors don't.
         const neverDispatchable = state.pendingQueue.filter((p) => {
           const skipSet = state.oversizedPacketPools.get(p.id);
           return confirmedPools.every(
@@ -1580,7 +1620,8 @@ export function createRollingDispatcher<TPacket>(
               (skipSet?.has(pool.id) ?? false) ||
               (pool.contextCapTokens != null &&
                 p.estimatedTokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS >
-                  pool.contextCapTokens),
+                  pool.contextCapTokens) ||
+              !capable(pool.id, p),
           );
         });
         if (neverDispatchable.length > 0) {

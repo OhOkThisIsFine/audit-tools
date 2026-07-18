@@ -74,11 +74,11 @@ function tasks() {
   }));
 }
 
-async function makeRun() {
+async function makeRun(taskListOverride) {
   const artifactsDir = await mkdtemp(join(tmpdir(), "rolling-audit-"));
   const runDir = join(artifactsDir, "runs", RUN_ID);
   await mkdir(runDir, { recursive: true });
-  const taskList = tasks();
+  const taskList = taskListOverride ?? tasks();
   await writeFile(
     join(runDir, "pending-audit-tasks.json"),
     JSON.stringify(taskList),
@@ -543,3 +543,59 @@ test("A8a: driveRollingAuditDispatch degrades to no-progress (does not crash) wh
   expect(result.packet_count, "the packets were still dispatched").toBe(3);
 });
 
+
+// ── 6. F4: capability floor enforced by the ENGINE on the audit draw ──────────
+
+test("F4: driveRollingAuditDispatch never dispatches a floor-carrying packet to an incapable pool", async (t) => {
+  // A single security-lens, LOW-priority task: the sensitive-lens escalator lifts
+  // its model_hint to "standard" (a real floor) while the low priority maps the
+  // engine packet to complexity 0 — so pre-F4 the engine's preference order
+  // (low complexity → least-capable pool first) selected exactly the bottom-band
+  // pool the floor must exclude. Red on that HEAD semantics: the assertion is on
+  // DISPATCH (which pool the worker launched on), not on a contract file.
+  const securityTask = [
+    {
+      task_id: "t-sec",
+      unit_id: "unit-sec",
+      pass_id: "pass:security",
+      lens: "security",
+      file_paths: ["src/mod_sec/sec.ts"],
+      file_line_counts: { "src/mod_sec/sec.ts": 120 },
+      rationale: "review sec",
+      priority: "low",
+    },
+  ];
+  const { artifactsDir, runDir, taskList } = await makeRun(securityTask);
+  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
+
+  const poolBase = {
+    providerName: "openai-compatible",
+    hostModel: null,
+    hostConcurrencyLimit: null,
+    quotaStateEntry: null,
+    discoveredLimits: null,
+    quotaSourceSnapshot: null,
+  };
+  const capablePool = { ...poolBase, id: "src-deep", rank: "deep" };
+  const incapablePool = { ...poolBase, id: "src-small", rank: "small" };
+
+  const writing = makeWritingDispatcher(runDir, taskList);
+  const seen = [];
+  const result = await driveRollingAuditDispatch({
+    root: artifactsDir,
+    artifactsDir,
+    activeReviewRun: activeReviewRun(artifactsDir, runDir),
+    sessionConfig: { provider: "openai-compatible", quota: {} },
+    timeoutMs: 1000,
+    poolsOverride: [capablePool, incapablePool],
+    dispatchPacket: async (packet, slot) => {
+      seen.push(slot.poolId);
+      return writing(packet, slot);
+    },
+    ingest: async ({ runId }) => ({ summary: { run_id: runId, accepted_count: 1 }, has_failures: false }),
+  });
+
+  expect(result.status).toBe("complete");
+  expect(seen.length > 0, "the packet must actually dispatch").toBeTruthy();
+  expect(seen.every((id) => id === "src-deep"), `dispatched pools were ${seen.join(", ")} — a standard-floor packet must never land on the bottom-band pool`).toBeTruthy();
+});
