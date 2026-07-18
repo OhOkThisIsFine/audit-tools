@@ -676,6 +676,12 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 Standing gotchas worth keeping for any agent (strong or weak):
 
+- **`$?` after a pipe reports the FILTER's status, not the command's — masked a red gate (2026-07-18).**
+  Ran `npm run verify:checks 2>&1 | grep -iE "fail|error"; echo "exit=$?"` and read `exit=0` as "gate
+  green" — it was grep's exit code. Combined with the tracked-files trap below, that produced a confident
+  false-green that CI then caught. **Capture the exit code before filtering** (`cmd > log 2>&1; echo $?;
+  tail log`) or use `PIPESTATUS`. Generalizes [[lap-green-must-match-ci-evidence]] to the agent's own
+  verification technique: a green *reading* is not a green *run*.
 - **`check:doc-manifest` only sees TRACKED files — a new doc passes locally pre-commit, then fails CI
   (2026-07-18).** Wrote a new `docs/reviews/*.md`, ran `npm run verify:checks` green, committed, and the
   release run's `gate` job failed on exactly that file ("stray doc not in the canonical manifest"). The
