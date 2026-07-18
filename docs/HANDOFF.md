@@ -59,8 +59,16 @@
 
 **The unified-routing collapse + repair-proxy retirement are COMPLETE (2026-07-18).** v0.33.7 shipped with the brand-neutral proxy contract (`proxyCatalog.ts` adapter for discovery + liveness probe; generic `proxy` block replaces legacy `repair_proxy`; CI green, published). **Single biggest remaining risk: the swap has never been exercised against a live proxy.** Forward work is three parallel tracks:
 
-**Track 1 — Deploy LiteLLM, validate the proxy swap live (deployment + validation):**
-Stand up a local LiteLLM proxy (`litellm --config config.yaml`, port 4000) with an `openai-compatible` backend (NIM, vLLM, etc.) configured. Point `~/.audit-code/sources-declared.json` at it via the generic `proxy` block (endpoint, api_key_env, optional model list). Validate end-to-end: `/v1/models` roster discovery, `/model/info` enrichment parsing (costs, context caps), `/health/liveliness` liveness check, auth threading when master_key is set, `--model` routing verbatim to workers, and the roster-only degradation when enrichment is absent. **Closes the "never run against a live proxy" gap.**
+**Track 1 — Deploy LiteLLM, validate the proxy swap live — ✅ DONE 2026-07-18.**
+LiteLLM 1.91.1 stood up on `127.0.0.1:4000` fronting NVIDIA NIM (9 aliases across tiers); all five
+deliverables (roster discovery, `/model/info` enrichment + its degrade path, liveness, auth threading,
+verbatim `--model` routing) validated against the live proxy. One defect found and fixed: the proxy lane
+accepted an `api_key_env` but never reach-verified it, so an unset key surfaced as a misleading
+"run the populate" instead of naming the variable. Record:
+[`docs/reviews/litellm-proxy-live-validation-2026-07-18.md`](reviews/litellm-proxy-live-validation-2026-07-18.md).
+Config at `~/.audit-code/litellm-config.yaml`; the machine declaration was migrated off the retired
+`repair_proxy` key. **Remaining on this track:** dispatch through the proxy under a real audit wave, and
+quota behavior at the proxy — both belong to the re-dogfood below, which this now unblocks.
 
 **Track 2 — Ranker contract (separate project, not audit-tools code):**
 Design the contract: what a model ranker PRODUCES and where audit-tools READS it. Natural home: alongside `~/.audit-code/sources-declared.json`, a machine-level file keyed by pool identity `backend_provider[#account]/model` with `rank` and `tier` optional per model. audit-tools consumes it if present (none of its routing code changes if the ranker isn't running). Property to hold: audit-tools stays agnostic — swapping the ranker, or having no ranker, changes zero audit-tools code.
@@ -68,7 +76,11 @@ Design the contract: what a model ranker PRODUCES and where audit-tools READS it
 **Track 3 — Ranking-absent fallback: Gate-0 operator-confirmed priority order (Gate-0 UX enhancement):**
 Gate-0 already persists a `cost_order` from operator input + has all dispatch wiring to honor it. What's missing: when NO EXTERNAL RANKS exist, Gate-0 should surface a **fallback priority order** (default: tier-based: frontier > capable > fast > unknown) and explicitly show the operator that `cost_order` is their **DISPATCH PRIORITY** (not inclusion; that's `exclude[]`/`include[]`). Operator can accept the suggested order, reorder it manually, or exclude pools — all persist to the shared confirmation. Make dispatch routing explicit about the ordering-vs-exclusion distinction, and name any design question as an owner call rather than deciding it yourself.
 
-**Next ordering:** (1) re-dogfood the collapsed routing — now able to run against a live proxy, so tracks 1 + the dogfood combine naturally; (2) track 1 LiteLLM install/config + live swap validation; (3) track 2 ranker contract design; (4) track 3 Gate-0 UX for priority order. See `docs/backlog.md` → *Open tracks* for detail.
+**Next ordering:** (1) **re-dogfood the collapsed routing against the now-live proxy** — this is the
+immediate next item; the proxy is configured and validated, so a real audit wave through it is the
+remaining unknown (it also covers Track 1's two leftovers: dispatch under load + quota at the proxy);
+(2) track 3 Gate-0 UX for priority order (has two named owner calls — see backlog); (3) track 2 ranker
+contract design. See `docs/backlog.md` → *Open tracks* for detail.
 
 ## Prior track — the G-series (closed)
 

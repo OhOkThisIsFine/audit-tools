@@ -554,6 +554,22 @@ function resolveProxyLane(
   if (declaration === null) return;
   const { endpoint } = declaration;
   const laneId = `proxy:${endpoint}`;
+  // Reach-verify the declared master key BEFORE the liveness probe. A proxy's
+  // health endpoint is typically unauthenticated (LiteLLM's /health/liveliness
+  // is), so the probe passes with no key and the lane then fails downstream at
+  // populate — surfacing "cache absent, run the populate" when the operator DID
+  // run it and the real cause is the unset var. Mirrors the same check the
+  // expanded per-model claude-worker sources get in `verifySourceReach`.
+  const env = deps.env ?? process.env;
+  if (declaration.api_key_env !== undefined) {
+    if (!(env[declaration.api_key_env] ?? "").trim()) {
+      dropped.push({
+        id: laneId,
+        reason: `env var "${declaration.api_key_env}" is unset or empty in this process.`,
+      });
+      return;
+    }
+  }
   const probe = deps.probeHttpReachable ?? defaultProbeHttpReachable;
   if (!probe(endpoint)) {
     dropped.push({

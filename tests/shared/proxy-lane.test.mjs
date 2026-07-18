@@ -149,6 +149,43 @@ describe("resolveAmbientSources — the proxy lane", () => {
     expect(result.dropped[0].reason).toContain("populate");
   });
 
+  // A proxy's health endpoint is typically UNAUTHENTICATED (LiteLLM's
+  // /health/liveliness is), so a declared-but-unset master key sails past the
+  // liveness probe and only fails later at populate — which reported "cache
+  // absent, run the populate" to an operator who had already run it. The lane
+  // must reach-verify its own declared key, exactly as the expanded per-model
+  // sources do, and name the env var.
+  it("declared api_key_env UNSET ⇒ dropped naming the env var, NOT a run-populate reason", () => {
+    const withKey = { proxy: { endpoint: PROXY, api_key_env: "PROXY_KEY" } };
+    const result = resolveAmbientSources(
+      deps({
+        declaration: withKey,
+        probe: () => true, // health endpoint is open — the probe cannot catch this
+        catalog: null,
+        env: {},
+      }),
+    );
+    expect(result.sources).toEqual([]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.dropped[0].id).toBe(`proxy:${PROXY}`);
+    expect(result.dropped[0].reason).toContain("PROXY_KEY");
+    expect(result.dropped[0].reason).not.toContain("populate");
+  });
+
+  it("declared api_key_env SET ⇒ the lane proceeds and expands from cache", () => {
+    const withKey = { proxy: { endpoint: PROXY, api_key_env: "PROXY_KEY" } };
+    const result = resolveAmbientSources(
+      deps({
+        declaration: withKey,
+        probe: () => true,
+        catalog: cache(),
+        env: { PROXY_KEY: "sk-live" },
+      }),
+    );
+    expect(result.dropped).toEqual([]);
+    expect(result.sources).toEqual([EXPANDED]);
+  });
+
   it("reachable + cache from a DIFFERENT endpoint ⇒ unexpanded with a reason", () => {
     const result = resolveAmbientSources(
       deps({

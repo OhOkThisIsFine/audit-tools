@@ -30,7 +30,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 ## Open tracks (2026-07-18 forward) — three parallel: proxy live validation, ranker contract, Gate-0 ordering
 
 **Track 1 — Deploy + validate proxy swap live (LiteLLM integration + end-to-end confirmation).**
-Deployment/configuration work, not audit-tools code changes. Stand up a local LiteLLM proxy (`litellm --config config.yaml`, default port 4000, optional master_key for auth). Configure it with an openai-compatible backend (NVIDIA NIM, vLLM, LM Studio, etc.) and model roster. Point the generic `proxy` block in `~/.audit-code/sources-declared.json` at it: `{endpoint, api_key_env, top_k?, cost_per_mtok?}` (env note: `NVIDIA_API_KEY` and `LLM_BACKEND_BASE_URL` are already set on the box). Then run `/audit-code` and validate the full chain end-to-end: (a) `/v1/models` roster is discovered and merged into Gate-0 confirmed pool, (b) `/model/info` enrichment parses cost + context caps when available (graceful degrades when absent), (c) liveness via `/health/liveliness` (fallback `/v1/models` if missing), (d) auth: master_key threaded correctly + loud drop if `api_key_env` names an unset var, (e) workers receive `--model <alias>` verbatim and dispatch honors the order. Deployment guidance → `examples/`, never as code concept. ⬇ Closes the "swap never run against a live proxy" gap.
+**(a)–(e) all VALIDATED live 2026-07-18** — LiteLLM 1.91.1 on `127.0.0.1:4000` fronting NVIDIA NIM,
+9 aliases across tiers; record: [`docs/reviews/litellm-proxy-live-validation-2026-07-18.md`](reviews/litellm-proxy-live-validation-2026-07-18.md).
+Config lives at `~/.audit-code/litellm-config.yaml`. One defect found + fixed (proxy lane never
+reach-verified its own `api_key_env`). **Still open on this track:** dispatch through the proxy under
+a real audit wave (packets validated only to the completion boundary), and quota/rate-limit behavior
+at the proxy — both fold into the re-dogfood step this validation unblocks.
+Original scope follows. Deployment/configuration work, not audit-tools code changes. Stand up a local LiteLLM proxy (`litellm --config config.yaml`, default port 4000, optional master_key for auth). Configure it with an openai-compatible backend (NVIDIA NIM, vLLM, LM Studio, etc.) and model roster. Point the generic `proxy` block in `~/.audit-code/sources-declared.json` at it: `{endpoint, api_key_env, top_k?, cost_per_mtok?}` (env note: `NVIDIA_API_KEY` and `LLM_BACKEND_BASE_URL` are already set on the box). Then run `/audit-code` and validate the full chain end-to-end: (a) `/v1/models` roster is discovered and merged into Gate-0 confirmed pool, (b) `/model/info` enrichment parses cost + context caps when available (graceful degrades when absent), (c) liveness via `/health/liveliness` (fallback `/v1/models` if missing), (d) auth: master_key threaded correctly + loud drop if `api_key_env` names an unset var, (e) workers receive `--model <alias>` verbatim and dispatch honors the order. Deployment guidance → `examples/`, never as code concept. ⬇ Closes the "swap never run against a live proxy" gap.
 
 **Track 2 — Ranker contract (separate project, owner decision on where it lives).**
 This is NOT audit-tools code. Owner decision: model ranking is a distinct project/repo outside audit-tools. Deliverable is the CONTRACT first — what shape the ranker PRODUCES and where audit-tools READS it. Natural home: alongside `~/.audit-code/sources-declared.json`, a machine-level file (JSON recommended for symmetry, path + name open) carrying model ranks keyed by pool identity (`backend_provider[#account]/model`), with fields like `rank: number` and optional `tier: string` per model. audit-tools reads it IFF present; zero audit-tools code changes if the ranker doesn't exist or is swapped. Note what audit-tools already CONSUMES today so the contract joins to it rather than inventing parallel channels: `resolveModelPrice()` in `src/shared/dispatch/costRank.ts` (reads `models.dev` catalog), `capability_rank` on `DispatchableSource`, `capabilityScore` in admission loop, and the existing fail-open floor (a model with no rank must stay dispatchable). **Property to hold: audit-tools stays agnostic — swapping, starting, or removing the ranker changes zero audit-tools source code.**
@@ -41,6 +47,16 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 ---
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
+
+- **Are `dropped[]` reasons actually SURFACED to the operator at Gate-0? (2026-07-18, medium,
+  from the LiteLLM live-validation lap.)** The whole declared-reach design leans on "never silently
+  discarded — every drop carries an operator-facing reason", and the reasons are good. But this lap
+  hit the retired-`repair_proxy` rejection and an unset-key drop, and in both cases the *operator-visible*
+  symptom was simply "the proxy lane isn't there" — the reason was only observable by calling
+  `resolveAmbientSources()` directly. **Property to hold:** every `dropped[]` entry reaches the operator
+  in the Gate-0 render, not just the return value. NOT yet traced — verify the Gate-0 rendering path
+  before designing a fix; the reasons may already be displayed and this may be a non-issue.
+  [[write-only-data-looks-authoritative]] (a reason nobody renders is write-only).
 
 - **H2+H4 collapse residual pins (2026-07-18, low, from review h2c3).** (a) The attended same-agent
   SPLIT semantics (blessed in the plan record: engine partition + host-subagent remainder on one meter,
@@ -615,6 +631,21 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 ## Durable traps (environment / tooling reference)
 
 Standing gotchas worth keeping for any agent (strong or weak):
+
+- **LiteLLM on Windows dies at startup without `PYTHONIOENCODING=utf-8` (2026-07-18).** The proxy's
+  startup banner contains non-cp1252 characters, so `show_banner()` raises
+  `UnicodeEncodeError: 'charmap' codec can't encode…` and FastAPI reports only
+  `Application startup failed. Exiting.` — the encoding cause is buried far up the traceback. Launch with
+  `PYTHONIOENCODING=utf-8 PYTHONUTF8=1 litellm --config … --port 4000`. Two adjacent install traps hit the
+  same lap: a bare `pip install litellm` lacks the proxy deps (`ImportError: No module named 'backoff'` →
+  needs `pip install 'litellm[proxy]'`), and a mismatched `pydantic-core` (2.47.0 vs the required 2.46.4)
+  fails the import with a `SystemError` before any of that. Working config:
+  `~/.audit-code/litellm-config.yaml`.
+- **A retired declaration key fails as a MISSING lane, not a loud error (2026-07-18).** `~/.audit-code/sources-declared.json`
+  still carried the retired `repair_proxy` key after the v0.33.7 swap; `auditorSources.ts` rejects it
+  correctly and with a good reason, but the reason lands in `dropped[]` and the lived symptom is just
+  "the proxy lane is gone". There is deliberately **no back-compat alias**. After any transport-contract
+  change, check the machine declaration file — the repo's tests will not catch a stale operator config.
 
 - **`mktemp -d` in the Bash tool returns an msys path (`/tmp/tmp.XXXX`) that `node` cannot resolve — cost two failed repro attempts (2026-07-16).** The Bash tool is Git Bash: `mktemp -d` yields `/tmp/…`, but `node -e "require('/tmp/…/x.json')"` resolves it against the Windows CWD → `Cannot find module 'C:\…\Temp\tmp.XXXX\…'`. Any temp path handed to a **native** tool (node, the packaged CLI, `--root`) must be a Windows-shaped path. Use the session scratchpad dir (an absolute `C:/…` path) instead of `mktemp`. Instance of the OS-agnostic rule biting the agent's own tooling rather than the product's.
 - **`llm read` / `llm write` are NIM-backed — `--model` must name a NIM catalog id, NOT `haiku`/a Claude id.**
