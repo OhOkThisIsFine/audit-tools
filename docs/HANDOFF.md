@@ -67,45 +67,46 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — re-dogfood the lane, then the Agent-tool carrier
+## ▶ IMMEDIATE NEXT — unified dispatch routing (in flight: steps A+F landed, B/D/E/C/G/H remain)
 
-**The three feedback gaps SHIPPED 2026-07-17** (plan + verified ground truth:
-[`claude-worker-feedback-gaps-plan-2026-07-17.md`](reviews/claude-worker-feedback-gaps-plan-2026-07-17.md)):
-the not-accepted launch branch now runs the full three-tier classifier (the dogfood root cause — a
-nonzero-exit worker's 429/404/413 text was never scanned); two new outcomes `model_unavailable`
-(pool exclusion, availability analog of cost drift) + `packet_too_large` (per-packet pool skip, no
-cooldown, livelock-strand guards); the capacity fold + coordinator claim walk are per-pool
-context-cap fit-aware (`quota.context_tokens`, stamped from the registry at populate); populate
-probes each top-K model and drops definite 404s. Accepted residuals: backlog → "claude-worker lane
-feedback-gap residuals". The batch RELEASED as v0.33.1 (2026-07-17, with the hermeticity fix); bins
-reinstalled. Next, in order:
-1. ~~**Re-dogfood**~~ **DONE 2026-07-17 — the "planned N, dispatched 0" was the liveness-probe cold-drop,
-   NOT an unbuilt host fan-out.** The probe (`auditorSources.ts`) aborted at 750ms with no retry, and the
-   proxy's first `/registry` after its catalog TTL lapses does a blocking upstream fan-probe (>750ms) → a
-   healthy lane dropped on the run's FIRST resolution → 0 pools → host-only → 0 dispatched. **Fixed both
-   sides + shipped:** repair-proxy `catalog.ts` `/registry` now stale-while-revalidate; audit-tools probe
-   retries at an escalating budget. Everything else was already built (pool≠transport is coded; dispatch is
-   already pool-availability-driven, `rolling_engine` defaults true). **Verified:** 8 pools resolve (was 0),
-   fresh Gate-0 roster lists them routable, a real dispatch through the proxy to a FREE model returned a
-   correct finding. Records: `docs/reviews/repair-proxy-dispatch-diagnosis-2026-07-17.md` +
-   `host-fanout-proxy-dispatch-design-2026-07-17.md`; memory [[repair-proxy-dispatch-unblocked-probe-fix]].
-   **Live-run confirmation DONE 2026-07-17 — DEFINITIVE NEGATIVE, and it corrects the claim above.** A fresh
-   conversation-first `/audit-code` self-audit reached the `dispatch_review` wave with `resolveAmbientSources`
-   returning **7 claude-worker pools** (proxy warm, 6ms) — but the wave's `capacity_pools` came back
-   **host-only** (`claude-code/*`), 1 packet admitted / 78 `cap_reached`. So "dispatch is already
-   pool-availability-driven" is **FALSE for the conversation-first default path**: a bare `{}`
-   `session-config.json` + unset `AUDIT_CODE_ROLLING_ENGINE` never arms the in-process rolling hybrid (needs
-   rolling_engine AND an explicit in-process backend provider), so the resolved source pools are never folded
-   in. The probe fix was necessary but NOT sufficient. `packet_too_large` routing could not be exercised at
-   all — no small pools resolve into a conversation-first wave. Finding logged: backlog → "Conversation-first
-   `/audit-code` dispatches HOST-ONLY…"; memory correction in [[repair-proxy-dispatch-unblocked-probe-fix]].
-   **⇒ The conversation-first host fan-out to the proxy pools is the confirmed UNBUILT follow-on (step 2), not
-   a nicety.** (Owner decision 2026-07-17: don't dogfood host-only; build the fan-out.)
-2. **Agent-tool carrier restart test** (now the critical path, not optional): from a Desktop session launched under
-   `ANTHROPIC_BASE_URL=<proxy>`, test whether a `.claude/agents/*.md` frontmatter `model:` string
-   rides verbatim to `/v1/messages` (agent defs load at session start — untestable mid-session).
-   If yes: the host fan-out half (reads `self.proxy_transport`, stamps per-packet model strings into
-   dispatch plans) is the follow-on commit.
+**The `proxy_transport` host-fanout build is RETIRED — premise refuted by ground truth** (2026-07-17).
+Investigating before building it: the conversation-first run's OWN artifacts show the proxy pools ARE
+folded into the wave (`buildAuditSourcePools` returns 3 pools; in-process repro confirms) — they drove,
+413/429'd, then got COLLECTIVELY settled onto a walled host. The design doc's "sources never folded in /
+need a `proxy_transport` trigger" was wrong; so was the live-run note's "config doesn't arm the hybrid"
+(rolling_engine defaults true; the hybrid gate needs only pools>0). Full diagnosis:
+[`host-fanout-premise-refuted-2026-07-17.md`](reviews/host-fanout-premise-refuted-2026-07-17.md).
+
+**Real root cause (source-verified):** the fit-check is silently NO-OP'd — a source pool's
+`contextCapTokens` was `null` (registry exposed no context field; stamp has no fallback), and `null` means
+"always fits," so every fit gate passed oversized packets → 413 → non-`complete` drive → `nextStepHelpers.ts:1947`
+settles ALL source pools → frontier collapses to a host the wall mislabels "exhausted."
+
+**Direction (owner, "go all in"): collapse dispatch to ONE routing decision** — per packet, pick a pool
+that meets the packet's capability floor ∧ is available ∧ has quota/rate headroom ∧ is agentic-capable ∧
+whose context window holds the packet; order by the λ dial; the host is just one pool. Delete
+`proxy_transport`, the headless-vs-hybrid split, the three `IN_PROCESS_*` sets, demote-to-source.
+**Design of record + owner-confirmed decisions + the 5-step sequence:**
+[`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md).
+Owner decisions (confirmed): capability_rank stamped at populate from the registry `capability_source`
+(BFCL+LMArena composite_rank) + models.dev `tool_call`/`reasoning` + RELATIVE tier→floor; fail-open on
+unknown capability with a low-confidence note; all 5 steps this push.
+
+**Progress (this session):**
+- ✅ **Step A** (`eaef2f0d`) — `resolveSourceContextWindowTokens`: NON-NULL effective window
+  (declared → models.dev backend window → `DEFAULT_CONTEXT_TOKENS`) stamped in `buildSourcePool`; the fit
+  gates stop no-op'ing. Red-green + middle-rung tests; independent review + attestation.
+- ✅ **Step F** (`ca15ecde`) — abandoned the `large_packet` advisory (headroom, not a packet property);
+  `largeFileMode` kept.
+- ⏭ **Remaining (per the design doc, sequenced):** **B** one fit predicate on BOTH paths (host-admission
+  uses `resolved_limits`/`fanoutMode:+Infinity`, not the per-pool window — unify + drop the infinity);
+  **D** settle per-pool + reason-aware (kill the collective settle on a non-complete drive); **E** honest
+  host wall (no false "exhausted" on a no-pool-fits zero-grant — item C); **C** capability floor via the
+  `capable` predicate hook + stamp `capability_rank` at populate; **G** packet composition flexes to the
+  target pool's window (generalize `fitPacketsToTierBudgets`; packer core untouched); **H** the structural
+  collapse (branches, the three sets, demote, unify the two quota contracts + emit wrappers).
+- Commits A+F are on local `main`, **un-pushed** (mid-build — ship the whole collapse together, not a
+  partial unified-routing to npm). Full-suite + CI verification pending build completion.
 
 ## Prior track — the G-series (closed)
 
