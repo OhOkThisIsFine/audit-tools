@@ -204,6 +204,16 @@ export interface DriveRollingAuditDispatchResult {
   /** Packet ids stranded when status === "partial", or held while `paused`. */
   stranded_ids: string[];
   /**
+   * Pool ids the engine PERMANENTLY excluded this pass — genuine terminal
+   * exhaustion only (credit_exhausted / model_unavailable / a rate limit with no
+   * parseable reset). The caller settles exactly THESE pools cross-cycle
+   * (unified-routing step D): a transient failure (timeout, cooling 429,
+   * quota_unclassified guess, per-packet 413) on pool A must never settle pool B —
+   * the old any-non-complete ⇒ settle-ALL reaction is what collapsed a healthy
+   * 3-pool frontier onto the walled host in the 2026-07-17 dogfood.
+   */
+  exhausted_pool_ids: string[];
+  /**
    * Result of the deterministic ingestion that folds the worker results in, or
    * null when no packet produced a result (a full strand — there is nothing to
    * ingest, and the recorded partial-completion terminal lets the pipeline proceed
@@ -457,6 +467,7 @@ export async function driveRollingAuditDispatch(params: {
       status: "complete",
       packet_count: 0,
       stranded_ids: [],
+      exhausted_pool_ids: [],
       ingest: await ingest({ runId, artifactsDir }),
     };
   }
@@ -596,6 +607,7 @@ export async function driveRollingAuditDispatch(params: {
     status: pausedState ? "paused" : run.status,
     packet_count: packets.length,
     stranded_ids: run.stranded_ids,
+    exhausted_pool_ids: run.exhausted_pool_ids,
     ingest: ingestResult,
     paused_state: pausedState,
   };

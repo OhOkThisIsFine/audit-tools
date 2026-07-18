@@ -12,18 +12,18 @@ const past = () => new Date(NOW - 60_000).toISOString();
 describe("detectHostDispatchWall", () => {
   it("not at wall when packets were granted and no cooldown", () => {
     const w = detectHostDispatchWall({ grantedCount: 3, cooldownUntil: null, now: NOW });
-    expect(w).toEqual({ atWall: false, earliestResetAt: null, reason: null, bindingWindow: null });
+    expect(w).toEqual({ atWall: false, earliestResetAt: null, reason: null, bindingWindow: null, emptyGrantCause: null });
   });
 
   it("empty grant with no cooldown and no binding window → wall, null reset (best-effort retry)", () => {
     const w = detectHostDispatchWall({ grantedCount: 0, cooldownUntil: null, now: NOW });
-    expect(w).toEqual({ atWall: true, earliestResetAt: null, reason: "empty_grant", bindingWindow: null });
+    expect(w).toEqual({ atWall: true, earliestResetAt: null, reason: "empty_grant", bindingWindow: null, emptyGrantCause: null });
   });
 
   it("active cooldown → wall even when the grant is non-empty (the F1 over-grant)", () => {
     const reset = future();
     const w = detectHostDispatchWall({ grantedCount: 12, cooldownUntil: reset, now: NOW });
-    expect(w).toEqual({ atWall: true, earliestResetAt: reset, reason: "cooldown", bindingWindow: null });
+    expect(w).toEqual({ atWall: true, earliestResetAt: reset, reason: "cooldown", bindingWindow: null, emptyGrantCause: null });
   });
 
   it("exhausted window carries its reset via cooldown_until", () => {
@@ -37,7 +37,7 @@ describe("detectHostDispatchWall", () => {
   it("expired cooldown does not gate — falls through to the grant check", () => {
     expect(detectHostDispatchWall({ grantedCount: 5, cooldownUntil: past(), now: NOW }).atWall).toBe(false);
     const empty = detectHostDispatchWall({ grantedCount: 0, cooldownUntil: past(), now: NOW });
-    expect(empty).toEqual({ atWall: true, earliestResetAt: null, reason: "empty_grant", bindingWindow: null });
+    expect(empty).toEqual({ atWall: true, earliestResetAt: null, reason: "empty_grant", bindingWindow: null, emptyGrantCause: null });
   });
 
   it("malformed cooldown timestamp is treated as inactive", () => {
@@ -127,5 +127,42 @@ describe("admissionBlockedOnBudget", () => {
   it("false for an empty / all-admitted explain set", () => {
     expect(admissionBlockedOnBudget([])).toBe(false);
     expect(admissionBlockedOnBudget([{ reason: "admitted" }])).toBe(false);
+  });
+});
+
+// ── Unified-routing step E: honest empty-grant classification ────────────────
+import { classifyEmptyGrantCause } from "../../src/shared/dispatch/hostDispatchWall.ts";
+
+describe("classifyEmptyGrantCause (step E)", () => {
+  it("any budget_exhausted dominates (the reset applies)", () => {
+    expect(classifyEmptyGrantCause([
+      { reason: "no_capable_pool" },
+      { reason: "budget_exhausted" },
+    ])).toBe("budget_exhausted");
+  });
+  it("cap_reached beats no_capable_pool in a mix (transient retry may still grant)", () => {
+    expect(classifyEmptyGrantCause([
+      { reason: "cap_reached" },
+      { reason: "no_capable_pool" },
+    ])).toBe("cap_reached");
+  });
+  it("no_capable_pool ONLY when every blocked packet fit no pool (structural)", () => {
+    expect(classifyEmptyGrantCause([
+      { reason: "no_capable_pool" },
+      { reason: "no_capable_pool" },
+    ])).toBe("no_capable_pool");
+  });
+  it("admitted explains are ignored; empty/unknown → null", () => {
+    expect(classifyEmptyGrantCause([{ reason: "admitted", admitted: true }])).toBe(null);
+    expect(classifyEmptyGrantCause([])).toBe(null);
+  });
+  it("detectHostDispatchWall stamps the cause on an empty grant — 'exhausted' is never claimed for a fit mismatch", () => {
+    const w = detectHostDispatchWall({
+      grantedCount: 0,
+      explains: [{ reason: "no_capable_pool" }],
+      now: Date.now(),
+    });
+    expect(w.atWall).toBe(true);
+    expect(w.emptyGrantCause).toBe("no_capable_pool");
   });
 });

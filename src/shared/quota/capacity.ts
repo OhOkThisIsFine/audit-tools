@@ -74,6 +74,13 @@ export interface PartialCompletionTerminal {
    * at/after this instant can redispatch the stranded items — they redo clean.
    */
   earliest_reset_at?: string;
+  /**
+   * Only for `reason: "quota_paused"` (unified-routing step E): WHY the grant was
+   * empty — `no_capable_pool` means a structural fit mismatch NO reset can clear,
+   * so the pause step must not tell the operator to wait for one. Optional and
+   * additive (older persisted terminals parse unchanged).
+   */
+  empty_grant_cause?: "budget_exhausted" | "cap_reached" | "no_capable_pool";
 }
 
 /**
@@ -134,11 +141,13 @@ export function buildEmptyPoolTerminal(strandedIds: string[]): PartialCompletion
 export function buildQuotaPausedTerminal(
   strandedIds: string[],
   earliestResetAt: string | null,
+  emptyGrantCause?: "budget_exhausted" | "cap_reached" | "no_capable_pool" | null,
 ): PartialCompletionTerminal {
   return {
     reason: "quota_paused",
     stranded_ids: [...strandedIds],
     ...(earliestResetAt ? { earliest_reset_at: earliestResetAt } : {}),
+    ...(emptyGrantCause ? { empty_grant_cause: emptyGrantCause } : {}),
   };
 }
 

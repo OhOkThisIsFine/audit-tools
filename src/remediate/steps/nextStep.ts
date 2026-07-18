@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -2050,16 +2050,17 @@ async function buildImplementDispatchStep(ctx: {
         // still surfaces as a quota_escalation friction (below), but without the
         // verbatim text. Threading verbatim capture into executeInProcessPartition is
         // a documented follow-up (affects credit_exhausted identically — not new to A2b).
+        // `packet_too_large` is deliberately NOT a settle trigger (unified-routing
+        // step D): a 413 is a per-(node,pool) sizing fact — one oversized node must
+        // never kill the pool for every other node; settling it would collapse
+        // capacity the run still has. NOTE: this frontier is sized with a FLAT
+        // per-node estimate (HYBRID_NODE_TOKEN_ESTIMATE), so the claim-time fit gate
+        // cannot pre-skip a genuinely-oversized node — a chronic (node,pool) 413 re-
+        // offers each cycle, bounded by item-level triage, and is surfaced as
+        // friction below (per-node real estimates are the step-G follow-up).
         const settledOutcomeBlocks = new Set(
           inProcessOutcome.nodes
-            .filter(
-              (n) =>
-                n.outcome === "rate_limited" ||
-                n.outcome === "credit_exhausted" ||
-                n.outcome === "model_unavailable" ||
-                n.outcome === "packet_too_large" ||
-                n.outcome === "quota_unclassified",
-            )
+            .filter((n) => isPoolSettlingOutcome(n.outcome))
             .map((n) => n.block_id),
         );
         const exhaustedPools = new Set(
@@ -2079,8 +2080,29 @@ async function buildImplementDispatchStep(ctx: {
             {
               eventType: "quota_escalation",
               discriminator: blockId,
-              note: "A-8 hybrid in-process node rate-limited / credit-exhausted / model-unavailable / packet-too-large / quota-unclassified; its backend pool was settled for this run.",
+              note: "A-8 hybrid in-process node rate-limited / credit-exhausted / model-unavailable / quota-unclassified; its backend pool was settled for this run.",
               severity: "high",
+              category: "trap",
+              area: "dispatch/quota",
+            },
+            "remediate-code",
+          );
+        }
+        // A 413 no longer settles its pool (step D), but it must stay OBSERVABLE —
+        // this direct partition never invokes the rolling engine's onPacketTooLarge
+        // hook, so without this record a hybrid 413 would vanish entirely (D+E
+        // review F4). Same dedupe chokepoint; medium severity (a sizing fact to
+        // reconcile at partition time, not a dead pool).
+        for (const node of inProcessOutcome.nodes) {
+          if (node.outcome !== "packet_too_large") continue;
+          void captureStepBoundaryFriction(
+            artifactsDir,
+            runId,
+            {
+              eventType: "quota_escalation",
+              discriminator: `packet-too-large:${node.block_id}`,
+              note: "A-8 hybrid in-process node hit 413 packet-too-large on its assigned pool; the pool was NOT settled (per-node sizing fact) — reconcile node sizing or route the node to a larger pool.",
+              severity: "medium",
               category: "trap",
               area: "dispatch/quota",
             },
@@ -2306,6 +2328,9 @@ Then run:
       grantedCount: implQuota?.admission?.granted_packet_ids?.length ?? 0,
       cooldownUntil: implQuota?.cooldown_until ?? null,
       bindingWindow: implBindingWindow,
+      // Step E parity: classify the zero-grant cause so the quota_paused terminal's
+      // reset semantics stay honest (a no_capable_pool wall has no reset to wait for).
+      explains: implQuota?.admission?.explains ?? [],
       now: Date.now(),
     });
     if (implWall.atWall) {
@@ -2320,6 +2345,7 @@ Then run:
         paused.partial_completion_terminal = buildQuotaPausedTerminal(
           strandedIds,
           implWall.earliestResetAt,
+          implWall.emptyGrantCause,
         );
         await store.saveState(paused);
       }
@@ -2391,9 +2417,38 @@ async function buildQuotaPausedStep(params: {
   runId: string;
   strandedIds: string[];
   resetAt: string | null;
+  /** WHY the grant was empty (step E) — `no_capable_pool` renders a fit-mismatch message, never "wait for the reset". */
+  emptyGrantCause?: "budget_exhausted" | "cap_reached" | "no_capable_pool" | null;
 }): Promise<RemediationStep> {
-  const { root, artifactsDir, runId, strandedIds, resetAt } = params;
+  const { root, artifactsDir, runId, strandedIds, resetAt, emptyGrantCause } = params;
   const nextCommand = loaderCommand("next-step");
+  // Honest pause (step E): a no_capable_pool zero-grant is a structural fit
+  // mismatch — telling the operator to wait for a reset that will never clear it
+  // would strand the run indefinitely (D+E review F2).
+  if (emptyGrantCause === "no_capable_pool") {
+    return writeCurrentStep({
+      stepKind: "quota_paused",
+      status: "ready",
+      runId,
+      repoRoot: root,
+      artifactsDir,
+      prompt: `
+# Remediation paused — no available pool fits the work
+
+${strandedIds.length} node(s) could not be granted because they exceed the context
+window (or capability) of every pool currently available — a fit mismatch, NOT a
+quota wall, so waiting for a reset will not clear it. The nodes remain PENDING.
+
+Options: free a larger pool (un-exclude one at the provider gate, or declare one),
+or shrink the oversized nodes' scope; then run:
+
+\`${nextCommand}\`
+`,
+      allowedCommands: [nextCommand],
+      stopCondition:
+        "No available pool fits the stranded nodes — free a larger pool or shrink the work, then re-run next-step.",
+    });
+  }
   const resetLine = resetAt
     ? `The earliest provider reset is \`${resetAt}\`. Wait until then, then run:`
     : `Wait for the provider session limit to reset, then run:`;
@@ -4865,6 +4920,7 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         // the resuming step starts fresh; the pending nodes are the durable signal.
         if (terminal.reason === "quota_paused") {
           const resetAt = terminal.earliest_reset_at ?? null;
+          const emptyGrantCause = terminal.empty_grant_cause ?? null;
           delete s.partial_completion_terminal;
           await store.saveState(s);
           return {
@@ -4875,6 +4931,7 @@ function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
               runId: stateRunId(s),
               strandedIds: terminal.stranded_ids ?? [],
               resetAt,
+              emptyGrantCause,
             }),
           };
         }

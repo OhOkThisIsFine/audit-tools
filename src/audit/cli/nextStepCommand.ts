@@ -157,6 +157,11 @@ async function gateHostFanoutOrPause(params: {
     } else {
       await stampDesignReviewSkipped(params.artifactsDir, params.bundle);
     }
+    // Honest skip message (step E): a structural no_capable_pool skip arrives
+    // livelocked on the FIRST pass — the panel does not fit any available window and
+    // no reset can change that. Claiming "persisted across repeated attempts" there
+    // would assert quota-wall passes that never happened (D+E review F1).
+    const structural = outcome.emptyGrantCause === "no_capable_pool";
     const skipStep = await writeCurrentStep({
       artifactsDir: params.artifactsDir,
       stepKind: "blocked",
@@ -165,21 +170,31 @@ async function gateHostFanoutOrPause(params: {
       allowedCommands: [params.continueCommand],
       allowedMcpTools: ["auditor_continue_audit"],
       progress: {
-        summary:
-          `Host session quota wall persisted past the enrichment bound — ` +
-          `skipping the ${label} pass and continuing on the audit's coverage.`,
+        summary: structural
+          ? `The ${label} panel does not fit any available pool's context window — ` +
+            `skipping the pass and continuing on the audit's coverage.`
+          : `Host session quota wall persisted past the enrichment bound — ` +
+            `skipping the ${label} pass and continuing on the audit's coverage.`,
         granted_count: 0,
       },
-      stopCondition:
-        `The host quota wall persisted past the enrichment bound, so the ${label} ` +
-        `pass is skipped. Run next-step to continue — the audit proceeds without it.`,
+      stopCondition: structural
+        ? `The ${label} panel exceeds every available pool's window (a fit mismatch, ` +
+          `not a quota wall), so the pass is skipped. Run next-step to continue — ` +
+          `the audit proceeds without it.`
+        : `The host quota wall persisted past the enrichment bound, so the ${label} ` +
+          `pass is skipped. Run next-step to continue — the audit proceeds without it.`,
       repoRoot: params.root,
       artifactPaths: { dispatch_quota: outcome.dispatchQuotaPath },
-      prompt:
-        `The host session limit stayed at its wall across repeated attempts, so the ` +
-        `audit is giving up on the ${label} enrichment pass and continuing on the ` +
-        "coverage it has. This is a graceful skip — nothing was lost. Run `next-step` " +
-        "to continue.",
+      prompt: structural
+        ? `The ${label} panel's prompt does not fit the context window of any pool ` +
+          `available to this run${wallExplain} — this is a size/capability mismatch, ` +
+          `not a quota wall, so waiting would not help and the audit is skipping the ` +
+          `enrichment pass rather than stalling. This is a graceful skip — nothing ` +
+          "else was lost. Run `next-step` to continue."
+        : `The host session limit stayed at its wall across repeated attempts, so the ` +
+          `audit is giving up on the ${label} enrichment pass and continuing on the ` +
+          "coverage it has. This is a graceful skip — nothing was lost. Run `next-step` " +
+          "to continue.",
     });
     console.log(JSON.stringify(skipStep, null, 2));
     return true;

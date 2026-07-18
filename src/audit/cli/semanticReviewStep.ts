@@ -149,12 +149,38 @@ export async function renderSemanticReviewStep(params: {
   // snapshot — a genuine reset clears the wall and resumes; a livelock has already
   // recorded the partial-completion terminal, so re-running routes to synthesis.
   if (dispatch.host_pause) {
-    const { earliestResetAt, livelocked, strandedCount, bindingWindow, perPacketCost } =
+    const { earliestResetAt, livelocked, strandedCount, emptyGrantCause, bindingWindow, perPacketCost } =
       dispatch.host_pause;
     const resetClause = earliestResetAt ? ` (resets at ${earliestResetAt})` : "";
     const wallExplain = livelocked
       ? ""
       : renderHostWallExplanation(bindingWindow, perPacketCost);
+    // Honest wall (unified-routing step E / item C): "exhausted" is claimed ONLY for a
+    // classified budget wall. A cap_reached zero-grant is transient ledger contention;
+    // a no_capable_pool zero-grant is a structural fit failure that waiting cannot
+    // clear. The old blanket message labeled a ~56%-headroom host "exhausted" with no
+    // explanation (2026-07-17 dogfood).
+    const wallSummary =
+      emptyGrantCause === "cap_reached"
+        ? `Host in-flight cap fully held (concurrent wave/admitter); ${strandedCount} review packet(s) paused, frees shortly.`
+        : emptyGrantCause === "no_capable_pool"
+          ? `No available pool holds this wave's packets (window/capability mismatch); ${strandedCount} packet(s) paused.`
+          : `Provider quota wall${resetClause}; ${strandedCount} review packet(s) paused, resumable.`;
+    const wallPrompt =
+      emptyGrantCause === "cap_reached"
+        ? `The host's in-flight dispatch cap is fully held — most likely a concurrent wave or a second admitter ` +
+          `on the same account — so no new packets were granted this pass. ${strandedCount} packet(s) remain ` +
+          `pending. This frees in seconds-to-minutes as in-flight work lands; re-run \`next-step\` shortly.`
+        : emptyGrantCause === "no_capable_pool"
+          ? `No available pool can hold this wave's packets: every blocked packet exceeds the context window (or ` +
+            `capability) of every pool currently available — this is a fit mismatch, NOT a quota wall, and waiting ` +
+            `for a reset will not clear it. ${strandedCount} packet(s) are pending.${wallExplain} Options: free a ` +
+            `larger pool (un-exclude one at Gate-0, or declare one), or re-run \`next-step\` after upstream ` +
+            `re-planning shrinks the packets.`
+          : `The provider session limit is exhausted${resetClause}, so no review packets can be dispatched this ` +
+            `pass. ${strandedCount} packet(s) remain pending.${wallExplain} This is a graceful, resumable pause — ` +
+            `nothing was dispatched and no work was lost. Wait for the quota to reset, then run \`next-step\`; the ` +
+            `tool re-checks the live quota and re-grants the pending packets when capacity returns.`;
     return writeCurrentStep({
       artifactsDir,
       stepKind: "blocked",
@@ -165,13 +191,15 @@ export async function renderSemanticReviewStep(params: {
       progress: {
         summary: livelocked
           ? `Provider quota wall persisted past the coverage bound; ${strandedCount} packet(s) left unreviewed — the audit will synthesize on partial coverage.`
-          : `Provider quota wall${resetClause}; ${strandedCount} review packet(s) paused, resumable.`,
+          : wallSummary,
         pending_packets: strandedCount,
         granted_count: 0,
       },
       stopCondition: livelocked
         ? "Coverage bound reached at the quota wall — run next-step to synthesize the audit on partial coverage."
-        : `Provider quota is at its wall${resetClause}.${wallExplain} Wait for the reset, then run next-step to resume — the tool re-grants automatically when capacity returns.`,
+        : emptyGrantCause === "no_capable_pool"
+          ? `No available pool fits this wave's packets.${wallExplain} Free a larger pool or let re-planning shrink the packets, then run next-step.`
+          : `Provider quota is at its wall${resetClause}.${wallExplain} Wait for the reset, then run next-step to resume — the tool re-grants automatically when capacity returns.`,
       repoRoot: root,
       artifactPaths: {
         dispatch_quota: dispatch.dispatch_quota_path,
@@ -180,10 +208,7 @@ export async function renderSemanticReviewStep(params: {
       prompt: livelocked
         ? `The provider session limit stayed at its wall across repeated attempts, so the audit is giving up ` +
           `on ${strandedCount} unreviewed packet(s) and will synthesize on the coverage it has. Run \`next-step\` to continue to synthesis.`
-        : `The provider session limit is exhausted${resetClause}, so no review packets can be dispatched this ` +
-          `pass. ${strandedCount} packet(s) remain pending.${wallExplain} This is a graceful, resumable pause — ` +
-          `nothing was dispatched and no work was lost. Wait for the quota to reset, then run \`next-step\`; the ` +
-          `tool re-checks the live quota and re-grants the pending packets when capacity returns.`,
+        : wallPrompt,
     });
   }
 

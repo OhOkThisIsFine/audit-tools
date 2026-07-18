@@ -385,6 +385,12 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
   );
   expect(activeDispatch.paused_state, "the resumable paused state must be persisted onto the active-dispatch artifact").toBeTruthy();
   expect(!activeDispatch.partial_completion_terminal, "a first strand is a resumable pause, NOT yet a partial-completion terminal").toBeTruthy();
+
+  // Unified-routing step D: the drive result surfaces the engine's PER-POOL terminal
+  // exclusion set so the hybrid caller settles exactly those pools — never "any
+  // non-complete drive ⇒ settle every source pool" (the 2026-07-17 frontier collapse).
+  expect(Array.isArray(result.exhausted_pool_ids), "exhausted_pool_ids must ride the drive result").toBe(true);
+  expect(result.exhausted_pool_ids.length > 0, "the rate-limit-exhausted pool is named in exhausted_pool_ids").toBeTruthy();
 });
 
 // ── 4. Regressions found by the live NIM e2e ──────────────────────────────────

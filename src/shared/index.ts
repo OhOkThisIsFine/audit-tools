@@ -1345,8 +1345,8 @@ export type {
   AdmitBatchInput,
 } from "./dispatch/admissionLoop.js";
 export { reconcileAdmissionLeasesFromQuotaFile } from "./dispatch/admissionLeaseReconcile.js";
-export { detectHostDispatchWall, renderHostWallExplanation, admissionBlockedOnBudget } from "./dispatch/hostDispatchWall.js";
-export type { HostDispatchWall } from "./dispatch/hostDispatchWall.js";
+export { detectHostDispatchWall, renderHostWallExplanation, admissionBlockedOnBudget, classifyEmptyGrantCause } from "./dispatch/hostDispatchWall.js";
+export type { HostDispatchWall, EmptyGrantCause } from "./dispatch/hostDispatchWall.js";
 export { finalizeProviderLaunchResult } from "./dispatch/providerLaunchFinalize.js";
 export {
   pathMatchesPrefix,
@@ -1406,7 +1406,7 @@ export { planHybridDispatch } from "./dispatch/hybridDispatch.js";
 export type { HybridDispatchPartition, HybridDispatchInput } from "./dispatch/hybridDispatch.js";
 // Cross-cycle settled-pool store (DC-4): a spilled-then-exhausted pool the coordinator
 // excludes from future splits so stranded work falls back to the host pool.
-export { readSettledPools, addSettledPool } from "./dispatch/settledPools.js";
+export { readSettledPools, addSettledPool, isPoolSettlingOutcome } from "./dispatch/settledPools.js";
 
 // Versioned seam contracts (N-X06) — pinned interface types + version constants
 export type {

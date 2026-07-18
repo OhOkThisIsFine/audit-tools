@@ -1941,12 +1941,25 @@ async function runHostDelegationObligation(
         for (const a of partition.inProcess) {
           await partition.coordinator.release(a);
         }
-        // DC-4: the NIM pool exhausted (paused / livelock-partial) and could not carry
-        // its partition → settle it (cross-cycle) so the next cycle excludes it and the
-        // stranded review tasks fall back to the batch host review instead of re-looping.
-        if (driven.status !== "complete") {
-          for (const pool of auditSourcePools) {
-            await partition.coordinator.settlePool(pool.id);
+        // DC-4 (per-pool, reason-aware — unified-routing step D): settle ONLY the pools
+        // the engine permanently excluded (credit_exhausted / model_unavailable / a
+        // no-reset rate limit), so their stranded tasks fall back to the batch host
+        // review while every OTHER pool stays dispatchable next cycle. The old reaction
+        // — ANY non-complete drive settles ALL source pools — is what collapsed a
+        // healthy 3-pool frontier onto the walled host in the 2026-07-17 dogfood (two
+        // of three settled pools had no failure of their own). On THIS (engine-backed)
+        // path, transients (timeout, per-packet 413) never settle, and a RESET-BEARING
+        // 429 pauses reversibly inside the engine rather than exhausting — narrower
+        // than remediate's no-memory cross-cycle predicate (`isPoolSettlingOutcome`),
+        // by design; see that predicate's docstring for the divergence rationale. A
+        // non-complete pass with nothing exhausted counts against the host-complement
+        // livelock via inProcessMadeProgress.
+        if (driven.exhausted_pool_ids.length > 0) {
+          const sourcePoolIds = new Set(auditSourcePools.map((pool) => pool.id));
+          for (const poolId of driven.exhausted_pool_ids) {
+            if (sourcePoolIds.has(poolId)) {
+              await partition.coordinator.settlePool(poolId);
+            }
           }
         }
         if (complement.length === 0) {

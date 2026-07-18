@@ -5,6 +5,7 @@ import {
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   detectHostDispatchWall,
   admissionBlockedOnBudget,
+  classifyEmptyGrantCause,
   emitBlindDispatchFrictionIfBlind,
   reconcileAdmissionLeasesFromQuotaFile,
   checkLivelockGuard,
@@ -69,6 +70,13 @@ export interface HostFanoutGateOutcome {
   /** Advisory reset time to surface to the host; null when unknown. */
   earliestResetAt: string | null;
   reason: "empty_grant" | "cooldown" | "partial_grant" | null;
+  /**
+   * WHY the grant fell short (step E, {@link classifyEmptyGrantCause}); null when not
+   * at a wall / unclassifiable. `no_capable_pool` = structural fit failure — the
+   * caller's message must say "the panel does not fit the available window", never
+   * "quota wall", and the outcome arrives already `livelocked` (immediate skip).
+   */
+  emptyGrantCause: "budget_exhausted" | "cap_reached" | "no_capable_pool" | null;
   grantedCount: number;
   requiredCount: number;
   /** The namespaced dispatch-quota path — reconciled at results ingest. */
@@ -240,6 +248,7 @@ export async function gateHostFanout(params: {
     grantedCount,
     cooldownUntil: dispatchCapacity.cooldown_until ?? null,
     bindingWindow: budgetBound ? (waveSchedule.binding_window ?? null) : null,
+    explains: admission.explains,
     now: Date.now(),
   });
   // The smallest panel unit's cost — if even that doesn't fit the binding budget, zero
@@ -258,15 +267,28 @@ export async function gateHostFanout(params: {
     await reconcileAdmissionLeasesFromQuotaFile(dispatchQuotaPath).catch(() => {});
   }
 
-  // Advance the resumable pause counter; a wall that persists past the bound flips to
-  // livelocked so the caller skips this enrichment rather than pausing forever.
-  const livelocked = await advanceFanoutPause(runDir, atWall);
+  // Honest-wall discriminator (unified-routing step E): classify WHY the grant fell
+  // short. A `no_capable_pool` block is STRUCTURAL — every blocked unit fit no pool
+  // (window/capability), and the host window never grows — so waiting is provably
+  // futile: no reset clears it. Walking the resumable pause counter would burn
+  // LIVELOCK_PAUSE_LIMIT next-step passes rendering a fake "quota wall" before
+  // skipping (B-review F1). Flip straight to the livelock/skip outcome instead.
+  const emptyGrantCause = atWall ? classifyEmptyGrantCause(admission.explains) : null;
+  const structuralFitBlock = atWall && emptyGrantCause === "no_capable_pool";
+  const livelocked = structuralFitBlock
+    ? true
+    : await advanceFanoutPause(runDir, atWall);
+  if (structuralFitBlock) {
+    // Clear any carried pause state — the skip is immediate, not counted.
+    await rm(join(runDir, "pause.json"), { force: true }).catch(() => {});
+  }
 
   return {
     atWall,
     livelocked,
     earliestResetAt: wall.earliestResetAt,
     reason: wall.reason ?? (partial ? "partial_grant" : null),
+    emptyGrantCause,
     grantedCount,
     requiredCount: units.length,
     dispatchQuotaPath,

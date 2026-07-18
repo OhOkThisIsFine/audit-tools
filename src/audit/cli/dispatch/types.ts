@@ -77,6 +77,13 @@ export interface PrepareDispatchResult {
     earliestResetAt: string | null;
     livelocked: boolean;
     strandedCount: number;
+    /**
+     * WHY the grant was empty (unified-routing step E, `classifyEmptyGrantCause`) —
+     * keys the honest wall message: "exhausted" only for `budget_exhausted`;
+     * `cap_reached` = transient ledger contention; `no_capable_pool` = structural
+     * fit mismatch no reset can clear. Null on cooldown / unclassifiable.
+     */
+    emptyGrantCause: "budget_exhausted" | "cap_reached" | "no_capable_pool" | null;
     /** The binding budget window (D1), for the host-facing wall explanation. Null on cooldown / no signal. */
     bindingWindow: QuotaBindingWindow | null;
     /** The smallest packet's estimated cost, compared against the binding budget in the wall message. */

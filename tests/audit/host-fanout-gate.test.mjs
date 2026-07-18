@@ -162,6 +162,30 @@ describe("gateHostFanout — item C host fan-out quota gate", () => {
     }
   });
 
+  test("a structural no_capable_pool wall skips IMMEDIATELY (livelocked on the FIRST pass, honest cause) — step E", async () => {
+    // A fit mismatch is permanent by construction (the host window never grows), so
+    // burning LIVELOCK_PAUSE_LIMIT next-step passes rendering a fake quota wall
+    // before skipping is provably futile (B-review F1 / D+E review). The outcome
+    // must arrive already livelocked with the honest cause on pass ONE.
+    const dir = await tmp("host-fanout-structural-");
+    setQuotaStateDir(await tmp("host-fanout-state-"));
+    try {
+      const outcome = await gateHostFanout({
+        artifactsDir: dir,
+        sessionConfig: {},
+        family: "design_review",
+        // ~600KB (~150k tokens) against a REAL discovered 32k window → no pool fits.
+        units: [{ id: "big", estInputBytes: 600_000 }],
+        hostContextTokens: 32_000,
+      });
+      expect(outcome.atWall).toBe(true);
+      expect(outcome.emptyGrantCause).toBe("no_capable_pool");
+      expect(outcome.livelocked, "structural fit block must skip on the FIRST pass, not walk the pause counter").toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("re-gating a family reconciles the prior grant's leases — no accumulation / leak", async () => {
     const dir = await tmp("host-fanout-regate-");
     setQuotaStateDir(await tmp("host-fanout-state-"));

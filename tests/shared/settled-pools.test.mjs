@@ -48,3 +48,23 @@ test("settled-pools store: concurrent adds don't lose entries (lock-guarded)", a
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Unified-routing step D: reason-aware settle predicate ────────────────────
+// Settling is permanent for the run (INV-S03), so only genuinely-terminal pool
+// conditions qualify. packet_too_large is the load-bearing exclusion: the 2026-07-17
+// dogfood settled a healthy 3-pool frontier onto a walled host because sizing faults
+// and transients were treated as exhaustion.
+test("isPoolSettlingOutcome: terminal exhaustion settles; sizing faults and transients never do", async () => {
+  const { isPoolSettlingOutcome } = await import("../../src/shared/dispatch/settledPools.ts");
+  // Genuine terminal pool conditions → settle.
+  expect(isPoolSettlingOutcome("credit_exhausted")).toBe(true);
+  expect(isPoolSettlingOutcome("model_unavailable")).toBe(true);
+  expect(isPoolSettlingOutcome("rate_limited")).toBe(true);
+  expect(isPoolSettlingOutcome("quota_unclassified")).toBe(true);
+  // A 413 is a per-(item,pool) sizing fact — must NEVER kill the pool.
+  expect(isPoolSettlingOutcome("packet_too_large")).toBe(false);
+  // Transients are retry/cooldown territory, not exhaustion.
+  expect(isPoolSettlingOutcome("timeout")).toBe(false);
+  expect(isPoolSettlingOutcome("error")).toBe(false);
+  expect(isPoolSettlingOutcome("success")).toBe(false);
+});

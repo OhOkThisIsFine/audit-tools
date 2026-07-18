@@ -686,6 +686,8 @@ export async function prepareDispatchArtifacts(params: {
         earliestResetAt: string | null;
         livelocked: boolean;
         strandedCount: number;
+        /** WHY the grant was empty (step E) — keys the honest wall message. */
+        emptyGrantCause: "budget_exhausted" | "cap_reached" | "no_capable_pool" | null;
         bindingWindow: QuotaBindingWindow | null;
         perPacketCost: number | null;
       }
@@ -701,6 +703,7 @@ export async function prepareDispatchArtifacts(params: {
       grantedCount: admission.granted_packet_ids.length,
       cooldownUntil: dispatchCapacity.cooldown_until ?? null,
       bindingWindow: budgetBound ? (waveSchedule.binding_window ?? null) : null,
+      explains: admission.explains,
       now: Date.now(),
     });
     if (wall.atWall) {
@@ -728,6 +731,7 @@ export async function prepareDispatchArtifacts(params: {
         earliestResetAt: wall.earliestResetAt,
         livelocked: advance.livelocked,
         strandedCount: strandedPacketIds.length,
+        emptyGrantCause: wall.emptyGrantCause,
         bindingWindow: wall.bindingWindow,
         // The smallest packet's cost — the number compared against the binding budget.
         perPacketCost: admissionPackets.length
