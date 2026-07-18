@@ -471,13 +471,13 @@ export async function prepareDispatchArtifacts(params: {
       largestEstimatedTokens = packet.estimated_tokens;
       largestPacketId = packet.packet_id;
     }
+    // `large_packet` advisory abandoned: "large" is not a packet property, only a
+    // per-pool headroom question — a packet either fits a target pool's effective
+    // context window or is skipped/re-split for it (resolveSourceContextWindowTokens +
+    // the token-fit gates). A line-count warning against a single global threshold
+    // spammed the run without gating anything. `largeFileMode` (single oversized file
+    // → deep-tier capability escalation) is a distinct, kept signal.
     const largeFileMode = isIsolatedLargeFilePacket(packet);
-    if (packet.total_lines > LARGE_FILE_PACKET_TARGET_LINES && !largeFileMode) {
-      warnings.push({
-        code: "large_packet",
-        message: `large packet ${packet.packet_id} (~${packet.total_lines} lines) may hit quota limits`,
-      });
-    }
 
     for (const task of packetTasks) {
       if (!lensDefs[task.lens]) {
