@@ -80,3 +80,6 @@ skills-lock.json
 .audit-tools/*/*
 !.audit-tools/*/agent-feedback.jsonl
 # <<< audit-tools managed ignores <<<
+
+# Dev-wrapper auto-rebuild lock (wrapper/audit-code-wrapper-build.mjs)
+.audit-code-build.lock
