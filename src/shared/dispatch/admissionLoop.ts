@@ -62,7 +62,7 @@ export interface AdmissionPool {
    * Raw per-`(provider,model)` capability score (registry `composite_rank`) — LOWER
    * is more capable, the inverse convention of {@link capabilityRank}. A FINER tiebreak
    * consulted only AFTER the coarse tier ordinal, so it reorders only among cost-equal
-   * pools that also share a tier (e.g. many repair-proxy models on the neutral fallback
+   * pools that also share a tier (e.g. many proxy-sourced models on the neutral fallback
    * tier). null/absent ⇒ no finer signal; a present score sorts before an absent one
    * within that tie. Never reorders against cost or tier.
    */
@@ -382,7 +382,7 @@ export function buildCapacityPoolCapabilityFloor(
  * Finer capability tiebreak on the raw registry score (LOWER = more capable), consulted
  * only after the coarse tier ordinal has tied. A present score sorts before an absent
  * one; both absent ⇒ 0 (fall through to the next tiebreak). Never a primary axis — it
- * only refines cost-equal, same-tier pools (e.g. repair-proxy models on one tier).
+ * only refines cost-equal, same-tier pools (e.g. proxy-sourced models on one tier).
  */
 function capabilityScoreCmp(a: AdmissionPool, b: AdmissionPool): number {
   const av = typeof a.capabilityScore === "number" && Number.isFinite(a.capabilityScore) ? a.capabilityScore : null;

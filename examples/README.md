@@ -29,7 +29,7 @@ Configuration splits across three shapes, one per home (the INTENT/CAPABILITY cu
   agent's provider identity, model scalars, subagent capabilities) plus optional explicit `sources[]`
   (the operator's escape hatch — normally sources resolve ambiently instead).
 - **`catalog/sources-declared.json`** — the machine-level declaration (`~/.audit-code/sources-declared.json`)
-  of backends this box owns, including the optional `repair_proxy` lane; see below.
+  of backends this box owns, including the optional `proxy` lane; see below.
 
 ### `../catalog/sources-declared.json` — a free dispatch pool (arbitrage tier, Phase 0)
 

@@ -54,7 +54,7 @@ export async function loadRemediateSessionConfig(params: {
 }): Promise<SessionConfig | undefined> {
   if (params.override) return params.override;
   // Remediate has no Gate-0 build moment (audit's populate trigger), so a declared
-  // repair-proxy lane on a remediate-only machine would never expand — the
+  // proxy lane on a remediate-only machine would never expand — the
   // [[silent-fail-closed-on-one-draw]] class. Missing-only populate: after one
   // success this is a cheap cache read, never a per-load fetch. Failure degrades
   // (the resolve half then drops the lane WITH a reason via resolveSessionConfig's

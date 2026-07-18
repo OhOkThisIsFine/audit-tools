@@ -1,10 +1,11 @@
 /**
- * POPULATE half of the repair-proxy lane (commit 3a): `populateProxyCatalog` fetches
- * `GET <proxy>/registry`, expands the reachable+keyed backends' top-K models into
- * `claude-worker` sources, and writes the machine-level cache `readProxyCatalog`
- * later reads (resolve NEVER fetches). Registry tolerance: malformed entries are
- * filtered, never thrown. Cost precedence: declared `cost_per_mtok` > registry price
- * > absent. Plan: docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md.
+ * POPULATE half of the neutral proxy lane: `populateProxyCatalog` fetches
+ * `GET <proxy>/v1/models` (roster) + `GET <proxy>/model/info` (enrichment),
+ * expands into `claude-worker` sources via the edge shape adapter, and writes
+ * the machine-level cache `readProxyCatalog` later reads (resolve NEVER fetches).
+ * Discovery tolerance: malformed entries are filtered, never thrown. Cost
+ * precedence: declared `cost_per_mtok` > advert price > absent. Liveness probe:
+ * `/v1/messages` per model, dropping 404/unavailable. Plan section h.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -40,59 +41,124 @@ function tempHome() {
   return dir;
 }
 
-/** A fetchImpl serving one JSON payload for `GET <PROXY>/registry`. */
-function registryFetch(payload, { status = 200, probeHandler } = {}) {
+/**
+ * A fetchImpl serving the neutral contract endpoints: `/v1/models` roster
+ * and `/model/info` enrichment (array form only — legacy map form is deleted).
+ * Fixtures are from the recon surfaces doc.
+ */
+function neutralContractFetch(
+  { roster = [], modelInfo = null } = {},
+  { probeHandler } = {},
+) {
   return async (url, options) => {
     const urlStr = String(url);
-    // Registry fetch
-    if (urlStr === `${PROXY}/registry`) {
-      expect(options).toBeUndefined();
+    // GET /v1/models — OpenAI-compatible roster (required baseline)
+    if (urlStr === `${PROXY}/v1/models`) {
       return {
-        ok: status >= 200 && status < 300,
-        status,
-        json: async () => payload,
+        ok: true,
+        status: 200,
+        json: async () => ({ data: roster, object: "list" }),
       };
     }
-    // Model probe
+    // GET /model/info — LiteLLM enrichment (optional, array form only)
+    if (urlStr === `${PROXY}/model/info`) {
+      if (modelInfo === null) {
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+      // Current array form only: {data: [...]}
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: modelInfo }),
+      };
+    }
+    // POST /v1/messages — model probe
     if (urlStr === `${PROXY}/v1/messages` && options?.method === "POST") {
       if (probeHandler) {
         return probeHandler(options);
       }
       // Default probe handler: return 200 OK
-      return {
-        status: 200,
-        text: async () => "{}",
-      };
+      return { status: 200, text: async () => "{}" };
     }
     throw new Error(`Unexpected request: ${urlStr}`);
   };
 }
 
-const NIM_A = { provider: "nim", model: "z-ai/glm-5.2", score: 0.9, has_key: true, reachable: true };
-const NIM_B = { provider: "nim", model: "meta/llama-4", score: 0.7, has_key: true, reachable: true, price_per_mtok: 0.4 };
+/**
+ * Fixtures from the recon surfaces doc (verbatim example responses from
+ * LiteLLM docs / BerriAI source). These test the edge adapter against
+ * documented shapes, not invented test doubles.
+ */
+const V1_MODELS_ROSTER = [
+  { id: "gpt-4", object: "model", created: 1677610602, owned_by: "openai" },
+  { id: "xai/grok-2-1212", object: "model", created: 1677610602, owned_by: "openai" },
+  { id: "claude-sonnet-4-6", object: "model", created: 1677610602, owned_by: "openai" },
+];
 
-describe("populateProxyCatalog — expansion", () => {
-  it("expands reachable+keyed entries into claude-worker sources and writes the cache", async () => {
+const MODEL_INFO_ARRAY = [
+  {
+    model_name: "gpt-4",
+    litellm_params: { model: "openai/gpt-4" },
+    model_info: {
+      id: "e889baacd17f591cce4c63639275ba5e8dc60765d6c553e6ee5a504b19e50ddc",
+      db_model: false,
+      key: "gpt-4",
+      max_input_tokens: 8192,
+      input_cost_per_token: 3e-05,
+      output_cost_per_token: 6e-05,
+      litellm_provider: "openai",
+      mode: "chat",
+    },
+  },
+  {
+    model_name: "claude-sonnet-4-6",
+    litellm_params: { model: "anthropic/claude-sonnet-4-6" },
+    model_info: {
+      db_model: false,
+      key: "claude-sonnet",
+      max_input_tokens: 200000,
+      input_cost_per_token: 3e-06,
+      output_cost_per_token: 15e-06,
+      litellm_provider: "anthropic",
+      mode: "chat",
+      capability_rank: 50, // operator-declared rank via advert custom key
+    },
+  },
+];
+
+describe("populateProxyCatalog — discovery contract", () => {
+  it("discovers roster via /v1/models and enriches via /model/info (array form)", async () => {
     const homeDir = tempHome();
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir,
-      fetchImpl: registryFetch([NIM_A, NIM_B]),
+      fetchImpl: neutralContractFetch({
+        roster: V1_MODELS_ROSTER,
+        modelInfo: MODEL_INFO_ARRAY,
+      }),
     });
     expect(result.written).toBe(true);
     expect(result.reason).toBeUndefined();
     expect(result.dropped).toEqual([]);
-    expect(result.sources).toHaveLength(2);
-    const [first] = result.sources;
-    // Shape per the plan's identity section: transport never enters the identity.
-    expect(first).toMatchObject({
+    expect(result.sources).toHaveLength(3);
+    // Discover by alias: roster id becomes the model name, enriched by model_name join
+    const byAlias = Object.fromEntries(
+      result.sources.map((s) => [s.model, s]),
+    );
+    expect(byAlias["gpt-4"]).toMatchObject({
       provider: "claude-worker",
       endpoint: PROXY,
-      backend_provider: "nim",
-      model: "z-ai/glm-5.2", // score 0.9 ranks first
+      backend_provider: "openai",
+      model: "gpt-4", // Alias VERBATIM (plan §e, regression pin i)
       worker_kind: "agentic",
+      cost_per_mtok: (3e-05 + 6e-05) / 2, // cost blend = mean
+      quota: { context_tokens: 8192 },
     });
-    // Roundtrip through the reader: entries + fetched_at (no TTL enforcement).
+    expect(byAlias["claude-sonnet-4-6"]).toMatchObject({
+      backend_provider: "anthropic",
+      capability_rank: 50, // advert custom key round-trips
+    });
+    // Roundtrip through the reader
     const catalog = readProxyCatalog({ homeDir });
     expect(catalog).not.toBeNull();
     expect(catalog.endpoint).toBe(PROXY);
@@ -100,183 +166,281 @@ describe("populateProxyCatalog — expansion", () => {
     expect(catalog.sources).toEqual(result.sources);
   });
 
-  it("filters malformed / unreachable / keyless entries, never throws", async () => {
+  it("degrades to roster-only when /model/info is absent (404)", async () => {
+    // When /model/info returns 404, discover falls back to roster only (no enrichment).
+    // Provider derivation: slash-prefix > "proxy" (default shared bucket).
+    const homeDir = tempHome();
     const result = await populateProxyCatalog({
       endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([
-        NIM_A,
-        { provider: "nim", model: "dead/model", has_key: true, reachable: false },
-        { provider: "nim", model: "keyless/model", has_key: false, reachable: true },
-        { provider: "", model: "no-provider", has_key: true, reachable: true },
-        { provider: "nim", model: 42, has_key: true, reachable: true },
-        "not-an-object",
-        null,
-      ]),
+      homeDir,
+      fetchImpl: neutralContractFetch({
+        roster: V1_MODELS_ROSTER,
+        modelInfo: null, // 404
+      }),
     });
+    expect(result.written).toBe(true);
     expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model)).toEqual(["z-ai/glm-5.2"]);
+    expect(result.sources).toHaveLength(3);
+    // Without enrichment: provider derived from slash-prefix or "proxy"
+    const xai = result.sources.find((s) => s.model === "xai/grok-2-1212");
+    expect(xai).toMatchObject({
+      backend_provider: "xai", // prefix before first /
+      model: "xai/grok-2-1212",
+    });
+    // Roster-only models have no enrichment fields
+    expect(xai.quota).toBeUndefined();
+    expect(xai.cost_per_mtok).toBeUndefined();
+    const unslashed = result.sources.find((s) => s.model === "claude-sonnet-4-6");
+    expect(unslashed).toMatchObject({
+      backend_provider: "proxy", // default shared bucket, owner decision
+      model: "claude-sonnet-4-6",
+    });
   });
 
-  it("caps at top-K per backend provider, best score first (unscored last)", async () => {
-    const entries = [
-      { provider: "nim", model: "m-low", score: 0.1, has_key: true, reachable: true },
-      NIM_A,
-      NIM_B,
-      { provider: "nim", model: "m-unscored", has_key: true, reachable: true },
-      { provider: "openrouter", model: "only-one", score: 0.5, has_key: true, reachable: true },
+  it("eligibility filter: mode != 'chat' → skip; supports_tool_calls === false → skip", async () => {
+    // Models unsuitable for agentic workers are excluded at discovery time.
+    const modelInfo = [
+      {
+        model_name: "chat-ok",
+        litellm_params: { model: "openai/gpt" },
+        model_info: { litellm_provider: "openai", mode: "chat" },
+      },
+      {
+        model_name: "embedding-skip",
+        litellm_params: { model: "openai/embed" },
+        model_info: { litellm_provider: "openai", mode: "embedding" },
+      },
+      {
+        model_name: "no-tools-skip",
+        litellm_params: { model: "openai/no-tools" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          supports_tool_calls: false,
+        },
+      },
+      {
+        model_name: "tools-ok",
+        litellm_params: { model: "openai/tools" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          supports_tool_calls: true,
+        },
+      },
+      {
+        model_name: "unknown-mode-ok",
+        litellm_params: { model: "custom/unknown" },
+        model_info: { litellm_provider: "custom" }, // mode absent = unknown ≠ incapable
+      },
     ];
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      topK: 2,
-      fetchImpl: registryFetch(entries),
+      fetchImpl: neutralContractFetch({
+        roster: modelInfo.map((m) => ({ id: m.model_name })),
+        modelInfo,
+      }),
     });
-    // 2 per provider max; nim keeps its two best scores, openrouter keeps its one.
     expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model)).toEqual([
-      "z-ai/glm-5.2",
-      "meta/llama-4",
-      "only-one",
+    expect(result.sources.map((s) => s.model).sort()).toEqual([
+      "chat-ok",
+      "tools-ok",
+      "unknown-mode-ok",
     ]);
-    expect(DEFAULT_PROXY_TOP_K).toBeGreaterThan(0); // the default cap exists and is small
   });
 
-  it("cost precedence: declared cost_per_mtok > registry price > absent", async () => {
-    const declared = await populateProxyCatalog({
+  it("cost blend: mean of input/output when both present", async () => {
+    // The plan's resolved decision: cost = (input + output) / 2
+    const modelInfo = [
+      {
+        model_name: "both-prices",
+        litellm_params: { model: "openai/both" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          input_cost_per_token: 2e-05,
+          output_cost_per_token: 4e-05,
+        },
+      },
+      {
+        model_name: "input-only",
+        litellm_params: { model: "openai/input" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          input_cost_per_token: 1e-05,
+        },
+      },
+      {
+        model_name: "output-only",
+        litellm_params: { model: "openai/output" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          output_cost_per_token: 5e-05,
+        },
+      },
+      {
+        model_name: "no-price",
+        litellm_params: { model: "openai/free" },
+        model_info: { litellm_provider: "openai", mode: "chat" },
+      },
+    ];
+    const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      costPerMtok: 0,
-      fetchImpl: registryFetch([NIM_A, NIM_B]),
+      topK: 10, // All 4 models must expand (default top_k=3 would truncate the 4th)
+      fetchImpl: neutralContractFetch({
+        roster: modelInfo.map((m) => ({ id: m.model_name })),
+        modelInfo,
+      }),
     });
-    // Declared (the free-to-operator axis) wins over the registry list price.
-    expect(declared.dropped).toEqual([]);
-    expect(declared.sources.map((s) => s.cost_per_mtok)).toEqual([0, 0]);
-
-    const fromRegistry = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A, NIM_B]),
-    });
-    expect(fromRegistry.dropped).toEqual([]);
-    const byModel = Object.fromEntries(
-      fromRegistry.sources.map((s) => [s.model, s.cost_per_mtok]),
+    expect(result.dropped).toEqual([]);
+    const byAlias = Object.fromEntries(
+      result.sources.map((s) => [s.model, s.cost_per_mtok]),
     );
-    expect(byModel["meta/llama-4"]).toBe(0.4); // registry price fallback
-    expect(byModel["z-ai/glm-5.2"]).toBeUndefined(); // no price anywhere → absent
+    expect(byAlias["both-prices"]).toBe((2e-05 + 4e-05) / 2);
+    expect(byAlias["input-only"]).toBe(1e-05);
+    expect(byAlias["output-only"]).toBe(5e-05);
+    expect(byAlias["no-price"]).toBeUndefined();
   });
 
-  it("tolerates a provider-grouped registry shape", async () => {
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch({
-        providers: [
-          {
-            name: "nim",
-            has_key: true,
-            reachable: true,
-            models: [{ id: "z-ai/glm-5.2", score: 0.9 }, "meta/llama-4"],
-          },
-        ],
-      }),
-    });
-    expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model).sort()).toEqual([
-      "meta/llama-4",
-      "z-ai/glm-5.2",
-    ]);
-  });
-
-  it("tolerates the provider-MAP registry shape the live repair-proxy emits", async () => {
-    // The real `GET /registry` body: `providers` is an OBJECT keyed by provider
-    // name (not an array), with per-provider `has_key`/`reachable` verdicts and a
-    // `models: [{id, ...}]` list. Observed live 2026-07-16 (first claude-worker
-    // dogfood): the array-only extractor read this as zero models and wrote an
-    // empty expansion.
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch({
-        generated_at: "2026-07-17T05:04:49.497Z",
-        routing: { default: "nim/z-ai/glm-5.2" },
-        providers: {
-          nim: {
-            base: "https://integrate.api.nvidia.com/v1",
-            kind: "openai",
-            authEnv: "NVIDIA_API_KEY",
-            has_key: true,
-            reachable: true,
-            models: [{ id: "z-ai/glm-5.2", score: 0.9 }, { id: "meta/llama-4" }],
-          },
-          mistral: {
-            has_key: false,
-            reachable: true,
-            models: [{ id: "keyless/model" }],
-          },
+  it("cost precedence: declared cost_per_mtok wins over advert price", async () => {
+    // The free-to-operator axis (declared cost) WINS (regression pin ii area).
+    const modelInfo = [
+      {
+        model_name: "test-model",
+        litellm_params: { model: "openai/test" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          input_cost_per_token: 1e-05,
+          output_cost_per_token: 2e-05,
         },
-      }),
-    });
-    expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model).sort()).toEqual([
-      "meta/llama-4",
-      "z-ai/glm-5.2",
-    ]);
-    expect(result.sources.every((s) => s.backend_provider === "nim")).toBe(true);
-  });
-
-  it("ranks by the registry's capability block when no flat score exists", async () => {
-    // Live repair-proxy model rows carry `capability: {composite_rank, arena_rank,
-    // arena_rating, ...}` (models.dev/arena sync), not a flat `score`. Rank by
-    // composite_rank, falling back to arena_rank (both: lower = better); models with
-    // neither rank as unscored (last) — otherwise top-K degrades to alphabetical and
-    // picks TTS/embedding models as agentic workers (observed live 2026-07-16).
+      },
+    ];
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      topK: 2,
-      fetchImpl: registryFetch({
-        providers: {
-          nim: {
-            has_key: true,
-            reachable: true,
-            models: [
-              { id: "aaa/alphabetical-first", capability: null },
-              { id: "mid/model", capability: { composite_rank: 200, arena_rating: 1300 } },
-              { id: "best/model", capability: { composite_rank: 46, arena_rating: 1456 } },
-              { id: "rated-only/model", capability: { composite_rank: null, arena_rating: 1400 } },
-            ],
-          },
+      costPerMtok: 0, // Declared: free to operator
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "test-model" }],
+        modelInfo,
+      }),
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.sources[0].cost_per_mtok).toBe(0); // declared wins
+  });
+
+  it("caps at top-K per backend provider, stable order (provider, score, alias)", async () => {
+    const modelInfo = [
+      {
+        model_name: "anthropic-low",
+        litellm_params: { model: "anthropic/low" },
+        model_info: {
+          litellm_provider: "anthropic",
+          mode: "chat",
+          capability_rank: 100,
         },
-      }),
-    });
-    expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model)).toEqual(["best/model", "mid/model"]);
-  });
-
-  it("dedups duplicate registry rows — one (provider, model) identity, one source", async () => {
-    // The live mistral registry lists some models twice; without dedup the
-    // expansion emits two identical claude-worker sources for one pool identity
-    // (observed live 2026-07-16 — the same map-clobber hazard as the declared
-    // intra-duplicates residual).
+      },
+      {
+        model_name: "anthropic-high",
+        litellm_params: { model: "anthropic/high" },
+        model_info: {
+          litellm_provider: "anthropic",
+          mode: "chat",
+          capability_rank: 10,
+        },
+      },
+      {
+        model_name: "openai-only",
+        litellm_params: { model: "openai/gpt" },
+        model_info: { litellm_provider: "openai", mode: "chat", capability_rank: 20 },
+      },
+    ];
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      topK: 3,
-      fetchImpl: registryFetch([NIM_A, NIM_A, NIM_B]),
+      topK: 1, // Only 1 per provider
+      fetchImpl: neutralContractFetch({
+        roster: modelInfo.map((m) => ({ id: m.model_name })),
+        modelInfo,
+      }),
     });
     expect(result.dropped).toEqual([]);
+    // Alphabetical providers (anthropic, openai); each has top-1 by score
     expect(result.sources.map((s) => s.model)).toEqual([
-      "z-ai/glm-5.2",
-      "meta/llama-4",
+      "anthropic-high", // anthropic's best (rank 10 < 100)
+      "openai-only", // openai's only one
     ]);
+    expect(DEFAULT_PROXY_TOP_K).toBeGreaterThan(0);
   });
 
-  it("strips a trailing slash from the endpoint before composing the url + sources", async () => {
+  it("deduplicates by (provider, alias) — one identity, one source", async () => {
+    // Without dedup the expansion would emit two identical sources for one pool identity.
+    const modelInfo = [
+      {
+        model_name: "duplicate",
+        litellm_params: { model: "openai/test" },
+        model_info: { litellm_provider: "openai", mode: "chat" },
+      },
+    ];
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir: tempHome(),
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "duplicate" }, { id: "duplicate" }], // Listed twice
+        modelInfo,
+      }),
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.sources.map((s) => s.model)).toEqual(["duplicate"]);
+  });
+
+  it("consumed capability_rank from advert custom key", async () => {
+    // Operator-declared rank via advert custom key (not a score) rides the source
+    // → capability floor. The advert provides declared_rank; expansion stamps it as
+    // capability_rank on the source.
+    const modelInfo = [
+      {
+        model_name: "ranked",
+        litellm_params: { model: "openai/ranked" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          capability_rank: 42, // Custom key (per operator setup in proxy config)
+        },
+      },
+    ];
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir: tempHome(),
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "ranked" }],
+        modelInfo,
+      }),
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.sources[0]).toMatchObject({
+      capability_rank: 42,
+    });
+  });
+
+  it("strips trailing slashes from endpoint before composing url + sources", async () => {
     const result = await populateProxyCatalog({
       endpoint: `${PROXY}/`,
       homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A]),
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "test-model" }],
+        modelInfo: [
+          {
+            model_name: "test-model",
+            litellm_params: { model: "openai/test" },
+            model_info: { litellm_provider: "openai", mode: "chat" },
+          },
+        ],
+      }),
     });
     expect(result.dropped).toEqual([]);
     expect(result.sources[0].endpoint).toBe(PROXY);
@@ -284,12 +448,24 @@ describe("populateProxyCatalog — expansion", () => {
 });
 
 describe("populateProxyCatalog — degrade, never throw", () => {
-  it("a failed fetch returns written:false with a reason (prior cache untouched)", async () => {
+  it("failed /v1/models fetch returns written:false with reason (prior cache untouched)", async () => {
     const homeDir = tempHome();
-    await populateProxyCatalog({ endpoint: PROXY, homeDir, fetchImpl: registryFetch([NIM_A]) });
-    // Step past the freshness TTL so the refresh actually fetches (and fails) —
-    // a same-endpoint fresh cache would otherwise short-circuit the degrade path
-    // this test exercises.
+    // Seed a good cache first
+    await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir,
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "test" }],
+        modelInfo: [
+          {
+            model_name: "test",
+            litellm_params: { model: "openai/test" },
+            model_info: { litellm_provider: "openai", mode: "chat" },
+          },
+        ],
+      }),
+    });
+    // Now fail the refresh (step past TTL so refresh actually attempts)
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir,
@@ -299,34 +475,45 @@ describe("populateProxyCatalog — degrade, never throw", () => {
       now: () => new Date(Date.now() + POPULATE_CACHE_FRESH_TTL_MS + 1_000),
     });
     expect(result.written).toBe(false);
+    // Reason should carry the underlying error cause (ECONNREFUSED in this mock)
+    expect(result.reason).toContain("failed");
     expect(result.reason).toContain("ECONNREFUSED");
     expect(result.dropped).toEqual([]);
-    // The earlier good cache survives a failed refresh.
+    // Prior good cache survives
     expect(readProxyCatalog({ homeDir })?.sources).toHaveLength(1);
   });
 
-  it("a non-2xx response returns written:false with the status", async () => {
+  it("empty roster returns written:false (no models to fetch)", async () => {
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      fetchImpl: registryFetch({}, { status: 503 }),
+      fetchImpl: neutralContractFetch({
+        roster: [],
+        modelInfo: null,
+      }),
     });
     expect(result.written).toBe(false);
-    expect(result.reason).toContain("503");
+    expect(result.reason).toContain("no models");
     expect(result.dropped).toEqual([]);
   });
 
-  it("an empty/unrecognizable registry WRITES an empty expansion (fresh knowledge)", async () => {
-    const homeDir = tempHome();
+  it("unparseable /v1/models (missing data[]) returns written:false", async () => {
     const result = await populateProxyCatalog({
       endpoint: PROXY,
-      homeDir,
-      fetchImpl: registryFetch({ nothing: "here" }),
+      homeDir: tempHome(),
+      fetchImpl: async (url) => {
+        if (String(url).includes("/v1/models")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ not_data: "invalid" }), // Missing data[]
+          };
+        }
+        throw new Error("unexpected");
+      },
     });
-    expect(result.written).toBe(true);
-    expect(result.dropped).toEqual([]);
-    expect(result.sources).toEqual([]);
-    expect(readProxyCatalog({ homeDir })?.sources).toEqual([]);
+    expect(result.written).toBe(false);
+    expect(result.reason).toContain("no models");
   });
 });
 
@@ -366,16 +553,27 @@ describe("readProxyCatalog — degrades to null, never throws", () => {
   });
 
   it("the cache filename is the plain machine-level catalog-cache.json", () => {
-    // Ambient callers have no auditor id, so the reserved `catalog-<auditor-id>.json`
-    // form is NOT used (see the rationale in proxyCatalog.ts).
     expect(resolveProxyCatalogPath("/home/test").replaceAll("\\", "/")).toBe(
       "/home/test/.audit-code/catalog-cache.json",
     );
   });
 
-  it("populate writes valid JSON on disk (spot-check the raw file)", async () => {
+  it("populate writes valid JSON on disk", async () => {
     const homeDir = tempHome();
-    const result = await populateProxyCatalog({ endpoint: PROXY, homeDir, fetchImpl: registryFetch([NIM_A]) });
+    const result = await populateProxyCatalog({
+      endpoint: PROXY,
+      homeDir,
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "test-model" }],
+        modelInfo: [
+          {
+            model_name: "test-model",
+            litellm_params: { model: "openai/test" },
+            model_info: { litellm_provider: "openai", mode: "chat" },
+          },
+        ],
+      }),
+    });
     expect(result.dropped).toEqual([]);
     const raw = JSON.parse(readFileSync(resolveProxyCatalogPath(homeDir), "utf8"));
     expect(raw.endpoint).toBe(PROXY);
@@ -383,44 +581,26 @@ describe("readProxyCatalog — degrades to null, never throws", () => {
   });
 });
 
-describe("populateProxyCatalog — context-window extraction", () => {
-  it("registry row with context_length carries quota.context_tokens", async () => {
-    const entry = { ...NIM_A, context_length: 131072 };
+describe("populateProxyCatalog — context-window from max_input_tokens", () => {
+  it("advert max_input_tokens maps to quota.context_tokens", async () => {
+    const modelInfo = [
+      {
+        model_name: "context-test",
+        litellm_params: { model: "openai/test" },
+        model_info: {
+          litellm_provider: "openai",
+          mode: "chat",
+          max_input_tokens: 200000,
+        },
+      },
+    ];
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      fetchImpl: registryFetch([entry]),
-    });
-    expect(result.dropped).toEqual([]);
-    expect(result.sources).toHaveLength(1);
-    expect(result.sources[0]).toMatchObject({
-      quota: { context_tokens: 131072 },
-    });
-  });
-
-  it("registry row without context field has no quota", async () => {
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A]),
-    });
-    expect(result.dropped).toEqual([]);
-    expect(result.sources).toHaveLength(1);
-    expect(result.sources[0].quota).toBeUndefined();
-  });
-
-  it("extracts context_tokens from nested capability block", async () => {
-    const entry = {
-      provider: "nim",
-      model: "test/model",
-      has_key: true,
-      reachable: true,
-      capability: { context_tokens: 200000 },
-    };
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([entry]),
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "context-test" }],
+        modelInfo,
+      }),
     });
     expect(result.dropped).toEqual([]);
     expect(result.sources[0]).toMatchObject({
@@ -428,22 +608,24 @@ describe("populateProxyCatalog — context-window extraction", () => {
     });
   });
 
-  it("flat context_length takes precedence over capability.context_tokens", async () => {
-    const entry = {
-      provider: "nim",
-      model: "test/model",
-      has_key: true,
-      reachable: true,
-      context_length: 100000,
-      capability: { context_tokens: 200000 },
-    };
+  it("advert without max_input_tokens has no quota", async () => {
+    const modelInfo = [
+      {
+        model_name: "no-context",
+        litellm_params: { model: "openai/test" },
+        model_info: { litellm_provider: "openai", mode: "chat" },
+      },
+    ];
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      fetchImpl: registryFetch([entry]),
+      fetchImpl: neutralContractFetch({
+        roster: [{ id: "no-context" }],
+        modelInfo,
+      }),
     });
     expect(result.dropped).toEqual([]);
-    expect(result.sources[0].quota?.context_tokens).toBe(100000);
+    expect(result.sources[0].quota).toBeUndefined();
   });
 });
 
@@ -455,196 +637,127 @@ describe("populateProxyCatalog — probe verification", () => {
     expect(POPULATE_PROBE_CONCURRENCY).toBeGreaterThan(0);
   });
 
-  it("models advertised and probed 200 are kept", async () => {
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A, NIM_B], {
-        probeHandler: () => ({
-          status: 200,
-          text: async () => "{}",
-        }),
-      }),
-    });
-    expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model).sort()).toEqual([
-      "meta/llama-4",
-      "z-ai/glm-5.2",
-    ]);
-  });
-
-  it("probe returns 404 → source dropped with reason", async () => {
+  it("models probed 200 are kept; 404 dropped with reason", async () => {
+    const modelInfo = [
+      {
+        model_name: "live-model",
+        litellm_params: { model: "openai/live" },
+        model_info: { litellm_provider: "openai", mode: "chat" },
+      },
+      {
+        model_name: "dead-model",
+        litellm_params: { model: "openai/dead" },
+        model_info: { litellm_provider: "openai", mode: "chat" },
+      },
+    ];
     let probeCount = 0;
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A, NIM_B], {
-        probeHandler: (options) => {
-          probeCount++;
-          const body = JSON.parse(options.body);
-          // First model 404s, second is OK
-          if (body.model === "nim/z-ai/glm-5.2") {
-            return { status: 404, text: async () => "" };
-          }
-          return { status: 200, text: async () => "{}" };
+      fetchImpl: neutralContractFetch(
+        {
+          roster: modelInfo.map((m) => ({ id: m.model_name })),
+          modelInfo,
         },
-      }),
+        {
+          probeHandler: (options) => {
+            probeCount++;
+            const body = JSON.parse(options.body);
+            if (body.model === "dead-model") {
+              return { status: 404, text: async () => "" };
+            }
+            return { status: 200, text: async () => "{}" };
+          },
+        },
+      ),
     });
-    expect(probeCount).toBe(2); // Both models probed
+    expect(probeCount).toBe(2);
     expect(result.dropped).toHaveLength(1);
-    expect(result.dropped[0].id).toBe("claude-worker:nim/z-ai/glm-5.2");
-    expect(result.dropped[0].reason).toBe("HTTP 404");
-    expect(result.sources.map((s) => s.model)).toEqual(["meta/llama-4"]);
+    expect(result.dropped[0]).toMatchObject({
+      id: "claude-worker:openai/dead-model",
+      reason: "HTTP 404",
+    });
+    expect(result.sources.map((s) => s.model)).toEqual(["live-model"]);
   });
 
-  it("probe returns model_not_found in body → source dropped", async () => {
+  it("probe timeout or transport failure keep the model (fail-open)", async () => {
+    const modelInfo = [
+      {
+        model_name: "slow-model",
+        litellm_params: { model: "openai/slow" },
+        model_info: { litellm_provider: "openai", mode: "chat" },
+      },
+    ];
     const result = await populateProxyCatalog({
       endpoint: PROXY,
       homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A], {
-        probeHandler: () => ({
-          status: 400,
-          text: async () => JSON.stringify({ error: { message: "model_not_found" } }),
-        }),
-      }),
-    });
-    expect(result.dropped).toHaveLength(1);
-    expect(result.dropped[0].reason).toContain("HTTP 400");
-    expect(result.sources).toEqual([]);
-  });
-
-  it("probe returns 'may not exist' in body → source dropped", async () => {
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A], {
-        probeHandler: () => ({
-          status: 400,
-          text: async () => "The model may not exist or you may not have access",
-        }),
-      }),
-    });
-    expect(result.dropped).toHaveLength(1);
-    expect(result.sources).toEqual([]);
-  });
-
-  it("probe returns 429 (rate limit) → source kept", async () => {
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A], {
-        probeHandler: () => ({
-          status: 429,
-          text: async () => "rate limited",
-        }),
-      }),
+      fetchImpl: neutralContractFetch(
+        {
+          roster: [{ id: "slow-model" }],
+          modelInfo,
+        },
+        {
+          probeHandler: async () => {
+            // Simulate network timeout
+            throw new Error("timeout");
+          },
+        },
+      ),
     });
     expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model)).toEqual(["z-ai/glm-5.2"]);
-  });
-
-  it("probe throws/timeout → source kept (fail-open)", async () => {
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: tempHome(),
-      fetchImpl: registryFetch([NIM_A], {
-        probeHandler: async () => {
-          throw new Error("Network timeout");
-        },
-      }),
-    });
-    expect(result.dropped).toEqual([]);
-    expect(result.sources.map((s) => s.model)).toEqual(["z-ai/glm-5.2"]);
-  });
-
-  it("X and Y advertised; X 404s, Y 200s → cache contains Y, dropped names X", async () => {
-    const X = { provider: "nim", model: "x/model", score: 0.9, has_key: true, reachable: true };
-    const Y = { provider: "nim", model: "y/model", score: 0.8, has_key: true, reachable: true };
-    const homeDir = tempHome();
-    const result = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir,
-      fetchImpl: registryFetch([X, Y], {
-        probeHandler: (options) => {
-          const body = JSON.parse(options.body);
-          if (body.model === "nim/x/model") {
-            return { status: 404, text: async () => "" };
-          }
-          return { status: 200, text: async () => "{}" };
-        },
-      }),
-    });
-    expect(result.sources.map((s) => s.model)).toEqual(["y/model"]);
-    expect(result.dropped).toHaveLength(1);
-    expect(result.dropped[0].id).toContain("x/model");
-    // Verify cache matches result
-    const cache = readProxyCatalog({ homeDir });
-    expect(cache?.sources.map((s) => s.model)).toEqual(["y/model"]);
+    expect(result.sources.map((s) => s.model)).toEqual(["slow-model"]);
   });
 });
 
-
-describe("populateProxyCatalog — freshness refresh throttle", () => {
-  it("a same-endpoint cache younger than the TTL skips the network entirely", async () => {
-    const home = tempHome();
-    let fetchCalls = 0;
-    const counting = (payload) => {
-      const inner = registryFetch(payload, {
-        probeHandler: () => ({ status: 200, text: async () => "{}" }),
+describe("REGRESSION PINS — neutral proxy contract", () => {
+  describe("(i) argv passes the alias VERBATIM to --model", () => {
+    it("the model field carries the roster alias, not composed provider/alias", async () => {
+      // PRE-SWAP: model was `${backend_provider}/${alias}` composition.
+      // POST-SWAP: model is the alias verbatim (the proxy's routing key).
+      const modelInfo = [
+        {
+          model_name: "my-alias",
+          litellm_params: { model: "openai/gpt-4" },
+          model_info: { litellm_provider: "openai", mode: "chat" },
+        },
+      ];
+      const result = await populateProxyCatalog({
+        endpoint: PROXY,
+        homeDir: tempHome(),
+        fetchImpl: neutralContractFetch({
+          roster: [{ id: "my-alias" }],
+          modelInfo,
+        }),
       });
-      return async (url, options) => {
-        fetchCalls += 1;
-        return inner(url, options);
-      };
-    };
-    const t0 = new Date("2026-07-17T10:00:00Z");
-
-    const first = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: home,
-      fetchImpl: counting([NIM_A]),
-      now: () => t0,
+      expect(result.dropped).toEqual([]);
+      // Must fail on pre-swap code that composed the model
+      expect(result.sources[0].model).toBe("my-alias"); // VERBATIM, not "openai/my-alias"
     });
-    expect(first.written).toBe(true);
-    const callsAfterFirst = fetchCalls;
-    expect(callsAfterFirst).toBeGreaterThan(0);
-
-    const second = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: home,
-      fetchImpl: counting([NIM_A]),
-      now: () => new Date(t0.getTime() + 5 * 60_000),
-    });
-    expect(second.written).toBe(false);
-    expect(second.reason).toMatch(/cache is fresh/);
-    expect(second.sources.map((s) => s.model)).toEqual(first.sources.map((s) => s.model));
-    expect(fetchCalls).toBe(callsAfterFirst);
-
-    const third = await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: home,
-      fetchImpl: counting([NIM_A]),
-      now: () => new Date(t0.getTime() + POPULATE_CACHE_FRESH_TTL_MS + 1_000),
-    });
-    expect(third.written).toBe(true);
-    expect(fetchCalls).toBeGreaterThan(callsAfterFirst);
   });
 
-  it("a fresh cache for a DIFFERENT endpoint does not suppress the refresh", async () => {
-    const home = tempHome();
-    const t0 = new Date("2026-07-17T10:00:00Z");
-    await populateProxyCatalog({
-      endpoint: PROXY,
-      homeDir: home,
-      fetchImpl: registryFetch([NIM_A], { probeHandler: () => ({ status: 200, text: async () => "{}" }) }),
-      now: () => t0,
+  describe("(ii) api_key_env flows through sources for ANTHROPIC_AUTH_TOKEN overlay", () => {
+    // Spawn-layer testing in claude-worker-provider.test.mjs.
+    // Populate-layer: sources carry api_key_env from proxy declaration.
+    it("sources carry api_key_env from proxy declaration", async () => {
+      const modelInfo = [
+        {
+          model_name: "auth-test",
+          litellm_params: { model: "openai/test" },
+          model_info: { litellm_provider: "openai", mode: "chat" },
+        },
+      ];
+      const result = await populateProxyCatalog({
+        endpoint: PROXY,
+        homeDir: tempHome(),
+        apiKeyEnv: "MY_PROXY_KEY",
+        fetchImpl: neutralContractFetch({
+          roster: [{ id: "auth-test" }],
+          modelInfo,
+        }),
+      });
+      expect(result.dropped).toEqual([]);
+      expect(result.sources[0]).toMatchObject({ api_key_env: "MY_PROXY_KEY" });
     });
-    const other = await populateProxyCatalog({
-      endpoint: "http://127.0.0.1:9999",
-      homeDir: home,
-      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ providers: [] }), text: async () => "" }),
-      now: () => new Date(t0.getTime() + 1_000),
-    });
-    expect(other.written).toBe(true);
   });
+
 });

@@ -380,10 +380,10 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   // in-memory resolve can never write dispatch inventory back into the repo config.
   // 3c POPULATE trigger (plan §populate-vs-resolve): with no Gate-0 confirmation on
   // disk yet, THIS invocation is the provider-confirmation build — refresh the
-  // repair-proxy populate cache NOW, before the effective config resolves, so this
+  // proxy catalog populate cache NOW, before the effective config resolves, so this
   // same invocation's `resolveAmbientSources` reads the fresh expansion and the
   // roster the operator confirms includes the proxied lane. Gated on the machine
-  // declaration's `repair_proxy` block (no lane declared ⇒ no network) and — via the
+  // declaration's `proxy` block (no lane declared ⇒ no network) and — via the
   // confirmation-absent check — run once per run, never per next-step. Confirmed
   // runs re-populate only on explicit refresh. Network-tolerant: a failed populate
   // degrades to a stderr warning (the lane then resolves from the existing cache or
@@ -392,7 +392,7 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     const populated = await populateDeclaredProxyCatalog().catch(() => null);
     if (populated !== null && !populated.written) {
       process.stderr.write(
-        `WARNING: repair-proxy registry populate did not refresh the catalog cache ` +
+        `WARNING: proxy catalog populate did not refresh the cache ` +
           `(${populated.reason ?? "unknown reason"}). The proxied lane resolves from ` +
           `any existing cache, or stays unexpanded for this run.\n`,
       );

@@ -79,9 +79,9 @@ test("examples/catalog/sources-declared.json sources pass the shared validator",
   );
   const errors = errorIssues(validateSessionConfig({ sources: declaration.sources }));
   expect(errors, "declared sources must pass the same bar readSourceDeclaration enforces").toEqual([]);
-  // The optional repair_proxy lane: endpoint required when the block is present.
-  if (declaration.repair_proxy !== undefined) {
-    expect(typeof declaration.repair_proxy.endpoint).toBe("string");
-    expect(declaration.repair_proxy.endpoint.length).toBeGreaterThan(0);
+  // The optional proxy lane: endpoint required when the block is present.
+  if (declaration.proxy !== undefined) {
+    expect(typeof declaration.proxy.endpoint).toBe("string");
+    expect(declaration.proxy.endpoint.length).toBeGreaterThan(0);
   }
 });

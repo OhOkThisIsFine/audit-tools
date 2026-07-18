@@ -8,15 +8,15 @@ import type { DispatchableSource } from "../types/sessionConfig.js";
 import { validateSessionConfig } from "../validation/sessionConfig.js";
 
 /**
- * The POPULATE cache for the repair-proxy lane: `GET <proxy>/registry` expanded into
- * ready-to-fold `claude-worker` {@link DispatchableSource}s, written once per populate
- * (Gate-0 build / explicit refresh) and READ by resolve — never fetched mid-resolve
- * (`docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md` §populate/resolve).
+ * The POPULATE cache for the proxy lane: discovered via `GET <proxy>/v1/models` +
+ * `GET <proxy>/model/info` (OpenAI-compatible surfaces) expanded into ready-to-fold
+ * `claude-worker` {@link DispatchableSource}s, written once per populate (Gate-0 build
+ * / explicit refresh) and READ by resolve — never fetched mid-resolve.
  *
  * Named `catalog-cache.json`, NOT the `catalog-<auditor-id>.json` the reserved-name
  * comment at `auditorSources.ts` anticipates: populate/resolve run on the AMBIENT
  * path, where no auditor id exists to key on. The cache is machine-level like the
- * declaration beside it — and it is a CACHE of live registry state, not resolved
+ * declaration beside it — and it is a CACHE of live discovery state, not resolved
  * per-auditor capability, so an auditor-id key would assert an isolation the data
  * doesn't have. Per-auditor never-inherit still holds: every resolve re-proves proxy
  * REACH itself; the cache only supplies the expansion.
@@ -54,27 +54,46 @@ export interface ProxyCatalog {
   sources: DispatchableSource[];
 }
 
-/** One registry entry after tolerant extraction (malformed entries are filtered, never thrown). */
-interface RegistryModel {
+/**
+ * Neutral proxy-contract model advert after shape adaptation.
+ * Maps from proxy-specific field shapes (`/model/info` response) to a
+ * generic contract. This is the edge adapter connecting proxy formats to generic types.
+ */
+interface ModelAdvert {
+  alias: string;
+  provider?: string;
+  context_tokens?: number;
+  input_cost_per_token?: number;
+  output_cost_per_token?: number;
+  mode?: string;
+  supports_tool_calls?: boolean;
+  /** Operator-declared rank via advert custom key (when present). */
+  declared_rank?: number;
+}
+
+/** One model after discovery + enrichment (malformed entries are filtered, never thrown). */
+interface DiscoveredModel {
+  alias: string;
   provider: string;
-  model: string;
   score: number | null;
-  /** Raw relative-capability rank (LOWER = better) when the registry exposes one. */
+  /** Raw relative-capability rank (LOWER = better) when the advert exposes one. */
   capabilityRank: number | undefined;
   costPerMtok: number | undefined;
   contextTokens: number | undefined;
 }
 
 export interface PopulateProxyCatalogOptions {
-  /** The repair-proxy base url (`GET <endpoint>/registry`). */
+  /** The proxy base url (`GET <endpoint>/v1/models`, `GET <endpoint>/model/info`). */
   endpoint: string;
-  /** Models expanded per backend provider (declared `repair_proxy.top_k`); default {@link DEFAULT_PROXY_TOP_K}. */
+  /** Models expanded per backend provider (declared `proxy.top_k`); default {@link DEFAULT_PROXY_TOP_K}. */
   topK?: number;
   /**
-   * Operator-declared blended $/Mtok for the proxied lane (`repair_proxy.cost_per_mtok`,
-   * the free-to-operator axis). WINS over any registry list price.
+   * Operator-declared blended $/Mtok for the proxied lane (`proxy.cost_per_mtok`,
+   * the free-to-operator axis). WINS over any advert price.
    */
   costPerMtok?: number;
+  /** Env var holding the proxy's master key when authentication is required. */
+  apiKeyEnv?: string;
   /** Injectable fetch (tests); defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /** Home dir override for the cache path (tests). */
@@ -101,36 +120,56 @@ function finiteNonNegative(value: unknown): number | undefined {
 }
 
 /**
- * Best-effort "higher = better" score for ranking. A flat `score` wins; otherwise
- * the live repair-proxy's `capability` block supplies someone-else-maintained
- * relative-capability RANKS (`composite_rank`, then `arena_rank`; lower = better,
- * so negated). A model with none stays unscored and ranks last — capability-less
- * registry rows are frequently non-chat models (TTS, embeddings) that cannot serve
- * as agentic workers.
+ * Edge adapter: proxy `/model/info` response shape → neutral ModelAdvert contract.
+ * Maps from proxy-specific field names to a generic contract.
+ *
+ * Returns:
+ * - { advert, filtered: false | undefined } for valid models
+ * - { filtered: true } for models filtered by eligibility rules
+ * - undefined for invalid data (missing modelName/model_info)
+ */
+function adaptProxyModelInfo(modelInfo: Record<string, unknown>): { advert?: ModelAdvert; filtered?: boolean } | undefined {
+  const modelName = modelInfo.model_name;
+  if (typeof modelName !== "string" || modelName.trim().length === 0) return undefined;
+
+  const info = modelInfo.model_info;
+  if (info === null || typeof info !== "object") return undefined;
+  const infoObj = info as Record<string, unknown>;
+
+  const proxyProvider = infoObj.litellm_provider;
+  const provider = typeof proxyProvider === "string" ? proxyProvider : undefined;
+  const mode = infoObj.mode;
+  const supportsToolCalls = infoObj.supports_tool_calls;
+
+  // Check eligibility: mode must be "chat" or absent (unknown ≠ incapable).
+  // supports_tool_calls false → skip; absent or true → keep.
+  if (typeof mode === "string" && mode !== "chat") return { filtered: true };
+  if (supportsToolCalls === false) return { filtered: true };
+
+  return {
+    advert: {
+      alias: modelName.trim(),
+      ...(provider !== undefined ? { provider } : {}),
+      context_tokens: finiteNonNegative(infoObj.max_input_tokens),
+      input_cost_per_token: finiteNonNegative(infoObj.input_cost_per_token),
+      output_cost_per_token: finiteNonNegative(infoObj.output_cost_per_token),
+      mode: typeof mode === "string" ? mode : undefined,
+      supports_tool_calls: typeof supportsToolCalls === "boolean" ? supportsToolCalls : undefined,
+      // Operator-declared rank via advert custom key (consumed as-is when present).
+      declared_rank: finiteNonNegative(infoObj.capability_rank),
+    },
+  };
+}
+
+/**
+ * Best-effort "higher = better" score for ranking. Uses a flat `score` field
+ * when present; absent/non-finite → null (unscored models rank last).
  */
 function deriveScore(entry: Record<string, unknown>): number | null {
   if (typeof entry.score === "number" && Number.isFinite(entry.score)) {
     return entry.score;
   }
-  const rank = deriveRawCapabilityRank(entry);
-  return rank === undefined ? null : -rank;
-}
-
-/**
- * The RAW relative-capability rank (LOWER = better) from a registry entry's
- * capability block, when the active proxy exposes one — best-effort and
- * proxy-agnostic (a registry with no capability data yields undefined; the floor
- * then fails open per the owner decision, [[litellm-replaces-repair-proxy]]).
- * Stamped onto the expanded source as `capability_rank` (unified-routing step C)
- * so the admission floor reads per-model capability with no operator declaration.
- */
-function deriveRawCapabilityRank(entry: Record<string, unknown>): number | undefined {
-  const capability = entry.capability;
-  if (capability === null || typeof capability !== "object") return undefined;
-  return (
-    finiteNonNegative((capability as Record<string, unknown>).composite_rank) ??
-    finiteNonNegative((capability as Record<string, unknown>).arena_rank)
-  );
+  return null;
 }
 
 /**
@@ -154,102 +193,128 @@ function deriveContextTokens(entry: Record<string, unknown>): number | undefined
 }
 
 /**
- * Tolerantly extract `{provider, model, score, price}` rows from a registry payload,
- * keeping only entries this process could actually dispatch through: `reachable` AND
- * `has_key` must be literally `true` (the proxy's own liveness/credential verdicts).
- * Anything malformed — wrong types, missing provider/model — is FILTERED, never thrown:
- * a half-broken registry degrades to a smaller expansion, not a failed populate.
+ * Discover models via the neutral proxy contract: `GET /v1/models` (required baseline)
+ * returns the alias roster; `GET /model/info` (optional enrichment) provides per-model
+ * metadata. Tolerant at every step: missing/unparseable/malformed → graceful degradation.
+ * Eligibility filters remove models from the pool entirely (mode != 'chat' or
+ * supports_tool_calls === false).
+ *
+ * Returns { adverts, filtered } where adverts is a map of alias → ModelAdvert,
+ * and filtered is a set of aliases that failed the eligibility filter.
  */
-function extractRegistryModels(payload: unknown): RegistryModel[] {
-  // The registry is providers × live models; tolerate a flat entry array, a
-  // `{providers|models|entries: [...]}` wrapper, or the live repair-proxy's
-  // provider-MAP form (`providers: {<name>: {has_key, reachable, models: [...]}}`
-  // — the name is the key, so it is folded into each entry as `name`), plus
-  // per-provider nested `models` in every form.
-  let container: unknown[] | undefined;
-  if (Array.isArray(payload)) {
-    container = payload;
-  } else if (payload !== null && typeof payload === "object") {
-    for (const key of ["providers", "models", "entries"]) {
-      const wrapped = (payload as Record<string, unknown>)[key];
-      if (Array.isArray(wrapped)) {
-        container = wrapped;
-        break;
-      }
-      if (wrapped !== null && typeof wrapped === "object") {
-        container = Object.entries(wrapped).map(([name, entry]) =>
-          entry !== null && typeof entry === "object"
-            ? { name, ...(entry as Record<string, unknown>) }
-            : entry,
-        );
-        break;
-      }
-    }
-  }
-  if (!Array.isArray(container)) return [];
+async function discoverModelAdverts(
+  endpoint: string,
+  fetchImpl: typeof fetch,
+  authHeader?: string,
+): Promise<{ adverts: Map<string, ModelAdvert>; filtered: Set<string> }> {
+  const adverts = new Map<string, ModelAdvert>();
+  const filtered = new Set<string>();
+  try {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (authHeader) headers.authorization = authHeader;
 
-  const models: RegistryModel[] = [];
-  const push = (entry: Record<string, unknown>, provider: unknown, model: unknown) => {
-    if (typeof provider !== "string" || provider.trim().length === 0) return;
-    if (typeof model !== "string" || model.trim().length === 0) return;
-    if (entry.reachable !== true || entry.has_key !== true) return;
-    models.push({
-      provider: provider.trim(),
-      model: model.trim(),
-      score: deriveScore(entry),
-      capabilityRank: deriveRawCapabilityRank(entry),
-      costPerMtok:
-        finiteNonNegative(entry.cost_per_mtok) ??
-        finiteNonNegative(entry.price_per_mtok) ??
-        finiteNonNegative(entry.price),
-      contextTokens: deriveContextTokens(entry),
-    });
-  };
-  for (const raw of container) {
-    if (raw === null || typeof raw !== "object") continue;
-    const entry = raw as Record<string, unknown>;
-    const provider = entry.provider ?? entry.name;
-    if (Array.isArray(entry.models)) {
-      // Provider-grouped form: reachable/has_key live on the provider row; each
-      // model row contributes id + score/price (and may override the flags).
-      for (const rawModel of entry.models) {
-        if (rawModel === null || typeof rawModel === "string") {
-          if (typeof rawModel === "string") push(entry, provider, rawModel);
-          continue;
+    // Try /model/info first (richer advert); tolerate absent/unparseable
+    try {
+      const response = await fetchImpl(`${endpoint}/model/info`, { headers });
+      if (response.ok) {
+        const payload = await response.json();
+        // Target the current array form: {data: [...]}
+        if (payload !== null && typeof payload === "object") {
+          const data = (payload as Record<string, unknown>).data;
+          if (Array.isArray(data)) {
+            for (const raw of data) {
+              if (raw !== null && typeof raw === "object") {
+                const result = adaptProxyModelInfo(raw as Record<string, unknown>);
+                if (result) {
+                  if (result.filtered) {
+                    // Track which aliases failed the eligibility filter
+                    const modelName = (raw as Record<string, unknown>).model_name;
+                    if (typeof modelName === "string" && modelName.trim().length > 0) {
+                      filtered.add(modelName.trim());
+                    }
+                  } else if (result.advert) {
+                    // Successful adaptation
+                    adverts.set(result.advert.alias, result.advert);
+                  }
+                }
+                // If result is undefined, it's invalid data (not eligibility filter)
+              }
+            }
+          }
         }
-        if (typeof rawModel !== "object") continue;
-        const model = rawModel as Record<string, unknown>;
-        push(
-          { ...entry, ...model, models: undefined },
-          provider,
-          model.id ?? model.model,
-        );
       }
-      continue;
+    } catch {
+      // /model/info absent/error → degrade to roster-only (no enrichment)
     }
-    push(entry, provider, entry.model ?? entry.id);
+  } catch {
+    // No adverts → degrade to roster-only (carrier of aliases only)
   }
-  return models;
+  return { adverts, filtered };
 }
 
 /**
- * Expand registry models into `claude-worker` sources: per reachable+keyed backend
- * provider, the top-K models by best-effort score (higher = better; unscored last).
+ * Discover the model roster via the neutral proxy contract: `GET /v1/models`
+ * (OpenAI-compatible list). Returns { aliases, error? }; absent/unparseable → empty aliases + reason.
+ */
+async function discoverModelRoster(
+  endpoint: string,
+  fetchImpl: typeof fetch,
+  authHeader?: string,
+): Promise<{ aliases: string[]; error?: string }> {
+  try {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (authHeader) headers.authorization = authHeader;
+
+    const response = await fetchImpl(`${endpoint}/v1/models`, { headers });
+    if (!response.ok) {
+      return {
+        aliases: [],
+        error: `HTTP ${response.status}`,
+      };
+    }
+
+    const payload = await response.json();
+    if (payload === null || typeof payload !== "object") return { aliases: [] };
+
+    const data = (payload as Record<string, unknown>).data;
+    if (!Array.isArray(data)) return { aliases: [] };
+
+    const aliases: string[] = [];
+    for (const entry of data) {
+      if (entry !== null && typeof entry === "object") {
+        const id = (entry as Record<string, unknown>).id;
+        if (typeof id === "string" && id.trim().length > 0) {
+          aliases.push(id.trim());
+        }
+      }
+    }
+    return { aliases };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { aliases: [], error: reason };
+  }
+}
+
+/**
+ * Expand discovered models into `claude-worker` sources: per backend provider,
+ * the top-K models by best-effort score (higher = better; unscored last).
  * Shape per the plan's identity section: the transport never enters the identity —
- * `backend_provider` + `model` key quota; `endpoint` is the proxy url the launch
- * transport (3b) fronts the spawn with; `worker_kind` is `agentic` by definition
- * (the whole point of the proxied lane is tool-call repair for a harness worker).
+ * `backend_provider` + `model` (alias) key quota; `endpoint` is the proxy url the
+ * launch transport fronts the spawn with; `worker_kind` is `agentic` by definition.
+ *
+ * Provider derivation: advert `provider` (from /model/info) > slash-prefix of alias
+ * (e.g., `anthropic/claude-*` → `anthropic`) > default shared `"proxy"` bucket
+ * (coarse pool identity at degradation rung, revisitable per owner decision).
  */
 function expandSources(
-  models: RegistryModel[],
-  options: { endpoint: string; topK: number; costPerMtok?: number },
+  discovered: DiscoveredModel[],
+  options: { endpoint: string; topK: number; costPerMtok?: number; apiKeyEnv?: string },
 ): DispatchableSource[] {
-  const byProvider = new Map<string, RegistryModel[]>();
-  // Dedup by (provider, model): live registries list some models twice, and one
-  // pool identity must expand to exactly one source (first row wins).
+  const byProvider = new Map<string, DiscoveredModel[]>();
+  // Dedup by (provider, alias): first row wins.
   const seen = new Set<string>();
-  for (const model of models) {
-    const identity = `${model.provider}/${model.model}`;
+  for (const model of discovered) {
+    const identity = `${model.provider}/${model.alias}`;
     if (seen.has(identity)) continue;
     seen.add(identity);
     const bucket = byProvider.get(model.provider) ?? [];
@@ -257,28 +322,29 @@ function expandSources(
     byProvider.set(model.provider, bucket);
   }
   const sources: DispatchableSource[] = [];
-  // Stable, content-derived order (provider, then score desc, then model id) so a
-  // re-populate over identical registry state emits byte-identical sources.
+  // Stable, content-derived order (provider, then score desc, then alias) so
+  // re-populate over identical state emits byte-identical sources.
   for (const provider of [...byProvider.keys()].sort()) {
     const ranked = byProvider
       .get(provider)!
       .sort(
         (a, b) =>
           (b.score ?? Number.NEGATIVE_INFINITY) - (a.score ?? Number.NEGATIVE_INFINITY) ||
-          a.model.localeCompare(b.model),
+          a.alias.localeCompare(b.alias),
       )
       .slice(0, options.topK);
     for (const model of ranked) {
-      // Cost precedence: operator-declared (free-to-operator axis) > registry list
-      // price > absent (falls through to the models.dev catalog / tier downstream).
+      // Cost precedence: operator-declared (free-to-operator axis) > advert price
+      // > absent (falls through to models.dev catalog / tier downstream).
       const cost = options.costPerMtok ?? model.costPerMtok;
       sources.push({
-        id: `claude-worker:${provider}/${model.model}`,
+        id: `claude-worker:${provider}/${model.alias}`,
         provider: "claude-worker",
         endpoint: options.endpoint,
         backend_provider: provider,
-        model: model.model,
+        model: model.alias, // Alias VERBATIM — the proxy's routing key
         worker_kind: "agentic",
+        ...(options.apiKeyEnv !== undefined ? { api_key_env: options.apiKeyEnv } : {}),
         ...(cost !== undefined ? { cost_per_mtok: cost } : {}),
         // Step C: per-model capability (raw rank, LOWER = better) rides the source →
         // CapacityPool.declaredCapabilityRank → the admission capability floor.
@@ -295,28 +361,32 @@ function expandSources(
 }
 
 /**
- * Probe a single source to verify the model is actually reachable.
- * Returns { dropped: true, reason } if the model should be excluded (404/unavailable),
- * or { dropped: false } to keep the source.
+ * Probe a single model via Anthropic-compatible `/v1/messages` to verify it is
+ * actually reachable. Returns { dropped: true, reason } if the model should be
+ * excluded (404/unavailable), or { dropped: false } to keep it.
  */
-async function probeSource(
-  source: DispatchableSource,
+async function probeModelViaMessages(
+  alias: string,
+  backendProvider: string,
   endpoint: string,
   fetchImpl: typeof fetch,
   timeoutMs: number,
+  authHeader?: string,
 ): Promise<{ dropped: boolean; reason?: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = {
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    };
+    if (authHeader) headers.authorization = authHeader;
+
     const response = await fetchImpl(`${endpoint}/v1/messages`, {
       method: "POST",
-      headers: {
-        "x-api-key": "audit-tools-populate-probe",
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
-        model: `${source.backend_provider}/${source.model}`,
+        model: alias, // Route on proxy alias, not backend namespace
         max_tokens: 1,
         messages: [{ role: "user", content: "hi" }],
       }),
@@ -340,10 +410,10 @@ async function probeSource(
       }
     }
 
-    // 200, 401, 429, 5xx, etc. → keep the source
+    // 200, 401, 429, 5xx, etc. → keep the model
     return { dropped: false };
   } catch (error) {
-    // Transport failure (timeout, network error) → fail-open, keep the source
+    // Transport failure (timeout, network error) → fail-open, keep the model
     return { dropped: false };
   } finally {
     clearTimeout(timeoutId);
@@ -351,49 +421,58 @@ async function probeSource(
 }
 
 /**
- * Run probes with bounded concurrency using a simple worker pool.
+ * Probe models with bounded concurrency using a simple worker pool.
  */
-async function probeSourcesWithConcurrency(
-  sources: DispatchableSource[],
+async function probeModelsWithConcurrency(
+  aliases: string[],
+  backendProvider: string,
   endpoint: string,
   fetchImpl: typeof fetch,
   timeoutMs: number,
   concurrency: number,
-): Promise<Array<{ source: DispatchableSource; dropped: boolean; reason?: string }>> {
-  const results: Array<{ source: DispatchableSource; dropped: boolean; reason?: string }> = [];
+  authHeader?: string,
+): Promise<Array<{ alias: string; dropped: boolean; reason?: string }>> {
+  const results: Array<{ alias: string; dropped: boolean; reason?: string }> = [];
   let index = 0;
 
   const worker = async () => {
-    while (index < sources.length) {
+    while (index < aliases.length) {
       const currentIndex = index++;
-      const source = sources[currentIndex];
-      const probeResult = await probeSource(source, endpoint, fetchImpl, timeoutMs);
+      const alias = aliases[currentIndex];
+      const probeResult = await probeModelViaMessages(
+        alias,
+        backendProvider,
+        endpoint,
+        fetchImpl,
+        timeoutMs,
+        authHeader,
+      );
       results[currentIndex] = {
-        source,
+        alias,
         dropped: probeResult.dropped,
         reason: probeResult.reason,
       };
     }
   };
 
-  const workers = Array(Math.min(concurrency, sources.length))
+  const workers = Array(Math.min(concurrency, aliases.length))
     .fill(null)
     .map(() => worker());
 
   await Promise.all(workers);
-  // results is index-assigned (results[currentIndex] = ...), so it is already in
-  // the sources' order regardless of probe completion order.
+  // results is index-assigned, so already in order.
   return results;
 }
 
 /**
- * POPULATE: fetch `GET <endpoint>/registry` and write the expanded `claude-worker`
- * sources to the machine-level cache. Network-bound and cacheable — runs at Gate-0
- * build / explicit refresh, NEVER inside `resolveAmbientSources` (which only READS
- * via {@link readProxyCatalog}). Never throws: a failed fetch returns
- * `{written:false, reason}` and leaves any prior cache untouched; an empty/zero-match
- * registry WRITES an empty expansion (fresh knowledge — resolve reports the lane
- * unexpanded with a reason).
+ * POPULATE: discover and expand models from an OpenAI-compatible proxy
+ * (`GET <endpoint>/v1/models` + `GET <endpoint>/model/info`) into
+ * ready-to-fold `claude-worker` sources, then write to the machine-level cache.
+ * Network-bound and cacheable — runs at Gate-0 build / explicit refresh, NEVER
+ * inside `resolveAmbientSources` (which only READS via {@link readProxyCatalog}).
+ * Never throws: a failed fetch returns `{written:false, reason}` and leaves any
+ * prior cache untouched; an empty discovery WRITES an empty expansion (fresh
+ * knowledge — resolve reports the lane unexpanded with a reason).
  */
 export async function populateProxyCatalog(
   options: PopulateProxyCatalogOptions,
@@ -401,15 +480,20 @@ export async function populateProxyCatalog(
   const endpoint = options.endpoint.replace(/\/+$/u, "");
   const doFetch = options.fetchImpl ?? fetch;
 
-  // Freshness short-circuit: the populate trigger fires on EVERY
-  // confirmation-absent next-step (nextStepCommand.ts), and populate now carries
-  // live per-model probes — real `/v1/messages` POSTs through the proxy that cost
-  // seconds of wall AND burn free-tier rate quota. A same-endpoint cache younger
-  // than the TTL answers instead (measured 2026-07-17: per-invocation populate
-  // was ~5.6s live, which alone pushed the e2e wrapper tests past their
-  // timeouts). This is a REFRESH throttle, not staleness acceptance — the
-  // no-TTL-on-READ residual (backlog: catalog accepted arbitrarily stale by
-  // resolve) is unchanged.
+  // Build auth header when api_key_env is declared and the env var is set.
+  let authHeader: string | undefined;
+  if (options.apiKeyEnv) {
+    const keyValue = process.env[options.apiKeyEnv];
+    if (keyValue?.trim()) {
+      authHeader = `Bearer ${keyValue}`;
+    }
+  }
+
+  // Freshness short-circuit: populate carries live per-model probes — real
+  // `/v1/messages` POSTs through the proxy that cost seconds and burn quota.
+  // A same-endpoint cache younger than the TTL answers instead. This is a
+  // REFRESH throttle, not staleness acceptance — the no-TTL-on-READ residual
+  // (backlog) is unchanged.
   const cached = readProxyCatalog({ homeDir: options.homeDir });
   if (cached && cached.endpoint === endpoint) {
     const nowMs = (options.now?.() ?? new Date()).getTime();
@@ -428,54 +512,104 @@ export async function populateProxyCatalog(
     }
   }
 
-  let payload: unknown;
-  try {
-    const response = await doFetch(`${endpoint}/registry`);
-    if (!response.ok) {
-      return {
-        sources: [],
-        written: false,
-        reason: `GET ${endpoint}/registry returned HTTP ${response.status}.`,
-        dropped: [],
-      };
-    }
-    payload = await response.json();
-  } catch (error) {
+  // Discover model roster (required baseline: /v1/models).
+  const { aliases, error: rosterError } = await discoverModelRoster(endpoint, doFetch, authHeader);
+  if (aliases.length === 0) {
     return {
       sources: [],
       written: false,
-      reason: `GET ${endpoint}/registry failed: ${error instanceof Error ? error.message : String(error)}.`,
+      reason: rosterError
+        ? `GET ${endpoint}/v1/models failed: ${rosterError}`
+        : `GET ${endpoint}/v1/models returned no models or was unreachable.`,
       dropped: [],
     };
   }
-  let sources = expandSources(extractRegistryModels(payload), {
+
+  // Discover model adverts (optional enrichment: /model/info).
+  const { adverts, filtered } = await discoverModelAdverts(endpoint, doFetch, authHeader);
+
+  // Build discovered models: join roster + adverts, deriving provider.
+  const discovered: DiscoveredModel[] = [];
+  for (const alias of aliases) {
+    // Skip models that failed the eligibility filter
+    if (filtered.has(alias)) continue;
+
+    const advert = adverts.get(alias);
+
+    // Provider derivation: advert provider > slash-prefix > default "proxy" bucket.
+    let provider: string;
+    if (advert?.provider) {
+      provider = advert.provider;
+    } else if (alias.includes("/")) {
+      provider = alias.split("/")[0];
+    } else {
+      provider = "proxy";
+    }
+
+    // Cost blend: mean of input/output $/Mtok when both present; otherwise the one present.
+    const availableCosts = [];
+    if (advert?.input_cost_per_token !== undefined) availableCosts.push(advert.input_cost_per_token);
+    if (advert?.output_cost_per_token !== undefined) availableCosts.push(advert.output_cost_per_token);
+
+    let costPerMtok: number | undefined;
+    if (availableCosts.length === 2) {
+      costPerMtok = (availableCosts[0] + availableCosts[1]) / 2;
+    } else if (availableCosts.length === 1) {
+      costPerMtok = availableCosts[0];
+    }
+
+    discovered.push({
+      alias,
+      provider,
+      score: advert?.declared_rank !== undefined ? -advert.declared_rank : null,
+      capabilityRank: advert?.declared_rank,
+      costPerMtok,
+      contextTokens: advert?.context_tokens,
+    });
+  }
+
+  // Probe to verify models are reachable and drop 404s.
+  // Group by provider for parallel probing per provider.
+  const byProvider = new Map<string, string[]>();
+  for (const model of discovered) {
+    const bucket = byProvider.get(model.provider) ?? [];
+    bucket.push(model.alias);
+    byProvider.set(model.provider, bucket);
+  }
+
+  const droppedAliases = new Set<string>();
+  const dropped: Array<{ id: string; reason: string }> = [];
+
+  for (const [provider, providerAliases] of byProvider) {
+    const probeResults = await probeModelsWithConcurrency(
+      providerAliases,
+      provider,
+      endpoint,
+      doFetch,
+      POPULATE_PROBE_TIMEOUT_MS,
+      POPULATE_PROBE_CONCURRENCY,
+      authHeader,
+    );
+
+    for (const result of probeResults) {
+      if (result.dropped) {
+        droppedAliases.add(result.alias);
+        dropped.push({
+          id: `claude-worker:${provider}/${result.alias}`,
+          reason: result.reason ?? "model unavailable",
+        });
+      }
+    }
+  }
+
+  // Filter out dropped models and expand sources.
+  const toExpand = discovered.filter((m) => !droppedAliases.has(m.alias));
+  let sources = expandSources(toExpand, {
     endpoint,
     topK: options.topK ?? DEFAULT_PROXY_TOP_K,
     costPerMtok: options.costPerMtok,
+    apiKeyEnv: options.apiKeyEnv,
   });
-
-  // Probe each source to verify reachability
-  const probeResults = await probeSourcesWithConcurrency(
-    sources,
-    endpoint,
-    doFetch,
-    POPULATE_PROBE_TIMEOUT_MS,
-    POPULATE_PROBE_CONCURRENCY,
-  );
-
-  const dropped: Array<{ id: string; reason: string }> = [];
-  sources = probeResults
-    .filter((result) => {
-      if (result.dropped) {
-        dropped.push({
-          id: result.source.id ?? `claude-worker:${result.source.backend_provider}/${result.source.model}`,
-          reason: result.reason ?? "model unavailable",
-        });
-        return false;
-      }
-      return true;
-    })
-    .map((result) => result.source);
 
   const catalog: ProxyCatalog = {
     fetched_at: (options.now?.() ?? new Date()).toISOString(),

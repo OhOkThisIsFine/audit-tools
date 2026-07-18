@@ -18,7 +18,7 @@
       "cost_per_mtok": 0
     }
   ],
-  "repair_proxy": {
+  "proxy": {
     "endpoint": "http://127.0.0.1:8402",
     "top_k": 2,
     "cost_per_mtok": 0

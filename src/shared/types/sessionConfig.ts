@@ -142,23 +142,24 @@ export interface OpenCodeConfig {
 
 /**
  * claude-worker launch config — the proxied, ISOLATED Claude-harness worker
- * (`claude -p` fronted by the repair-proxy). Unlike the other provider blocks this
+ * (`claude -p` fronted by the proxy). Unlike the other provider blocks this
  * is never operator-persisted: it is COMPOSED AT LAUNCH by `sourceProviderConfig`
  * from the {@link DispatchableSource} itself (`endpoint` = the proxy url,
- * `backend_provider` + `model` compose the `--model <backend_provider>/<model>`
- * namespace argv), so the fields mirror the source. All three routing fields are
+ * `model` = the proxy alias for routing). All three routing fields are
  * constructor invariants of `ClaudeWorkerProvider` — optional here only because
  * config shapes are uniformly partial; construction throws loudly when any is
  * missing/empty (an in-session isolated spawn with NO proxy endpoint must be
  * impossible).
  */
 export interface ClaudeWorkerConfig {
-  /** The repair-proxy base url the spawn is fronted with (`ANTHROPIC_BASE_URL`). REQUIRED at construction. */
+  /** The proxy base url the spawn is fronted with (`ANTHROPIC_BASE_URL`). REQUIRED at construction. */
   endpoint?: string;
-  /** The backend provider the proxy routes to (namespace segment, e.g. `"nim"`). REQUIRED at construction. */
+  /** The backend provider the proxy routes to (used for quota/identity, not argv). REQUIRED at construction. */
   backend_provider?: string;
-  /** Backend-native model id (namespace segment, e.g. `"z-ai/glm-5.2"`). REQUIRED at construction. */
+  /** Proxy-facing model alias (`--model` argv). REQUIRED at construction. */
   model?: string;
+  /** Env var holding the proxy's master key (resolved to `ANTHROPIC_AUTH_TOKEN` at launch; absent = sentinel). */
+  api_key_env?: string;
   /** Launcher on PATH (default "claude"). */
   command?: string;
   /** Prompt flag (default "-p"; the prompt itself is piped via stdin). */
@@ -311,7 +312,7 @@ export const PROVIDER_SECTION_KEYS = {
  * dispatchable source with an endpoint + parameters.
  *
  * `claude-worker` is NOT the conversation host: it is the proxied, ISOLATED
- * Claude-harness worker class — a `claude -p` spawn fronted by the repair-proxy
+ * Claude-harness worker class — a `claude -p` spawn fronted by a proxy transport
  * (`endpoint` = the proxy url, `--model <backend_provider>/<model>` composed at
  * launch). Every self-spawn / Gate-0 refusal layer keys on `claude-code` and never
  * sees this name, so the host guards stay byte-identical
@@ -394,7 +395,7 @@ export interface DispatchableSource {
   worker_kind?: WorkerKind;
   /**
    * The BACKEND provider actually serving this source when a transport fronts it
-   * (`claude-worker`: the repair-proxy routes to e.g. `"nim"`). The transport NEVER
+   * (`claude-worker`: the proxy transport routes to e.g. `"nim"`). The transport NEVER
    * enters the identity: the quota/ledger key stays
    * `backend_provider[#account]/model`, so a proxied lane and a direct lane to the
    * same backend dedup to ONE quota identity. The namespace string

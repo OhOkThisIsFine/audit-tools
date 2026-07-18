@@ -56,10 +56,10 @@ export interface AmbientSourceDeps {
   /** Raw declaration reader (tests inject); defaults to reading the declaration file. */
   readDeclarationFile?: (path: string) => string | null;
   /**
-   * HTTP liveness probe for endpoint-shaped lanes (the repair-proxy). Deliberately
+   * HTTP liveness probe for endpoint-shaped lanes (the proxy). Deliberately
    * SYNC — resolve stays cheap and synchronous (populate is where the network
-   * lives); the default shells a short-timeout `GET <endpoint>/registry` through a
-   * hidden node child (~750ms budget). Tests inject.
+   * lives); the default shells escalating-budget probes (`GET <endpoint>/health/liveliness`
+   * then `GET <endpoint>/v1/models` fallback) through a hidden node child. Tests inject.
    */
   probeHttpReachable?: (url: string) => boolean;
   /** Raw populate-cache reader (tests inject); defaults to reading the cache file. */
@@ -100,26 +100,16 @@ function defaultReadDeclarationFile(path: string): string | null {
 }
 
 /**
- * Default {@link AmbientSourceDeps.probeHttpReachable}: a `GET <url>` run in a hidden
- * node child so the check stays SYNCHRONOUS (resolve is sync by design — see the
- * populate/resolve split) without blocking the event loop machinery this process owns.
- * Exit 0 ⇔ HTTP 2xx within the attempt budget.
- *
- * TWO bounded attempts with escalating budgets: a healthy declared lane must NOT be
- * dropped for the whole invocation on a single cold probe. Warm, a proxy's `/registry`
- * answers in ~25ms and the first (1s) attempt passes; a COLD proxy whose model catalog
- * is being (re)built synchronously can exceed a short budget, so a second, longer (4s)
- * attempt covers it. (The proxy side also serves `/registry` stale-while-revalidate so
- * this is rare — but the run's FIRST probe is exactly when a drop is most costly, so the
- * retry is kept as defense in depth.) A genuinely-dead endpoint costs both budgets once,
- * at run start, for one lane — acceptable.
- */
-/**
  * Escalating-budget reachability: try `probeOnce` at each budget in order, returning
  * true on the first success. The retry (not the spawn) is the load-bearing property —
  * a healthy lane must survive a slow first attempt — so it is factored out here to be
  * unit-testable without spawning. `budgets` is ordered small→large so the common warm
- * case exits on the first, cheap attempt.
+ * case exits on the first, cheap attempt. Two bounded attempts with escalating budgets:
+ * a healthy declared lane must NOT be dropped on a single cold probe. Warm, a proxy's
+ * `/health/liveliness` answers in ~25ms; a COLD proxy whose model catalog is being
+ * (re)built can exceed a short budget, so a second, longer (4s) attempt covers it.
+ * A genuinely-dead endpoint costs both budgets once, at run start, for one lane —
+ * acceptable.
  */
 export function probeReachableWithEscalation(
   probeOnce: (budgetMs: number) => boolean,
@@ -132,17 +122,27 @@ export function probeReachableWithEscalation(
 }
 
 function defaultProbeHttpReachable(url: string): boolean {
-  const probeOnce = (budgetMs: number): boolean => {
+  // Neutral proxy contract liveness: try /health/liveliness first (unauthenticated),
+  // then fallback to /v1/models. On /v1/models, ANY HTTP status counts alive
+  // (a 401 from a keyed proxy still proves it's listening).
+  const probeOnce = (budgetMs: number, path: string): boolean => {
     const script =
       "const [url, ms] = process.argv.slice(1);" +
       "fetch(url, { signal: AbortSignal.timeout(Number(ms)) })" +
-      ".then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1));";
-    const result = spawnSyncHidden(process.execPath, ["-e", script, url, String(budgetMs)], {
+      ".then((r) => process.exit(0), () => process.exit(1));";
+    const result = spawnSyncHidden(process.execPath, ["-e", script, `${url}${path}`, String(budgetMs)], {
       timeout: budgetMs + 1_500,
     });
     return result.status === 0;
   };
-  return probeReachableWithEscalation(probeOnce);
+
+  for (const budgetMs of [1_000, 4_000]) {
+    // Try /health/liveliness first (unauthenticated, guaranteed safe)
+    if (probeOnce(budgetMs, "/health/liveliness")) return true;
+    // Fallback to /v1/models (if /health/liveliness is absent)
+    if (probeOnce(budgetMs, "/v1/models")) return true;
+  }
+  return false;
 }
 
 /** The source's stable id, matching `DispatchableSource.id`'s documented default. */
@@ -189,36 +189,41 @@ export function readSourceDeclaration(
 }
 
 /**
- * The declared repair-proxy lane (`repair_proxy` top-level key in the same
- * declaration file): the operator asserting "a repair-proxy listens here — expand
- * its registry into `claude-worker` sources". Optional knobs: `top_k` (models per
- * backend provider) and `cost_per_mtok` (the free-to-operator cost axis; wins over
- * the registry list price).
+ * The declared proxy lane (`proxy` top-level key in the same declaration file):
+ * the operator asserting "a generic OpenAI-compatible proxy listens here — discover
+ * and expand its models into `claude-worker` sources". Optional knobs: `top_k`
+ * (models per backend provider), `cost_per_mtok` (the free-to-operator cost axis;
+ * wins over the advert price), and `api_key_env` (env var holding the proxy's master
+ * key for authenticated endpoints).
  */
-export interface RepairProxyDeclaration {
+export interface ProxyDeclaration {
   endpoint: string;
   top_k?: number;
   cost_per_mtok?: number;
+  api_key_env?: string;
 }
 
-/** `readRepairProxyDeclaration`'s outcome: the lane, or why it is absent. */
-export interface RepairProxyDeclarationResult {
-  declaration: RepairProxyDeclaration | null;
-  /** Present only when a `repair_proxy` key EXISTS but is malformed (never thrown). */
+/** `readProxyDeclaration`'s outcome: the lane, or why it is absent. */
+export interface ProxyDeclarationResult {
+  declaration: ProxyDeclaration | null;
+  /** Present only when a `proxy` key EXISTS but is malformed (never thrown). */
   reason?: string;
 }
 
 /**
- * Read the optional `repair_proxy` block from the machine declaration. Tolerant like
+ * Read the optional `proxy` block from the machine declaration. Tolerant like
  * {@link readSourceDeclaration}: an absent / unparseable file or a missing key is
  * simply `{declaration: null}`; a PRESENT-but-malformed block degrades to lane-absent
  * WITH a reason (surfaced via `resolveAmbientSources`' `dropped[]`), never a throw.
- * Malformed optional knobs (`top_k` / `cost_per_mtok`) are dropped individually — a
- * bad tuning value must not cost the operator the whole lane.
+ * Malformed optional knobs (`top_k` / `cost_per_mtok` / `api_key_env`) are dropped
+ * individually — a bad tuning value must not cost the operator the whole lane.
+ *
+ * Rejection: if a `repair_proxy` key exists, it is not recognized and surfaces a
+ * dropped reason telling the operator what key to use instead (never silent ignore).
  */
-export function readRepairProxyDeclaration(
+export function readProxyDeclaration(
   deps: AmbientSourceDeps = {},
-): RepairProxyDeclarationResult {
+): ProxyDeclarationResult {
   const path = resolveSourceDeclarationPath(deps.homeDir);
   const raw = (deps.readDeclarationFile ?? defaultReadDeclarationFile)(path);
   if (raw === null) return { declaration: null };
@@ -231,23 +236,33 @@ export function readRepairProxyDeclaration(
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { declaration: null };
   }
-  const block = (parsed as { repair_proxy?: unknown }).repair_proxy;
+
+  // Check for unrecognized `repair_proxy` key and surface it as a dropped reason (never silent).
+  const unresolvedBlock = (parsed as Record<string, unknown>).repair_proxy;
+  if (unresolvedBlock !== undefined) {
+    return {
+      declaration: null,
+      reason: "repair_proxy is retired — declare a proxy block instead.",
+    };
+  }
+
+  const block = (parsed as { proxy?: unknown }).proxy;
   if (block === undefined) return { declaration: null };
   if (typeof block !== "object" || block === null || Array.isArray(block)) {
     return {
       declaration: null,
-      reason: "repair_proxy must be a JSON object with an endpoint — fix the declaration.",
+      reason: "proxy must be a JSON object with an endpoint — fix the declaration.",
     };
   }
-  const { endpoint, top_k, cost_per_mtok } = block as Record<string, unknown>;
+  const { endpoint, top_k, cost_per_mtok, api_key_env } = block as Record<string, unknown>;
   if (typeof endpoint !== "string" || endpoint.trim().length === 0) {
     return {
       declaration: null,
-      reason: "repair_proxy.endpoint must be a non-empty url string — fix the declaration.",
+      reason: "proxy.endpoint must be a non-empty url string — fix the declaration.",
     };
   }
-  const declaration: RepairProxyDeclaration = {
-    // Trailing slashes stripped so the reach probe, the populate cache's stored
+  const declaration: ProxyDeclaration = {
+    // Trailing slashes stripped so the reach probe, the discovery cache's stored
     // endpoint, and the expanded sources all compare on one canonical form.
     endpoint: endpoint.trim().replace(/\/+$/u, ""),
   };
@@ -261,6 +276,9 @@ export function readRepairProxyDeclaration(
   ) {
     declaration.cost_per_mtok = cost_per_mtok;
   }
+  if (typeof api_key_env === "string" && api_key_env.trim().length > 0) {
+    declaration.api_key_env = api_key_env.trim();
+  }
   return { declaration };
 }
 
@@ -272,13 +290,13 @@ const populateFetchWithTimeout: typeof fetch = (input, init) =>
   fetch(input, { ...init, signal: AbortSignal.timeout(5_000) });
 
 /**
- * POPULATE the declared repair-proxy lane (plan §populate-vs-resolve): read the
- * machine declaration's `repair_proxy` block and, when present, fetch its registry
- * into the machine-level populate cache ({@link populateProxyCatalog}). This is the
- * network half the resolve path must never run — call it at Gate-0 build time (once
- * per run) or on explicit refresh, NEVER from `resolveAmbientSources`.
+ * POPULATE the declared proxy lane (plan §populate-vs-resolve): read the
+ * machine declaration's `proxy` block and, when present, fetch its model
+ * discovery into the machine-level populate cache ({@link populateProxyCatalog}).
+ * This is the network half the resolve path must never run — call it at Gate-0
+ * build time (once per run) or on explicit refresh, NEVER from `resolveAmbientSources`.
  *
- * "Present + reachable" gating is the fetch itself: the registry GET is both the
+ * "Present + reachable" gating is the fetch itself: the discovery GET is both the
  * liveness proof and the payload, so a separate pre-probe would only double the
  * network. Never throws: no declared lane ⇒ `null`; a failed/unreachable fetch ⇒
  * `{written:false, reason}` and any prior cache is left untouched — the lane then
@@ -288,13 +306,16 @@ const populateFetchWithTimeout: typeof fetch = (input, init) =>
 export async function populateDeclaredProxyCatalog(
   deps: AmbientSourceDeps & { fetchImpl?: typeof fetch } = {},
 ): Promise<PopulateProxyCatalogResult | null> {
-  const { declaration } = readRepairProxyDeclaration(deps);
+  const { declaration } = readProxyDeclaration(deps);
   if (declaration === null) return null;
   return populateProxyCatalog({
     endpoint: declaration.endpoint,
     ...(declaration.top_k !== undefined ? { topK: declaration.top_k } : {}),
     ...(declaration.cost_per_mtok !== undefined
       ? { costPerMtok: declaration.cost_per_mtok }
+      : {}),
+    ...(declaration.api_key_env !== undefined
+      ? { apiKeyEnv: declaration.api_key_env }
       : {}),
     fetchImpl: deps.fetchImpl ?? populateFetchWithTimeout,
     ...(deps.homeDir !== undefined ? { homeDir: deps.homeDir } : {}),
@@ -303,17 +324,17 @@ export async function populateDeclaredProxyCatalog(
 
 /**
  * Populate the proxy catalog ONLY when the resolve half would otherwise drop the
- * lane for it: a `repair_proxy` is declared but the cache is absent or was fetched
- * from a different endpoint. Bounded by construction — after one success the cache
- * exists and this is a cheap read — so a draw with no Gate-0 build moment (remediate)
- * can call it on every config load without a per-load network fetch. Freshness
- * (TTL / explicit refresh) is deliberately NOT this function's job (backlog).
+ * lane for it: a `proxy` is declared but the cache is absent or was fetched from a
+ * different endpoint. Bounded by construction — after one success the cache exists
+ * and this is a cheap read — so a draw with no Gate-0 build moment (remediate) can
+ * call it on every config load without a per-load network fetch. Freshness (TTL /
+ * explicit refresh) is deliberately NOT this function's job (backlog).
  * [[silent-fail-closed-on-one-draw]] — both draws must trigger populate, not just audit.
  */
 export async function populateProxyCatalogIfMissing(
   deps: AmbientSourceDeps & { fetchImpl?: typeof fetch } = {},
 ): Promise<PopulateProxyCatalogResult | null> {
-  const { declaration } = readRepairProxyDeclaration(deps);
+  const { declaration } = readProxyDeclaration(deps);
   if (declaration === null) return null;
   const cache = readProxyCatalog(deps);
   if (
@@ -439,15 +460,15 @@ export function verifySourceReach(
       };
     }
     case "claude-worker": {
-      // The proxied isolated Claude-harness worker: its reach IS the repair-proxy's
+      // The proxied isolated Claude-harness worker: its reach IS the proxy's
       // liveness (endpoint = the proxy url). Normally these sources come pre-verified
-      // from the populate cache via the `repair_proxy` lane; a hand-declared one is
-      // held to the same bar. Inline api_key refused for the same possession≠reach
-      // reasons as openai-compatible above (the loopback proxy needs no key anyway).
+      // from the populate cache via the `proxy` lane; a hand-declared one is held to
+      // the same bar. Inline api_key refused for the same possession≠reach reasons as
+      // openai-compatible above; api_key_env is optional (keyless proxy default).
       if (!source.endpoint?.trim()) {
         return {
           verified: false,
-          reason: "claude-worker source has no endpoint (the repair-proxy url).",
+          reason: "claude-worker source has no endpoint (the proxy url).",
         };
       }
       if (!source.model?.trim()) {
@@ -457,16 +478,25 @@ export function verifySourceReach(
         return {
           verified: false,
           reason:
-            "inline api_key is not ambient-verifiable (it proves possession, not reach) — the proxied lane needs no inline key; remove it (declare api_key_env if the proxy requires one).",
+            "inline api_key is not ambient-verifiable (it proves possession, not reach) — declare api_key_env if the proxy requires one, otherwise omit.",
         };
+      }
+      // When api_key_env is declared, the env var must be set (reach verification).
+      if (source.api_key_env?.trim()) {
+        if (!(env[source.api_key_env] ?? "").trim()) {
+          return {
+            verified: false,
+            reason: `env var "${source.api_key_env}" is unset or empty in this process.`,
+          };
+        }
       }
       const probe = deps.probeHttpReachable ?? defaultProbeHttpReachable;
       const endpoint = source.endpoint.trim().replace(/\/+$/u, "");
-      return probe(`${endpoint}/registry`)
+      return probe(endpoint)
         ? { verified: true }
         : {
             verified: false,
-            reason: `repair-proxy at "${endpoint}" failed the liveness probe (GET /registry).`,
+            reason: `proxy at "${endpoint}" failed the liveness probe.`,
           };
     }
   }
@@ -499,36 +529,36 @@ export function resolveAmbientSources(
     if (reach.verified) sources.push(source);
     else dropped.push({ id: sourceId(source), reason: reach.reason });
   }
-  resolveRepairProxyLane(deps, sources, dropped);
+  resolveProxyLane(deps, sources, dropped);
   return { sources, dropped };
 }
 
 /**
- * The repair-proxy lane of the resolve half (plan §populate-vs-resolve): a declared
- * `repair_proxy` whose liveness probe passes expands from the POPULATE CACHE — never
+ * The proxy lane of the resolve half (plan §populate-vs-resolve): a declared
+ * `proxy` whose liveness probe passes expands from the POPULATE CACHE — never
  * a mid-resolve fetch. Fail-open, mirroring the declared-source contract: every
  * outcome short of expansion lands in `dropped[]` with an operator-facing reason
  * (malformed declaration / probe failure / cache absent-stale-empty), so the lane is
  * never silently discarded.
  */
-function resolveRepairProxyLane(
+function resolveProxyLane(
   deps: AmbientSourceDeps,
   sources: DispatchableSource[],
   dropped: DroppedSource[],
 ): void {
-  const { declaration, reason } = readRepairProxyDeclaration(deps);
+  const { declaration, reason } = readProxyDeclaration(deps);
   if (reason !== undefined) {
-    dropped.push({ id: "repair-proxy", reason });
+    dropped.push({ id: "proxy", reason });
     return;
   }
   if (declaration === null) return;
   const { endpoint } = declaration;
-  const laneId = `repair-proxy:${endpoint}`;
+  const laneId = `proxy:${endpoint}`;
   const probe = deps.probeHttpReachable ?? defaultProbeHttpReachable;
-  if (!probe(`${endpoint}/registry`)) {
+  if (!probe(endpoint)) {
     dropped.push({
       id: laneId,
-      reason: `repair-proxy at "${endpoint}" failed the liveness probe (GET /registry) — lane dropped for this invocation.`,
+      reason: `proxy at "${endpoint}" failed the liveness probe — lane dropped for this invocation.`,
     });
     return;
   }
@@ -537,14 +567,14 @@ function resolveRepairProxyLane(
     dropped.push({
       id: laneId,
       reason:
-        "repair-proxy is reachable but the populate cache is absent/invalid — run the registry populate (populateProxyCatalog) to expand this lane.",
+        "proxy is reachable but the populate cache is absent/invalid — run the populate (populateProxyCatalog) to expand this lane.",
     });
     return;
   }
   if (catalog.endpoint.replace(/\/+$/u, "") !== endpoint) {
     dropped.push({
       id: laneId,
-      reason: `populate cache was fetched from "${catalog.endpoint}", not the declared "${endpoint}" — re-run the registry populate.`,
+      reason: `populate cache was fetched from "${catalog.endpoint}", not the declared "${endpoint}" — re-run the populate.`,
     });
     return;
   }
@@ -552,7 +582,7 @@ function resolveRepairProxyLane(
     dropped.push({
       id: laneId,
       reason:
-        "repair-proxy registry expansion is empty (no reachable+keyed backend models at populate time) — lane present but unexpanded.",
+        "proxy expansion is empty (no reachable backend models at populate time) — lane present but unexpanded.",
     });
     return;
   }
@@ -571,7 +601,7 @@ function resolveRepairProxyLane(
     if (declaredIdentities.has(identity)) {
       dropped.push({
         id: sourceId(expanded),
-        reason: `expanded lane skipped — a declared source already covers backend identity "${identity}" (declared wins over registry expansion).`,
+        reason: `expanded lane skipped — a declared source already covers backend identity "${identity}" (declared wins over expansion).`,
       });
       continue;
     }

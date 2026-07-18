@@ -224,7 +224,7 @@ export interface CapacityPool {
    * `source.capability_rank`) — LOWER = more capable (the registry `composite_rank`,
    * never collapsed into a tier). Carried through unfolded to the summary → the
    * host-path admission tiebreak, where it refines the coarse tier ordinal among
-   * cost-equal pools of the same tier (e.g. many repair-proxy models all landing on
+   * cost-equal pools of the same tier (e.g. many proxy-sourced models all landing on
    * the neutral "standard" fallback tier). null/absent ⇒ no finer signal; ordering
    * falls back to the tier ordinal alone. Never enters the slot math.
    */

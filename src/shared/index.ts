@@ -1433,7 +1433,7 @@ export {
 export type { SharedProviderConfirmation, RenderedProviderConfirmation, ConfirmedDispatchPolicy, DispatchExclusionPattern, DispatchExclusion, ExcludableBackend, NewlyReachableBackend } from "./providers/sharedProviderConfirmation.js";
 export { SHARED_PROVIDER_CONFIRMATION_VERSION, SHARED_PROVIDER_CONFIRMATION_FILENAME, sharedProviderConfirmationPath, buildSharedProviderConfirmation, buildProviderConfirmationRender, writeSharedProviderConfirmation, readSharedProviderConfirmation, readConfirmedCostPositions, readConfirmedDispatchBias, readConfirmedDispatchPolicy, resolveDispatchExclusion, clampDispatchBias, computeNewlyReachableBackends, confirmedBackendKeys, PROVIDER_CONFIRMATION_INPUT_FILENAME, readProviderConfirmationInput, unlinkProviderConfirmationInput } from "./providers/sharedProviderConfirmation.js";
 
-// 3c — POPULATE trigger for the repair-proxy lane (Gate-0 build time / explicit
+// 3c — POPULATE trigger for the proxy lane (Gate-0 build time / explicit
 // refresh; the resolve path only READS the cache).
 export {
   populateDeclaredProxyCatalog,

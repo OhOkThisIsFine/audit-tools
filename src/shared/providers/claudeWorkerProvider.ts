@@ -21,10 +21,12 @@ import {
 export const CLAUDE_WORKER_PROVIDER_NAME = "claude-worker" as const;
 
 /**
- * The explicit DUMMY key presented to a proxied spawn. The loopback repair-proxy
- * needs no key, and an ambient real `ANTHROPIC_API_KEY` must NEVER be silently
- * presented to a proxied spawn — so the overlay always sets this sentinel rather
- * than leaving the variable to inherit from the parent env.
+ * The explicit DUMMY key presented to a proxied spawn when no api_key_env is set.
+ * A keyless proxy needs no key, and an ambient real `ANTHROPIC_API_KEY` must NEVER
+ * be silently presented to a proxied spawn — so the overlay always sets an explicit
+ * key (either from the resolved api_key_env or this sentinel) rather than leaving
+ * the variable to inherit from the parent env (the never-leak-the-ambient-real-key
+ * property, transport-independent).
  */
 export const CLAUDE_WORKER_DUMMY_API_KEY = "audit-tools-claude-worker";
 
@@ -67,7 +69,7 @@ function requireNonEmpty(
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(
       `claude-worker provider requires a non-empty ${field} — the source carries it ` +
-        `({endpoint: <repair-proxy url>, backend_provider, model}); an isolated spawn ` +
+        `({endpoint: <proxy url>, backend_provider, model}); an isolated spawn ` +
         `with no proxy ${field === "endpoint" ? "endpoint" : "route"} must be impossible.`,
     );
   }
@@ -76,13 +78,12 @@ function requireNonEmpty(
 
 /**
  * claude-worker backend — the proxied, ISOLATED, per-packet-routed Claude-harness
- * worker (the kind-1 launch transport,
- * docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md). It spawns
- * `claude -p` with a REQUIRED `ANTHROPIC_BASE_URL` overlay pointing at the
- * repair-proxy, a dummy `ANTHROPIC_API_KEY` (never the ambient real key), an
- * isolated per-launch `CLAUDE_CONFIG_DIR`, and `--model
- * <backend_provider>/<model>` — the namespace string the proxy routes on,
- * composed at launch for argv only (it never enters the quota identity).
+ * worker. It spawns `claude -p` with a REQUIRED `ANTHROPIC_BASE_URL` overlay
+ * pointing at the proxy, `ANTHROPIC_AUTH_TOKEN` (resolved from the source's
+ * api_key_env when set; sentinel when keyless), an isolated per-launch
+ * `CLAUDE_CONFIG_DIR`, and `--model <alias>` — the proxy's routing alias,
+ * passed verbatim to the endpoint (it never enters the quota identity, which
+ * keys on `backend_provider`/`model` for pool dedup).
  *
  * Deliberately NO nested-session guard: this class is NOT `claude-code` (the
  * conversation host) wearing a flag — isolation is its CONSTRUCTOR INVARIANT, not
@@ -155,18 +156,24 @@ export class ClaudeWorkerProvider implements FreshSessionProvider {
     const skipPermissions =
       this.config.dangerously_skip_permissions ?? this.skipPermissionsDefault;
     // The prompt is delivered via stdin (mirrors ClaudeCodeProvider), so
-    // `promptFlag` is a bare flag; `--model` carries the proxy's namespace
-    // routing key `<backend_provider>/<model>`, passed VERBATIM to the endpoint.
+    // `promptFlag` is a bare flag; `--model` carries the proxy's routing alias
+    // passed VERBATIM (not composed from backend_provider/model).
     const args = [
       promptFlag,
       "--model",
-      `${this.backendProvider}/${this.model}`,
+      this.model,
       ...(this.config.extra_args ?? []),
       ...(skipPermissions ? ["--dangerously-skip-permissions"] : []),
     ];
     const configDir = await this.prepareIsolatedConfigDir(input);
     emitProviderLaunchDiagnostic(this.name, input);
     try {
+      // Resolve auth key from api_key_env if configured; otherwise use sentinel.
+      const authKeyValue = this.config.api_key_env
+        ? process.env[this.config.api_key_env]
+        : undefined;
+      const anthropicAuthToken = authKeyValue?.trim() || CLAUDE_WORKER_DUMMY_API_KEY;
+
       const result = await this.launchCommand(
         command,
         args,
@@ -179,7 +186,8 @@ export class ClaudeWorkerProvider implements FreshSessionProvider {
         // is CLAUDE_CONF), so the child sees exactly this isolated dir.
         {
           ANTHROPIC_BASE_URL: this.endpoint,
-          ANTHROPIC_API_KEY: CLAUDE_WORKER_DUMMY_API_KEY,
+          ANTHROPIC_AUTH_TOKEN: anthropicAuthToken,
+          ANTHROPIC_API_KEY: CLAUDE_WORKER_DUMMY_API_KEY, // Never leak ambient real key
           CLAUDE_CONFIG_DIR: configDir,
         },
       );

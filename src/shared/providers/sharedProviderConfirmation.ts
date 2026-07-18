@@ -195,7 +195,7 @@ export interface SharedProviderConfirmation {
    */
   host_model_cost_order?: HostModelCostEntry[];
   /**
-   * Dispatchable SOURCE pools (explicit `sources[]` + repair-proxy expansion) with their
+   * Dispatchable SOURCE pools (explicit `sources[]` + proxy expansion) with their
    * operator-confirmed cost positions (Gate-0 source fold). Merged into the model-keyed
    * dispatch positions map by `readConfirmedCostPositions` so a source pool routes by its
    * confirmed order exactly like a provider pool / host tier. Absent when no source is
@@ -1033,8 +1033,8 @@ export async function readConfirmedCostPositions(
       positions.set(entry.model_id, entry.cost_order);
     }
   }
-  // Source pools (explicit sources[] + repair-proxy expansion) route by their confirmed
-  // position keyed on the source's model id — the SAME model-keyed lookup a repair-proxy
+  // Source pools (explicit sources[] + proxy expansion) route by their confirmed
+  // position keyed on the source's model id — the SAME model-keyed lookup a proxy
   // dispatch pool resolves against (pool.model = the namespaced `provider/model`). An entry
   // without a model_id is display-only and contributes no dispatch position.
   for (const entry of confirmation.source_pool_cost_order ?? []) {

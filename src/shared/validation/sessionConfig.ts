@@ -217,7 +217,7 @@ function validateDispatchableSources(
             issues,
             `${path}.${field}`,
             `${field} is required for a claude-worker source (${
-              field === "endpoint" ? "the repair-proxy url" : "the backend-native model id"
+              field === "endpoint" ? "the proxy endpoint" : "the backend-native model id"
             }).`,
           );
         }

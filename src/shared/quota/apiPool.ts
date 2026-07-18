@@ -154,15 +154,15 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
       return {};
     case "claude-worker":
       // The proxied isolated worker launches FROM the source itself: endpoint = the
-      // repair-proxy url ClaudeWorkerProvider fronts the spawn with, and
-      // backend_provider + model compose the `--model <backend_provider>/<model>`
-      // namespace argv at launch. `parameters` may carry the launcher tuning
-      // (command / prompt_flag / extra_args / dangerously_skip_permissions).
+      // proxy url ClaudeWorkerProvider fronts the spawn with, and model = the proxy
+      // alias (routing key). `parameters` may carry the launcher tuning (command /
+      // prompt_flag / extra_args / dangerously_skip_permissions).
       return {
         claude_worker: {
           endpoint: source.endpoint,
           backend_provider: source.backend_provider,
           model: source.model,
+          ...(source.api_key_env !== undefined ? { api_key_env: source.api_key_env } : {}),
           ...p,
         },
       };

@@ -120,7 +120,7 @@ export interface HostModelCostEntry {
  * source fold). Lives on the shared confirmation alongside `provider_pool` +
  * `host_model_cost_order`; merged into the model-keyed dispatch positions map by
  * `readConfirmedCostPositions` so a source pool (an explicit `sources[]` entry OR a
- * repair-proxy-expanded `provider/model`) routes by its operator-confirmed order exactly
+ * proxy-expanded `provider/model`) routes by its operator-confirmed order exactly
  * like a configured provider pool or host tier. Kept as a separate list (not extra
  * `provider_pool` entries) because a source is keyed by `(provider, model)`, not by a
  * single provider name — many sources can share the `openai-compatible` provider.
@@ -131,7 +131,7 @@ export interface SourcePoolCostEntry {
   /** The source's provider transport (e.g. `openai-compatible`). */
   provider: string;
   /**
-   * The source's model id — the DISPATCH cost-position key (a repair-proxy source's
+   * The source's model id — the DISPATCH cost-position key (a proxy-sourced source's
    * namespaced `provider/model`, or a plain source model). Absent when the source
    * declares no model (then it contributes no dispatch position, only display).
    */

@@ -3,8 +3,8 @@
 // Every e2e/wrapper test spawns the real CLIs, and every confirmation-absent CLI
 // invocation resolves the machine-global state dir (`~/.audit-code`:
 // sources-declared.json, catalog-cache.json, quota-state.json, reservations.json).
-// Without this override a box with a declared+live repair-proxy leaks that state
-// into EVERY child process — live-proxy-dependent behavior and per-invocation
+// Without this override a box with a declared+live proxy lane leaks that state
+// into EVERY child process — proxy-dependent behavior and per-invocation
 // network cost (docs/backlog.md "Machine-global ~/.audit-code state leaks into
 // EVERY e2e test", 2026-07-17).
 //

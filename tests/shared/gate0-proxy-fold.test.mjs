@@ -62,7 +62,7 @@ const EXPANDED = [
   },
 ];
 
-/** Injected ambient deps: declared repair_proxy lane, live probe, populated cache. */
+/** Injected ambient deps: declared proxy lane, live probe, populated cache. */
 function deps({ sources = EXPANDED } = {}) {
   return {
     env: {},
@@ -70,7 +70,7 @@ function deps({ sources = EXPANDED } = {}) {
     commandExists: () => false,
     fileReadable: () => false,
     readDeclarationFile: () =>
-      JSON.stringify({ repair_proxy: { endpoint: PROXY } }),
+      JSON.stringify({ proxy: { endpoint: PROXY } }),
     probeHttpReachable: () => true,
     readCatalogFile: () =>
       JSON.stringify({ fetched_at: new Date().toISOString(), endpoint: PROXY, sources }),

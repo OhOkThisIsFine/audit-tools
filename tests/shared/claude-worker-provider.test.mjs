@@ -109,13 +109,16 @@ describe("ClaudeWorkerProvider construction invariants", () => {
 });
 
 describe("ClaudeWorkerProvider.launch — argv composition", () => {
-  it("composes `<promptFlag> --model <backend_provider>/<model>` with stdin prompt", async () => {
+  it("REGRESSION PIN (i): passes --model <alias> VERBATIM to the proxy", async () => {
+    // PRE-SWAP: composed as `${backend_provider}/${model}` = "nim/z-ai/glm-5.2"
+    // POST-SWAP: passes the alias verbatim = "z-ai/glm-5.2"
     const h = launchWorker();
     await h.promiseResult;
     const c = h.getCaptured();
     expect(c, "launchCommand was called").toBeTruthy();
     expect(c.command).toBe("claude");
-    expect(c.args.slice(0, 3)).toEqual(["-p", "--model", "nim/z-ai/glm-5.2"]);
+    // Model is the alias VERBATIM, NOT composed from backend_provider
+    expect(c.args.slice(0, 3)).toEqual(["-p", "--model", "z-ai/glm-5.2"]);
     // Prompt is delivered via stdin, never as an argv positional.
     expect(c.input.stdinText).toBe("IMPLEMENT THIS NODE");
     expect(c.args.join(" ").includes("IMPLEMENT THIS NODE")).toBeFalsy();
@@ -136,7 +139,7 @@ describe("ClaudeWorkerProvider.launch — argv composition", () => {
     expect(c.args).toEqual([
       "--print",
       "--model",
-      "nim/z-ai/glm-5.2",
+      "z-ai/glm-5.2", // Model is the alias VERBATIM, not composed
       "--verbose",
     ]);
   });
@@ -169,19 +172,32 @@ describe("ClaudeWorkerProvider.launch — argv composition", () => {
 });
 
 describe("ClaudeWorkerProvider.launch — env overlay + isolated config dir", () => {
-  it("overlays exactly the proxy base url, the DUMMY key, and an isolated config dir", async () => {
+  it("REGRESSION PIN (ii): ANTHROPIC_AUTH_TOKEN overlay (sentinel when keyless)", async () => {
+    // PRE-SWAP: ANTHROPIC_AUTH_TOKEN was not set; only ANTHROPIC_API_KEY existed.
+    // POST-SWAP: ANTHROPIC_AUTH_TOKEN set from api_key_env (or sentinel when keyless).
+    // ANTHROPIC_API_KEY still set to sentinel (never leak ambient real key).
+    const h = launchWorker();
+    await h.promiseResult;
+    const env = h.getCaptured().env;
+    // Keyless proxy: ANTHROPIC_AUTH_TOKEN = sentinel
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe(CLAUDE_WORKER_DUMMY_API_KEY);
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("audit-tools-claude-worker");
+    // ANTHROPIC_API_KEY also set to sentinel (never leak ambient key)
+    expect(env.ANTHROPIC_API_KEY).toBe(CLAUDE_WORKER_DUMMY_API_KEY);
+  });
+
+  it("overlays proxy base url, auth tokens, and an isolated config dir", async () => {
     const h = launchWorker();
     await h.promiseResult;
     const env = h.getCaptured().env;
     expect(env.ANTHROPIC_BASE_URL).toBe(PROXY_URL);
-    // The dummy sentinel — an ambient real key must NEVER be silently presented
-    // to a proxied spawn.
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe(CLAUDE_WORKER_DUMMY_API_KEY);
     expect(env.ANTHROPIC_API_KEY).toBe(CLAUDE_WORKER_DUMMY_API_KEY);
-    expect(env.ANTHROPIC_API_KEY).toBe("audit-tools-claude-worker");
     expect(env.CLAUDE_CONFIG_DIR).toBeTruthy();
     expect(env.CLAUDE_CONFIG_DIR).toContain("audit-tools-claude-worker");
     expect(Object.keys(env).sort()).toEqual([
       "ANTHROPIC_API_KEY",
+      "ANTHROPIC_AUTH_TOKEN",
       "ANTHROPIC_BASE_URL",
       "CLAUDE_CONFIG_DIR",
     ]);

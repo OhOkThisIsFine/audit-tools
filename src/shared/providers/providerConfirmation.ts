@@ -250,7 +250,7 @@ export interface AnnotatedConfirmation {
    */
   host_model_cost_order: HostModelCostEntry[];
   /**
-   * Dispatchable SOURCE pools (explicit `sources[]` + repair-proxy expansion) with
+   * Dispatchable SOURCE pools (explicit `sources[]` + proxy expansion) with
    * their confirmed positions (Gate-0 source fold). Kept separate from `provider_pool`
    * because a source is keyed by `(provider, model)`, not a single provider name.
    */
@@ -366,7 +366,7 @@ export function annotateConfirmedPool(
     (source) => !(source.model && claimedModels.has(source.model)),
   );
   // Gate-0 source fold: every remaining dispatchable source pool (explicit sources[] +
-  // repair-proxy expansion) becomes a ranked candidate, keyed by its stable source id so a
+  // proxy expansion) becomes a ranked candidate, keyed by its stable source id so a
   // namespaced `provider/model` never collides with a provider-name key. Each carries its
   // declared cost (authoritative; 0 = free) and raw capability rank so the suggestion is
   // truthful and the capability tiebreak applies among cost-equal source pools.
@@ -484,7 +484,7 @@ export function deriveSourcePoolDisplay(
 /**
  * Same display derivation as {@link deriveSourcePoolDisplay} but over an EXPLICIT source
  * list — used by the Gate-0 confirmation display so the roster includes the async
- * repair-proxy `/registry` expansion (which is not in `sessionConfig.sources`), matching
+ * proxy catalog expansion (which is not in `sessionConfig.sources`), matching
  * exactly what {@link gatherDispatchableSources} folds into dispatch.
  */
 export function deriveSourcePoolDisplayFromSources(
