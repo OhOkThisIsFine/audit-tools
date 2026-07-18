@@ -217,7 +217,7 @@ export function getExplicitProvider(argv: string[]): string | undefined {
  * B1: explicit conversation-host provider override (`--host-provider`). Names the
  * auditor actually DRIVING this run, whose account meter the dispatch fan-out is
  * charged to — a quota-ATTRIBUTION key, distinct from `--provider` (which may name
- * a demoted headless backend that is only the per-packet worker). Normally left
+ * a headless in-process backend that is only the per-packet worker). Normally left
  * unset: the host is auto-detected from the run's own session env. Constrained to
  * a known ProviderName so a typo fails LOUDLY here rather than silently mis-keying.
  */

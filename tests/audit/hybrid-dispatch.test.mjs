@@ -221,3 +221,45 @@ test("audit hybrid: a node that fits NO active pool is left unclaimed (re-offere
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── H2+H4 collapse: the unconditional primary fold + D1 dedup on the audit draw ──
+
+const { buildAuditSourcePools } = await import("../../src/audit/cli/hybridDispatch.ts");
+
+test("audit pool assembly: an agy primary ALWAYS folds in as a source pool (D4 — red on HEAD twice over)", async () => {
+  // HEAD: agy was absent from the demotable set AND primaryInProcessSource had no
+  // agy arm — an attended agy run had no pool at all. Now the fold is unconditional.
+  const pools = await buildAuditSourcePools({
+    provider: "agy",
+    agy: { command: "agy", model: "gemini-3-pro" },
+  });
+  const agyPool = pools.find((p) => p.providerName === "agy");
+  expect(agyPool).toBeTruthy();
+  expect(agyPool.source?.provider).toBe("agy");
+  expect(isInProcessAuditPool(agyPool)).toBe(true);
+});
+
+test("audit pool assembly: a codex primary folds with NO demote flag; the option is gone", async () => {
+  const pools = await buildAuditSourcePools({
+    provider: "codex",
+    codex: { command: "codex", model: "gpt-5" },
+  });
+  expect(pools.filter((p) => p.providerName === "codex").length).toBe(1);
+});
+
+test("audit pool assembly (D1/D6): an attended host identity colliding with the in-process primary keeps the SOURCE pool", async () => {
+  // Audit's host is never a member pool (D6) — same-agent collision degenerates to
+  // "the engine/source pool survives" so the engine drives that single account.
+  const pools = await buildAuditSourcePools(
+    { provider: "codex", codex: { command: "codex", model: "gpt-5" } },
+    { attendedHostProviderName: "codex" },
+  );
+  expect(pools.filter((p) => p.providerName === "codex").length).toBe(1);
+});
+
+test("audit pool assembly: audit's policy excludes a command-shaped primary (no fold, no pool)", async () => {
+  const pools = await buildAuditSourcePools({
+    provider: "worker-command",
+  });
+  expect(pools).toEqual([]);
+});

@@ -928,6 +928,7 @@ export {
   isSelfSpawnBlocked,
   resolveConversationHostProvider,
   resolveHostProviderName,
+  resolveHostDispatchProviderName,
   setCommandExistsForTesting,
 } from "./providers/providerPathGuard.js";
 
@@ -1124,8 +1125,7 @@ export {
   collectDispatchableSources,
   gatherDispatchableSources,
   primaryInProcessSource,
-  isDemotableInProcessProvider,
-  shouldDemotePrimaryInProcess,
+  dedupHostAndSourcePools,
   withSourceConfig,
   sourceByPoolId,
   buildHostModelPool,

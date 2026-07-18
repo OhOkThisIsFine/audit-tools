@@ -3,6 +3,7 @@ import type {
   ProviderName,
   ResolvedProviderName,
 } from "../types/sessionConfig.js";
+import { isHeadlessPrimaryProvider } from "./inProcessWorkers.js";
 
 /**
  * Single-sourced PATH detection + self-spawn guard for the provider subsystem.
@@ -153,10 +154,10 @@ export function resolveConversationHostProvider(options?: {
  * both orchestrators.
  *
  * NOTE: this returns the configured provider verbatim when set — a run with
- * `provider: codex` (codex as the driving host) keys to codex. The audit
- * host-review path additionally DEMOTES a headless in-process backend to a
- * worker (see `resolveHostDispatchProviderName`), routing the driver identity
- * through {@link resolveConversationHostProvider} instead.
+ * `provider: codex` (codex as the driving host) keys to codex. The host-DISPATCH
+ * paths additionally treat a headless in-process backend as a worker, not a
+ * driver (see {@link resolveHostDispatchProviderName}), routing the driver
+ * identity through {@link resolveConversationHostProvider} instead.
  */
 export function resolveHostProviderName(
   sessionConfig: { provider?: ProviderName; host_provider?: ProviderName } | null | undefined,
@@ -171,4 +172,36 @@ export function resolveHostProviderName(
     });
   }
   return provider;
+}
+
+/**
+ * The identity of the agent DRIVING the host fan-out this invocation — what the
+ * host-dispatch pool / host-session quota key is keyed to (and charged against).
+ * When `sessionConfig.provider` names a headless in-process backend (codex /
+ * opencode / openai-compatible / agy — plus the command-shaped backends under a
+ * draw whose `commandWorkers` policy admits them), that provider is a WORKER,
+ * never the driver: the conversation host that reached the host-dispatch path
+ * resolves via {@link resolveConversationHostProvider} (auto-detected, and
+ * overridable via `--host-provider` / `host_provider` — NOT the literal
+ * `claude-code`, which mis-charged a Codex host's fan-out to the Claude pool).
+ * An explicit conversation-host provider (vscode-task / antigravity /
+ * claude-code — and, for audit's policy, worker-command / subprocess-template)
+ * IS a driver and passes through unchanged.
+ *
+ * This is the founding-bug fix ([[capability-is-per-auditor-not-per-audit]]): a
+ * run started with `provider: codex` and later resumed by a Claude host never
+ * keys or charges the host fan-out against codex's meter. Hoisted to shared
+ * (H2+H4 collapse, plan D5) so audit and remediate key their fan-outs through
+ * the ONE resolver; the `isHeadlessPrimaryProvider` read here is DRIVER
+ * IDENTITY, not branch selection — it survives the branch-pair deletion.
+ * [[host-provider-misattribution-nim-codex]]
+ */
+export function resolveHostDispatchProviderName(
+  sessionConfig: { provider?: ProviderName; host_provider?: ProviderName } | null | undefined,
+  options?: { commandWorkers?: boolean; env?: NodeJS.ProcessEnv },
+): ResolvedProviderName {
+  if (isHeadlessPrimaryProvider(sessionConfig?.provider, options)) {
+    return resolveConversationHostProvider({ sessionConfig, env: options?.env });
+  }
+  return resolveHostProviderName(sessionConfig, { env: options?.env });
 }

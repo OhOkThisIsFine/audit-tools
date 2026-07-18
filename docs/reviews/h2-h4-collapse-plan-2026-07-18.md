@@ -182,6 +182,35 @@ misattribute IDE-hosted runs), F4 (engine migration would lose DC-4 cross-cycle 
 driver outputs). MEDIUM: F5 (agy/worker-command need explicit synthesis), F6 (same-agent collision
 semantics), F7 (quota-scheduler source-scan test + stale comment).
 
+Commit-level reviews (all attested; findings fixed pre-commit unless noted):
+- **Commit 1** (`c9bd3505`, adversarial-reviewer-f4): approve-with-fixes, none blocking — all four
+  fixed in the commit. Notable correction to the review itself: its floor-only display-filter fix was
+  vacuous by construction (the relative floor can never refuse every pool), so size refusals are
+  labeled `packet_oversized` instead.
+- **Commit 2** (`52c8337f`, adversarial-reviewer-h2c2): approve; findings 1 (null-vs-empty partition
+  result), 2 (full-wall terminal pin), 4 (documented fallback) fixed in the commit; finding 3 became
+  commit 3's `planOverride`.
+- **Commit 3** (adversarial-reviewer-h2c3): approve-with-fixes. Blocker F1 (settled-pool re-dispatch
+  via unfiltered `poolsOverride` — DC-4 regression) FIXED; F2 (settle-fact friction), F3 (dedup
+  mixed-account host-lane loss), F5 (backend_provider identity), F6 (audit hint-enriched
+  tasksOverride), F9 (dedup draw policy) FIXED. Implementer deviations 1 (`planOverride` — prevents
+  the internal re-prepare clobbering the host-share admission grant) and 2 (`claimOwnerTokens` —
+  coordinator claims adopted, no self-collision) VERIFIED CORRECT.
+
+**Blessed semantics (h2c3 F4, recorded not changed):** attended same-agent (host == in-process
+primary, e.g. codex-in-codex) is now a SPLIT, not a monopoly: the deduped single pool takes the
+coordinator-bounded partition through the engine, and the remainder is emitted as a host-subagent
+rolling step on the same account — serial use of one meter (engine partition completes before the
+host prepare), never a concurrent double-book. HEAD engine-drove the whole frontier and idled the
+attended host; the split is deliberate under one-fan-out. Decision-point-level pin: backlog.
+
+**Routing changes beyond the named edge (h2c3 F7, all deliberate under the collapse):** headless +
+host-shaped provider (claude-code / vscode-task / antigravity) with configured sources now
+engine-drives those sources (HEAD: sequential step, sources unused); an EMPTY/absent
+subprocess-template primary falls to the sequential/host step instead of a doomed monopoly drive; a
+Gate-0-excluded primary now fails closed to the sequential step instead of monopoly-driving past the
+operator's exclusion.
+
 ### Out of scope (stays backlogged)
 
 - `HYBRID_NODE_TOKEN_ESTIMATE` flat sizing (step-G remediate half — separate backlog entry; D2 makes the

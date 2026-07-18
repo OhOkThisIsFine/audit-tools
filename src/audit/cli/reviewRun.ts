@@ -127,7 +127,7 @@ export interface MaterializeReviewRunParams {
  */
 export async function materializeReviewRun(
   params: MaterializeReviewRunParams,
-): Promise<{ task: WorkerTask; activeReviewRun: ActiveReviewRun }> {
+): Promise<{ task: WorkerTask; activeReviewRun: ActiveReviewRun; pendingTasks: AuditTask[] }> {
   const runId = buildRunId(params.obligationId, 1);
   const paths = getRunPaths(params.artifactsDir, runId);
   const pendingTasks = await addFileLineCountHints(
@@ -179,7 +179,11 @@ export async function materializeReviewRun(
   if (!activeReviewRun) {
     throw new Error("Internal error: failed to materialize active review run.");
   }
-  return { task, activeReviewRun };
+  // The HINT-ENRICHED set (file_line_counts) — drivers passing a tasksOverride to
+  // `driveRollingAuditDispatch` must use THIS, not their raw input, or packet
+  // sizing and the workers' total_lines contract inputs silently degrade
+  // (review h2c3 F6).
+  return { task, activeReviewRun, pendingTasks };
 }
 
 export async function ensureSemanticReviewRun(params: {

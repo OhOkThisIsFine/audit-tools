@@ -1,42 +1,48 @@
 /**
- * A-8 hybrid in-process partition execution (FINDING-020 capstone).
+ * A-8 hybrid in-process partition (H2+H4 collapse shape).
  *
- * `executeInProcessPartition` runs the coordinator's IN-PROCESS partition this
- * cycle — the half of the hybrid split the orchestrator runs itself (the other half
- * goes to the host-subagent driver). Over a real temp git repo with a stub worker,
- * this asserts the spec §A8 executor-level guarantees:
+ * The coordinator's IN-PROCESS partition now drives through the ROLLING ENGINE
+ * (`driveRollingImplementDispatch` with `blocksOverride` + adopted
+ * `claimOwnerTokens`) — `executeInProcessPartition`, the direct-Promise.all
+ * executor these tests used to pin, is DELETED. The spec-A8 executor-level
+ * guarantees carry over and are re-asserted against the engine path:
  *
  *  - each coordinator-claimed node runs on its assigned backend pool and LANDS its
- *    edits via the shared `acceptNodeWorktree` lifecycle (commit → verify → merge);
+ *    edits via the shared `acceptNodeWorktree` lifecycle (commit -> verify -> merge);
  *  - a worker that resolves nothing is NOT merged (never false-resolved) and is left
  *    for the deterministic merge to route to triage;
- *  - every node's coordinator claim is released on its terminal outcome, so a peer
- *    driver or the next cycle never re-grabs it.
+ *  - the coordinator's claims are ADOPTED, not re-claimed (a re-claim through the
+ *    same registry would self-collide and skip every node as peer-owned), and each
+ *    node's claim is released on its terminal outcome.
  *
- * acceptNodeWorktree's base-mutating section runs under a DISTINCT base-branch
- * lock, so the concurrent partition's per-node merges serialize on that lock — no
- * git index.lock race despite `Promise.all`.
+ * Red on HEAD: `claimOwnerTokens` did not exist, so a coordinator-claimed partition
+ * driven through the engine skipped every node as peer-owned.
  */
 
 import { describe, it, expect } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, existsSync } from "node:fs";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import {
   ClaimRegistry,
   type CapacityPool,
   type SessionConfig,
 } from "audit-tools/shared";
-import { executeInProcessPartition } from "../../src/remediate/steps/nextStep.js";
+import { driveRollingImplementDispatch } from "../../src/remediate/steps/nextStep.js";
 import { planHybridDispatch } from "audit-tools/shared";
-import { prepareHostRollingDispatch } from "../../src/remediate/steps/rollingSession.js";
-import type { WorktreeNodeWorker } from "../../src/remediate/steps/dispatch.js";
+import {
+  prepareHostRollingDispatch,
+  nodeClaimRegistryPath,
+} from "../../src/remediate/steps/rollingSession.js";
 import type { RemediationDispatchPlan } from "../../src/remediate/steps/types.js";
+import type { RemediationState } from "../../src/remediate/state/store.js";
+import { StateStore } from "../../src/remediate/state/store.js";
 import {
   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
 } from "../../src/remediate/steps/types.js";
+
 
 const RID = "RID-HYB";
 const SESSION = { quota: { unknown_hosted_concurrency: 8 } } as SessionConfig;
@@ -102,8 +108,52 @@ function planFor(repo: string, blockIds: string[]): RemediationDispatchPlan {
   };
 }
 
+/** Remediation state whose plan/items back the handcrafted dispatch plan. */
+function stateFor(blockIds: string[]): RemediationState {
+  return {
+    status: "implementing",
+    plan: {
+      plan_id: "PLAN-HYB",
+      findings: blockIds.map((id) => ({
+        id: `${id}-f`,
+        title: `Create src/${id}.ts`,
+        category: "correctness",
+        severity: "low",
+        confidence: "high",
+        lens: "correctness",
+        summary: `Create src/${id}.ts.`,
+        affected_files: [{ path: `src/${id}.ts` }],
+        evidence: [`src/${id}.ts:1`],
+      })),
+      blocks: blockIds.map((id) => ({
+        block_id: id,
+        items: [`${id}-f`],
+        parallel_safe: true,
+        dependencies: [],
+      })),
+      project_type: "unknown",
+      candidate_closing_actions: ["none"],
+    },
+    items: Object.fromEntries(
+      blockIds.map((id) => [
+        `${id}-f`,
+        { finding_id: `${id}-f`, status: "pending", block_id: id },
+      ]),
+    ),
+    closing_plan: { action: "none" },
+  } as unknown as RemediationState;
+}
+
 /** A stub worker that edits a node file + writes a valid resolved result. */
-const resolvingWorker: WorktreeNodeWorker = async ({ block, worktreeRoot, resultPath }) => {
+const resolvingWorker = async ({
+  block,
+  worktreeRoot,
+  resultPath,
+}: {
+  block: { block_id: string };
+  worktreeRoot: string;
+  resultPath: string;
+}) => {
   mkdirSync(join(worktreeRoot, "src"), { recursive: true });
   writeFileSync(join(worktreeRoot, "src", `${block.block_id}.ts`), `export const x = "${block.block_id}";\n`);
   writeFileSync(
@@ -116,22 +166,25 @@ const resolvingWorker: WorktreeNodeWorker = async ({ block, worktreeRoot, result
   );
   return {
     packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
-    outcome: "success",
+    outcome: "success" as const,
   };
 };
 
-describe("A-8 executeInProcessPartition", () => {
-  it("runs each coordinator-claimed node on its backend pool, merges into HEAD, releases the claim", async () => {
+describe("A-8 in-process partition via the rolling engine (H2+H4 collapse)", () => {
+  it("drives each coordinator-claimed node on its backend pool with ADOPTED claims, merges into HEAD, releases the claim", async () => {
     const { repo, ok } = initRepo();
     if (!ok) return;
     const artifactsDir = artifactsDirOf(repo);
     mkdirSync(artifactsDir, { recursive: true });
     const blockIds = ["NIM1", "NIM2"];
     const plan = planFor(repo, blockIds);
-    const registry = new ClaimRegistry(join(artifactsDir, "node-claims.json"));
+    await new StateStore(artifactsDir).saveState(stateFor(blockIds));
+    // The SAME registry file the driver derives (nodeClaimRegistryPath) — the
+    // coordinator claims through it, the driver must ADOPT those claims.
+    const registry = new ClaimRegistry(nodeClaimRegistryPath(artifactsDir, RID));
     const settled = new Set<string>();
 
-    // Backend-only pool set → the whole frontier is the in-process partition.
+    // Backend-only pool set -> the whole frontier is the in-process partition.
     const partition = await planHybridDispatch({
       frontier: blockIds.map((id) => ({ id, estimatedTokens: 1000 })),
       pools: [NIM_POOL],
@@ -146,26 +199,38 @@ describe("A-8 executeInProcessPartition", () => {
     // The coordinator claimed both before returning them.
     expect(Object.keys(await registry.listClaims()).sort()).toEqual(["NIM1", "NIM2"]);
 
-    const out = await executeInProcessPartition({
+    const driven = await driveRollingImplementDispatch({
       root: repo,
       artifactsDir,
       runId: RID,
       sessionConfig: SESSION,
-      partition: partition.inProcess,
-      plan,
-      coordinator: partition.coordinator,
       dispatchNode: resolvingWorker,
+      rebuildSharedBetweenLevels: async () => {},
+      blocksOverride: partition.inProcess.map((a) => a.nodeId),
+      poolsOverride: [NIM_POOL],
+      // planOverride: the decision point's ONE prepared plan is reused — the driver
+      // must not re-prepare (no dispatch-plan.json write from this drive).
+      planOverride: plan,
+      claimOwnerTokens: new Map(partition.inProcess.map((a) => [a.nodeId, a.ownerToken])),
     });
 
-    // Both nodes ran, merged, and report a clean lifecycle.
-    expect(out.nodes.map((n) => n.block_id).sort()).toEqual(["NIM1", "NIM2"]);
-    expect(out.nodes.every((n) => n.outcome === "success" && n.merged)).toBe(true);
+    // Both nodes ran on the assigned backend pool, merged, clean lifecycle.
+    expect(driven?.nodes.map((n) => n.block_id).sort()).toEqual(["NIM1", "NIM2"]);
+    expect(driven?.nodes.every((n) => n.outcome === "success" && n.merged)).toBe(true);
+    expect(driven?.nodes.every((n) => n.pool_id === "pool/nim")).toBe(true);
     // Each node's edit landed in HEAD — the in-process partition merged this cycle.
     expect(headHas(repo, "src/NIM1.ts")).toBe(true);
     expect(headHas(repo, "src/NIM2.ts")).toBe(true);
-    // Claims released so a peer / the next cycle never re-grabs them.
+    // planOverride respected: the driver did not re-prepare a plan.
+    expect(existsSync(join(artifactsDir, "runs", RID, "implement", "dispatch-plan.json"))).toBe(false);
+    // Terminal accepts released the ADOPTED claims (token-checked) so a peer / the
+    // next cycle never re-grabs them; the caller's coordinator release is a no-op.
     expect(Object.keys(await registry.listClaims())).toEqual([]);
-  });
+    for (const a of partition.inProcess) {
+      await partition.coordinator.release(a); // idempotent post-drive sweep
+    }
+    expect(Object.keys(await registry.listClaims())).toEqual([]);
+  }, 120_000);
 
   it("a worker that errors is NOT merged and is left for triage, but its claim is still released", async () => {
     const { repo, ok } = initRepo();
@@ -173,7 +238,8 @@ describe("A-8 executeInProcessPartition", () => {
     const artifactsDir = artifactsDirOf(repo);
     mkdirSync(artifactsDir, { recursive: true });
     const plan = planFor(repo, ["BAD"]);
-    const registry = new ClaimRegistry(join(artifactsDir, "node-claims.json"));
+    await new StateStore(artifactsDir).saveState(stateFor(["BAD"]));
+    const registry = new ClaimRegistry(nodeClaimRegistryPath(artifactsDir, RID));
     const settled = new Set<string>();
     const partition = await planHybridDispatch({
       frontier: [{ id: "BAD", estimatedTokens: 1000 }],
@@ -185,28 +251,65 @@ describe("A-8 executeInProcessPartition", () => {
       isInProcess: (pool) => pool.providerName === "openai-compatible",
     });
 
-    const errorWorker: WorktreeNodeWorker = async ({ block }) => ({
+    const errorWorker = async ({ block }: { block: { block_id: string } }) => ({
       packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
-      outcome: "error",
+      outcome: "error" as const,
       error: new Error("boom"),
     });
 
-    const out = await executeInProcessPartition({
+    const driven = await driveRollingImplementDispatch({
       root: repo,
       artifactsDir,
       runId: RID,
       sessionConfig: SESSION,
-      partition: partition.inProcess,
-      plan,
-      coordinator: partition.coordinator,
       dispatchNode: errorWorker,
+      rebuildSharedBetweenLevels: async () => {},
+      blocksOverride: ["BAD"],
+      poolsOverride: [NIM_POOL],
+      planOverride: plan,
+      claimOwnerTokens: new Map(partition.inProcess.map((a) => [a.nodeId, a.ownerToken])),
     });
 
-    expect(out.nodes[0]!.merged).toBe(false);
+    expect(driven?.nodes[0]?.merged).toBe(false);
     expect(headHas(repo, "src/BAD.ts")).toBe(false);
-    // Terminal error → claim released (never stuck claimed).
+    // Terminal error -> adopted claim released (never stuck claimed).
     expect(Object.keys(await registry.listClaims())).toEqual([]);
-  });
+  }, 120_000);
+
+  it("WITHOUT adoption a coordinator-held claim self-collides: the node is skipped as peer-owned (why claimOwnerTokens is load-bearing)", async () => {
+    const { repo, ok } = initRepo();
+    if (!ok) return;
+    const artifactsDir = artifactsDirOf(repo);
+    mkdirSync(artifactsDir, { recursive: true });
+    const plan = planFor(repo, ["HELD"]);
+    await new StateStore(artifactsDir).saveState(stateFor(["HELD"]));
+    const registry = new ClaimRegistry(nodeClaimRegistryPath(artifactsDir, RID));
+    const held = await registry.claim("HELD", "in-process");
+    expect(held.acquired).toBe(true);
+
+    let dispatched = 0;
+    const driven = await driveRollingImplementDispatch({
+      root: repo,
+      artifactsDir,
+      runId: RID,
+      sessionConfig: SESSION,
+      dispatchNode: async (args) => {
+        dispatched += 1;
+        return resolvingWorker(args);
+      },
+      rebuildSharedBetweenLevels: async () => {},
+      blocksOverride: ["HELD"],
+      poolsOverride: [NIM_POOL],
+      planOverride: plan,
+      // NO claimOwnerTokens: the driver self-claims, collides, and skips.
+    });
+
+    expect(dispatched).toBe(0);
+    expect(driven?.nodes[0]?.merged).toBe(false);
+    expect(headHas(repo, "src/HELD.ts")).toBe(false);
+    // The held claim is untouched (still the coordinator's to release).
+    expect(Object.keys(await registry.listClaims())).toEqual(["HELD"]);
+  }, 120_000);
 });
 
 describe("A-8 prepareHostRollingDispatch (hybrid partition)", () => {

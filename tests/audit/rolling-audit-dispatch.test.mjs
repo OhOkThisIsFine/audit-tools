@@ -22,29 +22,39 @@ const {
   makeAuditProviderPacketDispatcher,
   driveRollingAuditDispatch,
   resolveAuditRollingEngineEnabled,
-  resolvesToInProcessDispatchProvider,
 } = await import("../../src/audit/cli/rollingAuditDispatch.ts");
 const { ACTIVE_DISPATCH_FILENAME } = await import("../../src/audit/cli/dispatch.ts");
+const { primaryInProcessSource } = await import("../../src/shared/quota/apiPool.ts");
 
-// ── 0. Routing predicates ─────────────────────────────────────────────────────
+// ── 0. Routing policy ─────────────────────────────────────────────────────────
+// H2+H4 collapse: the old `resolvesToInProcessDispatchProvider` branch predicate is
+// gone — engine-vs-host routing is POOL-SET MEMBERSHIP. Audit's draw policy (which
+// primaries fold into the eligible set as source pools) is pinned here through the
+// unconditional primary fold with audit's default options (no command workers).
 
-test("A8a: resolvesToInProcessDispatchProvider is true only for explicit programmatic backends", () => {
-  expect(resolvesToInProcessDispatchProvider({ provider: "openai-compatible" })).toBe(true);
-  expect(resolvesToInProcessDispatchProvider({ provider: "codex" })).toBe(true);
-  expect(resolvesToInProcessDispatchProvider({ provider: "opencode" })).toBe(true);
-  // The conversation host + IDE backends never engage the in-process driver.
-  expect(resolvesToInProcessDispatchProvider({ provider: "claude-code" })).toBe(false);
-  expect(resolvesToInProcessDispatchProvider({ provider: "vscode-task" })).toBe(false);
-  expect(resolvesToInProcessDispatchProvider({ provider: "antigravity" })).toBe(false);
+test("A8a: audit's fold policy — only explicit programmatic backends become source pools", () => {
+  const cfg = {
+    codex: { command: "codex" },
+    opencode: { command: "opencode" },
+    openai_compatible: { base_url: "http://nim/v1", model: "m" },
+    agy: { command: "agy" },
+    subprocess_template: { command_template: ["run"] },
+  };
+  expect(primaryInProcessSource(cfg, "openai-compatible")?.provider).toBe("openai-compatible");
+  expect(primaryInProcessSource(cfg, "codex")?.provider).toBe("codex");
+  expect(primaryInProcessSource(cfg, "opencode")?.provider).toBe("opencode");
+  expect(primaryInProcessSource(cfg, "agy")?.provider).toBe("agy");
+  // The conversation host + IDE backends never fold (they are never engine pools).
+  expect(primaryInProcessSource(cfg, "claude-code")).toBe(null);
+  expect(primaryInProcessSource(cfg, "vscode-task")).toBe(null);
+  expect(primaryInProcessSource(cfg, "antigravity")).toBe(null);
   // worker-command / subprocess-template are NOT in-process for audit: they need a
   // per-worker command a read-only review packet lacks, and worker-command is the
   // conventional host-dispatch default (routing it in-process would hijack the
-  // host-subagent dispatch_review path).
-  expect(resolvesToInProcessDispatchProvider({ provider: "worker-command" })).toBe(false);
-  expect(resolvesToInProcessDispatchProvider({ provider: "subprocess-template" })).toBe(false);
-  // No explicit provider → host-subagent default (auto-resolution is NOT in-process).
-  expect(resolvesToInProcessDispatchProvider({})).toBe(false);
-  expect(resolvesToInProcessDispatchProvider(undefined)).toBe(false);
+  // host-subagent dispatch_review path). (Remediate's draw opts in via
+  // `commandWorkers: true` — a policy argument, not an audit fork.)
+  expect(primaryInProcessSource(cfg, "worker-command")).toBe(null);
+  expect(primaryInProcessSource(cfg, "subprocess-template")).toBe(null);
 });
 
 test("A8a: resolveAuditRollingEngineEnabled resolution order — explicit > session > env > default true", () => {

@@ -35,7 +35,6 @@ import {
   auditReportPath,
   groundDesignFindings,
   promotedAuditReportPath,
-  shouldDemotePrimaryInProcess,
   withFileLock,
   type NewlyReachableBackend,
 } from "audit-tools/shared";
@@ -157,7 +156,7 @@ export async function stampSystemicChallengeSkipped(
 import {
   driveRollingAuditDispatch,
   resolveAuditRollingEngineEnabled,
-  resolvesToInProcessDispatchProvider,
+  resolveHostDispatchProviderName,
 } from "./rollingAuditDispatch.js";
 import {
   buildAuditSourcePools,
@@ -1734,32 +1733,44 @@ async function runHostDelegationObligation(
     return runDeterministicExecutor(bundle, ctx);
   }
 
-  // Defect-1 attended/headless gate: an attended conversation host (host can dispatch
-  // subagents — the conversation-first default) drives the fan-out ITSELF and DEMOTES a
-  // configured in-process backend to a source pool (the hybrid path below), so host +
-  // backend + NIM run concurrently. The in-process whole-frontier driver fires ONLY when
-  // the run is headless (`host_can_dispatch_subagents:false` — no attended dispatcher),
-  // where the backend legitimately self-drives.
+  // H2+H4 collapse: ONE fan-out over the eligible pool set. The configured primary
+  // in-process backend is ALWAYS folded in as a source pool (no demote flag, plan
+  // D3/D4); the attended conversation host is the coverage-driven COMPLEMENT, never
+  // a coordinator claimant (plan D6). Headless degenerates to "the eligible set
+  // contains no attended host" — the engine drives the WHOLE frontier; attended
+  // splits the frontier across the source pools and the host reviews the complement
+  // (host + backend + NIM concurrent).
   const sessionConfig = ctx.params.sessionConfig;
   const hostCanDispatch = resolveHostDispatchCapability({
     explicit: ctx.params.hostCanDispatch,
     sessionConfig: sessionConfig ?? ({} as SessionConfig),
   });
+  const engineEnabled = resolveAuditRollingEngineEnabled({ sessionConfig });
+  const hybridCfg = sessionConfig ?? ({} as SessionConfig);
+  // The operator's Gate-0 route decision, applied as a set-difference over freshly
+  // gathered reach. Read here (not inside the pool build) because policy lives on the
+  // root-scoped confirmation and this is the layer that owns `root`. Self-spawn-blocked
+  // is recomputed against THIS process's env, never inherited from the writing auditor.
+  const auditExcludedBackends = resolveDispatchExclusion(
+    await readConfirmedDispatchPolicy(ctx.params.root),
+  );
+  const auditSourcePools = await buildAuditSourcePools(hybridCfg, {
+    excludedBackends: auditExcludedBackends,
+    // D1 cross-class collision rule: an attended host identity colliding with a
+    // folded source keeps exactly one pool (the in-process source survives — the
+    // engine drives that one account; a non-in-process collider is dropped).
+    ...(hostCanDispatch
+      ? { attendedHostProviderName: resolveHostDispatchProviderName(hybridCfg) }
+      : {}),
+  });
 
-  // A8(a) in-process provider driver: when the rolling engine is enabled, the run is
-  // HEADLESS, AND the operator EXPLICITLY configured a programmatic backend provider
-  // (openai-compatible / codex / opencode), the orchestrator drives the WHOLE
-  // semantic-review dispatch ITSELF — the provider is the per-packet worker —
-  // instead of emitting a host-subagent dispatch step. It `transition`s once the
-  // results are ingested so the fold re-derives state (the obligation-engine analog
-  // of the hand loop's `continue`), mirroring remediate's decideNextStep transition
-  // after driveRollingImplementDispatch.
-  if (
-    resolveAuditRollingEngineEnabled({ sessionConfig }) &&
-    !hostCanDispatch &&
-    resolvesToInProcessDispatchProvider(sessionConfig)
-  ) {
-    const { activeReviewRun } = await materializeReviewRun({
+  // Headless whole-frontier drive — the old in-process monopoly branch, now a
+  // degeneracy of the one fan-out (no attended host in the eligible set): the engine
+  // reviews every pending task across the source pools itself, then `transition`s
+  // once the results are ingested so the fold re-derives state (the
+  // obligation-engine analog of the hand loop's `continue`).
+  if (engineEnabled && !hostCanDispatch && auditSourcePools.length > 0) {
+    const { activeReviewRun, pendingTasks: enrichedPendingTasks } = await materializeReviewRun({
       root: ctx.params.root,
       artifactsDir: ctx.params.artifactsDir,
       bundle,
@@ -1778,6 +1789,14 @@ async function runHostDelegationObligation(
           activeReviewRun,
           sessionConfig: sessionConfig!,
           timeoutMs: ctx.params.timeoutMs,
+          // The whole pending frontier, driven against the eligible source-pool
+          // set — the same overrides the attended split uses, so headless is the
+          // degenerate "everything is the in-process partition" case. The
+          // HINT-ENRICHED set materialize built (file_line_counts), never the raw
+          // frontier — packet sizing + worker total_lines depend on the hints
+          // (review h2c3 F6).
+          tasksOverride: enrichedPendingTasks,
+          poolsOverride: auditSourcePools,
         }),
       (d) => d.status !== "paused" && !d.ingest && d.stranded_ids.length === 0,
       // Bound total added wall-time to one dispatch-timeout window: an all-timeout
@@ -1851,28 +1870,7 @@ async function runHostDelegationObligation(
   // D2: did the in-process (NIM) partition ingest results this pass? Carried to the
   // host-complement pause so a productive pass resets the wall-pass livelock counter.
   let inProcessMadeProgress = false;
-  const hybridCfg = sessionConfig ?? ({} as SessionConfig);
-  // Defect-1: an attended host (reached here because the headless in-process branch
-  // above was skipped) demotes its configured primary in-process backend into the
-  // source-pool set, so the hybrid split fans the frontier across host + backend + NIM.
-  // The operator's Gate-0 route decision, applied as a set-difference over freshly
-  // gathered reach. Read here (not inside the pool build) because policy lives on the
-  // root-scoped confirmation and this is the layer that owns `root`. Self-spawn-blocked
-  // is recomputed against THIS process's env, never inherited from the writing auditor.
-  const auditExcludedBackends = resolveDispatchExclusion(
-    await readConfirmedDispatchPolicy(ctx.params.root),
-  );
-  const auditSourcePools = await buildAuditSourcePools(hybridCfg, {
-    // B1 same-agent guard: don't demote the primary backend to a source when the
-    // conversation host IS that provider (one account ⇒ host self-drives; else the
-    // host pool and the demoted-source pool double-book a single meter).
-    demotePrimaryInProcess: shouldDemotePrimaryInProcess({
-      sessionConfig: hybridCfg,
-      hostCanDispatch,
-    }),
-    excludedBackends: auditExcludedBackends,
-  });
-  if (resolveAuditRollingEngineEnabled({ sessionConfig }) && auditSourcePools.length > 0) {
+  if (engineEnabled && auditSourcePools.length > 0) {
     const pending = buildPendingAuditTasks(bundle);
     if (pending.length > 0) {
       // DC-4: read the cross-cycle settled-pool set; a NIM pool exhausted on a prior
@@ -1913,7 +1911,7 @@ async function runHostDelegationObligation(
         // coverage-driven complement below: once these NIM tasks are ingested+covered,
         // `buildPendingAuditTasks` excludes them, so `ensureSemanticReviewRun` re-derives
         // exactly the complement. (`complement` is computed only for the skip-host guard.)
-        const { activeReviewRun } = await materializeReviewRun({
+        const { activeReviewRun, pendingTasks: enrichedNimTasks } = await materializeReviewRun({
           root: ctx.params.root,
           artifactsDir: ctx.params.artifactsDir,
           bundle,
@@ -1926,14 +1924,15 @@ async function runHostDelegationObligation(
           // task set instead of re-deriving the full coverage-driven host complement.
           updateDispatch: false,
         });
-        // Review the NIM partition in-process into the SAME run's task-results/ + ingest.
+        // Review the NIM partition in-process into the SAME run's task-results/ +
+        // ingest — driving the HINT-ENRICHED set materialize built (review h2c3 F6).
         const driven = await driveRollingAuditDispatch({
           root: ctx.params.root,
           artifactsDir: ctx.params.artifactsDir,
           activeReviewRun,
           sessionConfig: hybridCfg,
           timeoutMs: ctx.params.timeoutMs,
-          tasksOverride: nimTasks,
+          tasksOverride: enrichedNimTasks,
           poolsOverride: auditSourcePools,
         });
         // Progress = the NIM partition ingested AND accepted ≥1 result this pass (real

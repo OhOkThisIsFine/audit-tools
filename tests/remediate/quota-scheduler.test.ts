@@ -590,20 +590,17 @@ describe("M5-WIRING convergence — floor+mechanism from the single classifyProv
     expect(local.driverMechanism).toBe("in_process_slot_pull");
   });
 
-  it("the the shared in-process worker predicate (inProcessWorkers.ts) site selects a MECHANISM only — it never re-derives a concurrency floor", () => {
-    // resolvesToInProcessDispatchProvider is a pure Set-membership mechanism gate;
-    // it must NOT read or compute a concurrency floor (the floor lives ONLY on the
-    // classifyProvider struct, CE-005). Guard both orchestrators' sites.
-    for (const rel of [
-      "../../src/audit/cli/rollingAuditDispatch.ts",
-    ]) {
-      const src = readSource(rel);
-      const fnStart = src.indexOf("resolvesToInProcessDispatchProvider");
-      expect(fnStart).toBeGreaterThan(-1);
-      // Slice the function body region and assert it derives no floor.
-      const region = src.slice(fnStart, fnStart + 600);
-      expect(region).not.toMatch(/concurrencyFloor|COLD_START|AGENT_HOST_CONCURRENCY|first_contact/);
-    }
+  it("the shared driver-identity resolver (providerPathGuard.ts) selects a MECHANISM only — it never re-derives a concurrency floor", () => {
+    // resolveHostDispatchProviderName (the H2+H4 single-sourced driver-identity
+    // read — the branch predicate it absorbed is gone) is a pure classification
+    // gate; it must NOT read or compute a concurrency floor (the floor lives ONLY
+    // on the classifyProvider struct, CE-005).
+    const src = readSource("../../src/shared/providers/providerPathGuard.ts");
+    const fnStart = src.indexOf("export function resolveHostDispatchProviderName");
+    expect(fnStart).toBeGreaterThan(-1);
+    // Slice the function body region and assert it derives no floor.
+    const region = src.slice(fnStart, fnStart + 600);
+    expect(region).not.toMatch(/concurrencyFloor|COLD_START|AGENT_HOST_CONCURRENCY|first_contact/);
   });
 
   it("classifyProvider keys off provider-class, never a model-name table (no-hardcoded-models)", () => {

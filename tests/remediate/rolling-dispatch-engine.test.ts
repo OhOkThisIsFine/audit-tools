@@ -185,6 +185,9 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
   });
 
   it("does NOT duplicate the openai-compatible pool when it is the primary provider", async () => {
+    // H2+H4 collapse: the primary folds in UNCONDITIONALLY as ONE source pool
+    // alongside the conversation-host pool (attended member-pool semantics) —
+    // never two openai-compatible pools.
     const pools = await buildConfirmedPools({
       sessionConfig: {
         provider: "openai-compatible",
@@ -192,22 +195,23 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
         openai_compatible: { base_url: "https://example/v1", model: "vendor/model-x" },
       },
     });
-    expect(pools.length).toBe(1);
-    expect(pools[0].providerName).toBe("openai-compatible");
+    expect(pools.filter((p) => p.providerName === "openai-compatible").length).toBe(1);
+    // The host pool keys to the conversation host, not the worker backend (D5).
+    expect(pools.some((p) => p.providerName === "claude-code")).toBeTruthy();
   });
 
-  it("defect-1: attended demote keys the host pool to claude-code + adds the codex primary as a source", async () => {
+  it("attended + in-process primary: host pool keys to claude-code + the codex primary is ALWAYS a member source pool", async () => {
+    // Red-green (a) at pool level: no demote flag exists — the fold is unconditional.
     const pools = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
         quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
-      demotePrimaryInProcess: true,
     });
     // The conversation-host pool keys to claude-code (NOT codex — the founding-bug
-    // quota mis-keying), and codex appears as a SEPARATE demoted source pool so the
-    // host fans out onto it concurrently instead of the backend monopolizing.
+    // quota mis-keying), and codex appears as a SEPARATE source pool so the host
+    // fans out onto it concurrently instead of the backend monopolizing.
     const hostPool = pools.find((p) => p.providerName === "claude-code");
     const codexSource = pools.find((p) => p.providerName === "codex");
     expect(hostPool).toBeTruthy();
@@ -216,15 +220,64 @@ describe("INV-ROLL-01: implement concurrency is quota-derived", () => {
     expect(hostPool!.id).not.toBe(codexSource!.id);
   });
 
-  it("defect-1: headless (no demote) keeps codex the single driver pool, no claude-code host pool", async () => {
+  it("attended + agy primary: the agy pool is synthesized as a member source (D4)", async () => {
+    // Red on HEAD twice over: agy was missing from the demotable set AND had no
+    // synthesis case — an attended agy run had no pool at all.
+    const pools = await buildConfirmedPools({
+      sessionConfig: {
+        provider: "agy",
+        quota: {},
+        agy: { command: "agy", model: "gemini-3-pro" },
+      },
+    });
+    const agyPool = pools.find((p) => p.providerName === "agy");
+    expect(agyPool).toBeTruthy();
+    expect(pools.some((p) => p.providerName === "claude-code")).toBeTruthy();
+  });
+
+  it("attended + command-shaped primary (remediate policy): a pool, not a monopoly (D3)", async () => {
+    // Red on HEAD: subprocess-template self-drove even attended (row-5 asymmetry);
+    // now it fans out as a member source pool alongside the host.
+    const pools = await buildConfirmedPools({
+      sessionConfig: {
+        provider: "subprocess-template",
+        quota: {},
+        subprocess_template: { command_template: ["run", "{prompt}"] },
+      },
+    });
+    expect(pools.some((p) => p.providerName === "subprocess-template")).toBeTruthy();
+    expect(pools.some((p) => p.providerName === "claude-code")).toBeTruthy();
+  });
+
+  it("host IS the primary backend (same agent): ONE pool after cross-class dedup, engine pool survives (D1)", async () => {
+    // Red on HEAD: the retired B1 guard solved this by suppressing the fold; now the
+    // fold is unconditional and the collision resolves at pool assembly — the
+    // SOURCE/engine pool survives (it carries its `source`, so the engine drives
+    // that single account) and no second codex pool double-books the meter.
+    const pools = await buildConfirmedPools({
+      sessionConfig: {
+        provider: "codex",
+        host_provider: "codex",
+        quota: {},
+        codex: { command: "codex", model: "gpt-5" },
+      },
+    });
+    const codexPools = pools.filter((p) => p.providerName === "codex");
+    expect(codexPools.length).toBe(1);
+    expect(codexPools[0].source).toBeTruthy();
+    expect(pools.some((p) => p.providerName === "claude-code")).toBeFalsy();
+  });
+
+  it("headless (hostCanDispatch:false): no host pool in the set — codex is the single driver pool", async () => {
+    // Red-green (b) at pool level: attendance is pool-set membership, not a branch.
     const pools = await buildConfirmedPools({
       sessionConfig: {
         provider: "codex",
         quota: {},
         codex: { command: "codex", model: "gpt-5" },
       },
+      hostCanDispatch: false,
     });
-    // Headless: codex IS the driver pool; no conversation-host pool, no demoted source.
     expect(pools.some((p) => p.providerName === "claude-code")).toBeFalsy();
     expect(pools.filter((p) => p.providerName === "codex").length).toBe(1);
   });

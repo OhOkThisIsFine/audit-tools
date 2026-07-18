@@ -18,7 +18,10 @@ import { resolveModelStatics } from "./modelStatics.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../tokens.js";
 import type { DispatchExclusion } from "../providers/sharedProviderConfirmation.js";
 import { hasConfiguredOpenAiCompatible } from "../providers/providerFactory.js";
-import { resolveConversationHostProvider } from "../providers/providerPathGuard.js";
+import {
+  isHeadlessPrimaryProvider,
+  isInProcessWorkerProvider,
+} from "../providers/inProcessWorkers.js";
 
 /**
  * The stable id of a dispatchable source — its explicit `id`, or the quota-ledger
@@ -364,65 +367,8 @@ export async function buildSourcePool(params: {
   };
 }
 
-/**
- * The in-process backends that can be DEMOTED to a source pool when an attended host
- * drives (defect-1): the API/CLI worker backends. Excludes `worker-command` /
- * `subprocess-template` — those are host-dispatch defaults, not standalone source
- * pools to fan out onto alongside the host.
- */
-const DEMOTABLE_IN_PROCESS_PROVIDERS: ReadonlySet<string> = new Set([
-  "openai-compatible",
-  "codex",
-  "opencode",
-]);
-
-/**
- * Whether a provider is an in-process backend that DEMOTES to a source pool when an
- * attended host drives (defect-1): the API/CLI worker backends only. Callers gate the
- * in-process-monopoly branch on this so an attended host fans out onto the backend as a
- * source (host + backend + NIM concurrent) while a non-demotable in-process provider
- * (`subprocess-template` / `worker-command`, which carry no standalone source pool)
- * keeps self-driving. Also the discriminator for demoting the host-pool identity back
- * to the conversation host when the configured primary is one of these backends.
- */
-export function isDemotableInProcessProvider(providerName: string | undefined): boolean {
-  return providerName !== undefined && DEMOTABLE_IN_PROCESS_PROVIDERS.has(providerName);
-}
-
-/**
- * Whether an attended host should DEMOTE its configured primary in-process backend
- * to a separate source pool (defect-1 concurrent fan-out). True only when the host
- * can dispatch subagents AND the primary is a demotable backend AND — the B1
- * same-agent guard — the resolved CONVERSATION HOST is a DIFFERENT provider than
- * that backend.
- *
- * The same-agent guard is load-bearing: the primary demoted source shares the
- * host's own credential (it carries no `credentials_path`), so when the host
- * provider equals the primary provider they are ONE account. Emitting both a
- * host pool AND a demoted-source pool for that one account double-books its
- * budget/concurrency and — because `dispatchableSourceId` falls through to the
- * same `buildProviderModelKey` format the host pool uses — can even collide on a
- * single pool id. In that case there is no distinct host to fan out alongside;
- * the host self-drives the backend as its single pool. Single-sourced so audit
- * and remediate apply the identical guard. [[host-provider-misattribution-nim-codex]]
- */
-export function shouldDemotePrimaryInProcess(options: {
-  sessionConfig: SessionConfig | null | undefined;
-  hostCanDispatch: boolean;
-  env?: NodeJS.ProcessEnv;
-}): boolean {
-  if (!options.hostCanDispatch) return false;
-  const provider = options.sessionConfig?.provider;
-  if (!isDemotableInProcessProvider(provider)) return false;
-  const conversationHost = resolveConversationHostProvider({
-    sessionConfig: options.sessionConfig,
-    env: options.env,
-  });
-  return conversationHost !== provider;
-}
-
 /** Build a DispatchableSource for a configured `openai_compatible` block (the legacy
- * NIM source shape), reused by both the back-compat fold and the primary demote. */
+ * NIM source shape), reused by both the back-compat fold and the primary fold. */
 function openAiCompatibleSource(
   oc: NonNullable<SessionConfig["openai_compatible"]>,
 ): DispatchableSource {
@@ -458,17 +404,21 @@ function openAiCompatibleSource(
 
 /**
  * The DispatchableSource for the primary in-process backend, built from its own config
- * block, so an attended host can fan out onto it as a source pool ALONGSIDE its own
- * subagents (defect-1: host + codex + NIM concurrent, no backend monopoly). Returns
- * null when the primary provider is not a demotable in-process backend, or its config
- * block is absent. The dispatch worker rebuilds the concrete provider from this
- * source's `{endpoint, model, parameters}` via `withSourceConfig`.
+ * block, so the primary is just a SOURCE POOL in the one eligible pool set (H2+H4
+ * collapse): an attended host fans out onto it alongside its own subagents, and a
+ * headless run's engine drives it as an ordinary member pool — there is no demote
+ * flag and no monopoly branch. Returns null when the primary provider is not a
+ * self-drivable in-process backend under the DRAW's policy (`commandWorkers` —
+ * remediate admits the command-shaped backends, audit does not), or its config block
+ * is absent where one is required. The dispatch worker rebuilds the concrete provider
+ * from this source's `{endpoint, model, parameters}` via `withSourceConfig`.
  */
 export function primaryInProcessSource(
   sessionConfig: SessionConfig,
   primaryProviderName: string,
+  options?: { commandWorkers?: boolean },
 ): DispatchableSource | null {
-  if (!DEMOTABLE_IN_PROCESS_PROVIDERS.has(primaryProviderName)) return null;
+  if (!isHeadlessPrimaryProvider(primaryProviderName, options)) return null;
   switch (primaryProviderName) {
     case "openai-compatible":
       return hasConfiguredOpenAiCompatible(sessionConfig.openai_compatible)
@@ -496,14 +446,55 @@ export function primaryInProcessSource(
         },
       };
     }
+    // D4: agy needs an EXPLICIT synthesis case (it does not "fall out" of un-gating):
+    // without one, an attended `provider: agy` run would have NO pool and — with the
+    // monopoly branch gone — no dispatch at all. Synthesized from its config block,
+    // mirroring `sourceProviderConfig`'s agy mapping (command→endpoint, model→model).
+    case "agy": {
+      const a = sessionConfig.agy ?? {};
+      return {
+        provider: "agy",
+        ...(a.command !== undefined ? { endpoint: a.command } : {}),
+        ...(a.model !== undefined ? { model: a.model } : {}),
+        parameters: {
+          ...(a.extra_args !== undefined ? { extra_args: a.extra_args } : {}),
+          ...(a.dangerously_skip_permissions !== undefined
+            ? { dangerously_skip_permissions: a.dangerously_skip_permissions }
+            : {}),
+        },
+      };
+    }
+    // D3 (command-shaped primaries — reachable only under a draw whose policy sets
+    // `commandWorkers: true`, i.e. remediate): without these an attended run whose
+    // primary is command-shaped would silently lose ALL dispatch
+    // ([[silent-fail-closed-on-one-draw]] class).
+    case "subprocess-template": {
+      const s = sessionConfig.subprocess_template;
+      // The template block is the whole launch contract — absent/empty ⇒ no pool
+      // (mirrors the unconfigured openai-compatible case).
+      if (!s || s.command_template.length === 0) return null;
+      return {
+        provider: "subprocess-template",
+        parameters: {
+          command_template: s.command_template,
+          ...(s.env !== undefined ? { env: s.env } : {}),
+        },
+      };
+    }
+    case "worker-command":
+      // No session-level config block exists for worker-command: each node carries
+      // its own `task.worker_command`, resolved at dispatch. A bare provider source
+      // is the correct pool identity.
+      return { provider: "worker-command" };
   }
   return null;
 }
 
 /**
  * Every dispatchable backend source configured for a run, in pool order: the explicit
- * `sessionConfig.sources`, optionally the DEMOTED primary in-process backend (defect-1,
- * when an attended host drives — `demotePrimaryInProcess`), plus — for back-compat — a
+ * `sessionConfig.sources`, the primary in-process backend folded in UNCONDITIONALLY
+ * (H2+H4 collapse: the primary is just a source pool — there is no demote flag; which
+ * providers fold is the draw's `commandWorkers` policy), plus — for back-compat — a
  * single implicit source folded in from a legacy `openai_compatible` block when it
  * isn't the primary provider and isn't already covered by an explicit source of the
  * same id.
@@ -511,19 +502,21 @@ export function primaryInProcessSource(
 export function collectDispatchableSources(
   sessionConfig: SessionConfig,
   primaryProviderName: string,
-  options?: { demotePrimaryInProcess?: boolean },
+  options?: { commandWorkers?: boolean },
 ): DispatchableSource[] {
   const out: DispatchableSource[] = [...(sessionConfig.sources ?? [])];
   const pushUnique = (source: DispatchableSource): void => {
     const id = dispatchableSourceId(source);
     if (!out.some((s) => dispatchableSourceId(s) === id)) out.push(source);
   };
-  // Defect-1: an attended host demotes its configured primary in-process backend to a
-  // source pool so it fans out ALONGSIDE the host's subagents rather than monopolizing
-  // the frontier. Inert (null) when the primary is the conversation host / an IDE.
-  if (options?.demotePrimaryInProcess) {
-    const demoted = primaryInProcessSource(sessionConfig, primaryProviderName);
-    if (demoted) pushUnique(demoted);
+  // The unconditional primary fold: a self-drivable in-process primary is a member
+  // pool of the ONE eligible set, whether the run is attended (host + backend + NIM
+  // fan out concurrently) or headless (the engine drives it as its pool). Inert
+  // (null) when the primary is the conversation host / an IDE, or the draw's policy
+  // excludes a command-shaped primary.
+  {
+    const primary = primaryInProcessSource(sessionConfig, primaryProviderName, options);
+    if (primary) pushUnique(primary);
   }
   if (
     primaryProviderName !== "openai-compatible" &&
@@ -545,7 +538,7 @@ export function collectDispatchableSources(
 export async function gatherDispatchableSources(
   sessionConfig: SessionConfig,
   primaryProviderName: string,
-  options?: { demotePrimaryInProcess?: boolean },
+  options?: { commandWorkers?: boolean },
 ): Promise<DispatchableSource[]> {
   return collectDispatchableSources(sessionConfig, primaryProviderName, options);
 }
@@ -562,8 +555,8 @@ export async function buildSourcePools(params: {
   primaryProviderName: string;
   quotaSource: QuotaSource;
   quotaEntries: Record<string, QuotaStateEntry>;
-  /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
-  demotePrimaryInProcess?: boolean;
+  /** The draw's fold policy: admit command-shaped primaries (remediate) or not (audit). */
+  commandWorkers?: boolean;
   /**
    * The backends the operator ruled out at Gate-0, plus any recomputed as
    * self-spawn-blocked in THIS process (`resolveDispatchExclusion`). Applied as a
@@ -584,7 +577,7 @@ export async function buildSourcePools(params: {
   excludedBackends?: DispatchExclusion;
 }): Promise<CapacityPool[]> {
   const gathered = await gatherDispatchableSources(params.sessionConfig, params.primaryProviderName, {
-    demotePrimaryInProcess: params.demotePrimaryInProcess,
+    commandWorkers: params.commandWorkers,
   });
   const excluded = params.excludedBackends;
   const sources = excluded
@@ -610,6 +603,99 @@ export async function buildSourcePools(params: {
  * derivable account (not `openai-compatible`, missing endpoint/api_key_env, or
  * an explicit `source.account` override) is returned unchanged.
  */
+/**
+ * Cross-class host-vs-source pool dedup (H2+H4 collapse, plan D1) — the ONE shared
+ * collision rule both draws apply when assembling their eligible pool set. With the
+ * primary in-process backend folded in UNCONDITIONALLY, the attended host's pool
+ * identity can collide with a folded source's `dispatchableSourceId` (the classic
+ * case: conversation host codex + `provider: codex` — one credential, one account;
+ * emitting both pools double-books that one meter and can collide on a single pool
+ * id, the retired B1 same-agent guard's bug class
+ * [[host-provider-misattribution-nim-codex]]).
+ *
+ * Collision = same provider identity on the same account axis. Provider identity is
+ * the BACKEND when the source declares one (`backend_provider` — a proxied lane onto
+ * the host's own backend is exactly the double-grant this guards; review h2c3 F5),
+ * else the pool's providerName. The account compare is DIRECTIONAL (review h2c3 F3):
+ * a source with NO declared account collides on provider alone — the synthesized
+ * primary fold shares the host credential by construction — but a source with an
+ * EXPLICIT account collides only when the host's account resolves equal; a host
+ * whose account is merely unresolved (dark credential) must never lose its lane to
+ * a source declared on a DIFFERENT account. Deliberately NOT model-granular: the
+ * double-grant boundary this protects is `(provider, account)`, not the model axis.
+ *
+ * Survivor rule (D1): on collision the SOURCE/engine pool survives when its provider
+ * is an in-process worker — the engine drives that one account and the host has no
+ * separate pool to double-book (preserving self-drive for attended
+ * provider=codex=host); the HOST pool survives otherwise (a host-shaped identity is
+ * not an engine-drivable source).
+ *
+ * `hostProviderName` serves the draw whose host is NOT a member pool (audit, plan
+ * D6: the host is the coverage-driven complement): with no host pools to drop, the
+ * rule degenerates to dropping a colliding non-in-process source.
+ */
+export function dedupHostAndSourcePools(params: {
+  hostPools: CapacityPool[];
+  sourcePools: CapacityPool[];
+  /** Attended host identity for a draw whose host is not a member pool (audit). */
+  hostProviderName?: ResolvedProviderName | null;
+  /**
+   * The DRAW's worker policy for the D1 survivor rule (remediate admits
+   * command-shaped workers; audit does not) — a command-shaped source can only
+   * survive a collision on a draw whose engine can actually drive it.
+   */
+  commandWorkers?: boolean;
+}): { hostPools: CapacityPool[]; sourcePools: CapacityPool[] } {
+  const identityOf = (pool: CapacityPool): { provider: string; account: string | null } => {
+    const parsed = parseProviderModelKey(pool.id);
+    // Backend outranks transport (h2c3 F5): a proxied lane's double-grant axis is
+    // its backend, the same axis `dispatchableSourceId` keys such pools on. A
+    // source with an explicit non-provider-shaped `id` parses to an arbitrary
+    // head; providerName is the fallback routing identity.
+    return { provider: pool.source?.backend_provider ?? pool.providerName, account: parsed.account };
+  };
+  const hostIdentities: Array<{ provider: string; account: string | null }> =
+    params.hostPools.length > 0
+      ? params.hostPools.map(identityOf)
+      : params.hostProviderName
+        ? [{ provider: params.hostProviderName, account: null }]
+        : [];
+  if (hostIdentities.length === 0) {
+    return { hostPools: params.hostPools, sourcePools: params.sourcePools };
+  }
+  // Directional account compare (h2c3 F3): an accountless SOURCE shares the host
+  // credential by construction (the synthesized primary fold) → provider-only
+  // collide; an explicitly-accounted source collides only on a RESOLVED equal
+  // host account — an unresolved host account is never surrendered to it.
+  const collide = (
+    host: { provider: string; account: string | null },
+    source: { provider: string; account: string | null },
+  ): boolean =>
+    host.provider === source.provider &&
+    (source.account === null ? true : host.account === source.account);
+
+  const survivingSourceIdentities: Array<{ provider: string; account: string | null }> = [];
+  const sourcePools = params.sourcePools.filter((source) => {
+    const id = identityOf(source);
+    if (!hostIdentities.some((host) => collide(host, id))) return true;
+    if (
+      isInProcessWorkerProvider(source.providerName, {
+        commandWorkers: params.commandWorkers === true,
+      })
+    ) {
+      // D1: the engine pool survives; the colliding host pool(s) drop below.
+      survivingSourceIdentities.push(id);
+      return true;
+    }
+    // Host survives; the colliding non-in-process source drops.
+    return false;
+  });
+  const hostPools = params.hostPools.filter(
+    (pool) => !survivingSourceIdentities.some((id) => collide(identityOf(pool), id)),
+  );
+  return { hostPools, sourcePools };
+}
+
 function foldAccountCooldownAcrossPools(pools: CapacityPool[]): CapacityPool[] {
   return pools.map((pool) => {
     const accountId = pool.source ? deriveLocalAccountId(pool.source) : null;

@@ -165,24 +165,26 @@ ordering matters).
   is not "persist to the run" (which froze auditor A onto B) — the descriptor
   rides the conversation that owns it.
 - `sessionConfig.provider` is demoted to the headless in-process pool only.
-- **Attended host demotes a configured backend to a source; only headless self-drives.**
-  When an attended conversation host drives (`host_can_dispatch_subagents` — the
-  conversation-first default is *true*), a configured in-process backend
-  (codex/opencode/openai-compatible) is DEMOTED to a *source pool* so the host fans out
-  onto it ALONGSIDE its own subagents (host + backend + NIM concurrent), never letting the
-  backend monopolize the frontier. The in-process whole-frontier driver fires ONLY when the
-  run is headless (`host_can_dispatch_subagents:false` — no attended dispatcher). The
-  discriminator is the existing `host_can_dispatch_subagents` boolean, not a new
-  driver-identity field — driver identity for quota already rides the
-  `AuditorDescriptor` (above). The host-pool identity is decoupled from the demoted
-  source: the host pool keys to the conversation host (claude-code) while the backend's own
-  source pool keys to the backend. The demotion itself is additionally gated by a same-agent
-  guard (`shouldDemotePrimaryInProcess`): when the resolved conversation-host provider equals
-  the configured primary backend, they are one credential/account — demoting would
-  double-book that account's budget and could even collide on the same `pool_id`. In that
-  case demotion is skipped entirely and the host self-drives the backend as its single pool;
-  only when the two providers differ does demotion produce two genuinely distinct,
-  non-aliasing pools.
+- **ONE fan-out over the eligible pool set; the primary backend is always a source
+  pool.** A configured in-process backend (codex/opencode/openai-compatible/agy — plus
+  the command-shaped backends under remediate's policy) is folded into the source-pool
+  set UNCONDITIONALLY (`primaryInProcessSource` via `collectDispatchableSources` —
+  there is no demote flag and no monopoly branch). The attended/headless split is
+  pool-set membership, not a predicate pair: attended
+  (`host_can_dispatch_subagents:true` — the conversation-first default) means the
+  conversation host participates (remediate: as a member pool; audit: as the
+  coverage-driven complement reviewer, never a coordinator claimant) and the frontier
+  fans across host + backend + NIM concurrently; headless means no attended host in
+  the set, so the engine drives the whole frontier — the same fan-out, degenerate
+  case. The host-pool identity is decoupled from the folded source: the host keys to
+  the conversation host (`resolveHostDispatchProviderName`, single-sourced in shared)
+  while the backend's own source pool keys to the backend. Same-agent collision
+  (conversation host provider equals the primary backend — one credential/account,
+  where two pools would double-book the meter and could collide on one `pool_id`) is
+  resolved by the shared cross-class dedup (`dedupHostAndSourcePools`): on a
+  provider+account identity collision the SOURCE/engine pool survives when its
+  provider is an in-process worker (the engine drives that single account), and the
+  HOST pool survives otherwise.
 
 ## Where the pieces live
 

@@ -21,9 +21,9 @@ import type { DispatchModelTier } from "audit-tools/shared";
 import {
   buildHostPoolPreamble,
   buildSourcePools,
+  dedupHostAndSourcePools,
   resolveHostProviderName,
-  resolveConversationHostProvider,
-  isDemotableInProcessProvider,
+  resolveHostDispatchProviderName,
 } from "audit-tools/shared";
 import type { HostSessionQuotaSource } from "audit-tools/shared";
 import {
@@ -199,24 +199,27 @@ export async function buildConfirmedPools(input: {
    * Omit on the proactive-sizing-only paths; one is constructed internally.
    */
   hostSession?: HostSessionQuotaSource;
-  /** Defect-1: demote the primary in-process backend to a source when an attended host drives. */
-  demotePrimaryInProcess?: boolean;
+  /**
+   * Whether the conversation host is an attended dispatcher (H2+H4 collapse): true
+   * (the default) includes the host-model pools as members of the eligible set;
+   * false (a headless run) builds the SOURCE pools only — "no attended host" is
+   * pool-set membership, not a branch flag.
+   */
+  hostCanDispatch?: boolean;
   /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
   excludedBackends?: DispatchExclusion;
 }): Promise<CapacityPool[]> {
-  // Defect-1: the ACTUAL configured backend (used to build the demoted source pool) vs
-  // the HOST-pool identity. When an attended host demotes a headless backend to a source
-  // (codex/opencode/openai-compatible), the host pool must key to the CONVERSATION HOST,
-  // not the backend — otherwise the host fan-out is charged against the backend's meter
-  // AND collides with the demoted source pool ([[capability-is-per-auditor-not-per-audit]]).
-  // B1: the conversation host is auto-detected (codex when inside a Codex session, else
-  // claude-code; --host-provider / host_provider overrides), NOT the literal claude-code.
+  // The ACTUAL configured backend (the primary the fold synthesizes a source for) vs
+  // the HOST-pool identity. When the primary is a headless in-process backend it is a
+  // WORKER, never the driver: the host pools key to the CONVERSATION HOST (D5,
+  // shared `resolveHostDispatchProviderName`, remediate policy `commandWorkers`) —
+  // otherwise the host fan-out is charged against the backend's meter
+  // ([[capability-is-per-auditor-not-per-audit]]).
   const actualProviderName = resolveHostProviderName(input.sessionConfig);
-  const demoteHostIdentity =
-    input.demotePrimaryInProcess === true && isDemotableInProcessProvider(actualProviderName);
-  const hostProviderName: ResolvedProviderName = demoteHostIdentity
-    ? resolveConversationHostProvider({ sessionConfig: input.sessionConfig })
-    : actualProviderName;
+  const hostProviderName: ResolvedProviderName = resolveHostDispatchProviderName(
+    input.sessionConfig,
+    { commandWorkers: true },
+  );
 
   // Resolve identity/limits and build the per-rank host-model pools via the SAME
   // shared assembly core `scheduleWave` uses — and that audit uses.
@@ -238,19 +241,29 @@ export async function buildConfirmedPools(input: {
   // proactive cross-pool spill (INV-QD-14) and the A-8 coordinator can route work to
   // them. Single-sourced in shared (`buildSourcePools`) so audit and remediate surface
   // the IDENTICAL pool shapes — the spill topology can't drift. `primaryProviderName`
-  // is the ACTUAL configured backend (not the demoted host identity) so the demoted
-  // source is built for the real provider.
+  // is the ACTUAL configured backend so the unconditional primary fold builds the
+  // source for the real provider; remediate's draw admits command-shaped primaries.
   const sourcePools = await buildSourcePools({
     sessionConfig,
     primaryProviderName: actualProviderName,
     quotaSource,
     quotaEntries,
-    demotePrimaryInProcess: input.demotePrimaryInProcess,
+    commandWorkers: true,
     excludedBackends: input.excludedBackends,
   });
-  primaryPools.push(...sourcePools);
 
-  return primaryPools;
+  // Headless: no host pool in the eligible set — the engine drives the source pools.
+  if (input.hostCanDispatch === false) return sourcePools;
+
+  // D1 cross-class dedup: a folded source colliding with the host's pool identity
+  // (same provider+account — attended provider=codex=host) keeps exactly ONE pool.
+  const dedup = dedupHostAndSourcePools({
+    hostPools: primaryPools,
+    sourcePools,
+    // Remediate policy: command-shaped workers are engine-drivable here (H3).
+    commandWorkers: true,
+  });
+  return [...dedup.hostPools, ...dedup.sourcePools];
 }
 
 export async function buildDispatchQuota(

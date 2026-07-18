@@ -24,10 +24,12 @@ import {
   isInProcessWorkerProvider,
   buildSourcePools,
   buildQuotaSource,
+  dedupHostAndSourcePools,
   readQuotaStateOrDegrade,
   type CapacityPool,
   type DispatchExclusion,
   type QuotaStateEntry,
+  type ResolvedProviderName,
   type SessionConfig,
 } from "audit-tools/shared";
 
@@ -52,9 +54,16 @@ export function isInProcessAuditPool(pool: { providerName: string }): boolean {
 export async function buildAuditSourcePools(
   sessionConfig: SessionConfig,
   options?: {
-    demotePrimaryInProcess?: boolean;
     /** Operator-excluded + locally-self-spawn-blocked backends (`resolveDispatchExclusion`). */
     excludedBackends?: DispatchExclusion;
+    /**
+     * The attended conversation host's identity (D1 cross-class dedup): audit's host
+     * is never a member pool (plan D6 — it reviews the coverage-driven complement),
+     * so the shared collision rule degenerates here to dropping a colliding
+     * NON-in-process source; a colliding in-process source survives (the engine
+     * drives that one account). Omit on a headless run (no host identity).
+     */
+    attendedHostProviderName?: ResolvedProviderName | null;
   },
 ): Promise<CapacityPool[]> {
   const primaryProviderName =
@@ -63,17 +72,21 @@ export async function buildAuditSourcePools(
     await readQuotaStateOrDegrade("audit source-pool build")
   ).entries;
   const quotaSource = buildQuotaSource();
-  return buildSourcePools({
+  // H2+H4 collapse: the configured primary in-process backend is ALWAYS folded in as
+  // a source pool (no demote flag) — audit's draw policy admits only the non-command
+  // in-process workers (a read-only review packet carries no per-worker command).
+  const sourcePools = await buildSourcePools({
     sessionConfig,
     primaryProviderName,
     quotaSource,
     quotaEntries,
-    // Defect-1: when an attended host drives, demote the configured primary in-process
-    // backend (codex/opencode/openai-compatible) to a source pool so the host fans out
-    // onto it alongside its own subagents instead of the backend monopolizing.
-    demotePrimaryInProcess: options?.demotePrimaryInProcess,
     excludedBackends: options?.excludedBackends,
   });
+  return dedupHostAndSourcePools({
+    hostPools: [],
+    sourcePools,
+    hostProviderName: options?.attendedHostProviderName ?? null,
+  }).sourcePools;
 }
 
 /**

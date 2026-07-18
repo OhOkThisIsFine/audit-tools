@@ -17,7 +17,6 @@ const {
   dispatchableSourceId,
   collectDispatchableSources,
   primaryInProcessSource,
-  isDemotableInProcessProvider,
   sourceByPoolId,
   buildSourcePool,
   buildHostModelPools,
@@ -169,8 +168,15 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
   expect(got.some((s) => s.provider === "codex")).toBeTruthy();
   expect(got.some((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1")).toBeTruthy();
 
-  // When openai-compatible IS the primary, it is the primary worker, not a spill source.
-  expect(collectDispatchableSources({ openai_compatible: { base_url: "x", model: "m" } }, "openai-compatible")).toEqual([]);
+  // When openai-compatible IS the primary, the unconditional primary fold (H2+H4
+  // collapse) carries it as a source pool — the primary is just a source now.
+  const primaryFold = collectDispatchableSources(
+    { openai_compatible: { base_url: "x", model: "m" } },
+    "openai-compatible",
+  );
+  expect(primaryFold.length).toBe(1);
+  expect(primaryFold[0].provider).toBe("openai-compatible");
+  expect(primaryFold[0].endpoint).toBe("x");
 
   // Two explicit NIM endpoints → two sources (distinct), no special-casing.
   const two = collectDispatchableSources(
@@ -248,18 +254,7 @@ test("3c: a source WITHOUT backend_provider keeps the existing id/provider keyin
   );
 });
 
-// ── Defect-1: demote the primary in-process backend to a source (attended host) ──
-
-test("isDemotableInProcessProvider: only the API/CLI worker backends demote", () => {
-  expect(isDemotableInProcessProvider("codex")).toBeTruthy();
-  expect(isDemotableInProcessProvider("opencode")).toBeTruthy();
-  expect(isDemotableInProcessProvider("openai-compatible")).toBeTruthy();
-  // Not demotable: the conversation host, IDE backends, host-dispatch defaults.
-  expect(isDemotableInProcessProvider("claude-code")).toBeFalsy();
-  expect(isDemotableInProcessProvider("worker-command")).toBeFalsy();
-  expect(isDemotableInProcessProvider("subprocess-template")).toBeFalsy();
-  expect(isDemotableInProcessProvider(undefined)).toBeFalsy();
-});
+// ── H2+H4 collapse: the primary in-process backend ALWAYS folds in as a source ──
 
 test("primaryInProcessSource builds a source from the primary backend's own config block", () => {
   const codex = primaryInProcessSource(
@@ -278,25 +273,67 @@ test("primaryInProcessSource builds a source from the primary backend's own conf
   expect(oc.provider).toBe("openai-compatible");
   expect(oc.endpoint).toBe("http://nim/v1");
 
-  // Non-demotable primaries → null (nothing to demote).
+  // Host-shaped primaries → null (the conversation host / IDE is never a source).
   expect(primaryInProcessSource({}, "claude-code")).toBeNull();
+  expect(primaryInProcessSource({}, "vscode-task")).toBeNull();
   // openai-compatible named but not configured → null.
   expect(primaryInProcessSource({}, "openai-compatible")).toBeNull();
 });
 
-test("collectDispatchableSources: demotePrimaryInProcess adds the codex primary as a source", () => {
+test("primaryInProcessSource: agy synthesizes from its config block (D4 — no silent fail-closed)", () => {
+  const agy = primaryInProcessSource(
+    {
+      agy: {
+        command: "agy",
+        model: "gemini-3-pro",
+        extra_args: ["--foo"],
+        dangerously_skip_permissions: true,
+      },
+    },
+    "agy",
+  );
+  expect(agy.provider).toBe("agy");
+  expect(agy.endpoint).toBe("agy");
+  expect(agy.model).toBe("gemini-3-pro");
+  expect(agy.parameters.extra_args).toEqual(["--foo"]);
+  expect(agy.parameters.dangerously_skip_permissions).toBe(true);
+  // An EMPTY agy block still folds (the CLI has PATH defaults, like codex).
+  expect(primaryInProcessSource({}, "agy").provider).toBe("agy");
+});
+
+test("primaryInProcessSource: command-shaped primaries fold ONLY under commandWorkers policy (D3)", () => {
+  const cfg = {
+    subprocess_template: { command_template: ["run", "{prompt}"], env: { A: "1" } },
+  };
+  // Audit policy (default, no command workers): no fold.
+  expect(primaryInProcessSource(cfg, "subprocess-template")).toBeNull();
+  expect(primaryInProcessSource({}, "worker-command")).toBeNull();
+  // Remediate policy (commandWorkers): subprocess-template from its block …
+  const sub = primaryInProcessSource(cfg, "subprocess-template", { commandWorkers: true });
+  expect(sub.provider).toBe("subprocess-template");
+  expect(sub.parameters.command_template).toEqual(["run", "{prompt}"]);
+  expect(sub.parameters.env).toEqual({ A: "1" });
+  // … but an absent/empty template block is no pool (nothing to launch).
+  expect(primaryInProcessSource({}, "subprocess-template", { commandWorkers: true })).toBeNull();
+  // worker-command has NO session-level block: a bare provider source (the command
+  // is per-node on the task, resolved at dispatch).
+  expect(
+    primaryInProcessSource({}, "worker-command", { commandWorkers: true }),
+  ).toEqual({ provider: "worker-command" });
+});
+
+test("collectDispatchableSources: the codex primary ALWAYS folds in as a source (no flag)", () => {
   const cfg = { codex: { command: "codex", model: "gpt-5" } };
-  // Default (headless): codex is the in-process worker, NOT a source.
-  expect(collectDispatchableSources(cfg, "codex")).toEqual([]);
-  // Attended: codex is demoted to a source pool so the host fans out onto it.
-  const demoted = collectDispatchableSources(cfg, "codex", { demotePrimaryInProcess: true });
-  expect(demoted.length).toBe(1);
-  expect(demoted[0].provider).toBe("codex");
+  // Headless and attended alike: the primary is a member source pool of the ONE
+  // eligible set (the demote flag is retired — H4).
+  const folded = collectDispatchableSources(cfg, "codex");
+  expect(folded.length).toBe(1);
+  expect(folded[0].provider).toBe("codex");
 });
 
 // ── C1: legacy openai_compatible block's quota converges onto the source pool ──
 
-test("C1: a legacy openai_compatible.quota converges onto the folded source (fold + demote)", () => {
+test("C1: a legacy openai_compatible.quota converges onto the folded source (legacy fold + primary fold)", () => {
   const quota = { context_tokens: 128_000, output_tokens: 8_000, max_concurrent: 6 };
   // Fold-in path (openai-compatible is NOT the primary).
   const folded = collectDispatchableSources(
@@ -307,12 +344,12 @@ test("C1: a legacy openai_compatible.quota converges onto the folded source (fol
   expect(folded[0].provider).toBe("openai-compatible");
   expect(folded[0].quota).toEqual(quota);
 
-  // Primary-demote path (openai-compatible IS the primary, attended host).
-  const demoted = primaryInProcessSource(
+  // Primary-fold path (openai-compatible IS the primary).
+  const primary = primaryInProcessSource(
     { openai_compatible: { base_url: "http://nim/v1", model: "m", quota } },
     "openai-compatible",
   );
-  expect(demoted.quota).toEqual(quota);
+  expect(primary.quota).toEqual(quota);
 
   // Absent quota stays undefined → the source falls to the conservative floor,
   // exactly as before C1 (no regression for unconfigured operators).
@@ -345,26 +382,24 @@ test("C1: a legacy-derived source's quota reaches discoveredLimits + concurrency
   expect(floorPool.discoveredLimits).toBe(null);
 });
 
-test("collectDispatchableSources: attended openai-compatible primary demotes alongside a second NIM source", () => {
+test("collectDispatchableSources: openai-compatible primary folds alongside a second explicit source", () => {
   const cfg = {
     sources: [{ provider: "codex", endpoint: "codex" }],
     openai_compatible: { base_url: "http://nim/v1", model: "m" },
   };
-  const demoted = collectDispatchableSources(cfg, "openai-compatible", {
-    demotePrimaryInProcess: true,
-  });
-  // The explicit codex source + the demoted openai-compatible primary, deduped once.
-  expect(demoted.some((s) => s.provider === "codex")).toBeTruthy();
+  const got = collectDispatchableSources(cfg, "openai-compatible");
+  // The explicit codex source + the folded openai-compatible primary, deduped once.
+  expect(got.some((s) => s.provider === "codex")).toBeTruthy();
   expect(
-    demoted.filter((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1").length,
+    got.filter((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1").length,
   ).toBe(1);
 });
 
-test("collectDispatchableSources: demote is a no-op for a non-demotable primary (claude-code)", () => {
+test("collectDispatchableSources: the fold is a no-op for a host-shaped primary (claude-code)", () => {
   const cfg = { openai_compatible: { base_url: "http://nim/v1", model: "m" } };
-  // claude-code host + NIM source: demote adds nothing new; the legacy fold already
-  // carries the NIM source (one, not duplicated).
-  const got = collectDispatchableSources(cfg, "claude-code", { demotePrimaryInProcess: true });
+  // claude-code host + NIM source: the primary fold adds nothing; the legacy fold
+  // already carries the NIM source (one, not duplicated).
+  const got = collectDispatchableSources(cfg, "claude-code");
   expect(got.filter((s) => s.provider === "openai-compatible").length).toBe(1);
 });
 

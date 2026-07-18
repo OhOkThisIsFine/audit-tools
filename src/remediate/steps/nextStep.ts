@@ -10,7 +10,7 @@ import type {
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
-import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, type HybridSpillCoordinator, type NodeAssignment, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, isHeadlessPrimaryProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveConversationHostProvider, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, shouldDemotePrimaryInProcess, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
+import { readConfirmedDispatchPolicy, resolveDispatchExclusion, readOptionalJsonFile, readValidatedRepoSessionIntent, stagedAndUntracked, writeJsonFile, writeTextFile, buildAuditDeliverablePair, formatValidationIssues, isRecord, withFsRetry, RunLogger, DISPATCH_PROMPT_HANDOFF_NOTE, renderHostScratchNote, hostScratchDir, renderQuotaCoverageNudge, renderTokenBudgetView, coerceJsonObjectArg, driveRolling, resolveLedgerBudgets, setQuotaStateDir, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, buildQuotaPausedTerminal, interpretFreeFormIntent, advance, decideFrictionTriage, buildFrictionTriageBlock, type FrictionTriageDecision, type ObligationDef, type ObligationOutcome, type InterpretedIntent, type SessionConfig, type HostModelRosterEntry, type CapacityPool, type PartialCompletionTerminal, type RollingDispatchResult, type ProviderSlot, type FrontierNode, planHybridDispatch, readSettledPools, addSettledPool, isPoolSettlingOutcome, isInProcessWorkerProvider, sourceByPoolId, classifyProvider, selectDispatchDriver, renderDispatchDriverInstruction, HostSessionQuotaSource, buildProviderModelKey, captureStepBoundaryFriction, captureCostDriftFriction, captureCreditExhaustionFriction, captureQuotaUnclassifiedFriction, captureModelUnavailableFriction, capturePacketTooLargeFriction, LENSES, SEVERITIES, resolveHostProviderName, resolveHostDispatchProviderName, resolveHostDispatchCapability as sharedResolveHostDispatchCapability, resolveAutonomousMode, resolveRollingEngineFlag, DEFAULT_CONTEXT_TOKENS, type ResolvedProviderName, type ProviderName, type DispatchableSource, type QuotaBindingWindow, type DispatchModelTier } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { readRemediationAccessMemory, computeBlockContinuityScores } from "../state/accessMemory.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -25,9 +25,7 @@ import {
   buildConfirmedPools,
   executeNodeInWorktree,
   blockScopesFromPlan,
-  declaredPathsFromPlan,
   targetedCommandsForBlock,
-  type WorktreeNodeWorker,
 } from "./dispatch.js";
 import { makeProviderNodeDispatcher } from "./providerNodeDispatch.js";
 import { prepareHostRollingDispatch, nodeClaimRegistry, nodeSettledPoolsPath } from "./rollingSession.js";
@@ -984,6 +982,35 @@ export interface DriveRollingImplementDispatchOptions {
    * `poolsOverride`) instead of deriving `buildConfirmedPools` here.
    */
   poolsOverride?: CapacityPool[];
+  /**
+   * Reuse the caller's already-prepared dispatch plan instead of re-preparing here
+   * (H2 collapse — the "cleaner shape" the plan invited over a documented
+   * double-prepare). The hybrid decision point prepares ONCE (worktree-rooted
+   * prompts, host-grant admission + leases) so the coordinator split, this
+   * partition drive, and the host hand-off all read the SAME plan; an internal
+   * re-prepare here would additionally CLOBBER the host-share dispatch-quota file
+   * with this engine path's `grantLeases:false` variant, which
+   * `prepareHostRollingDispatch` then reads for the host grant. Only meaningful
+   * together with `blocksOverride` (a partition-scoped drive).
+   *
+   * Documented lease overlap: the caller's grant leased the whole granted set (the
+   * host reserve-before-dispatch contract) and the engine ALSO admits + leases
+   * per-packet for the partition it drives — a transient conservative over-count,
+   * reconciled at merge (review h2c2: prepare reconciles complete results; the
+   * merge has a supplementary sweep).
+   */
+  planOverride?: RemediationDispatchPlan;
+  /**
+   * Coordinator-held claims to ADOPT (block id → owner token). The hybrid caller's
+   * coordinator already claimed its in-process partition through the SAME
+   * `nodeClaimRegistry` this driver claims through, so self-claiming here would
+   * self-collide and skip every node as peer-owned. Adopted tokens feed the
+   * merge-time ownership gate and are released on terminal accepts exactly like
+   * self-claimed ones (token-checked, so the caller's post-drive coordinator
+   * release of an already-released node is a no-op). Mirrors
+   * `prepareHostRollingDispatch`'s pre-claimed host-partition hand-off.
+   */
+  claimOwnerTokens?: ReadonlyMap<string, string>;
 }
 
 export interface DriveRollingImplementDispatchResult {
@@ -1016,19 +1043,6 @@ export interface DriveRollingImplementDispatchResult {
    * run-level lifecycle.
    */
   terminal?: PartialCompletionTerminal;
-}
-
-/**
- * Whether session config names an EXPLICIT backend the orchestrator self-drives as
- * the per-node implement worker — the shared `isHeadlessPrimaryProvider` predicate
- * (H3), remediate policy: command-shaped primaries allowed (implement nodes carry
- * per-node worker commands). The conversation host (claude-code) and IDE-bound
- * providers stay excluded; "auto" stays on the conversation host-subagent default.
- */
-function resolvesToInProcessDispatchProvider(
-  sessionConfig: SessionConfig | null | undefined,
-): boolean {
-  return isHeadlessPrimaryProvider(sessionConfig?.provider, { commandWorkers: true });
 }
 
 /**
@@ -1077,26 +1091,29 @@ export async function driveRollingImplementDispatch(
 
   // Prepare the dispatch plan (eligible verified-complete frontier) with the SAME
   // quota-derived sizing the wave path uses. This writes per-node prompts +
-  // dispatch-plan.json + dispatch-quota.json.
-  const plan = await prepareImplementDispatch(
-    { root, artifactsDir },
-    runId,
-    undefined,
-    {
-      hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
-      sessionConfig: options.sessionConfig,
-      hostContextTokens: options.waveOptions?.hostContextTokens,
-      hostOutputTokens: options.waveOptions?.hostOutputTokens,
-      hostModels: options.waveOptions?.hostModels,
-      hostModelId: options.waveOptions?.hostModelId,
-      // Each node runs in its own worktree, so its prompt is rooted there.
-      worktreeRootedPrompts: true,
-      // The in-process rolling engine admits + leases per-packet itself, so the
-      // dispatch-quota grant here must NOT lease (a host grant lease would
-      // double-count the same work against the shared account budget).
-      grantLeases: false,
-    },
-  );
+  // dispatch-plan.json + dispatch-quota.json. A partition-scoped hybrid caller
+  // supplies its already-prepared plan instead (planOverride — see its docblock).
+  const plan =
+    options.planOverride ??
+    (await prepareImplementDispatch(
+      { root, artifactsDir },
+      runId,
+      undefined,
+      {
+        hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
+        sessionConfig: options.sessionConfig,
+        hostContextTokens: options.waveOptions?.hostContextTokens,
+        hostOutputTokens: options.waveOptions?.hostOutputTokens,
+        hostModels: options.waveOptions?.hostModels,
+        hostModelId: options.waveOptions?.hostModelId,
+        // Each node runs in its own worktree, so its prompt is rooted there.
+        worktreeRootedPrompts: true,
+        // The in-process rolling engine admits + leases per-packet itself, so the
+        // dispatch-quota grant here must NOT lease (a host grant lease would
+        // double-count the same work against the shared account budget).
+        grantLeases: false,
+      },
+    ));
   if (plan.items.length === 0) {
     return null;
   }
@@ -1241,7 +1258,9 @@ export async function driveRollingImplementDispatch(
   // life of this run: a `rate_limited` re-queue re-enters for the same block, so a
   // node already claimed by THIS driver reuses its token rather than self-colliding.
   const registry = nodeClaimRegistry(artifactsDir, runId);
-  const claimTokens = new Map<string, string>();
+  // Seeded with any coordinator-held claims the caller hands off (hybrid partition
+  // drive) — an adopted node skips self-claiming and releases with the adopted token.
+  const claimTokens = new Map<string, string>(options.claimOwnerTokens ?? []);
 
   // Per-node worktree dispatch + verify-before-accept, wrapped so the rolling
   // engine's dispatchNode callback always RESOLVES (never rejects).
@@ -1421,139 +1440,6 @@ export async function driveRollingImplementDispatch(
  */
 const HYBRID_NODE_TOKEN_ESTIMATE = 2000;
 
-/** Outcome of running the coordinator's in-process partition this cycle. */
-export interface InProcessPartitionResult {
-  nodes: Array<{
-    block_id: string;
-    outcome: RollingDispatchResult<{ block_id: string }>["outcome"];
-    verify_passed: boolean;
-    merged: boolean;
-  }>;
-}
-
-/**
- * Run the A-8 coordinator's IN-PROCESS partition this cycle. Each node was already
- * claimed by the coordinator and assigned to a backend pool (NIM / codex / …), so it
- * is launched on THAT pool's provider — binding the slot's providerName to the
- * per-node assignment is what routes a node to its assigned backend — cwd-confined to
- * its worktree, through the shared `executeNodeInWorktree` lifecycle (commit → verify
- * → write-scope → merge); then the coordinator's claim is released.
- *
- * Nodes run concurrently: the coordinator's proactive split already bounded the
- * partition to the backend pools' capacity, so the partition size IS the safe
- * concurrency. The host partition runs in parallel via the host-subagent driver;
- * both write accept-outcome sidecars the run-level `mergeImplementResults` reconciles.
- *
- * Run-once (no in-pass re-queue): a node whose worker rate-limits or errors is not
- * merged (its worktree drops) and is routed to triage by the deterministic merge —
- * bounded, never a livelock. (Cross-cycle settled-pool re-balancing is a follow-up.)
- */
-export async function executeInProcessPartition(params: {
-  root: string;
-  artifactsDir: string;
-  runId: string;
-  sessionConfig: SessionConfig | null;
-  partition: NodeAssignment[];
-  plan: RemediationDispatchPlan;
-  coordinator: HybridSpillCoordinator;
-  /**
-   * Merge-time ownership gate (OD3 layer 2, D-66/67 slice-1): the SAME registry
-   * instance `coordinator` claimed `partition` through (the caller constructs
-   * BOTH from one `nodeClaimRegistry(artifactsDir, runId)`, never re-derived here
-   * by path — the coordinator's own `claimRegistry` field is private, so an
-   * independently-reconstructed registry could silently target a different file
-   * than the one that actually holds the claims). Threaded into each node's
-   * {@link AcceptNodeWorktreeParams.ownership} with that node's `ownerToken`.
-   * OMITTED (test callers claiming through an ad-hoc registry path) ⇒ no gate.
-   */
-  registry?: ClaimRegistry;
-  /**
-   * Injectable per-node worker (tests). Defaults to the live provider-backed
-   * dispatcher, which resolves each node's provider from its slot so the
-   * coordinator's per-node pool assignment routes it (cross-provider dispatch).
-   */
-  dispatchNode?: WorktreeNodeWorker;
-  /**
-   * Per-pool dispatchable source (A-8 generic sources), keyed by pool id. Lets a node
-   * launch FROM its source's own `{endpoint, model, parameters}` (so two sources of the
-   * same provider — e.g. two NIM endpoints — dispatch distinctly). Built from the
-   * confirmed pools by the caller; absent → the global per-provider config block.
-   */
-  sourceByPoolId?: Map<string, DispatchableSource>;
-}): Promise<InProcessPartitionResult> {
-  const { root, artifactsDir, runId, sessionConfig, partition, plan, coordinator, registry } = params;
-  if (partition.length === 0) return { nodes: [] };
-
-  const allBlockScopes = blockScopesFromPlan(plan);
-  const withBlockId = plan.items.filter(
-    (i): i is typeof i & { block_id: string } => typeof i.block_id === "string",
-  );
-  const promptPathByBlock = new Map(withBlockId.map((i) => [i.block_id, i.prompt_path]));
-  const referencedFilesByBlock = new Map(
-    withBlockId.map((i) => [i.block_id, i.access?.read_paths ?? []]),
-  );
-  const resultPathByBlock = new Map(withBlockId.map((i) => [i.block_id, i.result_path]));
-  const state = await new StateStore(artifactsDir).loadState();
-  const blockById = new Map<string, RemediationBlock>(
-    (state?.plan?.blocks ?? []).map((b) => [b.block_id, b]),
-  );
-
-  const dispatchNode =
-    params.dispatchNode ??
-    makeProviderNodeDispatcher({
-      root,
-      artifactsDir,
-      runId,
-      sessionConfig,
-      promptPathByBlock,
-      referencedFilesByBlock,
-      sourceByPoolId: params.sourceByPoolId,
-    });
-
-  const nodes = await Promise.all(
-    partition.map(async (a) => {
-      // `a` IS the coordinator's NodeAssignment — release it directly on terminal.
-      const resultPath = resultPathByBlock.get(a.nodeId);
-      if (!resultPath) {
-        // No prepared prompt/result for this node — release + mark error (the merge
-        // routes it to triage); never silently drop a claimed node.
-        await coordinator.release(a);
-        return { block_id: a.nodeId, outcome: "error" as const, verify_passed: false, merged: false };
-      }
-      const block = blockById.get(a.nodeId) ?? ({ block_id: a.nodeId } as RemediationBlock);
-      const slot: ProviderSlot = {
-        providerName: a.providerName,
-        hostModel: a.hostModel,
-        poolId: a.poolId,
-      };
-      const { accept } = await executeNodeInWorktree({
-        block,
-        slot,
-        root,
-        artifactsDir,
-        runId,
-        resultPath,
-        seedPaths: declaredPathsFromPlan(plan, a.nodeId),
-        allBlockScopes,
-        additionalVerifyCommands: state ? targetedCommandsForBlock(state, a.nodeId) : [],
-        dispatchNode,
-        // Merge-time ownership gate (OD3 layer 2): the SAME lease the coordinator
-        // claimed `a` under. Omitted when the caller didn't supply a registry.
-        ...(registry ? { ownership: { registry, nodeId: a.nodeId, ownerToken: a.ownerToken } } : {}),
-      });
-      // Run-once → terminal; free the coordinator claim (token-checked).
-      await coordinator.release(a);
-      return {
-        block_id: a.nodeId,
-        outcome: accept.outcome,
-        verify_passed: accept.verifyPassed,
-        merged: accept.merged,
-      };
-    }),
-  );
-
-  return { nodes };
-}
 
 // ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10) + coarse re-block (INV-RS-09)
@@ -1961,83 +1847,23 @@ async function buildImplementDispatchStep(ctx: {
       hostModelId: resolvedHostModelId,
     };
 
-    // A8 in-process provider driver: when the rolling engine is enabled, the run is
-    // HEADLESS (no attended host that can dispatch subagents), AND the operator
-    // EXPLICITLY configured a programmatic backend provider (openai-compatible / codex /
-    // opencode / …), the orchestrator drives the FULL rolling implement dispatch ITSELF —
-    // the configured provider is the per-node worker, cwd-confined to each node's
-    // worktree, sharing the same `acceptNodeWorktree` core (commit → verify → merge,
-    // verify-fail → triage) as the host-subagent driver. Defect-1: gated on `!canDispatchImpl`
-    // so an ATTENDED host demotes the backend to a source pool (the hybrid branch below,
-    // host + backend + NIM concurrent) rather than the backend monopolizing the frontier;
-    // only a truly headless run (e.g. a NIM pool for headless autonomy, host_can_dispatch:false)
-    // lets the backend self-drive.
-    // Defect-1: DEMOTE (attended concurrent fan-out) applies only to the demotable
-    // backends (codex/opencode/openai-compatible). A non-demotable in-process provider
-    // (subprocess-template/worker-command — no standalone source pool) keeps
-    // self-driving regardless of attendance, so the monopoly branch still fires for it.
-    // B1 same-agent guard: suppress the demote when the conversation host IS the
-    // primary backend provider (one account ⇒ host self-drives as a single pool),
-    // else host + demoted-source pools double-book that one meter.
-    const demoteBackendToSource = shouldDemotePrimaryInProcess({
-      sessionConfig: sessionConfigImpl,
-      hostCanDispatch: canDispatchImpl,
-    });
-    if (
-      rollingEngineEnabled &&
-      !demoteBackendToSource &&
-      resolvesToInProcessDispatchProvider(sessionConfigImpl)
-    ) {
-      const driven = await driveRollingImplementDispatch({
-        root,
-        artifactsDir,
-        runId,
-        sessionConfig: sessionConfigImpl ?? null,
-        // Per-node verify (targeted_commands) owns each node's build/test; an
-        // inter-level "shared surface" rebuild is a monorepo-self-remediation concern
-        // the host-driven paths handle, not a generic target-repo step → no-op here.
-        rebuildSharedBetweenLevels: async () => {},
-        waveOptions: {
-          hostMaxConcurrent: resolvedHostMaxConcurrent,
-          hostContextTokens: resolvedHostContextTokens,
-          hostOutputTokens: resolvedHostOutputTokens,
-          hostModels: resolvedHostModels,
-          hostModelId: resolvedHostModelId,
-        },
+    // H2+H4 collapse: ONE fan-out over the eligible pool set. `buildConfirmedPools`
+    // folds the configured primary in-process backend in as a source pool
+    // UNCONDITIONALLY (no demote flag; command-shaped primaries included under
+    // remediate's policy — plan D3) and includes the conversation host as a member
+    // pool iff it can dispatch subagents. Headless is the degenerate "no host pool
+    // in the set" case: the engine drives the whole frontier itself. The same-agent
+    // case (conversation host IS the primary backend) is the shared cross-class
+    // dedup's D1 collision rule — the engine/source pool survives, so one account is
+    // never double-booked across a host pool and a folded source.
+    if (rollingEngineEnabled) {
+      // D5: the host-session quota key follows the DRIVER identity — an in-process
+      // worker primary keys to the conversation host; an explicit IDE/host provider
+      // passes through verbatim (never re-keyed to the literal claude-code, the
+      // founding-bug misattribution class [[capability-is-per-auditor-not-per-audit]]).
+      const hybridProviderName = resolveHostDispatchProviderName(sessionConfigImpl, {
+        commandWorkers: true,
       });
-      // null = no eligible pending work this pass; the engine merges internally once
-      // it has run, so only the empty-frontier case needs a merge here. Either way the
-      // implement frontier is resolved — transition on the freshly-merged state so the
-      // engine re-scans (triage / closing) without recursion.
-      if (driven === null) {
-        const merged = await mergeImplementResults({ root, artifactsDir }, runId);
-        return { kind: "transition", state: merged };
-      }
-      return { kind: "transition", state: await store.loadState() };
-    }
-
-    if (rollingEngineEnabled && canDispatchImpl) {
-      // A-8 hybrid spill: when an in-process backend pool is ALSO confirmed (a
-      // configured NIM/openai-compatible endpoint alongside the conversation host),
-      // split the eligible frontier across BOTH pool classes via the shared
-      // HybridSpillCoordinator (single claimant, proactive capacity split) — the
-      // orchestrator runs the in-process partition THIS cycle while the host spawns
-      // subagents for its partition. Pure host-subagent dispatch falls out when no
-      // backend pool is confirmed (the coordinator has nothing to split against).
-      // Retained host-session source for the hybrid pool-sizing pre-wall throttle
-      // (this branch previously sized pools with no account-wall awareness at all,
-      // unlike the primary path above). This branch has its own already-working,
-      // bounded rate-limited/settle mechanism below (DC-4) rather than routing
-      // through HostSessionQuotaSource.recordLimit/isEscalated, so onEscalation is
-      // unused here — the source only feeds buildConfirmedPools' sizing.
-      // Defect-1: the host-session quota key must follow the CONVERSATION HOST, not a
-      // demoted backend — key it to the auto-detected conversation host (B1: codex
-      // when inside a Codex session, else claude-code; --host-provider overrides)
-      // when the configured primary is a demotable backend that this attended run is
-      // fanning out onto as a source.
-      const hybridProviderName = demoteBackendToSource
-        ? resolveConversationHostProvider({ sessionConfig: sessionConfigImpl })
-        : resolveHostProviderName(sessionConfigImpl);
       const hybridHostSessionModelKey = buildProviderModelKey(
         hybridProviderName,
         (sessionConfigImpl as { block_quota?: { host_model?: string | null } } | undefined)
@@ -2056,10 +1882,8 @@ async function buildImplementDispatchStep(ctx: {
         hostModels: resolvedHostModels,
         hostModelId: resolvedHostModelId,
         hostSession: hybridHostSession,
-        // Defect-1: reached here because the headless in-process branch above was
-        // skipped (attended host) — demote the configured primary backend into the
-        // source-pool set so the split fans across host + backend + NIM.
-        demotePrimaryInProcess: demoteBackendToSource,
+        // Attendance IS pool-set membership: headless ⇒ no host pool in the set.
+        hostCanDispatch: canDispatchImpl,
         // The operator's Gate-0 exclusions, applied as a set-difference over freshly
         // gathered reach; self-spawn-blocked recomputed against THIS process's env.
         excludedBackends: resolveDispatchExclusion(
@@ -2068,10 +1892,66 @@ async function buildImplementDispatchStep(ctx: {
       });
       const backendPools = confirmedPools.filter(isInProcessPool);
 
+      if (!canDispatchImpl) {
+        // Headless: no host pool in the eligible set — when any dispatchable
+        // backend pool is confirmed, the engine drives the FULL rolling implement
+        // dispatch itself (no blocksOverride: the driver's full path owns terminal
+        // persistence + the final merge), cwd-confined to each node's worktree,
+        // sharing the same `acceptNodeWorktree` core as the host-subagent driver.
+        // No pool at all ⇒ fall through to the sequential host step below.
+        if (backendPools.length > 0) {
+          const driven = await driveRollingImplementDispatch({
+            root,
+            artifactsDir,
+            runId,
+            sessionConfig: sessionConfigImpl ?? null,
+            // Per-node verify (targeted_commands) owns each node's build/test; an
+            // inter-level "shared surface" rebuild is a monorepo-self-remediation concern
+            // the host-driven paths handle, not a generic target-repo step → no-op here.
+            rebuildSharedBetweenLevels: async () => {},
+            waveOptions: {
+              hostMaxConcurrent: resolvedHostMaxConcurrent,
+              hostContextTokens: resolvedHostContextTokens,
+              hostOutputTokens: resolvedHostOutputTokens,
+              hostModels: resolvedHostModels,
+              hostModelId: resolvedHostModelId,
+            },
+            // The eligible pool set built above (source pools only — headless),
+            // so the drive routes across every confirmed backend pool.
+            poolsOverride: backendPools,
+          });
+          // null = no eligible pending work this pass; the engine merges internally once
+          // it has run, so only the empty-frontier case needs a merge here. Either way the
+          // implement frontier is resolved — transition on the freshly-merged state so the
+          // engine re-scans (triage / closing) without recursion.
+          if (driven === null) {
+            const merged = await mergeImplementResults({ root, artifactsDir }, runId);
+            return { kind: "transition", state: merged };
+          }
+          return { kind: "transition", state: await store.loadState() };
+        }
+      }
+
+      if (canDispatchImpl) {
+      // A-8 hybrid spill: when an in-process backend pool is ALSO confirmed (a
+      // configured NIM/openai-compatible endpoint alongside the conversation host),
+      // split the eligible frontier across BOTH pool classes via the shared
+      // HybridSpillCoordinator (single claimant, proactive capacity split) — the
+      // orchestrator runs the in-process partition THIS cycle while the host spawns
+      // subagents for its partition. Pure host-subagent dispatch falls out when no
+      // backend pool is confirmed (the coordinator has nothing to split against).
+      // The hybrid host-session source above fed `buildConfirmedPools`' pool-sizing
+      // pre-wall throttle; this branch has its own bounded rate-limited/settle
+      // mechanism below (DC-4) rather than routing through
+      // HostSessionQuotaSource.recordLimit/isEscalated.
       let rolling: Awaited<ReturnType<typeof prepareHostRollingDispatch>>;
       if (backendPools.length > 0) {
         // Prepare the frontier ONCE (worktree-rooted prompts) so the coordinator
-        // split, the in-process executor, and the host driver all read the same plan.
+        // split, the partition drive (via planOverride), and the host driver all
+        // read the same plan — the partition drive deliberately does NOT re-prepare
+        // (see DriveRollingImplementDispatchOptions.planOverride for the lease
+        // overlap this shape carries and why a re-prepare would clobber the
+        // host-share dispatch-quota).
         const plan = await prepareImplementDispatch({ root, artifactsDir }, runId, undefined, {
           ...waveOptsImpl,
           worktreeRootedPrompts: true,
@@ -2105,92 +1985,96 @@ async function buildImplementDispatchStep(ctx: {
           },
           isInProcess: isInProcessPool,
         });
-        // Run the in-process partition now (each node on its assigned backend pool,
-        // launched FROM that pool's source config — A-8 generic dispatchable sources).
-        const inProcessOutcome = await executeInProcessPartition({
-          root,
-          artifactsDir,
-          runId,
-          sessionConfig: sessionConfigImpl ?? null,
-          partition: partition.inProcess,
-          plan,
-          coordinator: partition.coordinator,
-          registry: hybridClaimRegistry,
-          sourceByPoolId: sourceByPoolId(confirmedPools),
-        });
-        // DC-4: a backend pool whose node rate-limited, credit-exhausted, OR
-        // returned a quota_unclassified death → settle it (cross-cycle) so the next
-        // cycle routes its share to the host pool. This partition spans multiple
-        // cycles, each with its own fresh in-process dispatcher (a fresh in-memory
-        // exhaustedPoolIds AND pausedPoolResetAt), so the rolling engine's own
-        // reversible pause evaporates at the cycle boundary — without settling here,
-        // credit_exhausted (no reset timer) and a chronically-quota_unclassified pool
-        // alike would be RE-OFFERED next cycle and re-die on the same pool. Settling
-        // in the hybrid path is the cross-cycle analog of the rolling path's pause.
-        // NOTE: the verbatim-message harvest (captureQuotaUnclassifiedFriction /
-        // captureCreditExhaustionFriction) rides the rolling engine's hooks, which
-        // this direct-Promise.all partition does not invoke; here every settled node
-        // still surfaces as a quota_escalation friction (below), but without the
-        // verbatim text. Threading verbatim capture into executeInProcessPartition is
-        // a documented follow-up (affects credit_exhausted identically — not new to A2b).
-        // `packet_too_large` is deliberately NOT a settle trigger (unified-routing
-        // step D): a 413 is a per-(node,pool) sizing fact — one oversized node must
-        // never kill the pool for every other node; settling it would collapse
-        // capacity the run still has. NOTE: this frontier is sized with a FLAT
-        // per-node estimate (HYBRID_NODE_TOKEN_ESTIMATE), so the claim-time fit gate
-        // cannot pre-skip a genuinely-oversized node — a chronic (node,pool) 413 re-
-        // offers each cycle, bounded by item-level triage, and is surfaced as
-        // friction below (per-node real estimates are the step-G follow-up).
-        const settledOutcomeBlocks = new Set(
-          inProcessOutcome.nodes
-            .filter((n) => isPoolSettlingOutcome(n.outcome))
-            .map((n) => n.block_id),
-        );
-        const exhaustedPools = new Set(
-          partition.inProcess.filter((a) => settledOutcomeBlocks.has(a.nodeId)).map((a) => a.poolId),
-        );
-        for (const poolId of exhaustedPools) {
-          await partition.coordinator.settlePool(poolId);
-        }
-        // Surface each settled node as reviewable friction (not just the settle
-        // side-effect above). The shared step-boundary chokepoint dedupes on
-        // {eventType, runId, discriminator}, so a chronically-exhausted backend pool
-        // re-hitting the same block_id across cycles collapses to one record.
-        for (const blockId of settledOutcomeBlocks) {
-          void captureStepBoundaryFriction(
+        // Drive the in-process partition through the ROLLING ENGINE (H2 plan D2 —
+        // `executeInProcessPartition`'s direct Promise.all executor is deleted; one
+        // core, one driver): each node runs on a coordinator-claimed backend pool,
+        // launched FROM that pool's source config, with the engine's full hook set
+        // live (413 → packet_too_large re-queue + friction, verbatim quota harvest,
+        // cost-drift / credit-exhaustion / model-unavailable capture) instead of the
+        // hand-replicated friction blocks this replaces. The coordinator's claims
+        // are ADOPTED (claimOwnerTokens) — same registry, no self-collision — and
+        // run-level lifecycle stays HERE: the drive is partition-scoped
+        // (blocksOverride), so a backend-only wall never persists a run terminal and
+        // the final merge remains this caller's.
+        if (partition.inProcess.length > 0) {
+          // DC-4 (review h2c3 F1): the engine's per-packet selection binds freely
+          // across `poolsOverride`, so a pool settled on a PRIOR cycle must be
+          // filtered out here — the coordinator's claim walk already excluded it,
+          // and re-offering it would re-die on the same dead pool every cycle.
+          const liveBackendPools = backendPools.filter((p) => !settled.has(p.id));
+          const driven = await driveRollingImplementDispatch({
+            root,
             artifactsDir,
             runId,
-            {
-              eventType: "quota_escalation",
-              discriminator: blockId,
-              note: "A-8 hybrid in-process node rate-limited / credit-exhausted / model-unavailable / quota-unclassified; its backend pool was settled for this run.",
-              severity: "high",
-              category: "trap",
-              area: "dispatch/quota",
+            sessionConfig: sessionConfigImpl ?? null,
+            rebuildSharedBetweenLevels: async () => {},
+            waveOptions: {
+              hostMaxConcurrent: resolvedHostMaxConcurrent,
+              hostContextTokens: resolvedHostContextTokens,
+              hostOutputTokens: resolvedHostOutputTokens,
+              hostModels: resolvedHostModels,
+              hostModelId: resolvedHostModelId,
             },
-            "remediate-code",
+            blocksOverride: partition.inProcess.map((a) => a.nodeId),
+            poolsOverride: liveBackendPools,
+            planOverride: plan,
+            claimOwnerTokens: new Map(
+              partition.inProcess.map((a) => [a.nodeId, a.ownerToken]),
+            ),
+          });
+          // Free any coordinator claim still held (a non-terminal outcome keeps its
+          // claim through the drive); terminal accepts already released in-driver,
+          // so this is a token-checked no-op for them.
+          for (const a of partition.inProcess) {
+            await partition.coordinator.release(a);
+          }
+          // DC-4 cross-cycle settle (D2 iii — PRESERVED across the engine
+          // migration): a backend pool whose node rate-limited, credit-exhausted,
+          // went model-unavailable, or died quota-unclassified → settle it
+          // (cross-cycle) so the next cycle routes its share to the host pool. This
+          // partition spans multiple cycles, each with a fresh in-process dispatcher
+          // (fresh in-memory exhaustedPoolIds AND pausedPoolResetAt), so the
+          // engine's reversible pause evaporates at the cycle boundary — the BROAD
+          // `isPoolSettlingOutcome` predicate (incl. reset-bearing 429 +
+          // quota_unclassified; see settledPools.ts for the divergence rationale)
+          // therefore applies over the drive's real per-node pool attribution, plus
+          // the engine's own terminal-exhaustion set. `packet_too_large` is
+          // deliberately NOT a settle trigger (step D): a 413 is a per-(node,pool)
+          // sizing fact, surfaced via the engine's onPacketTooLarge friction hook.
+          // `driven` is null only when the plan/state vanished mid-cycle (nothing was
+          // dispatched) — no outcomes ⇒ nothing to settle.
+          const settlingPoolIds = new Set(
+            (driven?.nodes ?? [])
+              .filter((n) => isPoolSettlingOutcome(n.outcome))
+              .map((n) => n.pool_id),
           );
-        }
-        // A 413 no longer settles its pool (step D), but it must stay OBSERVABLE —
-        // this direct partition never invokes the rolling engine's onPacketTooLarge
-        // hook, so without this record a hybrid 413 would vanish entirely (D+E
-        // review F4). Same dedupe chokepoint; medium severity (a sizing fact to
-        // reconcile at partition time, not a dead pool).
-        for (const node of inProcessOutcome.nodes) {
-          if (node.outcome !== "packet_too_large") continue;
-          void captureStepBoundaryFriction(
-            artifactsDir,
-            runId,
-            {
-              eventType: "quota_escalation",
-              discriminator: `packet-too-large:${node.block_id}`,
-              note: "A-8 hybrid in-process node hit 413 packet-too-large on its assigned pool; the pool was NOT settled (per-node sizing fact) — reconcile node sizing or route the node to a larger pool.",
-              severity: "medium",
-              category: "trap",
-              area: "dispatch/quota",
-            },
-            "remediate-code",
-          );
+          for (const poolId of driven?.exhausted_pool_ids ?? []) {
+            settlingPoolIds.add(poolId);
+          }
+          const liveBackendPoolIds = new Set(liveBackendPools.map((p) => p.id));
+          for (const poolId of settlingPoolIds) {
+            if (liveBackendPoolIds.has(poolId)) {
+              await partition.coordinator.settlePool(poolId);
+              // The settle FACT itself is reviewable friction (review h2c3 F2):
+              // the engine hooks capture the per-death evidence (verbatim 429
+              // text, credit exhaustion, 404), but reset-bearing rate limits have
+              // no engine hook, and no hook records "this pool is now settled for
+              // the run". One record per (run, pool) via the dedupe chokepoint.
+              void captureStepBoundaryFriction(
+                artifactsDir,
+                runId,
+                {
+                  eventType: "quota_escalation",
+                  discriminator: `pool-settled:${poolId}`,
+                  note: "Hybrid in-process backend pool settled for this run (rate-limited / credit-exhausted / model-unavailable / quota-unclassified); its remaining share routes to the host on later cycles.",
+                  severity: "high",
+                  category: "trap",
+                  area: "dispatch/quota",
+                },
+                "remediate-code",
+              );
+            }
+          }
         }
         // The backend carried the whole batch (or every host node was contested by a
         // peer driver) → nothing for the host this cycle; merge what landed + transition.
@@ -2307,6 +2191,7 @@ ${renderHostScratchNote(hostScratchDir(artifactsDir, runId))}
           "Stop after every node has been accepted (accept-node returns done), results merged, and next-step has been run.",
         artifactPaths: { dispatch_plan: rolling.planPath, dispatch_quota: rolling.quotaPath },
       }) };
+      }
     }
     // Rolling per-node dispatch: prepare EVERY currently-eligible node (deps all
     // verified-complete), never a single artificially-serialized block. There is

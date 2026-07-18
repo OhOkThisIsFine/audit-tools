@@ -246,7 +246,7 @@ async function gateHostFanoutOrPause(params: {
  * chokepoint both `buildSourcePools` and the Gate-0 surface consume, so what the
  * operator confirms is exactly what routes. Deliberately NOT `resolveAmbientSources`:
  * that is an INPUT to the chokepoint and is blind to descriptor-supplied sources, the
- * demoted primary, and the legacy `openai_compatible` fold — three backends that
+ * folded primary, and the legacy `openai_compatible` fold — three backends that
  * route without ever appearing in it.
  */
 async function resolveNewlyReachableBackends(
@@ -437,13 +437,13 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
     },
     since: getFlag(argv, "--since"),
     // G2: the fold's dispatch reads (buildAuditSourcePools / driveRollingAuditDispatch
-    // / planHybridDispatch / resolvesToInProcessDispatchProvider) key off this, so they
+    // / planHybridDispatch / resolveHostDispatchProviderName) key off this, so they
     // see the per-auditor descriptor's resolved backends, not the repo config. Intent
     // reads folded in here are identical either way (resolve preserves every intent field).
     sessionConfig: effectiveConfig,
-    // Defect-1: the resolved attended/headless discriminator, so the fold demotes a
-    // configured in-process backend to a source pool (attended) rather than letting it
-    // monopolize the frontier — or self-drives it (headless).
+    // The resolved attended/headless discriminator (H2+H4 collapse): attended ⇒ the
+    // host reviews the coverage-driven complement of the one fan-out; headless ⇒ no
+    // attended host in the eligible set, the engine drives the whole frontier.
     hostCanDispatch,
     // G3: the reconciliation gate — a non-empty delta re-opens the Gate-0 obligation;
     // `autonomous` keys the response (prompt the delta vs fail-closed-exclude it).

@@ -29,6 +29,13 @@ corpus to hand-label for the A2 oracle (see Deferred / waiting).
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **H2+H4 collapse residual pins (2026-07-18, low, from review h2c3).** (a) The attended same-agent
+  SPLIT semantics (blessed in the plan record: engine partition + host-subagent remainder on one meter,
+  replacing HEAD's whole-frontier monopoly) is pinned only at pool-composition level — add a
+  decision-point-level test asserting where the frontier is actually driven; fold the DC-4
+  settled-pool `poolsOverride` filter into the same harness. (b) The env-DETECTED same-agent path
+  (`CODEX_THREAD_ID` → `resolveConversationHostProvider` → dedup) lost its end-to-end pin when
+  `demote-same-agent-guard.test.mjs` died; the new D1 tests use explicit `host_provider` only.
 - **Recurrence #5 (2026-07-18): vitest exited 0 with "1 failed"** — targeted 4-file run (`admission-loop` red during the F4 fix loop) returned exit 0; caught only because the summary line was read, not the exit code. Fifth observed instance; the false-green defect + the outcome-ledger gap remain the top test-infra fixes (both already tracked below).
 - **A delegated implementer embedded a RAW 0x00 byte in source (H2+H4 lap 2026-07-18, tool-should-decide, low-medium).** A subagent writing `rollingDispatch.ts` used a literal NUL character as a template-literal dedup-key separator — tsc compiles it happily, but the file turns BINARY to grep/Grep/rg (silently zero search results — a wiring-pass grep returned "no matches" on code that existed, initially reading as unwired enforcement). Fixed by replacing with the `backslash-u0000` escape. Property to hold: a post-write guard (hook or check) rejects raw control bytes (< 0x20 except \t\n\r) in source files; same family as the CRLF-rewrite trap. Cheap mitigation until then: when a grep over a just-edited file returns nothing or "binary file matches", scan for control bytes before concluding anything.
 
