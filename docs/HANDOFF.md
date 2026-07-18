@@ -11,23 +11,11 @@
 - **Current version = `package.json`** (authoritative). Per-lap shipped detail is NOT narrated here
   (changelog creep — see `git log` + project memory [[live-status]]); this section is current-state +
   open-work roadmap only.
-- **The maximal-coverage validation run's dispatch/quota fix cluster shipped in the current release.**
-  The remaining open work is ▶ IMMEDIATE NEXT below (the live-run confirmation) + the bounded forward
-  remainder; authoritative per-track status is in the Track status section (the older T1–T6 quota-cluster
-  numbering, all closed — not a claim about the open dogfood gap, which ▶ IMMEDIATE NEXT owns).
-- **repair-proxy dispatch integration — SUPERSEDED (the source-pool model was wrong); reworking to the
-  unified worker model.** The owner-attended dogfood ran 2026-07-15 and proved the integration is the wrong
-  abstraction: a host-driven `/audit-code` planned 430 tasks and dispatched **zero** (repair-proxy sources
-  failed on a missing key the loopback proxy doesn't need; audit packets exceeded the single-shot inline
-  caps; the host review path then walled at 56%). Root: repair-proxy is NOT a cost-ranked source pool — it is
-  a loopback Anthropic `/v1/messages` **tool-repair transport** for agentic claude-harness workers (owner-
-  confirmed). New **design of record: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md)**
-  (ONE core, three worker KINDS; repair-proxy = kind-1 launch-transport; per-auditor handshake inventory;
-  retire the source-pool wiring). The old `spec/repair-proxy-dispatch-integration.md` is retired with the code.
-  Memory [[unified-dispatch-worker-model]]. The decomposition's inventory/handshake half is DONE through G3;
-  the kind-1 transport shipped 2026-07-16, was dogfooded, and its three feedback gaps CLOSED 2026-07-17
-  — all RELEASED as v0.33.1 (with the `AUDIT_CODE_STATE_DIR` hermeticity fix), global bins reinstalled.
-  See ▶ IMMEDIATE NEXT for the re-dogfood.
+- **The maximal-coverage validation run's dispatch/quota fix cluster, unified-routing collapse, and
+  proxy-contract swap all shipped.** The remaining open work is ▶ IMMEDIATE NEXT below (the live-run
+  confirmation with the new contract live) + the bounded forward remainder; authoritative per-track status
+  is in the Track status section (the older T1–T6 quota-cluster numbering, all closed — not a claim about
+  the open dogfood gap, which ▶ IMMEDIATE NEXT owns).
 - **Env cruft (harmless):** two empty git-deregistered worktree dirs (`.claude/worktrees/beautiful-euclid-1514e9`,
   and in repair-proxy `repair-proxy-tool-calls-7e075d`) are held by a stale Windows handle — gitignored,
   inert, clear on reboot. Also: `INV-shared-core-14` fails in this shell but identically on `main`
@@ -67,9 +55,9 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — re-dogfood the collapsed routing, then LiteLLM groundwork
+## ▶ IMMEDIATE NEXT — re-dogfood the collapsed routing with brand-neutral proxy contract live
 
-**The unified-routing collapse is COMPLETE (2026-07-18).** Steps A–G + H1/H3/H5 landed 2026-07-17;
+**The unified-routing collapse + repair-proxy retirement are COMPLETE (2026-07-18).** Steps A–G + H1/H3/H5 landed 2026-07-17;
 **H2+H4 landed 2026-07-18 as three attested loop-core commits** (design of record:
 [`unified-dispatch-routing-design-2026-07-17.md`](reviews/unified-dispatch-routing-design-2026-07-17.md);
 plan + all four review records: [`h2-h4-collapse-plan-2026-07-18.md`](reviews/h2-h4-collapse-plan-2026-07-18.md)):
@@ -83,16 +71,13 @@ same-agent rule (backend identity, directional accounts, draw policy), primary f
 with agy/subprocess-template/worker-command synthesis, `resolveHostDispatchProviderName` hoisted to
 shared. Blessed semantics + deliberate routing changes recorded in the plan doc; residual pins in
 backlog ("H2+H4 collapse residual pins"). Routing criteria (owner): capability floor ∧ available ∧
-quota/rate headroom ∧ agentic-capable ∧ context-fit; λ orders the eligible; host is just a pool.
+quota/rate headroom ∧ agentic-capable ∧ context-fit; λ orders the eligible; host is just a pool. **Separately shipped in v0.33.7: repair-proxy retired, replaced by brand-neutral proxy contract** (`proxyCatalog.ts` adapter for discovery + liveness probe; generic `proxy` block replaces legacy `repair_proxy`; plan/review record [`litellm-swap-plan-2026-07-18.md`](reviews/litellm-swap-plan-2026-07-18.md); CI green, published).
 
-Next, in order:
-1. **Re-dogfood a fresh conversation-first self-audit** (backlog → RESOLVED entry's ⬇ watch line, plus
-   the collapse: an attended run fans host + primary + NIM concurrently; small pools take fitting
+Next item:
+**Re-dogfood a fresh conversation-first self-audit** (backlog → RESOLVED entry's ⬇ watch line, plus
+   the collapse + proxy swap: an attended run fans host + primary + NIM concurrently; small pools take fitting
    packets, oversized packets skip (no 413), a 429 on pool A leaves pool B dispatchable, zero-grants
-   render their honest cause, a floored packet never lands on a bottom-band pool).
-2. **LiteLLM swap groundwork** (owner is replacing repair-proxy; backlog → "LiteLLM replaces
-   repair-proxy"): proxy-agnostic populate adapter before any deeper `/registry` coupling.
-   [[litellm-replaces-repair-proxy]]
+   render their honest cause, a floored packet never lands on a bottom-band pool; observe the generic `proxy` block resolving, liveness via `/health/liveliness`, and score-less pools failing open at the capability floor).
 
 ## Prior track — the G-series (closed)
 
