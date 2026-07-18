@@ -48,6 +48,22 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Unranked + free compose badly: hard packets structurally prefer the least-known models
+  (2026-07-18, medium-high, from the LiteLLM live-validation lap).** Retiring repair-proxy also retired
+  the only source of automated capability data (it collected arena rankings + agentic/tool-use
+  benchmarks). audit-tools has no automated capability signal today — only operator-declared
+  `capability_rank` and the static provider-name tier switch (`providerConfirmation.ts:62-80`);
+  models.dev supplies price + context only (`ModelStatics` has no quality field). Live-observed: the
+  proxy-expanded `claude-worker:*` sources carry NO `capability_rank`. Unranked hits the fail-open branch
+  (`admissionLoop.ts:307,324-333`) → eligible for EVERY floor incl. `deep`; `cost_per_mtok: 0` → ranked
+  first under cost-first. **Property to hold:** a pool with no capability evidence must not be
+  preferentially selected for the packets that most need capability. Each half is a deliberate decision
+  (fail-open = 2026-07-17 owner call; the models really are free) — it's the COMPOSITION that regressed.
+  NOT yet observed in a real wave — mechanism verified by reading, prediction unconfirmed; the
+  re-dogfood is the test. **Note the seam already exists:** `proxyCatalog.ts:159` ingests
+  `capability_rank` from `/model/info` and `:352` rides it to the floor, and LiteLLM permits arbitrary
+  `model_info` keys — so a ranker can feed this today with zero audit-tools code change. That reduces
+  Track 2 from "design the contract" to "decide what produces the numbers" (owner call).
 - **Are `dropped[]` reasons actually SURFACED to the operator at Gate-0? (2026-07-18, medium,
   from the LiteLLM live-validation lap.)** The whole declared-reach design leans on "never silently
   discarded — every drop carries an operator-facing reason", and the reasons are good. But this lap
