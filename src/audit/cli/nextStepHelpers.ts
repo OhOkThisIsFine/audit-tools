@@ -1880,8 +1880,16 @@ async function runHostDelegationObligation(
       const settledPath = auditHybridSettledPath(ctx.params.artifactsDir);
       const settled = await readSettledPools(settledPath);
       const partition = await planHybridDispatch({
-        // Flat estimate: the coordinator bounds NIM by SLOTS, so uniform is sufficient.
-        frontier: pending.map((t) => ({ id: t.task_id, estimatedTokens: 2000 })),
+        // REAL per-task estimates (unified-routing step G): the coordinator's claim
+        // walk is context-fit-aware (nodeContextFits), and with step A every pool
+        // carries a real window — a flat estimate made that gate blind (everything
+        // "fits" 2000 tokens), so oversized tasks were claimed onto small pools and
+        // died at dispatch. The planning-time frozen estimate is the same number the
+        // packer sums; flat 2000 remains only as the no-estimate fallback.
+        frontier: pending.map((t) => ({
+          id: t.task_id,
+          estimatedTokens: t.token_estimate ?? 2000,
+        })),
         // Audit passes ONLY the NIM pool(s): the coordinator bounds NIM to its capacity
         // and claims those tasks; the rest stay pending for the batch host review.
         pools: auditSourcePools,

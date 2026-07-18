@@ -18,7 +18,7 @@ import type {
   ResolvedProviderName,
 } from "audit-tools/shared";
 import type { HostModelRosterEntry, ProviderRateLimits, QuotaBindingWindow } from "audit-tools/shared";
-import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile } from "audit-tools/shared";
+import { isFileMissingError, ClaimRegistry, taskClaimsPath, readConfirmedCostPositions, readConfirmedDispatchBias, emitBlindDispatchFrictionIfBlind, detectHostDispatchWall, admissionBlockedOnBudget, reconcileAdmissionLeasesFromQuotaFile, AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "audit-tools/shared";
 import { advanceHostDispatchPause } from "./dispatch/pausePersist.js";
 import { mergeOwnerTokens } from "./ownerTokens.js";
 import type { WorkerTask } from "../types/workerSession.js";
@@ -133,6 +133,33 @@ export {
 // merge-side ownership gate (mergeAndIngestCommand.ts) constructs its registry
 // with the SAME lease — liveness must be judged against one window, never two.
 export const AUDIT_TASK_CLAIM_LEASE_MS = 20 * 60_000;
+
+/**
+ * Packer budget for the pool-override (in-process hybrid) path — consistent with
+ * the ENGINE's fit test (unified-routing step G). The rolling engine admits a
+ * packet to a capped pool only when
+ * `tokens + AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS <= contextCapTokens`, so a
+ * packet packed to the raw `context − output` budget could pass the packer yet
+ * fail every pool's fit gate (packed 28k, cap 32k, overhead 15k ⇒ unroutable —
+ * the packer/fit inconsistency behind the 2026-07-17 413 class). Size to the
+ * LARGEST override pool's fit-eligible window (cap − overhead), never above the
+ * resolved `context − output` budget; smaller sibling pools take the packets that
+ * fit them via the engine's per-packet fit skip. Pools with no cap (impossible
+ * post step A, kept as degrade) fall back to the resolved budget.
+ */
+export function deriveOverridePackerBudget(
+  pools: ReadonlyArray<{ contextCapTokens?: number | null }>,
+  limits: { context_tokens: number; output_tokens: number },
+): number {
+  const caps = pools
+    .map((pool) => pool.contextCapTokens)
+    .filter((cap): cap is number => typeof cap === "number" && Number.isFinite(cap) && cap > 0);
+  const rawBudget = limits.context_tokens - limits.output_tokens;
+  const fitBudget = caps.length
+    ? Math.min(rawBudget, Math.max(...caps) - AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS)
+    : rawBudget;
+  return Math.max(1, fitBudget);
+}
 
 export async function prepareDispatchArtifacts(params: {
   packageRoot: string;
@@ -350,7 +377,7 @@ export async function prepareDispatchArtifacts(params: {
     dispatchPool = {
       pools: params.poolsOverride,
       hostModel: params.hostModel ?? null,
-      contextBudgetTokens: Math.max(1, limits.context_tokens - limits.output_tokens),
+      contextBudgetTokens: deriveOverridePackerBudget(params.poolsOverride, limits),
       tierBudgets: null,
       hostSession: overrideHostSession,
     };
@@ -570,6 +597,9 @@ export async function prepareDispatchArtifacts(params: {
       id: entry.packet_id,
       inputTokens: entry.complexity.estimated_tokens,
       complexity: packetPriorityScore(entry),
+      // Step C: the packet's capability floor rides into admission — the same
+      // risk/complexity-derived tier the plan entry already carries.
+      ...(entry.model_hint ? { requiredTier: entry.model_hint.tier } : {}),
     }))
     .sort((a, b) => b.complexity - a.complexity);
   // Cost-first routing rung 1: honor the operator-confirmed cost ordering from the
@@ -592,6 +622,17 @@ export async function prepareDispatchArtifacts(params: {
     grantLeases: params.grantLeases,
     confirmedCostPositions,
     dispatchBias,
+    // Step C: fail-open on unknown capability is deliberate but must be OBSERVABLE —
+    // each (pool, packet) fail-open routes a floor-carrying packet to a pool with no
+    // capability signal, recorded as a dispatch warning (deduped per pair).
+    onCapabilityFailOpen: (info) => {
+      warnings.push({
+        code: "capability_fail_open",
+        message:
+          `packet ${info.packetId} (tier ${info.requiredTier}) admitted to pool ` +
+          `${info.poolId} with UNKNOWN capability (fail-open, low confidence)`,
+      });
+    },
   });
 
   // Fail loud when self-quota monitoring is blind on the host-dispatch path (no live

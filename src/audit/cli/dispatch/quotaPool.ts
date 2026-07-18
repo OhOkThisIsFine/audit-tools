@@ -5,6 +5,7 @@ import {
   computeDispatchAdmission,
   createReservationLedger,
   admissionPoolsFromSummaries,
+  buildCapabilityFloorCapable,
 } from "audit-tools/shared";
 import type {
   ProviderRateLimits,
@@ -205,7 +206,7 @@ export async function finalizeDispatchQuota(params: {
    * The pending packets, in priority order (highest first): the admission loop
    * grants the affordable prefix and defers the rest to a later next-step grant.
    */
-  packets: { id: string; inputTokens: number; complexity: number }[];
+  packets: { id: string; inputTokens: number; complexity: number; requiredTier?: DispatchModelTier }[];
   /** Echo of the host's reported roster, when one was given. */
   hostModelRoster?: HostModelRosterEntry[] | null;
   /** Per-tier packet input budgets derived from the roster, when given. */
@@ -241,6 +242,13 @@ export async function finalizeDispatchQuota(params: {
    * only legitimate fan-out wall is budget-exhausted (ledger denies) or cooldown.
    */
   fanoutMode?: boolean;
+  /**
+   * Step C observability: called once per (pool, packet) pair where a
+   * floor-carrying packet was admitted to a pool with UNKNOWN capability
+   * (fail-open, owner decision 2026-07-17). The caller records it (dispatch
+   * warning) so low-confidence routing is visible, never silent.
+   */
+  onCapabilityFailOpen?: (info: { poolId: string; packetId: string; requiredTier: DispatchModelTier }) => void;
 }): Promise<{
   dispatchQuota: DispatchQuota;
   dispatchQuotaPath: string;
@@ -318,12 +326,23 @@ export async function finalizeDispatchQuota(params: {
   // admission derivation is single-sourced in `computeDispatchAdmission` so audit and
   // remediate can't drift; `grantLeases: false` (in-process driver) returns the
   // plan-only block (the rolling engine leases per-packet itself, no double-count).
+  // Step C: the composed capability gate — size-fit AND the packet's RELATIVE
+  // capability floor over this batch's pool set (fail-open + recorded on unknown).
+  // Deduped per (pool, packet) so a re-evaluation never double-records.
+  const failOpenSeen = new Set<string>();
+  const capable = buildCapabilityFloorCapable(admissionPools, (info) => {
+    const key = `${info.poolId}\u0000${info.packetId}`;
+    if (failOpenSeen.has(key)) return;
+    failOpenSeen.add(key);
+    params.onCapabilityFailOpen?.(info);
+  });
   const admission = await computeDispatchAdmission({
     packets: params.packets,
     pools: admissionPools,
     outputCap: waveSchedule.resolved_limits.output_tokens,
     grantLeases: params.grantLeases !== false,
     ledger: createReservationLedger(),
+    capable,
     ...(params.dispatchBias != null ? { dispatchBias: params.dispatchBias } : {}),
   });
 

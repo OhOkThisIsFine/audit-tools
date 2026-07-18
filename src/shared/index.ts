@@ -1330,7 +1330,7 @@ export {
   admitBatch,
   computeDispatchAdmission,
   deriveThroughputConcurrency,
-  admissionPoolsFromSummaries,
+  admissionPoolsFromSummaries, buildCapabilityFloorCapable,
   AdmissionGrantSchema,
   AdmissionExplainSchema,
   DispatchAdmissionSchema,

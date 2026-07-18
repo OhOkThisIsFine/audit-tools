@@ -563,3 +563,163 @@ test("end-to-end: an oversized packet is NOT admitted to a small-window source p
   expect(res.granted.length).toBe(1);
   expect(res.granted[0].pool_id).toBe("claude-code/*");
 });
+
+// ── Unified-routing step C: relative capability floor ────────────────────────
+test("capability floor: a deep packet skips bottom-band scored pools and lands on the top band", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  // Three scored pools (composite_rank: LOWER = better). Cheapest is the weakest —
+  // without the floor, cost-first would send the deep packet there.
+  const weak = pool("weak#a/m", { costRank: 0, capabilityScore: 300 });
+  const mid = pool("mid#a/m", { costRank: 1, capabilityScore: 200 });
+  const strong = pool("strong#a/m", { costRank: 2, capabilityScore: 100 });
+  const pools = [weak, mid, strong];
+  const capable = buildCapabilityFloorCapable(pools);
+  const res = await admitBatch({
+    packets: [{ id: "hard", cost: 1000, complexity: 1, requiredTier: "deep" }],
+    pools,
+    ledger,
+    capable,
+  });
+  expect(res.granted.length).toBe(1);
+  expect(res.granted[0].pool_id).toBe("strong#a/m"); // top tercile only
+});
+
+test("capability floor: standard admits top two bands; small admits all (cost-first prevails)", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  const weak = pool("weak#a/m", { costRank: 0, capabilityScore: 300 });
+  const mid = pool("mid#a/m", { costRank: 1, capabilityScore: 200 });
+  const strong = pool("strong#a/m", { costRank: 2, capabilityScore: 100 });
+  const pools = [weak, mid, strong];
+  const capable = buildCapabilityFloorCapable(pools);
+  const res = await admitBatch({
+    packets: [
+      { id: "std", cost: 1000, complexity: 1, requiredTier: "standard" },
+      { id: "easy", cost: 1000, complexity: 0.5, requiredTier: "small" },
+    ],
+    pools,
+    ledger,
+    capable,
+  });
+  const byPacket = Object.fromEntries(res.granted.map((g) => [g.packet_id, g.pool_id]));
+  expect(byPacket.std).toBe("mid#a/m"); // cheapest within bands 0-1
+  expect(byPacket.easy).toBe("weak#a/m"); // no floor → cheapest overall
+});
+
+test("capability floor: UNKNOWN capability fails OPEN with a recorded note when banded siblings exist", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  // An unknown pool (no score, neutral ordinal) alongside a scored sibling — a real
+  // routing choice exists, so the fail-open is a low-confidence decision worth noting.
+  const unknown = pool("proxy#groq/x", { costRank: 0, capabilityRank: 1 });
+  const scoredPricey = pool("strong#a/m", { costRank: 5, capabilityScore: 100 });
+  const pools = [unknown, scoredPricey];
+  const failOpens = [];
+  const capable = buildCapabilityFloorCapable(pools, (info) => failOpens.push(info));
+  const res = await admitBatch({
+    packets: [{ id: "hard", cost: 1000, complexity: 1, requiredTier: "deep" }],
+    pools,
+    ledger,
+    capable,
+  });
+  expect(res.granted.length).toBe(1); // fail-open: the cheap unknown pool is admitted
+  expect(res.granted[0].pool_id).toBe("proxy#groq/x");
+  expect(failOpens).toEqual([
+    { poolId: "proxy#groq/x", packetId: "hard", requiredTier: "deep" },
+  ]);
+});
+
+test("capability floor composes over size-fit — a top-band pool that cannot HOLD the packet still rejects", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  const strongSmall = pool("strong#a/m", { costRank: 0, capabilityScore: 100, capacityTokens: 500 });
+  const midBig = pool("mid#a/m", { costRank: 1, capabilityScore: 200, capacityTokens: 100000 });
+  const pools = [strongSmall, midBig];
+  const capable = buildCapabilityFloorCapable(pools);
+  const res = await admitBatch({
+    packets: [{ id: "hard", cost: 40_000, complexity: 1, requiredTier: "standard" }],
+    pools,
+    ledger,
+    capable,
+  });
+  // strong is band 0 but too small; mid is band 1 (standard-eligible) and fits.
+  expect(res.granted.length).toBe(1);
+  expect(res.granted[0].pool_id).toBe("mid#a/m");
+});
+
+test("capability floor: non-neutral tier ordinals band scoreless pools (roster deep→0, small→2)", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  // Ordinal-only pools (a host roster): deep rank → band 0; small rank → band 2.
+  const hostDeep = pool("host#a/deep", { costRank: 5, capabilityRank: 2 });
+  const hostSmall = pool("host#a/small", { costRank: 0, capabilityRank: 0 });
+  const pools = [hostDeep, hostSmall];
+  const capable = buildCapabilityFloorCapable(pools);
+  const res = await admitBatch({
+    packets: [{ id: "hard", cost: 1000, complexity: 1, requiredTier: "deep" }],
+    pools,
+    ledger,
+    capable,
+  });
+  // The cheap small-rank pool is band 2 → ineligible for deep; the deep rank takes it.
+  expect(res.granted.length).toBe(1);
+  expect(res.granted[0].pool_id).toBe("host#a/deep");
+});
+
+test("capability floor degeneracy pin: a SINGLE scored pool is band 0 by construction (relative-only, no absolute cutoff)", async () => {
+  // With n=1 scored pool, "top tercile of scored pools" is that pool — even a
+  // weak-scoring model. This is the deliberate consequence of the relative-not-
+  // absolute invariant (never a named-model→tier map): with nothing to compare
+  // against, the floor cannot call a model weak. Pinned so a future "fix" that
+  // sneaks in an absolute score cutoff turns this red and gets discussed first.
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  const onlyScored = pool("weak#a/m", { costRank: 0, capabilityScore: 300 });
+  const capable = buildCapabilityFloorCapable([onlyScored]);
+  const res = await admitBatch({
+    packets: [{ id: "hard", cost: 1000, complexity: 1, requiredTier: "deep" }],
+    pools: [onlyScored],
+    ledger,
+    capable,
+  });
+  expect(res.granted.length).toBe(1);
+  expect(res.granted[0].pool_id).toBe("weak#a/m");
+});
+
+// C-review F3: the floor is relative ALL the way down — an all-small roster still
+// dispatches deep packets to the best AVAILABLE band, never a self-made livelock.
+test("capability floor: an all-small pool set still admits deep packets (best-available band, no manufactured no_capable_pool)", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  const smallA = pool("host#a/small-a", { costRank: 0, capabilityRank: 0 });
+  const smallB = pool("host#a/small-b", { costRank: 1, capabilityRank: 0 });
+  const pools = [smallA, smallB];
+  const capable = buildCapabilityFloorCapable(pools);
+  const res = await admitBatch({
+    packets: [{ id: "hard", cost: 1000, complexity: 1, requiredTier: "deep" }],
+    pools,
+    ledger,
+    capable,
+  });
+  expect(res.granted.length).toBe(1);
+  expect(res.granted[0].pool_id).toBe("host#a/small-a"); // best available (band tie) → cheapest
+});
+
+// C-review F2: with ZERO capability data the floor is globally inert — no fail-open
+// notes (a warning per packet on every ordinary single-host wave is fatigue, not signal).
+test("capability floor: no banded pools ⇒ inert floor, NO fail-open notes", async () => {
+  const { buildCapabilityFloorCapable } = await import("../../src/shared/dispatch/admissionLoop.ts");
+  const ledger = await freshLedger();
+  const hostOnly = pool("claude-code/*", { costRank: 0, capabilityRank: 1 }); // neutral, unscored
+  const failOpens = [];
+  const capable = buildCapabilityFloorCapable([hostOnly], (info) => failOpens.push(info));
+  const res = await admitBatch({
+    packets: [{ id: "hard", cost: 1000, complexity: 1, requiredTier: "deep" }],
+    pools: [hostOnly],
+    ledger,
+    capable,
+  });
+  expect(res.granted.length).toBe(1);
+  expect(failOpens).toEqual([]); // inert floor → nothing to flag
+});

@@ -218,6 +218,34 @@ describe("populateDeclaredProxyCatalog — the Gate-0 POPULATE trigger (3c)", ()
   ];
   const okFetch = async () => ({ ok: true, json: async () => REGISTRY });
 
+  it("a registry capability block stamps capability_rank onto the expanded source (step C, proxy-agnostic)", async () => {
+    // The capability data is best-effort: composite_rank (LOWER = better) stamps
+    // through so the admission floor reads per-model capability with no operator
+    // declaration. A registry with no capability block (e.g. LiteLLM) emits no
+    // field — the floor then fails open, by design.
+    const home = tmpHome();
+    const result = await populateDeclaredProxyCatalog({
+      ...deps({ declaration: { repair_proxy: { endpoint: PROXY, cost_per_mtok: 0 } } }),
+      homeDir: home,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => [
+          {
+            provider: "groq", model: "strong-model", reachable: true, has_key: true,
+            capability: { composite_rank: 3, arena_rating: 1400 },
+          },
+          { provider: "groq", model: "unscored-model", reachable: true, has_key: true },
+        ],
+      }),
+    });
+    expect(result?.written).toBe(true);
+    const sources = readProxyCatalog({ homeDir: home })?.sources ?? [];
+    const strong = sources.find((s) => s.model === "strong-model");
+    const unscored = sources.find((s) => s.model === "unscored-model");
+    expect(strong?.capability_rank).toBe(3);
+    expect(unscored ? "capability_rank" in unscored : null).toBe(false);
+  });
+
   it("no repair_proxy declared ⇒ null, and the network is never touched", async () => {
     let fetched = 0;
     const result = await populateDeclaredProxyCatalog({

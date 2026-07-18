@@ -63,6 +63,12 @@ Supply a predicate: eligible iff `poolCapability >= packetFloor`, composed with 
   better, operator-declared). The floor must gate on a per-MODEL capability, else all proxy pools collapse
   to the neutral `standard` tier (§Open decision 1).
 
+**Step-C scope (review F4, deliberate):** the capability floor lands on the ADMISSION side
+(`admitBatch`/`finalizeDispatchQuota`). The in-process rolling engine's own selection
+(`rollingDispatch.ts selectProvider`, ordinal-only) is unchanged this step, and `grantLeases:false`
+callers bypass `capable` — so scored proxy pools are floor-gated only once source pools enter unified
+admission (step H). Admission-side-first, engine-side at the collapse.
+
 ### D. Settle per-pool + reason-aware
 `nextStepHelpers.ts:1947-1951` settles ALL source pools on any non-`complete` drive — the coarsest possible
 reaction, and the reason 2 of 3 pools settled with no individual error. Replace with: a pool is removed
@@ -141,6 +147,13 @@ The per-model capability data already exists, synced, someone-else-maintained �
 ## Owner decisions — CONFIRMED (2026-07-17)
 1. Capability approach **confirmed** — stamp `capability_rank` at populate from the registry
    `capability_source` (composite_rank), keep models.dev `tool_call`/`reasoning`, relative tier→floor.
+   **AMENDED same day — repair-proxy is being replaced by LiteLLM ([[litellm-replaces-repair-proxy]]),
+   which serves no leaderboard scores.** So: the `capable` predicate + relative-floor mapping land
+   PROXY-AGNOSTIC — capability_rank is read from whatever the pool carries (operator-declared
+   `source.capability_rank`, a populate stamp if the active proxy exposes one, models.dev
+   `tool_call`/`reasoning`), and the fail-open-on-unknown rule (decision 2) is the primary path for
+   LiteLLM-fronted pools until a proxy-independent capability table is wired. Do NOT deepen the
+   `/registry` `capability_source` coupling.
 2. Unknown capability → **fail-open + low-confidence note**.
 3. Default window → reuse `DEFAULT_CONTEXT_TOKENS=32000`.
 4. Scope → **all five steps this push**, sequenced atomic green commits.

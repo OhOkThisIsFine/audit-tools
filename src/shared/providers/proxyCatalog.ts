@@ -59,6 +59,8 @@ interface RegistryModel {
   provider: string;
   model: string;
   score: number | null;
+  /** Raw relative-capability rank (LOWER = better) when the registry exposes one. */
+  capabilityRank: number | undefined;
   costPerMtok: number | undefined;
   contextTokens: number | undefined;
 }
@@ -110,12 +112,25 @@ function deriveScore(entry: Record<string, unknown>): number | null {
   if (typeof entry.score === "number" && Number.isFinite(entry.score)) {
     return entry.score;
   }
-  const capability = entry.capability;
-  if (capability === null || typeof capability !== "object") return null;
-  const rank =
-    finiteNonNegative((capability as Record<string, unknown>).composite_rank) ??
-    finiteNonNegative((capability as Record<string, unknown>).arena_rank);
+  const rank = deriveRawCapabilityRank(entry);
   return rank === undefined ? null : -rank;
+}
+
+/**
+ * The RAW relative-capability rank (LOWER = better) from a registry entry's
+ * capability block, when the active proxy exposes one — best-effort and
+ * proxy-agnostic (a registry with no capability data yields undefined; the floor
+ * then fails open per the owner decision, [[litellm-replaces-repair-proxy]]).
+ * Stamped onto the expanded source as `capability_rank` (unified-routing step C)
+ * so the admission floor reads per-model capability with no operator declaration.
+ */
+function deriveRawCapabilityRank(entry: Record<string, unknown>): number | undefined {
+  const capability = entry.capability;
+  if (capability === null || typeof capability !== "object") return undefined;
+  return (
+    finiteNonNegative((capability as Record<string, unknown>).composite_rank) ??
+    finiteNonNegative((capability as Record<string, unknown>).arena_rank)
+  );
 }
 
 /**
@@ -182,6 +197,7 @@ function extractRegistryModels(payload: unknown): RegistryModel[] {
       provider: provider.trim(),
       model: model.trim(),
       score: deriveScore(entry),
+      capabilityRank: deriveRawCapabilityRank(entry),
       costPerMtok:
         finiteNonNegative(entry.cost_per_mtok) ??
         finiteNonNegative(entry.price_per_mtok) ??
@@ -264,6 +280,11 @@ function expandSources(
         model: model.model,
         worker_kind: "agentic",
         ...(cost !== undefined ? { cost_per_mtok: cost } : {}),
+        // Step C: per-model capability (raw rank, LOWER = better) rides the source →
+        // CapacityPool.declaredCapabilityRank → the admission capability floor.
+        ...(model.capabilityRank !== undefined
+          ? { capability_rank: model.capabilityRank }
+          : {}),
         ...(model.contextTokens !== undefined
           ? { quota: { context_tokens: model.contextTokens } }
           : {}),

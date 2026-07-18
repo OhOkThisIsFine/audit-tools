@@ -22,6 +22,7 @@ import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { estimatePacketCost } from "../quota/packetCost.js";
 import type { DispatchCapacityPoolSummary } from "../quota/capacity.js";
+import type { DispatchModelTier } from "../types/stepContract.js";
 import { deriveColdStartAdmissionBatch } from "../quota/scheduler.js";
 import { tierRank } from "./tierRank.js";
 import { deriveCostRank, lookupConfirmedPosition } from "./costRank.js";
@@ -33,6 +34,15 @@ export interface AdmissionCandidate {
   cost: number;
   /** Complexity in [0, 1] — the default capability gate's routing signal. */
   complexity: number;
+  /**
+   * The packet's minimum-capability floor (unified-routing step C): its dispatch
+   * tier (`resolveDispatchTier` — risk/complexity-derived). A pool is eligible only
+   * if its RELATIVE capability among the currently-available pools clears this
+   * floor ({@link buildCapabilityFloorCapable}); a hard `deep` packet is never
+   * routed to a bottom-band model just because it is free, idle, and fits context.
+   * Absent ⇒ no floor (small), preserving legacy callers.
+   */
+  requiredTier?: DispatchModelTier;
 }
 
 /** One pool a packet may be routed to. */
@@ -249,6 +259,83 @@ function defaultCapable(pool: AdmissionPool, packet: AdmissionCandidate): boolea
 }
 
 /**
+ * Build the composed capability gate (unified-routing step C): size-fit AND a
+ * RELATIVE per-packet capability floor over the currently-available pool set.
+ *
+ * Relative, never absolute (the "never a named-model→tier map" invariant): pools
+ * with a known per-model `capabilityScore` (registry/leaderboard composite_rank,
+ * LOWER = better) are banded into terciles among the SCORED pools — band 0 = top
+ * third. A pool with no score but a NON-NEUTRAL tier ordinal maps ordinal→band
+ * (deep→0, small→2). A pool with neither signal (score null + neutral ordinal —
+ * e.g. a proxy pool the leaderboard didn't match) is UNKNOWN and **fails open**
+ * (owner decision 2026-07-17): it stays eligible for every floor, and `onFailOpen`
+ * records the low-confidence routing so the choice is observable — fail-closed
+ * would reproduce the host-only collapse whenever no pool carries capability data.
+ *
+ * Floor: `deep` ⇒ band 0 only; `standard` ⇒ bands 0–1; `small`/absent ⇒ all.
+ * Composed over the size-fit gate, so supplying this predicate never loses the
+ * context-window check. Proxy-agnostic by construction — it reads only the pool's
+ * own `capabilityScore`/`capabilityRank` fields, never a transport's catalog
+ * ([[litellm-replaces-repair-proxy]]).
+ */
+export function buildCapabilityFloorCapable(
+  pools: readonly AdmissionPool[],
+  onFailOpen?: (info: { poolId: string; packetId: string; requiredTier: DispatchModelTier }) => void,
+): (pool: AdmissionPool, packet: AdmissionCandidate) => boolean {
+  // Tercile-band the scored pools once per batch (deterministic: score asc, poolId tiebreak).
+  const scored = pools
+    .filter((p) => typeof p.capabilityScore === "number" && Number.isFinite(p.capabilityScore))
+    .sort(
+      (a, b) =>
+        (a.capabilityScore as number) - (b.capabilityScore as number) ||
+        a.poolId.localeCompare(b.poolId),
+    );
+  const scoreBand = new Map<string, number>();
+  scored.forEach((p, i) => {
+    scoreBand.set(p.poolId, Math.floor((3 * i) / scored.length));
+  });
+  const NEUTRAL_ORDINAL = tierRank(undefined); // the fallback tier — carries no information
+  const bandOf = (pool: AdmissionPool): number | null => {
+    const fromScore = scoreBand.get(pool.poolId);
+    if (fromScore !== undefined) return fromScore;
+    // No score: a non-neutral ordinal is a real declared/roster rank → coarse band.
+    // (A genuinely-DECLARED `standard` rank is indistinguishable from the fallback
+    // here — both are the neutral ordinal — so declared-standard pools are treated
+    // as unknown/fail-open. Deliberate: representing "declared vs defaulted" would
+    // need rank provenance on the summary; fail-open is the safe direction.)
+    if (pool.capabilityRank !== NEUTRAL_ORDINAL) return 2 - Math.min(pool.capabilityRank, 2);
+    return null; // unknown — fail open
+  };
+  // The batch's BEST available band — the floor is RELATIVE all the way down
+  // (C-review F3): `deep` means "the most capable band available", not "band 0 or
+  // nothing". Without this, an all-small ordinal roster gives every deep packet an
+  // empty candidate set → a `no_capable_pool` wall that step E rightly calls
+  // structural/permanent — a livelock the floor itself manufactured. The scored
+  // path already behaves this way (n=1 scored pool = band 0 by construction).
+  const bands = pools.map(bandOf).filter((b): b is number => b !== null);
+  const anyBanded = bands.length > 0;
+  const bestAvailableBand = anyBanded ? Math.min(...bands) : 0;
+  const FLOOR_MAX_BAND: Record<DispatchModelTier, number> = { deep: 0, standard: 1, small: 2 };
+  return (pool, packet) => {
+    if (!defaultCapable(pool, packet)) return false;
+    const tier = packet.requiredTier;
+    if (!tier || tier === "small") return true;
+    const band = bandOf(pool);
+    if (band === null) {
+      // Unknown capability: fail-open, never a block. Record it ONLY when the batch
+      // has at least one banded pool (C-review F2) — with zero capability data the
+      // floor is globally inert and there is no routing choice to flag; recording
+      // would spam a warning per packet on every ordinary single-host wave.
+      if (anyBanded) {
+        onFailOpen?.({ poolId: pool.poolId, packetId: packet.id, requiredTier: tier });
+      }
+      return true;
+    }
+    return band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand);
+  };
+}
+
+/**
  * Finer capability tiebreak on the raw registry score (LOWER = more capable), consulted
  * only after the coarse tier ordinal has tied. A present score sorts before an absent
  * one; both absent ⇒ 0 (fall through to the next tiebreak). Never a primary axis — it
@@ -460,7 +547,7 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
  * so a host grant here would double-count).
  */
 export async function computeDispatchAdmission(input: {
-  packets: { id: string; inputTokens: number; complexity: number }[];
+  packets: { id: string; inputTokens: number; complexity: number; requiredTier?: DispatchModelTier }[];
   pools: AdmissionPool[];
   /** Declared output cap for the packet envelope (cold-start; ratio refines later). */
   outputCap: number;
@@ -474,6 +561,7 @@ export async function computeDispatchAdmission(input: {
     id: p.id,
     cost: estimatePacketCost({ inputEstimate: p.inputTokens, declaredOutputCap: input.outputCap }).cost,
     complexity: p.complexity,
+    ...(p.requiredTier ? { requiredTier: p.requiredTier } : {}),
   }));
   const declaredCap = input.pools.reduce<number | null>(
     (min, p) => (p.declaredCap == null ? min : min == null ? p.declaredCap : Math.min(min, p.declaredCap)),
