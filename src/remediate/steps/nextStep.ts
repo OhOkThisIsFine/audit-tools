@@ -790,6 +790,15 @@ export interface DriveRollingDispatchResult {
    * packet completed.
    */
   terminal?: PartialCompletionTerminal;
+  /**
+   * Pools the engine PERMANENTLY excluded this drive (credit exhaustion,
+   * model-unavailable, a no-reset rate limit) — the unified driver's set passed
+   * through verbatim, so a partition-scoped caller can apply its cross-cycle
+   * settle from real per-pool evidence (H2 plan D2). Reversible pauses
+   * (reset-bearing 429, quota_unclassified cooldowns) are NOT in it, by the
+   * engine's own pause-vs-exhaust split.
+   */
+  exhaustedPoolIds: string[];
 }
 
 /**
@@ -901,6 +910,7 @@ export async function driveRollingDispatch(
     levels: run.levels.map((l) => ({ blockIds: l.nodeIds, results: l.results })),
     rebuilds: run.rebuilds,
     ...(run.terminal ? { terminal: run.terminal } : {}),
+    exhaustedPoolIds: run.exhaustedPoolIds,
   };
 }
 
@@ -959,6 +969,21 @@ export interface DriveRollingImplementDispatchOptions {
     hostModels?: HostModelRosterEntry[] | null;
     hostModelId?: string | null;
   };
+  /**
+   * Partition-scoped drive (H2 plan D2, mirroring audit's `tasksOverride`): drive
+   * ONLY these planned block ids — the caller's coordinator-assigned in-process
+   * partition. When set, run-level lifecycle stays with the CALLER: the engine
+   * terminal is NOT persisted onto state (a backend-only wall must never pause
+   * the whole run while the host share proceeds) and the final
+   * `mergeImplementResults` is NOT run. Full-frontier behavior (unset) is
+   * unchanged.
+   */
+  blocksOverride?: readonly string[];
+  /**
+   * Drive against these pools (the caller's coordinator set, mirroring audit's
+   * `poolsOverride`) instead of deriving `buildConfirmedPools` here.
+   */
+  poolsOverride?: CapacityPool[];
 }
 
 export interface DriveRollingImplementDispatchResult {
@@ -968,11 +993,29 @@ export interface DriveRollingImplementDispatchResult {
     outcome: RollingDispatchResult<{ block_id: string }>["outcome"];
     verify_passed: boolean;
     merged: boolean;
+    /** The pool the node actually ran on (claim-contested skips name the offered pool). */
+    pool_id: string;
   }>;
   /** Number of inter-level shared rebuilds performed. */
   rebuilds: number;
-  /** The state status after the deterministic merge of all node results. */
+  /**
+   * The state status after the deterministic merge of all node results; for a
+   * partition-scoped drive (no merge here) the CURRENT persisted status.
+   */
   state_status: RemediationState["status"];
+  /**
+   * Pools the engine permanently excluded this drive (see
+   * {@link DriveRollingDispatchResult.exhaustedPoolIds}) — the partition caller's
+   * cross-cycle settle evidence.
+   */
+  exhausted_pool_ids: string[];
+  /**
+   * The engine's partial-completion terminal, surfaced to the caller. On a
+   * full-frontier drive it has ALSO been persisted onto state (pre-merge); on a
+   * partition-scoped drive it is deliberately NOT persisted — the caller owns
+   * run-level lifecycle.
+   */
+  terminal?: PartialCompletionTerminal;
 }
 
 /**
@@ -1126,22 +1169,25 @@ export async function driveRollingImplementDispatch(
   });
 
   // Confirmed pools: quota-derived concurrency, never the raw host flag (INV-QD-11).
-  const confirmedPools = await buildConfirmedPools({
-    sessionConfig: options.sessionConfig,
-    hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
-    hostContextTokens: options.waveOptions?.hostContextTokens,
-    hostOutputTokens: options.waveOptions?.hostOutputTokens,
-    hostModels: options.waveOptions?.hostModels,
-    hostModelId: options.waveOptions?.hostModelId,
-    hostSession,
-    // The operator's Gate-0 exclusions, applied as a set-difference over freshly
-    // gathered reach. Read here because this layer owns `root`; self-spawn-blocked is
-    // recomputed against THIS process's env rather than inherited from the auditor
-    // that wrote the confirmation.
-    excludedBackends: resolveDispatchExclusion(
-      await readConfirmedDispatchPolicy(options.root),
-    ),
-  });
+  // A partition-scoped caller supplies its coordinator's already-built set instead.
+  const confirmedPools =
+    options.poolsOverride ??
+    (await buildConfirmedPools({
+      sessionConfig: options.sessionConfig,
+      hostMaxConcurrent: options.waveOptions?.hostMaxConcurrent,
+      hostContextTokens: options.waveOptions?.hostContextTokens,
+      hostOutputTokens: options.waveOptions?.hostOutputTokens,
+      hostModels: options.waveOptions?.hostModels,
+      hostModelId: options.waveOptions?.hostModelId,
+      hostSession,
+      // The operator's Gate-0 exclusions, applied as a set-difference over freshly
+      // gathered reach. Read here because this layer owns `root`; self-spawn-blocked is
+      // recomputed against THIS process's env rather than inherited from the auditor
+      // that wrote the confirmation.
+      excludedBackends: resolveDispatchExclusion(
+        await readConfirmedDispatchPolicy(options.root),
+      ),
+    }));
 
   // The live per-node worker: the configured provider, launched with the node's
   // worktree-rooted prompt and cwd = its worktree. Tests inject `options.dispatchNode`
@@ -1163,11 +1209,27 @@ export async function driveRollingImplementDispatch(
   const state = await new StateStore(artifactsDir).loadState();
   if (!state) return null;
   const plannedBlockIds = new Set(resultPathByBlock.keys());
+  // Partition scope (H2): when the caller assigned this driver a coordinator
+  // partition, only those planned blocks are driven — everything else stays
+  // pending for the caller's other pools (the host share included).
+  const partitionIds =
+    options.blocksOverride !== undefined ? new Set(options.blocksOverride) : null;
   const allLevels = rollingDependencyLevels(state);
   // Keep only the blocks that were actually planned this dispatch (eligible now).
   const levels = allLevels
-    .map((level) => level.filter((b) => plannedBlockIds.has(b.block_id)))
+    .map((level) =>
+      level.filter(
+        (b) => plannedBlockIds.has(b.block_id) && (partitionIds === null || partitionIds.has(b.block_id)),
+      ),
+    )
     .filter((level) => level.length > 0);
+  // Empty partition → an empty-but-SHAPED result, never null: `null` means "no
+  // eligible work, run the merge" to existing callers, and a partition caller
+  // following that recipe against the just-written full-frontier plan would
+  // terminal-block every undriven block (review h2c2 F1).
+  if (partitionIds !== null && levels.length === 0) {
+    return { nodes: [], rebuilds: 0, state_status: state.status, exhausted_pool_ids: [] };
+  }
 
   const nodeOutcomes: DriveRollingImplementDispatchResult["nodes"] = [];
 
@@ -1193,7 +1255,7 @@ export async function driveRollingImplementDispatch(
     if (!claimTokens.has(block.block_id)) {
       const claim = await registry.claim(block.block_id, "in-process");
       if (!claim.acquired) {
-        nodeOutcomes.push({ block_id: block.block_id, outcome: "success", verify_passed: false, merged: false });
+        nodeOutcomes.push({ block_id: block.block_id, outcome: "success", verify_passed: false, merged: false, pool_id: slot.poolId });
         return {
           packet: { id: block.block_id, payload: { block_id: block.block_id }, estimatedTokens: 0, complexity: 0.5 },
           outcome: "success",
@@ -1226,6 +1288,9 @@ export async function driveRollingImplementDispatch(
       outcome: accept.outcome,
       verify_passed: accept.verifyPassed,
       merged: accept.merged,
+      // Real per-node pool attribution (H2 plan D2) — the slot the engine bound,
+      // so a partition caller can settle the RIGHT pool from a node's outcome.
+      pool_id: slot.poolId,
     });
     // Release the claim ONLY on a terminal accept. A `rate_limited`,
     // `credit_exhausted`, or `quota_unclassified` worker re-queues (still owned
@@ -1303,6 +1368,23 @@ export async function driveRollingImplementDispatch(
     },
   });
 
+  // Partition-scoped drive (H2): run-level lifecycle belongs to the CALLER — the
+  // engine terminal is surfaced on the result but never persisted (a backend-only
+  // wall must not pause the whole run while the host share proceeds), and the
+  // deterministic merge is the caller's, run once over ALL partitions.
+  if (partitionIds !== null) {
+    // Freshly persisted status; falls back to the pre-drive snapshot only if
+    // state.json vanished mid-drive (review h2c2 F4 — documented, not silent).
+    const current = await new StateStore(artifactsDir).loadState();
+    return {
+      nodes: nodeOutcomes,
+      rebuilds: Math.max(0, levels.length - 1),
+      state_status: (current ?? state).status,
+      exhausted_pool_ids: driven.exhaustedPoolIds,
+      ...(driven.terminal ? { terminal: driven.terminal } : {}),
+    };
+  }
+
   // Piece D — persist the rolling engine's partial-completion terminal onto state
   // BEFORE the merge, so the merge can SKIP-block the quota_paused stranded nodes
   // (their worker rate-limited → no result file, but they must stay PENDING for a
@@ -1326,6 +1408,8 @@ export async function driveRollingImplementDispatch(
     nodes: nodeOutcomes,
     rebuilds: Math.max(0, levels.length - 1),
     state_status: merged.status,
+    exhausted_pool_ids: driven.exhaustedPoolIds,
+    ...(driven.terminal ? { terminal: driven.terminal } : {}),
   };
 }
 
