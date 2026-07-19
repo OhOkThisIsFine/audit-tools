@@ -214,6 +214,18 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   guess. Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
   $/Mtok alone, never demoting a quota-saturated pool).
 
+- **`ci.yml`'s path filter makes DOC-gate violations dormant until an unrelated `src/` change
+  (2026-07-19, medium, friction: tool-should-decide).** `ci.yml` triggers only on
+  `src/** tests/** schemas/** dispatch/**`, but `verify:checks` includes `check:doc-manifest`, which
+  guards `docs/`. So a docs-only push can introduce a doc-manifest violation that CI never runs — and
+  it then detonates on the next unrelated `src/` commit, which gets blamed for it. Hit this lap: two
+  review docs landed in a docs-only commit, stayed dormant, and turned `ci.yml` red on a quota commit
+  that had nothing to do with them (plus two older strays that had been dormant longer). **Property to
+  hold:** the trigger paths for a gate must cover every path that gate inspects — either add `docs/**`
+  to `ci.yml`'s filter, or split the doc checks into a workflow whose filter matches what it guards.
+  Corollary already known and re-proved: local `build + check + vitest` does NOT include
+  `verify:checks`, so a lap can be "green" while CI is red ([[lap-green-must-match-ci-evidence]]).
+
 - **Durable trap — `codex exec "<prompt>"` HANGS when stdin is a non-TTY pipe (2026-07-19).** With a
   prompt passed as an argument, Codex still reads stdin to append as a `<stdin>` block; under any
   harness that leaves stdin open (background tasks, CI, most spawn wrappers) it blocks forever on
