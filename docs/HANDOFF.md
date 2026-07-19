@@ -55,7 +55,27 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT (a) — account-metering: ROUND 2 REFUSED 3/3, one owner call before any code
+## ✅ ACCOUNT METERING — CLOSED 2026-07-19 (`b913377f`). Do not reopen as a lap.
+
+**The N× over-admission is FIXED and verified by execution**, not by inspection: the real
+`nim-nano`/`nim-super`/`nim-kimi` config (three sources, one credential) was driven through
+`buildSourcePool` → `windowResourceKey` and converges on ONE ledger key, under both the
+`api_key_env` and inline `api_key` shapes; two different credentials correctly stay split.
+
+Shipped across three commits: `d842e557` (step 1, `QuotaWindow.scope` at the producer), `fe9659c0`
+(step 2, multi-constraint all-or-nothing ledger + branded `WindowSlopeKey`), `b913377f` (steps 3–4,
+per-window constraints + producer-derived `CapacityPool.accountKey`).
+
+**The durable shape of the fix, if you touch this subsystem:** every partition — window scope,
+account identity — is decided by the PRODUCER that knows and carried on the wire. Each of the five
+refused rounds re-derived one of them at the consumer from pool identity. Constraints meter in each
+window's OWN unit; there is no shared denominator.
+
+**Named residuals** (in `docs/backlog.md`, neither restoring N×): mixed env/inline credential
+references split one credential into two accounts; the test tree is not typechecked at all, so
+"required field ⇒ tsc enumerates the sites" buys nothing over fixtures.
+
+## Prior context — how it got here (kept only as the record of a defect that survived five repairs)
 
 **On `wip/capability-evidence` at `e500672f`, NOT on main. Round 2 was REFUSED by all three independent
 lenses (2026-07-19) — round 4 of refusals on this defect.** The underlying bug is real (N models on one
