@@ -59,6 +59,14 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   class as the scope-less-window fixture problem. **Property to hold:** a fixture that omits a
   required contract field fails loudly — either the test tree is typechecked, or the wire crossing
   schema-validates on every path a fixture can reach.
+  Two more symptoms of the same root, worth knowing because each costs time on its own: (a) making a
+  field required *because omission is a defect* enforces nothing in tests — the compiler correctly
+  sweeps production call sites while every test call site silently keeps getting `undefined`, so a
+  green suite reads as "every call site swept" when it cannot be; (b) a large `Edit` that breaks brace
+  balance in a `.test.mjs` is invisible to the typecheck and surfaces only as vitest failing to
+  transform the whole FILE — one opaque "Failed Suites" entry naming no test, masking every real
+  assertion in it. Candidate mechanisms: a `tsconfig.test.json` wired into `verify:checks`, or
+  `vitest --typecheck`.
 
 - **Mixed credential REFERENCES on one real key split the account (2026-07-19).** `deriveAccountKey`
   compares `(endpoint, credential reference)`, so a source declaring
@@ -107,18 +115,12 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   hold:** the artifact either records every key the lease was taken against, or does not record one
   at all. Documented in place at `admissionLoop.ts`.
 
-- **Account-metering steps 3–4 carry two obligations step 2 could not hold (2026-07-19).** Step 2
-  (multi-constraint ledger + `(scope,label)` slope key) landed the mechanism; these two properties
-  belong to the callers it enables and are NOT yet pinned anywhere but a test comment:
-  (a) **an uncalibrated pool must go through the cold-start probe path, not be waved through.** The
-  ledger treats a non-finite budget as unbounded by design (optimistic start; the reactive 429 floor
-  corrects), so whether a pool that cannot price a constraint reaches dispatch at all is decided in
-  budget derivation (`deriveWindowTokenBudget` → `COLD_START_PROBE_BATCH`) and admission wiring. The
-  design of record states this as a standing constraint (§ Standing constraints).
-  (b) **account-key DERIVATION must distinguish two credentials on one `backend_provider`**
-  (`accountId.ts`). The step-2 ledger test for "two accounts" pins only that two distinct map keys
-  don't share a bucket — nearly trivial, and NOT the mechanism at risk. An earlier refused review
-  round was about exactly this derivation.
+- **An uncalibrated pool must reach the cold-start probe path, not be waved through (unpinned).** The
+  ledger treats a non-finite budget as unbounded by design — an optimistic start that the reactive 429
+  floor corrects. So whether a pool that cannot price a constraint reaches dispatch at all is decided in
+  budget derivation and admission wiring, not in the ledger. The standing constraint is stated in the
+  design of record but is pinned nowhere except a test comment. **Property to hold:** a pool with no
+  calibration is probed, not admitted at full width.
 
 - **`dispatch-quota.json` cannot re-parse its own output when a budget is cold-start
   (2026-07-19, found by independent review during account-metering step 2).** `pool.budget`
@@ -144,25 +146,18 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   hold:** the test's cost does not scale with unrelated suite concurrency (raise its timeout, or
   make it not contend on whatever shared resource slows it).
 
-- **Per-site pinning gate — REAL BUT FAIL-OPEN ONE LEVEL UP; do NOT cite it as evidence yet
-  (2026-07-19, was reported SHIPPED, independent review found two soundness holes).**
-  `scripts/shared/assert-sites-pinned.mjs <spec.json>` reverts each site of a change individually and
-  requires each reversion to turn the named suite red. The 7 sites it checks for
-  `account-scoped-metering.json` ARE genuinely checked (independently confirmed, failure counts
-  1/3/1/1/1/1/1), and its original fail-open parse bug is genuinely fixed. **Two holes remain:**
-  (1) **it measures "the suite went red", not "a test asserting THIS behavior went red"** — renaming the
-  `resolvePoolAccountKey` export so importers crash yields `71 failed` and the gate reports
-  `PINNED … All 1 site(s) individually pinned`. That is the same fail-open shape the tool exists to
-  catch, relocated up a level. (2) **the spec is a hand-written subset with nothing cross-checking it
-  against the diff** — 7 declared vs ≥11 substantive hunks, and the two hunks carrying the fix's core
-  claim (`capacity.ts:725`, `apiPool.ts:276`) are outside it and survive reversion with `tsc` clean and
-  the suite byte-identical. "All 7 sites pinned" is literally true and materially misleading. A related
-  tell: three dead imports exist only to make the gate's `replace` text compile, i.e. reversions were
-  authored to fit the tool rather than derived from pre-fix code. **Properties to hold:** each spec site
-  binds to the NAME(s) of the test(s) expected to fail, and the spec is DERIVED from the diff so an
-  omitted hunk is impossible. Until both hold, a passing run is not admissible as attestation evidence
-  (see the attestation-gate entries below). ⚠ Needs `npm run build` first (imports the compiled shim
-  resolver from `dist/`).
+- **A per-site pinning gate would make "red-green validated" mechanically checkable — UNBUILT on main.**
+  The idea: revert each site of a change individually and require each reversion to turn the suite red,
+  so "every changed site is pinned by a test" stops being a claim the author makes about their own work.
+  A prototype existed on an unmerged branch and an independent review found the shape that makes a naive
+  version worthless: measuring *"the suite went red"* rather than *"a test asserting THIS behavior went
+  red"* passes trivially — renaming an export so importers crash turns 71 tests red and reads as PINNED.
+  That is the same fail-open the tool exists to catch, relocated one level up. A hand-written site list
+  has the mirror problem: it is silently a subset, so "all N sites pinned" is literally true and
+  materially misleading whenever the omitted hunks are the ones carrying the fix's core claim.
+  **Properties to hold:** each spec site binds to the NAME(s) of the test(s) expected to fail, and the
+  site list is DERIVED from the diff so an omitted hunk is impossible. Until both hold, no such gate's
+  output is admissible as attestation evidence.
 
 - **⚠ Two concurrent `vitest run` invocations corrupt each other's results (2026-07-19, medium,
   friction: inefficient-feeding).** Running a targeted suite while a full-suite run was still going in
@@ -174,83 +169,36 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   (`AUDIT_CODE_STATE_DIR`-style, per [[state-dir-env-override-hermeticity]]) or a second concurrent
   vitest refuses to start. Same family as the other three known full-suite-only failures.
 
-- **N models on ONE account are metered as N INDEPENDENT budgets — ROUND 2 REFUSED 3/3 (2026-07-19),
-  owner call open (loop-core, `e500672f` on `wip/capability-evidence`, NOT on main).** Three independent
-  lenses each refused sign-off. **Blocking owner call:** the lease key is account-scoped while the budget
-  operand stayed pool-scoped, which starves an account's lowest-budget pool (executed: budgets 1000/200,
-  20 packets → 10 granted all on the big pool, small pool 0) and drops the ceiling entirely when any
-  sibling is uncalibrated. Not a partial fix — a new bug. Either budget goes account-scoped (needs an
-  account-level `tokens_per_pct`) or the lease key returns to pool scope. Also: the motivating case is
-  STILL unfixed for the inline `api_key` shape (third round running); the `concurrency_cap` revert's
-  conclusion is a non-sequitur (enforcement keys on `poolId`, so 2 models × `max_concurrent: 2` on one
-  endpoint admit 4); and the pinning gate is not yet admissible evidence (see its own entry). Full
-  record:
-  [`docs/reviews/account-metering-round2-independent-review-2026-07-19.md`](reviews/account-metering-round2-independent-review-2026-07-19.md).
-  Round 2 addresses all
-  eight defects: the account key is now resolved ONCE at `CapacityPool` construction (`accountKey`) and
-  carried on the wire as a required `DispatchCapacityPoolSummary.account_key` that every consumer READS
-  — one partition by construction, and the only way the host path (which never sees a `source`) can key
-  an explicitly-`id`'d source correctly. The over-merge is fixed by checking `backend_provider` FIRST:
-  a transport-fronted endpoint never becomes the identity. The per-account in-flight-cap change was
-  REVERTED — `concurrency_cap` is documented as a per-ENDPOINT limit, which settles three defects at
-  once and narrows the fix honestly to the BUDGET and COOLDOWN axes. All seven changed sites are now
-  individually red-green validated (round 1 had two unpinned, including the one the record most
-  emphasized). **The durable lessons stand regardless of whether round 2 passes:** (1) three of five
-  sites were verified and the result GENERALIZED to "each fix" — verify every site, never extrapolate;
-  (2) the round-1 test asserted a helper the metering path never calls, which reads as coverage and is
-  not ([[verify-delegated-findings-mechanism-not-just-citation]]); (3) a required field did not break
-  any test call site at compile time because the test tree is untypechecked — the runtime failure was
-  the only signal (see the untypechecked-tests entry below). The attempt
-  introduced `accountKeyFromPoolKey` + `resolvePoolAccountKey` and rerouted budget, in-flight cap and
-  the cooldown fold. An independent adversarial review refused sign-off on eight defects — the two that
-  matter most: **(a)** deleting the `provider !== "openai-compatible"` guard made rung 1 key on the
-  TRANSPORT, so every backend behind one proxy collapses into a single cooldown account (a free-lane
-  429 stalls a paid lane) — an over-merge WORSE than the original bug, and directly against
-  `dispatchableSourceId`'s "the transport NEVER enters the quota identity"; **(b)** the motivating case
-  is still unfixed — an explicitly-`id`'d source has no `/` in its pool id, so budget and cap remain
-  per-model for exactly the `nim-nano`/`nim-super`-on-one-key scenario `accountId.ts:13-18` cites.
-  Full list + sign-off conditions:
-  [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
-  **Two durable lessons, both about how a green tree lied:** (1) three of five changed sites were
-  red-green validated and the result was GENERALIZED to "each fix" — the most-emphasized site was in
-  fact unpinned, and reverting it kept every test green. Verify each site, never extrapolate from a
-  sample. (2) the new test *looked* like it covered the motivating case but asserted a helper **the
-  metering path never calls** — a test can assert a true statement about a function that is not on the
-  path under test, which reads as coverage and is not
-  ([[verify-delegated-findings-mechanism-not-just-citation]]).
-  Original defect statement follows.
+- **The COOLDOWN axis of account metering was never migrated — budget and cooldown now derive account
+  identity two different ways (HIGH, loop-core).** The budget axis is closed: account identity is
+  resolved once at pool construction and carried on the wire as a required field every consumer reads,
+  so pools sharing one credential share one budget. The cooldown fold did NOT move with it. Both fold
+  sites still gate on the older local derivation, which returns null unless the source is
+  `openai-compatible` **and** names its credential through an env var **and** carries no explicit
+  account override. So a 429 learned on one model still fails to throttle its siblings for exactly the
+  cases that motivated the original fix: a source pasting its credential inline, and any proxy-fronted
+  source (those are `claude-worker`, not `openai-compatible`). Verified by reading both fold sites and
+  the derivation, not inferred.
+  **Property to hold:** budget and cooldown partition an account the SAME way — one derivation, one
+  answer. Two mechanisms answering "which account is this?" differently is the defect, independent of
+  which answer is right.
+  ⚠ The in-flight-cap axis is deliberately NOT part of this: the concurrency cap is documented as a
+  per-ENDPOINT limit, and an earlier attempt to make it per-account was correctly reverted.
+  ⚠ Do not "fix" this by deleting the `openai-compatible` guard — an independent review caught that
+  doing so keys identity on the TRANSPORT, collapsing every backend behind one proxy into a single
+  cooldown account so a free-lane 429 stalls a paid lane. That is an over-merge worse than the bug, and
+  against the standing rule that the transport never enters the quota identity.
+  **The durable lesson from the five refused rounds:** every partition — window scope, account identity
+  — is decided by the PRODUCER that knows it and carried on the wire. Each refused round re-derived one
+  of them at the CONSUMER from pool identity, which is why each was a guess.
+  [[account-metering-closed-producer-decides-partition]] [[fix-the-defect-class-not-the-named-instance]]
 
-  **N models on ONE account are metered as N INDEPENDENT budgets (2026-07-19, HIGH, loop-core,
-  observed configuring the NIM lane).** Expanding a proxy backend into K models yields K
-  `CapacityPool`s with K token budgets, K in-flight caps and K independent 429 cooldowns — against
-  one credential with one real rate limit. Admits ~K× the true ceiling; backoff learned on one model
-  never throttles its siblings. Evidence: pool identity `(provider, account, model)` puts `model` in
-  the *budget* key (`apiPool.ts:37-57` → `scheduler.ts:802-809`); quota state/ceilings/caps key off it
-  (`apiPool.ts:425,428`, `state.ts:576`, `admissionLoop.ts:613,668-669,689`); 429 cooldown is
-  per-model (`rollingDispatch.ts:1061,1087` → `state.ts:567`); and `admissionLoop.ts:227` assigns
-  `resourceKey` — documented at :51-52 as "the metered account the lease keys to" — verbatim from the
-  per-model `pool_id`. The account fold that exists for exactly this bug (`accountId.ts:8-10` cites the
-  NIM incident) never fires here: `accountId.ts:39` gates it to `provider === "openai-compatible"` and
-  proxy sources are `claude-worker` (`proxyCatalog.ts:342`); and even ungated it is contractually
-  scoped to the cooldown axis alone, never budget (`accountId.ts:55-57`).
-  **Property to hold:** pools sharing one credential share ONE budget, ONE in-flight cap and ONE
-  cooldown; the model axis may subdivide *routing*, never *metering*. **Currently mitigated only in
-  config** (`proxy.top_k: 1`) — latent for any `top_k > 1` or any operator declaring several models on
-  one key. Fixing `accountId.ts:39` alone is NOT sufficient (propagates cooldown, leaves budget split)
-  — this is the [[fix-the-defect-class-not-the-named-instance]] shape.
-  Record: [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
-
-- **Model selection within one budget is FREE-vs-METERED, not one rule (2026-07-19, owner ruling,
-  RESOLVED — no code change needed).** Refines the first draft of this entry, which said "single pool ⇒
-  always best model" unconditionally. The owner's actual rule: **free pool ⇒ always the best model at
-  every complexity level** (no tradeoff exists — capability is the only axis); **metered pool (e.g. a
-  Codex subscription) ⇒ the CHEAPEST model that clears the capability floor.** Both already fall out of
-  `costFirstCmp` (`admissionLoop.ts:527`), `costRank ↑ || capabilityRank ↓ || capabilityScore ↑`: a free
-  pool's costs all tie so capability decides, and a metered pool sorts on price with the floor gating
-  eligibility. **Verified by reading the comparator, not assumed.** The rule was previously inert only
-  because no capability ranks existed to break the tie — which the ranker now supplies. Residual: the
-  operator still expresses "collapse this shared-budget roster to its best member" by hand as
-  `proxy.top_k: 1`; nothing derives it.
+- **Nothing derives "collapse a shared-budget roster to its best member" (low).** The selection rule
+  itself is settled and already falls out of the cost-first comparator: a free pool's costs all tie so
+  capability decides, and a metered pool sorts on price with the capability floor gating eligibility.
+  What is missing is that the operator still expresses the collapse by hand as a `top_k: 1` on the
+  proxy declaration. **Property to hold:** when several models share one budget, restricting the roster
+  to the member that best serves the work is derived, not hand-declared.
 
 - **A stale proxy catalog cache is served silently, and an absent one deletes the lane (2026-07-19,
   medium, friction: tool-should-decide).** `resolveAmbientSources` returned a `catalog-cache.json`
@@ -270,68 +218,15 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   silently-wrong-by-default for any unranked proxy. **Property to hold:** truncating a roster with no
   ranking signal must be loud, not alphabetical.
 
-- **Durable trap — LiteLLM will not start on Windows with redirected stdout (2026-07-19).** Its
-  startup banner crashes with `UnicodeEncodeError: 'charmap' codec can't encode characters` (cp1252)
-  before the server binds; exit code 3, no proxy, and the traceback buries the cause under ~40 lines
-  of FastAPI lifespan frames. Launch with `PYTHONIOENCODING=utf-8` (`PYTHONUTF8=1` also fine).
-  Recorded in the generated config's header comment.
-
-- **Anchored insertion makes RE-RANKING an already-ranked model unexpressible at roster
-  scale (2026-07-18, medium, known limitation of the BL-1 fix).** `mergeCapabilityOrder`
-  (`src/shared/providers/sharedProviderConfirmation.ts`) treats EVERY submitted id already
-  present in `priorOrder` as a fixed anchor and seeds `positions` from `priorPos`, so a
-  mentioned-but-previously-ranked model keeps its old position no matter where the operator
-  puts it. The one escape — a TOTAL submission restating every prior model — is unreachable
-  once the roster is large, which is exactly the regime anchored insertion exists for.
-  Net: the operator can ADD new models anywhere, but can never say "that model I ranked
-  highly is actually worse than I thought." That is the likeliest follow-up action, since the
-  point of operator ranking is that judgment improves with use.
-  **Not a livelock** — the merge converges and the delta empties; this is an expressiveness
-  gap, deliberately accepted to close a critical livelock, not an oversight.
-  **Property to hold:** an operator must be able to reposition a previously-ranked model
-  without restating the entire roster. **Likely fix:** distinguish a TOOL-OFFERED anchor
-  (from `selectCapabilityAnchors`, genuinely a fixed reference point) from any OTHER
-  previously-ranked model the operator chose to mention — the latter should be repositioned
-  by the same interpolation new models get. That makes demotion/promotion expressible while
-  keeping anchors stable, and needs no new field. Predicted in advance by the round-4 review
-  ("merge-always makes removal and reordering unexpressible"); recorded here so the
-  prediction is not lost if the fix is deferred.
-
-- **A DEADLINE should drive λ, not become another dial (2026-07-18, medium, forward track,
-  needs live data first).** The measurement half of this shipped — the speed axis now ranks on
-  `min(concurrency-derived, rate-derived)` (`deriveSustainedThroughput`) and spill consults
-  remaining rate budget (`deriveRateCap`, cooldown ⇒ zero) so it fires BEFORE the 429 rather
-  than after. What is still open is the sub-question that fix deliberately deferred: "finish
-  within an hour" is a CONSTRAINT rather than a preference, so it belongs as something that
-  drives λ from observed progress, **not as another operator knob** (a needed manual flag is a
-  bug signal — λ, "how much will I pay to finish sooner", is already the right tradeoff).
-  **Do not build it until a real wave under the shipped rate-aware routing shows the shape** —
-  the whole reason it was held back is that the right control law is not derivable from a
-  guess. Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
+- **A DEADLINE should drive λ, not become another dial (needs live data first).** "Finish within an
+  hour" is a CONSTRAINT rather than a preference, so it belongs as something that drives λ from observed
+  progress, **not as another operator knob** (a needed manual flag is a bug signal — λ, "how much will I
+  pay to finish sooner", is already the right tradeoff). **Do not build it until a real wave shows the
+  shape** — the right control law is not derivable from a guess. ⚠ An earlier version of this entry
+  claimed the measurement half had shipped, naming two functions that do not exist; throughput is
+  derived from concurrency alone today, so what "observed progress" would even read from is itself
+  undecided. Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
   $/Mtok alone, never demoting a quota-saturated pool).
-
-- **`ci.yml`'s path filter makes DOC-gate violations dormant until an unrelated `src/` change
-  (2026-07-19, medium, friction: tool-should-decide).** `ci.yml` triggers only on
-  `src/** tests/** schemas/** dispatch/**`, but `verify:checks` includes `check:doc-manifest`, which
-  guards `docs/`. So a docs-only push can introduce a doc-manifest violation that CI never runs — and
-  it then detonates on the next unrelated `src/` commit, which gets blamed for it. Hit this lap: two
-  review docs landed in a docs-only commit, stayed dormant, and turned `ci.yml` red on a quota commit
-  that had nothing to do with them (plus two older strays that had been dormant longer). **Property to
-  hold:** the trigger paths for a gate must cover every path that gate inspects. **FIXED same lap** —
-  `docs/**` added to both the `push` and `pull_request` filters in `.github/workflows/ci.yml`, so a
-  docs-only push now runs the gate that guards docs.
-  Corollary already known and re-proved: local `build + check + vitest` does NOT include
-  `verify:checks`, so a lap can be "green" while CI is red ([[lap-green-must-match-ci-evidence]]).
-
-- **Durable trap — `codex exec "<prompt>"` HANGS when stdin is a non-TTY pipe (2026-07-19).** With a
-  prompt passed as an argument, Codex still reads stdin to append as a `<stdin>` block; under any
-  harness that leaves stdin open (background tasks, CI, most spawn wrappers) it blocks forever on
-  "Reading additional input from stdin…" and is killed by the timeout with **exit 0 and empty output**.
-  Silent: it looks exactly like a model that returned nothing, and it cost two dispatches here before
-  being diagnosed. **Always `codex exec … </dev/null`** (or pass the prompt ON stdin instead of as an
-  argument). Same class as the Windows `npx.cmd` shim trap — an offload lane that fails silently reads
-  as a capability gap in the backend rather than a wiring bug on our side. If a dispatch worker ever
-  spawns `codex`, its stdin must be explicitly closed at the spawn site.
 
 - **The loop-core attestation gate cannot tell a human reviewer from the committing agent
   (2026-07-19, medium, friction: tool-should-decide).** `attest-loop-core-review.mjs` takes
@@ -359,65 +254,36 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   an override, while a commit onto `main` keeps the current strictness. Same family as the
   agent-vs-human entry above: both are the gate measuring the wrong thing.
 
-- **A large `Edit` into a `.test.mjs` can break brace balance and only surface as a vite parse
-  error (2026-07-19, low, friction: inefficient-feeding).** Rewriting a `test()` body whose
-  replacement spanned the closing `});` left the enclosing `test()` unclosed; `npm run check`
-  is blind to it (tests are outside `tsconfig`, see the entry below) so the first signal was
-  vitest failing to transform the whole FILE — which reports as one opaque "Failed Suites"
-  entry naming no test, and masks every real assertion in the file until fixed. Same root as
-  the untypechecked-tests entry below; noted separately because the SYMPTOM is what costs the
-  time (a suite-level parse failure reads as a harness problem, not an editing slip).
-
-- **The test tree is NOT typechecked, so a required-field contract change is not enforced
-  there (2026-07-18, medium, friction: tool-should-decide).** `tsconfig.json` is
-  `include: ["src"]` and vitest transpiles via esbuild without typechecking, so
-  `npm run check` never sees `tests/**`. Hit while making
-  `ScheduleWaveInput.capabilityRanks` required to close a fail-open: the compiler
-  correctly caught the production call sites, but every test call site silently kept
-  getting `undefined`. **Property to hold:** if a field is made required *because
-  omission is a defect*, omission must be a compile error everywhere the field is
-  passed — or the enforcement claim must be scoped in writing. A green suite currently
-  reads as "every call site swept" when it cannot be. Options: a `tsconfig.test.json`
-  wired into `verify:checks`, or `vitest --typecheck`.
-
-- **`llm read` (the free NIM lane) is unusable for review-shaped prompts
-  (2026-07-18, medium, friction: inefficient-feeding).** Two failures in one lap on
-  `nvidia/nemotron-3-ultra-550b-a55b`: a ~13KB diff timed out past 120s, and a ~5KB
-  function returned `Backend JSON did not match read schema` even after the built-in
-  stricter-format retry. The lane works for summarization/extraction but not for
-  "find defects in this diff, report file:line" — the schema is `{summary, findings[],
-  open_questions[]}` and the backend drifts off it under an analytical prompt.
-  **Property to hold:** the free lane either satisfies its own advertised schema or
-  fails with a signal the caller can route on — a schema-mismatch die means the whole
-  offload is wasted with nothing salvaged. Consider a size guard + a partial-parse
-  salvage path. Until then: delegate review work to Haiku/Sonnet subagents, not `llm read`.
-
-- **Capability-evidence obligation: implemented + green but REVIEW-BLOCKED, on branch
-  `wip/capability-evidence` (2026-07-18, high, blocks the ▶ IMMEDIATE NEXT).** Two adversarial review
-  rounds; round 2 REFUSED sign-off. Full record + the six open issues:
+- **Capability-evidence obligation — REVIEW-BLOCKED across four rounds, all of it on the unmerged
+  branch `wip/capability-evidence`; NONE of it is on main (high).** A pool with no capability evidence
+  must be pinned down — by LLM judgment or by asking the operator — never silently routed around.
+  Implemented and green, but three independent adversarial lenses refused sign-off. Full record:
   [`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
-  Properties that must hold before this lands:
-  (1) the capability floor must band on real evidence on BOTH draws — remediate's `scheduleWave` path
-  (`marshal.ts`) currently still fails open, the exact defect the change exists to fix;
-  (2) a promotion must never DESTROY a persisted operator decision — today the autonomous/headless
-  branch wipes `host_model_cost_order` entirely, and a capability-only submission reverts the confirmed
-  `cost_order`;
-  (3) a host that writes the prompt's JSON verbatim must produce a file the parser ACCEPTS — the
-  capability fragment omits `schema_version`, so following the prompt literally re-creates the
-  infinite-re-prompt livelock one layer up, and the canonical shape block never lists `capability_order`;
-  (4) explicit removal must stay representable — an empty `host_models` is currently indistinguishable
-  from omission, so the carry-forward resurrects a roster the operator deleted.
-  ⚠ The generalizable lesson (worth reading before the fix lap): every round-2 issue except the prompt
-  one is a SIBLING of a round-1 defect on a branch the round-1 fix did not sweep. Fixing the named
-  instance is not fixing the defect class — especially for a fail-open mechanism, where an unwired site
-  is indistinguishable from a working one.
-
-- **`resolveUnevidencedCapabilityPools` is untestable where it lives (2026-07-18, medium, friction:
-  tool-should-decide).** It is module-private in `src/audit/cli/nextStepCommand.ts`, so the
-  model-less-pool skip — the property that prevents an unpinnable pool from wedging `PRIORITY[0]`
-  forever — has no test, and the one test that claims to cover convergence is tautological. Property:
-  a delta-computation function whose failure mode is a livelock must be reachable by a test. Likely
-  the function belongs in shared beside the other confirmation readers rather than in a CLI command.
+  ⚠ Because the branch is not an ancestor of main, every symbol it introduces is absent from HEAD —
+  entries describing them as defects in shipped code are describing branch code.
+  **Properties that must hold before this lands:**
+  (1) the capability floor bands on real evidence on BOTH draws — remediate's `scheduleWave` path still
+  fails open, the exact defect the change exists to fix, and it is currently invisible to the suite;
+  (2) a promotion never DESTROYS a persisted operator decision — the headless branch wipes the whole
+  host model cost order, and a capability-only submission reverts the confirmed one;
+  (3) a host that writes the prompt's JSON verbatim produces a file the parser ACCEPTS — the capability
+  fragment omits its schema version, so following the prompt literally re-creates the infinite-re-prompt
+  livelock one layer up, and the canonical shape block never lists the capability order field;
+  (4) explicit removal stays representable — an empty host-model roster is indistinguishable from
+  omission, so carry-forward resurrects a roster the operator deleted;
+  (5) an operator can REPOSITION an already-ranked model without restating the entire roster. Anchored
+  insertion treats every previously-ranked id as a fixed anchor, so new models can be added anywhere but
+  a model already ranked can never be demoted — the likeliest follow-up action, since the point of
+  operator ranking is that judgment improves with use. Likely shape: distinguish a TOOL-OFFERED anchor
+  (a genuine fixed reference point) from any other previously-ranked model the operator chose to
+  mention; the latter gets the same interpolation new models get. Needs no new field;
+  (6) the delta computation whose failure mode is a LIVELOCK is reachable by a test. The model-less-pool
+  skip — the property preventing an unpinnable pool from wedging the first obligation forever — is
+  module-private in a CLI command and untested; the one test claiming to cover convergence is
+  tautological. It likely belongs in shared beside the other confirmation readers.
+  ⚠ The generalizable lesson: every round-2 issue except the prompt one is a SIBLING of a round-1 defect
+  on a branch the round-1 fix did not sweep. Fixing the named instance is not fixing the defect class —
+  especially for a fail-open mechanism, where an unwired site is indistinguishable from a working one.
 
 - **Unranked + free compose badly: hard packets structurally prefer the least-known models
   (2026-07-18, medium-high, from the LiteLLM live-validation lap).** Retiring repair-proxy also retired
@@ -489,7 +355,7 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   settled-pool `poolsOverride` filter into the same harness. (b) The env-DETECTED same-agent path
   (`CODEX_THREAD_ID` → `resolveConversationHostProvider` → dedup) lost its end-to-end pin when
   `demote-same-agent-guard.test.mjs` died; the new D1 tests use explicit `host_provider` only.
-- **The vitest false-green defect has recurred at least 6 times (2026-07-16 through 2026-07-18) — `vitest run` exits 0 while reporting N failed.** Caught only by reading the summary line, never the exit code. Both standing fixes remain unbuilt: (1) the local gate must fail-nonzero on ANY reported failure count; (2) the vitest timing ledger must record pass/fail outcome + failed file names, not just cost (`vitest-timing-reporter.mjs`).
+- **The vitest false-green defect has recurred at least 6 times — `vitest run` exits 0 while reporting N failed.** Caught only by reading the summary line, never the exit code; it has let a deterministic bug reach release CI, which then caught it in a shard. Both standing fixes remain unbuilt: (1) the local gate must fail-nonzero on ANY reported failure count; (2) the vitest timing ledger must record pass/fail outcome + failed file names, not just cost (`vitest-timing-reporter.mjs`) — without it, a run whose console output gets clipped is unrecoverable and costs a full re-run. ⚠ **And do not work around it by grepping vitest's prose**: matching `/failed/` over the output hit the string "fail-closed" *in test names* and reported a non-existent flake, and `/(\d+) passed/` catches "Test Files 1 passed" before "Tests 12 passed". The prose contains arbitrary author-chosen test names by construction, so any keyword match over it is unsound — which is exactly why the outcome belongs in the ledger as data.
 - **A delegated implementer embedded a RAW 0x00 byte in source (H2+H4 lap 2026-07-18, tool-should-decide, low-medium).** A subagent writing `rollingDispatch.ts` used a literal NUL character as a template-literal dedup-key separator — tsc compiles it happily, but the file turns BINARY to grep/Grep/rg (silently zero search results — a wiring-pass grep returned "no matches" on code that existed, initially reading as unwired enforcement). Fixed by replacing with the `backslash-u0000` escape. Property to hold: a post-write guard (hook or check) rejects raw control bytes (< 0x20 except \t\n\r) in source files; same family as the CRLF-rewrite trap. Cheap mitigation until then: when a grep over a just-edited file returns nothing or "binary file matches", scan for control bytes before concluding anything.
 - **Non-hermetic test: `tests/audit/quota-command.test.mjs` "nothing is written to disk" reads the box's real `.audit-tools/audit/session-config.json` (2026-07-18, low).** A leftover gitignored local artifact makes the test fail on a clean checkout of main; it presents as a regression from whatever diff is in flight. Property: the test must resolve repo-root state through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo path. Same box-dependence family as `INV-shared-core-14`.
 - **Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).** `src/shared/quota/apiPool.ts` (~370-371, ~497-498) and `src/shared/types/sessionConfig.ts` (~700-701) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the owner's no-legacy rule this fold should be deleted and the block treated as a plain source declaration.
@@ -499,17 +365,12 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 > lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
-- **Friction walk (unified-routing lap, 2026-07-17):** (1) **ambiguous-direction (HIGH — nearly built on a dead premise):** HANDOFF's "▶ step 2 Agent-tool carrier test" and the same-day host-fanout design doc pointed at a build whose central claim the run's own artifacts refuted; two same-day records disagreed and only an in-process repro + artifact read resolved it. Durable lesson homed in [[unified-dispatch-routing-direction]]: a same-day, owner-attended diagnosis/design doc's premise is still a LEAD — reproduce the central claim before building. (2) **tool-should-decide (medium):** python text-mode file rewrites on Windows CRLF-ified LF sources, which silently flipped a source-grep guard (`cli-args-utils` "found 3" — comment-stripper regex vs CRLF) that HEAD passed; cost a stash/pop diagnosis. Durable trap: after any scripted rewrite, verify line endings (`open(..., newline='
 ')` on write) — same family as the release CRLF trap. (3) **inefficient-feeding (medium, recurrence):** a background full-area vitest run piped through `grep` clipped the failure NAMES (the ledger outcome gap's 4th billing, entry above) forcing a full re-run; and an adversarial reviewer observed the working tree MUTATING mid-review (parent kept editing while a tree-scoped review ran) — it stash/popped defensively and flagged a transient phantom type error. Process rule: freeze edits on files under active review, or hand the reviewer a pinned diff.
 - **Friction walk (H2+H4 collapse lap, 2026-07-18):** (1) **ambiguous-direction (medium):** my own plan doc asserted "the host-vs-source dedup already exists" from a docblock's phrasing — the adversarial plan review refuted it against the writers (dedup was source-vs-source only, the new rule was new code); and the reviewer's own proposed fix for the display filter was itself a gate-that-never-fires (relative floor can't refuse every pool) — caught only by re-deriving at implementation time. Both are the standing lesson: every causal claim, including a REVIEWER's fix, gets verified against source before building. [[gate-must-be-traced-not-designed]] (2) **tool-should-decide (low):** the pre-commit loop-core gate evaluates a CHAINED `attest && commit` command before the inner attest has run, so the legitimate one-shot form is blocked — attest must be its own Bash call first; either the hook could ignore commits preceded by an attest in the same chain, or document the split as the required shape. (3) **inefficient-feeding (medium, recurrences):** NIM `llm read` lane 503-saturated ("Worker local total request limit 163/32") after ONE call in its session — recon fell back to targeted greps; and a delegated implementer died mid-task on the Claude session limit, with its partial recon unrecoverable (clean tree, redone in-context). Both argue for the standing pattern: main context implements from subagent recon it can verify, not the reverse.
 - **Friction walk (proxy-swap lap, 2026-07-18):** (1) **ambiguous-direction (medium, 4 instances in one lap):** four delegated-agent claims with accurate file:line citations dissolved when the surrounding MECHANISM was traced — a "shipping-blocking" quota defect refuted by a `handlesProvider` gate two lines above the cited line; a "paradoxical asymmetry" in cost blend that was per-provider top-K truncation in the test fixture, not the blend; a "real regression" that was a leftover gitignored artifact; and an implementer self-reporting "zero repair_proxy references in src/" while 19 remained across 6 files. Property/lesson: cited line numbers make an interpretation look verified — the parent must trace the gate/caller around the citation, and must run its OWN completeness grep after any delegated sweep. [[gate-must-be-traced-not-designed]] [[grep-the-writers-before-believing-inheritance]] (2) **tool-should-decide (low, FIXED this lap):** the dev wrapper's `.audit-code-build.lock` in the repo root left the worktree dirty and tripped the release clean-tree guard; now gitignored (`bc6ca9cd`). (3) **inefficient-feeding (medium):** two delegated agents died mid-task on session/credit limits, losing partial work (one left no partial output at all); and heavy audit tests timed out en masse (22 across 9 files) purely from parallel-agent load on the box, costing an is-it-mine investigation that CI's green sharded run settled. Lesson: local full-suite results are unreliable while many agents run concurrently — CI is the arbiter.
 - **Remediate hybrid frontier still sizes with a FLAT per-node estimate (step-G remediate half, medium).** `HYBRID_NODE_TOKEN_ESTIMATE` (`src/remediate/steps/nextStep.ts:1441`) makes the claim-time fit gate blind for implement nodes (audit's half fixed 2026-07-17 with real `token_estimate`s). Property: derive per-node estimates from the node's `affected_files` sizes (`estimateTokensFromBytes`) so a chronically-413ing (node,pool) pair is pre-skipped, not re-claimed each cycle.
-- **A same-day design doc's premise, unverified against the run's artifacts, nearly drove a whole wrong build (unified-routing lap 2026-07-17, ambiguous-direction, HIGH).** `host-fanout-proxy-dispatch-design-2026-07-17.md` diagnosed "conversation-first resolves source pools but never folds them into the wave → build a `proxy_transport` trigger," and the owner + I scoped 4 build decisions on it. The run's OWN artifacts refuted it: `buildAuditSourcePools` returns 3 pools (in-process repro), `hybrid-settled-pools.json` = exactly those 3 (collectively settled), the fit gate was silently no-op'd by a `null` `contextCapTokens`. The design doc had even misidentified the gate (named the headless branch `nextStepHelpers.ts:1757`; conversation-first fires the hybrid `:1875`). Property: before building on a design/diagnosis doc — even a same-day, owner-attended one — reproduce its central claim against the run's artifacts / an in-process repro; a doc's causal story is a LEAD, its ✅/decisions decay. Cost avoided: an entire `proxy_transport` build that fixes nothing. Full record: `docs/reviews/host-fanout-premise-refuted-2026-07-17.md`; direction in `docs/reviews/unified-dispatch-routing-design-2026-07-17.md`. [[external-audit-catalogs-are-leads]] [[grep-the-writers-before-believing-inheritance]] [[gate-must-be-traced-not-designed]]
-- **A recon agent's "should work / is missing" story about a live-run defect is a LEAD — the run's own artifacts are the writers-grep (gap-fix lap 2026-07-17, ambiguous-direction, medium).** The backlog framed gap (b) as "the agentic path has no classification equivalent"; two recon agents then produced a plausible "classifier exists and fires" trace. Both wrong: the classifier existed AND was wired but was short-circuited by the not-accepted early return — found only by reading the RUN'S artifacts (119 worker stdouts: all failure text on stdout, none on stderr; quota-state ledger: entries touched in-window with streak 0). Property: diagnosing a live-run defect starts from the run's evidence files, not from code-reading; a ledger showing "recorded but not as X" refutes a code-trace saying "X fires". [[grep-the-writers-before-believing-inheritance]] [[external-audit-catalogs-are-leads]]
-- **Loop-core delegation needs a parent WIRING pass — two Haiku implementers shipped defined-but-unwired / wrong-layer mechanisms (gap-fix lap 2026-07-17, inefficient-feeding, low-medium).** (a) Engine hooks (`onModelUnavailable`/`onPacketTooLarge`) were declared + handled in the engine but wired at NEITHER draw site nor the two pass-through layers — friction capture would never fire (the gate-that-never-fires class; caught by grepping the hook names outside shared/). (b) The partition fit gate was implemented as post-claim relabeling — an assignment claimed to source pool X pushed into the host partition with `poolId` still X (claim/accounting on the wrong pool; caught by reading the claim walk). Property: after any delegated multi-layer change, the parent greps the NEW symbol names across src/ and traces one end-to-end call path before accepting; adversarial review alone caught only one of the two. Also self-inflicted: two implementers raced edits on `rollingDispatch.ts` — sequence same-file units. [[delegate-adversarial-phases-to-separate-agent]] [[gate-must-be-traced-not-designed]]
 - **Every step prompt's trailing "Then run: … next-step" makes any DELEGATED step executor a second driver (claude-worker dogfood 2026-07-16, tool-should-decide, medium).** A Haiku subagent handed one bounded step (charter_extraction) with an explicit "do NOT run next-step" instruction obeyed the step prompt's own embedded advance command instead and drove the workflow forward — the parent lost the step boundary. This generalizes the existing "design-review worker prompts FOLLOW-UP" entry from one branch to EVERY step prompt: the advance command belongs to the DRIVER, not the step executor, and prompt text cannot enforce that split (host/worker discretion). Property to hold: a step prompt handed to a non-driving executor must not carry the advance command — e.g. emit it only in the step JSON (driver-facing), not in the worker-facing prompt md, or gate next-step on the driving agent-id. **Recurrence 2026-07-17 (design-review re-dogfood):** a `systemic_challenge` adversary subagent, handed its step-prompt path to follow, executed the prompt's embedded `next-step` and advanced the loop from round 7→8 — even convergence-loop worker prompts carry the advance command, so this is not branch-specific. Mitigation used the rest of the lap: the dispatch message explicitly overrides ("do NOT run next-step; the parent owns advancement"), which held — but that is host-discretion, exactly what the property says to remove. [[enforce-robustness-in-tooling-not-host-discretion]] [[delegate-adversarial-phases-to-separate-agent]]
 - **The `charter_delta` step defaults its miner to the same host that merged `charter_extraction` — no mechanical author/critic split (2026-07-17 re-dogfood, tool-should-decide, medium).** `charter_extraction` instructs the host to author via blind subagents AND merge/trim their output into the submission; the very next `charter_delta` step then hands that same host the job of mining deltas over the charter set it just curated — the "independent delta-miner" is independent of the blind authors but NOT of the merger, so the host grades homework it helped assemble. Prompt text alone cannot enforce the split (host discretion; caught this lap only because the owner flagged it — I had started mining in-context before re-dispatching to a fresh agent reading `charter_register.json` cold). Property to hold: the delta-miner must be a mechanically distinct agent from whoever assembled the charters — e.g. the step dispatches the miner itself, or binds next-step acceptance to a delta submission authored under a different agent-id than the extraction merge. Same family as the executor-second-driver entry above. [[delegate-adversarial-phases-to-separate-agent]] [[enforce-robustness-in-tooling-not-host-discretion]]
-- **Nested-delegation results deliver to the top driver, not the delegating agent (claude-worker dogfood 2026-07-16, inefficient-feeding, low).** A Haiku step-executor spawned three blind charter children and ended its turn "waiting for their completion notifications" — but the children's task-notifications delivered to the MAIN session, so the parent never saw its own children's results and the driver had to relay all three back via SendMessage (an extra round-trip + full result bodies through main context). When delegating a step whose executor will itself fan out, either forbid nested spawn ("do the work yourself" — used for all later steps this lap, works) or expect to relay. Harness behavior, not an audit-tools defect; noted so the delegation pattern defaults to flat fan-out driven by the session that owns the notifications.
 - **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium).** The dispatch-blocking defect was found BY the run, and committing its fix changed the audited tree → staleness cascade correctly marked the whole planning chain stale → the 313-packet run regressed to charter_extraction, so every LLM planning step re-runs before dispatch is reattempted. Semantics are right (DAG is truth); the cost is structural to dogfooding-by-self-audit. Two tool slivers worth considering: (a) the resume emitted ~30 identical `{"kind":"staleness",...}` lines in one invocation (recompute spin — dedupe the log line per drain); (b) an active run whose frontier goes stale could say so explicitly ("run X invalidated by upstream staleness: <artifacts>") instead of silently re-planning from charter_extraction with run_id null.
 - **A stale prior-run shared confirmation suppresses the proxy populate trigger while Gate-0 still pends (claude-worker dogfood 2026-07-16, tool-should-decide, medium).** The 3c populate trigger (`nextStepCommand.ts:381`) keys on `readSharedProviderConfirmation(root) === null`, but the Gate-0 obligation keys on the per-tool seam — so a leftover `.audit-tools/provider-confirmation.json` from an ABANDONED prior run (yesterday's dogfood) silently skipped populate on a fresh run whose Gate-0 was still being emitted, and the lane dropped as "cache absent". Same split-artifact class as the reconciliation-gate entry below. Property to hold: the populate trigger and the Gate-0 obligation must key on the same confirmation artifact (or a fresh run must not inherit an abandoned run's confirmation). Diagnosis cost: the populate's `.catch(() => null)` is silent AND the skip-branch prints nothing, so "cache absent" pointed at the wrong half.
 - **INV-shared-core-14 fails on a box with `agy`/`gemini` on PATH — `deps.createAgyProvider is not a function` on clean HEAD (2026-07-17, tool-should-decide, low).** The state-dir hermeticity override (AUDIT_CODE_STATE_DIR, shipped 2026-07-17) closed the `~/.audit-code` leak class, but this test's auto-resolution still reads the BOX's real PATH: with an agy/gemini binary installed, `createFreshSessionProvider` resolves the agy branch and the test's injected deps lack `createAgyProvider`. Same box-dependence class, different vector (PATH probe, not state dir). Property to hold: the test must pin `commandExists` (and any env the resolver reads) so its resolution path is box-independent.
@@ -525,22 +386,14 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 - **Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).** (a) `prepareDispatchCommand.ts:17-23` and `quotaCommand.ts:25` swallow an invalid session-config to `{}` ("using defaults") while `dispatch.ts:219-230` documents fail-closed as the invariant *precisely because* a permissive default builds dispatch against an attacker-influenced config. (b) `prepareDispatchCommand.ts:28` uses `resolveFreshSessionProviderName` where the host path (`semanticReviewStep.ts:117`) uses `resolveHostDispatchProviderName` — the exact founding-bug shape the latter exists to prevent (`provider: codex` would key the pool to codex, not the conversation host). Property to hold: every dispatch entry point carries the same guards, or there is only one entry point.
 - **Dead code: `src/audit/quota/headerExtraction.ts` + `headerExtractors/` have zero production consumers (owner question 2026-07-16, low).** Only the `index.ts` re-export + `tests/audit/header-extraction.test.mjs` reference them — the tested-but-unwired class that default-mode knip cannot catch. Delete symbol + orphaned tests per the periodic manual-audit recipe. [[knip-deadcode-gate-default-mode]]
 - **G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo, and it outranks the descriptor (found G4 premise-check 2026-07-16, corrected same-day during implementation, medium).** `resolveHostModel` (`limits.ts:56-71`) resolves `explicit ?? block_quota.host_model ?? env`; `hostPool.ts:156` then does `quotaModelKeySegment = hostModel ?? input.hostModelId` — so the repo's `block_quota.host_model` beats the descriptor's `self.model_id` and **auditor B keys its quota to auditor A's model**. Violates [[capability-is-per-auditor-not-per-audit]]. **⚠ The rest of the original claim is REFUTED: nothing writes `quota`/`block_quota`** — they are operator-authored, and `packetFilter.ts:259` documents `quota.models` as the operator's override mechanism. So `quota.models[<model>]` is keyed BY MODEL NAME (same window for every auditor) → inheriting it is CORRECT, and `limits.ts:115` beating discovery is the intended escape hatch, **not a bug — do not "fix" it** (it only misfires because `hostModel` was mis-resolved upstream; fix the identity and it's right). `quota.default_context_tokens`/`reserved_output_tokens` and `block_quota.context_tokens`/`reserved_output_tokens` (`plan.ts:47-51`) are policy → stay on intent. **Fix = move `block_quota.host_model` → `self.model_id` only**; narrow the `RepoSessionIntent` HALF-type note (`src/shared/types/sessionConfig.ts:772-779`) accordingly. Also stale: G4's "may fold into G2" — G2 shipped and did not fold it. Separately real (and still open): `resolveSessionConfig.ts:86-116` maps none of the `self.*` capability fields; they reach dispatch hand-threaded through three audit CLI commands (`nextStepCommand.ts:130-133`, `prepareDispatchCommand.ts:43-48`, `quotaCommand.ts:38`) — a parallel channel bypassing the one seam. **⚠ Correcting this entry's own earlier claim that the channel "MUST collapse in the same commit as any shared-assembly lift": that premise did NOT apply and the 2026-07-16 lift shipped without it.** The constraint assumed shared assembly would take the DESCRIPTOR and read the resolved config; `buildHostPoolPreamble` instead takes already-resolved scalars (`providerName` / `explicitHostModel` / `hostModelId` / `hostContextTokens` / …), so the channel now hand-threads into ONE function rather than two — strictly better, and not a correctness coupling. The collapse remains worth doing on its own merits (one seam, not two channels), but it does not gate the lift. **Also note the lift moved the `hostModel ?? hostModelId` precedence INTO shared (`hostPool.ts`), so if G4 IS a bug its blast radius is now both draws — which is an argument for settling the owner call, not for reverting.** Detail: `docs/reviews/g4-g5-g6-premise-check-2026-07-16.md`.
-- **Durable: a recon agent's causal story is a LEAD; grep the WRITERS before believing an inheritance bug (2026-07-16, ambiguous-direction, medium).** Twice in one session a subagent's confident finding was half-wrong in a way only a writer-grep caught: (a) *"auditor A writes `quota.models`"* — nothing writes it; it's operator config, so the "inheritance" framing collapsed and the proposed `limits.ts:115` fix would have BROKEN the documented escape hatch; (b) the G6 remediate-pool loss was reported as a pre-existing gap when it is an un-released regression. Both survived a plausible-sounding evidence table with real file:line refs. **The precedence facts were right; the causal interpretation was wrong** — and file:line citations make an interpretation look verified. Property: before accepting "X is inherited/stale/authoritative", grep who WRITES X; a field nothing writes cannot carry a stale value between actors. Generalizes [[write-only-data-looks-authoritative]] to its mirror — read-only data can't be inherited either. [[external-audit-catalogs-are-leads]]
 - **G5's premise is 2/3 DEAD — narrow the spec before laying it out (found G4 premise-check 2026-07-16, low).** (a) `declared ∩ ambient-verifiable` SHIPPED as G2.5 (`resolveAmbientSources`). (b) The **auditor-id stamp is dead as specced** — `auditor_id`/`resolved_at` are parsed (`args.ts:348-349`) and read at exactly ONE site (`prompts.ts:61-62`) purely as an is-non-empty test: a write-only field ([[write-only-data-looks-authoritative]]). G2.5 established each IDE spawns its own process → own env → nothing shared to contaminate, and the spec's own Honest-residuals says the `(provider, account)` ledger — not auditor identity — is the load-bearing double-grant boundary. Before building a stamp, name the transient cross-auditor-shared run-state and re-derive whether an id is the fix. (c) Only the **lies-reachably quarantine** survives (`auditorSources.ts:147-148`); it is the sole catcher for G2.5's inline-`api_key` refusal. **G5 ≈ clause (c) alone.**
 - **A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression (re-measured G3 A′ lap 2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.mjs` fails in a full `vitest run` but passes alone (35s), and a **third failure rotates** between runs — observed as `tests/remediate/wave-scheduler.test.ts`, `tests/audit/next-step.test.mjs`, `tests/shared/quota-state.test.mjs` (all heavy, all pass alone). **Measured baseline: clean `main` fails the SAME 2 + 1 rotating** (`linux-cycle-regression` + `INV-shared-core-14` + one mover), so a branch showing this is at parity, not regressing. Also timed `linux-cycle-regression` mine-vs-main: 35s both. Per the test-failure protocol these are test bugs (timeout under worker contention / shared quota-state dirs), not code regressions. **The real cost is the is-it-mine investigation** — every dispatch-touching lap pays a full-suite baseline run on stashed main (~2×260s) to prove parity. Property to hold: a green branch must be distinguishable from a flaky one WITHOUT re-running the suite on main. Fix the hermeticity/timeouts, or quarantine the known-flaky set into a separate serial shard. (Distinct from `INV-shared-core-14`, which fails deterministically on main too — noted in `docs/HANDOFF.md` as pre-existing + env-sensitive.)
-- **`rtk` cannot resolve `npm` — every `rtk npm run <script>` dies "program not found" (G3 A′ lap 2026-07-16, inefficient-feeding, low).** `rtk npm run check` fails identically from the Bash tool AND PowerShell, so the token-saving wrapper is unusable for the single most-run command class in this repo (`build` / `check` / `test` / `check:deadcode`) — every verify falls back to raw `npm`, forfeiting the 70-90% filtering on exactly the noisiest output. Presumably `rtk` resolves `npm` as an exe rather than through the Windows shim (`npm.cmd`), i.e. the same class as `resolveWindowsShimSpawnCommand`. One-line note now: any lap doing verification pays full-noise output.
-- **A test-name substring silently corrupted a flakiness measurement (G3 A′ lap 2026-07-16, ambiguous-direction, low).** Checking suite stability with `$out -match 'failed'` reported the file flaky on 2 of 3 runs — it was matching the string **"fail-closed" in my own test names**, not a result. Same for `(\d+) passed`, which caught "Test Files 1 passed" before "Tests 12 passed". Cost a detour re-investigating a non-existent flake. **Durable rule: read vitest's EXIT CODE, never grep its prose** — the prose contains arbitrary author-chosen test names by construction, so any keyword match over it is unsound. [[log-all-friction-categories-every-lap]]
-- **A stale plan-doc ground-truth row nearly seeded a wrong design (G3 A″ lap 2026-07-16, ambiguous-direction, low).** The G3 plan's "Verified ground truth" table — the table that exists precisely to stop re-derivation — carried a ✅-marked claim that was FALSE at HEAD (*"`openai-compatible` has no `CLI_PROBES` entry, so `discoverProviders` never sees it"*; `providerConfirmation.ts` surfaces it explicitly when configured). Caught only because an independent reviewer re-verified against source instead of trusting the ✅. The row is load-bearing for the plan's REACH-NOW argument. Corrected in place with a retraction note. **Durable lesson: a ✅ in a dated plan doc is a claim about the tree AT AUTHORING TIME — it decays, and the ✅ makes it decay invisibly.** [[external-audit-catalogs-are-leads]] [[spec-degradation-and-doc-staleness]]
-- **`git commit -F` needs a temp file; heredoc/PS here-strings still bite (G3 A″ lap 2026-07-16, inefficient-feeding, low).** Re-hit the known trap writing the A″ commit body (already logged for `git commit`); also hit it composing multi-line JSON test fixtures. Existing entry covers the fix (`-F` + temp file). Noting the recurrence only as evidence the trap is load-bearing, not to duplicate it.
 - **No read-only surface shows the built dispatch pools — an exclusion rule is unverifiable until a live dispatch (G3 A″ lap 2026-07-16, tool-should-decide, medium).** Verifying "operator excludes one NIM model ⇒ siblings still route" end-to-end, I could observe the operator half at the real CLI (Gate-0 prompt → persisted `policy`) but **not the routing half**: `buildSourcePools` is reachable only from a live dispatch wave. Checked every read-only surface — `audit-code quota` reports only the host pool (`claude-code/*`) and reports the SAME with no exclusion at all, so it never builds source pools; `validate` surfaces none either. So an operator authors a rule and cannot see which pools resulted, and a typo'd rule (`openai-compatible:model-typo`) persists happily and matches nothing, silently. The grammar is OPEN by design so it can't be validated at parse time — but nothing reports "this rule matched zero backends". Property to hold: the operator can see the resolved dispatch pool set (and any zero-match rule) WITHOUT committing to a dispatch. Would also give the A″ routing filter a runtime surface to verify at, which it currently lacks.
 - **Gate-0 display never reflects an exclusion for a SOURCE — no status column, and the endpoint tier can't mark a provider entry (G3 A″ lap 2026-07-16, tool-should-decide, low).** Two halves of one gap, both display-only (routing is correct — `buildSourcePools` honors every tier): (a) the Gate-0 **sources table** (`providerConfirmationStep.ts`, `| id | provider | model | $/Mtok |`) carries **no status column at all**, so NO exclusion tier is ever shown for a source — pre-existing for provider-name rules, but total for A″'s model/endpoint tiers, which can only ever match sources; (b) `provider_pool` is provider-granular and its entries carry no endpoint, so an **endpoint-host rule can never mark one** (`ruledOut` in `sharedProviderConfirmation.ts` evaluates `{provider, model}` only) — the Gate-0 table renders the backend "included" while dispatch correctly drops it. Property to hold: what the operator is shown as excluded is exactly what dispatch drops, at EVERY grammar tier. Direction is fail-safe (under-reports, never over-routes), which is why it is low. NOTE: `excluded` leaves the persisted shape in **B+D**, so fix the RENDER path, not the artifact field.
 - **The per-tool seam artifact marks `excluded` at provider granularity only — inert today (G3 A″ lap 2026-07-16, low).** `confirmProviders` (`src/audit/orchestrator/providerConfirmation.ts`) still does `excludeSet.has(provider.name)` on what is now a **pattern** list, so a `provider:model` rule marks nothing in the per-tool `provider_confirmation.json`. Verified inert: the only reader of `.excluded` anywhere is the Gate-0 renderer, which reads the SHARED artifact. Cleanup, not a defect — but it is a latent trap the moment anything reads the seam's `excluded`.
 - **The gate's delta collapses two providers that share a model id (G3 A″ lap 2026-07-16, low).** `computeNewlyReachableBackends`' `reachNow` map keys on `backendGateKey` = `model_id ?? provider`, i.e. the **bare model** when known — so two backends of DIFFERENT providers advertising the same model string collapse to one delta entry, and only one gets an `exclusion_pattern`. Pre-existing at A′ (which read `provider` off the same surviving entry); A″ neither introduces nor worsens it. Needs a cross-provider identical model string to bite. Property to hold: the delta enumerates BACKENDS, so its key must be provider-qualified. **3c update (2026-07-16): the repair-proxy expansion makes this likelier** — two `claude-worker` sources with different `backend_provider`s can serve the same model string and still collapse (pinned in `tests/shared/gate0-proxy-fold.test.mjs`). Deliberately NOT fixed in 3c: it is not a local key change — `backendGateKey`, `confirmedBackendKeys` (which reads `SourcePoolCostEntry`, which carries no `backend_provider`), and the exclusion grammar (`provider:model` matches on `source.provider`+`model` only) must move together, or a provider-qualified delta key that the confirmed side cannot reproduce livelocks the `PRIORITY[0]` obligation.
 - **Gate-0 exclusion — SOURCE pools wired (`c99bcb9c`); HOST/primary pools still unwired, and the artifact's reach half is still write-only.** Open residue only: (a) an operator excluding the **host or primary provider** is still not honored — `buildConfirmedPools` returns unfiltered `primaryPools` + filtered `sourcePools`, and audit's `buildHostModelPools` (`quotaPool.ts:200`) is unfiltered. This is NOT a simple extension: `resolveExcludedProviders` always contains the conversation host in-session, so passing that set to the host-pool builder would zero out dispatch — excluding your own driver needs a decision about what it should even mean. (b) an absent/unparseable confirmation still fails OPEN (no policy ⇒ no operator exclusions); irreducible without a decision elsewhere. (c) the artifact's remaining reach half (`capability_tier` / `self_spawn_blocked` / derived `excluded` / `reason`) is still persisted and still write-only for dispatch → G3 commit B+D (`roster` is gone as of A′). (d) `opencode` asymmetry: `providerFactory` reads `env.OPENCODE` but `isSelfSpawnBlocked` has no opencode signal, so an opencode source inside an opencode session is not self-spawn-excluded.
 - **The reconciliation gate is silently disabled if the two confirmation artifacts split (G3 A′ review 2026-07-16, tool-should-decide, low).** The obligation gates on the per-tool SEAM (`has(bundle.provider_confirmation)`, `state.ts:98`) while the gate's delta early-outs on the SHARED artifact (`readSharedProviderConfirmation(root)`, `nextStepCommand.ts`). They are written together only under `if (root)`, so seam-present + shared-absent (a root-less promotion, or an operator deleting the shared file) ⇒ obligation satisfied AND delta `[]` ⇒ the gate never fires for the run, and `resolveExcludedProviders` also finds no policy ⇒ a newly-reachable backend routes unconfirmed. Narrow (needs the pair to split) but silent. Property to hold: the gate's CONFIRMED operand and the obligation's presence check must key on the same artifact, or a split must be loud. [[dispatch-policy-vs-reach-cut]]
-- **Answering an ambiguity question from memory instead of source cost a full re-decision cycle (G2.5 lap 2026-07-16, inefficient-feeding, medium).** Two owner-facing options were recommended on premises the source refutes: "two IDEs on one box get different host providers" (`resolveConversationHostProvider` discriminates only codex/claude-code/agy and DEFAULTS to claude-code — `providerPathGuard.ts:143`) and "emitted sources can't fail the parse boundary" (the validator checked 2 fields). Both survived plan-authoring and only died at independent review, after the owner had already answered. Endpoint: verify the *premise of an option* against source BEFORE putting it in an `AskUserQuestion` — an option built on an unverified claim spends the owner's decision twice. [[front-load-broad-search-before-contract-authoring]]
-- **A "fully reconned, don't re-run the recon" plan doc was materially under-scoped (G1 lap 2026-07-15, inefficient-feeding, low).** [`docs/reviews/g1-auditor-descriptor-plan-2026-07-16.md`](reviews/g1-auditor-descriptor-plan-2026-07-16.md) billed its handshake-surface map as "exhaustive … the next agent should NOT re-run this recon", but a source check (not a full re-recon — just verifying edit sites) found it MISSED two live consumers (`prepareDispatchCommand.ts`, `quotaCommand.ts` both parse the handshake directly) and wrongly declared `--host-model` dead (two callers). Cheap to absorb, but the "don't re-verify" framing is the trap — a pre-written plan's replace-set is a LEAD, not a verdict; always cross-check the exact edit sites against source before trusting an "exhaustive" claim. [[external-audit-catalogs-are-leads]]
-- **Offloaded (Haiku) test rewrites can silently WEAKEN assertions (G1 lap 2026-07-15, tool-should-decide, low-medium).** A Haiku subagent converting `quota-command.test.mjs` kept the test green but rewrote a malformed-roster assertion into one matching an incidental `is not a function` TypeError (asserting a downstream crash, not the intended CLI-boundary validation error). Green-but-weaker slips through a pass/fail gate. Endpoint: when offloading test rewrites, the parent MUST review the assertion semantics of each changed test (the independent-review step is the mechanical backstop — it caught this one), never trust "it passes." Generalizes [[delegate-adversarial-phases-to-separate-agent]] to offloaded test authoring.
 - **Host cold-start admission wall — still open (item C from the 2026-07-15 repair-proxy dogfood).** A host
   at ~56% session-remaining (percent-only claude-oauth, no learned tokens-per-percent slope) granted 0
   packets with `admission.explains` EMPTY and the misleading message "the provider session limit is
@@ -553,7 +406,6 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worker-model.md),
   [[unified-dispatch-worker-model]] — only item C remains, tracked as "commit 4" in that spec's
   Decomposition + `docs/HANDOFF.md`.
-- **Free NIM `llm` lane — `read` BACK, `write`/NIM-completion UNVERIFIED (updated G1 session 2026-07-15, external).** `llm read` responded correctly on real inputs during the G1 recon (the earlier "completions time out / return EMPTY" note was stale — the read side is usable again). `llm write` and the raw NIM completion endpoint + `ANTHROPIC_BASE_URL` subagent-fronting were NOT retested this session. Re-probe `llm write` before relying on it. When the free write-lane is uncertain, the working offload pattern is **Haiku subagents** (parent Opus orchestrates + verifies green + independent-reviews) — used successfully for G1's bulk. Compounds the standing NIM-reliability friction (JSON-contract failures on reasoning prompts). [[free-nim-pool-first-default-worker]]
 - **Loop-core gate covers `src/audit/orchestrator/` but NOT the audit cli dispatch step-emitters (2a-ii lap, tool-should-decide, low-medium) [[loop-core-enforcement-layer]].** `LOOP_CORE_PATTERNS` includes `src/audit/orchestrator/` (so 2a-ii's Finding-A fix in `advanceTypes.ts`/`executorRunners.ts`/`intakeExecutors.ts` correctly demanded attestation) but NOT `src/audit/cli/nextStepCommand.ts` / `semanticReviewStep.ts` / `prompts.ts` — where the CORE 2a-ii dispatch-inventory READ switch lives. A dispatch-substrate edit confined to those cli emitters (plausible for 2a-iii's loader wiring) would ship WITHOUT the attestation backstop. Endpoint (owner call): either add the audit cli dispatch-emitters to `src/shared/loopCorePaths.ts` (+ the `.mjs` hook parity list), or accept them as cli-glue and rely on the reviewer catching it. Not auto-expanded — widening the set makes every edit to the big `nextStepCommand.ts` require attestation, a real friction tax to weigh. **G1 (`e7b593ac`) is a concrete SECOND instance:** a breaking dispatch-handshake transport change spanning `args.ts`/`prompts.ts`/`nextStepCommand.ts`/`semanticReviewStep.ts`/`prepareDispatchCommand.ts`/`quotaCommand.ts` shipped attestation-free (none are loop-core by path). An independent review WAS done by discipline (and caught a real roster-validation-drop regression) — so the reviewer-catches-it fallback held, but only because the author chose to run it. Reinforces the owner-call endpoint above.
 - **Friction walk (G3 re-plan lap, 2026-07-16):** (1) **ambiguous-direction (HIGH — cost a full review round and nearly a bad spec edit):** the doc set contradicted itself on where `DispatchPolicy` lives. `spec/unified-dispatch-worker-model.md:283` said "persists on the intent"; the memory [[dispatch-policy-vs-reach-cut]] said intent-collapse was "refuted"; the plan doc said the artifact is the only cross-tool channel. All three were *true* — of different phases (intent is the G6 endpoint; artifact is the pre-G6 reality) — but **nothing recorded that they were phases of one design**, so each doc read as a flat contradiction of the others. Draft 4 concluded the spec was stale and proposed striking an owner-approved decision. Fixed this lap by phase-qualifying the spec + memory, but the general defect stands: **a spec that states an endpoint without marking what gates it invites a later agent to "fix" the endpoint to match the implementation.** Endpoint-vs-phase should be a doc-lint rule ([[spec-degradation-and-doc-staleness]]). (2) **inefficient-feeding (HIGH):** the dated plan doc (`docs/reviews/g3-*.md`) reads as self-sufficient — verified ground-truth table, owner decisions, scope — so an agent starting from HANDOFF's "▶ Next" pointer plans from IT and never opens the design of record. That is exactly what happened here (and, per the owner, in prior laps: *"agents keep forgetting the actual goals"*). The dated plan carries mechanism; the spec carries the GOAL. Fix direction: dated plan docs should open with a mandatory "Goal (from spec §X)" restatement, or HANDOFF should point at the spec FIRST and the plan second. Cf. [[front-load-broad-search-before-contract-authoring]]. (3) **tool-should-decide (medium):** three of four drafts specced a gate that would never fire, and each was caught only by an adversarial agent tracing the call path — nothing mechanical flags "this predicate is satisfied-once-written so its executor is unreachable", "this artifact input is never invalidated", or "this obligation has no clearing path". A lint over the obligation table (every obligation's satisfy-predicate must have a reachable transition to unsatisfied, and every consume-an-input executor must invalidate it) would have caught all three deterministically. [[gate-must-be-traced-not-designed]]
 - **Friction walk (repair-proxy dogfood lap, 2026-07-15):** (1) **tool-should-decide (medium), overlaps [[quota-before-cost-ordering]]:** the cost ordering shows models.dev **LIST price** ($1.92 for nim/glm-5.2), but the operator pays **$0** for it (NVIDIA NIM free tier). Free-to-operator vs metered is a per-`(operator,backend)` fact the catalog can't know; discovered pools default to list price, so a genuinely-free backend sorts as if expensive and a paid one (openrouter) can hide mid-list. Today's only lever is hand-declaring `cost_per_mtok:0` / `enabled:false` per backend in `repair_proxy.providers` (done for this run) — the tool should let the operator classify a backend's cost-relationship once, not re-price every model. (2) **tool-should-decide (low):** no way to mark a whole discovered transport's sub-provider as paid→excluded at Gate-0 itself; had to edit session config + re-run next-step. (3) **tool-should-decide (medium), = [[per-model-tiering]]:** owner reinforced that capability/tier is assigned per PROVIDER, not per (provider, model, effort). Concrete: Codex (`~/.codex/config.toml` model=`gpt-5.6-sol`, effort `high`, but `-m/--model` + `-c model=` take any model per-call) renders at Gate-0 as ONE `capable`/`resolved at dispatch` row because the legacy `codex` block has a single `model` field — its multiple models at different capability tiers collapse to one. The tool's own workaround (pin `sources[]` `{provider:codex, model, parameters:{extra_args}}` per model/effort) puts the burden on the operator; the tiering should be per-(provider,model,effort) natively, sourced from models.dev / declared config. (4) **env-var trap (low):** repair-proxy `mistral` provider hardcodes `authEnv: "MISTRAL_API_KEY"`, but the operator's Mistral La Plateforme key lived in `CODESTRAL_API_KEY` (Codestral and La Plateforme share one key but the env-var name differs) → pool silently `has_key=false`/excluded until the authEnv was repointed. A reachability probe that reports "keyed but wrong-env-var" vs "no key" would cut the diagnosis.
@@ -714,12 +566,6 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   attestation half hasn't executed when the gate checks (workaround = attest as its own call); a gate that
   recognized the attest step in the same chain would remove the trap.
 
-- **Friction-walk lesson (shared-logic-audit validation lap):** an external audit catalog is leads, not
-  verdicts — validate its rows against current code + design-of-record before remediation intake
-  (`[[external-audit-catalogs-are-leads]]` / `[[spec-degradation-and-doc-staleness]]`) — see memory. Open
-  tool gap: remediate's grounding phase catches phantom PATHS but not stale CLAIMS ("X is duplicated" when X
-  was single-sourced) — no tool support for claim-staleness (inherently judgment; handled by subagent
-  verification today).
 
 - **Friction-walk lesson (backlog-clearance lap):** a backlog item / chosen option / design memory is a
   point-in-time proposal — verify its premises against current code AND a real measurement before building
@@ -783,13 +629,6 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   `auditStep.ts:96`) restoring ~30s crash recovery. Efficiency-only; folds naturally into D-66/67 slice-3
   (heartbeat-on-long-claims) if that opens.
 
-- **Critical-flow LLM fallback — residual (accepted, low) (`critical_flow_fallback_current` obligation).**
-  The host submission (`critical-flow-fallback.json`) is a durable leaf input that never re-stales, and
-  the obligation is satisfied by its PRESENCE alone — so once the host answers (even `{flows:[]}`), the pass is
-  permanently suppressed even if the repo later grows and deterministic inference stays below the bar. Matches
-  `intent_checkpoint` persistence semantics (a host input that persists). A future enhancement could re-prompt
-  when the repo materially changes (add `repo_manifest.json` as a marker dep, or gate satisfaction on
-  merged-flow freshness rather than marker presence) — deferred until a real run shows stale enrichment biting.
 
 - **Friction detection — M-QUOTA escalation chain: live validation env-bound.** The
   `recordLimit → escalate → strand → quota_escalation friction` chain is unit-tested end-to-end on both
@@ -810,9 +649,6 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
     same finding re-deepened every round (idempotency collision), or the run only finishing via
     `force-synthesis`. If you hit it, quarantine the orphan `deepening:*` tasks and note the round count here.
 
-- **`llm read` very large review-framed payloads still fail post-fix.** A ~700-line review-framed diff
-  still fails after the upstream JSON-contract fix (clean error, no result) — workaround: split the
-  payload; if it recurs, add a chunked-review mode in llm-worker-tools rather than host-side splitting.
 
 ## Forward tracks
 
@@ -858,39 +694,18 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
     **vertex-trial → deferred** (needs operator's GCP $300-trial SA JSON). **Remaining = live validation only**
     (no more code): a real opencode-free run confirming declared-free routing + a live lapsed-free demotion +
     the `declared_cost_drift` friction event end-to-end.
-- **Cost↔speed dispatch dial + free-pool maximization.** Generalizes the cost-first router — the
-  minimum-cost corner of a cost-vs-throughput Pareto frontier — into a tunable operating point ON TOP of
-  the kept router (does not replace it). Shipped: 1D dial (λ ∈ [0,1], capability a hard floor),
-  pool-class-aware throughput derivation (`deriveThroughputConcurrency`), and the shared
-  `admissionPoolsFromSummaries` builder. Design of record
+- **Should QUALITY become tradeable against cost — a true 2D dial? (owner call.)** Today the dispatch
+  dial is 1D: λ ∈ [0,1] trades cost against throughput, with capability a hard FLOOR rather than a
+  tradeable axis. Making quality tradeable would require a per-task "what is better output worth here"
+  weighting, which does not exist and is not obviously derivable. **Default recorded = keep 1D
+  cost↔speed with a capability floor.** Design of record
   [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md); extends
   [[cost-first-routing-design]].
-  - **Free-pool maximization (dial-independent).** Price-0 pools are first-fill at every operating point → free
-    is saturated before any paid pool automatically (`costRank` already delivers it once a source is registered).
-    "Maxed" = saturated to the pool's declared sustainable ceiling (`declaredCap` + rate limits + reactive 429
-    floor), NOT flooded. **Correction:** the old note said this "depends on C3-AIMD" — C3-AIMD is CLOSED; the
-    ceiling is now `declaredCap` + reactive backoff, no learned ceiling. Real work = **register every free source
-    as a pool** = the arbitrage-tier track [[arbitrage-dispatch-tier-design]] (Phase 0 zero-ban-risk first).
-  - **OPEN (owner call):** whether QUALITY also becomes tradeable vs cost (a true 2D dial, needs a per-task
-    quality-worth weighting) — default recorded = 1D cost↔speed + capability floor.
 
 - **models.dev static window can over-state a specific deployment (carried from W1).** The snapshot lists e.g.
   `claude-opus-4-7` at 1M context; a real headless run serving a 200k variant with discovery absent would over-size
   work blocks off the static rung. Mitigated by `BLOCK_SAFETY_MARGIN` 0.7 + discovered-capability always overriding —
   watch on a real headless metered run.
-- **Minor provider/dispatch cleanups (low-pri, bundle opportunistically).**
-  ~~providerFactory Rule 6 (`hasClaudeCodeConfig && claudeAvailable`) is a provable strict subset of Rule 9
-  (`claudeAvailable`) — delete the redundant rung~~ — **FALSIFIED 2026-07-05 (verify-before-implementing).**
-  Not a no-op: the opencode/codex *config-gated* rungs sit BETWEEN Rule 6 (claude config-gated) and Rule 9
-  (claude bare-availability tie-break) and resolve to *different* providers. For a dual-configured operator
-  (`hasClaudeCodeConfig && claudeAvailable && hasOpenCodeConfig && opencodeAvailable`), Rule 6 makes explicit
-  claude config win; deleting it lets the opencode config-gated rung fire first → resolution flips
-  claude-code→opencode. Rule 6 is a predicate-subset of Rule 9 but NOT redundant in the ordered table. Leave it.
-  Remaining (still valid): inline `makeProviderKeyedFactory` (19 LOC, 2 sites — but it's a cross-area generic
-  with its own dedicated test `tests/shared/provider-keyed-factory.test.mjs`; inlining loses cohesion,
-  marginal — low value).
-  Do NOT delete working proactive quota sources (`BaseHttpQuotaSource` + one-array register is already clean);
-  `copilot` is correctly broker-only.
 
 - **Schema-enforced generation — CE-004 residual (provider-blocked only).** The openai-compatible / NIM
   guided-decoding path is **SHIPPED** — the AuditResult `outputSchema` is plumbed through and the dispatch site
@@ -940,16 +755,16 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
     reachable now; Copilot/Antigravity need those IDEs running. FAIL = a source stuck on degrade when its
     real endpoint is reachable.
 
-- **D-66/67 SLICE-1 — merge-time ownership-gate on the long-lived claims (OD3 layer 2).** Shipped;
-  design-of-record + residuals below.
-  - **Accepted residual:** the probe window is staleMs-wide, not instantaneous — worst case is a stale
-    LAND a beat before an imminent reclaim, never a double-land (base mutations stay serialized by the
-    per-node + base-branch locks). Slice-3 heartbeat machinery shrinks it if a real cooperative run
-    shows it matters.
-  - **Discovered asymmetry:** remediate's `phase:main` mutex has OD3 layer-1 only (`withClaimHeartbeat`
-    wraps `advance()`, `nextStep.ts` ~5088), NO layer-2 re-check before persist — unlike audit's
-    `auditStep.ts:216-239` template. Not mechanically mirrorable (remediate's persists are distributed
-    inside `advance()`); tracked as a still-open correctness gap for slice-3 to fold in.
+- **Remediate's `phase:main` has no merge-time ownership re-check before persist — a correctness gap.**
+  Audit's template re-checks that it still owns its claim immediately before persisting, so a claim
+  reclaimed mid-step cannot land. Remediate's equivalent wraps its advance in the heartbeat but never
+  re-checks — so a step whose claim was reclaimed can still write. Not mechanically mirrorable from the
+  audit side: remediate's persists are distributed inside `advance()` rather than funnelled through one
+  merge point, so the gate has to go somewhere else or the persists have to be funnelled.
+  **Property to hold:** a step that has lost its claim cannot persist, on both draws.
+  ⚠ Accepted residual on the shipped half: the probe window is stale-interval-wide, not instantaneous —
+  worst case is a stale LAND a beat before an imminent reclaim, never a double-land (base mutations stay
+  serialized by the per-node + base-branch locks).
 
 - **Unify the full rolling-dispatch lifecycle shell across audit + remediate (doc-review D-66/D-67/C-7).
   Slice-1 SHIPPED (entry above); slice-2 VERIFIED not worth building as a shared reducer — Layer A
@@ -993,15 +808,6 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
     machinery in the repo (pause/claim/quota), a genuine divergence to respect, and the owner's own
     "redesign before scheduled autonomy" caution applies; do NOT rush it as a tail-end change.
 
-- **Per-lap cadence rules tool-enforcement (doc-review D-68/D-69) — genuine residue (accepted, not
-  built):** (a) the LAP-level decision to route an item through the orchestrator vs hand-fix it is still
-  host judgment — its tool-enforced end-state is "route substantive work through the self-scaling
-  orchestrator" (the [[self-scaling-pipeline-not-forked-paths]] north star), not a new gate; (b) a
-  hand-fix lap that never invokes an orchestrator produces no friction artifact, so it is covered only by
-  the Stop-hook backstop (and only if a recent run artifact exists in its 12h window). Closing (b)
-  mechanically (e.g. block session end on any commit-bearing lap lacking a friction walk) would be fragile
-  and over-fire; deferred with `CLAUDE.md`'s "Redesign before scheduled autonomy" rather than force it.
-  [[enforce-robustness-in-tooling-not-host-discretion]] / [[self-scaling-pipeline-not-forked-paths]]
 
 - **Context-efficiency access-memory track (items 1-3) shipped; non-blocking follow-up open:** packet `task_ids`/`lens` attribution missing from the token-usage ledger (`DispatchPlanEntry` carries neither).
 
@@ -1025,7 +831,6 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   (or extend `host-validation.md`). Folds into the A7 release-time GUI checklist work.
 - **Gated live e2es** skip without creds: `RUN_PROVIDER_MATRIX_E2E=1`, `RUN_NIM_E2E=1`,
   `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_AUTONOMY_E2E=1`.
-- **Provider `queryLimits`** deferred — revisit if a provider gains a real proactive rate-limit endpoint.
 - **Narrow staleness on prose-heavy artifacts via bounded semantic judgment.** Prose-heavy fields feed
   downstream LLM prompts; a cosmetic edit forces wasteful re-emit. The narrowing = bounded judgment on
   meaning change, fail-safe to re-derive. Efficiency-only; defer until re-emit churn is measured.
@@ -1052,6 +857,15 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   `assertWindowScopes` call + its import; caught only because a red-green mutation then behaved
   impossibly). **Use instead:** copy the file to the scratchpad before mutating and `cp` it back, or
   `git stash` the mutation. Never `git checkout --` a file that has unstaged work you want.
+
+- **`codex exec "<prompt>"` HANGS when stdin is a non-TTY pipe.** With a prompt passed as an argument,
+  Codex still reads stdin to append as a `<stdin>` block; under any harness that leaves stdin open
+  (background tasks, CI, most spawn wrappers) it blocks forever on "Reading additional input from
+  stdin…" and is killed by the timeout with **exit 0 and empty output**. Silent — it looks exactly like
+  a model that returned nothing. **Always `codex exec … </dev/null`**, or pass the prompt ON stdin
+  instead of as an argument. Same class as the Windows `npx.cmd` shim trap: an offload lane that fails
+  silently reads as a capability gap in the backend rather than a wiring bug on our side. Any dispatch
+  worker spawning `codex` must close its stdin explicitly at the spawn site.
 
 Standing gotchas worth keeping for any agent (strong or weak):
 
@@ -1084,11 +898,14 @@ Standing gotchas worth keeping for any agent (strong or weak):
   change, check the machine declaration file — the repo's tests will not catch a stale operator config.
 
 - **`mktemp -d` in the Bash tool returns an msys path (`/tmp/tmp.XXXX`) that `node` cannot resolve — cost two failed repro attempts (2026-07-16).** The Bash tool is Git Bash: `mktemp -d` yields `/tmp/…`, but `node -e "require('/tmp/…/x.json')"` resolves it against the Windows CWD → `Cannot find module 'C:\…\Temp\tmp.XXXX\…'`. Any temp path handed to a **native** tool (node, the packaged CLI, `--root`) must be a Windows-shaped path. Use the session scratchpad dir (an absolute `C:/…` path) instead of `mktemp`. Instance of the OS-agnostic rule biting the agent's own tooling rather than the product's.
-- **`llm read` / `llm write` are NIM-backed — `--model` must name a NIM catalog id, NOT `haiku`/a Claude id.**
-  `Get-Content x | llm read --model haiku` 404s (`404 page not found`); the backend is an OpenAI-compatible
-  NIM endpoint (`llm models` → default `nvidia/nemotron-3-ultra-550b-a55b`). Omit `--model` (auto-select
-  works fine) or pass a listed NIM id. Offloading to *Claude Haiku* is a separate lane (Agent tool
-  `model: haiku`), unrelated to the `llm` worker CLI. (Hit 2026-07-15.)
+- **The free offload lane is the local LiteLLM proxy — it must be RUNNING, and the model must be one of
+  its aliases.** `llm-worker-tools` (`llm read`/`llm write`) is retired; requests go to
+  `127.0.0.1:4000` (see `~/.claude/CLAUDE.md` → *Offload lane*). Two consequences: (a) unlike the old
+  CLI there is no standalone fallback — if the proxy is down the whole lane is down, so a failing
+  offload means "start the proxy", not "the backend is broken"; (b) `--model` must name a LiteLLM alias
+  from `~/.audit-code/litellm-config.yaml` (`glm-5.2`, `deepseek-v4-pro`, …), not a raw NIM catalog id
+  and not `haiku`. Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`),
+  unrelated to the proxy.
 - **The Bash tool is POSIX sh, NOT PowerShell — for any multi-line commit/PR body, use a temp file
   (`git commit -F <file>`), never a PowerShell here-string `@'…'@`.** `git commit -m @'…'@` in the Bash
   tool is parsed as literal `@` characters + a bash syntax error at the first `)`, and the commit lands
@@ -1238,6 +1055,11 @@ Standing gotchas worth keeping for any agent (strong or weak):
   For a broad mechanical sweep over a shared file set, run it as ONE serial agent (or partition by
   NON-overlapping files), never an uncoordinated fan-out; and never hand-edit the same files while a
   background agent is live on them.
+- **`rtk` cannot resolve `npm` — every `rtk npm run <script>` dies "program not found",** from both the
+  Bash tool and PowerShell. So the token-saving wrapper is unusable for the most-run command class in
+  this repo (`build` / `check` / `test` / `check:deadcode`) and every verify falls back to raw `npm`,
+  forfeiting the filtering on exactly the noisiest output. Presumably `rtk` resolves `npm` as an exe
+  rather than through the Windows shim (`npm.cmd`) — same class as `resolveWindowsShimSpawnCommand`.
 - **`rtk` compresses files you need verbatim.** When reading the `audit-code` skill body or `docs/backlog.md`
   through `rtk read`, content gets partially summarized with retrieval hashes → not exact. For any file you must
   act on verbatim, use raw `Get-Content -Raw` (or the Read tool), not `rtk read`.
