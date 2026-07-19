@@ -77,11 +77,35 @@ quotas/limits, and burn quota at different rates.* Verified — `scheduler.ts:41
 `tokens_per_pct` **cannot exist**, and its exclusion from the fold (`accountId.ts:104-107`) is correct by
 design, not the obstacle. Budgets of 1000 and 200 may be *the same 10% of quota* in two currencies.
 
-**Direction (needs a design pass first): meter in the SHARED unit** — budget = account `remaining_pct`,
-packet cost converted through its own pool's `tokens_per_pct`. **Unanalyzed second half:** per-model
-limits within one account imply a **two-level** structure (account allowance AND per-model limit, both
-satisfied), not the single partition this change assumes. **Establish that before coding — a repair
-assuming one level will be the fifth refusal.**
+**✅ DESIGN SETTLED 2026-07-19 — and STEP 1 IS LANDED on main (`d842e557`).**
+Design of record: [`account-metering-design-of-record-2026-07-19.md`](reviews/account-metering-design-of-record-2026-07-19.md).
+
+**The two-level structure already existed, as WINDOWS.** `topLevelWindows` (session/weekly) are
+account-wide; `limits[]` filtered by `limitAppliesToModel` on `lim.scope.model` are model-scoped;
+budget is the MIN across windows, so "satisfy every applicable limit" was already the semantics.
+**Root cause: `QuotaWindow` carried no scope** — the producer knew and discarded it, so four rounds of
+repairs were re-deriving it at the consumer from pool identity. That is why each was a guess.
+
+**Step 1 (LANDED, `d842e557`): `QuotaWindow.scope` plumbed from every producer**, required with no
+default, with `assertWindowScopes` failing loud. ⚠ **FOUNDATION ONLY — scope is carried, NOT consumed,
+so metering is UNCHANGED and the N× over-admission is still live.** Independent review refused it
+twice; both rounds were right and both are fixed + individually red-green pinned.
+
+**▶ NEXT — steps 2–4, in order** (breakdown in the design doc, near-mechanical):
+(2) `ReservationLedger` single-key → **multi-constraint** (all-or-nothing across windows;
+`reconcile(leaseId)` sweeping every key so a partial release is unrepresentable);
+(3) budget derivation emits **per-window constraints** instead of collapsing to MIN
+(`scheduler.ts:512-540` — MIN stays for REPORTING the binding window, stops being the metering unit);
+(4) admission wiring at `admissionLoop.ts:239-241`, `rollingDispatch.ts:1005-1011`,
+`unifiedRolling.ts:99` builds constraint arrays. Then tests + a fourth independent review.
+
+⚠ **Step 2 MUST also re-key `tokens_per_pct` to `(scope, label)`** — today it is keyed by label alone
+within a pool, so an account-scoped and a model-scoped window sharing a group name would share one
+exchange rate. Harmless while scope is unconsumed; a silent defect the moment it is.
+
+⚠ **The unit of metering is `(window, its own percent)` — there is NO single shared percent.** Windows
+scale on different denominators (5h `session` vs 7d `weekly`), so "meter in percent" as one number is
+mathematically invalid. This killed an earlier proposed direction; do not revive it.
 
 ⚠ The reviewers noted this is **the author's own rejection argument, verbatim** — `admissionLoop.ts:624-628`
 rejects a per-account cap because it would make the ceiling "the MAX cap across an account's pools
