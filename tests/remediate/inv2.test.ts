@@ -60,6 +60,7 @@ describe("INV-2 silent-degrade marker (shared contract)", () => {
   it("a degraded probe attaches quotaSignalDegraded as a raw, unfolded pool signal", () => {
     const pool: CapacityPool = {
       id: "claude-code/*",
+      accountKey: "claude-code/*",
       providerName: "claude-code",
       hostModel: null,
       hostConcurrencyLimit: null,
@@ -84,6 +85,7 @@ describe("INV-2 silent-degrade marker (shared contract)", () => {
   it("a healthy pool omits the marker (positive signal, never a literal false)", () => {
     const pool: CapacityPool = {
       id: "claude-code/*",
+      accountKey: "claude-code/*",
       providerName: "claude-code",
       hostModel: null,
       hostConcurrencyLimit: null,
@@ -130,6 +132,7 @@ describe("INV-2 discovered-window slot-rise (32k floor escape)", () => {
   it("a reported capability window outranks the conservative 32k default", () => {
     const base: CapacityPool = {
       id: "claude-code/*",
+      accountKey: "claude-code/*",
       providerName: "claude-code",
       hostModel: null,
       hostConcurrencyLimit: null,

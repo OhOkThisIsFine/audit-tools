@@ -48,6 +48,36 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **The TEST TREE IS NOT TYPECHECKED AT ALL — `.ts` tests included (2026-07-19).** `tsconfig.json`
+  is `include: ["src"]` and vitest has no `typecheck` configured, so no test file is typechecked.
+  This keeps defeating "make the field required so `tsc` enumerates the sites": that guarantee is
+  real for production (`CapacityPool.accountKey` correctly enumerated its 2 producers) and worth
+  ZERO over fixtures. Concretely, three `.mjs` fixtures built pools without the new required field
+  and failed at RUNTIME rather than at compile time, and two more (`tests/audit/inv2.test.mjs`,
+  `tests/remediate/inv2.test.ts`) produced `account_key: undefined` through
+  `summarizeDispatchCapacityPools` and PASSED because nothing schema-parsed there. This is the same
+  class as the scope-less-window fixture problem. **Property to hold:** a fixture that omits a
+  required contract field fails loudly — either the test tree is typechecked, or the wire crossing
+  schema-validates on every path a fixture can reach.
+
+- **Mixed credential REFERENCES on one real key split the account (2026-07-19).** `deriveAccountKey`
+  compares `(endpoint, credential reference)`, so a source declaring
+  `api_key_env: "NVIDIA_API_KEY"` and a sibling pasting that same key inline as `api_key` are two
+  accounts and each meters its own allowance — a 2× over-admission of the same defect class as the
+  main N× bug. Deliberately not fixed by hashing the credential VALUE: that would change the account
+  identity on every credential rotation, orphaning ledger state and learned slopes for what is still
+  one account. **Property to hold:** two references naming one credential meter as one account,
+  without making identity depend on the secret's current value. Narrow today (inline `api_key` is
+  documented as discouraged).
+
+- **`INV-shared-core-14` is machine/PATH-dependent, NOT a flake (2026-07-19).** Long characterized in
+  handoffs as "pre-existing + env-sensitive". Actual cause, identified by independent review: provider
+  auto-resolution picks `agy` because that binary is on this box's PATH, and the test's dependency stub
+  has no `createAgyProvider`. Reproduces alone, so it is not a hermeticity/concurrency flake — the test
+  is coupled to whatever agent binaries happen to be installed. **Property to hold:** the test pins the
+  resolution it means to pin regardless of what is on PATH (inject the roster, or stub every provider
+  the resolver can reach).
+
 - **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Step 2
   ran 4 adversarial rounds; each spawned FRESH agents that re-grepped the same `tokens_per_pct` /
   `admit` / `reconcile` call-site map from scratch (~135k subagent tokens per round, much of it

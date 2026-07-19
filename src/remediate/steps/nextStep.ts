@@ -852,7 +852,7 @@ export async function driveRollingDispatch(
     ...(ledgerCfg.reservationLedger
       ? {
           reservationLedger: ledgerCfg.reservationLedger,
-          resolvePoolBudget: ledgerCfg.resolvePoolBudget,
+          resolvePoolConstraints: ledgerCfg.resolvePoolConstraints,
           resolveOutputReservation: (_packet, poolId) =>
             ledgerCfg.resolveOutputReservation(poolId),
         }

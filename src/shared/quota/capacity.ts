@@ -16,7 +16,7 @@ import {
   WaveBindingCapSchema,
 } from "./types.js";
 import type { QuotaUsageSnapshot } from "./quotaSource.js";
-import { QuotaUsageSnapshotSchema } from "./quotaSource.js";
+import { QuotaUsageSnapshotSchema, QuotaWindowScopeSchema } from "./quotaSource.js";
 import type { QuotaCoverageStatus } from "./coverage.js";
 import { QuotaCoverageStatusSchema } from "./coverage.js";
 import { scheduleWave, type DiscoveredRateLimitsInput } from "./scheduler.js";
@@ -177,6 +177,24 @@ export function buildOperatorForcedTerminal(strandedIds: string[]): PartialCompl
 export interface CapacityPool {
   /** Stable identifier, e.g. the provider/model key. */
   id: string;
+  /**
+   * The ACCOUNT this pool's credential belongs to — the partition an `account`-scoped
+   * quota window's allowance is shared across. Two models on one credential MUST carry
+   * the same value; that identity is the whole mechanism stopping N models on one
+   * account from each admitting against their own copy of one allowance.
+   *
+   * ⚠ Required, and set at CONSTRUCTION from the source's own declaration
+   * ({@link deriveAccountKey}) — never re-derived downstream from {@link id}. An
+   * explicitly declared `source.id` is returned verbatim as the pool key, so the key
+   * carries no recoverable credential; parsing it back out is precisely the mistake
+   * that kept the motivating case broken across five rounds of repair. Required with
+   * no default so `tsc` enumerates the construction sites rather than us trusting a
+   * grep.
+   *
+   * Falls back to the pool id when the source cannot be attributed to a credential —
+   * an unattributable pool meters alone rather than joining someone else's allowance.
+   */
+  accountKey: string;
   providerName: ResolvedProviderName;
   hostModel: string | null;
   /**
@@ -273,6 +291,8 @@ export interface CapacityPool {
 /** One pool's slice of the overall dispatch capacity. */
 export interface PoolDispatchAllocation {
   pool_id: string;
+  /** The ACCOUNT partition this pool meters against (CapacityPool.accountKey). */
+  accountKey: string;
   /** Relative rank this pool serves, when the host reported a roster. */
   rank?: DispatchModelTier;
   /** Concurrent dispatch slots this pool can sustain right now. */
@@ -337,6 +357,13 @@ export const DispatchCapacityPoolSummarySchema = z
     is_conversation_host: z.boolean(),
     cooldown_until: z.string().nullable(),
     estimated_wave_tokens: z.number().int().min(0),
+    /**
+     * The ACCOUNT partition this pool meters against (CapacityPool.accountKey),
+     * carried from the producer. Required: admission keys account-scoped windows on
+     * it, and re-deriving it downstream from  cannot work for an explicitly
+     * declared source id.
+     */
+    account_key: z.string(),
     binding_cap: WaveBindingCapSchema,
     /**
      * Per-target token-budget view surfaced to the orchestrating host so it sees
@@ -358,6 +385,28 @@ export const DispatchCapacityPoolSummarySchema = z
         budget: z.number(),
       })
       .nullable()
+      .optional(),
+    /**
+     * Every window this pool must fit inside, each in its own unit — the METERING
+     * basis the host-path admission builder reserves against (all-or-nothing).
+     * `remaining_token_budget` above is the MIN across these and is REPORTING only:
+     * the windows share no denominator, and an `account`-scoped entry's allowance is
+     * shared with every sibling model on the same credential. Absent when there is no
+     * live snapshot, or on the cooldown path where derivation is skipped.
+     */
+    window_budgets: z
+      .array(
+        z
+          .object({
+            scope: QuotaWindowScopeSchema,
+            label: z.string(),
+            budget: z.number(),
+            unit: z.enum(["tokens", "percent"]),
+            tokens_per_pct: z.number().optional(),
+            reset_at: z.string().nullable(),
+          })
+          .strict(),
+      )
       .optional(),
     in_flight_tokens: z.number().int().min(0).optional(),
     /**
@@ -693,6 +742,7 @@ function schedulePool(
   });
   return {
     pool_id: pool.id,
+    accountKey: pool.accountKey,
     ...(pool.rank ? { rank: pool.rank } : {}),
     slots: itemTokens.length > 0
       ? Math.min(schedule.max_concurrent, itemTokens.length)
@@ -742,9 +792,22 @@ export function summarizeDispatchCapacityPools(
     is_conversation_host: allocation.isConversationHost,
     cooldown_until: allocation.schedule.cooldown_until,
     estimated_wave_tokens: allocation.schedule.estimated_wave_tokens,
+    account_key: allocation.accountKey,
     binding_cap: allocation.schedule.binding_cap ?? "none",
     remaining_token_budget: allocation.schedule.remaining_token_budget ?? null,
     binding_window: allocation.schedule.binding_window ?? null,
+    ...(allocation.schedule.window_budgets && allocation.schedule.window_budgets.length > 0
+      ? {
+          window_budgets: allocation.schedule.window_budgets.map((w) => ({
+            scope: w.scope,
+            label: w.label,
+            budget: w.budget,
+            unit: w.unit,
+            ...(w.tokensPerPct != null ? { tokens_per_pct: w.tokensPerPct } : {}),
+            reset_at: w.reset_at,
+          })),
+        }
+      : {}),
     in_flight_tokens: allocation.schedule.in_flight_tokens ?? 0,
     ...(allocation.schedule.calibrating ? { calibrating: true } : {}),
     quota_source_snapshot: allocation.schedule.quota_source_snapshot ?? null,

@@ -9,6 +9,7 @@ import type {
   ResolvedLimits,
   WaveBindingCap,
   WaveSchedule,
+  WindowBudget,
 } from "./types.js";
 import {
   hasWindowScope,
@@ -511,13 +512,21 @@ interface TokenBudgetResolution {
    * derivable budget (cold start).
    */
   bindingWindow: QuotaBindingWindow | null;
+  /**
+   * Every window the pool must fit inside, each in its own unit — the METERING
+   * basis (see {@link WindowBudget}). `budget` above is the MIN across these and is
+   * now for REPORTING only: it cannot be the metering unit because the windows do
+   * not share a denominator, and because an account-scoped window's allowance is
+   * shared with sibling models that convert tokens at their own rates.
+   */
+  windowBudgets: WindowBudget[];
 }
 
 /**
- * Resolve the pool's remaining token budget from its snapshot, reducing across
- * the pool's OWN windows with MIN (the binding window governs). Uses the
- * per-window breakdown when present, else the flat top-level snapshot as a
- * single implicit window. Per-window: absolute → learned-slope → cold-start.
+ * Resolve the pool's per-window remaining allowances from its snapshot, plus the MIN
+ * across them for reporting. Uses the per-window breakdown when present, else the
+ * flat top-level snapshot as a single implicit account-scoped window. Per-window:
+ * absolute → learned-slope → cold-start.
  */
 function deriveTokenBudget(
   snapshot: QuotaUsageSnapshot,
@@ -559,10 +568,12 @@ function deriveTokenBudget(
   let calibrating = false;
   let exhaustedResetAt: string | null = null;
   let bindingWindow: QuotaBindingWindow | null = null;
+  const windowBudgets: WindowBudget[] = [];
 
   for (const w of windows) {
+    const slopeKey = windowSlopeKey(w.scope, w.label);
     const windowBudget = deriveWindowTokenBudget(
-      windowSlopeKey(w.scope, w.label),
+      slopeKey,
       w.remaining_pct,
       w.tokens_remaining,
       learnedSlopes,
@@ -570,6 +581,54 @@ function deriveTokenBudget(
     if (windowBudget == null) {
       calibrating = true;
       continue;
+    }
+
+    // Emit the window in the unit it can actually meter in. An absolute
+    // `tokens_remaining` is directly commensurable (no exchange rate), so it meters
+    // in tokens even when account-scoped. Otherwise the shared quantity is the
+    // window's PERCENT, priced through this pool's own learned slope — which is what
+    // lets N siblings draw on one account allowance at their own conversion rates.
+    if (typeof w.tokens_remaining === "number" && Number.isFinite(w.tokens_remaining)) {
+      windowBudgets.push({
+        scope: w.scope,
+        label: w.label,
+        budget: Math.max(0, w.tokens_remaining),
+        unit: "tokens",
+        reset_at: w.reset_at,
+      });
+    } else {
+      const slope = learnedSlopes?.[slopeKey];
+      if (
+        typeof slope === "number" &&
+        Number.isFinite(slope) &&
+        slope > 0 &&
+        w.remaining_pct != null &&
+        Number.isFinite(w.remaining_pct)
+      ) {
+        windowBudgets.push({
+          scope: w.scope,
+          label: w.label,
+          budget: Math.max(0, w.remaining_pct * 100),
+          unit: "percent",
+          tokensPerPct: slope,
+          reset_at: w.reset_at,
+        });
+      } else {
+        // A window with a derivable TOKEN budget but no metering unit is only
+        // reachable via the `remaining_pct <= 0` known-empty branch, whose budget is
+        // 0. Emit it as an exhausted window so admission BLOCKS on it rather than
+        // dropping it from the constraint set (dropping = metering against fewer
+        // allowances than apply). The unit is immaterial at budget 0 — a zero ceiling
+        // refuses any positive draw either way — so it is emitted as `tokens`, which
+        // needs no slope.
+        windowBudgets.push({
+          scope: w.scope,
+          label: w.label,
+          budget: 0,
+          unit: "tokens",
+          reset_at: w.reset_at,
+        });
+      }
     }
     // A near-empty window needs no special-case cliff: its own budget
     // (remaining_pct × slope, or an absolute tokens_remaining) is already tiny,
@@ -590,7 +649,7 @@ function deriveTokenBudget(
     }
   }
 
-  return { budget, calibrating, exhaustedResetAt, bindingWindow };
+  return { budget, calibrating, exhaustedResetAt, bindingWindow, windowBudgets };
 }
 
 function sumTopN(sorted: number[], n: number): number {
@@ -766,6 +825,10 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   let calibrating = false;
   // The binding window (D1), hoisted so an empty_grant wall can surface it + its reset.
   let bindingWindow: QuotaBindingWindow | null = null;
+  // Per-window allowances — the METERING basis admission reserves against. Empty on
+  // the cooldown path and when there is no snapshot, which admission reads as "no
+  // live signal" and falls back to one unbounded pool-keyed constraint.
+  let windowBudgets: WindowBudget[] = [];
   // Validate window scopes on EVERY path that carries a snapshot, not only the
   // one that derives a budget. `deriveTokenBudget` is skipped under an active
   // cooldown, but the snapshot is still stamped onto the returned schedule and
@@ -779,10 +842,12 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
       calibrating: windowCalibrating,
       exhaustedResetAt,
       bindingWindow: windowBinding,
+      windowBudgets: derivedWindowBudgets,
     } = deriveTokenBudget(quotaSourceSnapshot, quotaStateEntry?.tokens_per_pct);
     remainingTokenBudget = budget;
     calibrating = windowCalibrating;
     bindingWindow = windowBinding;
+    windowBudgets = derivedWindowBudgets;
     if (budget === 0) {
       // A genuinely empty window (remaining fraction 0 / absolute count 0):
       // throttle to 1 and persist a cooldown to its reset so a later transiently
@@ -843,6 +908,7 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     binding_cap: bindingCap,
     remaining_token_budget: remainingTokenBudget,
     binding_window: bindingWindow,
+    window_budgets: windowBudgets,
     in_flight_tokens: inFlightTokens,
     calibrating,
   };

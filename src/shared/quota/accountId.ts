@@ -1,4 +1,73 @@
+import { createHash } from "node:crypto";
 import type { QuotaStateEntry } from "./types.js";
+
+/**
+ * The CREDENTIAL a source authenticates with, as a stable, value-free string —
+ * `(normalized endpoint, credential REFERENCE)`. Two sources reaching the same
+ * endpoint through the same credential reference resolve to one identity, which is
+ * what makes them ONE metered account.
+ *
+ * ⚠ It compares REFERENCES, not values. Two sources naming the same real key by
+ * different references — one `api_key_env: "NVIDIA_API_KEY"`, a sibling pasting that
+ * same key inline — split into two accounts and each meters its own allowance.
+ * Deliberate: keying on the VALUE would make the account identity change whenever the
+ * operator rotates the credential, orphaning the ledger state and the learned slopes
+ * for what is still the same account. The mixed-reference config is narrow (inline
+ * `api_key` is documented as discouraged) and tracked in `docs/backlog.md`.
+ *
+ * ⚠ Never contains a secret. An `api_key_env` contributes its NAME; an inline
+ * `api_key` contributes a truncated SHA-256 of its value, never the value — this
+ * string is persisted into the reservation-ledger file and appears in artifacts.
+ * Supporting the inline shape is not optional polish: it is a documented supported
+ * field, and treating it as "no credential" is what left the motivating
+ * `nim-nano`/`nim-super` case splitting across four rounds of repairs.
+ *
+ * Returns null only when the source exposes no discriminator at all — no endpoint,
+ * or no credential of either shape.
+ */
+export function deriveCredentialIdentity(source: {
+  endpoint?: string;
+  api_key_env?: string;
+  api_key?: string;
+}): string | null {
+  const normalizedEndpoint = source.endpoint?.trim().toLowerCase().replace(/\/+$/, "");
+  if (!normalizedEndpoint) return null;
+  if (source.api_key_env) return `${normalizedEndpoint}::env:${source.api_key_env}`;
+  if (source.api_key) {
+    const digest = createHash("sha256").update(source.api_key).digest("hex").slice(0, 16);
+    return `${normalizedEndpoint}::inline:${digest}`;
+  }
+  return null;
+}
+
+/**
+ * The ACCOUNT a pool meters against — the partition an `account`-scoped quota
+ * window's allowance is shared across.
+ *
+ * Decided HERE, at the producer, from the source's own declaration. It is NOT
+ * recoverable from the pool-key string: `dispatchableSourceId` returns an explicitly
+ * declared `source.id` verbatim, so an operator naming two models `nim-nano` and
+ * `nim-super` on one credential produces two keys with no account segment and no
+ * shared substring. Parsing identity back out of that string was the defect that made
+ * a fifth round of this repair necessary — the producer holds the credential, so the
+ * producer decides.
+ *
+ * Precedence: an explicit operator `account` declaration always wins (two declared
+ * accounts on one endpoint must never be silently re-merged), then the derived
+ * credential identity. Returns null when neither is available, and the caller then
+ * falls back to a pool-scoped key — correct, because a source we cannot attribute to
+ * a credential must not be merged with anyone else's allowance.
+ */
+export function deriveAccountKey(source: {
+  provider: string;
+  endpoint?: string;
+  api_key_env?: string;
+  api_key?: string;
+  account?: string | null;
+}): string | null {
+  if (source.account) return `${source.provider}#${source.account}`;
+  return deriveCredentialIdentity(source);
+}
 
 /**
  * Derive a LOCAL, credential-VALUE-free account id for a bare-API-key source
@@ -37,10 +106,29 @@ export function deriveLocalAccountId(source: {
 }): string | null {
   if (source.account) return null;
   if (source.provider !== "openai-compatible") return null;
-  if (!source.endpoint || !source.api_key_env) return null;
-  const normalizedEndpoint = source.endpoint.trim().toLowerCase().replace(/\/+$/, "");
-  if (!normalizedEndpoint) return null;
-  return `${normalizedEndpoint}::${source.api_key_env}`;
+  if (!source.api_key_env) return null;
+  return deriveCredentialIdentity(source);
+}
+
+/**
+ * The account key for a pool whose key is PROVIDER-SHAPED by construction —
+ * `provider[#account]/model`, as built by `buildProviderModelKey`. Host pools are the
+ * only such class: the caller builds the key itself, so the account segment is present
+ * exactly when an account was resolved.
+ *
+ * ⚠ Valid ONLY for keys this codebase constructed. Never call it on a
+ * {@link https | dispatchableSourceId} result: an explicitly declared `source.id` is
+ * returned verbatim, so the whole opaque id parses as the "provider" and every sibling
+ * on one credential gets a distinct account. Source pools derive their account from the
+ * source declaration ({@link deriveAccountKey}) instead.
+ *
+ * An absent account segment folds every model on that provider onto one key. For host
+ * pools that is right: they are the one conversation host's own credential.
+ */
+export function accountKeyFromProviderShapedKey(poolKey: string): string {
+  const slash = poolKey.indexOf("/");
+  const head = slash === -1 ? poolKey : poolKey.slice(0, slash);
+  return head;
 }
 
 /**

@@ -47,6 +47,13 @@ export function classifyEmptyGrantCause(
   if (blocked.some((e) => e.reason === "budget_exhausted")) return "budget_exhausted";
   if (blocked.some((e) => e.reason === "cap_reached")) return "cap_reached";
   if (blocked.every((e) => e.reason === "no_capable_pool")) return "no_capable_pool";
+  // A grant emptied ONLY by uncalibrated windows is a calibration state, not a wall:
+  // no allowance ran out, so there is no reset to wait for. Classified as
+  // `budget_exhausted` would send the operator to wait on a reset that will never
+  // come; leaving it unclassified would drop the reason entirely. It maps to
+  // `cap_reached` — the "retry shortly, nothing structural" cause — because the pool
+  // re-enters as soon as a slope is observed.
+  if (blocked.every((e) => e.reason === "window_uncalibrated")) return "cap_reached";
   return null;
 }
 

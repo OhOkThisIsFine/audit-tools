@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 
-const { admitBatch, DispatchAdmissionSchema } = await import(
+const { admitBatch, admissionPoolsFromSummaries, DispatchAdmissionSchema } = await import(
   "../../src/shared/dispatch/admissionLoop.ts"
 );
 const { ReservationLedger } = await import(
@@ -30,12 +30,19 @@ function pool(
     throughputConcurrency = Infinity,
     capacityTokens = Infinity,
     calibrating = false,
+    accountKey,
+    windowBudgets = [],
   } = {},
 ) {
   return {
     poolId,
     resourceKey: poolId,
     budget,
+    // Default: each pool is its own account (no sharing), so existing cases keep
+    // metering exactly as before. Pass an explicit `accountKey` to put two pools on
+    // ONE credential and exercise the shared-allowance partition.
+    accountKey: accountKey ?? poolId,
+    windowBudgets,
     declaredCap,
     costRank,
     capabilityRank,
@@ -780,4 +787,199 @@ test("F4: grantLeases:false with an EMPTY pool set grants all — absent capacit
   expect(res.granted_packet_ids).toEqual(["p1"]);
   expect(res.leases).toEqual([]);
   expect(res.explains).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// The N× over-admission — the defect this whole design exists to close.
+// ---------------------------------------------------------------------------
+
+/** An account-scoped percent window: the allowance shared by every sibling model. */
+function accountWindow(pctRemaining, tokensPerPct, label = "session") {
+  return {
+    scope: "account",
+    label,
+    budget: pctRemaining,
+    unit: "percent",
+    tokensPerPct,
+    reset_at: null,
+  };
+}
+
+test("N-TIMES OVER-ADMISSION: siblings on ONE credential draw down ONE allowance", async () => {
+  const ledger = await freshLedger();
+  // Two models on one account, each seeing the SAME account-wide window: 10% left,
+  // 1000 tokens per percentage point ⇒ 10_000 tokens of real headroom TOTAL.
+  // Pre-fix each pool metered its own copy of that budget, so two pools admitted
+  // ~2× the work the credential could actually serve (N pools ⇒ N×).
+  const shared = () => accountWindow(10, 1000);
+  const pools = [
+    pool("nim#acct-1/nano", { accountKey: "nim#acct-1", windowBudgets: [shared()], costRank: 0 }),
+    pool("nim#acct-1/super", { accountKey: "nim#acct-1", windowBudgets: [shared()], costRank: 1 }),
+  ];
+  // Six packets of 4000 tokens = 24_000 requested against 10_000 available.
+  const packets = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, cost: 4000, complexity: 0.5 }));
+
+  const res = await admitBatch({ packets, pools, ledger });
+
+  // 4000 tokens = 4 percentage points; 10 points available ⇒ exactly 2 fit.
+  expect(res.granted).toHaveLength(2);
+  expect(res.blocked).toHaveLength(4);
+
+  // Both grants meter against the SAME account key, whichever pool served them.
+  const leased = await ledger.snapshot();
+  expect(Object.keys(leased)).toEqual(["acct:nim#acct-1::session"]);
+  const drawn = leased["acct:nim#acct-1::session"].reduce((sum, l) => sum + l.cost, 0);
+  expect(drawn).toBeCloseTo(8, 6); // 2 packets × 4 points
+});
+
+test("a MODEL-scoped window throttles its own pool without starving its sibling", async () => {
+  const ledger = await freshLedger();
+  // Both share a roomy account window; only `nano` carries a tight model-scoped limit.
+  const roomy = () => accountWindow(100, 1000);
+  const pools = [
+    pool("nim#acct-1/nano", {
+      accountKey: "nim#acct-1",
+      costRank: 0, // cheapest, so routing tries it first
+      windowBudgets: [
+        roomy(),
+        { scope: "model", label: "session", budget: 4, unit: "percent", tokensPerPct: 1000, reset_at: null },
+      ],
+    }),
+    pool("nim#acct-1/super", { accountKey: "nim#acct-1", costRank: 1, windowBudgets: [roomy()] }),
+  ];
+  const packets = Array.from({ length: 3 }, (_, i) => ({ id: `p${i}`, cost: 4000, complexity: 0.5 }));
+
+  const res = await admitBatch({ packets, pools, ledger });
+
+  // nano's own window fits exactly one 4-point packet; the rest spill to super
+  // rather than being refused — the sibling is not starved by nano's private limit.
+  expect(res.granted).toHaveLength(3);
+  const byPool = res.granted.reduce((acc, g) => {
+    acc[g.pool_id] = (acc[g.pool_id] ?? 0) + 1;
+    return acc;
+  }, {});
+  expect(byPool["nim#acct-1/nano"]).toBe(1);
+  expect(byPool["nim#acct-1/super"]).toBe(2);
+
+  // Discriminating assertion: the model window must be keyed to the POOL, not the
+  // account. A broken impl that keyed model-scoped windows to accountKey produces the
+  // same 1/2 split, so the counts alone do not pin the partition — the keys do.
+  const keys = Object.keys(await ledger.snapshot()).sort();
+  expect(keys).toContain("pool:nim#acct-1/nano::session");
+  expect(keys).toContain("acct:nim#acct-1::session");
+});
+
+test("TWO ACCOUNTS on one provider do not share an allowance", async () => {
+  const ledger = await freshLedger();
+  const pools = [
+    pool("nim#acct-a/model", { accountKey: "nim#acct-a", windowBudgets: [accountWindow(4, 1000)], costRank: 0 }),
+    pool("nim#acct-b/model", { accountKey: "nim#acct-b", windowBudgets: [accountWindow(4, 1000)], costRank: 1 }),
+  ];
+  const packets = Array.from({ length: 2 }, (_, i) => ({ id: `p${i}`, cost: 4000, complexity: 0.5 }));
+
+  const res = await admitBatch({ packets, pools, ledger });
+
+  // Each account affords exactly one packet — 2 total. If the account key collapsed
+  // to the provider, the second would be refused.
+  expect(res.granted).toHaveLength(2);
+  expect(Object.keys(await ledger.snapshot()).sort()).toEqual([
+    "acct:nim#acct-a::session",
+    "acct:nim#acct-b::session",
+  ]);
+});
+
+test("an UNPRICEABLE window refuses the pool rather than admitting on the priced subset", async () => {
+  const ledger = await freshLedger();
+  // The account window has no learned slope, so it cannot price the draw. Admitting
+  // on the model window alone would meter against fewer allowances than bind it.
+  const pools = [
+    pool("nim#acct-1/nano", {
+      accountKey: "nim#acct-1",
+      windowBudgets: [
+        { scope: "account", label: "session", budget: 50, unit: "percent", reset_at: null },
+        { scope: "model", label: "session", budget: 1_000_000, unit: "tokens", reset_at: null },
+      ],
+    }),
+  ];
+  const res = await admitBatch({
+    packets: [{ id: "p1", cost: 4000, complexity: 0.5 }],
+    pools,
+    ledger,
+  });
+  expect(res.granted).toEqual([]);
+  expect(res.blocked).toEqual(["p1"]);
+  // Nothing was reserved — a refusal must not leave a partial lease behind.
+  expect(await ledger.snapshot()).toEqual({});
+});
+
+test("END-TO-END: two id'd siblings summarized from ONE credential meter as ONE account", async () => {
+  const ledger = await freshLedger();
+  // Starts from CAPACITY SUMMARIES — the real wire shape — and goes through
+  // `admissionPoolsFromSummaries`, so the account key travels the production path
+  // instead of being hand-injected into the pool helper. The pool ids are the
+  // explicitly-declared ones the operator's sources-declared.json actually produces
+  // (`nim-nano`, `nim-super`): no `/`, no `#`, nothing recoverable from the string.
+  const CRED = "https://integrate.api.nvidia.com/v1::env:NVIDIA_API_KEY";
+  const summary = (poolId) => ({
+    pool_id: poolId,
+    account_key: CRED,
+    slots: 4,
+    model: poolId,
+    rank: "standard",
+    confidence: "high",
+    source: "declared",
+    resolved_limits: { context_tokens: 200_000, output_tokens: 8_000 },
+    host_concurrency_limit: null,
+    is_conversation_host: false,
+    cooldown_until: null,
+    estimated_wave_tokens: 0,
+    binding_cap: "none",
+    remaining_token_budget: 10_000,
+    binding_window: null,
+    window_budgets: [
+      { scope: "account", label: "session", budget: 10, unit: "percent", tokens_per_pct: 1000, reset_at: null },
+    ],
+    in_flight_tokens: 0,
+  });
+
+  const pools = admissionPoolsFromSummaries([summary("nim-nano"), summary("nim-super")]);
+  // The identity survived the wire: both siblings resolve to the same account.
+  expect(pools[0].accountKey).toBe(CRED);
+  expect(pools[1].accountKey).toBe(CRED);
+
+  const packets = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, cost: 4000, complexity: 0.5 }));
+  const res = await admitBatch({ packets, pools, ledger });
+
+  // 10 percentage points, 4 per packet ⇒ 2 fit ACROSS BOTH POOLS. Pre-fix each pool
+  // metered its own copy and 4 were admitted against a 2-packet credential.
+  expect(res.granted).toHaveLength(2);
+  expect(Object.keys(await ledger.snapshot())).toEqual([`acct:${CRED}::session`]);
+});
+
+test("a declared in-flight cap is passed VERBATIM regardless of window count", async () => {
+  // The cap counts IN-FLIGHT REQUESTS. A multi-constraint admission writes one ledger
+  // row per window under one lease id, so seeding the count from rows would divide the
+  // cap by the pool's window count — a 2-window pool with cap 4 would admit 2. The
+  // seed only matters for leases from a PRIOR wave or a co-located run, so this
+  // pre-seeds one such lease and checks the cap still admits the full remainder.
+  const ledger = await freshLedger();
+  const twoWindows = [
+    { scope: "account", label: "session", budget: 1e9, unit: "tokens", reset_at: null },
+    { scope: "account", label: "weekly", budget: 1e9, unit: "tokens", reset_at: null },
+  ];
+  // One packet already in flight on this pool, metering against BOTH windows.
+  await ledger.admit({
+    poolId: "p",
+    constraints: [
+      { resourceKey: "acct:acct-1::session", budget: 1e9, cost: 10 },
+      { resourceKey: "acct:acct-1::weekly", budget: 1e9, cost: 10 },
+    ],
+  });
+
+  const pools = [pool("p", { accountKey: "acct-1", windowBudgets: twoWindows, declaredCap: 3 })];
+  const packets = Array.from({ length: 3 }, (_, i) => ({ id: `q${i}`, cost: 10, complexity: 0.5 }));
+  const res = await admitBatch({ packets, pools, ledger });
+
+  // Cap 3, one already in flight ⇒ 2 more. Counting rows would see 2 in flight ⇒ 1.
+  expect(res.granted).toHaveLength(2);
 });

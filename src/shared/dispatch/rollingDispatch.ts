@@ -73,6 +73,7 @@ import {
 } from "../quota/state.js";
 import type { QuotaWindowPctReading } from "../quota/state.js";
 import type { WindowSlopeKey } from "../quota/quotaSource.js";
+import type { PoolConstraintResolution } from "../quota/windowConstraints.js";
 import { buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "../quota/capacity.js";
 import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { detectRateLimitError, computeCooldownUntil } from "../quota/errorParsing.js";
@@ -441,13 +442,18 @@ export interface RollingDispatchConfig<TPacket> {
    */
   reservationLedger?: ReservationLedger;
   /**
-   * Live remaining token budget for a pool's resourceKey (its `pool.id`). Consulted
-   * only when `reservationLedger` is set — it is the budget the ledger admits
-   * against (`budget - Σ outstanding_leases >= cost`). Return a non-finite value
-   * (the default) for an optimistic/unbounded budget, in which case the ledger only
-   * prevents co-located double-counting and never gates on an absolute token ceiling.
+   * Every metered allowance a packet of `tokens` must fit inside on this pool — one
+   * constraint per quota WINDOW, in that window's own unit. Consulted only when
+   * `reservationLedger` is set; the ledger admits iff EVERY constraint clears.
+   *
+   * Not a scalar budget: an `account`-scoped window's allowance is shared with every
+   * sibling model on the same credential (the N× over-admission), and windows share
+   * no denominator, so no single number can express "fits every applicable
+   * allowance". Omit to leave the in-process `InFlightTokenTracker` as the sole
+   * accounting; a resolution with a non-empty `unpriced` means REFUSE, never admit on
+   * the priced subset.
    */
-  resolvePoolBudget?: (poolId: string) => number;
+  resolvePoolConstraints?: (poolId: string, tokens: number) => PoolConstraintResolution;
   /**
    * Output-token envelope (spec Resolved decision 1) added to a packet's INPUT
    * `estimatedTokens` to form the reservation cost. Consulted only when
@@ -809,7 +815,7 @@ export function createRollingDispatcher<TPacket>(
     isPacketEscalated,
     recordRateLimit,
     reservationLedger,
-    resolvePoolBudget,
+    resolvePoolConstraints,
     resolveOutputReservation: resolveOutputReservationFn,
   } = config;
 
@@ -1007,13 +1013,19 @@ export function createRollingDispatcher<TPacket>(
     if (!reservationLedger) return { status: "no_ledger" };
     const outputReservation = resolveOutputReservationFn?.(packet, slot.poolId) ?? 0;
     const cost = Math.max(0, packet.estimatedTokens) + Math.max(0, outputReservation);
-    const constraints = [
-      {
-        resourceKey: slot.poolId,
-        budget: resolvePoolBudget?.(slot.poolId) ?? Number.POSITIVE_INFINITY,
-        cost,
-      },
-    ];
+    const resolution = resolvePoolConstraints?.(slot.poolId, cost) ?? {
+      constraints: [{ resourceKey: slot.poolId, budget: Number.POSITIVE_INFINITY, cost }],
+      unpriced: [],
+    };
+    if (resolution.unpriced.length > 0) {
+      // A window that applies but cannot price this draw. Admitting on the priced
+      // subset would meter the packet against fewer allowances than bind it, so
+      // refuse — and report nothing outstanding is holding it, since waiting for a
+      // lease to free cannot make an unpriceable window priceable. The pool re-enters
+      // once a slope is learned (cold-start probe path).
+      return { status: "blocked", anyOutstanding: false };
+    }
+    const constraints = resolution.constraints;
     const decision = await reservationLedger.admit({
       constraints: forceUnbounded
         ? constraints.map((c) => ({ ...c, budget: Number.POSITIVE_INFINITY }))

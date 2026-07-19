@@ -57,12 +57,17 @@ export interface QuotaStateEntry {
   last_429_at: string | null;
   consecutive_429_count?: number;
   /**
-   * Learned tokens→percent slope (EWMA) for the token-budget gate, keyed PER
-   * WINDOW LABEL (e.g. "session", "weekly"). `slope = Δtokens / Δpercent` where
-   * percent = remaining_pct*100. Windows scale on different denominators, so
-   * each learns its own slope; the gate multiplies the right slope by that
-   * window's remaining percent to get its token budget and takes the MIN across
-   * a pool's own windows. Absent until observed (cold start).
+   * Learned tokens→percent slope (EWMA), keyed by `windowSlopeKey(scope, label)`
+   * (e.g. "account:session", "model:session") — NOT by bare label: an account-scoped
+   * and a model-scoped window can share a group name while pricing different
+   * allowances. `slope = Δtokens / Δpercent` where percent = remaining_pct*100.
+   * Windows scale on different denominators, so each learns its own slope.
+   *
+   * Two consumers, and the distinction matters: the slope prices each window's
+   * remaining percent into a token budget for REPORTING (the MIN across a pool's
+   * windows), and it is the exchange rate ADMISSION uses to convert a packet's tokens
+   * into a draw against a percent-denominated window. Absent until observed (cold
+   * start), which reads as `calibrating`.
    */
   tokens_per_pct?: Record<string, number>;
   /**
@@ -113,6 +118,42 @@ export interface QuotaBindingWindow {
   budget: number;
 }
 
+/**
+ * One quota window's remaining allowance, expressed in THAT WINDOW'S OWN UNIT, as
+ * the metering unit admission reserves against. This is what replaces the MIN
+ * collapse as the basis for admission: the MIN survives only for REPORTING which
+ * window binds ({@link QuotaBindingWindow}).
+ *
+ * ⚠ There is no unit shared across windows, which is the whole reason this is a
+ * list rather than a number. A 5-hour `session` and a 7-day `weekly` scale on
+ * different denominators, so the same N tokens is a different fraction of each.
+ *
+ * `unit` is decided per window, by what the provider actually reported:
+ *  - `tokens` — the window reported an ABSOLUTE `tokens_remaining`. Tokens are
+ *    directly commensurable here because no exchange rate is involved, so even an
+ *    account-scoped window shared by N models can meter in tokens.
+ *  - `percent` — only `remaining_pct` is known, priced through the pool's own
+ *    learned `tokensPerPct`. This is REQUIRED for an account-scoped percent window:
+ *    N models share one percent allowance but each converts its tokens at its OWN
+ *    rate, so percent is the only unit in which their draws are comparable.
+ *
+ * A window that can be priced in NEITHER unit is not represented here at all — it
+ * sets `calibrating`, which routes the pool through the cold-start clamp rather
+ * than being waved through unmetered.
+ */
+export interface WindowBudget {
+  /** Which partition the allowance belongs to — decided at the producer, never re-derived. */
+  scope: import("./quotaSource.js").QuotaWindowScope;
+  label: string;
+  /** Remaining allowance, in `unit`. */
+  budget: number;
+  unit: "tokens" | "percent";
+  /** Tokens per percentage point for this pool+window. Present iff `unit === "percent"`. */
+  tokensPerPct?: number;
+  /** The window's reset, carried for wall reporting. */
+  reset_at: string | null;
+}
+
 export interface WaveSchedule {
   max_concurrent: number;
   estimated_wave_tokens: number;
@@ -141,6 +182,17 @@ export interface WaveSchedule {
    * time when there is no cooldown. Absent/null at cold start / no live snapshot.
    */
   binding_window?: QuotaBindingWindow | null;
+  /**
+   * Every window this pool must fit inside, each in its own unit — the METERING
+   * basis. Admission reserves against ALL of them (all-or-nothing); an account-scoped
+   * entry is shared with every sibling model on the credential, which is what stops N
+   * models on one account from each admitting against their own copy of one allowance.
+   *
+   * Empty/absent when there is no live snapshot, or on the cooldown path where budget
+   * derivation is skipped entirely — admission then falls back to a single pool-keyed
+   * constraint carrying the scalar budget, i.e. exactly the pre-partition behaviour.
+   */
+  window_budgets?: WindowBudget[];
   /** Tokens already in flight against this pool when the wave was sized (0 default). */
   in_flight_tokens?: number;
   /**

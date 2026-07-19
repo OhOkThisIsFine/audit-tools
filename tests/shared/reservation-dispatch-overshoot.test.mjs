@@ -84,7 +84,10 @@ test("two co-located dispatchers over one ledger never exceed the shared account
       sessionConfig: unlimitedSession(),
       dispatchPacket: dispatchPacket(COST),
       reservationLedger: ledger,
-      resolvePoolBudget: () => BUDGET,
+      resolvePoolConstraints: (poolId, tokens) => ({
+        constraints: [{ resourceKey: poolId, budget: BUDGET, cost: tokens }],
+        unpriced: [],
+      }),
     });
     d.enqueue([
       makePacket(`${prefix}-1`, COST),
@@ -120,7 +123,11 @@ test("liveness: a single packet whose cost exceeds the whole budget still runs (
     sessionConfig: unlimitedSession(),
     dispatchPacket: dispatchPacket(500),
     reservationLedger: ledger,
-    resolvePoolBudget: () => 100, // packet cost 500 >> budget 100
+    // packet cost 500 >> budget 100
+    resolvePoolConstraints: (poolId, tokens) => ({
+      constraints: [{ resourceKey: poolId, budget: 100, cost: tokens }],
+      unpriced: [],
+    }),
   });
   d.enqueue([makePacket("oversized", 500)]);
 
@@ -146,7 +153,10 @@ test("output-envelope reservation is counted in the admission cost", async () =>
     // The meter charges the FULL reserved cost (input + envelope) = 80 per packet.
     dispatchPacket: dispatchPacket(80),
     reservationLedger: ledger,
-    resolvePoolBudget: () => 100,
+    resolvePoolConstraints: (poolId, tokens) => ({
+      constraints: [{ resourceKey: poolId, budget: 100, cost: tokens }],
+      unpriced: [],
+    }),
     resolveOutputReservation: () => 40,
   });
   d.enqueue([makePacket("p1", 40), makePacket("p2", 40)]);

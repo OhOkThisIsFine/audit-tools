@@ -23,6 +23,8 @@ import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
 import { estimatePacketCost } from "../quota/packetCost.js";
 import type { DispatchCapacityPoolSummary } from "../quota/capacity.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
+import type { WindowBudget } from "../quota/types.js";
+import { windowConstraintsFor } from "../quota/windowConstraints.js";
 import { deriveColdStartAdmissionBatch } from "../quota/scheduler.js";
 import { tierRank } from "./tierRank.js";
 import { deriveCostRank, lookupConfirmedPosition } from "./costRank.js";
@@ -48,10 +50,33 @@ export interface AdmissionCandidate {
 /** One pool a packet may be routed to. */
 export interface AdmissionPool {
   poolId: string;
-  /** `provider#account/model` — the metered account the lease keys to. */
+  /**
+   * ⚠ REPORTING ONLY — no longer what the lease keys to. Admission keys per WINDOW
+   * ({@link windowBudgets}); this remains for the explain artifact's pool-level label.
+   */
   resourceKey: string;
-  /** Live remaining token budget for `resourceKey`. `+Infinity` ⇒ optimistic. */
+  /**
+   * The MIN across the pool's windows. NOT the metering unit when
+   * {@link windowBudgets} is populated — windows share no denominator, so a single
+   * scalar cannot express "fits every applicable allowance", and admission meters per
+   * window instead. It has TWO live uses beyond reporting, so it is not inert: the
+   * cold-start batch sizer reads it as a rough magnitude, and it is the ceiling of the
+   * fallback constraint when {@link windowBudgets} is EMPTY (no snapshot / cooldown).
+   */
   budget: number;
+  /**
+   * The account this pool's credential belongs to — the partition an `account`-scoped
+   * window's allowance is shared across. Two models on one credential MUST produce the
+   * same value; that identity is what stops N models from each admitting against their
+   * own copy of one allowance.
+   */
+  accountKey: string;
+  /**
+   * Every window this pool must fit inside, each in its own unit — the METERING basis.
+   * Empty ⇒ no live signal (no snapshot, or the cooldown path), and admission falls
+   * back to ONE pool-keyed constraint carrying {@link budget} as its ceiling.
+   */
+  windowBudgets: WindowBudget[];
   /** Declared hard in-flight cap (e.g. Codex's 6), passed verbatim. null ⇒ none. */
   declaredCap: number | null;
   /** Cost rank — LOWER is cheaper; the loop routes cheapest-capable-first. */
@@ -135,6 +160,15 @@ export function admissionPoolsFromSummaries(
     poolId: pool.pool_id,
     resourceKey: pool.pool_id,
     budget: pool.remaining_token_budget ?? Number.POSITIVE_INFINITY,
+    accountKey: pool.account_key,
+    windowBudgets: (pool.window_budgets ?? []).map((w) => ({
+      scope: w.scope,
+      label: w.label,
+      budget: w.budget,
+      unit: w.unit,
+      ...(w.tokens_per_pct != null ? { tokensPerPct: w.tokens_per_pct } : {}),
+      reset_at: w.reset_at,
+    })),
     declaredCap: pool.host_concurrency_limit?.active_subagents ?? pool.concurrency_cap ?? null,
     costRank: deriveCostRank({
       model: pool.model,
@@ -195,7 +229,18 @@ export const AdmissionExplainSchema = z
     pool_id: z.string().nullable(),
     resource_key: z.string().nullable(),
     admitted: z.boolean(),
-    reason: z.enum(["admitted", "no_capable_pool", "budget_exhausted", "cap_reached", "packet_oversized"]),
+    reason: z.enum([
+      "admitted",
+      "no_capable_pool",
+      "budget_exhausted",
+      "cap_reached",
+      "packet_oversized",
+      // A window that APPLIES to the packet has no learned tokens-per-percent slope,
+      // so it cannot price the draw. Distinct from : nothing ran
+      // out, the pool is still calibrating — telling the operator the budget is gone
+      // would be a false report of a wall that does not exist.
+      "window_uncalibrated",
+    ]),
     /** Present on an admit attempt against a real pool (budget headroom before it). */
     headroom_before: z.number().optional(),
     outstanding_before: z.number().optional(),
@@ -361,10 +406,14 @@ export function buildCapacityPoolCapabilityFloor(
   }[],
   onFailOpen?: (info: { poolId: string; packetId: string; requiredTier: DispatchModelTier }) => void,
 ): (poolId: string, packet: { id: string; requiredTier?: DispatchModelTier }) => boolean {
+  // Capability-gate stubs only — these never reach `admit`, so the metering fields
+  // are inert placeholders rather than a second (drifting) derivation of them.
   const stubs: AdmissionPool[] = pools.map((p) => ({
     poolId: p.id,
     resourceKey: p.id,
     budget: Number.POSITIVE_INFINITY,
+    accountKey: p.id,
+    windowBudgets: [],
     declaredCap: null,
     costRank: 0,
     capabilityRank: tierRank(p.rank),
@@ -477,14 +526,27 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
 
   // Seed per-pool in-flight COUNT from the ledger (other consumers' live leases),
   // so a declared cap accounts for cross-process in-flight, then add this batch's.
+  //
+  // ⚠ Count DISTINCT lease ids, not lease rows. A multi-constraint admission writes
+  // one row PER WINDOW under the same lease id, so counting rows would divide a
+  // pool's declared cap by its window count (a 2-window account pool with a declared
+  // cap of 4 would admit 2). The cap is a COUNT OF IN-FLIGHT REQUESTS and must be
+  // passed verbatim regardless of how many allowances each request meters against.
   const countByPool = new Map<string, number>();
   try {
     const snapshot = await input.ledger.snapshot();
+    const seenByPool = new Map<string, Set<string>>();
     for (const leases of Object.values(snapshot)) {
       for (const lease of leases) {
-        countByPool.set(lease.poolId, (countByPool.get(lease.poolId) ?? 0) + 1);
+        let seen = seenByPool.get(lease.poolId);
+        if (!seen) {
+          seen = new Set<string>();
+          seenByPool.set(lease.poolId, seen);
+        }
+        seen.add(lease.leaseId);
       }
     }
+    for (const [poolId, seen] of seenByPool) countByPool.set(poolId, seen.size);
   } catch {
     // Degrade-safe: an unreadable ledger just means cap counting starts at 0.
   }
@@ -537,8 +599,40 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
         lastPool = pool;
         continue;
       }
+      // Reserve against EVERY window this pool must fit inside — the account-scoped
+      // ones shared with sibling models on the same credential, plus any scoped to
+      // this model alone. This is where N models on one account stop each admitting
+      // against their own copy of one allowance — PROVIDED the pools carry a shared
+      // , which is decided at the producer () and
+      // merely consumed here. A pool whose source cannot be attributed to a credential
+      // falls back to metering alone.
+      const { constraints, unpriced } = windowConstraintsFor(
+        pool.poolId,
+        pool.accountKey,
+        pool.windowBudgets,
+        packet.cost,
+        pool.budget,
+      );
+      if (unpriced.length > 0) {
+        // A window that cannot price this draw (percent window, no learned slope) must
+        // NOT be dropped from the set — admitting on the remaining constraints would
+        // meter the packet against fewer allowances than actually apply to it, which is
+        // the fail-open direction. Reported as its own reason: nothing is exhausted.
+        //
+        // ⚠ NOT reachable from the in-repo producer: deriveTokenBudget drops an
+        // unpriceable window BEFORE it enters window_budgets and sets 
+        // instead, so every emitted percent window carries a positive slope. This
+        // guards a summary arriving over the WIRE, where  is
+        // schema-optional. Keep it fail-CLOSED: if it ever became producer-reachable
+        // for a calibrating pool it would livelock (blocked ⇒ no dispatch ⇒ no delta
+        // sample ⇒ no slope ⇒ blocked), so that producer change must come with a
+        // calibration escape, not a relaxation here.
+        lastReason = "window_uncalibrated";
+        lastPool = pool;
+        continue;
+      }
       const decision = await input.ledger.admit({
-        constraints: [{ resourceKey: pool.resourceKey, budget: pool.budget, cost: packet.cost }],
+        constraints,
         poolId: pool.poolId,
         ...(input.leaseTtlMs != null ? { leaseTtlMs: input.leaseTtlMs } : {}),
       });

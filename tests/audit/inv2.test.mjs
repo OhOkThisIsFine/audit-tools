@@ -134,6 +134,7 @@ test("each source maps its live payload to an exact, binding 0–1 fraction", ()
 test("a discovered capability window lifts the resolved context above the 32k floor → more slots", async () => {
   const pool = (overrides) => ({
     id: "claude-code/*",
+    accountKey: "claude-code/*",
     providerName: "claude-code",
     hostModel: null,
     hostConcurrencyLimit: null,
@@ -300,6 +301,7 @@ test("a pool carries the RAW per-pool signals and the degrade marker — no pre-
   };
   const pool = {
     id: "claude-code/*",
+    accountKey: "claude-code/*",
     providerName: "claude-code",
     hostModel: null,
     hostConcurrencyLimit: null,
@@ -328,6 +330,7 @@ test("a pool carries the RAW per-pool signals and the degrade marker — no pre-
 test("a healthy (non-degraded) pool omits the degrade marker from its summary", async () => {
   const pool = {
     id: "claude-code/*",
+    accountKey: "claude-code/*",
     providerName: "claude-code",
     hostModel: null,
     hostConcurrencyLimit: null,

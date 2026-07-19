@@ -95,7 +95,7 @@ describe("driveRolling — unified in-process rolling driver", () => {
   });
 
   it("forwards the reservation ledger: two co-located runs over one ledger never exceed the shared budget", async () => {
-    // The C4 wiring: driveRolling forwards reservationLedger + resolvePoolBudget to the
+    // The C4 wiring: driveRolling forwards reservationLedger + resolvePoolConstraints to the
     // engine, so two co-located in-process loops on ONE account (same ledger file) reserve
     // before dispatch and never collectively over-admit — the spec's central overshoot
     // criterion, exercised through the unified driver rather than the raw engine.
@@ -122,7 +122,10 @@ describe("driveRolling — unified in-process rolling driver", () => {
         toPacket: (it) => ({ id: it.id, payload: { id: it.id }, estimatedTokens: COST, complexity: 0.5 }),
         dispatchPacket,
         reservationLedger: ledger,
-        resolvePoolBudget: () => BUDGET,
+        resolvePoolConstraints: (poolId, tokens) => ({
+          constraints: [{ resourceKey: poolId, budget: BUDGET, cost: tokens }],
+          unpriced: [],
+        }),
       });
 
     // Two SEPARATE ledger instances → SAME file (two co-located loops coordinating only
@@ -143,7 +146,12 @@ describe("driveRolling — unified in-process rolling driver", () => {
     // safety), so in-process dispatch stays lock-overhead-free and fully parallel.
     const cfg = resolveLedgerBudgets({ pools: [POOL], sessionConfig: SESSION, pendingItemTokens: [100, 100] });
     expect(cfg.reservationLedger).toBeUndefined();
-    expect(cfg.resolvePoolBudget("stub/*")).toBe(Number.POSITIVE_INFINITY);
+    // No windows and no scalar ceiling ⇒ one unbounded pool-keyed constraint.
+    const resolved = cfg.resolvePoolConstraints("stub/*", 100);
+    expect(resolved.unpriced).toEqual([]);
+    expect(resolved.constraints).toEqual([
+      { resourceKey: "stub/*", budget: Number.POSITIVE_INFINITY, cost: 100 },
+    ]);
   });
 
   it("reactive cost verification: a declared-free pool that charges stays demoted across levels — onCostDrift fires ONCE per drive", async () => {

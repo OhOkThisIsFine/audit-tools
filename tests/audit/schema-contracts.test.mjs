@@ -348,6 +348,7 @@ test("dispatch quota accepts multi-pool capacity summaries", () => {
       capacity_pools: [
         {
           pool_id: "claude-code/*",
+          account_key: "claude-code/*",
           slots: 2,
           model: null,
           confidence: "medium",
@@ -372,6 +373,7 @@ test("dispatch quota accepts multi-pool capacity summaries", () => {
         },
         {
           pool_id: "codex/o4-mini",
+          account_key: "codex/o4-mini",
           slots: 3,
           model: "o4-mini",
           confidence: "high",

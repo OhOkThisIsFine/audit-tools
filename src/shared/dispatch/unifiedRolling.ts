@@ -23,6 +23,11 @@ import type { CapacityPool, PartialCompletionTerminal } from "../quota/capacity.
 import { computeDispatchCapacity } from "../quota/capacity.js";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { createReservationLedger } from "../quota/reservationLedger.js";
+import type { WindowBudget } from "../quota/types.js";
+import {
+  windowConstraintsFor,
+  type PoolConstraintResolution,
+} from "../quota/windowConstraints.js";
 import {
   createRollingDispatcher,
   type RollingDispatchPacket,
@@ -82,7 +87,7 @@ export function resolveLedgerBudgets(input: {
   pendingItemTokens: number[];
 }): {
   reservationLedger?: ReservationLedger;
-  resolvePoolBudget: (poolId: string) => number;
+  resolvePoolConstraints: (poolId: string, tokens: number) => PoolConstraintResolution;
   resolveOutputReservation: (poolId: string) => number;
 } {
   const capacity = computeDispatchCapacity({
@@ -90,13 +95,20 @@ export function resolveLedgerBudgets(input: {
     sessionConfig: input.sessionConfig,
     pendingItemTokens: input.pendingItemTokens,
   });
-  const budgetByPool = new Map<string, number | null | undefined>();
+  const windowsByPool = new Map<string, WindowBudget[]>();
+  const accountKeyByPool = new Map<string, string>();
+  const budgetByPool = new Map<string, number>();
   const outputByPool = new Map<string, number>();
   let hasFiniteBudget = false;
   for (const alloc of capacity.pools) {
     const budget = alloc.schedule.remaining_token_budget;
     if (typeof budget === "number" && Number.isFinite(budget)) hasFiniteBudget = true;
-    budgetByPool.set(alloc.pool_id, budget);
+    windowsByPool.set(alloc.pool_id, alloc.schedule.window_budgets ?? []);
+    accountKeyByPool.set(alloc.pool_id, alloc.accountKey);
+    budgetByPool.set(
+      alloc.pool_id,
+      typeof budget === "number" && Number.isFinite(budget) ? budget : Number.POSITIVE_INFINITY,
+    );
     outputByPool.set(alloc.pool_id, alloc.schedule.resolved_limits.output_tokens);
   }
   return {
@@ -104,8 +116,18 @@ export function resolveLedgerBudgets(input: {
     // budget (claude-code percent-only) ⇒ ledger omitted; the reactive 429 floor is the
     // safety and dispatch stays lock-overhead-free / fully parallel.
     ...(hasFiniteBudget ? { reservationLedger: createReservationLedger() } : {}),
-    // null/undefined ⇒ +Inf (no absolute ceiling); a real 0 stays 0 (exhausted).
-    resolvePoolBudget: (poolId) => budgetByPool.get(poolId) ?? Number.POSITIVE_INFINITY,
+    // Per-WINDOW constraints, not a scalar: an account-scoped window's allowance is
+    // shared with every sibling model on the credential, and the windows share no
+    // denominator, so no single number can express "fits every applicable allowance".
+    // An unknown pool yields the unbounded single-constraint fallback.
+    resolvePoolConstraints: (poolId, tokens) =>
+      windowConstraintsFor(
+        poolId,
+        accountKeyByPool.get(poolId) ?? poolId,
+        windowsByPool.get(poolId),
+        tokens,
+        budgetByPool.get(poolId) ?? Number.POSITIVE_INFINITY,
+      ),
     resolveOutputReservation: (poolId) => outputByPool.get(poolId) ?? 0,
   };
 }
@@ -195,7 +217,7 @@ export interface UnifiedRollingConfig<TItem, TPayload> {
    * the ledger path inert (behaviour identical to no ledger).
    */
   reservationLedger?: ReservationLedger;
-  resolvePoolBudget?: (poolId: string) => number;
+  resolvePoolConstraints?: (poolId: string, tokens: number) => PoolConstraintResolution;
   resolveOutputReservation?: (packet: RollingDispatchPacket<TPayload>, poolId: string) => number;
 }
 
@@ -289,7 +311,7 @@ export async function driveRolling<TItem, TPayload>(
         ...(config.recordRateLimit ? { recordRateLimit: config.recordRateLimit } : {}),
         ...(config.isPacketEscalated ? { isPacketEscalated: config.isPacketEscalated } : {}),
         ...(config.reservationLedger ? { reservationLedger: config.reservationLedger } : {}),
-        ...(config.resolvePoolBudget ? { resolvePoolBudget: config.resolvePoolBudget } : {}),
+        ...(config.resolvePoolConstraints ? { resolvePoolConstraints: config.resolvePoolConstraints } : {}),
         ...(config.resolveOutputReservation
           ? { resolveOutputReservation: config.resolveOutputReservation }
           : {}),

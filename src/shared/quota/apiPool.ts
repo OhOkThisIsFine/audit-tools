@@ -12,7 +12,12 @@ import { probeQuotaSource, resolveAccountIdSafe } from "./quotaSource.js";
 import { buildProviderModelKey } from "./scheduler.js";
 import { parseProviderModelKey } from "./httpQuotaSource.js";
 import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
-import { deriveLocalAccountId, foldAccountCooldown } from "./accountId.js";
+import {
+  accountKeyFromProviderShapedKey,
+  deriveAccountKey,
+  deriveLocalAccountId,
+  foldAccountCooldown,
+} from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
 import { resolveModelStatics } from "./modelStatics.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../tokens.js";
@@ -217,6 +222,10 @@ export async function buildHostModelPool(params: {
   );
   return {
     id: params.poolKey,
+    // Host pool keys are provider-shaped by construction (buildProviderModelKey), so
+    // the account segment is recoverable from the key here — unlike a source pool,
+    // whose key may be an opaque operator-declared id.
+    accountKey: accountKeyFromProviderShapedKey(params.poolKey),
     providerName: params.providerName,
     hostModel: parseProviderModelKey(params.poolKey).model,
     ...(params.rank ? { rank: params.rank } : {}),
@@ -325,6 +334,13 @@ export async function buildSourcePool(params: {
   );
   return {
     id: poolKey,
+    // The account comes from the SOURCE DECLARATION, not from `poolKey` — an
+    // explicitly declared `source.id` is returned verbatim by `dispatchableSourceId`,
+    // so two models on one credential (`nim-nano`, `nim-super`) yield keys with no
+    // shared substring. Falls back to the pool key when the source declares neither an
+    // account nor a credential we can identify: an unattributable pool meters alone
+    // rather than joining someone else's allowance.
+    accountKey: deriveAccountKey({ ...source, account }) ?? poolKey,
     providerName: source.provider,
     // Both the pool key (via dispatchableSourceId) and hostModel are derived from
     // THIS one source, so they cannot leak apart: for a provider-shaped key the model

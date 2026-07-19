@@ -476,6 +476,7 @@ test("A8a: a same-packet account wall escalates through the retained host-sessio
   // re-limit (count 4 > 3) escalates — before pool exhaustion would strand it.
   const pools = ["pa", "pb", "pc", "pd"].map((id) => ({
     id,
+    accountKey: id,
     providerName: "openai-compatible",
     hostModel: null,
     hostConcurrencyLimit: null,
@@ -586,8 +587,8 @@ test("F4: driveRollingAuditDispatch never dispatches a floor-carrying packet to 
     discoveredLimits: null,
     quotaSourceSnapshot: null,
   };
-  const capablePool = { ...poolBase, id: "src-deep", rank: "deep" };
-  const incapablePool = { ...poolBase, id: "src-small", rank: "small" };
+  const capablePool = { ...poolBase, id: "src-deep", accountKey: "src-deep", rank: "deep" };
+  const incapablePool = { ...poolBase, id: "src-small", accountKey: "src-small", rank: "small" };
 
   const writing = makeWritingDispatcher(runDir, taskList);
   const seen = [];
