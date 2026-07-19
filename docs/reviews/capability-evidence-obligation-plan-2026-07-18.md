@@ -110,6 +110,58 @@ a model-keyed map merged across `provider_pool` + `host_model_cost_order` + `sou
 identically. v1 conflated the **gate** keyspace (four keyspaces — genuinely open) with the **dispatch**
 keyspace (settled).
 
+## v3 delta — premise re-verification against HEAD (2026-07-18, pre-implementation)
+
+Two independent verification passes against HEAD. Ten of twelve v2 code claims CONFIRMED verbatim.
+Three corrections, one of them scope-changing:
+
+**1. Touch point #5 is not implementable as written (material).** `buildCapacityPoolCapabilityFloor`
+(`admissionLoop.ts:348-379`) takes `{id, rank?, declaredCapabilityRank?}` — it **never sees a model**,
+so `lookupConfirmedCapability(..., pool.model)` cannot be applied there. v2's "both construction sites"
+fix only works at one of them.
+
+**2. The correct injection point is upstream, at the CapacityPool constructors.** Both live in
+`src/shared/quota/apiPool.ts`: `buildHostModelPool` (`:206`, literal `:218-232`) and `buildSourcePool`
+(`:305`, literal `:326-367`). Stamping `declaredCapabilityRank` there — joined on `CapacityPool.hostModel`,
+which BOTH constructors already derive (`:221`, `:335`) and which is universal where `source.model` is
+optional-and-never-defaulted (`sessionConfig.ts:386`) — makes the confirmed rank part of the pool's
+identity. Both downstream floors then inherit with **zero further change**: the summary path already
+carries it (`capacity.ts:709` → `:755` → `admissionLoop.ts:146`), and the engine path
+(`rollingDispatch.ts:636/838`) reads `declaredCapabilityRank` off the `CapacityPool` directly. A
+summary-level join — v2's approach — leaves the **in-process rolling engine on registry ranks only**.
+Cost: 9 signatures across 6 files, plus a `root` param on `gateHostFanout` (`hostFanoutGate.ts:200`, has
+`artifactsDir` but not `root`) and on `cmdQuota` (`quotaCommand.ts:63`, argv-only). Both are one field,
+not a chain. `readConfirmedCostPositions`'s existing loader sites all have `root` in scope, so one
+combined reader serves both maps off a single `readSharedProviderConfirmation` parse.
+
+**3. NEW — host pools carry NO capability evidence at all today.** `declaredCapabilityRank` has exactly
+one writer (`apiPool.ts:358`, source pools); `buildHostModelPool`'s literal omits the field entirely. So
+every host pool bands to `null` and takes the fail-open branch (`:307` → `:324`) on **every ordinary
+single-host wave**. v2 never noticed this. It is in scope by the owner's decision — the host is a pool
+with no capability evidence — but it expands what the gate prompts for, in the common case.
+
+### Owner decision on the host pool (2026-07-18) — it is not a special case
+
+The framing "the host pool is unevidenced, so it must be pinned" is **wrong**, and the three options
+built on it were all rejected. **The host knows what it can dispatch, and the host's models are ranked
+exactly like every other model.** A host pool is not evidence-less by nature — it is evidence-less only
+because nothing currently looks its model up. `buildHostModelPool` already derives its model
+(`parseProviderModelKey(params.poolKey).model`, `:221`) and `buildHostModelPools` fans out one pool per
+`HostModelRosterEntry`, each with a real model id.
+
+So the fix at `buildHostModelPool` is the **same join as every other pool**, resolving through path 1
+(external evidence) with no operator interaction: a ranked roster clears the obligation silently. The
+gate therefore fires only for pools whose model resolves in NO rank source — which, once the ranker
+lands, is the genuinely-unknown tail, not the common single-host run. No host special-casing, no
+seeded-best-band proposal, no exemption.
+
+**4. Minor.** The "no zod here" trap has its mechanism backwards: `provider_pool` passes through the
+parser wholesale (`sharedProviderConfirmation.ts:884`), so a new *pool-entry* field survives the read
+path; the round-trip drop is caused solely by `toPersistedPoolEntry` (`:247-253`). `backendGateKey` is
+defined at `:471`, not `:570` (that is a call site). Attestation surface is larger than v2's
+"data plumbing" claim: `state.ts`, `admissionLoop.ts`, `rollingDispatch.ts`, `apiPool.ts`, `capacity.ts`,
+`waveScheduling.ts`, `quotaPool.ts` all match `LOOP_CORE_PATTERNS`.
+
 ## Touch points
 
 | # | File | Change |

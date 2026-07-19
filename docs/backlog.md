@@ -48,6 +48,39 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Capability-evidence obligation: implemented + green but REVIEW-BLOCKED, on branch
+  `wip/capability-evidence` (2026-07-18, high, blocks the ▶ IMMEDIATE NEXT).** Two adversarial review
+  rounds; round 2 REFUSED sign-off. Full record + the six open issues:
+  [`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
+  Properties that must hold before this lands:
+  (1) the capability floor must band on real evidence on BOTH draws — remediate's `scheduleWave` path
+  (`marshal.ts`) currently still fails open, the exact defect the change exists to fix;
+  (2) a promotion must never DESTROY a persisted operator decision — today the autonomous/headless
+  branch wipes `host_model_cost_order` entirely, and a capability-only submission reverts the confirmed
+  `cost_order`;
+  (3) a host that writes the prompt's JSON verbatim must produce a file the parser ACCEPTS — the
+  capability fragment omits `schema_version`, so following the prompt literally re-creates the
+  infinite-re-prompt livelock one layer up, and the canonical shape block never lists `capability_order`;
+  (4) explicit removal must stay representable — an empty `host_models` is currently indistinguishable
+  from omission, so the carry-forward resurrects a roster the operator deleted.
+  ⚠ The generalizable lesson (worth reading before the fix lap): every round-2 issue except the prompt
+  one is a SIBLING of a round-1 defect on a branch the round-1 fix did not sweep. Fixing the named
+  instance is not fixing the defect class — especially for a fail-open mechanism, where an unwired site
+  is indistinguishable from a working one.
+
+- **`resolveUnevidencedCapabilityPools` is untestable where it lives (2026-07-18, medium, friction:
+  tool-should-decide).** It is module-private in `src/audit/cli/nextStepCommand.ts`, so the
+  model-less-pool skip — the property that prevents an unpinnable pool from wedging `PRIORITY[0]`
+  forever — has no test, and the one test that claims to cover convergence is tautological. Property:
+  a delta-computation function whose failure mode is a livelock must be reachable by a test. Likely
+  the function belongs in shared beside the other confirmation readers rather than in a CLI command.
+
+- **`tests/audit/linux-cycle-regression.test.mjs` fails in a full-suite run, passes alone
+  (2026-07-18, medium, hermeticity).** Proven pre-existing: reproduced on a stashed clean HEAD with a
+  matching rebuilt `dist/`. Per the test-failure protocol this is a hermeticity bug in the test
+  (shared dir / concurrency), not a regression — fix the test, not the code. It quietly costs every
+  lap a "is this mine?" investigation.
+
 - **Unranked + free compose badly: hard packets structurally prefer the least-known models
   (2026-07-18, medium-high, from the LiteLLM live-validation lap).** Retiring repair-proxy also retired
   the only source of automated capability data (it collected arena rankings + agentic/tool-use

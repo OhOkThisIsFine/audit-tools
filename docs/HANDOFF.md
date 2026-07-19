@@ -57,7 +57,20 @@
 
 ## ▶ IMMEDIATE NEXT — implement the capability-evidence obligation (plan ready, ONE owner call open)
 
-**UNBLOCKED — implement it.** Plan, written and adversarially reviewed:
+**IN FLIGHT, REVIEW-BLOCKED — on branch `wip/capability-evidence`, NOT on main.** The obligation is
+implemented end-to-end and the tree is green (build + check + `verify:checks` + 6845 tests; the only
+failures are the two proven-pre-existing ones). Two adversarial review rounds ran; **round 2 refused
+sign-off** with six open issues. Do not land it as-is, and do not re-implement it from the plan — read
+the implementation review first:
+[`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
+It records what is CONFIRMED correct (the core mechanism, sign convention, precedence, keyspace,
+additive schema), what is open, and the durable lesson (round 2's issues are mostly SIBLINGS of round
+1's defects on branches the round-1 fixes did not sweep). Backlog entry states the properties that must
+hold before it lands. **Owner decisions taken during implementation** (settled, in the plan's v3 delta):
+the injection point is the `apiPool.ts` CapacityPool constructors, not `admissionLoop`; and the host
+pool is not a special case — its models are ranked like any other model.
+
+Plan, written and adversarially reviewed:
 [`docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md)
 (v2 + owner clarification — the review REFUTED three v1 claims; read it, not a summary).
 
