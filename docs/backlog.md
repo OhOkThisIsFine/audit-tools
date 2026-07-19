@@ -221,8 +221,9 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   it then detonates on the next unrelated `src/` commit, which gets blamed for it. Hit this lap: two
   review docs landed in a docs-only commit, stayed dormant, and turned `ci.yml` red on a quota commit
   that had nothing to do with them (plus two older strays that had been dormant longer). **Property to
-  hold:** the trigger paths for a gate must cover every path that gate inspects — either add `docs/**`
-  to `ci.yml`'s filter, or split the doc checks into a workflow whose filter matches what it guards.
+  hold:** the trigger paths for a gate must cover every path that gate inspects. **FIXED same lap** —
+  `docs/**` added to both the `push` and `pull_request` filters in `.github/workflows/ci.yml`, so a
+  docs-only push now runs the gate that guards docs.
   Corollary already known and re-proved: local `build + check + vitest` does NOT include
   `verify:checks`, so a lap can be "green" while CI is red ([[lap-green-must-match-ci-evidence]]).
 

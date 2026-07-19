@@ -5,6 +5,11 @@ on:
     branches:
       - main
     paths:
+      # A gate's trigger paths must cover every path the gate INSPECTS.
+      # verify:checks runs check:doc-manifest, which guards docs/ — without
+      # docs/** a docs-only push plants a violation CI never runs, which then
+      # detonates on the next unrelated src/ commit. Happened 2026-07-19.
+      - docs/**
       - src/**
       - tests/**
       - schemas/**
@@ -23,6 +28,11 @@ on:
     branches:
       - main
     paths:
+      # A gate's trigger paths must cover every path the gate INSPECTS.
+      # verify:checks runs check:doc-manifest, which guards docs/ — without
+      # docs/** a docs-only push plants a violation CI never runs, which then
+      # detonates on the next unrelated src/ commit. Happened 2026-07-19.
+      - docs/**
       - src/**
       - tests/**
       - schemas/**
