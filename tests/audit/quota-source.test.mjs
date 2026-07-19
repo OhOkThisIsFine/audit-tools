@@ -131,7 +131,7 @@ test("token-budget gate: a genuinely exhausted window (remaining 0) throttles to
     tokens_remaining: null,
     captured_at: new Date().toISOString(),
     source: "test",
-    windows: [{ label: "session", remaining_pct: 0, reset_at: reset }],
+    windows: [{ label: "session", scope: "account", remaining_pct: 0, reset_at: reset }],
   };
   const schedule = scheduleWave({
     providerName: "claude-code",
@@ -175,7 +175,7 @@ test("token-budget gate: cold start (no absolute, no learned slope) admits a sma
     tokens_remaining: null,
     captured_at: new Date().toISOString(),
     source: "test",
-    windows: [{ label: "session", remaining_pct: 0.5, reset_at: null }],
+    windows: [{ label: "session", scope: "account", remaining_pct: 0.5, reset_at: null }],
   };
   const schedule = scheduleWave({
     providerName: "claude-code",
@@ -197,7 +197,7 @@ test("token-budget gate: a healthy learned budget does not reduce the wave", () 
     tokens_remaining: null,
     captured_at: new Date().toISOString(),
     source: "test",
-    windows: [{ label: "session", remaining_pct: 0.9, reset_at: null }],
+    windows: [{ label: "session", scope: "account", remaining_pct: 0.9, reset_at: null }],
   };
   const schedule = scheduleWave({
     providerName: "claude-code",
@@ -230,8 +230,8 @@ test("token-budget gate: weekly-binding vs session-binding pools use distinct sl
     captured_at: new Date().toISOString(),
     source: "test",
     windows: [
-      { label: "session", remaining_pct: 0.8, reset_at: null },
-      { label: "weekly", remaining_pct: 0.2, reset_at: null },
+      { label: "session", scope: "account", remaining_pct: 0.8, reset_at: null },
+      { label: "weekly", scope: "account", remaining_pct: 0.2, reset_at: null },
     ],
   };
   const schedule = scheduleWave({

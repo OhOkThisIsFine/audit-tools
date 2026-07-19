@@ -264,8 +264,8 @@ test("cold start, one window known + a sibling window still calibrating: clamps 
       captured_at: new Date().toISOString(),
       source: "test",
       windows: [
-        { label: "session", remaining_pct: null, tokens_remaining: 100_000, reset_at: null },
-        { label: "weekly", remaining_pct: 0.5, tokens_remaining: null, reset_at: null },
+        { label: "session", scope: "account", remaining_pct: null, tokens_remaining: 100_000, reset_at: null },
+        { label: "weekly", scope: "account", remaining_pct: 0.5, tokens_remaining: null, reset_at: null },
       ],
     },
   });
@@ -289,8 +289,8 @@ test("cold-start concurrency clamp binds an in-process (backend) pool identicall
       captured_at: new Date().toISOString(),
       source: "test",
       windows: [
-        { label: "session", remaining_pct: null, tokens_remaining: 100_000, reset_at: null },
-        { label: "weekly", remaining_pct: 0.5, tokens_remaining: null, reset_at: null },
+        { label: "session", scope: "account", remaining_pct: null, tokens_remaining: 100_000, reset_at: null },
+        { label: "weekly", scope: "account", remaining_pct: 0.5, tokens_remaining: null, reset_at: null },
       ],
     },
   };
@@ -366,3 +366,36 @@ test("quota disabled: host ceiling still binds, otherwise binding_cap is 'none'"
   expect(uncapped.binding_cap).toBe("none");
 });
 
+
+// Pins the scope guard's PLACEMENT, not merely its existence. `deriveTokenBudget`
+// is skipped when a cooldown is active, so a guard living inside it is not a gate
+// for that path — yet the snapshot is still stamped onto the returned schedule and
+// flows downstream. An incomplete gate reads exactly like a working one.
+test("window scope guard: fires on the COOLDOWN path, where budget derivation is skipped", () => {
+  const future = new Date(Date.now() + 5 * 60_000).toISOString();
+  const scopeless = {
+    remaining_pct: 0.5,
+    reset_at: null,
+    requests_remaining: null,
+    tokens_remaining: null,
+    captured_at: new Date().toISOString(),
+    source: "test",
+    windows: [{ label: "session", remaining_pct: 0.5, reset_at: null }], // no scope
+  };
+  expect(() =>
+    scheduleWave({
+      providerName: "claude-code",
+      sessionConfig: { quota: { safety_margin: 1.0 } },
+      hostModel: null,
+      requestedConcurrency: 4,
+      quotaStateEntry: {
+        updated_at: new Date().toISOString(),
+        buckets: {},
+        cooldown_until: future,
+        last_429_at: future,
+      },
+      quotaSourceSnapshot: scopeless,
+      hostConcurrencyLimit: null,
+    }),
+  ).toThrow(/no metering scope/);
+});

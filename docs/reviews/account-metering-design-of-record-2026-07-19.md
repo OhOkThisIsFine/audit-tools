@@ -75,12 +75,72 @@ Round 2's `accountKey` derivation is **necessary but insufficient**, not wrong. 
 budget rather than to the account-scoped windows only. The reviewers' "account-keyed meter, pool-keyed
 budget" finding is the SYMPTOM of applying a correct key at the wrong granularity.
 
+## Owner constraints (2026-07-19) — scope is UNIVERSAL, never provider-conditional
+
+**"Whether all providers return per-model snapshots or not, we need to allow for it — explicitly leave
+space for it in all cases."**
+
+This is stronger than "Claude happens to expose model-scoped limits", and it is the binding form:
+
+- **Every window from every producer carries a `scope`. There is no path that omits it.** A provider
+  that cannot distinguish account-wide from model-scoped emits `scope: "account"` for all its windows —
+  and that IS the documented fallback ("if they only provide account-wide quota, apply that value to all
+  their models"), not a bypass. Making the field required, with no default, is what stops the next
+  provider from being special-cased.
+- **The learned slope stays individual to each model**, unconditionally — including under an
+  account-wide-only provider, where N models share ONE window's percent but each converts it to tokens
+  at its own rate. This is precisely why the shared resource must be the window's percent and the
+  per-model quantity must be the exchange rate. Confirms `tokens_per_pct` per `(pool, window)`.
+
+### Deferred seam — sibling-derived slope priors
+
+An uncalibrated pool has no exchange rate for a window and so cannot price a constraint. This design
+routes it through the existing cold-start probe path. **Better, and explicitly left open: seed the prior
+from SIBLING models on the same provider whose slope is already learned** (Bayesian-style update rather
+than start-from-nothing), so a newly-added model is not maximally ignorant.
+
+**Deliberately NOT bundled into the partition fix.** It is an estimator improvement, independent of the
+partition; bundling it means metering cannot land until the estimator is also right, and the estimator
+wants live data to validate. The seam to preserve: slope lookup must be a function of `(pool, window)`
+with a single resolution point, so a prior can be injected there later without touching admission.
+Tracked in `docs/backlog.md`.
+
+## Step 1 status — LANDED (scope plumbing only), with two named residuals
+
+Step 1 below is implemented and green. It is **foundation only: `scope` is carried but not yet
+consumed, so metering behavior is UNCHANGED.** Do not read "scope landed" as "the N× over-admission is
+fixed" — it is not, until steps 2–4 land.
+
+Two independent adversarial review rounds ran against it; both REFUSED and both were right. Round 1
+found three defects (label-only dedup swallowing a model-scoped window; `display_name ?? id` returning
+`""` and misclassifying a scoped limit as account-wide; the guard living inside `deriveTokenBudget`,
+which an active cooldown skips). Round 2 found that the *fixes* were themselves wrong — most sharply
+that scope was being derived by extracting a model NAME, so a `scope.model` present with blank
+identifiers still fell through to `account`. **Scope now keys on the PRESENCE of `scope.model`;
+naming is a separate concern used only for matching.** Each fix is individually red-green pinned.
+
+**Residual 1 — the guard is on the metering path only.** `assertWindowScopes` runs in `scheduleWave`.
+Other snapshot consumers (`quotaSnapshotWindowPctMap` / `foldSlopeObservationFromSnapshots` in
+`state.ts`, `tokenBudgetView.ts`) do not call it. In production this cannot fire — every producer
+stamps scope — so it is defense-in-depth completeness, not a live bug. **The right fix is to validate
+ONCE at the producer boundary** (where a snapshot is created) rather than at each consumer, so
+consumers are safe by construction. Do that when step 2 touches this code.
+
+**Residual 2 — `tokens_per_pct` is keyed by label alone, within a pool.** An account-scoped and a
+model-scoped window sharing a group name (both `session`) therefore share one learned slope entry.
+Harmless today (scope is unconsumed) but **step 2 MUST key the slope map by `(scope, label)`**, or the
+two partitions will silently share an exchange rate. This is why the dedup key carries scope while the
+emitted label does not — mangling the label would have orphaned every previously-learned slope.
+
 ## Work breakdown
 
-1. **`QuotaWindow.scope`** — add `scope: "account" | "model"` (required; no back-compat shim, per
-   ideal-code). Stamp it in every producer: `claudeOAuthQuotaSource.collectWindows` (topLevel ⇒
-   `account`; `limits[]` with `scope.model` ⇒ `model`; unscoped `limits[]` ⇒ `account`), plus
-   `codexQuotaSource`, `hostSessionQuotaSource`, and any other `QuotaSource` implementation.
+1. **`QuotaWindow.scope`** — add `scope: "account" | "model"`, **required, no default, no back-compat
+   shim** (per ideal-code, and per the owner constraint above: a default is how a provider gets
+   silently special-cased). Stamp it in EVERY producer — `claudeOAuthQuotaSource.collectWindows`
+   (topLevel ⇒ `account`; `limits[]` with `scope.model` ⇒ `model`; unscoped `limits[]` ⇒ `account`),
+   `codexQuotaSource`, `hostSessionQuotaSource`, and every other `QuotaSource` implementation, including
+   ones that only ever emit `account`. Required-with-no-default means `tsc` enumerates the producers for
+   us rather than us trusting a grep.
 2. **`ReservationLedger` → multi-constraint.** `admit` takes `constraints: Array<{resourceKey, budget,
    cost}>`; admitted iff EVERY constraint clears; one `leaseId` recorded under each key; `reconcile`
    releases all. Currently single-key (`reservationLedger.ts:202-236`).

@@ -9,9 +9,37 @@ import { z } from "zod";
  * windows. `label` is an AGNOSTIC string ("session","weekly",…) — never a
  * provider/model identity — so any source can add its own windows.
  */
+/**
+ * Whether a window's allowance is shared by every model on the credential, or
+ * belongs to one model alone. This is the METERING PARTITION and it is decided
+ * HERE, by the producer that knows — never re-derived downstream from pool
+ * identity, which is what four refused repair attempts each tried and got wrong.
+ *
+ *  - `account` — one allowance shared across all of the credential's models
+ *    (Claude's `five_hour`/`seven_day`, an unscoped `limits[]` entry). Meters on
+ *    `(accountKey, label)`: N models on one credential draw down ONE budget.
+ *  - `model` — applies to this model alone (a `limits[]` entry carrying
+ *    `scope.model`). Meters on `(poolId, label)`: sharing it would falsely
+ *    throttle siblings that the limit does not cover.
+ *
+ * REQUIRED, with no default, on every window from every source. A source that
+ * cannot distinguish the two emits `account` for all of its windows — that IS
+ * the fallback ("provider exposes only account-wide quota ⇒ it applies to all
+ * their models"), stated rather than assumed. The absence of a default is
+ * deliberate: a default is how the next provider gets silently special-cased.
+ *
+ * Orthogonal to the learned slope. `tokens_per_pct` stays per (pool, window)
+ * unconditionally — even under an account-scoped window, where N models share
+ * one percent allowance but each converts it to tokens at its OWN rate. Scope
+ * partitions the ALLOWANCE; the slope prices it per model.
+ */
+export const QuotaWindowScopeSchema = z.enum(["account", "model"]);
+export type QuotaWindowScope = z.infer<typeof QuotaWindowScopeSchema>;
+
 export const QuotaWindowSchema = z
   .object({
     label: z.string(),
+    scope: QuotaWindowScopeSchema,
     remaining_pct: z.number().nullable(),
     reset_at: z.string().nullable(),
     tokens_remaining: z.number().int().nullable().optional(),

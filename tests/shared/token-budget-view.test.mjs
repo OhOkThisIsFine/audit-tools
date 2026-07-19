@@ -95,8 +95,8 @@ test("renderTokenBudgetView: multi-window snapshot renders a per-window breakdow
             remaining_pct: 0.4,
             reset_at: "2026-07-01T01:59:59Z",
             windows: [
-              { label: "session", remaining_pct: 0.4, reset_at: "2026-07-01T01:59:59Z" },
-              { label: "weekly", remaining_pct: 0.86, reset_at: "2026-07-07T16:59:59Z" },
+              { label: "session", scope: "account", remaining_pct: 0.4, reset_at: "2026-07-01T01:59:59Z" },
+              { label: "weekly", scope: "account", remaining_pct: 0.86, reset_at: "2026-07-07T16:59:59Z" },
             ],
           },
         },

@@ -10,7 +10,7 @@ import type {
   WaveBindingCap,
   WaveSchedule,
 } from "./types.js";
-import type { QuotaUsageSnapshot } from "./quotaSource.js";
+import type { QuotaUsageSnapshot, QuotaWindowScope } from "./quotaSource.js";
 import {
   hostClassFor,
   resolveLimits,
@@ -421,6 +421,27 @@ export function deriveColdStartAdmissionBatch(params: {
  *  2. else the learned `tokens_per_pct[label]` × remaining_pct × 100;
  *  3. else `null` (cold start — the caller applies the calibration bootstrap).
  */
+/**
+ * Every window on a snapshot must declare its metering scope. Unmeterable, NOT
+ * defaultable: the scope decides which partition the window's allowance is drawn
+ * from, so guessing it silently meters against the wrong one. The test tree is
+ * untypechecked, so a stale fixture can omit the field with `tsc` staying
+ * silent — defaulting here would let that fixture pass while exercising the
+ * wrong partition, which is precisely how the previous defect stayed invisible.
+ * Fail loud, at every entry point that accepts a snapshot.
+ */
+export function assertWindowScopes(snapshot: QuotaUsageSnapshot): void {
+  for (const w of snapshot.windows ?? []) {
+    if (w.scope !== "account" && w.scope !== "model") {
+      throw new Error(
+        `quota window "${w.label}" has no metering scope (got ${JSON.stringify(w.scope)}). ` +
+          `Every window must declare scope "account" or "model" at its producer — see ` +
+          `QuotaWindowScopeSchema in quotaSource.ts.`,
+      );
+    }
+  }
+}
+
 function deriveWindowTokenBudget(
   windowLabel: string,
   remainingPct: number | null | undefined,
@@ -483,6 +504,7 @@ function deriveTokenBudget(
 ): TokenBudgetResolution {
   interface BudgetWindow {
     label: string;
+    scope: QuotaWindowScope;
     remaining_pct: number | null;
     tokens_remaining: number | null;
     reset_at: string | null;
@@ -491,6 +513,7 @@ function deriveTokenBudget(
     snapshot.windows && snapshot.windows.length > 0
       ? snapshot.windows.map((w) => ({
           label: w.label,
+          scope: w.scope,
           remaining_pct: w.remaining_pct,
           tokens_remaining: w.tokens_remaining ?? null,
           reset_at: w.reset_at,
@@ -498,6 +521,13 @@ function deriveTokenBudget(
       : [
           {
             label: "default",
+            // A source exposing ONE aggregate number is stating an account-wide
+            // allowance that applies to every model on the credential — the
+            // documented fallback, stated rather than assumed. Never `model`:
+            // that would give each of N siblings its own copy of one shared
+            // allowance, which is the N× over-admission this partition exists
+            // to close.
+            scope: "account",
             remaining_pct: snapshot.remaining_pct,
             tokens_remaining: snapshot.tokens_remaining,
             reset_at: snapshot.reset_at,
@@ -715,6 +745,13 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
   let calibrating = false;
   // The binding window (D1), hoisted so an empty_grant wall can surface it + its reset.
   let bindingWindow: QuotaBindingWindow | null = null;
+  // Validate window scopes on EVERY path that carries a snapshot, not only the
+  // one that derives a budget. `deriveTokenBudget` is skipped under an active
+  // cooldown, but the snapshot is still stamped onto the returned schedule and
+  // flows downstream — so a guard living inside the derivation is not a gate at
+  // all for the cooldown path. An incomplete gate reads exactly like a working
+  // one, which is the failure shape this whole change exists to remove.
+  if (quotaSourceSnapshot) assertWindowScopes(quotaSourceSnapshot);
   if (quotaSourceSnapshot && !cooldownUntil) {
     const {
       budget,

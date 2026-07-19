@@ -214,6 +214,16 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   guess. Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
   $/Mtok alone, never demoting a quota-saturated pool).
 
+- **Durable trap — `codex exec "<prompt>"` HANGS when stdin is a non-TTY pipe (2026-07-19).** With a
+  prompt passed as an argument, Codex still reads stdin to append as a `<stdin>` block; under any
+  harness that leaves stdin open (background tasks, CI, most spawn wrappers) it blocks forever on
+  "Reading additional input from stdin…" and is killed by the timeout with **exit 0 and empty output**.
+  Silent: it looks exactly like a model that returned nothing, and it cost two dispatches here before
+  being diagnosed. **Always `codex exec … </dev/null`** (or pass the prompt ON stdin instead of as an
+  argument). Same class as the Windows `npx.cmd` shim trap — an offload lane that fails silently reads
+  as a capability gap in the backend rather than a wiring bug on our side. If a dispatch worker ever
+  spawns `codex`, its stdin must be explicitly closed at the spawn site.
+
 - **The loop-core attestation gate cannot tell a human reviewer from the committing agent
   (2026-07-19, medium, friction: tool-should-decide).** `attest-loop-core-review.mjs` takes
   `--reviewed-by <id>` as a free string and the pre-commit gate checks only that a fresh,

@@ -388,3 +388,102 @@ test("AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA disables the source even with an injec
     else process.env.AUDIT_TOOLS_DISABLE_PROACTIVE_QUOTA = prev;
   }
 });
+
+// ── window metering scope ────────────────────────────────────────────────────
+// These pin the three defects an independent review found in the scope-stamping
+// change. Each drives the REAL seam (mapUsageToSnapshot), not a helper, because
+// a helper-level assertion proves nothing about the path that builds windows.
+
+test("window scope: a model-scoped limit whose display_name is EMPTY still scopes to the model", () => {
+  // Regression: `display_name ?? id` returns "" for an empty display_name — falsy,
+  // so the limit was stamped `account` and one model's allowance was applied to
+  // every sibling on the credential. Must fall through to `id`.
+  const snap = mapUsageToSnapshot(
+    {
+      five_hour: { utilization: 10, resets_at: null },
+      limits: [
+        {
+          kind: "fable_cap",
+          percent: 40,
+          resets_at: null,
+          scope: { model: { id: "claude-fable-5", display_name: "" } },
+          is_active: true,
+        },
+      ],
+    },
+    "claude-fable-5",
+    NOW,
+  );
+  const scoped = snap.windows.find((w) => w.label.endsWith("fable_cap"));
+  expect(scoped).toBeDefined();
+  expect(scoped.scope).toBe("model");
+});
+
+test("window scope: a model-scoped limit is NOT deduped away by an account window of the same name", () => {
+  // Regression: `seen` was keyed on the bare label, so a model-scoped limit whose
+  // group is "session" was swallowed by the top-level five_hour "session" window
+  // — silently dropping that model's own constraint.
+  const snap = mapUsageToSnapshot(
+    {
+      five_hour: { utilization: 10, resets_at: null },
+      limits: [
+        {
+          kind: "session",
+          percent: 80,
+          resets_at: null,
+          scope: { model: { id: null, display_name: "Sonnet" } },
+          is_active: true,
+        },
+      ],
+    },
+    "claude-sonnet-5",
+    NOW,
+  );
+  const account = snap.windows.filter((w) => w.scope === "account");
+  const model = snap.windows.filter((w) => w.scope === "model");
+  expect(account.map((w) => w.label)).toContain("session");
+  expect(model).toHaveLength(1);
+  // Distinct label, so it also cannot collide with the account window in the
+  // per-pool tokens_per_pct slope map, which is keyed by label.
+  // The label is emitted VERBATIM — the scope, not a mangled string, is what
+  // distinguishes the two windows. Encoding scope into the label would orphan
+  // previously-learned slopes keyed by the old label.
+  expect(model[0].label).toBe("session");
+  expect(model[0].scope).toBe("model");
+});
+
+test("window scope: every window emitted by the real payload declares a scope", () => {
+  const snap = mapUsageToSnapshot(LIVE_USAGE, "claude-sonnet-5", NOW);
+  expect(snap.windows.length).toBeGreaterThan(0);
+  for (const w of snap.windows) {
+    expect(["account", "model"]).toContain(w.scope);
+  }
+});
+
+test("window scope: a limit with scope.model PRESENT but unnameable is still model-scoped", () => {
+  // Regression: scope was derived by extracting a model NAME, so a blank
+  // display_name AND blank id collapsed to null and the limit was classified
+  // `account` — applying one model's cap to every sibling on the credential.
+  // Presence of `scope.model` is the discriminator; naming is a separate concern.
+  const snap = mapUsageToSnapshot(
+    {
+      five_hour: { utilization: 10, resets_at: null },
+      limits: [
+        {
+          kind: "opaque_cap",
+          percent: 40,
+          resets_at: null,
+          scope: { model: { id: "", display_name: " " } },
+          is_active: true,
+        },
+      ],
+    },
+    "claude-sonnet-5",
+    NOW,
+  );
+  const scoped = snap.windows.find((w) => w.label === "opaque_cap");
+  // It may or may not APPLY to this model (naming drives matching), but if it is
+  // emitted at all it must never be stamped account-wide.
+  if (scoped) expect(scoped.scope).toBe("model");
+  expect(snap.windows.filter((w) => w.scope === "account").map((w) => w.label)).not.toContain("opaque_cap");
+});

@@ -488,7 +488,7 @@ test("scheduleWave reports binding_cap='token_budget' when a small learned budge
       tokens_remaining: null,
       captured_at: new Date().toISOString(),
       source: "test",
-      windows: [{ label: "session", remaining_pct: 0.4, reset_at: null }],
+      windows: [{ label: "session", scope: "account", remaining_pct: 0.4, reset_at: null }],
     },
   });
   expect(schedule.binding_cap).toBe("token_budget");
@@ -614,8 +614,8 @@ test("scheduleWave surfaces the binding window (the MIN-budget window) with its 
       windows: [
         // Session window is fresh (huge budget) but the weekly window is nearly
         // empty — the weekly window binds, and days out.
-        { label: "session", remaining_pct: 0.96, reset_at: "2026-07-15T05:00:00.000Z", tokens_remaining: 500000 },
-        { label: "weekly", remaining_pct: 0.02, reset_at: weeklyReset, tokens_remaining: 1200 },
+        { label: "session", scope: "account", remaining_pct: 0.96, reset_at: "2026-07-15T05:00:00.000Z", tokens_remaining: 500000 },
+        { label: "weekly", scope: "account", remaining_pct: 0.02, reset_at: weeklyReset, tokens_remaining: 1200 },
       ],
     },
   });

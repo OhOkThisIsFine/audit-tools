@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { QuotaUsageSnapshot, QuotaWindow } from "./quotaSource.js";
+import type { QuotaUsageSnapshot, QuotaWindow, QuotaWindowScope } from "./quotaSource.js";
 import { withFileLock } from "./fileLock.js";
 import {
   BaseHttpQuotaSource,
@@ -363,25 +363,47 @@ function collectWindows(body: UsageResponse, model: string | null): QuotaWindow[
   // `five_hour`/`seven_day` block and again as a `limits[]` entry with the
   // matching group/kind. Emit ONE window per label (top-level wins, pushed
   // first); a later entry for an already-seen label is skipped.
-  const pushWindow = (label: string, utilization: unknown, resets_at: string | null): void => {
+  const pushWindow = (
+    label: string,
+    scope: QuotaWindowScope,
+    utilization: unknown,
+    resets_at: string | null,
+  ): void => {
     if (typeof utilization !== "number") return;
-    if (seen.has(label)) return;
-    seen.add(label);
+    // Dedup on (scope, label), NOT on label alone. A model-scoped window is a
+    // DIFFERENT allowance from an account-wide window that merely shares a
+    // group/kind name, so collapsing them silently drops that model's own
+    // constraint. Scope is part of the window's identity, so it belongs in the
+    // identity key.
+    //
+    // The delimiter lives ONLY in this local key — never in the emitted label.
+    // Encoding scope into the label instead would (a) be defeatable by a payload
+    // whose group already contains the delimiter, and (b) orphan every
+    // previously-learned `tokens_per_pct` slope keyed by the old label, silently
+    // forcing recalibration on upgrade.
+    const identity = `${scope} ${label}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
     out.push({
       label,
+      scope,
       remaining_pct: clampFraction((100 - utilization) / 100),
       reset_at: resets_at ?? null,
     });
   };
-  if (body.five_hour) pushWindow("session", body.five_hour.utilization, body.five_hour.resets_at ?? null);
-  if (body.seven_day) pushWindow("weekly", body.seven_day.utilization, body.seven_day.resets_at ?? null);
+  // Top-level windows are aggregate: one allowance shared by every model on the
+  // credential, so they meter on the ACCOUNT.
+  if (body.five_hour)
+    pushWindow("session", "account", body.five_hour.utilization, body.five_hour.resets_at ?? null);
+  if (body.seven_day)
+    pushWindow("weekly", "account", body.seven_day.utilization, body.seven_day.resets_at ?? null);
   let syntheticIndex = 0;
   for (const lim of Array.isArray(body.limits) ? body.limits : []) {
     if (typeof lim?.percent !== "number") continue;
     if (!limitAppliesToModel(lim, model)) continue;
     const label = limitLabel(lim, syntheticIndex);
     syntheticIndex++;
-    pushWindow(label, lim.percent, lim.resets_at ?? null);
+    pushWindow(label, limitScope(lim), lim.percent, lim.resets_at ?? null);
   }
   return out;
 }
@@ -418,11 +440,35 @@ function pickBindingWindow(body: UsageResponse, model: string | null): BindingWi
   return candidates.reduce((a, b) => (b.utilization > a.utilization ? b : a));
 }
 
+/**
+ * The model a `limits[]` entry names, or null when it names none usably. Used
+ * for MATCHING only — never to decide scope. `??` is insufficient: it falls
+ * through only on null/undefined, so a blank `display_name` yields `""`, which
+ * is falsy downstream and silently changed the answer.
+ */
+function scopedModelName(lim: UsageLimitEntry): string | null {
+  for (const c of [lim.scope?.model?.display_name, lim.scope?.model?.id]) {
+    if (typeof c === "string" && c.trim().length > 0) return c.trim();
+  }
+  return null;
+}
+
+/**
+ * A `limits[]` entry's metering scope. Keys on the PRESENCE of a model scope,
+ * never on our ability to NAME the model: an entry carrying `scope.model` with
+ * blank identifiers is still that model's own allowance, and classifying it
+ * `account` because the name was unreadable would apply one model's cap to every
+ * sibling on the credential — the over-merge this partition exists to prevent.
+ */
+function limitScope(lim: UsageLimitEntry): QuotaWindowScope {
+  return lim.scope?.model != null ? "model" : "account";
+}
+
 function limitAppliesToModel(lim: UsageLimitEntry, model: string | null): boolean {
-  const scopeModel = lim.scope?.model?.display_name ?? lim.scope?.model?.id ?? null;
+  const scopeModel = scopedModelName(lim);
   if (!scopeModel) return true; // unscoped → applies to everything
   if (!model) return false; // model-scoped but our model is unknown → skip
-  return model.toLowerCase().includes(String(scopeModel).toLowerCase());
+  return model.toLowerCase().includes(scopeModel.toLowerCase());
 }
 
 // Aggregate windows only. Per-model constraints come from the data-driven

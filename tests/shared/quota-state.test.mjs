@@ -195,8 +195,8 @@ test("quotaSnapshotWindowPctMap: multi-window snapshot keys by label, each with 
     captured_at: "2026-07-11T09:00:00.000Z",
     source: "test",
     windows: [
-      { label: "session", remaining_pct: 0.6, reset_at: "2026-07-11T10:00:00.000Z" },
-      { label: "weekly", remaining_pct: 0.9, reset_at: "2026-07-18T00:00:00.000Z" },
+      { label: "session", scope: "account", remaining_pct: 0.6, reset_at: "2026-07-11T10:00:00.000Z" },
+      { label: "weekly", scope: "account", remaining_pct: 0.9, reset_at: "2026-07-18T00:00:00.000Z" },
     ],
   });
   expect(map.get("session")).toEqual({ remainingPct: 0.6, resetAt: "2026-07-11T10:00:00.000Z" });
