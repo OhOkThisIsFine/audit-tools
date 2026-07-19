@@ -91,17 +91,31 @@ default, with `assertWindowScopes` failing loud. ⚠ **FOUNDATION ONLY — scope
 so metering is UNCHANGED and the N× over-admission is still live.** Independent review refused it
 twice; both rounds were right and both are fixed + individually red-green pinned.
 
-**▶ NEXT — steps 2–4, in order** (breakdown in the design doc, near-mechanical):
-(2) `ReservationLedger` single-key → **multi-constraint** (all-or-nothing across windows;
-`reconcile(leaseId)` sweeping every key so a partial release is unrepresentable);
-(3) budget derivation emits **per-window constraints** instead of collapsing to MIN
-(`scheduler.ts:512-540` — MIN stays for REPORTING the binding window, stops being the metering unit);
-(4) admission wiring at `admissionLoop.ts:239-241`, `rollingDispatch.ts:1005-1011`,
-`unifiedRolling.ts:99` builds constraint arrays. Then tests + a fourth independent review.
+**Step 2 (LANDED, `fe9659c0`): multi-constraint ledger + branded `WindowSlopeKey(scope,label)`.**
+`admit` takes `constraints[]`, all-or-nothing under one lock; `reconcile(leaseId)` sweeps every key so
+a partial release is unrepresentable. ⚠ **STILL MECHANISM ONLY — both admit call sites pass a SINGLE
+constraint, so the N× over-admission is UNCHANGED and live.** Do not read "multi-constraint landed" as
+"metering fixed"; that mistake has been made four times on this defect.
+Two latent bugs fixed in passing: the force-unbounded liveness backstop read one constraint's
+outstanding as "nothing anywhere holds budget" (now an explicit `anyOutstanding` aggregate; and
+`forceUnbounded` unbounds every constraint, not one); and pre-scope persisted snapshots would have
+keyed as `"undefined:<label>"` — 12/12 on-disk `dispatch-quota.json` windows carry no scope, so every
+resumed run would have silently lost slope learning.
 
-⚠ **Step 2 MUST also re-key `tokens_per_pct` to `(scope, label)`** — today it is keyed by label alone
-within a pool, so an account-scoped and a model-scoped window sharing a group name would share one
-exchange rate. Harmless while scope is unconsumed; a silent defect the moment it is.
+**▶ NEXT — steps 3–4, in order** (breakdown in the design doc):
+(3) budget derivation emits **per-window constraints** instead of collapsing to MIN
+(`scheduler.ts` `deriveTokenBudget` — MIN stays for REPORTING the binding window, stops being the
+metering unit). ⚠ **Constraints meter in each window's OWN percent, not tokens** — for a shared
+account window, sibling A's 1000 tokens and sibling B's 1000 tokens are different fractions of one
+allowance, so tokens are not commensurable across siblings on a shared key;
+(4) admission wiring at `admissionLoop.ts` (the admit call, ~`:532`) and `rollingDispatch.ts`
+(`admitAgainstLedger`) builds constraint arrays. `unifiedRolling.ts` supplies `resolvePoolBudget` and
+needs no change until then. Then a fresh independent review.
+
+⚠ Steps 3–4 also inherit three obligations step 2 could not hold — an uncalibrated pool must reach the
+cold-start probe path rather than be waved through; account-key DERIVATION must distinguish two
+credentials on one `backend_provider`; and `AdmissionGrant.resource_key` becomes one-of-N. All three
+are in `docs/backlog.md` → *Open bugs*, with the properties to hold.
 
 ⚠ **The unit of metering is `(window, its own percent)` — there is NO single shared percent.** Windows
 scale on different denominators (5h `session` vs 7d `weekly`), so "meter in percent" as one number is
