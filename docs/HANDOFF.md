@@ -55,20 +55,68 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT — implement the capability-evidence obligation (plan ready, ONE owner call open)
+## ▶ IMMEDIATE NEXT (a) — RE-REVIEW the account-metering fix (round 2, do not land unreviewed)
 
-**IN FLIGHT, REVIEW-BLOCKED — on branch `wip/capability-evidence`, NOT on main.** The obligation is
-implemented end-to-end and the tree is green (build + check + `verify:checks` + 6845 tests; the only
-failures are the two proven-pre-existing ones). Two adversarial review rounds ran; **round 2 refused
-sign-off** with six open issues. Do not land it as-is, and do not re-implement it from the plan — read
-the implementation review first:
+**On `wip/capability-evidence`, committed + pushed at `e500672f`, NOT on main.** The defect is real
+(N models on one credential metered as N budgets/caps/cooldowns ⇒ ~N× over-admission). **Round 1 was
+REFUSED** by independent review on eight defects; **round 2 addresses all eight and is now the code on
+that branch** — but it has had **no independent review of its own**, so it is not landable.
+
+Round 2's three structural moves: `resolvePoolAccountKey` checks `backend_provider` FIRST (a transport
+never becomes the account identity — closes the round-1 over-merge, which was worse than the bug);
+`account_key` is resolved ONCE at `CapacityPool` construction and carried as a required
+`DispatchCapacityPoolSummary` field every consumer READS (one partition by construction, and the only
+way the host path — which never sees a `source` — can key an explicitly-`id`'d source); and the
+per-account `concurrency_cap` change is REVERTED, because the contract documents it as per-ENDPOINT.
+**Scope is narrowed honestly to the BUDGET and COOLDOWN axes.**
+
+**The next action is a fourth-party adversarial review, not more code.** Full defect list + sign-off
+conditions: [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
+
+⚠ **A green suite proved nothing here.** Read the two "how the green tree lied" lessons in the backlog
+entry before re-attempting — both are about verification technique, not this defect. Round 2 answers
+them with a runnable gate: `node scripts/shared/assert-sites-pinned.mjs
+scripts/shared/pinned-sites/account-scoped-metering.json` reverts each of the 7 sites individually and
+requires each reversion to turn the suite red (needs `npm run build` first). **The attestation on
+`e500672f` is `verdict=concerns` with an explicit override — it is a preservation record, not a
+sign-off.**
+
+Same lap, no code change needed: the capability ranker's PRODUCER now exists (NIM roster joined to
+OpenRouter `agentic_index` → LiteLLM `model_info.capability_rank` → the seam `proxyCatalog.ts:159`
+already ingests), and codex/agy quota is reachable as CLI-agentic declared sources. **LiteLLM cannot
+front codex/agy** (CLI agents are their own harnesses — no endpoint to proxy), and Codex-subscription-
+off-CLI stays ruled out on ToS per the owner's standing 2026-07-14 decision.
+
+**Still not done:** the audit wave through the proxy. Configuration is now correct for it.
+
+## ▶ IMMEDIATE NEXT (b) — implement the capability-evidence obligation (plan ready, ONE owner call open)
+
+**IN FLIGHT, REVIEW-BLOCKED after THREE review rounds — on branch `wip/capability-evidence` (pushed,
+HEAD `e500672f`), NOT on main.** The tree is green (build + check + `check:deadcode`;
+`tests/audit`+`tests/shared` 4651 passed, the single failure resolved by name to `INV-shared-core-14`
+and proven pre-existing on clean HEAD).
+**Green is not the blocker and never was.** Round 3 ran three INDEPENDENT adversarial lenses and all
+three refused sign-off; five of their six defects are now closed. Do not land it, and do not
+re-implement it from the plan — read the implementation review first:
 [`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
-It records what is CONFIRMED correct (the core mechanism, sign convention, precedence, keyspace,
-additive schema), what is open, and the durable lesson (round 2's issues are mostly SIBLINGS of round
-1's defects on branches the round-1 fixes did not sweep). Backlog entry states the properties that must
-hold before it lands. **Owner decisions taken during implementation** (settled, in the plan's v3 delta):
-the injection point is the `apiPool.ts` CapacityPool constructors, not `admissionLoop`; and the host
-pool is not a special case — its models are ranked like any other model.
+It records what is confirmed correct, every round's defects, the owner decisions, and the durable
+lesson — which round 3 proved twice over: fixing the named instance is not fixing the defect class.
+Round 3's critical find was that **the change did not achieve its own purpose in the default
+configuration** (the rank join walked three arrays while the evidence obligation walked two, so the
+conversation-first host pool was unranked, never asked about, and failing open forever). The
+round-3 fixes therefore SINGLE-SOURCE their walks instead of adding a third correct copy.
+
+**Three things block landing, in order:** (a) **R3-3** — route the headless promotion through an LLM
+ranker (owner decision 2026-07-19); until it lands the obligation never converges on the headless
+path. (b) a test for **`marshal.ts`'s rank stamping** — the live fail-open this whole sprint exists
+to close, currently invisible to the suite (reverting one line breaks nothing). (c) **producer-seam
+tests** for `admissionPoolsFromSummaries`/`parseCooldownMs` and `cmdNextStep`'s anchor wiring, then a
+**fourth independent review**. Detail: backlog entry, properties (5)–(7).
+
+**Owner decisions (settled, do not re-litigate):** injection at the `apiPool.ts` CapacityPool
+constructors, not `admissionLoop`; the host pool is not a special case; headless unrankable models go
+to an **LLM ranker** (not a recorded fail-open) with LLM provenance kept out of the operator's raw
+`capability_order`; an active cooldown grants **one**, matching `scheduler.ts`.
 
 Plan, written and adversarially reviewed:
 [`docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`](reviews/capability-evidence-obligation-plan-2026-07-18.md)

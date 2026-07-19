@@ -48,6 +48,213 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Per-site pinning is now a runnable gate, not a claim (2026-07-19, SHIPPED — wire it into more
+  changes).** `scripts/shared/assert-sites-pinned.mjs <spec.json>` reverts each site of a change
+  individually, requires each reversion to turn the named suite red, and exits non-zero listing any
+  unpinned site. First spec: `scripts/shared/pinned-sites/account-scoped-metering.json`. Built because
+  a loop-core fix this lap was reported as fully red-green validated when three of five sites had been
+  checked and the most-emphasized one was unpinned. **Forward work:** add a spec for each loop-core
+  change, and consider making it part of the loop-core attestation evidence — an attestation that cites
+  a passing pinning run is a materially stronger claim than a free-text `--checked` string (see the
+  attestation-gate entry below). ⚠ Note it needs `npm run build` first (it imports the compiled shim
+  resolver from `dist/`).
+
+- **⚠ Two concurrent `vitest run` invocations corrupt each other's results (2026-07-19, medium,
+  friction: inefficient-feeding).** Running a targeted suite while a full-suite run was still going in
+  the background produced 61 failures across 6 files in areas the diff never touched
+  (`inferRepairTarget`, `archiveContractArtifact`); both areas passed cleanly on a serial re-run, twice.
+  The tests share on-disk fixture dirs under `tests/remediate/.test-*`, so concurrent runs race. This
+  cost a full stash-and-baseline cycle to attribute, and would read as a damning regression to anyone
+  who did not re-run serially. **Property to hold:** either test fixture dirs are per-invocation
+  (`AUDIT_CODE_STATE_DIR`-style, per [[state-dir-env-override-hermeticity]]) or a second concurrent
+  vitest refuses to start. Same family as the other three known full-suite-only failures.
+
+- **N models on ONE account are metered as N INDEPENDENT budgets — REWORKED after a review refusal,
+  AWAITING RE-REVIEW (loop-core, committed + pushed at `e500672f` on `wip/capability-evidence`, NOT on
+  main; its attestation is `verdict=concerns` with an explicit override — a preservation record, not a
+  sign-off).** Round 2 addresses all
+  eight defects: the account key is now resolved ONCE at `CapacityPool` construction (`accountKey`) and
+  carried on the wire as a required `DispatchCapacityPoolSummary.account_key` that every consumer READS
+  — one partition by construction, and the only way the host path (which never sees a `source`) can key
+  an explicitly-`id`'d source correctly. The over-merge is fixed by checking `backend_provider` FIRST:
+  a transport-fronted endpoint never becomes the identity. The per-account in-flight-cap change was
+  REVERTED — `concurrency_cap` is documented as a per-ENDPOINT limit, which settles three defects at
+  once and narrows the fix honestly to the BUDGET and COOLDOWN axes. All seven changed sites are now
+  individually red-green validated (round 1 had two unpinned, including the one the record most
+  emphasized). **The durable lessons stand regardless of whether round 2 passes:** (1) three of five
+  sites were verified and the result GENERALIZED to "each fix" — verify every site, never extrapolate;
+  (2) the round-1 test asserted a helper the metering path never calls, which reads as coverage and is
+  not ([[verify-delegated-findings-mechanism-not-just-citation]]); (3) a required field did not break
+  any test call site at compile time because the test tree is untypechecked — the runtime failure was
+  the only signal (see the untypechecked-tests entry below). The attempt
+  introduced `accountKeyFromPoolKey` + `resolvePoolAccountKey` and rerouted budget, in-flight cap and
+  the cooldown fold. An independent adversarial review refused sign-off on eight defects — the two that
+  matter most: **(a)** deleting the `provider !== "openai-compatible"` guard made rung 1 key on the
+  TRANSPORT, so every backend behind one proxy collapses into a single cooldown account (a free-lane
+  429 stalls a paid lane) — an over-merge WORSE than the original bug, and directly against
+  `dispatchableSourceId`'s "the transport NEVER enters the quota identity"; **(b)** the motivating case
+  is still unfixed — an explicitly-`id`'d source has no `/` in its pool id, so budget and cap remain
+  per-model for exactly the `nim-nano`/`nim-super`-on-one-key scenario `accountId.ts:13-18` cites.
+  Full list + sign-off conditions:
+  [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
+  **Two durable lessons, both about how a green tree lied:** (1) three of five changed sites were
+  red-green validated and the result was GENERALIZED to "each fix" — the most-emphasized site was in
+  fact unpinned, and reverting it kept every test green. Verify each site, never extrapolate from a
+  sample. (2) the new test *looked* like it covered the motivating case but asserted a helper **the
+  metering path never calls** — a test can assert a true statement about a function that is not on the
+  path under test, which reads as coverage and is not
+  ([[verify-delegated-findings-mechanism-not-just-citation]]).
+  Original defect statement follows.
+
+  **N models on ONE account are metered as N INDEPENDENT budgets (2026-07-19, HIGH, loop-core,
+  observed configuring the NIM lane).** Expanding a proxy backend into K models yields K
+  `CapacityPool`s with K token budgets, K in-flight caps and K independent 429 cooldowns — against
+  one credential with one real rate limit. Admits ~K× the true ceiling; backoff learned on one model
+  never throttles its siblings. Evidence: pool identity `(provider, account, model)` puts `model` in
+  the *budget* key (`apiPool.ts:37-57` → `scheduler.ts:802-809`); quota state/ceilings/caps key off it
+  (`apiPool.ts:425,428`, `state.ts:576`, `admissionLoop.ts:613,668-669,689`); 429 cooldown is
+  per-model (`rollingDispatch.ts:1061,1087` → `state.ts:567`); and `admissionLoop.ts:227` assigns
+  `resourceKey` — documented at :51-52 as "the metered account the lease keys to" — verbatim from the
+  per-model `pool_id`. The account fold that exists for exactly this bug (`accountId.ts:8-10` cites the
+  NIM incident) never fires here: `accountId.ts:39` gates it to `provider === "openai-compatible"` and
+  proxy sources are `claude-worker` (`proxyCatalog.ts:342`); and even ungated it is contractually
+  scoped to the cooldown axis alone, never budget (`accountId.ts:55-57`).
+  **Property to hold:** pools sharing one credential share ONE budget, ONE in-flight cap and ONE
+  cooldown; the model axis may subdivide *routing*, never *metering*. **Currently mitigated only in
+  config** (`proxy.top_k: 1`) — latent for any `top_k > 1` or any operator declaring several models on
+  one key. Fixing `accountId.ts:39` alone is NOT sufficient (propagates cooldown, leaves budget split)
+  — this is the [[fix-the-defect-class-not-the-named-instance]] shape.
+  Record: [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
+
+- **Model selection within one budget is FREE-vs-METERED, not one rule (2026-07-19, owner ruling,
+  RESOLVED — no code change needed).** Refines the first draft of this entry, which said "single pool ⇒
+  always best model" unconditionally. The owner's actual rule: **free pool ⇒ always the best model at
+  every complexity level** (no tradeoff exists — capability is the only axis); **metered pool (e.g. a
+  Codex subscription) ⇒ the CHEAPEST model that clears the capability floor.** Both already fall out of
+  `costFirstCmp` (`admissionLoop.ts:527`), `costRank ↑ || capabilityRank ↓ || capabilityScore ↑`: a free
+  pool's costs all tie so capability decides, and a metered pool sorts on price with the floor gating
+  eligibility. **Verified by reading the comparator, not assumed.** The rule was previously inert only
+  because no capability ranks existed to break the tie — which the ranker now supplies. Residual: the
+  operator still expresses "collapse this shared-budget roster to its best member" by hand as
+  `proxy.top_k: 1`; nothing derives it.
+
+- **A stale proxy catalog cache is served silently, and an absent one deletes the lane (2026-07-19,
+  medium, friction: tool-should-decide).** `resolveAmbientSources` returned a `catalog-cache.json`
+  whose `fetched_at` was a day old, with a roster that no longer matched the running proxy — no
+  freshness check, no warning. Deleting the cache then dropped the whole proxy lane, and the
+  operator-facing reason names an internal FUNCTION (`populateProxyCatalog`) rather than any runnable
+  command — there is no CLI to populate it. **Property to hold:** the resolve path either revalidates
+  the cache against the live roster or states its age; and every drop reason names an action the
+  operator can actually take. Same family as the `dropped[]`-not-surfaced entry below.
+
+- **`top_k` truncates ALPHABETICALLY when nothing is ranked, silently dropping the frontier tier
+  (2026-07-19, medium, now mitigable).** With all `score` undefined, `expandSources`
+  (`proxyCatalog.ts:327-335`) falls through to `a.alias.localeCompare(b.alias)` — so `top_k: 3` over
+  the NIM roster kept a *flash* model and dropped every frontier one. Mechanism (3) of the
+  unranked+free composition entry, now observed directly. **Mitigated** now that
+  `model_info.capability_rank` is populated (see below), but the fallback remains
+  silently-wrong-by-default for any unranked proxy. **Property to hold:** truncating a roster with no
+  ranking signal must be loud, not alphabetical.
+
+- **Durable trap — LiteLLM will not start on Windows with redirected stdout (2026-07-19).** Its
+  startup banner crashes with `UnicodeEncodeError: 'charmap' codec can't encode characters` (cp1252)
+  before the server binds; exit code 3, no proxy, and the traceback buries the cause under ~40 lines
+  of FastAPI lifespan frames. Launch with `PYTHONIOENCODING=utf-8` (`PYTHONUTF8=1` also fine).
+  Recorded in the generated config's header comment.
+
+- **Anchored insertion makes RE-RANKING an already-ranked model unexpressible at roster
+  scale (2026-07-18, medium, known limitation of the BL-1 fix).** `mergeCapabilityOrder`
+  (`src/shared/providers/sharedProviderConfirmation.ts`) treats EVERY submitted id already
+  present in `priorOrder` as a fixed anchor and seeds `positions` from `priorPos`, so a
+  mentioned-but-previously-ranked model keeps its old position no matter where the operator
+  puts it. The one escape — a TOTAL submission restating every prior model — is unreachable
+  once the roster is large, which is exactly the regime anchored insertion exists for.
+  Net: the operator can ADD new models anywhere, but can never say "that model I ranked
+  highly is actually worse than I thought." That is the likeliest follow-up action, since the
+  point of operator ranking is that judgment improves with use.
+  **Not a livelock** — the merge converges and the delta empties; this is an expressiveness
+  gap, deliberately accepted to close a critical livelock, not an oversight.
+  **Property to hold:** an operator must be able to reposition a previously-ranked model
+  without restating the entire roster. **Likely fix:** distinguish a TOOL-OFFERED anchor
+  (from `selectCapabilityAnchors`, genuinely a fixed reference point) from any OTHER
+  previously-ranked model the operator chose to mention — the latter should be repositioned
+  by the same interpolation new models get. That makes demotion/promotion expressible while
+  keeping anchors stable, and needs no new field. Predicted in advance by the round-4 review
+  ("merge-always makes removal and reordering unexpressible"); recorded here so the
+  prediction is not lost if the fix is deferred.
+
+- **A DEADLINE should drive λ, not become another dial (2026-07-18, medium, forward track,
+  needs live data first).** The measurement half of this shipped — the speed axis now ranks on
+  `min(concurrency-derived, rate-derived)` (`deriveSustainedThroughput`) and spill consults
+  remaining rate budget (`deriveRateCap`, cooldown ⇒ zero) so it fires BEFORE the 429 rather
+  than after. What is still open is the sub-question that fix deliberately deferred: "finish
+  within an hour" is a CONSTRAINT rather than a preference, so it belongs as something that
+  drives λ from observed progress, **not as another operator knob** (a needed manual flag is a
+  bug signal — λ, "how much will I pay to finish sooner", is already the right tradeoff).
+  **Do not build it until a real wave under the shipped rate-aware routing shows the shape** —
+  the whole reason it was held back is that the right control law is not derivable from a
+  guess. Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
+  $/Mtok alone, never demoting a quota-saturated pool).
+
+- **The loop-core attestation gate cannot tell a human reviewer from the committing agent
+  (2026-07-19, medium, friction: tool-should-decide).** `attest-loop-core-review.mjs` takes
+  `--reviewed-by <id>` as a free string and the pre-commit gate checks only that a fresh,
+  staged-tree-bound attestation EXISTS. On this lap the committing agent ran the attestation
+  itself (naming its three independent reviewer subagents in the string) — which is honest,
+  but the gate would equally have accepted `--reviewed-by me` with no review at all. CLAUDE.md
+  describes the intent as "a logged, attributable **human** step"; the mechanism does not
+  enforce the human part, so the doc currently overstates what is guaranteed. **Property to
+  hold:** either the gate distinguishes agent-attested from human-attested (and the two carry
+  different weight), or the docs stop claiming a human step and describe it as what it is — an
+  attributable, tree-bound audit record. Per *enforce-in-tooling-never-host-discretion*, the
+  first is preferable; the second is at minimum required for the claim to be true.
+
+- **The loop-core gate conflates COMMITTING with LANDING, so preserving WIP forces an override
+  (2026-07-19, medium, friction: tool-should-decide).** Committing review-blocked loop-core work to a
+  do-not-merge branch — the correct way to preserve it across a branch switch — is gated identically to
+  landing it on main. The honest verdict for un-reviewed work is `concerns`, and the pre-commit gate
+  REFUSES `concerns` without `--override`. So the only paths are: claim `clear` (a false sign-off),
+  override (what this lap did, on `e500672f`), or leave the work uncommitted and risk losing it. The
+  override reason is recorded, so the audit trail survives — but a gate whose honest path requires an
+  override will train the override into a habit, and then it stops signalling anything. **Property to
+  hold:** the gate keys on the DESTINATION, not the act of committing — a commit that cannot reach main
+  (branch not `main`, or the tree is marked do-not-merge) should accept a `concerns` attestation without
+  an override, while a commit onto `main` keeps the current strictness. Same family as the
+  agent-vs-human entry above: both are the gate measuring the wrong thing.
+
+- **A large `Edit` into a `.test.mjs` can break brace balance and only surface as a vite parse
+  error (2026-07-19, low, friction: inefficient-feeding).** Rewriting a `test()` body whose
+  replacement spanned the closing `});` left the enclosing `test()` unclosed; `npm run check`
+  is blind to it (tests are outside `tsconfig`, see the entry below) so the first signal was
+  vitest failing to transform the whole FILE — which reports as one opaque "Failed Suites"
+  entry naming no test, and masks every real assertion in the file until fixed. Same root as
+  the untypechecked-tests entry below; noted separately because the SYMPTOM is what costs the
+  time (a suite-level parse failure reads as a harness problem, not an editing slip).
+
+- **The test tree is NOT typechecked, so a required-field contract change is not enforced
+  there (2026-07-18, medium, friction: tool-should-decide).** `tsconfig.json` is
+  `include: ["src"]` and vitest transpiles via esbuild without typechecking, so
+  `npm run check` never sees `tests/**`. Hit while making
+  `ScheduleWaveInput.capabilityRanks` required to close a fail-open: the compiler
+  correctly caught the production call sites, but every test call site silently kept
+  getting `undefined`. **Property to hold:** if a field is made required *because
+  omission is a defect*, omission must be a compile error everywhere the field is
+  passed — or the enforcement claim must be scoped in writing. A green suite currently
+  reads as "every call site swept" when it cannot be. Options: a `tsconfig.test.json`
+  wired into `verify:checks`, or `vitest --typecheck`.
+
+- **`llm read` (the free NIM lane) is unusable for review-shaped prompts
+  (2026-07-18, medium, friction: inefficient-feeding).** Two failures in one lap on
+  `nvidia/nemotron-3-ultra-550b-a55b`: a ~13KB diff timed out past 120s, and a ~5KB
+  function returned `Backend JSON did not match read schema` even after the built-in
+  stricter-format retry. The lane works for summarization/extraction but not for
+  "find defects in this diff, report file:line" — the schema is `{summary, findings[],
+  open_questions[]}` and the backend drifts off it under an analytical prompt.
+  **Property to hold:** the free lane either satisfies its own advertised schema or
+  fails with a signal the caller can route on — a schema-mismatch die means the whole
+  offload is wasted with nothing salvaged. Consider a size guard + a partial-parse
+  salvage path. Until then: delegate review work to Haiku/Sonnet subagents, not `llm read`.
+
 - **Capability-evidence obligation: implemented + green but REVIEW-BLOCKED, on branch
   `wip/capability-evidence` (2026-07-18, high, blocks the ▶ IMMEDIATE NEXT).** Two adversarial review
   rounds; round 2 REFUSED sign-off. Full record + the six open issues:
@@ -116,6 +323,15 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   RELATIVE (`band <= Math.max(FLOOR_MAX_BAND[tier], bestAvailableBand)`), so if every pool is weak,
   `deep` still routes to the least-weak one. Forcing rankings guarantees the ordering, not that anyone
   is good enough — whether an ABSOLUTE floor is wanted needs live data from a ranked run first.
+  **RANKER PRODUCER NOW EXISTS (2026-07-19), zero audit-tools code change** — the predicted pattern was
+  built and validated live: NIM `/v1/models` (119 models) joined to OpenRouter `agentic_index`
+  (21 covered, exact `id` else `hugging_face_id`) → written into LiteLLM `model_info.capability_rank`
+  → ingested at `proxyCatalog.ts:159`, sign inverted at `:564`. **The documented sign trap is already
+  handled correctly in HEAD** — verified live, the populate now selects `glm-5.2` (rank 1) rather than
+  the alphabetical head. Nothing is redistributed (scores land in the operator's own proxy config), so
+  the AA licensing blocker is sidestepped. Still open: the ranker is a hand-run generation step, not a
+  refreshed pipeline. Record:
+  [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
   **The symptom had THREE mechanisms:** (1) unranked ⇒ fail-open ⇒ `deep`
   eligible [the plan]; (2) `cost_per_mtok: 0` sorts first among eligible [by design; largely obviated once every pool is ranked];
   (3) `top_k` truncates alphabetically [resolved by the ranker, nothing to sort by today].
