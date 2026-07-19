@@ -48,6 +48,16 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Step 2
+  ran 4 adversarial rounds; each spawned FRESH agents that re-grepped the same `tokens_per_pct` /
+  `admit` / `reconcile` call-site map from scratch (~135k subagent tokens per round, much of it
+  identical recon). Continuing a prior reviewer preserves its context but forfeits independence,
+  which is the whole point of the round — so the two goals are in tension and the fix is not "reuse
+  the agent". **Property to hold:** a review round receives the verified call-site map as INPUT
+  (cheap, mechanical, produced once) and spends its budget on judgment, not rediscovery — while still
+  reaching its own verdict. Candidate: a recon step that emits a map artifact each round refreshes
+  rather than rebuilds.
+
 - **Window-scope validation at the PRODUCER boundary — designed for step 2, deferred with reason
   (2026-07-19).** The design of record (Residual 1) says to validate scope once where a snapshot is
   created so consumers are safe by construction, "when step 2 touches this code". Attempted and
