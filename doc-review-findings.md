@@ -5,159 +5,183 @@ outside the block, after it.
 
 <!-- DOC-REVIEW-OPEN:START -->
 ### Proposed instruction-file edits (approve to apply)
-- [CLAUDE-3] `CLAUDE.md` ~line 108 — the Providers paragraph names 9 providers but `PROVIDER_NAMES`
-  (`src/shared/types/sessionConfig.ts:4-16`) has 10: it omits `claude-worker`, wired into both
-  orchestrators (`src/audit/providers/claudeWorkerProvider.ts`, `src/remediate/providers/claudeWorkerProvider.ts`)
-  since the commit-3 lane shipped (2026-07-16). Note it's architecturally distinct from the other 9, not a
-  drop-in list append: `providerFactory.ts:152-159` excludes it from auto-resolution ("source-pool-only
-  proxied worker class... auto-resolution must never be able to pick it") and `assertHostProviderName`
-  (`sessionConfig.ts:27-42`) explicitly rejects it as `--host-provider`/`self.provider` ("it can never be
-  the conversation host driving a run"). Proposed: add `claude-worker` to the list with a short caveat
-  that it's a proxied dispatch-worker class only, never a driver/host provider — not a bare append.
-- [CLAUDE-4] `CLAUDE.md` ~line 108 — same paragraph's claim that `openai-compatible` is "the backend the
-  in-process rolling engine drives for headless autonomy" is now incomplete. `spec/unified-dispatch-worker-model.md`'s
-  worker-taxonomy table gives kind-3 (`openai-compatible`) "none (no tool loop)" for tools/file access and
-  states explicitly that "remediate implement is the case that justifies repair-proxy" (kind-1,
-  `claude-worker`) "— those workers Read/Edit/Bash/run tests," while kind-3 is permanently capped to
-  "self-contained packets... that is their permanent ceiling, not a bug to fix." Both backends run through
-  the same in-process rolling engine, but `claude-worker` is the fuller-capability (full tool access)
-  headless-autonomy backend for the case the spec calls out as requiring it. Proposed: reword to name
-  both, or clarify which capability class each backend actually provides.
+- [CLAUDE-5] `CLAUDE.md` ~line 108 — the `claude-worker` description says it spawns `claude -p`
+  "through a repair-proxy overlay onto a free backend" and cites `spec/unified-dispatch-worker-model.md`
+  for "requiring repair-proxy when a node needs file access." Verified (2 independent adversary passes):
+  "repair-proxy" was genuinely RETIRED 2026-07-18 (commit `4441703`, `docs/reviews/litellm-swap-plan-2026-07-18.md`),
+  not renamed — the old repair-proxy validated/repaired malformed tool calls and exposed a `GET /registry`
+  discovery shape; the new generic `proxy` block (LiteLLM-backed) is a plain passthrough with none of that.
+  `src/shared/providers/auditorSources.ts` now explicitly rejects a declared `repair_proxy` key
+  ("repair_proxy is retired — declare a proxy block instead"). CLAUDE.md's providers paragraph was last
+  touched the day *before* the retirement commit and never caught up. Proposed: replace "spawns `claude -p`
+  through a repair-proxy overlay onto a free backend" → "spawns `claude -p` through the declared `proxy`
+  overlay (LiteLLM-backed; the retired `repair_proxy` config key now hard-rejects) onto a free backend", and
+  "requiring repair-proxy when a node needs file access" → "requiring the proxy transport when a node needs
+  file access."
 
 ### Design decisions for you
-- [DD-A] `spec/unified-dispatch-worker-model.md` — the worker-taxonomy table's kind-1 row ("the host and
-  its `claude` subagents; `claude -p` when headless") never names the shipped `claude-worker` provider
-  (`CLAUDE_WORKER_PROVIDER_NAME`) that concretely realizes it, unlike the kind-2/kind-3 rows which do name
-  concretes (codex/agy; NIM/opencode/vLLM). The doc's last edit (`0a540ca`) predates every commit-3 commit
-  that built and shipped the class (`9f4cf8f`, `dd47e8d`, `860920c`, `b6a5f0e`) — it structurally predates
-  its own "kind-1 launch transport" section's concrete instance. Does this doc need a pass to reconcile
-  against the now-shipped commit-3 lane (name `claude-worker` in the taxonomy row / repair-proxy section,
-  and check whether the reconciliation-gate/exclusion-grammar sections need a claude-worker-specific note
-  anywhere)?
-- [DD-B] `spec/cross-provider-quota-matrix.md` — `claude-worker` sources carry no first-party credential
-  of their own; quota/pool identity keys on `backend_provider[#account]/model` per
-  `apiPool.ts`'s `dispatchableSourceId` (whose own comment states "the transport NEVER enters the quota
-  identity"), i.e. `claude-worker` quota-tracks under whatever real backend it's routed to, never under
-  its own name. Should this matrix add a one-line note that `claude-worker` is a *transport*, not an
-  independently quota-tracked backend, to preempt someone building a redundant `ClaudeWorkerQuotaSource`?
-- [DD-C] `spec/audit/dispatch-admission-control.md` lines ~191, ~379 — two "(formerly the standalone
-  `--host-max-active-subagents` flag)" / "(formerly `--host-models`)" lineage parentheticals attached to
-  `self.max_active_subagents`/`self.roster`. These are pure retired-CLI-transport history with no
-  architectural payload (unlike the doc's legitimate "capability inherited from the run, not the driver"
-  founding-bug narrative elsewhere, which motivates *why* the architecture is shaped this way) — structurally
-  the same "former X folded into Y" changelog-creep smell `documentation-philosophy.md` names as forbidden.
-  Recommend stripping both; approve?
-- [DD-D] `spec/audit/executor-catalog.md` — "friction triage actually fires from the `present_report`
-  terminal step (`decideAuditFrictionCloseout`, called from `nextStepHelpers.ts`/`nextStepCommand.ts`)
-  instead" — `decideAuditFrictionCloseout` is called only from `nextStepHelpers.ts` and `executorRunners.ts`;
-  `nextStepCommand.ts` never calls it directly, it only reads the already-computed `result.triage`. Pre-existing
-  (confirmed present at the prior checkpoint `7817a11` too, not introduced by this window's rework) — low
-  confidence this is worth a fix vs. defensible loose phrasing ("spans these two files"). Tighten the
-  wording, or leave as-is?
-- [DD-E] `docs/HANDOFF.md` "Live state" — "All major code tracks remain complete" sits one paragraph above
-  ▶ IMMEDIATE NEXT's description of 0/119 claude-worker-lane dogfood packets succeeding on a HIGH-priority
-  open gap. Genuinely ambiguous whether "code tracks" scopes to the older T1–T6 quota-cluster numbering
-  (true) or reads globally (false, given the open dogfood gap). Scope the bullet explicitly, or drop it
-  now that ▶ IMMEDIATE NEXT is the authoritative current-state pointer?
-- [DD-F] `docs/HANDOFF.md` "Older track — bounded quota-cluster remainder" references a "parked self-audit
-  (14/261 packets, resumable)" tied to "the charter-fix dogfood run." This carries a different packet
-  count than both the claude-worker-lane dogfood run named in ▶ IMMEDIATE NEXT
-  (`20260717T062404401Z_audit_tasks_completed_001`, 0/119) and `docs/backlog.md`'s separately-mentioned
-  "313-packet run" that regressed mid-dogfood. Three different numbers across what read as two distinct
-  efforts (general dispatch/quota validation vs. claude-worker-lane-specific dogfood) — not enough evidence
-  in the docs alone to resolve mechanically. Are these the same run under different descriptions, or truly
-  separate — and if the "14/261" pointer is stale/superseded, should it be dropped?
-- [DD-G] `docs/backlog.md` "`validateDispatchableSources` shape-checked 2 of 9 fields... (FIXED this lap)"
-  — fully shipped per its own text (validator now guards all 9 fields at the one shared site) but carries
-  no `[[memory-tag]]`, unlike sibling shipped-lesson entries. Per the shipped-entry-deletion rule's "give
-  the durable rule a home in the same edit, then delete" clause: the durable lesson here is "a validator
-  that guards a field the caller reads must guard every field the caller reads." Give it a memory tag (or
-  fold into CLAUDE.md's validation/two-tier-dependency conventions) then delete, or delete now without a
-  new home?
-- [DD-H] `docs/backlog.md` "Undisclosed-at-authoring behavior changes from the 2026-07-16 assembly lift"
-  (sub-items a–e) — entirely retrospective, zero open action items, framed explicitly as "recorded so they
-  are not rediscovered as mysteries," but carries no `[[memory-tag]]` — same shape as DD-G. Sub-item (d)
-  notes a real durable property (remediate now resolves machine-dependent `sources[]` from ambient
-  environment at 3 config-load sites — a hermeticity exposure shared symmetrically with audit). Give (d)'s
-  hermeticity note a durable-trap home before deleting the entry, or delete outright now?
-- [DD-I] `docs/backlog.md` "Friction walk (repair-proxy dogfood lap, 2026-07-15)" item (1) — proposed
-  "model dispatch pools by `(backend-model, operator-cost-class)`, with transport an attribute, not the
-  namespace" closely matches commit `860920c1`'s shipped behavior ("Pool/ledger identity keys on
-  `backend_provider[#account]/model`... Transport never enters the key"). Medium-high confidence the
-  backend-model axis is now satisfied (the operator-cost-class axis may already be covered by the
-  pre-existing `cost_per_mtok`/`declared_cost_drift` arbitrage mechanism — not traced to full certainty).
-  Confirm this item is shipped and delete, or is there a genuine open remainder on the cost-class axis?
+- [DD-1] `docs/backlog.md` (the "Capability-evidence obligation..." entry, ~lines 51-69; the
+  "`resolveUnevidencedCapabilityPools` is untestable..." bullet, ~lines 71-76; the "UNBLOCKED 2026-07-18 —
+  implement it." tail of "Unranked + free compose badly", ~lines 118-127) and `docs/HANDOFF.md`'s
+  "IN FLIGHT, REVIEW-BLOCKED... round 2 refused sign-off with six open issues" paragraph (~lines 60-72) —
+  all describe the capability-evidence obligation's review status as of round 2. A reviewer proposed
+  updating these to round 3 (5/6 defects closed, 3 new named blockers) by reading `origin/wip/capability-evidence`.
+  An adversary + judge REFUTED auto-applying this: `git merge-base origin/main origin/wip/capability-evidence`
+  = `a8bee5d` — the branches are siblings, main's HEAD never merged the branch, and on main's own tree
+  `resolveUnevidencedCapabilityPools` doesn't exist at all (only referenced in docs). Per this routine's own
+  scoping rule ("check out main's HEAD content to review against"), an unmerged branch's state is not a
+  legitimate ground for a stale-factual-fix against main. Separately, "round N of M closed" is itself a
+  status-noise pattern that will just go stale again (round 4 is already in motion per the branch's own
+  latest commit) — auto-bumping the number recreates the problem the guidelines forbid. Questions: (1)
+  should these docs ever cite unmerged branch state as fact — if so, how (e.g. "may cite the tracked
+  branch's latest commit by name" instead of a review-round count)? Or should they stay untouched until the
+  branch lands, at which point the routine's ordinary passes pick it up automatically? (2) should the
+  "Capability-evidence obligation" bullet and the "Unranked + free compose badly" tail be merged into one
+  entry — both track the same in-flight work and currently risk drifting independently? (3) should the
+  round-count itself be de-status-noised now (e.g. "REVIEW-BLOCKED, see wip/capability-evidence for current
+  round" instead of a number this doc will keep needing to re-bump)?
+- [DD-2] `spec/unified-dispatch-worker-model.md` — same "repair-proxy" retirement as CLAUDE-5 above, but
+  this file has ~15 live references including a whole section header ("## repair-proxy — the kind-1 launch
+  transport"), a worker-taxonomy table column, and a "discovery feeder" registry claim (~line 118) that no
+  longer has an equivalent (the plan doc: "no leaderboard fetching, syncing, or scoring logic inside
+  audit-tools" post-swap). `docs/reviews/litellm-swap-plan-2026-07-18.md`'s own touch-list planned this
+  exact rework ("18 refs... reworded to the neutral proxy contract") but never executed it. This is a
+  functional redescription (what replaces the deleted discovery/repair behavior, if anything — does the
+  "kind-1 launch transport" section still make sense at all?), not a narrow substitution, so it needs your
+  judgment on the replacement prose before it lands rather than a blind auto-apply. Should this section be
+  rewritten to describe the new brand-neutral `proxy` contract, and should the file's organizing concept
+  move away from "repair-proxy"?
+- [DD-3] `docs/HANDOFF.md` ~line 167 — "**commit 5** decide kind-3's fate" has no `docs/backlog.md` entry
+  to point to (`grep -n "kind-3\|kind 3\|commit 5" docs/backlog.md` → no hits), violating HANDOFF's own
+  contract that every open item points to a backlog.md detail. The "commit 5" numbering itself references a
+  per-commit Decomposition that HANDOFF's own "Release gate" section says was RETIRED. Should this get a
+  backlog.md entry (what specifically is undecided about kind-3 — single-shot/openai-compatible workers —
+  per `spec/unified-dispatch-worker-model.md`), or has it actually been resolved/dropped and the pointer
+  should just be deleted?
+- [DD-4] `docs/HANDOFF.md` — the "## Prior track — the G-series (closed)" section (~lines 133-211, ~80
+  lines) narrates already-shipped commit-by-commit history (engine-sharing, G4/G5/G6 closure mechanics, a
+  v0.33.0 release recap, a dated "as of the G3 session" offload-lane snapshot) that duplicates content
+  already in `docs/backlog.md` (e.g. its own G4/G5 entries) — the changelog-creep smell this doc type is
+  meant to avoid, and contrary to the doc's own frontmatter ("Per-lap shipped detail is not narrated
+  here... this doc is the open-work roadmap only"). The genuinely-open pointers are already condensed into
+  one paragraph (~lines 164-166). Trim the section to that pointer paragraph + the still-load-bearing
+  warnings (the "reinstall before dogfooding" note, the "Release gate — the durable lesson" sub-section),
+  dropping the shipped-commit narration — or is the history load-bearing enough to keep (it explains *why*
+  full unification was rejected, preventing re-litigation)?
+- [DD-5] `docs/HANDOFF.md` ~line 283 — "Residuals from earlier shipped fixes (M-B3/`judge_report` self-check,
+  audit worker scratch pollution) live under `docs/backlog.md` → Open bugs." `grep -n "judge_report"
+  docs/backlog.md` → zero hits, and `git log --all -S "judge_report" -- docs/backlog.md` shows backlog.md
+  has never contained this string — this pointer has been dangling since the section was introduced ("audit
+  worker scratch pollution" does resolve fine, to the untracked-exclusion residuals). Does "M-B3/`judge_report`
+  self-check" need a real backlog.md entry, or should the reference just be dropped from this line?
+- [DD-6] `spec/audit-workflow-design.md` — "...both frozen after one always-on LLM estimate review." Verified
+  (2 independent passes): `token_estimate`/`risk_estimate` are populated purely deterministically
+  (`computeRiskEstimate` is pure arithmetic; frozen and copied verbatim downstream). A repo-wide grep
+  (including full `git log -S` history) for "estimate review"/"estimateReview"/"estimate_review" across
+  every `*.ts` file, ever, returns zero hits as an identifier/executor/obligation — only four hedged
+  ("may later refine") prose comments use similar wording, none tied to a real `N3` obligation. Was this
+  always-on LLM review step ever built, or is this vestigial/aspirational design text that should drop the
+  "after one always-on LLM estimate review" clause?
+- [DD-7] `spec/remediate/remediation-goals.md` — this normative goals doc's Phases/Resume-semantics/
+  Completion sections never mention the `quota_paused` retryable-pause mechanism, even though it's a real,
+  wired, host-facing halt/resume state (`partial_terminal` obligation, `buildQuotaPausedStep`,
+  `step_kind: "quota_paused"` in `src/remediate/steps/nextStep.ts`) and `spec/remediation-workflow-design.md`
+  already documents it explicitly. Per the normative-goals-doc rule, a registry entry the doc omits is an
+  escalation. Should `remediation-goals.md` gain a mention (either inline or a pointer to
+  `remediation-workflow-design.md`'s existing section), or is this intentionally left out of the normative
+  product doc as an implementation-level pause distinct from the phase/completion contract?
+- [DD-8] `docs/backlog.md` — "Unify the full rolling-dispatch lifecycle shell across audit + remediate
+  (doc-review D-66/D-67/C-7)..." (~lines 617-657, ~522 words). Roughly 350-390 words are shipped-status/
+  architecture narrative (what's already unified, already verified, already rejected) vs. ~130-170 words of
+  genuinely open content (the slice-3 heartbeat scope + its architectural gotcha) — the "living to-do list,
+  not a status log" smell the backlog's own header and the doc-shape philosophy both name. Should this be
+  trimmed to just the slice-3 open work (relocating the architecture recap to a spec doc, e.g.
+  `spec/multi-ide-concurrent-runs-design.md`, which already owns OD3), or is the recap load-bearing enough
+  here (it explains why full unification was rejected, preventing re-litigation) to keep as-is?
+- [DD-9] `docs/backlog-remediation-design.md` — "**semantic-equivalence gate (O2↔F1↔D8):** O2 exports ONE
+  reusable gate; F1/D8 consume." Verified: the gate (`intentCheckpointGate.ts`, `runIntentCheckpointGate`)
+  has zero production importers anywhere in `src/audit`/`src/remediate` (`grep -rln 'intentCheckpointGate'
+  src tests` finds only its own file + its own test). F1's actual mechanism
+  (`src/audit/orchestrator/resultBaseline.ts`) uses a plain deterministic content-key comparison instead,
+  and the same doc's own "Still-gated" section says D8 "needs a manual proxy session... never present as
+  landable now." Is the LLM-judge gate dead/unwired code F1 was meant to wire in and never did, or does the
+  doc overstate current wiring and should read "F1/D8 will consume" (or scope to D8 only, once landed)?
+- [DD-10] `docs/end-of-sprint-report-template.md` — the "Friction this sprint" section uses four named
+  dimensions (Gate/tool re-loops; Integration-guard failures; Re-scopes/surprises; Open-ended) that don't
+  map onto the single-sourced `FRICTION_CATEGORIES` vocabulary (`ambiguous_direction`/`tool_should_decide`/
+  `inefficient_feeding`, `src/shared/friction/frictionRecord.ts`) that `docs/project-philosophy.md` B6 ties
+  dev-workflow friction logging to ("log all three categories... durably to backlog"), and CLAUDE.md's own
+  "Log friction" bullet uses yet a third framing (bugs vs. durable traps — a filing destination, not a
+  category set). Is the sprint-closeout template's taxonomy deliberately a separate axis (dev-sprint retro
+  vs. product mechanical-capture are different domains), or should it be recast in the single-sourced
+  vocabulary for consistency with "ONE category vocabulary... can never drift"?
+- [DD-11] **`docs/reviews/capability-evidence-implementation-review-2026-07-18.md` is not in the canonical
+  manifest — this currently BREAKS `npm run verify:release`.** `node scripts/check-doc-manifest.mjs` fails
+  right now on `main`'s HEAD:
+  ```
+  ✗ doc-manifest check failed:
+  Stray doc(s) not in the canonical manifest (docs/doc-review-guidelines.md routing table):
+    - docs/reviews/capability-evidence-implementation-review-2026-07-18.md
+  ```
+  This file was added in the same commit that added its sibling `docs/reviews/capability-evidence-obligation-plan-2026-07-18.md`
+  (which *is* registered, as a "dated plan artifact... one-off record, not a timeless concept") — the
+  implementation-review file was simply missed. Register it in `docs/doc-review-guidelines.md`'s routing
+  table with the same pattern as its sibling (this is an edit to the guidelines file itself, which is
+  excluded from this routine's own self-review, so it needs your hand)?
 
 ### Doc-set condensation
-- [CX-1] `spec/audit/artifact-contract.md` + `spec/audit/dependency-map.md` + `spec/audit/executor-catalog.md`
-  — still open from prior runs, re-verified accurate this run (38 artifacts / 27 executors, independently
-  recounted three separate times across reviewer + two adversaries, all converging on the same figures):
-  "which executor produces which artifact" is hand-maintained independently in two places
-  (executor-catalog.md's Produces column and dependency-map.md's per-artifact rows) over the same registry
-  pair. Should this have exactly one home (fold one into the other), or is the duplication an acceptable,
-  differently-shaped view (catalog = by-executor, map = by-artifact) worth keeping as-is?
-- [CX-2] `docs/HANDOFF.md`'s "Release gate — the durable lesson" section and `docs/backlog.md`'s "Durable:
-  CI runs the release gate on every push, but nothing was watching it" entry record the identical root
-  fact (main was red for ~a dozen laps because the pre-commit hook only runs `npm run check`, not
-  `verify:checks`) and the identical corrective habit, under two different memory tags
-  (`[[lap-green-must-match-ci-evidence]]` vs `[[enforce-robustness-in-tooling-not-host-discretion]]`).
-  backlog.md's item (c) — "consider adding `check:doc-manifest` to the pre-commit hook" — is still
-  genuinely open (confirmed: `.claude/hooks/pre-commit-gate.mjs` still runs only `npm run check`).
-  Proposal: fold the durable-rule narrative into HANDOFF's Cadence & standing rules section (a standing
-  operating rule is what that section is for) and trim backlog.md's entry to just open remainder (c),
-  rather than deleting it outright. Confirm?
-- [CX-3] `README.md`'s "Philosophy" bullet section (lines ~22-33) restates `docs/project-philosophy.md`
-  A2 ("right tool, not deterministic dogma") and A7 (don't grade your own homework / delegate adversarial
-  phases) in different prose — a fact in two homes, drift risk if one is updated without the other. Keep
-  as a distinct user-facing summary (different register, marketing-adjacent), or replace with a one-line
-  pointer to `project-philosophy.md`?
+- [CX-3] `README.md`'s "## Philosophy" section (~lines 22-33) restates `docs/project-philosophy.md`'s A2
+  ("right tool, not deterministic dogma"), A4 ("everything-agnostic by default"), and A7 ("delegate
+  adversarial phases to a separate agent" / "tool owns structure, LLM authors only irreducible judgment in
+  small pre-scaffolded slots") in different prose — a fact living in two homes, drift risk if one is updated
+  without the other. Still open from a prior run (re-verified this run; the prior run's citation additionally
+  named a "North-Star" claim that a fresh read does not support — scope corrected to A2/A4/A7 only). Keep as
+  a distinct user-facing summary (different register: terse, no jargon like "A2"/"A7"/canonical-home
+  citations), or replace with a one-line pointer to `project-philosophy.md`? If kept, should
+  `project-philosophy.md` note that README carries a condensed public-facing version, so a future edit to
+  the convictions knows to check both?
 <!-- DOC-REVIEW-OPEN:END -->
 
 ## FYI — what was auto-applied this run (stale-factual-fix, code-anchored, green-gated)
 
-Full three-agent gate ran this run (commit `7817a11` → `2d1b74c`, 35 commits since the last checkpoint —
-the claude-worker provider lane / proxy-catalog / host-pool rework: the isolated proxied kind-1 launch
-transport (`ClaudeWorkerProvider`, commits `9f4cf8f`/`dd47e8d`/`860920c`), proxy registry expansion with
-capability ranking + identity dedup (`bebd69f`), reclassifying claude-worker as an in-process pool in both
-draws (`b6a5f0e`), and the claude-worker lane dogfood run + its feedback-gap record. The owner had already
-manually applied 17 of 18 items from the prior escalation batch (commit `2ba6ae3`) before this run started.
-5 reviewer agents (ops/package/provider-surface + meta-tooling; backlog.md + HANDOFF.md; the highest-risk
-`spec/audit/*` cluster; the remaining `spec/*` cluster; policy/philosophy including CLAUDE.md/AGENTS.md),
-each examining every in-scope item in their cluster against live code, then 5 independent adversary agents
-re-checked every item from scratch — several adversaries independently recounted registry sizes and found
-new items the reviewers missed (a second `spec/host-validation.md` coverage-gap omission for claude-worker;
-two additional shipped-but-untagged backlog.md entries; a refined framing for the unified-dispatch-worker-model.md
-escalation). Exactly one item was genuinely contested (reviewer vs. adversary disagreed on whether
-`docs/end-of-sprint-report-template.md`'s section ordering violates a CLAUDE.md sequencing rule) and was
-resolved by an independent judge agent: DROP — direct inspection of both files showed the alleged
-ordering constraint doesn't exist (friction was never part of the 7-numbered cleanup sequence in either
-file), so the reviewer's premise was factually wrong and no escalation was warranted.
+Full three-tier gate ran this run (checkpoint `2c321cd` → `4e9eb43`, 43 commits since the last checkpoint —
+the H1+H3+H5 dispatch-quota unification, the H2+H4 branch-pair collapse, the repair-proxy retirement /
+LiteLLM proxy-contract swap and its live validation, the model-capability-ranking survey, and the
+capability-evidence obligation plan/implementation-review work). 7 reviewer agents each examined every
+in-scope item in their doc cluster against live code (backlog.md; HANDOFF.md; the `spec/audit/*` cluster;
+the remaining `spec/*` cluster; `docs/audit-pkg/*` + README.md; the 6 design/concept docs; instruction files
++ meta-tooling + package READMEs), then 4 independent adversary agents re-checked every candidate finding
+from scratch plus swept their clusters for anything missed — several adversaries found additional items the
+reviewers missed (a stale self-contradictory "repair-proxy" line in HANDOFF.md itself; a stale
+`spec/cost-first-routing.md` reference; the unregistered-doc manifest failure, independently found by two
+different agents plus direct inspection). One cluster was genuinely contested (docs/backlog.md's
+capability-evidence bullets — reviewer proposed rewriting them against the unmerged `wip/capability-evidence`
+branch's state, adversary refuted) and one needed an apply-vs-escalate scope call
+(`spec/unified-dispatch-worker-model.md`'s repair-proxy terminology — broad functional redescription vs. a
+narrow single-line sibling fix); both resolved by an independent judge agent (both ESCALATE; see DD-1/DD-2
+above).
 
 Applied:
-- `docs/audit-pkg/operator-guide.md`: added `claude_worker` to the per-backend dispatch-inventory block
-  list (`DISPATCH_INVENTORY_FIELDS` includes it, the doc's list didn't).
-- `src/audit/README.md`: added `claude-worker` to the provider wiring-layer list (`src/audit/providers/index.ts`
-  now injects `createClaudeWorkerProvider` alongside claude-code/opencode/agy).
-- `spec/audit/dispatch-admission-control.md`: `HostDispatchDescriptor` → `AuditorDescriptor` (a stale type
-  name — the rename predates even the prior doc-review checkpoint, reintroduced by the owner's manual
-  batch-apply commit after the rename had already shipped).
-- `spec/host-validation.md`: extended the live-dispatch e2e coverage-gap note to also name `claude-worker`
-  alongside `agy` (its only existing test, `tests/shared/claude-worker-provider.test.mjs`, is a
-  local-mock-HTTP-server unit test, not a live-dispatch e2e).
-- `docs/HANDOFF.md`: fixed two changelog-lag spots left behind when commit 3 shipped after the section
-  narrating it as open was last edited — "So the next item is `commit 3`" (inside a section already
-  retitled "(closed)") now points to its shipped commits + ▶ IMMEDIATE NEXT; the "Live state" repair-proxy
-  bullet's "an open worth-it call" tail now states the kind-1 transport shipped and was dogfooded.
-- `docs/backlog.md`: deleted two fully-shipped memory-tagged friction entries with zero open remainder
-  (the shared-core-capability-restore-every-draw lesson; the G2.5 spec-intent-vs-sketch lesson — both
-  already have durable homes via their existing memory tags); fixed two stale internal citations in the
-  G4 entry (`quotaPool.ts:129` → `hostPool.ts:156`, the logic moved during the assembly-unification lift;
-  `sessionConfig.ts:681-685` → `src/shared/types/sessionConfig.ts:772-779`, drifted ~90 lines from
-  intervening edits).
-- `docs/project-philosophy.md`: tightened the B6 "log friction" citation to name its actual CLAUDE.md
-  section (`→ Known friction & deferred fixes`), matching every sibling citation's precision — the same
-  imprecision pattern the prior run's DD-11 fixed for A2/A4/B2; this was the one citation that pattern
-  missed, independently re-scanned and confirmed exhaustive by both reviewer and adversary this run.
+- `docs/backlog.md`: deleted a stale `SHIPPED` status-marker bracket (repair-proxy dogfood lap entry);
+  rewrote the "cost ordering doesn't consult quota" claim — the quota-demotion primitive
+  (`CostCandidate.saturated`) now exists in `costRank.ts` but no caller ever sets it, so the doc now says
+  "unwired" not "doesn't exist"; folded two duplicate test-hermeticity bullets (`quota-command.test.mjs`,
+  `linux-cycle-regression.test.mjs`) into their richer siblings; consolidated 5 near-identical vitest
+  false-green "Recurrence #N" bullets into one summary bullet; deleted two `CLOSED`-status-marker bullets
+  (H3/H5 residuals) with independently-verified zero open remainder; fixed 3 stale citations
+  (`HYBRID_NODE_TOKEN_ESTIMATE` line number, the pre-commit-gate.mjs scope description, the session-config
+  three-filenames citations + a dead wrapper-seeding claim).
+- `docs/HANDOFF.md`: removed a stale "two quota contracts" open-item (unified into one contract by commit
+  `4008f46`); fixed a self-contradictory repair-proxy reference (the doc's own line 108 already says
+  repair-proxy was retired).
+- `docs/audit-pkg/operator-guide.md`: corrected the "Shared install files" list — `session-config.json` is
+  created lazily by `next-step`/`advance-audit`, not by `install`/`ensure` bootstrap (confirmed via
+  `wrapper/audit-code-wrapper-install-hosts.mjs`'s own "No session-config seeding" comment).
+- `spec/conceptual-design-review-design.md`: `charter_clarification` → `charter_clarification_current`
+  (matches the actual `PRIORITY` array entry in `src/audit/orchestrator/nextStep.ts`).
+- `spec/cost-first-routing.md`: "the repair-proxy registry" → "the declared proxy lane" (the `/registry`
+  discovery shape was deleted, not renamed, per commit `4441703`).
 
-Full green gate (`npm run build && npm run check && npm test`) passed before push. One discrete commit
-(`doc-review: nightly pass — 8 stale-factual-fixes applied, 12 items escalated`), pushed to `main`.
+Full green gate (`npm run build && npm run check && npm test`) passed before push — 510 passed | 5 skipped
+test files, 6816 passed | 12 skipped tests, exit 0, no failures. One discrete commit (`doc-review: nightly
+pass — 11 stale-factual-fixes applied, ~14 items escalated`), pushed to `main`.
