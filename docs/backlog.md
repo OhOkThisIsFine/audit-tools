@@ -48,6 +48,62 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **Window-scope validation at the PRODUCER boundary — designed for step 2, deferred with reason
+  (2026-07-19).** The design of record (Residual 1) says to validate scope once where a snapshot is
+  created so consumers are safe by construction, "when step 2 touches this code". Attempted and
+  REVERTED: it does not work as a drop-in. Every production caller swallows a throw from
+  `probeQuotaSource` into `status: "degraded"` (`apiPool.ts`'s two `.catch`es, plus the
+  `queryCurrentUsage` branch's own try), so asserting there converts a contract violation into a
+  quiet `quotaSignalDegraded` pool rather than a loud failure — and `compositeQuotaSource` bypasses
+  `probeQuotaSource` entirely, so "safe by construction" would be false regardless. **Property to
+  hold:** a scope violation from a live producer is distinguishable from a network degrade and
+  surfaces loudly — which needs a distinct error class that the degrade catches deliberately
+  re-throw, not another assert call. Meanwhile `scheduleWave` still asserts (live path, throws) and
+  `quotaSnapshotWindowPctMap` skips-and-warns (persisted path, must not throw).
+
+- **`AdmissionGrant.resource_key` becomes partial under multi-constraint (2026-07-19).** Now that
+  `reconcile(leaseId)` sweeps every key, this field has no reader — it is diagnostic provenance. Once
+  steps 3–4 supply N constraints it will record one of N while looking authoritative. **Property to
+  hold:** the artifact either records every key the lease was taken against, or does not record one
+  at all. Documented in place at `admissionLoop.ts`.
+
+- **Account-metering steps 3–4 carry two obligations step 2 could not hold (2026-07-19).** Step 2
+  (multi-constraint ledger + `(scope,label)` slope key) landed the mechanism; these two properties
+  belong to the callers it enables and are NOT yet pinned anywhere but a test comment:
+  (a) **an uncalibrated pool must go through the cold-start probe path, not be waved through.** The
+  ledger treats a non-finite budget as unbounded by design (optimistic start; the reactive 429 floor
+  corrects), so whether a pool that cannot price a constraint reaches dispatch at all is decided in
+  budget derivation (`deriveWindowTokenBudget` → `COLD_START_PROBE_BATCH`) and admission wiring. The
+  design of record states this as a standing constraint (§ Standing constraints).
+  (b) **account-key DERIVATION must distinguish two credentials on one `backend_provider`**
+  (`accountId.ts`). The step-2 ledger test for "two accounts" pins only that two distinct map keys
+  don't share a bucket — nearly trivial, and NOT the mechanism at risk. An earlier refused review
+  round was about exactly this derivation.
+
+- **`dispatch-quota.json` cannot re-parse its own output when a budget is cold-start
+  (2026-07-19, found by independent review during account-metering step 2).** `pool.budget`
+  defaults to `+Infinity` at cold start, so `headroom_before: Infinity` reaches the admission
+  explain artifact. Zod's `z.number()` accepts `Infinity` in memory, but `JSON.stringify` writes
+  `null`, and `admissionLoop.ts`'s `z.number().optional()` inside a `.strict()` object REJECTS
+  `null` on read-back. Already on disk:
+  `.audit-tools/audit/fanout-quota/design_review/dispatch-quota.json` → `"headroom_before": null`.
+  Latent only because no production path re-parses `DispatchQuotaContractSchema` (it is `parse`d at
+  emit only). **The test that should catch it cannot:** `tests/shared/admission-loop.test.mjs`
+  validates the IN-MEMORY object, never a serialize/parse round-trip, and its `pool()` helper
+  defaults `budget = Infinity` — so the one test named for artifact-shape validity asserts the
+  schema accepts exactly the value that does not survive the round trip. **Properties to hold:**
+  a non-finite headroom serializes to something the schema accepts on read-back (or the schema
+  admits it explicitly), and the artifact-shape test asserts a round trip, not an in-memory object.
+  Pre-existing; not introduced by the multi-constraint change.
+
+- **`tests/audit/linux-cycle-regression.test.mjs` times out under full-suite parallel load
+  (2026-07-19).** Passes alone in ~29s; exceeded its 120s timeout when run as part of `vitest run`
+  over the whole suite, then passed alone immediately after. Load-sensitivity, not a regression —
+  but it makes a full-suite run non-deterministically red, which is exactly the condition that
+  trains a reader to wave at "known flaky" instead of resolving failures to names. **Property to
+  hold:** the test's cost does not scale with unrelated suite concurrency (raise its timeout, or
+  make it not contend on whatever shared resource slows it).
+
 - **Per-site pinning gate — REAL BUT FAIL-OPEN ONE LEVEL UP; do NOT cite it as evidence yet
   (2026-07-19, was reported SHIPPED, independent review found two soundness holes).**
   `scripts/shared/assert-sites-pinned.mjs <spec.json>` reverts each site of a change individually and
@@ -947,6 +1003,15 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   dated `*-plan-of-record.md` in the tracked tree (the gate now rejects the latter).
 
 ## Durable traps (environment / tooling reference)
+
+- **`git checkout -- <file>` silently destroys unstaged work when a review round is staged.** Common
+  during review-driven rework: you `git add -A` to give reviewers a stable diff, keep editing in the
+  working tree, then use `git checkout -- <file>` to undo a temporary mutation-test edit. That
+  restores from the INDEX, i.e. the pre-rework staged version — so every unstaged fix to that file is
+  gone, with no warning and a clean-looking tree. Bit once during account-metering step 2 (lost an
+  `assertWindowScopes` call + its import; caught only because a red-green mutation then behaved
+  impossibly). **Use instead:** copy the file to the scratchpad before mutating and `cp` it back, or
+  `git stash` the mutation. Never `git checkout --` a file that has unstaged work you want.
 
 Standing gotchas worth keeping for any agent (strong or weak):
 

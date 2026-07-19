@@ -72,6 +72,7 @@ import {
   foldSlopeObservationFromPctMaps,
 } from "../quota/state.js";
 import type { QuotaWindowPctReading } from "../quota/state.js";
+import type { WindowSlopeKey } from "../quota/quotaSource.js";
 import { buildEmptyPoolTerminal, buildQuotaPausedTerminal } from "../quota/capacity.js";
 import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { detectRateLimitError, computeCooldownUntil } from "../quota/errorParsing.js";
@@ -226,11 +227,12 @@ export interface InFlightEntry<TPacket> {
   /**
    * Reservation-ledger lease held for this in-flight packet (spec admission model).
    * Set only when a `reservationLedger` was configured; reconciled (freed) in
-   * `handleResult` when the packet completes. `resourceKey` is the pool id the lease
-   * was taken against, needed to reconcile. Null/undefined when no ledger is wired.
+   * `handleResult` when the packet completes. The id alone is sufficient — the
+   * ledger sweeps every key it was recorded under, so a lease spanning several
+   * metered windows cannot be partially released. Null/undefined when no ledger is
+   * wired.
    */
   leaseId?: string | null;
-  resourceKey?: string;
 }
 
 /** Mutable state of the rolling dispatcher. */
@@ -851,8 +853,8 @@ export function createRollingDispatcher<TPacket>(
   // Δpercent and seed/update the learned tokens_per_pct slope. Degrade-safe: when
   // the snapshot hasn't moved (Δpercent below the floor) nothing is learned.
   interface SlopeBaseline {
-    /** remaining_pct (0–1) + reset_at per window label at the baseline reading. */
-    pctByLabel: Map<string, QuotaWindowPctReading>;
+    /** remaining_pct (0–1) + reset_at per window SLOPE KEY at the baseline reading. */
+    pctByKey: Map<WindowSlopeKey, QuotaWindowPctReading>;
     /** Tokens dispatched against this pool since the baseline reading. */
     tokensSinceBaseline: number;
   }
@@ -862,7 +864,7 @@ export function createRollingDispatcher<TPacket>(
     if (slopeBaselines.has(poolId)) return;
     const pool = confirmedPools.find((p) => p.id === poolId);
     slopeBaselines.set(poolId, {
-      pctByLabel: quotaSnapshotWindowPctMap(pool?.quotaSourceSnapshot),
+      pctByKey: quotaSnapshotWindowPctMap(pool?.quotaSourceSnapshot),
       tokensSinceBaseline: 0,
     });
   }
@@ -882,12 +884,12 @@ export function createRollingDispatcher<TPacket>(
     const current = quotaSnapshotWindowPctMap(pool?.quotaSourceSnapshot);
     const folded = await foldSlopeObservationFromPctMaps(
       poolId,
-      baseline.pctByLabel,
+      baseline.pctByKey,
       current,
       baseline.tokensSinceBaseline,
     );
     if (folded.length > 0) {
-      slopeBaselines.set(poolId, { pctByLabel: current, tokensSinceBaseline: 0 });
+      slopeBaselines.set(poolId, { pctByKey: current, tokensSinceBaseline: 0 });
       quotaStateCacheDirty = true;
     }
   }
@@ -933,7 +935,7 @@ export function createRollingDispatcher<TPacket>(
   function dispatchOnePacket(
     packet: RollingDispatchPacket<TPacket>,
     slot: ProviderSlot,
-    lease?: { leaseId: string; resourceKey: string } | null,
+    lease?: { leaseId: string } | null,
   ): void {
     // Remove from pending queue.
     state.pendingQueue = state.pendingQueue.filter((p) => p.id !== packet.id);
@@ -959,7 +961,6 @@ export function createRollingDispatcher<TPacket>(
       estimatedTokens: packet.estimatedTokens,
       promise,
       leaseId: lease?.leaseId ?? null,
-      resourceKey: lease?.resourceKey,
     };
 
     state.inFlight.set(packet.id, entry);
@@ -976,16 +977,23 @@ export function createRollingDispatcher<TPacket>(
    *  - `no_ledger` — no ledger configured; dispatch unconditionally (behaviour
    *    identical to before the ledger existed).
    *  - `admitted` — carry the lease on the in-flight entry; reconciled on completion.
-   *  - `blocked` — budget minus everyone's outstanding leases cannot cover this
-   *    packet. `outstandingBefore` is the sum of OTHERS' (and this loop's own)
-   *    live leases the ledger saw: `0` means nothing anywhere holds budget, so the
-   *    single packet's cost exceeds the WHOLE budget and no completion will ever
-   *    free room — the caller's liveness backstop force-admits it (the reactive 429
-   *    floor still catches the overshoot). A non-zero value means a lease is
-   *    outstanding and will free budget, so the caller waits instead of forcing.
+   *  - `blocked` — some constraint's budget minus outstanding leases cannot cover
+   *    this packet. `anyOutstanding` reports whether ANY of the packet's constraints
+   *    had a live lease against it: `false` means nothing anywhere holds budget, so
+   *    the packet's cost exceeds a whole budget and no completion will ever free
+   *    room — the caller's liveness backstop force-admits it (the reactive 429 floor
+   *    still catches the overshoot). `true` means a lease is outstanding somewhere
+   *    and will free budget, so the caller waits instead of forcing.
    *
-   * `forceUnbounded` overrides the pool budget with +Infinity so the backstop admit
-   * always succeeds.
+   *    ⚠ This MUST be the across-constraint aggregate, never one constraint's own
+   *    outstanding total. Under a multi-window packet, a model window can block at
+   *    zero outstanding while the shared account window has plenty in flight; taking
+   *    the blocked constraint's own number would force-dispatch straight into
+   *    overshoot, and which constraint that was would depend on list order.
+   *
+   * `forceUnbounded` overrides EVERY constraint's budget with +Infinity so the
+   * backstop admit always succeeds — unbounding only one still leaves the others to
+   * block it, which would silently disable the anti-deadlock backstop.
    */
   async function admitAgainstLedger(
     packet: RollingDispatchPacket<TPacket>,
@@ -993,20 +1001,23 @@ export function createRollingDispatcher<TPacket>(
     forceUnbounded: boolean,
   ): Promise<
     | { status: "no_ledger" }
-    | { status: "admitted"; lease: { leaseId: string; resourceKey: string } }
-    | { status: "blocked"; outstandingBefore: number }
+    | { status: "admitted"; lease: { leaseId: string } }
+    | { status: "blocked"; anyOutstanding: boolean }
   > {
     if (!reservationLedger) return { status: "no_ledger" };
-    const resourceKey = slot.poolId;
     const outputReservation = resolveOutputReservationFn?.(packet, slot.poolId) ?? 0;
     const cost = Math.max(0, packet.estimatedTokens) + Math.max(0, outputReservation);
-    const budget = forceUnbounded
-      ? Number.POSITIVE_INFINITY
-      : resolvePoolBudget?.(slot.poolId) ?? Number.POSITIVE_INFINITY;
+    const constraints = [
+      {
+        resourceKey: slot.poolId,
+        budget: resolvePoolBudget?.(slot.poolId) ?? Number.POSITIVE_INFINITY,
+        cost,
+      },
+    ];
     const decision = await reservationLedger.admit({
-      resourceKey,
-      cost,
-      budget,
+      constraints: forceUnbounded
+        ? constraints.map((c) => ({ ...c, budget: Number.POSITIVE_INFINITY }))
+        : constraints,
       poolId: slot.poolId,
       // The lease guards a live LLM call (minutes); the ledger's seconds-scale
       // default would expire it mid-flight and hand a concurrent admitter a
@@ -1014,9 +1025,9 @@ export function createRollingDispatcher<TPacket>(
       leaseTtlMs: DISPATCH_LEASE_TTL_MS,
     });
     if (decision.admitted && decision.leaseId !== null) {
-      return { status: "admitted", lease: { leaseId: decision.leaseId, resourceKey } };
+      return { status: "admitted", lease: { leaseId: decision.leaseId } };
     }
-    return { status: "blocked", outstandingBefore: decision.outstandingBefore };
+    return { status: "blocked", anyOutstanding: decision.anyOutstanding };
   }
 
   async function handleResult(
@@ -1042,9 +1053,9 @@ export function createRollingDispatcher<TPacket>(
     // real token cost surfaces in the provider's next quota snapshot; the ledger's
     // job is only to stop reserving it. Best-effort: a ledger failure must never
     // abort dispatch.
-    if (reservationLedger && entry.leaseId && entry.resourceKey) {
+    if (reservationLedger && entry.leaseId) {
       try {
-        await reservationLedger.reconcile(entry.resourceKey, entry.leaseId);
+        await reservationLedger.reconcile(entry.leaseId);
       } catch {
         // Non-fatal: the lease's TTL expiry reclaims it if reconcile ever fails.
       }
@@ -1501,13 +1512,14 @@ export function createRollingDispatcher<TPacket>(
    * the reservation ledger (when configured), and dispatch the admitted ones.
    * Returns how many were dispatched.
    *
-   * Liveness backstop: a packet the ledger BLOCKS with `outstandingBefore === 0`
-   * has a cost exceeding the WHOLE pool budget while nothing anywhere holds a lease
-   * to ever free room — the FIRST such packet per pass is admitted unbounded so the
-   * run can never deadlock on a single over-budget packet (the reactive 429 floor
-   * still catches the overshoot). A block with outstanding leases (`> 0`) means a
-   * co-located peer or an in-flight packet will free budget, so it waits instead —
-   * this is what stops two co-located loops from both force-admitting into overshoot.
+   * Liveness backstop: a packet the ledger BLOCKS with `anyOutstanding === false`
+   * has a cost exceeding a whole budget while nothing anywhere holds a lease to ever
+   * free room — the FIRST such packet per pass is admitted unbounded so the run can
+   * never deadlock on a single over-budget packet (the reactive 429 floor still
+   * catches the overshoot). A block with a lease outstanding against ANY of the
+   * packet's constraints means a co-located peer or an in-flight packet will free
+   * budget, so it waits instead — this is what stops two co-located loops from both
+   * force-admitting into overshoot.
    */
   async function dispatchPass(): Promise<number> {
     let dispatched = 0;
@@ -1554,11 +1566,11 @@ export function createRollingDispatcher<TPacket>(
 
       // Reservation-ledger admission (proactive layer).
       const admission = await admitAgainstLedger(packet, slot, false);
-      let lease: { leaseId: string; resourceKey: string } | null = null;
+      let lease: { leaseId: string } | null = null;
       if (admission.status === "admitted") {
         lease = admission.lease;
       } else if (admission.status === "blocked") {
-        if (admission.outstandingBefore === 0 && !forcedUsed && dispatched === 0) {
+        if (!admission.anyOutstanding && !forcedUsed && dispatched === 0) {
           // Single packet exceeds the whole budget with nothing holding a lease →
           // force it unbounded so the run can't deadlock. Only the first per pass.
           const forced = await admitAgainstLedger(packet, slot, true);

@@ -146,7 +146,7 @@ test("MNT-bf201bf7: a healthy learned window does not reduce scheduleWave", () =
       },
       cooldown_until: null,
       last_429_at: null,
-      tokens_per_pct: { default: 1_000_000 }, // huge budget
+      tokens_per_pct: { "account:default": 1_000_000 }, // huge budget
     },
     estimatedSlotTokens: [1000, 1000, 1000, 1000],
     quotaSourceSnapshot: {

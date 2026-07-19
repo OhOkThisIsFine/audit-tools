@@ -164,6 +164,14 @@ export function admissionPoolsFromSummaries(
 export interface AdmissionGrant {
   packet_id: string;
   pool_id: string;
+  /**
+   * ⚠ DIAGNOSTIC PROVENANCE ONLY — not the reconcile key. `reconcile(leaseId)`
+   * sweeps every key the lease was recorded under, precisely so no caller has to
+   * know which keys those were. Once steps 3-4 supply multiple constraints this
+   * field records only ONE of N and will look authoritative while being partial
+   * ([[write-only-data-looks-authoritative]]); make it a key array or drop it then.
+   * Tracked in `docs/backlog.md`.
+   */
   resource_key: string;
   lease_id: string;
   cost: number;
@@ -530,9 +538,7 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
         continue;
       }
       const decision = await input.ledger.admit({
-        resourceKey: pool.resourceKey,
-        cost: packet.cost,
-        budget: pool.budget,
+        constraints: [{ resourceKey: pool.resourceKey, budget: pool.budget, cost: packet.cost }],
         poolId: pool.poolId,
         ...(input.leaseTtlMs != null ? { leaseTtlMs: input.leaseTtlMs } : {}),
       });
@@ -551,8 +557,12 @@ export async function admitBatch(input: AdmitBatchInput): Promise<AdmitBatchResu
           resource_key: pool.resourceKey,
           admitted: true,
           reason: "admitted",
-          headroom_before: decision.headroomBefore,
-          outstanding_before: decision.outstandingBefore,
+          ...(decision.binding
+            ? {
+                headroom_before: decision.binding.headroomBefore,
+                outstanding_before: decision.binding.outstandingBefore,
+              }
+            : {}),
           cost: packet.cost,
         });
         placed = true;

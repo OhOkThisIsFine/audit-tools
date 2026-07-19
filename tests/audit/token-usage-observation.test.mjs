@@ -260,7 +260,7 @@ test("recordHostTokenUsageObservation: token_usage + pre/post snapshot delta gra
       expect(entry, "quota-state entry created").toBeTruthy();
       expect(entry.tokens_per_pct, "tokens_per_pct slope learned").toBeTruthy();
       // 15000 tokens / (0.5-0.4)*100 = 10 percent → 1500 tokens/pct.
-      expect(Math.abs(entry.tokens_per_pct.default - 1500) < 1e-6).toBe(true);
+      expect(Math.abs(entry.tokens_per_pct["account:default"] - 1500) < 1e-6).toBe(true);
     } finally {
       await rm(runDir, { recursive: true, force: true });
     }
@@ -471,7 +471,7 @@ test("recordHostTokenUsageObservation: SAME reset_at on PRE/POST still folds nor
       expect(outcome.reason).toBe("recorded");
 
       const state = await readQuotaState();
-      expect(state.entries["claude-code/model-a"].tokens_per_pct.default).toBeGreaterThan(0);
+      expect(state.entries["claude-code/model-a"].tokens_per_pct["account:default"]).toBeGreaterThan(0);
     } finally {
       await rm(runDir, { recursive: true, force: true });
     }

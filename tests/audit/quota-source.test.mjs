@@ -209,7 +209,7 @@ test("token-budget gate: a healthy learned budget does not reduce the wave", () 
       buckets: fullBuckets(10),
       cooldown_until: null,
       last_429_at: null,
-      tokens_per_pct: { session: 100000 }, // huge slope → huge budget
+      tokens_per_pct: { "account:session": 100000 }, // huge slope → huge budget
     },
     estimatedSlotTokens: [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
     quotaSourceSnapshot: snapshot,
@@ -245,7 +245,7 @@ test("token-budget gate: weekly-binding vs session-binding pools use distinct sl
       cooldown_until: null,
       last_429_at: null,
       // session: 80% × 1000 = 80000 budget; weekly: 20% × 50 = 1000 budget → weekly binds.
-      tokens_per_pct: { session: 1000, weekly: 50 },
+      tokens_per_pct: { "account:session": 1000, "account:weekly": 50 },
     },
     estimatedSlotTokens: [500, 500, 500, 500, 500, 500, 500, 500, 500, 500],
     quotaSourceSnapshot: snapshot,

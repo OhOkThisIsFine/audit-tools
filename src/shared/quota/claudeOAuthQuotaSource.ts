@@ -376,11 +376,11 @@ function collectWindows(body: UsageResponse, model: string | null): QuotaWindow[
     // constraint. Scope is part of the window's identity, so it belongs in the
     // identity key.
     //
-    // The delimiter lives ONLY in this local key — never in the emitted label.
-    // Encoding scope into the label instead would (a) be defeatable by a payload
-    // whose group already contains the delimiter, and (b) orphan every
-    // previously-learned `tokens_per_pct` slope keyed by the old label, silently
-    // forcing recalibration on upgrade.
+    // The delimiter lives ONLY in this local key — never in the emitted label,
+    // which would be defeatable by a payload whose group already contains it.
+    // The slope map is separately partitioned by scope via `windowSlopeKey`, so
+    // the emitted label stays a clean agnostic string and the scope travels as
+    // its own field.
     const identity = `${scope} ${label}`;
     if (seen.has(identity)) return;
     seen.add(identity);

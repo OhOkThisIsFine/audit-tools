@@ -31,7 +31,7 @@ export async function reconcileAdmissionLeasesFromQuotaFile(
   const ledger = createReservationLedger();
   for (const lease of leases) {
     try {
-      await ledger.reconcile(lease.resource_key, lease.lease_id);
+      await ledger.reconcile(lease.lease_id);
     } catch {
       // Best-effort: the lease TTL reclaims budget if a reconcile is lost.
     }

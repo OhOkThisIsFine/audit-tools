@@ -10,7 +10,13 @@ import type {
   WaveBindingCap,
   WaveSchedule,
 } from "./types.js";
-import type { QuotaUsageSnapshot, QuotaWindowScope } from "./quotaSource.js";
+import {
+  hasWindowScope,
+  windowSlopeKey,
+  type QuotaUsageSnapshot,
+  type QuotaWindowScope,
+  type WindowSlopeKey,
+} from "./quotaSource.js";
 import {
   hostClassFor,
   resolveLimits,
@@ -416,23 +422,31 @@ export function deriveColdStartAdmissionBatch(params: {
 }
 
 /**
- * Derive a single window's remaining token budget, in learned/absolute priority:
- *  1. absolute `tokens_remaining` when the window reports one;
- *  2. else the learned `tokens_per_pct[label]` × remaining_pct × 100;
- *  3. else `null` (cold start — the caller applies the calibration bootstrap).
- */
-/**
  * Every window on a snapshot must declare its metering scope. Unmeterable, NOT
  * defaultable: the scope decides which partition the window's allowance is drawn
  * from, so guessing it silently meters against the wrong one. The test tree is
- * untypechecked, so a stale fixture can omit the field with `tsc` staying
- * silent — defaulting here would let that fixture pass while exercising the
- * wrong partition, which is precisely how the previous defect stayed invisible.
- * Fail loud, at every entry point that accepts a snapshot.
+ * untypechecked, so a stale fixture can omit the field with `tsc` staying silent —
+ * defaulting would let that fixture pass while exercising the wrong partition,
+ * which is precisely how the previous defect stayed invisible.
+ *
+ * ⚠ Deliberately still called from `scheduleWave` ONLY, and NOT hoisted to the
+ * producer boundary, which the design of record scheduled for this step. That move
+ * turns out not to be mechanical: every production caller of `probeQuotaSource`
+ * swallows a throw into `status: "degraded"` (`apiPool.ts`'s `.catch`, and the
+ * `queryCurrentUsage` branch's own try), so asserting there would not fail loud — it
+ * would quietly convert a contract violation into a degraded pool. `compositeQuotaSource`
+ * bypasses `probeQuotaSource` entirely, so "safe by construction" would be false
+ * regardless. Doing it properly needs a distinct error class that the degrade
+ * catches deliberately re-throw. Tracked in `docs/backlog.md`.
+ *
+ * This is a LIVE path, so it must stay a throw: `scheduleWave` is where a scope-less
+ * window would actually mis-meter. Snapshots read back from PERSISTED artifacts are a
+ * different case and are handled by skipping, not throwing — see
+ * `quotaSnapshotWindowPctMap`.
  */
 export function assertWindowScopes(snapshot: QuotaUsageSnapshot): void {
   for (const w of snapshot.windows ?? []) {
-    if (w.scope !== "account" && w.scope !== "model") {
+    if (!hasWindowScope(w)) {
       throw new Error(
         `quota window "${w.label}" has no metering scope (got ${JSON.stringify(w.scope)}). ` +
           `Every window must declare scope "account" or "model" at its producer — see ` +
@@ -442,8 +456,15 @@ export function assertWindowScopes(snapshot: QuotaUsageSnapshot): void {
   }
 }
 
+/**
+ * Derive a single window's remaining token budget, in learned/absolute priority:
+ *  1. absolute `tokens_remaining` when the window reports one;
+ *  2. else the learned slope `tokens_per_pct[windowSlopeKey(scope, label)]`
+ *     × remaining_pct × 100;
+ *  3. else `null` (cold start — the caller applies the calibration bootstrap).
+ */
 function deriveWindowTokenBudget(
-  windowLabel: string,
+  slopeKey: WindowSlopeKey,
   remainingPct: number | null | undefined,
   tokensRemaining: number | null | undefined,
   learnedSlopes: Record<string, number> | undefined,
@@ -460,7 +481,7 @@ function deriveWindowTokenBudget(
   if (remainingPct != null && Number.isFinite(remainingPct) && remainingPct <= 0) {
     return 0;
   }
-  const slope = learnedSlopes?.[windowLabel];
+  const slope = learnedSlopes?.[slopeKey];
   if (
     typeof slope === "number" &&
     Number.isFinite(slope) &&
@@ -541,7 +562,7 @@ function deriveTokenBudget(
 
   for (const w of windows) {
     const windowBudget = deriveWindowTokenBudget(
-      w.label,
+      windowSlopeKey(w.scope, w.label),
       w.remaining_pct,
       w.tokens_remaining,
       learnedSlopes,

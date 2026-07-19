@@ -962,8 +962,18 @@ export type {
   QuotaWindow,
   QuotaProbeResult,
   QuotaProbeStatus,
+  QuotaWindowScope,
+  WindowSlopeKey,
 } from "./quota/quotaSource.js";
-export { QuotaUsageSnapshotSchema, QuotaWindowSchema, probeQuotaSource } from "./quota/quotaSource.js";
+export {
+  QuotaUsageSnapshotSchema,
+  QuotaWindowSchema,
+  probeQuotaSource,
+  // Exported alongside the slope-map helpers below: those REQUIRE a WindowSlopeKey,
+  // and this is the only way to construct one. Omitting it would leave an
+  // out-of-area caller able to reach the map but not to key it correctly.
+  windowSlopeKey,
+} from "./quota/quotaSource.js";
 export {
   resolveLimits,
   hostClassFor,

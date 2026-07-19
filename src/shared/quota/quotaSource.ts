@@ -5,8 +5,8 @@ import { z } from "zod";
  * that scale on DIFFERENT denominators (e.g. Claude's 5-hour `session` vs 7-day
  * `weekly`; Codex's primary vs secondary). The same N tokens is a large percent
  * of a small window and a tiny percent of a big one, so tokens→percent slope is
- * learned per (pool, window-label) and the pool's budget is the MIN across
- * windows. `label` is an AGNOSTIC string ("session","weekly",…) — never a
+ * learned per (pool, {@link windowSlopeKey}) and each window meters against its own
+ * allowance. `label` is an AGNOSTIC string ("session","weekly",…) — never a
  * provider/model identity — so any source can add its own windows.
  */
 /**
@@ -36,6 +36,41 @@ import { z } from "zod";
 export const QuotaWindowScopeSchema = z.enum(["account", "model"]);
 export type QuotaWindowScope = z.infer<typeof QuotaWindowScopeSchema>;
 
+/**
+ * A `tokens_per_pct` map key, as produced by {@link windowSlopeKey}. Branded so the
+ * slope map cannot be read or written with a bare window label: the two key spaces
+ * are both strings, and an unbranded parameter left the guarantee to whoever
+ * remembered it — which a test promptly got wrong, writing under `"weekly"` where
+ * production only ever reads `"account:weekly"`.
+ */
+export type WindowSlopeKey = string & { readonly __windowSlopeKey: unique symbol };
+
+/**
+ * The key a window's learned tokens-per-percent slope is stored under, within a
+ * pool's quota-state entry. **The single resolution point for slope lookup** — the
+ * only way to obtain a {@link WindowSlopeKey}, and every read and write of
+ * `tokens_per_pct` requires one, so the map cannot be keyed one way by the producer
+ * and another by the consumer.
+ *
+ * Keyed by `(scope, label)`, not label alone: an account-scoped and a model-scoped
+ * window can share a group name (both `session`) while pricing different allowances,
+ * and collapsing them onto one entry would silently blend two exchange rates into a
+ * single wrong one.
+ *
+ * ⚠ Changing this key ORPHANS previously-learned slopes (they were stored under the
+ * bare label). That is deliberate and self-healing: an orphaned window reads as
+ * uncalibrated, which routes the pool through the cold-start probe path and re-learns
+ * within a few dispatches. A migration shim would instead carry a slope forward onto a
+ * partition it was never measured against.
+ *
+ * This is also the seam for the deferred sibling-derived slope prior (design of
+ * record, "Deferred seam"): a prior can be injected at this one lookup point without
+ * touching admission.
+ */
+export function windowSlopeKey(scope: QuotaWindowScope, label: string): WindowSlopeKey {
+  return `${scope}:${label}` as WindowSlopeKey;
+}
+
 export const QuotaWindowSchema = z
   .object({
     label: z.string(),
@@ -46,6 +81,11 @@ export const QuotaWindowSchema = z
   })
   .strict();
 export type QuotaWindow = z.infer<typeof QuotaWindowSchema>;
+
+/** Whether a window carries a usable metering scope. */
+export function hasWindowScope(window: { scope?: unknown }): boolean {
+  return window.scope === "account" || window.scope === "model";
+}
 
 export const QuotaUsageSnapshotSchema = z
   .object({

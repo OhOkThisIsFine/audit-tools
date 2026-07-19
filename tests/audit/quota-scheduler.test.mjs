@@ -478,7 +478,7 @@ test("scheduleWave reports binding_cap='token_budget' when a small learned budge
     requestedConcurrency: 10,
     // 100 tokens per percent; window at 40% remaining (well above the near-wall
     // floor) → budget = 40*100 = 4000.
-    quotaStateEntry: makeEntry({ tokens_per_pct: { session: 100 } }),
+    quotaStateEntry: makeEntry({ tokens_per_pct: { "account:session": 100 } }),
     // Each slot ~2000 tokens → only 2 fit in 4000.
     estimatedSlotTokens: [2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000],
     quotaSourceSnapshot: {

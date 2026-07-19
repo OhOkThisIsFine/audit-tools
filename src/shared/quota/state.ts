@@ -3,7 +3,12 @@ import { join } from "node:path";
 import type { ObservedWaveOutcome, QuotaState, QuotaStateEntry } from "./types.js";
 import { withFileLock } from "./fileLock.js";
 import { writeJsonFile } from "../io/json.js";
-import type { QuotaUsageSnapshot } from "./quotaSource.js";
+import {
+  hasWindowScope,
+  windowSlopeKey,
+  type QuotaUsageSnapshot,
+  type WindowSlopeKey,
+} from "./quotaSource.js";
 
 let _statePath: string | undefined;
 
@@ -228,7 +233,7 @@ export const MIN_SLOPE_DELTA_PERCENT = 0.5;
  */
 export function foldTokensPerPctObservation(
   prior: Record<string, number> | undefined,
-  windowLabel: string,
+  slopeKey: WindowSlopeKey,
   priorRemainingPct: number,
   newRemainingPct: number,
   tokensDispatched: number,
@@ -247,12 +252,12 @@ export function foldTokensPerPctObservation(
   if (deltaPercent < MIN_SLOPE_DELTA_PERCENT) return base;
   const sampleSlope = tokensDispatched / deltaPercent;
   if (!Number.isFinite(sampleSlope) || sampleSlope <= 0) return base;
-  const previous = base[windowLabel];
+  const previous = base[slopeKey];
   const blended =
     typeof previous === "number" && Number.isFinite(previous) && previous > 0
       ? previous * (1 - TOKENS_PER_PCT_EWMA_ALPHA) + sampleSlope * TOKENS_PER_PCT_EWMA_ALPHA
       : sampleSlope;
-  return { ...base, [windowLabel]: blended };
+  return { ...base, [slopeKey]: blended };
 }
 
 // EWMA weight for a new output/input ratio observation. Shares the responsive-but-
@@ -336,7 +341,7 @@ export async function recordOutputRatioObservation(
  */
 export async function recordTokensPerPctObservation(
   providerModelKey: string,
-  windowLabel: string,
+  slopeKey: WindowSlopeKey,
   priorRemainingPct: number,
   newRemainingPct: number,
   tokensDispatched: number,
@@ -347,7 +352,7 @@ export async function recordTokensPerPctObservation(
     const entry = state.entries[providerModelKey] ?? blankEntry();
     const updated = foldTokensPerPctObservation(
       entry.tokens_per_pct,
-      windowLabel,
+      slopeKey,
       priorRemainingPct,
       newRemainingPct,
       tokensDispatched,
@@ -372,28 +377,56 @@ export interface QuotaWindowPctReading {
 }
 
 /**
- * Build a window-label → {@link QuotaWindowPctReading} map from a quota usage
- * snapshot. Falls back to a single `"default"` label when the source has no
- * per-window breakdown (single-window providers). Returns an empty map for a
- * null/absent snapshot or one with no usable percent reading.
+ * Build a {@link windowSlopeKey} → {@link QuotaWindowPctReading} map from a quota
+ * usage snapshot. Falls back to a single account-scoped `"default"` window when the
+ * source has no per-window breakdown (single-window providers — matching the
+ * synthetic window the scheduler derives for the same case). Returns an empty map
+ * for a null/absent snapshot or one with no usable percent reading.
+ *
+ * Keyed by `(scope, label)` so a slope sample is attributed to the same partition
+ * the budget will later be metered against — keying by bare label would blend an
+ * account-wide and a model-scoped window that happen to share a group name.
  *
  * Single-sourced so the in-process rolling dispatcher and the host-dispatch
  * merge path attribute a slope sample against the SAME window semantics —
  * see {@link foldSlopeObservationFromSnapshots}.
+ *
+ * ⚠ A window with no usable `scope` is SKIPPED (loudly), never keyed. This path is
+ * fed PERSISTED snapshots — `dispatch-quota.json` written before scope existed, read
+ * back raw with no schema parse — so scope-less windows are real on disk, not a
+ * hypothetical. Two rejected alternatives: keying them anyway produces
+ * `"undefined:<label>"`, which no reader ever looks up, so the slope is silently
+ * orphaned; and THROWING would break {@link foldSlopeObservationFromSnapshots}'s
+ * documented "never throws" contract and kill slope learning on any run resumed
+ * across the upgrade. Skipping costs one window's slope sample, says so, and lets
+ * the rest of the fold proceed.
  */
 export function quotaSnapshotWindowPctMap(
   snapshot: QuotaUsageSnapshot | null | undefined,
-): Map<string, QuotaWindowPctReading> {
-  const map = new Map<string, QuotaWindowPctReading>();
+): Map<WindowSlopeKey, QuotaWindowPctReading> {
+  const map = new Map<WindowSlopeKey, QuotaWindowPctReading>();
   if (!snapshot) return map;
   if (snapshot.windows && snapshot.windows.length > 0) {
     for (const w of snapshot.windows) {
+      if (!hasWindowScope(w)) {
+        process.stderr.write(
+          `[quota] window "${w.label}" from ${snapshot.source} carries no metering scope; ` +
+            `skipping its slope sample (a pre-scope persisted snapshot re-learns on the next probe)\n`,
+        );
+        continue;
+      }
       if (w.remaining_pct != null && Number.isFinite(w.remaining_pct)) {
-        map.set(w.label, { remainingPct: w.remaining_pct, resetAt: w.reset_at ?? null });
+        map.set(windowSlopeKey(w.scope, w.label), {
+          remainingPct: w.remaining_pct,
+          resetAt: w.reset_at ?? null,
+        });
       }
     }
   } else if (snapshot.remaining_pct != null && Number.isFinite(snapshot.remaining_pct)) {
-    map.set("default", { remainingPct: snapshot.remaining_pct, resetAt: snapshot.reset_at ?? null });
+    map.set(windowSlopeKey("account", "default"), {
+      remainingPct: snapshot.remaining_pct,
+      resetAt: snapshot.reset_at ?? null,
+    });
   }
   return map;
 }
@@ -440,14 +473,14 @@ export function quotaSnapshotWindowPctMap(
  */
 export async function foldSlopeObservationFromPctMaps(
   providerModelKey: string,
-  priorPctByLabel: Map<string, QuotaWindowPctReading>,
-  currentPctByLabel: Map<string, QuotaWindowPctReading>,
+  priorPctByKey: Map<WindowSlopeKey, QuotaWindowPctReading>,
+  currentPctByKey: Map<WindowSlopeKey, QuotaWindowPctReading>,
   tokensDispatched: number,
 ): Promise<string[]> {
   const folded: string[] = [];
   if (!Number.isFinite(tokensDispatched) || tokensDispatched <= 0) return folded;
-  for (const [label, prior] of priorPctByLabel) {
-    const current = currentPctByLabel.get(label);
+  for (const [slopeKey, prior] of priorPctByKey) {
+    const current = currentPctByKey.get(slopeKey);
     if (current == null) continue;
     if (prior.resetAt != null && current.resetAt != null && prior.resetAt !== current.resetAt) {
       // P1: same label, different window instance — a rollover, not consumption.
@@ -462,7 +495,7 @@ export async function foldSlopeObservationFromPctMaps(
     try {
       await recordTokensPerPctObservation(
         providerModelKey,
-        label,
+        slopeKey,
         prior.remainingPct,
         current.remainingPct,
         tokensDispatched,
@@ -470,7 +503,7 @@ export async function foldSlopeObservationFromPctMaps(
       // C2: push only AFTER a successful write — a throw below is caught and
       // swallowed (slope learning must never abort the caller) WITHOUT this
       // label being reported as folded.
-      folded.push(label);
+      folded.push(slopeKey);
     } catch {
       // Non-fatal: slope learning must never abort the caller.
     }

@@ -443,11 +443,12 @@ test("window scope: a model-scoped limit is NOT deduped away by an account windo
   const model = snap.windows.filter((w) => w.scope === "model");
   expect(account.map((w) => w.label)).toContain("session");
   expect(model).toHaveLength(1);
-  // Distinct label, so it also cannot collide with the account window in the
-  // per-pool tokens_per_pct slope map, which is keyed by label.
-  // The label is emitted VERBATIM — the scope, not a mangled string, is what
-  // distinguishes the two windows. Encoding scope into the label would orphan
-  // previously-learned slopes keyed by the old label.
+  // The label is emitted VERBATIM and is deliberately IDENTICAL to the account
+  // window's ("session"). The scope, not a mangled label, is what distinguishes the
+  // two — and it is what keeps them apart in the per-pool tokens_per_pct slope map,
+  // which is keyed by `windowSlopeKey(scope, label)` ("account:session" vs
+  // "model:session"). Encoding scope into the label itself would be defeatable by a
+  // payload whose group already contains the delimiter.
   expect(model[0].label).toBe("session");
   expect(model[0].scope).toBe("model");
 });

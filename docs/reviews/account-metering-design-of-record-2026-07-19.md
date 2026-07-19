@@ -121,10 +121,23 @@ naming is a separate concern used only for matching.** Each fix is individually 
 
 **Residual 1 — the guard is on the metering path only.** `assertWindowScopes` runs in `scheduleWave`.
 Other snapshot consumers (`quotaSnapshotWindowPctMap` / `foldSlopeObservationFromSnapshots` in
-`state.ts`, `tokenBudgetView.ts`) do not call it. In production this cannot fire — every producer
-stamps scope — so it is defense-in-depth completeness, not a live bug. **The right fix is to validate
-ONCE at the producer boundary** (where a snapshot is created) rather than at each consumer, so
-consumers are safe by construction. Do that when step 2 touches this code.
+`state.ts`, `tokenBudgetView.ts`) do not call it.
+
+⚠ **CORRECTED 2026-07-19 by step 2's execution — the premise below was FALSE.** This said "in
+production this cannot fire — every producer stamps scope — so it is defense-in-depth completeness,
+not a live bug." Live producers do stamp scope, but consumers are also fed **persisted** snapshots
+read back from `dispatch-quota.json` with no schema parse, and those predate scope: **12 of 12
+windows across all 9 on-disk artifacts carry none.** Once step 2 put scope into the slope key, those
+windows keyed as `"undefined:<label>"` — silently orphaned. So this was a live bug, and step 2 made
+it materially worse before fixing it.
+
+**The "validate ONCE at the producer boundary" prescription was also attempted and REVERTED** — it is
+not mechanical. Every production caller swallows a throw from `probeQuotaSource` into
+`status: "degraded"`, and `compositeQuotaSource` bypasses that boundary entirely, so asserting there
+fails quietly rather than loudly. What shipped instead splits by input provenance: the LIVE path
+(`scheduleWave`) still throws; the PERSISTED path (`quotaSnapshotWindowPctMap`) skips-and-warns,
+because it sits under a function contracted never to throw. The genuine producer-boundary fix needs a
+distinct error class the degrade-catches deliberately re-throw — tracked in `docs/backlog.md`.
 
 **Residual 2 — `tokens_per_pct` is keyed by label alone, within a pool.** An account-scoped and a
 model-scoped window sharing a group name (both `session`) therefore share one learned slope entry.

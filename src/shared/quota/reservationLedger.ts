@@ -58,26 +58,88 @@ export interface ReservationLease {
   expiresAt: number;
 }
 
-/** Outcome of an admission attempt against one resourceKey's shared budget. */
+/**
+ * One metered allowance a dispatch must fit inside. A packet is admitted only if it
+ * clears EVERY constraint that applies to it — an account-wide window shared with
+ * every sibling model on the credential, plus any window scoped to this model alone.
+ *
+ * ⚠ **`budget` and `cost` are in the WINDOW's own unit, and the caller owns the
+ * conversion.** There is no unit shared across windows: a 5-hour `session` and a
+ * 7-day `weekly` scale on different denominators, so the same N tokens is a
+ * different fraction of each. The ledger is deliberately unit-agnostic — it only
+ * compares `cost` against `budget - Σ outstanding` for one key — which is exactly
+ * what lets an account-scoped window meter in the shared percent while each sibling
+ * converts its own tokens at its own learned rate.
+ */
+export interface AdmitConstraint {
+  /** The metered allowance's identity — `(accountKey, label)` for an account-wide window, `(poolId, label)` for a model-scoped one. */
+  resourceKey: string;
+  /** Caller-computed live remaining allowance for `resourceKey`. Non-finite ⇒ optimistic (unbounded). */
+  budget: number;
+  /** This dispatch's draw against `resourceKey`, in the same unit as `budget`. */
+  cost: number;
+}
+
+/** How one constraint evaluated during an admission attempt. */
+export interface ConstraintOutcome {
+  resourceKey: string;
+  /** Live budget minus `outstandingBefore` — so it carries that field's carve-out too. */
+  headroomBefore: number;
+  /**
+   * Outstanding (non-expired) leases counted against this key when it was
+   * evaluated. This is everyone else's in-flight total — PLUS any draw an earlier
+   * constraint in this same attempt already made on the same key (see the
+   * duplicate-key note on {@link ReservationLedger.admit}), so it is what this
+   * constraint was actually measured against rather than a pure "before" reading.
+   */
+  outstandingBefore: number;
+  /** The cost this attempt tried to reserve against this key (clamped to >= 0). */
+  cost: number;
+  /** Whether this constraint alone had room. Admission requires ALL to be true. */
+  cleared: boolean;
+}
+
+/** Outcome of an admission attempt against every constraint that applies. */
 export interface AdmitDecision {
   admitted: boolean;
   /** Minted only when `admitted`; pass back to `reconcile` on completion. */
   leaseId: string | null;
-  /** Live budget minus everyone's outstanding leases, BEFORE this attempt. */
-  headroomBefore: number;
-  /** Sum of everyone's outstanding (non-expired) leases, BEFORE this attempt. */
-  outstandingBefore: number;
-  /** The cost this attempt tried to reserve (echoed for the explain-artifact). */
-  cost: number;
+  /** Every constraint's evaluation, in input order — the per-admission explain record. */
+  constraints: ConstraintOutcome[];
+  /**
+   * The TIGHTEST constraint — the one closest to blocking this dispatch, by the
+   * dimensionless ratio `cost / headroomBefore`. This is the "binding window" a
+   * report should name. Null only when no constraints were supplied.
+   *
+   * ⚠ Deliberately a RATIO, not the smallest `headroomBefore`. Constraints meter in
+   * different windows' units, so raw headroom is not comparable across them — "40
+   * left of a session window" vs "80 left of a weekly one" says nothing about which
+   * binds. The ratio is dimensionless and therefore is comparable. A blocked
+   * constraint always outranks a cleared one (its ratio exceeds 1), so this is also
+   * independent of the order the caller supplied the constraints in.
+   */
+  binding: ConstraintOutcome | null;
+  /**
+   * Whether ANY constraint had outstanding leases against it.
+   *
+   * This exists because `binding.outstandingBefore` is one key's total and must
+   * never be read as "is anything in flight anywhere" — the liveness backstop in
+   * the rolling dispatcher needs exactly that aggregate to decide whether waiting
+   * could ever help. Given as a computed boolean rather than left to the consumer
+   * to derive, so the predicate cannot be reconstructed wrongly from a per-key
+   * number (it was, and a blocked model window with an idle account window would
+   * have force-dispatched into overshoot).
+   */
+  anyOutstanding: boolean;
 }
 
 export interface AdmitInput {
-  /** `provider#account/model` — the real metered account the budget belongs to. */
-  resourceKey: string;
-  /** Total reservation: input estimate + output envelope. */
-  cost: number;
-  /** Caller-computed live remaining tokens for `resourceKey`. Non-finite ⇒ optimistic (unbounded). */
-  budget: number;
+  /**
+   * Every allowance this dispatch draws against. Admission is ALL-OR-NOTHING: one
+   * lease id is recorded under each key, or none are. An empty array is admitted
+   * unmetered (a lease is still minted so completion reconciles symmetrically).
+   */
+  constraints: AdmitConstraint[];
   /** Pool id for diagnostics. */
   poolId: string;
   /** Lease lifetime in ms; defaults to the ledger's TTL. */
@@ -151,6 +213,42 @@ function sumOutstanding(leases: ReservationLease[] | undefined, now: number): nu
   return total;
 }
 
+/**
+ * How close a constraint came to blocking, as a dimensionless ratio of the draw to
+ * the room available for it. Comparable ACROSS windows that meter in different
+ * units, which raw headroom is not. Higher = tighter; > 1 means it blocked.
+ */
+function tightness(outcome: ConstraintOutcome): number {
+  // Order matters. A zero-cost constraint ALWAYS clears — including on an exhausted
+  // window — so it must rank loosest, not tightest. Testing headroom first returned
+  // +Infinity for `cost 0, headroom 0` and let a constraint that cleared outrank one
+  // that actually blocked. With this order the invariant below is exact: cleared
+  // ⇒ tightness <= 1 (cost <= 0 ⇒ 0, else headroom >= cost ⇒ ratio <= 1), and
+  // blocked ⇒ > 1 or +Infinity.
+  if (outcome.cost <= 0) return 0;
+  if (outcome.headroomBefore <= 0) return Number.POSITIVE_INFINITY;
+  return outcome.cost / outcome.headroomBefore;
+}
+
+/**
+ * The constraint closest to blocking — what a report should name as the binding
+ * window. Replaces the MIN-collapse that used to happen before the ledger was
+ * reached. Ranked by {@link tightness}, so the result does not depend on the order
+ * the caller listed the constraints in, and a blocked constraint always wins.
+ */
+function pickBinding(outcomes: ConstraintOutcome[]): ConstraintOutcome | null {
+  if (outcomes.length === 0) return null;
+  return outcomes.reduce((tightest, o) => {
+    const a = tightness(o);
+    const b = tightness(tightest);
+    if (a !== b) return a > b ? o : tightest;
+    // Ties are reachable (two exhausted windows both score +Infinity; equal ratios).
+    // Break them on the key so the answer is a property of the ledger state, not of
+    // the order the caller happened to list the constraints in.
+    return o.resourceKey < tightest.resourceKey ? o : tightest;
+  });
+}
+
 /** Drop expired leases from every key, returning the trimmed map and how many were dropped. */
 function pruneExpired(ledger: LedgerMap, now: number): { ledger: LedgerMap; dropped: number } {
   let dropped = 0;
@@ -190,64 +288,99 @@ export class ReservationLedger {
   }
 
   /**
-   * Attempt to reserve `cost` tokens against `resourceKey`'s shared budget.
-   * Admitted iff `budget - Σ outstanding_leases(resourceKey) >= cost`, evaluated
-   * atomically under the lock so concurrent admitters serialize and each sees the
-   * others' in-flight reservations. A non-finite `budget` is treated as unbounded
-   * (optimistic start — the reactive floor still corrects). A non-positive `cost`
-   * is always admitted with a lease so completion still reconciles symmetrically.
-   * The returned `headroomBefore`/`outstandingBefore`/`cost` feed the per-admission
-   * explain record on the dispatch-quota artifact.
+   * Attempt to reserve against EVERY constraint that applies to this dispatch.
+   * Each is admitted iff `budget - Σ outstanding_leases(resourceKey) >= cost`, and
+   * the dispatch is admitted iff every one clears — **all-or-nothing**: either one
+   * lease id is recorded under each key, or nothing is written. A partial
+   * reservation (fits the account window, overruns its model window) is therefore
+   * unrepresentable, which is what makes `reconcile` by lease id total.
+   *
+   * The whole evaluation runs atomically under the lock, so concurrent admitters
+   * serialize and each sees the others' in-flight reservations across every key.
+   * A non-finite `budget` is unbounded (optimistic start — the reactive floor still
+   * corrects); a non-positive `cost` always clears its own constraint so completion
+   * still reconciles symmetrically. Every constraint is evaluated even after one
+   * blocks, so the explain record shows the full picture rather than the first
+   * failure.
+   *
+   * Two constraints on the same `resourceKey` accumulate within the attempt — the
+   * second sees the first's draw as outstanding — so a caller that supplies a key
+   * twice cannot double-spend one allowance.
    */
   async admit(input: AdmitInput): Promise<AdmitDecision> {
     const ttl = input.leaseTtlMs ?? this.defaultTtlMs;
     return withFileLock(this.lockPath, async () => {
       const now = this.now();
       const { ledger } = pruneExpired(await readLedger(this.ledgerPath), now);
-      const outstandingBefore = sumOutstanding(ledger[input.resourceKey], now);
-      const budget = Number.isFinite(input.budget) ? input.budget : Number.POSITIVE_INFINITY;
-      const headroomBefore = budget - outstandingBefore;
-      const cost = Number.isFinite(input.cost) ? input.cost : 0;
-      const admitted = cost <= 0 || headroomBefore >= cost;
+
+      // Draws already committed by EARLIER constraints in this same attempt, so a
+      // repeated resourceKey is metered once against its real allowance.
+      const pendingByKey = new Map<string, number>();
+      const outcomes: ConstraintOutcome[] = [];
+      let anyOutstanding = false;
+      for (const constraint of input.constraints) {
+        const pending = pendingByKey.get(constraint.resourceKey) ?? 0;
+        const priorOutstanding = sumOutstanding(ledger[constraint.resourceKey], now);
+        if (priorOutstanding > 0) anyOutstanding = true;
+        const outstandingBefore = priorOutstanding + pending;
+        const budget = Number.isFinite(constraint.budget) ? constraint.budget : Number.POSITIVE_INFINITY;
+        const headroomBefore = budget - outstandingBefore;
+        // Normalize ONCE: the value validated against headroom, accumulated for a
+        // repeated key, and persisted on the lease must be the same number. A
+        // negative cost reaching the lease would subtract from the key's outstanding
+        // total and manufacture headroom that does not exist for every peer.
+        const cost = Number.isFinite(constraint.cost) ? Math.max(0, constraint.cost) : 0;
+        outcomes.push({
+          resourceKey: constraint.resourceKey,
+          headroomBefore,
+          outstandingBefore,
+          cost,
+          cleared: cost <= 0 || headroomBefore >= cost,
+        });
+        pendingByKey.set(constraint.resourceKey, pending + cost);
+      }
+
+      const admitted = outcomes.every((o) => o.cleared);
+      const binding = pickBinding(outcomes);
       if (!admitted) {
         // Persist the prune even on a blocked admission so expired leases don't
         // linger and depress headroom for the next attempt.
         await writeLedger(this.ledgerPath, ledger);
-        return { admitted: false, leaseId: null, headroomBefore, outstandingBefore, cost };
+        return { admitted: false, leaseId: null, constraints: outcomes, binding, anyOutstanding };
       }
+
       const leaseId = mintLeaseId();
-      const lease: ReservationLease = {
-        leaseId,
-        cost,
-        poolId: input.poolId,
-        expiresAt: now + ttl,
-      };
-      ledger[input.resourceKey] = [...(ledger[input.resourceKey] ?? []), lease];
+      const expiresAt = now + ttl;
+      for (const outcome of outcomes) {
+        const lease: ReservationLease = { leaseId, cost: outcome.cost, poolId: input.poolId, expiresAt };
+        ledger[outcome.resourceKey] = [...(ledger[outcome.resourceKey] ?? []), lease];
+      }
       await writeLedger(this.ledgerPath, ledger);
-      return { admitted: true, leaseId, headroomBefore, outstandingBefore, cost };
+      return { admitted: true, leaseId, constraints: outcomes, binding, anyOutstanding };
     });
   }
 
   /**
    * Free a reservation on completion (success OR failure — the request is no longer
-   * in flight either way). Token-checked by `leaseId`: a no-op if the lease is
-   * already gone (expired / reconciled). Returns whether a lease was removed. The
-   * lease's real cost surfaces in the provider's next quota snapshot; the ledger's
-   * job is only to stop reserving it.
+   * in flight either way). Token-checked by `leaseId` and swept across EVERY key, so
+   * a multi-constraint reservation is released in full or not at all — the caller
+   * cannot leak one window's reservation by forgetting which keys it took. A no-op
+   * if the lease is already gone (expired / reconciled). Returns whether anything was
+   * removed. The lease's real cost surfaces in the provider's next quota snapshot;
+   * the ledger's job is only to stop reserving it.
    */
-  async reconcile(resourceKey: string, leaseId: string): Promise<boolean> {
+  async reconcile(leaseId: string): Promise<boolean> {
     return withFileLock(this.lockPath, async () => {
       const now = this.now();
       const { ledger } = pruneExpired(await readLedger(this.ledgerPath), now);
-      const leases = ledger[resourceKey];
-      if (!leases) {
-        await writeLedger(this.ledgerPath, ledger);
-        return false;
+      let removed = false;
+      for (const [resourceKey, leases] of Object.entries(ledger)) {
+        const remaining = leases.filter((l) => l.leaseId !== leaseId);
+        if (remaining.length === leases.length) continue;
+        removed = true;
+        if (remaining.length > 0) ledger[resourceKey] = remaining;
+        else delete ledger[resourceKey];
       }
-      const remaining = leases.filter((l) => l.leaseId !== leaseId);
-      const removed = remaining.length !== leases.length;
-      if (remaining.length > 0) ledger[resourceKey] = remaining;
-      else delete ledger[resourceKey];
       await writeLedger(this.ledgerPath, ledger);
       return removed;
     });

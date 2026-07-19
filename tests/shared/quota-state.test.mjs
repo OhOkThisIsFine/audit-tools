@@ -20,6 +20,15 @@ const {
   foldSlopeObservationFromSnapshots,
 } = await import("../../src/shared/quota/state.ts");
 
+const { windowSlopeKey } = await import("../../src/shared/quota/quotaSource.ts");
+
+// Tests key the slope map the same way production does. Passing a bare label here
+// would exercise a key space the scheduler never reads — the branded WindowSlopeKey
+// stops that in TypeScript, but these tests are .mjs and are not typechecked, so
+// going through the constructor is the discipline that keeps them honest.
+const SESSION = windowSlopeKey("account", "session");
+const WEEKLY = windowSlopeKey("account", "weekly");
+
 async function withTempStateDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-quota-"));
   setQuotaStateDir(dir);
@@ -135,37 +144,41 @@ test("COR-d528d2cd: 'rate_limited' outcome correctly increments 429 count and se
 
 test("foldTokensPerPctObservation seeds a new window slope from the first sample", () => {
   // 5000 tokens over a 5-percent drop (0.50 → 0.45) → slope 1000 tokens/percent.
-  const updated = foldTokensPerPctObservation(undefined, "session", 0.5, 0.45, 5000);
-  expect(Math.abs(updated.session - 1000) < 1, `expected ~1000, got ${updated.session}`).toBeTruthy();
+  const updated = foldTokensPerPctObservation(undefined, SESSION, 0.5, 0.45, 5000);
+  expect(Math.abs(updated[SESSION] - 1000) < 1, `expected ~1000, got ${updated[SESSION]}`).toBeTruthy();
 });
 
 test("foldTokensPerPctObservation blends into the prior EWMA and learns per label", () => {
-  const prior = { session: 1000, weekly: 40 };
+  const prior = { [SESSION]: 1000, [WEEKLY]: 40 };
   // New session sample: 3000 tokens over 0.10 → 0.05 (5 percent) → 600/pct sample.
-  const updated = foldTokensPerPctObservation(prior, "session", 0.1, 0.05, 3000);
+  const updated = foldTokensPerPctObservation(prior, SESSION, 0.1, 0.05, 3000);
   // EWMA(alpha 0.3): 1000*0.7 + 600*0.3 = 880. weekly untouched.
-  expect(Math.abs(updated.session - 880) < 1, `expected ~880, got ${updated.session}`).toBeTruthy();
-  expect(updated.weekly).toBe(40);
+  expect(Math.abs(updated[SESSION] - 880) < 1, `expected ~880, got ${updated[SESSION]}`).toBeTruthy();
+  expect(updated[WEEKLY]).toBe(40);
 });
 
 test("foldTokensPerPctObservation ignores a below-threshold or non-positive delta (degrade-safe)", () => {
-  const prior = { session: 1000 };
+  const prior = { [SESSION]: 1000 };
   // Δpercent = 0.3 (< 0.5 floor) → unchanged.
-  expect(foldTokensPerPctObservation(prior, "session", 0.5, 0.497, 5000)).toEqual(prior);
+  expect(foldTokensPerPctObservation(prior, SESSION, 0.5, 0.497, 5000)).toEqual(prior);
   // Non-positive tokens → unchanged.
-  expect(foldTokensPerPctObservation(prior, "session", 0.5, 0.4, 0)).toEqual(prior);
+  expect(foldTokensPerPctObservation(prior, SESSION, 0.5, 0.4, 0)).toEqual(prior);
   // Percent went UP (no consumption) → unchanged.
-  expect(foldTokensPerPctObservation(prior, "session", 0.4, 0.5, 5000)).toEqual(prior);
+  expect(foldTokensPerPctObservation(prior, SESSION, 0.4, 0.5, 5000)).toEqual(prior);
 });
 
 test("recordTokensPerPctObservation persists a per-window slope to quota-state", async () => {
   await withTempStateDir(async () => {
-    await recordTokensPerPctObservation("prov/model", "weekly", 0.2, 0.1, 2000);
+    // Must be written under the SAME key production reads (`windowSlopeKey`), or
+    // the slope persists somewhere the scheduler will never look it up.
+    const key = windowSlopeKey("account", "weekly");
+    await recordTokensPerPctObservation("prov/model", key, 0.2, 0.1, 2000);
     const state = await readQuotaState();
     const entry = state.entries["prov/model"];
     expect(entry, "entry created").toBeTruthy();
     // 2000 tokens / (0.2-0.1)*100 = 10 percent → 200 tokens/pct.
-    expect(Math.abs(entry.tokens_per_pct.weekly - 200) < 1e-9).toBeTruthy();
+    expect(Math.abs(entry.tokens_per_pct[key] - 200) < 1e-9).toBeTruthy();
+    expect(key).toBe("account:weekly");
   });
 });
 
@@ -174,7 +187,7 @@ test("recordTokensPerPctObservation persists a per-window slope to quota-state",
 // in-process rolling dispatcher's observeSlope AND the host-dispatch merge
 // path's foldSlopeObservationFromSnapshots) — a fix here applies to both.
 
-test("quotaSnapshotWindowPctMap: single-window snapshot falls back to a 'default' label, carrying reset_at", () => {
+test("quotaSnapshotWindowPctMap: single-window snapshot falls back to an account-scoped 'default' window, carrying reset_at", () => {
   const map = quotaSnapshotWindowPctMap({
     remaining_pct: 0.6,
     reset_at: "2026-07-11T10:00:00.000Z",
@@ -183,10 +196,11 @@ test("quotaSnapshotWindowPctMap: single-window snapshot falls back to a 'default
     captured_at: "2026-07-11T09:00:00.000Z",
     source: "test",
   });
-  expect(map.get("default")).toEqual({ remainingPct: 0.6, resetAt: "2026-07-11T10:00:00.000Z" });
+  // A source exposing one aggregate number is stating an ACCOUNT-wide allowance.
+  expect(map.get("account:default")).toEqual({ remainingPct: 0.6, resetAt: "2026-07-11T10:00:00.000Z" });
 });
 
-test("quotaSnapshotWindowPctMap: multi-window snapshot keys by label, each with its own reset_at", () => {
+test("quotaSnapshotWindowPctMap: multi-window snapshot keys by (scope,label), each with its own reset_at", () => {
   const map = quotaSnapshotWindowPctMap({
     remaining_pct: 0.6,
     reset_at: "2026-07-11T10:00:00.000Z",
@@ -199,9 +213,78 @@ test("quotaSnapshotWindowPctMap: multi-window snapshot keys by label, each with 
       { label: "weekly", scope: "account", remaining_pct: 0.9, reset_at: "2026-07-18T00:00:00.000Z" },
     ],
   });
-  expect(map.get("session")).toEqual({ remainingPct: 0.6, resetAt: "2026-07-11T10:00:00.000Z" });
-  expect(map.get("weekly")).toEqual({ remainingPct: 0.9, resetAt: "2026-07-18T00:00:00.000Z" });
-  expect(map.has("default")).toBe(false);
+  expect(map.get("account:session")).toEqual({ remainingPct: 0.6, resetAt: "2026-07-11T10:00:00.000Z" });
+  expect(map.get("account:weekly")).toEqual({ remainingPct: 0.9, resetAt: "2026-07-18T00:00:00.000Z" });
+  expect(map.has("account:default")).toBe(false);
+});
+
+test("quotaSnapshotWindowPctMap: a scope-less window is SKIPPED, not keyed as 'undefined:'", () => {
+  // Scope entered the slope key, so a window missing it would key under
+  // "undefined:session" — a key no production reader ever looks up, i.e. a silently
+  // orphaned slope. This is NOT hypothetical: dispatch-quota.json artifacts written
+  // before scope existed are read back raw with no schema parse, and real ones on
+  // disk carry scope-less windows. Throwing would violate
+  // foldSlopeObservationFromSnapshots' documented "never throws" contract and kill
+  // slope learning on any run resumed across the upgrade, so the window is dropped
+  // and the rest of the fold proceeds.
+  const map = quotaSnapshotWindowPctMap({
+    remaining_pct: 0.6,
+    reset_at: null,
+    requests_remaining: null,
+    tokens_remaining: null,
+    captured_at: "2026-07-11T09:00:00.000Z",
+    source: "test",
+    windows: [
+      { label: "session", remaining_pct: 0.6, reset_at: null },
+      { label: "weekly", scope: "account", remaining_pct: 0.9, reset_at: null },
+    ],
+  });
+  expect([...map.keys()]).toEqual(["account:weekly"]);
+  expect([...map.keys()].some((k) => k.startsWith("undefined"))).toBe(false);
+});
+
+test("foldSlopeObservationFromSnapshots does not throw on a pre-scope persisted snapshot", async () => {
+  // The regression guard for the above: this function documents "never throws", and
+  // it is fed snapshots read back from dispatch-quota.json.
+  await withTempStateDir(async () => {
+    const preScope = (pct) => ({
+      remaining_pct: pct,
+      reset_at: null,
+      requests_remaining: null,
+      tokens_remaining: null,
+      captured_at: "2026-07-11T09:00:00.000Z",
+      source: "test",
+      windows: [{ label: "session", remaining_pct: pct, reset_at: null }],
+    });
+    const folded = await foldSlopeObservationFromSnapshots(
+      "prov/model",
+      preScope(0.5),
+      preScope(0.4),
+      1500,
+    );
+    // No scoped window survived, so nothing folds — but it returns, it does not throw.
+    expect(folded).toEqual([]);
+  });
+});
+
+test("quotaSnapshotWindowPctMap: same label at two scopes stays TWO entries (no blended slope)", () => {
+  const map = quotaSnapshotWindowPctMap({
+    remaining_pct: 0.6,
+    reset_at: "2026-07-11T10:00:00.000Z",
+    requests_remaining: null,
+    tokens_remaining: null,
+    captured_at: "2026-07-11T09:00:00.000Z",
+    source: "test",
+    windows: [
+      { label: "session", scope: "account", remaining_pct: 0.6, reset_at: "2026-07-11T10:00:00.000Z" },
+      { label: "session", scope: "model", remaining_pct: 0.2, reset_at: "2026-07-11T10:00:00.000Z" },
+    ],
+  });
+  // Keyed by label alone these would collapse onto one entry, blending the shared
+  // account allowance's exchange rate with the model-scoped one's.
+  expect(map.size).toBe(2);
+  expect(map.get("account:session").remainingPct).toBe(0.6);
+  expect(map.get("model:session").remainingPct).toBe(0.2);
 });
 
 test("foldSlopeObservationFromPctMaps: zero/negative delta is rejected for both an increase and no change", async () => {
@@ -270,10 +353,10 @@ test("foldSlopeObservationFromSnapshots (C1 shared-core wrapper): folds a real P
       source: "test",
     };
     const folded = await foldSlopeObservationFromSnapshots("prov/model", pre, post, 1500);
-    expect(folded).toEqual(["default"]);
+    expect(folded).toEqual(["account:default"]);
     const state = await readQuotaState();
     // 1500 tokens / (0.5-0.4)*100 = 10 percent → 150 tokens/pct.
-    expect(Math.abs(state.entries["prov/model"].tokens_per_pct.default - 150) < 1e-6).toBe(true);
+    expect(Math.abs(state.entries["prov/model"].tokens_per_pct["account:default"] - 150) < 1e-6).toBe(true);
   });
 });
 
