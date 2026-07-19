@@ -163,8 +163,7 @@ record: [`spec/unified-dispatch-worker-model.md`](../spec/unified-dispatch-worke
 
 Also open, each on its own merits (detail in [`backlog.md`](backlog.md)): **G6 read-path unification** (the
 half above — it unphases policy's home onto the intent); **G5's one surviving clause** (lies-reachably
-quarantine); the **dispatch emit wrapper + the two quota contracts** (the assembly fork's remainder);
-**commit 4** fix C (host cold-start wall, needs a clean minimal repro); **commit 5** decide kind-3's fate.
+quarantine); **commit 4** fix C (host cold-start wall, needs a clean minimal repro); **commit 5** decide kind-3's fate.
 
 
 **Verify a queued item's PREMISE against HEAD before opening a lap on it** — a spec's decomposition is a
@@ -207,8 +206,8 @@ order for a dozen laps. **Shipped detail is `git log`; open sequencing is THIS d
 `llm write`/NIM completion + `ANTHROPIC_BASE_URL` subagent-fronting are UNRETESTED. Mechanical bulk offloads
 cleanly to **Haiku subagents** (parent orchestrates + verifies green + independent review) — but ALWAYS
 review offloaded test diffs for assertion QUALITY, not just green (a Haiku agent once weakened a test to an
-incidental TypeError). Fastest full unblock: point `ANTHROPIC_BASE_URL` at a running repair-proxy on a free
-model.
+incidental TypeError). Fastest full unblock: point `ANTHROPIC_BASE_URL` at the declared `proxy` block on a
+free model.
 
 ## Older track — bounded quota-cluster remainder (secondary, not blocking the rework)
 

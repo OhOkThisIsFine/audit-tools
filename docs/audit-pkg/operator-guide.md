@@ -36,7 +36,10 @@ Shared install files:
 - `.audit-code/install/SKILL.md`
 - `.audit-code/install/GETTING-STARTED.md`
 - `.audit-code/install/manifest.json`
-- `.audit-tools/audit/session-config.json` when no backend fallback config exists
+
+Separately, `.audit-tools/audit/session-config.json` is created with defaults the first time
+`next-step`/`advance-audit` runs and no config file yet exists — this happens lazily during an
+audit run, not during `install`/`ensure` bootstrap.
 
 Host-specific files may include:
 

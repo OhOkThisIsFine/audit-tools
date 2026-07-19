@@ -84,7 +84,7 @@ when there is no operator.
   and **suggests an ordering** (ascending price, capability tiebreak). Unknown-price
   candidates are flagged and placed last within their tier.
 - **Dispatchable sources fold into the SAME unified ordering** — configured `sources[]` pools and
-  ambient expansions (NIM/opencode endpoints, claude-worker lanes from the repair-proxy registry)
+  ambient expansions (NIM/opencode endpoints, claude-worker lanes from the declared proxy lane)
   are ranked alongside provider/host candidates, not in a separate list. Source candidates are
   keyed under a `source::` namespace internally so a source id can never collide with a provider
   name, but the operator's `cost_order` may name a source by its **displayed bare id** — the bare

@@ -235,7 +235,7 @@ never extracted). The attention dial = **how many rounds** / how far down the qu
   re-applied on deterministic re-derivation — genuinely different in shape AND resolution semantics
   from remediate's finding-ambiguity questions (which resolve via an imperative keep/reject/defer
   action that mutates item state). So audit uses its own `CharterClarificationRequest` and an
-  obligation-gated pause (the `charter_clarification` obligation — audit has no dedicated
+  obligation-gated pause (the `charter_clarification_current` obligation — audit has no dedicated
   `waiting_for_clarification` status; its status enum is `not_started|active|blocked|complete`). This
   is a deliberate **category difference, not drift** — the resolution semantics are two different
   operations, not two policy settings of one core, so a shared type would be a false unification.
