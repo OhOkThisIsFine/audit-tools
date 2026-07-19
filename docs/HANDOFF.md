@@ -63,15 +63,25 @@ credential metered as N budgets/caps/cooldowns ⇒ ~N× over-admission); the fix
 Full record: [`account-metering-round2-independent-review-2026-07-19.md`](reviews/account-metering-round2-independent-review-2026-07-19.md).
 Defect statement + author's own account: [`nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
 
-**⛔ OWNER CALL, gates all further code — the budget axis.** The lease key moved to account scope
-(`resourceKey: pool.account_key`) but the budget operand did not (`budget: pool.remaining_token_budget`)
-— `admissionLoop.ts:239-241`, `rollingDispatch.ts:1005-1011`, `unifiedRolling.ts:99`. Executed at
-`e500672f`: two pools on one account (budgets 1000/200), 20 packets → **10 granted, all on the big pool,
-the small pool starved to 0.** The effective ceiling becomes the MAX sibling budget, and drops to
-unenforced entirely when any sibling is uncalibrated (null → `+Infinity`). **This is not a partial fix,
-it is a new starvation bug.** Either the budget becomes account-scoped (needs an account-level
-`tokens_per_pct`; today it is per-pool and explicitly excluded from the fold, `accountId.ts:104-107`) or
-the lease key returns to pool scope. Decide before touching code.
+**The budget axis — bug confirmed, DIAGNOSIS REFRAMED by owner ruling 2026-07-19.** The lease key moved
+to account scope (`resourceKey: pool.account_key`) but the budget operand did not
+(`budget: pool.remaining_token_budget`) — `admissionLoop.ts:239-241`, `rollingDispatch.ts:1005-1011`,
+`unifiedRolling.ts:99`. Executed at `e500672f`: two pools on one account (budgets 1000/200), 20 packets →
+**10 granted, all on the big pool, the small pool starved to 0**; unenforced entirely when a sibling is
+uncalibrated (null → `+Infinity`). **Not a partial fix — a new starvation bug.**
+
+⚠ **But the repair the review implied is FALSIFIED.** Owner: *models on one account have different
+quotas/limits, and burn quota at different rates.* Verified — `scheduler.ts:418-421` derives
+`remaining_token_budget = tokens_per_pct[label] × remaining_pct × 100`. The **shared resource is
+`remaining_pct`**; `tokens_per_pct` is a per-model **exchange rate**. So an account-level
+`tokens_per_pct` **cannot exist**, and its exclusion from the fold (`accountId.ts:104-107`) is correct by
+design, not the obstacle. Budgets of 1000 and 200 may be *the same 10% of quota* in two currencies.
+
+**Direction (needs a design pass first): meter in the SHARED unit** — budget = account `remaining_pct`,
+packet cost converted through its own pool's `tokens_per_pct`. **Unanalyzed second half:** per-model
+limits within one account imply a **two-level** structure (account allowance AND per-model limit, both
+satisfied), not the single partition this change assumes. **Establish that before coding — a repair
+assuming one level will be the fifth refusal.**
 
 ⚠ The reviewers noted this is **the author's own rejection argument, verbatim** — `admissionLoop.ts:624-628`
 rejects a per-account cap because it would make the ceiling "the MAX cap across an account's pools

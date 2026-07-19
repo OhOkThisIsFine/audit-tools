@@ -134,12 +134,49 @@ explanation that fit** — which is the same shape as the defect under review: v
 generalize. `CLAUDE.md`'s rule is that "N failed" must be resolved to NAMED files, plural, before any
 baseline attribution. One name was produced; the count was not reconciled against it.
 
+## ⚠ Owner ruling 2026-07-19 — the reviewers' budget diagnosis is REFRAMED
+
+**"Under the same account, different models can have different quotas/limits, and tokens burn quota at
+different rates with different models."** (owner)
+
+This does not rescue the change — the starvation the reviewers executed is real — but it **falsifies the
+repair they implied**, and the option this review originally recommended. Verified from source:
+`scheduler.ts:418-421` derives `remaining_token_budget` as `tokens_per_pct[label] × remaining_pct × 100`.
+So:
+
+- The **shared account resource is `remaining_pct`** — a percentage of the account's quota window.
+- **`tokens_per_pct` is a per-model EXCHANGE RATE**, converting that percentage into one model's token
+  units.
+- `remaining_token_budget` is therefore a **per-model denomination of the same shared allowance**, not
+  an independent budget.
+
+**Consequence: an account-level `tokens_per_pct` cannot exist.** There is no common token unit across
+models on one account, because they burn at different rates. `tokens_per_pct` being learned per-pool and
+excluded from the account fold (`accountId.ts:104-107`) is **correct by design** — this review treated it
+as the obstacle to an account-scoped budget when it is in fact the conversion that makes one possible.
+
+Two pools on one account reading 1000 and 200 are not necessarily two budgets. They may be **the same
+10% of quota**, priced in two currencies.
+
+**The implied direction (needs its own design pass, not yet verified in depth): meter in the SHARED
+unit.** `resourceKey` = account (round 2 got this right), budget = the account's `remaining_pct`, and a
+packet's token cost converts through *its own pool's* `tokens_per_pct` before reaching the ledger. Both
+operands then sit in one currency on one partition, and the uncalibrated-sibling `+Infinity` hole becomes
+an ordinary cold start with no exchange rate yet — which already has a bootstrap path
+(`COLD_START_PROBE_BATCH`).
+
+**Second half of the ruling, NOT yet analyzed:** different models on one account may also carry their own
+distinct quotas/limits. That implies a **two-level** structure — an account allowance AND a per-model
+limit, with admission required to satisfy both — rather than the single partition this whole change
+assumes. Whether the existing per-window quota-state shape already expresses that, or whether it needs a
+new level, is the first thing the next round should establish. **Do not start coding until it is
+settled** — a repair that assumes one level will be the fifth refusal.
+
 ## What the next round must do
 
-1. **Decide the budget axis before writing code.** Either the budget operand becomes account-scoped
-   (which requires an account-level `tokens_per_pct`, currently per-pool and excluded from the fold), or
-   the lease key goes back to pool scope. **The current pairing is not a partial fix — it is a new
-   starvation bug.** This is the owner call that gates everything else.
+1. **Start from the owner ruling above, not from this review's original framing.** The budget operand and
+   the lease key must end up in the same unit; the open question is which unit and how many levels, not
+   whether to revert to pool scope.
 2. **Settle the credential-shape question:** `api_key_env` vs inline `api_key` (and any other supported
    credential field). Enumerate the field set from source; do not fix the named one.
 3. **Name the `concurrency_cap` residual explicitly** or fix it. The revert is defensible; presenting it
