@@ -48,15 +48,24 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
-- **Per-site pinning is now a runnable gate, not a claim (2026-07-19, SHIPPED — wire it into more
-  changes).** `scripts/shared/assert-sites-pinned.mjs <spec.json>` reverts each site of a change
-  individually, requires each reversion to turn the named suite red, and exits non-zero listing any
-  unpinned site. First spec: `scripts/shared/pinned-sites/account-scoped-metering.json`. Built because
-  a loop-core fix this lap was reported as fully red-green validated when three of five sites had been
-  checked and the most-emphasized one was unpinned. **Forward work:** add a spec for each loop-core
-  change, and consider making it part of the loop-core attestation evidence — an attestation that cites
-  a passing pinning run is a materially stronger claim than a free-text `--checked` string (see the
-  attestation-gate entry below). ⚠ Note it needs `npm run build` first (it imports the compiled shim
+- **Per-site pinning gate — REAL BUT FAIL-OPEN ONE LEVEL UP; do NOT cite it as evidence yet
+  (2026-07-19, was reported SHIPPED, independent review found two soundness holes).**
+  `scripts/shared/assert-sites-pinned.mjs <spec.json>` reverts each site of a change individually and
+  requires each reversion to turn the named suite red. The 7 sites it checks for
+  `account-scoped-metering.json` ARE genuinely checked (independently confirmed, failure counts
+  1/3/1/1/1/1/1), and its original fail-open parse bug is genuinely fixed. **Two holes remain:**
+  (1) **it measures "the suite went red", not "a test asserting THIS behavior went red"** — renaming the
+  `resolvePoolAccountKey` export so importers crash yields `71 failed` and the gate reports
+  `PINNED … All 1 site(s) individually pinned`. That is the same fail-open shape the tool exists to
+  catch, relocated up a level. (2) **the spec is a hand-written subset with nothing cross-checking it
+  against the diff** — 7 declared vs ≥11 substantive hunks, and the two hunks carrying the fix's core
+  claim (`capacity.ts:725`, `apiPool.ts:276`) are outside it and survive reversion with `tsc` clean and
+  the suite byte-identical. "All 7 sites pinned" is literally true and materially misleading. A related
+  tell: three dead imports exist only to make the gate's `replace` text compile, i.e. reversions were
+  authored to fit the tool rather than derived from pre-fix code. **Properties to hold:** each spec site
+  binds to the NAME(s) of the test(s) expected to fail, and the spec is DERIVED from the diff so an
+  omitted hunk is impossible. Until both hold, a passing run is not admissible as attestation evidence
+  (see the attestation-gate entries below). ⚠ Needs `npm run build` first (imports the compiled shim
   resolver from `dist/`).
 
 - **⚠ Two concurrent `vitest run` invocations corrupt each other's results (2026-07-19, medium,
@@ -69,10 +78,19 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   (`AUDIT_CODE_STATE_DIR`-style, per [[state-dir-env-override-hermeticity]]) or a second concurrent
   vitest refuses to start. Same family as the other three known full-suite-only failures.
 
-- **N models on ONE account are metered as N INDEPENDENT budgets — REWORKED after a review refusal,
-  AWAITING RE-REVIEW (loop-core, committed + pushed at `e500672f` on `wip/capability-evidence`, NOT on
-  main; its attestation is `verdict=concerns` with an explicit override — a preservation record, not a
-  sign-off).** Round 2 addresses all
+- **N models on ONE account are metered as N INDEPENDENT budgets — ROUND 2 REFUSED 3/3 (2026-07-19),
+  owner call open (loop-core, `e500672f` on `wip/capability-evidence`, NOT on main).** Three independent
+  lenses each refused sign-off. **Blocking owner call:** the lease key is account-scoped while the budget
+  operand stayed pool-scoped, which starves an account's lowest-budget pool (executed: budgets 1000/200,
+  20 packets → 10 granted all on the big pool, small pool 0) and drops the ceiling entirely when any
+  sibling is uncalibrated. Not a partial fix — a new bug. Either budget goes account-scoped (needs an
+  account-level `tokens_per_pct`) or the lease key returns to pool scope. Also: the motivating case is
+  STILL unfixed for the inline `api_key` shape (third round running); the `concurrency_cap` revert's
+  conclusion is a non-sequitur (enforcement keys on `poolId`, so 2 models × `max_concurrent: 2` on one
+  endpoint admit 4); and the pinning gate is not yet admissible evidence (see its own entry). Full
+  record:
+  [`docs/reviews/account-metering-round2-independent-review-2026-07-19.md`](reviews/account-metering-round2-independent-review-2026-07-19.md).
+  Round 2 addresses all
   eight defects: the account key is now resolved ONCE at `CapacityPool` construction (`accountKey`) and
   carried on the wire as a required `DispatchCapacityPoolSummary.account_key` that every consumer READS
   — one partition by construction, and the only way the host path (which never sees a `source`) can key

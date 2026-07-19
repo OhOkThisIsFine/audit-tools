@@ -55,31 +55,47 @@
 
 ---
 
-## ▶ IMMEDIATE NEXT (a) — RE-REVIEW the account-metering fix (round 2, do not land unreviewed)
+## ▶ IMMEDIATE NEXT (a) — account-metering: ROUND 2 REFUSED 3/3, one owner call before any code
 
-**On `wip/capability-evidence`, committed + pushed at `e500672f`, NOT on main.** The defect is real
-(N models on one credential metered as N budgets/caps/cooldowns ⇒ ~N× over-admission). **Round 1 was
-REFUSED** by independent review on eight defects; **round 2 addresses all eight and is now the code on
-that branch** — but it has had **no independent review of its own**, so it is not landable.
+**On `wip/capability-evidence` at `e500672f`, NOT on main. Round 2 was REFUSED by all three independent
+lenses (2026-07-19) — round 4 of refusals on this defect.** The underlying bug is real (N models on one
+credential metered as N budgets/caps/cooldowns ⇒ ~N× over-admission); the fix is not correct.
+Full record: [`account-metering-round2-independent-review-2026-07-19.md`](reviews/account-metering-round2-independent-review-2026-07-19.md).
+Defect statement + author's own account: [`nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
 
-Round 2's three structural moves: `resolvePoolAccountKey` checks `backend_provider` FIRST (a transport
-never becomes the account identity — closes the round-1 over-merge, which was worse than the bug);
-`account_key` is resolved ONCE at `CapacityPool` construction and carried as a required
-`DispatchCapacityPoolSummary` field every consumer READS (one partition by construction, and the only
-way the host path — which never sees a `source` — can key an explicitly-`id`'d source); and the
-per-account `concurrency_cap` change is REVERTED, because the contract documents it as per-ENDPOINT.
-**Scope is narrowed honestly to the BUDGET and COOLDOWN axes.**
+**⛔ OWNER CALL, gates all further code — the budget axis.** The lease key moved to account scope
+(`resourceKey: pool.account_key`) but the budget operand did not (`budget: pool.remaining_token_budget`)
+— `admissionLoop.ts:239-241`, `rollingDispatch.ts:1005-1011`, `unifiedRolling.ts:99`. Executed at
+`e500672f`: two pools on one account (budgets 1000/200), 20 packets → **10 granted, all on the big pool,
+the small pool starved to 0.** The effective ceiling becomes the MAX sibling budget, and drops to
+unenforced entirely when any sibling is uncalibrated (null → `+Infinity`). **This is not a partial fix,
+it is a new starvation bug.** Either the budget becomes account-scoped (needs an account-level
+`tokens_per_pct`; today it is per-pool and explicitly excluded from the fold, `accountId.ts:104-107`) or
+the lease key returns to pool scope. Decide before touching code.
 
-**The next action is a fourth-party adversarial review, not more code.** Full defect list + sign-off
-conditions: [`docs/reviews/nim-dispatch-single-pool-2026-07-19.md`](reviews/nim-dispatch-single-pool-2026-07-19.md).
+⚠ The reviewers noted this is **the author's own rejection argument, verbatim** — `admissionLoop.ts:624-628`
+rejects a per-account cap because it would make the ceiling "the MAX cap across an account's pools
+rather than any real limit, permanently starving its lowest-cap pool." That is why the cap change was
+reverted; the identical flaw shipped on the budget axis.
 
-⚠ **A green suite proved nothing here.** Read the two "how the green tree lied" lessons in the backlog
-entry before re-attempting — both are about verification technique, not this defect. Round 2 answers
-them with a runnable gate: `node scripts/shared/assert-sites-pinned.mjs
-scripts/shared/pinned-sites/account-scoped-metering.json` reverts each of the 7 sites individually and
-requires each reversion to turn the suite red (needs `npm run build` first). **The attestation on
-`e500672f` is `verdict=concerns` with an explicit override — it is a preservation record, not a
-sign-off.**
+**Also blocking:** the motivating `nim-nano`/`nim-super` case is **still unfixed** for the inline
+`api_key` shape (`accountId.ts:37` requires `api_key_env`; `api_key` is a supported field
+`openAiCompatibleSource` copies) — third consecutive round where this case was claimed fixed and was
+not. And the `concurrency_cap` revert rests on a TRUE contract claim but a non-sequitur conclusion:
+enforcement keys on `poolId`, so two models declaring `max_concurrent: 2` on one endpoint admit 4.
+
+⚠ **The pinning gate is not admissible as evidence yet.** `assert-sites-pinned.mjs` measures "the suite
+went red", not "a test asserting THIS behavior went red" — renaming an export so importers crash yields
+`71 failed` and it reports `PINNED`. Its spec is also a hand-written subset (7 declared, ≥11 substantive
+hunks), and the two hunks that are the fix's core claim (`capacity.ts:725`, `apiPool.ts:276`) sit outside
+it and survive reversion with `tsc` clean and the suite byte-identical. Bind it to expected-failing test
+NAMES and derive the spec from the diff before citing it again.
+
+**The attestation on `e500672f` is `verdict=concerns` with an explicit override — a preservation record,
+never a sign-off.** ⚠ Its "sole failure" claim was **wrong**: a clean-worktree run measured TWO
+pre-existing failures (`linux-cycle-regression.test.mjs` unmentioned alongside `INV-shared-core-14`).
+Env-sensitive, but the claim was made by stopping at the first explanation that fit — resolve "N failed"
+to N names, not one.
 
 Same lap, no code change needed: the capability ranker's PRODUCER now exists (NIM roster joined to
 OpenRouter `agentic_index` → LiteLLM `model_info.capability_rank` → the seam `proxyCatalog.ts:159`
