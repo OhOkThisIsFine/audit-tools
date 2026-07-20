@@ -41,10 +41,16 @@
   tagging — the local pre-tag gate is only `check`.
 - **End every lap by checking CI on `main`.** `ci` and `audit-code-test-suite` were red for ~a dozen
   laps while every lap reported "green": the pre-commit hook gates only `npm run check`, and laps
-  verified with build + check + vitest — none of which include `verify:checks`. The per-workflow runs
-  endpoint (`gh api "repos/…/actions/workflows/<wf>.yml/runs?per_page=3"`) is the reliable one; the
-  generic `gh run list` has been flaky ([[lap-green-must-match-ci-evidence]]). A local "N failed" must
-  be resolved to NAMED files before being waved at as the known-flaky baseline.
+  verified with build + check + vitest — none of which include `verify:checks`
+  ([[lap-green-must-match-ci-evidence]]). A local "N failed" must be resolved to NAMED files before
+  being waved at as the known-flaky baseline.
+  ⚠ **Neither `gh` endpoint is dependably up — try BOTH before concluding anything.** The per-workflow
+  form (`actions/workflows/<wf>.yml/runs`) was previously the reliable one and the generic form flaky;
+  on 2026-07-19 that inverted — the per-workflow endpoint returned HTTP 503 repeatedly while
+  `actions/runs?per_page=N` (filter by `head_sha` yourself) answered immediately. Treat a 503 from
+  either as "ask the other one", never as "CI is unavailable", and never as a reason to skip the check.
+  Also expect superseded runs to show `cancelled` — a newer push cancels the older run by concurrency,
+  which is normal and is not a failure.
 - **Branch-strand trap (bit twice):** a remediation run leaves you checked out on its worktree branch —
   commit/push docs from `main` (verify `git rev-parse --abbrev-ref HEAD`) or the commit strands.
 - **Never pass `isolation: "worktree"` to the Agent tool** when dispatching a remediate-code/audit-code
