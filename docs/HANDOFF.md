@@ -10,6 +10,13 @@
 - **Current version = `package.json`** (authoritative).
 - **Tree is green and published.** The dispatch/quota fix cluster, unified-routing collapse, the
   proxy-contract swap, and the Gate-0 backend-identity fix all shipped.
+- **⚠ Changing an identity means auditing every FILTER that feeds it, not just every consumer.**
+  v0.33.11 service-qualified the Gate-0 key and was verified against its consumers — but the source
+  fold UPSTREAM still deduped on the bare model id, so a source colliding with a host tier on another
+  service was dropped from the confirmed record and could never be confirmed (a livelock, fixed in
+  v0.33.12). While the key was bare-model that same collision silently matched, which was the BYPASS:
+  one defect, fail-open from one side and wedged-shut from the other. The verification was thorough
+  within the boundary drawn, and the boundary was the error.
 - **⚠ A local test failure can be an AMBIENT-PATH artifact, not a regression.** `INV-shared-core-14`
   stubbed only two provider constructors while auto-resolution walks the real PATH — so it passed in CI
   (no CLIs on the runner) and failed on any box with `agy`/`codex` installed, reading as a product
@@ -75,11 +82,24 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**0. Pick any specced backlog item and build it.** The disambiguation pass left every open item with an
-agreed mechanism, so the next lap is implementation rather than design. The highest-value remaining
-cluster by blast radius is the **capability-evidence branch**, which is one defect class
+**0. Backend-identity migration — design settled, stage 1 is the next build.** Design of record:
+[`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
+[`backlog.md`](backlog.md) → *Forward tracks*. The vocabulary stage (`provider` → `transport`,
+`backend_provider` → `service`, normalize `service` at the gather chokepoint) is the foundation the
+other four stages sit on. ~527 refs / 29 files, mechanical — **but** any site reading transport where
+it MEANS service is a behavior fix and belongs in its own commit, never smuggled into a rename. One
+such site is already confirmed and waiting in *Open bugs* (proxied lanes priced on the wrong vendor).
+
+The design survived an adversarial review only in part: four claims were refuted and corrected in
+place, the ACCOUNT axis was missing entirely, and three preconditions now gate the grammar stage — in
+particular, `service:` rules can zero out all dispatch capacity with nothing noticing, so a capacity
+guard is a prerequisite of that stage rather than a follow-up. Read the doc's own "did NOT survive
+review" notes before re-proposing anything it rules out (especially the `url | command` locus union and
+a `model:` axis — both are recorded as refuted, with reasons).
+
+**0b. Or: the capability-evidence branch** — the other high-value cluster, one defect class
 (hand-maintained enumerations drifted from their source) rather than the six-item punch list four
-review rounds treated it as.
+review rounds treated it as. Independent of 0.
 
 ⚠ **A specced mechanism is still a LEAD, not a work order — the Gate-0 identity lap proved it.** That
 item's SPEC said "one identity function consumed by the delta, the confirmed set, and the exclusion

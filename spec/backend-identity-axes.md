@@ -22,11 +22,21 @@ needed. They did not all get it right:
   a confirmation BYPASS (confirming one vendor's model approved another vendor's identically-named
   model), fixed in v0.33.11;
 - the **exclusion matcher** keyed on the transport, which is correct for its own question but was
-  briefly proposed as the single unified identity — which would have been fail-OPEN.
+  briefly proposed as the single unified identity — which would have been fail-OPEN;
+- the **Gate-0 source fold** deduped on the bare model id, dropping any source that merely shared a
+  model string with a host tier or configured pool on a DIFFERENT service.
 
-Three consumers, three answers, one of them a security defect. The cause is not carelessness. It is
-that the domain has **more than one identity**, the type system expressed none of them, and the
-naming actively pointed the wrong way.
+Four consumers, four answers, one of them a security defect. The cause is not carelessness. It is that
+the domain has **more than one identity**, the type system expressed none of them, and the naming
+actively pointed the wrong way.
+
+**The fold is the clearest lesson in this document, so do not skip it.** While the gate key was
+bare-model, the fold's collision was invisible — it silently *matched*, which WAS the bypass.
+Service-qualifying the gate key (v0.33.11) turned that same collision into a LIVELOCK: the source was
+dropped from the confirmed record, so it deltaed, the operator confirmed it, the fold dropped it again,
+forever. One defect, two faces — fail-open from one side, wedged-shut from the other. Fixing an
+identity WITHOUT fixing every filter that feeds it converts a silent bypass into a visible wedge. When
+changing any key here, enumerate what filters the input, not just what consumes the output.
 
 ## The axes
 
@@ -89,7 +99,7 @@ invent an identity.
 | "Does this operator rule drop this source?" | **whichever axis the rule names** | Policy is authored per-axis — see the grammar below. |
 | "Which config block builds this?" | **transport** | The adapter decides the constructor. |
 | "Is this backend me (self-spawn)?" | **transport** | Self-spawn is about the process, not the vendor. |
-| "What does this cost?" | **model** (+service for declared price) | Prices are per-model; a service may declare an override. |
+| "What does this cost?" | **model**, disambiguated by **service** | The price table is vendor-keyed. Passing the transport here silently yields the cheapest-collision default — a live defect, see `docs/backlog.md`. A declared per-source price outranks the table. |
 
 **Different questions legitimately bind to different axes. That is the domain, not a defect.** The
 instinct to collapse them into "one identity function" is wrong and was tried: it produces either a
@@ -101,16 +111,24 @@ gate that approves backends the operator never saw, or an exclusion rule that ma
 
 Every axis-derived key is produced by a named function in ONE module, each documented with the
 question it answers. Divergence between them is then visible in a single file rather than
-rediscovered per-consumer.
+rediscovered per-consumer. They are near-identical strings answering different questions, and that is
+exactly why adjacency is the safeguard: a reader choosing one is shown the others.
+
+**Today** (partially realized): `backendIdentity(model, service)` and `sourceService(source)` live in
+`src/shared/providers/providerConfirmation.ts` — the lowest module that both the Gate-0 delta, the
+confirmed set, and the source fold can import. That co-location is what stops those three from
+answering differently, and it exists because they already did.
+
+**Target** — the same module also owning the other two projections, so all three are read together:
 
 ```
-serviceIdentity(ref)        → "nim:z-ai/glm-5.2"      // the confirmation gate
-quotaPoolKey(ref, account)  → "nim#acct/z-ai/glm-5.2" // the ledger
-transportRoute(ref)         → "claude-worker:z-ai/glm-5.2"
+backendIdentity(model, service)   → "nim:z-ai/glm-5.2"            // the confirmation gate
+quotaPoolKey(ref, account)        → "nim#acct/z-ai/glm-5.2"       // the ledger
+transportRoute(ref)               → "claude-worker:z-ai/glm-5.2"  // what the routing filter drops
 ```
 
-They are near-identical strings answering different questions. Adjacency is the safeguard — a reader
-choosing one is shown the others.
+The quota and route keys are still derived elsewhere (`buildProviderModelKey`,
+`backendExclusionPattern`); moving them here is stage 2 of the migration in `docs/backlog.md`.
 
 ## Normalization at the chokepoint
 
@@ -134,9 +152,8 @@ Two claims made for fixing it did NOT survive review, and are recorded so they a
 
 1. **There is no live hostname-parsing bug.** `endpointHosts` guards on `//` and otherwise returns the
    raw lowercased literal, so URL parsing never runs over a launcher command.
-2. **Literal command matching is deliberate, supported, and tested** — a rule naming
-   `C:	ools\codex.cmd` matches exactly that command. A `url | command` union would REMOVE a working
-   feature.
+2. **Literal command matching is deliberate, supported, and tested** — a rule naming a launcher command
+   path matches exactly that command. A `url | command` union would REMOVE a working feature.
 
 And the union is not an honest model anyway: `claude-worker` has a proxy URL and a launcher command at
 once, `subprocess-template` has a command array, `worker-command` has a per-node command. The real
@@ -162,8 +179,10 @@ transport:openai-compatible/glm-5.2 one model on that adapter
 service:nim                         every model from that vendor, HOWEVER reached
 service:nim/z-ai/glm-5.2            one model from that vendor
 host:localhost:8000                 by address
-model:glm-5.2                       that model, wherever it is served
 ```
+
+There is deliberately **no `model:` axis** — see the third precondition below for why a cross-service
+model rule is dangerous rather than merely convenient.
 
 Three properties follow, and each retires a known defect:
 
