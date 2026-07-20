@@ -19,7 +19,7 @@ const {
   resolveAmbientSources,
   verifySourceReach,
 } = await import("../../src/shared/providers/auditorSources.ts");
-const { readProxyCatalog } = await import(
+const { readProxyCatalog, PROXY_CATALOG_VERSION } = await import(
   "../../src/shared/providers/proxyCatalog.ts"
 );
 
@@ -38,7 +38,12 @@ const EXPANDED = {
 
 /** A valid populate cache body. */
 function cache({ endpoint = PROXY, sources = [EXPANDED] } = {}) {
-  return JSON.stringify({ fetched_at: new Date().toISOString(), endpoint, sources });
+  return JSON.stringify({
+    version: PROXY_CATALOG_VERSION,
+    fetched_at: new Date().toISOString(),
+    endpoint,
+    sources,
+  });
 }
 
 /**

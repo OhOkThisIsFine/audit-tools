@@ -210,10 +210,10 @@ test("3c red-green: proxied claude-worker lane + direct lane to the SAME backend
     service: "nim",
     account: "X",
   };
-  // Proxied lane: the populate-cache expansion (claude-worker transport, carrying
-  // the transport-shaped explicit id the cache stamps).
+  // Proxied lane: the populate-cache expansion (claude-worker transport). The cache
+  // stamps NO id — an id is an operator override that outranks derivation, so a
+  // tool-stamped one would re-split exactly the identity `service` exists to merge.
   const proxied = {
-    id: "claude-worker:nim/z-ai/glm-5.2",
     transport: "claude-worker",
     endpoint: "http://127.0.0.1:8791",
     service: "nim",
@@ -231,17 +231,19 @@ test("3c red-green: proxied claude-worker lane + direct lane to the SAME backend
   expect(directPool.id).toBe("nim#X/z-ai/glm-5.2");
 });
 
-test("3c: the transport never enters the identity — backend keying outranks the transport-shaped explicit id", () => {
+test("3c: the transport never enters the identity — service keying, and an operator id outranks it", () => {
   const proxied = {
-    id: "claude-worker:nim/z-ai/glm-5.2",
     transport: "claude-worker",
     endpoint: "http://127.0.0.1:8791",
     service: "nim",
     model: "z-ai/glm-5.2",
   };
-  // Honoring the populate-stamped id would re-split the identity the field merges.
   expect(dispatchableSourceId(proxied)).toBe("nim/z-ai/glm-5.2");
   expect(dispatchableSourceId(proxied)).not.toContain("claude-worker");
+  // An OPERATOR-declared id is an override and outranks the service derivation
+  // (spec/backend-identity-axes.md). This is only safe because nothing auto-stamps
+  // one — see the populate-cache pin below.
+  expect(dispatchableSourceId({ ...proxied, id: "my-lane" })).toBe("my-lane");
   // The declared `account` folds in even when the caller passes none (the gather-time
   // dedup path), so two same-backend lanes on DIFFERENT accounts stay distinct pools.
   expect(dispatchableSourceId({ ...proxied, account: "X" })).toBe("nim#X/z-ai/glm-5.2");

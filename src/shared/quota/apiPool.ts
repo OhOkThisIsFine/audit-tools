@@ -41,16 +41,23 @@ import {
  * backend-qualified provider half but carries no account. Do not unify them.
  */
 export function dispatchableSourceId(source: DispatchableSource, account?: string | null): string {
-  // Transport-fronted lane (3c): the transport NEVER enters the quota identity. A
-  // source declaring `service` keys on the BACKEND actually serving it —
-  // `service[#account]/model` — so a proxied `claude-worker` lane and a
-  // direct lane to the same backend DEDUP to ONE CapacityPool / ledger entry (the
-  // `(provider, account)` double-grant boundary). This deliberately outranks an
-  // explicit `id`: the populate cache stamps transport-shaped ids
-  // (`claude-worker:<backend>/<model>`), and honoring them would re-split the
-  // identity the field exists to merge. The declared `account` folds in even when
-  // the caller resolves none, so two same-backend lanes on different accounts stay
-  // distinct (the gather-time dedup path passes no account).
+  // Precedence, in order:
+  //
+  //   1. An explicit `id` is an operator OVERRIDE and outranks derivation
+  //      (spec/backend-identity-axes.md). This is only safe because NOTHING auto-stamps
+  //      one any more — the populate cache used to stamp transport-shaped ids
+  //      (`claude-worker:<service>/<model>`), which is why this branch previously sat
+  //      BELOW the service branch. Re-introducing a tool-stamped id would silently
+  //      re-split the identity `service` exists to merge; the cache comment in
+  //      `proxyCatalog.ts` pins that.
+  //   2. Transport-fronted lane (3c): the transport NEVER enters the quota identity. A
+  //      source declaring `service` keys on the BACKEND actually serving it —
+  //      `service[#account]/model` — so a proxied `claude-worker` lane and a direct
+  //      lane to the same backend DEDUP to ONE CapacityPool / ledger entry (the
+  //      `(service, account)` double-grant boundary). The declared `account` folds in
+  //      even when the caller resolves none, so two same-backend lanes on different
+  //      accounts stay distinct (the gather-time dedup path passes no account).
+  if (source.id) return account ? `${source.id}#${account}` : source.id;
   if (source.service) {
     return buildProviderModelKey(
       source.service,
@@ -58,7 +65,9 @@ export function dispatchableSourceId(source: DispatchableSource, account?: strin
       account ?? source.account ?? null,
     );
   }
-  if (source.id) return account ? `${source.id}#${account}` : source.id;
+  // Unreachable for anything that came through the gather chokepoint (`service` is
+  // normalized to `declared ?? transport` there). Retained for the pre-chokepoint
+  // callers in `resolveProxyLane`, which see raw declared sources.
   return buildProviderModelKey(source.transport, source.model ?? source.endpoint ?? null, account);
 }
 
@@ -541,7 +550,19 @@ export function collectDispatchableSources(
   ) {
     pushUnique(openAiCompatibleSource(sessionConfig.openai_compatible!));
   }
-  return out;
+  // Normalize `service` ONCE, here, as `declared ?? transport`. Downstream it is never
+  // optional, so no consumer has to re-derive it (and none can derive it differently).
+  //
+  // This kills a real fragility: while `service` was optional, a DIRECT source that
+  // simply omitted it got identity `openai-compatible:model` while its proxied twin got
+  // `nim:model` — so the two stopped folding, and the operator was re-asked to confirm a
+  // backend they had already approved. The fold must not depend on whether a declaration
+  // happened to include an optional field.
+  //
+  // Deliberately in `collectDispatchableSources`, not in the `gatherDispatchableSources`
+  // wrapper: both are publicly exported, so normalizing in the wrapper would leave the
+  // inner function as a bypass of the invariant.
+  return out.map((source) => (source.service ? source : { ...source, service: source.transport }));
 }
 
 /**

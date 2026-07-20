@@ -20,6 +20,9 @@ const { ambientAuditorDescriptor } = await import(
 const { gatherDispatchableSources } = await import(
   "../../src/shared/quota/apiPool.ts"
 );
+const { PROXY_CATALOG_VERSION } = await import(
+  "../../src/shared/providers/proxyCatalog.ts"
+);
 const { deriveSourcePoolDisplayFromSources, annotateConfirmedPool } = await import(
   "../../src/shared/providers/providerConfirmation.ts"
 );
@@ -73,7 +76,12 @@ function deps({ sources = EXPANDED } = {}) {
       JSON.stringify({ proxy: { endpoint: PROXY } }),
     probeHttpReachable: () => true,
     readCatalogFile: () =>
-      JSON.stringify({ fetched_at: new Date().toISOString(), endpoint: PROXY, sources }),
+      JSON.stringify({
+        version: PROXY_CATALOG_VERSION,
+        fetched_at: new Date().toISOString(),
+        endpoint: PROXY,
+        sources,
+      }),
   };
 }
 

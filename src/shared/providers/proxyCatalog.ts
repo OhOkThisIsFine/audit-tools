@@ -44,8 +44,24 @@ export function resolveProxyCatalogPath(homeDir?: string): string {
   return join(resolveAuditCodeStateDir(homeDir), PROXY_CATALOG_FILENAME);
 }
 
+/**
+ * Shape version of the on-disk cache. Bump whenever a written entry's meaning changes,
+ * so a cache written by older code degrades to "absent" rather than being read under
+ * new semantics. The cache is tool-written and fully regenerable, so degrading is free —
+ * `readProxyCatalog` returns null, and `populateProxyCatalogIfMissing` then repopulates.
+ *
+ * v2: entries no longer carry a tool-stamped `id`. A v1 entry does, and since `id` now
+ * outranks the `service` derivation in `dispatchableSourceId`, reading one under v2
+ * semantics would key a proxied lane to `claude-worker:<service>/<model>` instead of
+ * `<service>/<model>` — silently splitting it from the direct lane to the same backend
+ * and reopening the double-grant boundary.
+ */
+export const PROXY_CATALOG_VERSION = 2;
+
 /** The on-disk cache shape: expansion + when it was fetched (staleness policy later). */
 export interface ProxyCatalog {
+  /** Shape version — see {@link PROXY_CATALOG_VERSION}. Absent ⇒ pre-versioned (v1). */
+  version: number;
   /** ISO timestamp of the populate fetch. Read-side returns it; NO TTL is enforced yet. */
   fetched_at: string;
   /** The proxy endpoint the registry was fetched from. */
@@ -338,7 +354,13 @@ function expandSources(
       // > absent (falls through to models.dev catalog / tier downstream).
       const cost = options.costPerMtok ?? model.costPerMtok;
       sources.push({
-        id: `claude-worker:${provider}/${model.alias}`,
+        // No `id` stamped, deliberately. `id` is an operator OVERRIDE that outranks
+        // derivation (spec/backend-identity-axes.md); a tool-stamped transport-shaped
+        // id would claim that override and re-split the very identity `service` exists
+        // to merge — a proxied lane and a direct lane to the same service+model would
+        // key to two CapacityPools, reopening the double-grant boundary. Leaving it
+        // absent lets `dispatchableSourceId` derive `service[#account]/model`, which
+        // dedups the two lanes by construction.
         transport: "claude-worker",
         endpoint: options.endpoint,
         service: provider,
@@ -612,6 +634,7 @@ export async function populateProxyCatalog(
   });
 
   const catalog: ProxyCatalog = {
+    version: PROXY_CATALOG_VERSION,
     fetched_at: (options.now?.() ?? new Date()).toISOString(),
     endpoint,
     sources,
@@ -669,10 +692,15 @@ export function readProxyCatalog(
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return null;
   }
-  const { fetched_at, endpoint, sources } = parsed as Record<string, unknown>;
+  const { version, fetched_at, endpoint, sources } = parsed as Record<string, unknown>;
+  // Degrade a foreign-shape cache to "absent" rather than reading it under current
+  // semantics. A pre-versioned (v1) file carries tool-stamped ids that would now
+  // outrank the service derivation and re-split a proxied lane from its direct twin.
+  // Regenerable by design — the caller repopulates.
+  if (version !== PROXY_CATALOG_VERSION) return null;
   if (typeof fetched_at !== "string" || typeof endpoint !== "string") return null;
   if (!Array.isArray(sources)) return null;
   const issues = validateSessionConfig({ sources });
   if (issues.some((issue) => issue.severity === "error")) return null;
-  return { fetched_at, endpoint, sources: sources as DispatchableSource[] };
+  return { version, fetched_at, endpoint, sources: sources as DispatchableSource[] };
 }

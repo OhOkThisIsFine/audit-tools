@@ -10,7 +10,6 @@
       "cost_per_mtok": 0
     },
     {
-      "id": "proxied-glm",
       "transport": "claude-worker",
       "endpoint": "http://127.0.0.1:8402",
       "service": "nim",

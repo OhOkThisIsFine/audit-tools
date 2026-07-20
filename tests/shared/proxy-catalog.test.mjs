@@ -158,6 +158,13 @@ describe("populateProxyCatalog — discovery contract", () => {
       service: "anthropic",
       capability_rank: 50, // advert custom key round-trips
     });
+    // The expansion stamps NO `id`. `id` is an operator OVERRIDE that outranks the
+    // service derivation in `dispatchableSourceId`; a tool-stamped, transport-shaped
+    // id would claim that override and re-split the identity `service` exists to
+    // merge, so a proxied lane and a direct lane to the same service+model would key
+    // to two CapacityPools — reopening the double-grant boundary. Pinned here because
+    // the failure is SILENT: two pools where one belongs, with no error anywhere.
+    for (const s of result.sources) expect(s.id).toBeUndefined();
     // Roundtrip through the reader
     const catalog = readProxyCatalog({ homeDir });
     expect(catalog).not.toBeNull();
@@ -535,6 +542,35 @@ describe("readProxyCatalog — degrades to null, never throws", () => {
       writeFileSync(path, raw);
       expect(readProxyCatalog({ homeDir }), raw).toBeNull();
     }
+  });
+
+  it("degrades a pre-versioned (v1) cache to absent — its stamped ids would re-split identity", () => {
+    // A v1 file is exactly what an existing machine has on disk: no `version`, and
+    // entries carrying the tool-stamped `id` the populate cache used to write. Since
+    // `id` now outranks the `service` derivation in `dispatchableSourceId`, reading one
+    // under v2 semantics would key this lane `claude-worker:nim/z-ai/glm-5.2` instead of
+    // `nim/z-ai/glm-5.2`, splitting it from the direct NIM lane to the same model and
+    // reopening the double-grant boundary. Degrade to null; the caller repopulates.
+    const homeDir = tempHome();
+    mkdirSync(join(homeDir, ".audit-code"), { recursive: true });
+    writeFileSync(
+      resolveProxyCatalogPath(homeDir),
+      JSON.stringify({
+        fetched_at: new Date().toISOString(),
+        endpoint: PROXY,
+        sources: [
+          {
+            id: "claude-worker:nim/z-ai/glm-5.2",
+            transport: "claude-worker",
+            endpoint: PROXY,
+            service: "nim",
+            model: "z-ai/glm-5.2",
+            worker_kind: "agentic",
+          },
+        ],
+      }),
+    );
+    expect(readProxyCatalog({ homeDir })).toBeNull();
   });
 
   it("returns null when a cached source fails the shared validator", () => {
