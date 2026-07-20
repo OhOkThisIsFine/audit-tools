@@ -230,6 +230,35 @@ export async function queryProviderQuota(
  * and are priced deterministically at dispatch instead. Never hardcodes a model
  * name; reads only operator-supplied config.
  */
+/**
+ * **THE** identity of one backend: `service:model` where the model is knowable, else
+ * the coarse service name — where "service" is the BACKEND ACTUALLY SERVING the model
+ * (`backend_provider ?? provider`), never the transport that reaches it.
+ *
+ * Lives HERE, the lowest module both consumers can import, so the Gate-0 delta, the
+ * confirmed set, and the source-fold dedup cannot answer "which backend is this?"
+ * differently. They are required to agree; a second copy is a second chance to
+ * disagree — which is exactly how the confirmation BYPASS and the source-fold
+ * collision arose independently.
+ *
+ * Full rationale, and the axis each downstream question binds to:
+ * `spec/backend-identity-axes.md`.
+ */
+export function backendIdentity(
+  modelId: string | undefined,
+  serviceName: string,
+): string {
+  return modelId ? `${serviceName}:${modelId}` : serviceName;
+}
+
+/** The service a source is served BY — its declared backend, else its own transport. */
+export function sourceService(source: {
+  provider: string;
+  backend_provider?: string;
+}): string {
+  return source.backend_provider ?? source.provider;
+}
+
 export function representativeModelId(
   name: ResolvedProviderName,
   sessionConfig: SessionConfig,
@@ -344,6 +373,10 @@ export function annotateConfirmedPool(
   env: NodeJS.ProcessEnv = process.env,
 ): AnnotatedConfirmation {
   const hostModels = input?.host_models ?? [];
+  // The host roster is by definition the CONVERSATION HOST's own models, so the
+  // service half of each tier's identity is the resolved host. Resolved HERE (above
+  // the source fold) because the fold dedups on identity and therefore needs it.
+  const hostProvider = resolveConversationHostProvider({ sessionConfig, env });
   const providerCandidates: CostCandidate[] = pool.map((entry) => ({
     key: entry.name,
     model: representativeModelId(entry.name, sessionConfig),
@@ -361,14 +394,27 @@ export function annotateConfirmedPool(
   // again would double-rank one model_id and let the source position overwrite the
   // provider's in the model-keyed dispatch map. Dedup by model_id so each pool is ranked
   // once. Repair-proxy sources carry distinct namespaced models, so they're never skipped.
-  const claimedModels = new Set<string>();
+  // Dedup on BACKEND IDENTITY, never on the bare model string. A bare-model fold
+  // drops a source that merely SHARES a model id with a host tier or a configured
+  // pool on a DIFFERENT service — and since the confirmed set is derived from what
+  // survives this fold, that source could then never be confirmed: it would delta,
+  // the operator would confirm it, the fold would drop it again, and it would delta
+  // forever. (Before the gate key was service-qualified, the same bare-model collapse
+  // hid this as a silent BYPASS instead — the two are one defect seen from either
+  // side.) Identity-keyed, only a genuine duplicate folds: the legacy
+  // `openai_compatible` block, which really is represented twice (once as a provider
+  // entry, once as a `collectDispatchableSources` source) on ONE service.
+  const claimedIdentities = new Set<string>();
   for (const entry of pool) {
     const m = representativeModelId(entry.name, sessionConfig);
-    if (m) claimedModels.add(m);
+    if (m) claimedIdentities.add(backendIdentity(m, entry.name));
   }
-  for (const m of hostModels) claimedModels.add(m.model_id);
+  for (const m of hostModels) {
+    claimedIdentities.add(backendIdentity(m.model_id, hostProvider));
+  }
   const foldedSources = sources.filter(
-    (source) => !(source.model && claimedModels.has(source.model)),
+    (source) =>
+      !claimedIdentities.has(backendIdentity(source.model, sourceService(source))),
   );
   // Gate-0 source fold: every remaining dispatchable source pool (explicit sources[] +
   // proxy expansion) becomes a ranked candidate, keyed by its stable source id so a
@@ -396,11 +442,8 @@ export function annotateConfirmedPool(
       ...(order !== undefined ? { cost_order: order } : {}),
     };
   });
-  // The host roster is by definition the CONVERSATION HOST's own models, so the
-  // provider half of each tier's gate identity is the resolved host — recorded here,
-  // at the only point it is known for certain, rather than re-derived by a later
-  // reader running under a possibly different host.
-  const hostProvider = resolveConversationHostProvider({ sessionConfig, env });
+  // Recorded at the only point the host is known for certain, rather than re-derived
+  // by a later reader running under a possibly different host.
   const host_model_cost_order: HostModelCostEntry[] = hostModels.map((m) => ({
     model_id: m.model_id,
     provider: hostProvider,

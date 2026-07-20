@@ -52,6 +52,8 @@ import type { RunLogger } from "../observability/runLog.js";
 import {
   discoverProviders,
   annotateConfirmedPool,
+  backendIdentity,
+  sourceService,
   representativeModelId,
   type CapabilityTier,
 } from "./providerConfirmation.js";
@@ -513,12 +515,9 @@ const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.
  * provider, so a rule built from this identity would silently match nothing for a
  * proxied lane. They were unified once; that is why they are documented apart now.
  */
-function backendIdentity(
-  modelId: string | undefined,
-  backendProvider: string,
-): string {
-  return modelId ? `${backendProvider}:${modelId}` : backendProvider;
-}
+// `backendIdentity` + `sourceService` live in ./providerConfirmation.ts — the lowest
+// module both this file and the source-fold can import, so there is exactly ONE
+// answer to "which backend is this?". See spec/backend-identity-axes.md.
 
 /**
  * The pattern that rules out one backend at the finest granularity its model is
@@ -1121,7 +1120,17 @@ export async function readConfirmedCostPositions(
     if (
       entry.model_id &&
       Number.isFinite(entry.cost_order) &&
-      entry.cost_order >= 0
+      entry.cost_order >= 0 &&
+      // FIRST-WINS, and this guard is load-bearing. This map is keyed by BARE model
+      // id (costRank looks positions up with no service in hand), so two backends on
+      // different services sharing a model string necessarily collide here. The
+      // source fold used to prevent that by DROPPING such a source outright — which
+      // silently cost the confirmed set that source's identity and livelocked its
+      // Gate-0 confirmation. The fold is now identity-keyed and keeps the source, so
+      // the collision surfaces here instead and is resolved in favor of the
+      // provider/host entry, preserving the original "a source must not overwrite a
+      // configured pool's position" intent without discarding the source.
+      !positions.has(entry.model_id)
     ) {
       positions.set(entry.model_id, entry.cost_order);
     }

@@ -261,6 +261,48 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     expect(delta.map((b) => b.key)).toEqual(["openrouter:z-ai/glm-5.2"]);
   });
 
+  it("a source sharing a model string with a HOST tier still confirms (fold livelock regression)", () => {
+    // The source fold used to dedup on the bare model id, so a source whose model
+    // merely COLLIDED with a host tier on another service was dropped from
+    // source_pool_cost_order entirely. The confirmed set is derived from what survives
+    // that fold, so the source could never be confirmed: it deltas, the operator
+    // confirms, the fold drops it again, it deltas forever. While the gate key was
+    // bare-model this was invisible — the collision silently matched, which was the
+    // BYPASS. Service-qualifying the key exposed the livelock; the fold is now
+    // identity-keyed, so only a genuine same-service duplicate folds.
+    const MODEL = "z-ai/glm-5.2";
+    const source = {
+      id: `claude-worker:nim/${MODEL}`,
+      provider: "claude-worker",
+      endpoint: PROXY,
+      backend_provider: "nim",
+      model: MODEL,
+    };
+    const annotated = annotateConfirmedPool(
+      [],
+      {},
+      { schema_version: "provider-confirmation-input/v1", host_models: [{ model_id: MODEL }] },
+      [source],
+      {},
+    );
+    // The colliding source survives the fold, carrying the service that identifies it.
+    expect(annotated.source_pool_cost_order).toHaveLength(1);
+    expect(annotated.source_pool_cost_order[0].backend_provider).toBe("nim");
+
+    const delta = computeNewlyReachableBackends(
+      {
+        ...emptyConfirmation,
+        host_model_cost_order: annotated.host_model_cost_order,
+        source_pool_cost_order: annotated.source_pool_cost_order,
+      },
+      {},
+      [source],
+      {},
+      noCli,
+    );
+    expect(delta, "confirming must CLOSE the gate, not re-ask forever").toEqual([]);
+  });
+
   it("promoting a confirmation built WITH the sources clears the delta (gate closure)", async () => {
     const effective = effectiveConfig();
     const gathered = await gatherDispatchableSources(effective, "claude-code");
