@@ -59,6 +59,20 @@ test("an explicit operator account declaration wins and is never re-merged", () 
   expect(deriveAccountKey(a)).toBe("openai-compatible#team-a");
 });
 
+test("one vendor credential is ONE account partition, however the lane is reached", () => {
+  // A proxied lane (transport claude-worker) and a direct lane (transport
+  // openai-compatible) both routing to service `nim` under one declared account are ONE
+  // real credential at one vendor and must share ONE budget partition. Namespacing the
+  // explicit-account key on the TRANSPORT split them into `claude-worker#work` and
+  // `openai-compatible#work` — double-booking the budget the account key exists to protect.
+  // Account is only meaningful WITHIN a service (spec/backend-identity-axes.md), so the
+  // namespace is service-keyed.
+  const proxied = { transport: "claude-worker", service: "nim", account: "work" };
+  const direct = { transport: "openai-compatible", service: "nim", account: "work" };
+  expect(deriveAccountKey(proxied)).toBe(deriveAccountKey(direct));
+  expect(deriveAccountKey(proxied)).toBe("nim#work");
+});
+
 test("an unattributable source yields null so the caller meters it ALONE", () => {
   // No endpoint and no credential ⇒ we cannot prove it shares anyone's allowance.
   // Merging on a guess would over-throttle; the caller falls back to the pool key.

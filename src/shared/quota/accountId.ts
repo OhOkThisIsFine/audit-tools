@@ -57,15 +57,26 @@ export function deriveCredentialIdentity(source: {
  * credential identity. Returns null when neither is available, and the caller then
  * falls back to a pool-scoped key — correct, because a source we cannot attribute to
  * a credential must not be merged with anyone else's allowance.
+ *
+ * ⚠ The explicit-account namespace is the SERVICE, never the transport. Account is only
+ * meaningful WITHIN a service (`spec/backend-identity-axes.md`), so a proxied lane
+ * (`transport: claude-worker`, `service: nim`) and a direct lane
+ * (`transport: openai-compatible`, `service: nim`) both declaring `account: "work"` are
+ * ONE real credential at one vendor and must yield ONE partition (`nim#work`). Keying on
+ * the transport split them into two, double-booking the budget this key protects. Service
+ * is normalized to `declared ?? transport` at the producer (`collectDispatchableSources`),
+ * so the fallback here only fires for an un-normalized source and preserves the old
+ * transport-namespaced key in that case.
  */
 export function deriveAccountKey(source: {
   transport: string;
+  service?: string;
   endpoint?: string;
   api_key_env?: string;
   api_key?: string;
   account?: string | null;
 }): string | null {
-  if (source.account) return `${source.transport}#${source.account}`;
+  if (source.account) return `${source.service ?? source.transport}#${source.account}`;
   return deriveCredentialIdentity(source);
 }
 
