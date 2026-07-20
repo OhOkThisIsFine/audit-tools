@@ -1009,7 +1009,7 @@ followed" is otherwise indistinguishable from a bug.
   **Staged migration — each stage atomic + green on its own (atomic-replace ordering invariant):**
   1. ✅ **SHIPPED 2026-07-19. Vocabulary.** `DispatchableSource.provider` → `transport`, `backend_provider` → `service`; normalize `service = declared ?? transport` ONCE at the source-gather chokepoint. Landed as four commits: the service-axis price fix, the 394-ref rename, the `id`-outranks-derivation precedence fix (+ populate-cache de-stamping + `PROXY_CATALOG_VERSION=2`), and a loud validator error for operator files still using the old names. ⚠ **Normalization went in `collectDispatchableSources`, NOT the `gatherDispatchableSources` wrapper** — both are exported, so the wrapper would have left a bypass. ⚠ **Residual:** normalization activates the declared-account fold for a source carrying `account` but no `service`, changing those CapacityPool ids and orphaning their learned `quota-state.json` keys (degrades to blind defaults — not a correctness break, but unmigrated). Record: [`identity-migration-stage1-plan-2026-07-19.md`](reviews/identity-migration-stage1-plan-2026-07-19.md).
      <br>*(original spec, retained for the stages below)* normalize at the `gatherDispatchableSources` chokepoint so it is never optional downstream (this alone kills the declaration-dependent fold fragility, where a direct source omitting `backend_provider` stopped folding with its proxied twin and re-prompted the operator). ~527 refs / 29 files, mechanical — but any site the classification pass flags as reading transport where it MEANS service is a behavior fix and must be split into its own commit, never smuggled into a rename.
-  2. **Co-locate the projections.** One identity module exporting `serviceIdentity` / `quotaPoolKey` / `transportRoute`, each documented with the question it answers. Pure move, no behavior change.
+  2. ✅ **SHIPPED 2026-07-20. Co-locate the projections.** All four now live in `src/shared/providers/identity.ts`, each documented with the question it answers: `backendIdentity` (gate) / `sourceService` / `quotaPoolKey` (ledger, was `buildProviderModelKey`) / `transportRoute` (routing filter, was the private `backendExclusionPattern`). Pure move — every call-site argument preserved. ⚠ **Deviation from the spec's literal "same module"**: the target was `providerConfirmation.ts`, but that file imports `dispatch/costRank.ts` → `quota/modelStatics.ts`, so quota importing it would point quota back at providers through dispatch. A LEAF module with zero value imports satisfies the spec's own stated rationale ("the lowest module both consumers can import") without the cycle. ⚠ **A claimed axis divergence here was FALSE and is not a follow-up**: `dispatchableSourceId` (the persisted ledger key) already passes `service` post-stage-1; the transport-passing sites are a documented-unreachable fallback and a throwaway key feeding `resolveAccountIdSafe`, not ledger keys. `apiPool.ts`'s doc comment had said `transport[#account]/…` since before stage 1 and was corrected.
   3. **`Locus` discriminated union** (`{kind:"url"} | {kind:"command"}`); host-tier rules apply only to URLs. Lowest priority of the five — justified BY stage 4, not independently (there is no live parsing bug; `endpointHosts` guards on `//`).
   4. **Axis-explicit exclusion grammar** (`transport:` / `service:` / `host:` / `model:`). Retires two defects outright: an unknown axis becomes a PARSE ERROR rather than a silently-inert host rule (the "typo'd rule matches nothing, silently" item), and `service:nim` closes every transport reaching that vendor. Carries a persisted-policy migration — one user, so MIGRATE rather than dual-parse.
   5. **Fail-closed autonomous write emits the `service` axis.** Closes the multi-transport residue durably: a transport snapshot decays the moment proxy expansion adds a route, a service rule does not. Touches `intakeExecutors.ts` → loop-core, attestation required.
@@ -1264,6 +1264,24 @@ followed" is otherwise indistinguishable from a bug.
   dated `*-plan-of-record.md` in the tracked tree (the gate now rejects the latter).
 
 ## Durable traps (environment / tooling reference)
+
+- **`rtk npm run <script>` fails with "program not found" from the Bash (Git Bash) tool
+  (2026-07-20, inefficient-feeding, low).** `rtk npm run build` / `rtk npm run check` both die with
+  `Error: Failed to run npm run / Caused by: program not found`; rtk cannot resolve the `npm` shim
+  under Git Bash. Plain `npm run …` works fine from the same shell. So the global "always prefix with
+  rtk" rule silently costs a round-trip on every build/check unless you already know this. Workaround:
+  use plain `npm run …` from Bash, or route rtk-wrapped npm through the PowerShell tool instead.
+
+- **An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right
+  (2026-07-20, medium).** A NIM (`glm-5.2`) call to verify an axis claim returned an accurate
+  per-call-site breakdown that correctly refuted the claim — but attributed sentences to
+  `spec/backend-identity-axes.md` that actually came from the just-written source file passed in the
+  same call, and invented a verbatim "host quota pools … still key on transport or host identity"
+  quote from the identity module that exists nowhere. The lane's structural analysis was worth the
+  call; every citation in it was worthless. Treat quoted evidence from the lane as the LEAST reliable
+  part of its output, not the most — the opposite of the intuition that a quote is checkable proof.
+  ([[offload-lane-failures-are-usually-the-caller]] is about weak-looking output; this is the inverse
+  failure — confident output with fake support.)
 
 - **`agy -p` treats its OWN CLI flags as the research topic — never pass `--dangerously-skip-permissions` with a real task.** Two consecutive dispatches of a
   provider-confirmation analysis came back as an essay about `--dangerously-skip-permissions` itself:

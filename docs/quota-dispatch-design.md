@@ -153,7 +153,7 @@ and vice-versa. This is the intended way to get more aggregate Claude throughput
 subagents out to a second account's CLI — so the design must keep the two readings separate
 rather than letting one credential's snapshot masquerade as both.
 
-The key + resolution + stamping is realized across `scheduler.ts` `buildProviderModelKey`,
+The key + resolution + stamping is realized across `providers/identity.ts` `quotaPoolKey`,
 `httpQuotaSource.ts` `parseProviderModelKey`, `quotaSource.ts` `resolveAccountIdSafe`,
 `apiPool.ts` `buildHostModelPools`/`buildSourcePool`, `accountId.ts` `deriveLocalAccountId`,
 and `compositeQuotaSource.ts` `buildAccountScopedQuotaSource`:

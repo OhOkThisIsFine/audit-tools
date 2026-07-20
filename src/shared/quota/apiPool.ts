@@ -9,7 +9,7 @@ import type { HostConcurrencyLimit, QuotaStateEntry } from "./types.js";
 import type { QuotaSource, QuotaProbeResult } from "./quotaSource.js";
 import type { DiscoveredRateLimitsInput, HostModelRosterEntry } from "./scheduler.js";
 import { probeQuotaSource, resolveAccountIdSafe } from "./quotaSource.js";
-import { buildProviderModelKey } from "./scheduler.js";
+import { quotaPoolKey } from "../providers/identity.js";
 import { parseProviderModelKey } from "./httpQuotaSource.js";
 import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
 import {
@@ -30,9 +30,11 @@ import {
 
 /**
  * The stable id of a dispatchable source — its explicit `id`, or the quota-ledger
- * pool identity `transport[#account]/(model ?? endpoint ?? *)` ({@link buildProviderModelKey})
- * so two sources of the same transport stay distinct as long as their model/endpoint
+ * pool identity `service[#account]/(model ?? endpoint ?? *)` ({@link quotaPoolKey})
+ * so two sources onto the same service stay distinct as long as their model/endpoint
  * differ. This is the CapacityPool id and the key learned quota is recorded under.
+ * (It said `transport[...]` until stage 1 normalized `service` at the chokepoint; the
+ * transport arm below is now the unreachable fallback, not the main path.)
  *
  * ⚠ Keyspace (1) of three, and NOT the `provider:model` operator exclusion grammar
  * (`DispatchExclusionPattern`) it superficially resembles — an account is load-bearing
@@ -59,7 +61,7 @@ export function dispatchableSourceId(source: DispatchableSource, account?: strin
   //      accounts stay distinct (the gather-time dedup path passes no account).
   if (source.id) return account ? `${source.id}#${account}` : source.id;
   if (source.service) {
-    return buildProviderModelKey(
+    return quotaPoolKey(
       source.service,
       source.model ?? source.endpoint ?? null,
       account ?? source.account ?? null,
@@ -68,7 +70,7 @@ export function dispatchableSourceId(source: DispatchableSource, account?: strin
   // Unreachable for anything that came through the gather chokepoint (`service` is
   // normalized to `declared ?? transport` there). Retained for the pre-chokepoint
   // callers in `resolveProxyLane`, which see raw declared sources.
-  return buildProviderModelKey(source.transport, source.model ?? source.endpoint ?? null, account);
+  return quotaPoolKey(source.transport, source.model ?? source.endpoint ?? null, account);
 }
 
 /**
@@ -232,7 +234,7 @@ export async function buildHostModelPool(params: {
   );
   return {
     id: params.poolKey,
-    // Host pool keys are provider-shaped by construction (buildProviderModelKey), so
+    // Host pool keys are provider-shaped by construction (quotaPoolKey), so
     // the account segment is recoverable from the key here — unlike a source pool,
     // whose key may be an opaque operator-declared id.
     accountKey: accountKeyFromProviderShapedKey(params.poolKey),
@@ -279,7 +281,7 @@ export async function buildHostModelPools(params: {
   // and never alias a same-provider dispatch source on a different account (§5).
   const hostAccount = await resolveAccountIdSafe(
     params.quotaSource,
-    buildProviderModelKey(params.providerName, params.hostModel),
+    quotaPoolKey(params.providerName, params.hostModel),
   );
   return Promise.all(
     (params.roster ?? [null]).map(async (entry) => {
@@ -287,7 +289,7 @@ export async function buildHostModelPools(params: {
       // Re-key with the host account (the caller builds an account-less key; recover
       // its provider/model and re-stamp). Account-null → key is unchanged.
       const parsed = parseProviderModelKey(resolved.poolKey);
-      const poolKey = buildProviderModelKey(parsed.provider, parsed.model, hostAccount);
+      const poolKey = quotaPoolKey(parsed.provider, parsed.model, hostAccount);
       return buildHostModelPool({
         poolKey,
         providerName: params.providerName,
@@ -336,7 +338,7 @@ export async function buildSourcePool(params: {
     source.account ??
     (await resolveAccountIdSafe(
       scoped,
-      buildProviderModelKey(source.transport, source.model ?? source.endpoint ?? null),
+      quotaPoolKey(source.transport, source.model ?? source.endpoint ?? null),
     ));
   const poolKey = dispatchableSourceId(source, account);
   const probe = await probeQuotaSource(scoped, poolKey).catch(

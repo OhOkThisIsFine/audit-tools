@@ -50,7 +50,7 @@ export type {
 // Wave scheduler now lives in audit-tools/shared (single source of truth for
 // both orchestrators). This also gives the remediator the first-contact
 // concurrency cap and host-reported-capacity handling it previously lacked.
-export { scheduleWave, buildProviderModelKey } from "audit-tools/shared";
+export { scheduleWave, quotaPoolKey } from "audit-tools/shared";
 export type { ScheduleWaveOptions } from "audit-tools/shared";
 
 // Capacity model: the JIT, multi-pool-capable layer both orchestrators size

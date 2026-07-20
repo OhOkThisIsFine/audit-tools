@@ -82,7 +82,7 @@ const SHARED_QUOTA_SYMBOLS = [
   // Wave (no learned concurrency cap — concurrency is declared or absent)
   "recordWaveOutcome",
   "scheduleWave",
-  "buildProviderModelKey",
+  "quotaPoolKey",
   // Backoff
   "computeBackoffCooldownMs",
   "computeCooldownUntil",

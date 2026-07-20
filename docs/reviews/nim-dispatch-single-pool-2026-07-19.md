@@ -22,8 +22,8 @@ The configuration now reflects (3): **one NIM pool, best model, all complexity l
 
 Verified by source trace, not inference.
 
-- **Pool identity is `(provider, account, model)`** — `apiPool.ts:37-57` → `buildProviderModelKey`
-  (`scheduler.ts:802-809`), rendering `provider[#account]/model`. `model` is in the key, and that same key
+- **Pool identity is `(provider, account, model)`** — `apiPool.ts:37-57` → `quotaPoolKey`
+  (`providers/identity.ts`), rendering `provider[#account]/model`. `model` is in the key, and that same key
   is the *budget* key.
 - **Quota state, rate ceilings, and in-flight caps all key off it** — `apiPool.ts:425,428`;
   `state.ts:576`; `admissionLoop.ts:613,668-669,689`.
@@ -245,7 +245,7 @@ partitions: metering calls `accountKeyFromPoolKey` (pool-key head only), while t
    `rollingDispatch.ts:434,436,443` still state `resourceKey` IS the pool id.
 
 **Clean on:** no import cycle; count seed/increment/check internally coherent; lease reconcile safe;
-`accountKeyFromPoolKey` itself correct against `buildProviderModelKey`; folding host `active_subagents`
+`accountKeyFromPoolKey` itself correct against `quotaPoolKey`; folding host `active_subagents`
 across model tiers is a genuine improvement.
 
 **Sign-off requires:** rung 1 removed or restricted to backend-not-transport endpoints; ONE grouping
@@ -255,7 +255,7 @@ min-not-max semantics; and red-green coverage at `rollingDispatch.ts:1003` and b
 
 ### Original (pre-review) description of the change
 
-`accountKeyFromPoolKey` (`scheduler.ts`, inverse of `buildProviderModelKey`) + `resolvePoolAccountKey`
+`accountKeyFromPoolKey` (`scheduler.ts`, inverse of `quotaPoolKey` in `providers/identity.ts`) + `resolvePoolAccountKey`
 (`accountId.ts`) single-source ONE account grouping, now used by all three per-account axes:
 
 - **Budget + in-flight cap** — `admissionLoop.ts`: `resourceKey` derives from the account, and the

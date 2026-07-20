@@ -112,7 +112,7 @@ export function deriveLocalAccountId(source: {
 
 /**
  * The account key for a pool whose key is PROVIDER-SHAPED by construction —
- * `provider[#account]/model`, as built by `buildProviderModelKey`. Host pools are the
+ * `provider[#account]/model`, as built by `quotaPoolKey`. Host pools are the
  * only such class: the caller builds the key itself, so the account segment is present
  * exactly when an account was resolved.
  *

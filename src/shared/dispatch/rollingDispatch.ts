@@ -60,10 +60,8 @@ import type { SessionConfig } from "../types/sessionConfig.js";
 import type { CapacityPool, PartialCompletionTerminal } from "../quota/capacity.js";
 import { AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS } from "../quota/capacity.js";
 import type { QuotaStateEntry, QuotaState, WaveSchedule } from "../quota/types.js";
-import {
-  scheduleWave,
-  buildProviderModelKey,
-} from "../quota/scheduler.js";
+import { scheduleWave } from "../quota/scheduler.js";
+import { quotaPoolKey } from "../providers/identity.js";
 import {
   recordWaveOutcome,
   readQuotaState,

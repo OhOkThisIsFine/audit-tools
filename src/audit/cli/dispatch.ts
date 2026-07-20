@@ -30,7 +30,7 @@ import { computeContinuityScores } from "../orchestrator/continuityScore.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import { taskResultPath, packetPromptPath, artifactNameForId } from "./args.js";
 import { resolveFreshSessionProviderName } from "../providers/index.js";
-import { buildProviderModelKey } from "../quota/index.js";
+import { quotaPoolKey } from "../quota/index.js";
 import {
   HostSessionQuotaSource,
   type HostSessionEscalation,
@@ -368,7 +368,7 @@ export async function prepareDispatchArtifacts(params: {
     // construct its own retained host-session source rather than inheriting one.
     const overrideProviderName = resolveFreshSessionProviderName(undefined, sessionConfig);
     const overrideHostSession = new HostSessionQuotaSource({
-      providerModelKey: buildProviderModelKey(
+      providerModelKey: quotaPoolKey(
         overrideProviderName,
         params.hostModel ?? params.hostModelId ?? null,
       ),

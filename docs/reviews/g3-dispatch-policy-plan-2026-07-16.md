@@ -90,7 +90,7 @@ predicate flip.
 | `roster` is read ONLY by its own parse gate + the freshness check | ✅ | `:546` (hard required-field gate) and `:654` |
 | `buildSourcePools` is the **shared routing chokepoint** | ✅ | audit `hybridDispatch.ts:67`; remediate `waveScheduling.ts:335` |
 | **most providers have NO `model_id` at confirmation time** | ✅ | `representativeModelId` (`providerConfirmation.ts:257-269`) returns a model only for `openai-compatible` + `codex`; `undefined` for claude-code/agy/opencode/worker-command/subprocess-template. `annotateConfirmedPool:399` spreads conditionally (`...(model ? {model_id: model} : {})`) ⇒ no field at all. `DiscoveredProvider` has no `model_id`. `:249-256`: *"a CLI backend's model arrive[s] only at the dispatch handshake"* |
-| **THREE distinct keyspaces, do not conflate** — (1) quota-ledger pool identity `provider[#account]/model` (`buildProviderModelKey`, `scheduler.ts:802-809`; `account` is load-bearing for the double-grant boundary, spec `:204`); (2) operator EXCLUSION grammar `provider:model` (spec `:206-208`, owner-approved; account is irrelevant to a rule about a backend); (3) dispatch's confirmed-position lookup on the **bare `model_id`** (`costRank.ts:299-315`) — the one the gate's CONFIRMED set is built from | ✅ | nothing forces unification; the `apiPool.ts:22` comment is stale *about (1)* and is not evidence about (2) |
+| **THREE distinct keyspaces, do not conflate** — (1) quota-ledger pool identity `provider[#account]/model` (`quotaPoolKey`, `providers/identity.ts`; `account` is load-bearing for the double-grant boundary, spec `:204`); (2) operator EXCLUSION grammar `provider:model` (spec `:206-208`, owner-approved; account is irrelevant to a rule about a backend); (3) dispatch's confirmed-position lookup on the **bare `model_id`** (`costRank.ts:299-315`) — the one the gate's CONFIRMED set is built from | ✅ | nothing forces unification; the `apiPool.ts:22` comment is stale *about (1)* and is not evidence about (2) |
 | **`resolveAmbientSources` is blind to undeclared backends** | ✅ | `auditorSources.ts:258-270` iterates ONLY `readSourceDeclaration()` (`~/.audit-code/sources-declared.json`); an installed-on-PATH `codex` is discovered by `discoverProviders` (`sharedProviderConfirmation.ts:204,270`) and never by this |
 | `provider-confirmation.input.json` is **never deleted** | ✅ | zero `unlink`/`rm` in `src/`; consumed at `nextStepHelpers.ts:1436-1441` |
 | spec `:283-284` ("`DispatchPolicy` … persists on the intent") is a **PHASE, not stale** | ✅ | panel synthesis `dispatch-inventory-greenfield-design-2026-07-16.md:39,73-77` puts `policy{exclusions,cost_order,dispatch_bias,confirmed_by,confirmed_at}` on `RepoSessionIntent` as unanimous **Decision (A)** — and it PREDATES draft 1; spec **G6** (`:296-297`) is what closes the disjointness |
@@ -101,7 +101,7 @@ predicate flip.
 
 - **Comparison key = the operator-facing exclusion grammar, `provider:model`** (spec `:206-208`,
   owner-approved), with `provider` and endpoint-host as coarser patterns. **Not**
-  `provider[#account]/model` — that is the internal quota-pool identity key (`buildProviderModelKey`) and a
+  `provider[#account]/model` — that is the internal quota-pool identity key (`quotaPoolKey` in `providers/identity.ts`) and a
   different keyspace. The two are reconciled by *keeping them distinct and saying so*, not by unifying.
   **Model granularity is the goal, not a refinement:** the owner said *model* choices. A second NIM model
   under an already-confirmed `openai-compatible` introduces no new *provider* — at provider granularity the
@@ -252,7 +252,7 @@ Widens `policy.exclude` and the gate's key together. A **type + parser change**,
 `ConfirmedDispatchPolicy.exclude?: ResolvedProviderName[]` (`sharedProviderConfirmation.ts:121`) becomes a
 pattern list, and `parseProviderNameList` (`:371-384`) — which membership-checks against
 `RESOLVED_PROVIDER_NAMES` and would **reject** any `provider:model` string — is replaced by a pattern
-parser. Draft 4 cited "extract `buildProviderModelKey`" and would have left the caveat fully intact.
+parser. Draft 4 cited "extract `quotaPoolKey`" and would have left the caveat fully intact.
 
 **Budget the ripple (draft 5 under-scoped this as "two files").** `resolveExcludedProviders` (`:386-397`)
 can no longer return `Set<ResolvedProviderName>` — it becomes a **matcher over source keys**. Consumers:

@@ -52,11 +52,10 @@ import type { RunLogger } from "../observability/runLog.js";
 import {
   discoverProviders,
   annotateConfirmedPool,
-  backendIdentity,
-  sourceService,
   representativeModelId,
   type CapabilityTier,
 } from "./providerConfirmation.js";
+import { backendIdentity, sourceService, transportRoute } from "./identity.js";
 import { resolveConfirmedCostPositions } from "../dispatch/costRank.js";
 import type {
   ConfirmedPoolEntry,
@@ -147,7 +146,7 @@ export interface ConfirmedDispatchPolicy {
  * | `integrate.api.nvidia.com` / `localhost:8000` | no | every source whose `endpoint` host (and port, when the pattern names one) matches — the coarse endpoint tier |
  *
  * ⚠ This is a THIRD keyspace, deliberately distinct from the quota-ledger pool
- * identity (`provider[#account]/model`, `buildProviderModelKey`): an account is
+ * identity (`provider[#account]/model`, `quotaPoolKey`): an account is
  * irrelevant to a rule about a backend. Do not unify them.
  */
 export type DispatchExclusionPattern = string;
@@ -454,86 +453,6 @@ const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.
 // ---------------------------------------------------------------------------
 
 /**
- * **THE** identity of one backend: `provider:model` where the model is knowable,
- * else the coarse `provider` name. ONE function, consumed by all three halves of
- * the gate — the reachability delta, the confirmed set, and the exclusion pattern
- * it hands the routing filter — so those three cannot answer "which backend is
- * this?" differently. They are *required* to agree; a second copy would be a
- * second chance to disagree.
- *
- * It is **provider-qualified**, and that is load-bearing rather than cosmetic. The
- * earlier `model_id ?? provider` form dropped the provider whenever a model was
- * known, which was a gate BYPASS in two directions: two backends from DIFFERENT
- * providers advertising the SAME model string collapsed into one delta entry (only
- * one of them got an exclusion pattern), and — worse — confirming one provider's
- * model marked a different provider's identically-named model as confirmed, so a
- * backend the operator never saw routed as though approved. Proxy expansion makes
- * the collision ordinary, not exotic: several sources behind one transport can
- * serve the same model string.
- *
- * The fallback to the bare provider name is equally load-bearing and is why this is
- * NOT a plain `provider:model`: `representativeModelId` knows a model only for
- * `openai-compatible` and `codex` — for claude-code / agy / opencode /
- * worker-command a CLI backend's model arrives only at the dispatch handshake. A
- * model-only identity would let such a backend contribute NO key, so installing
- * `agy` on PATH would leave the delta empty and the gate would silently dispatch it
- * — re-opening the exact PATH-appearance case the gate exists to catch, blind
- * rather than loud. It is also why a `provider:model` *rule* must degrade to the
- * coarse `provider` tier for those backends: a `provider:model` rule only matches
- * when the routing filter can see that exact model.
- *
- * Model granularity is the POINT, not a refinement: the operator confirms *model*
- * choices, so a second model under an already-confirmed `openai-compatible` is a
- * new choice even though it introduces no new provider.
- *
- * The provider half is the **BACKEND ACTUALLY SERVING the model**
- * (`service ?? transport`), not the transport that reaches it — the same
- * rule `apiPool` already applies to the quota-ledger pool identity. This is what
- * makes the gate's two proxy cases come out right, and they pull in OPPOSITE
- * directions, so a transport-keyed identity cannot satisfy both:
- *   • a proxied `claude-worker` lane and a direct `openai-compatible` lane onto the
- *     SAME `nim` backend+model are genuinely ONE backend reached two ways — the
- *     operator confirms it once, and it must not delta twice; while
- *   • two lanes over the SAME transport onto DIFFERENT backends (`nim` vs
- *     `openrouter`) sharing a model string are genuinely TWO backends — and
- *     collapsing them was the bypass.
- * Transport-qualifying would invert both: it splits the first pair and still
- * collapses the second.
- *
- * ⚠ This is a keyspace of its own, deliberately distinct from BOTH:
- *   • the quota-ledger pool identity (`service[#account]/model`,
- *     `buildProviderModelKey`) — it shares this provider half, but an account is
- *     irrelevant to a rule about a backend; and
- *   • the dispatch COST-POSITION map (`readConfirmedCostPositions`), which is keyed
- *     by bare `model_id` because `costRank` looks positions up with no provider in
- *     hand at the lookup site.
- * Do not unify this with either.
- *
- * ⚠ NOT the same value as {@link backendExclusionPattern}. The identity answers "is
- * this the backend the operator already saw?"; the pattern answers "what must the
- * routing filter match to drop it?" — and `ruleMatches` matches on the TRANSPORT
- * provider, so a rule built from this identity would silently match nothing for a
- * proxied lane. They were unified once; that is why they are documented apart now.
- */
-// `backendIdentity` + `sourceService` live in ./providerConfirmation.ts — the lowest
-// module both this file and the source-fold can import, so there is exactly ONE
-// answer to "which backend is this?". See spec/backend-identity-axes.md.
-
-/**
- * The pattern that rules out one backend at the finest granularity its model is
- * knowable at — keyed on the TRANSPORT provider, because that is the field
- * `ruleMatches` compares (`ExcludableBackend.transport`). A backend whose model
- * arrives only at the dispatch handshake (a CLI) must be ruled out at the coarse
- * `provider` tier or the rule would never match.
- */
-function backendExclusionPattern(
-  modelId: string | undefined,
-  transportProvider: string,
-): DispatchExclusionPattern {
-  return modelId ? `${transportProvider}:${modelId}` : transportProvider;
-}
-
-/**
  * The keys of the operator's persisted DECISION — the CONFIRMED half of the gate.
  *
  * All three pools contribute, and each is load-bearing: `annotateConfirmedPool`
@@ -640,7 +559,7 @@ export function computeNewlyReachableBackends(
     reachNow.set(identity, {
       key: identity,
       provider,
-      exclusion_pattern: backendExclusionPattern(modelId, provider),
+      exclusion_pattern: transportRoute(modelId, provider),
     });
   };
   for (const provider of discoverProviders(sessionConfig, env, detectCommand)) {

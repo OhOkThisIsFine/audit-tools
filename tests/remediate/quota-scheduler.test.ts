@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { QuotaStateEntry, SessionConfig } from "audit-tools/shared";
 import {
   scheduleWave,
-  buildProviderModelKey,
+  quotaPoolKey,
   computeBackoffCooldownMs,
   classifyProvider,
   computeDispatchCapacity,
@@ -207,15 +207,15 @@ describe("scheduleWave (quota module)", () => {
   });
 });
 
-describe("buildProviderModelKey", () => {
+describe("quotaPoolKey", () => {
   it("combines provider and model", () => {
-    expect(buildProviderModelKey("claude-code", "anthropic/claude-sonnet-4-6")).toBe(
+    expect(quotaPoolKey("claude-code", "anthropic/claude-sonnet-4-6")).toBe(
       "claude-code/anthropic/claude-sonnet-4-6",
     );
   });
 
   it("uses wildcard when model is null", () => {
-    expect(buildProviderModelKey("claude-code", null)).toBe("claude-code/*");
+    expect(quotaPoolKey("claude-code", null)).toBe("claude-code/*");
   });
 });
 
@@ -626,4 +626,3 @@ describe("M5-WIRING convergence — deterministic-local token estimate, never an
     );
   });
 });
-

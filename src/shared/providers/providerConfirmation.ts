@@ -14,6 +14,7 @@ import {
   resolveConversationHostProvider,
 } from "./providerPathGuard.js";
 import { suggestCostOrdering, resolveModelPrice, type CostCandidate } from "../dispatch/costRank.js";
+import { backendIdentity, sourceService } from "./identity.js";
 import type {
   ConfirmedPoolEntry,
   HostModelCostEntry,
@@ -230,35 +231,6 @@ export async function queryProviderQuota(
  * and are priced deterministically at dispatch instead. Never hardcodes a model
  * name; reads only operator-supplied config.
  */
-/**
- * **THE** identity of one backend: `service:model` where the model is knowable, else
- * the coarse service name — where "service" is the BACKEND ACTUALLY SERVING the model
- * (`service ?? transport`), never the transport that reaches it.
- *
- * Lives HERE, the lowest module both consumers can import, so the Gate-0 delta, the
- * confirmed set, and the source-fold dedup cannot answer "which backend is this?"
- * differently. They are required to agree; a second copy is a second chance to
- * disagree — which is exactly how the confirmation BYPASS and the source-fold
- * collision arose independently.
- *
- * Full rationale, and the axis each downstream question binds to:
- * `spec/backend-identity-axes.md`.
- */
-export function backendIdentity(
-  modelId: string | undefined,
-  serviceName: string,
-): string {
-  return modelId ? `${serviceName}:${modelId}` : serviceName;
-}
-
-/** The service a source is served BY — its declared backend, else its own transport. */
-export function sourceService(source: {
-  transport: string;
-  service?: string;
-}): string {
-  return source.service ?? source.transport;
-}
-
 export function representativeModelId(
   name: ResolvedProviderName,
   sessionConfig: SessionConfig,

@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 
 const {
   scheduleWave,
-  buildProviderModelKey,
+  quotaPoolKey,
   computeBackoffCooldownMs,
 } = await import("audit-tools/shared");
 const { detectHostActiveSubagentLimit, resolveHostActiveSubagentLimit } = await import("../../src/audit/quota/hostLimits.ts");
@@ -19,15 +19,15 @@ function makeEntry(overrides = {}) {
   };
 }
 
-// ── buildProviderModelKey ────────────────────────────────────────────────────
+// ── quotaPoolKey ─────────────────────────────────────────────────────────────
 
-test("buildProviderModelKey uses provider/* when no model given", () => {
-  expect(buildProviderModelKey("claude-code", null)).toBe("claude-code/*");
-  expect(buildProviderModelKey("claude-code", undefined)).toBe("claude-code/*");
+test("quotaPoolKey uses provider/* when no model given", () => {
+  expect(quotaPoolKey("claude-code", null)).toBe("claude-code/*");
+  expect(quotaPoolKey("claude-code", undefined)).toBe("claude-code/*");
 });
 
-test("buildProviderModelKey includes model when provided", () => {
-  expect(buildProviderModelKey("anthropic", "claude-sonnet-4-6")).toBe("anthropic/claude-sonnet-4-6");
+test("quotaPoolKey includes model when provided", () => {
+  expect(quotaPoolKey("anthropic", "claude-sonnet-4-6")).toBe("anthropic/claude-sonnet-4-6");
 });
 
 test("scheduleWave returns requestedConcurrency when quota is disabled", () => {

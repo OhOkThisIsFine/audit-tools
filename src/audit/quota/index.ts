@@ -50,7 +50,7 @@ export type {
 // Wave scheduler now lives in audit-tools/shared (single source of truth for
 // both orchestrators). Auditor passes its discovered-limits via the structural
 // DiscoveredRateLimitsInput the shared scheduler accepts.
-export { scheduleWave, buildProviderModelKey, resolveHostModel } from "audit-tools/shared";
+export { scheduleWave, quotaPoolKey, resolveHostModel } from "audit-tools/shared";
 export type { ScheduleWaveOptions } from "audit-tools/shared";
 
 // Capacity model: the JIT, multi-pool-capable layer both orchestrators size

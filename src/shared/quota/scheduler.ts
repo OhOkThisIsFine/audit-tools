@@ -913,21 +913,3 @@ export function scheduleWave(options: ScheduleWaveOptions): WaveSchedule {
     calibrating,
   };
 }
-
-/**
- * Build the quota pool key used for indexing quota-state.json entries and gating
- * sources. Pool identity is `(provider, account, model)` — quota is billed
- * per-ACCOUNT, so two same-provider accounts must NOT alias to one pool (see
- * docs/quota-dispatch-design.md §5). Format: `provider[#account]/model`. The
- * account segment is OMITTED when null, so a single-account run keeps the legacy
- * `provider/model` key (no migration). The `model` tail may itself contain `/`;
- * provider + account live in the head before the first `/`.
- */
-export function buildProviderModelKey(
-  providerName: string,
-  hostModel: string | null | undefined,
-  account?: string | null,
-): string {
-  const head = account ? `${providerName}#${account}` : providerName;
-  return hostModel ? `${head}/${hostModel}` : `${head}/*`;
-}

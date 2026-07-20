@@ -1089,10 +1089,10 @@ export {
   classifyProvider,
   selectDispatchDriver,
   DISPATCH_Y_DISPATCHER_MIN_ITEMS,
-  buildProviderModelKey,
   parseHostModelRoster,
   DEFAULT_SAFETY_MARGIN,
 } from "./quota/scheduler.js";
+export { quotaPoolKey } from "./providers/identity.js";
 export type {
   ScheduleWaveOptions,
   DiscoveredRateLimitsInput,

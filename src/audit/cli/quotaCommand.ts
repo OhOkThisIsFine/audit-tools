@@ -3,7 +3,7 @@ import { buildQuotaSource } from "audit-tools/shared/quota/compositeQuotaSource"
 import { resolveFreshSessionProviderName } from "../providers/index.js";
 import { loadSessionConfig } from "../supervisor/sessionConfig.js";
 import {
-  buildProviderModelKey,
+  quotaPoolKey,
   readQuotaStateOrDegrade,
   resolveLimits,
   resolveHostActiveSubagentLimit,
@@ -40,7 +40,7 @@ export async function cmdQuota(argv: string[]): Promise<void> {
     explicitProvider ?? (sessionConfig.provider === undefined ? "auto" : undefined),
     sessionConfig,
   );
-  const providerModelKey = buildProviderModelKey(providerName, hostModel);
+  const providerModelKey = quotaPoolKey(providerName, hostModel);
 
   const { limits, source, confidence } = resolveLimits({ providerName, sessionConfig, hostModel });
 

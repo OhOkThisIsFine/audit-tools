@@ -14,7 +14,7 @@ needed. They did not all get it right:
   only there. An earlier draft of this document claimed quota "already keys on service"; that is
   **materially overstated** and was refuted. When no `backend_provider` is declared it returns an
   arbitrary explicit `source.id`, or keys on the transport; host quota pools, the `quota` CLI, and
-  the remediate host-session keys all key on host/transport identity; and `buildProviderModelKey`
+  the remediate host-session keys all key on host/transport identity; and `quotaPoolKey`
   normalizes nothing — it embeds whatever string its caller supplies. The accurate statement is:
   *some* source pools key on the declared service; fallback source pools and every host pool still
   key on transport or host identity. The inconsistency is wider than the defect that exposed it;
@@ -114,21 +114,14 @@ question it answers. Divergence between them is then visible in a single file ra
 rediscovered per-consumer. They are near-identical strings answering different questions, and that is
 exactly why adjacency is the safeguard: a reader choosing one is shown the others.
 
-**Today** (partially realized): `backendIdentity(model, service)` and `sourceService(source)` live in
-`src/shared/providers/providerConfirmation.ts` — the lowest module that both the Gate-0 delta, the
-confirmed set, and the source fold can import. That co-location is what stops those three from
-answering differently, and it exists because they already did.
-
-**Target** — the same module also owning the other two projections, so all three are read together:
+**Today:** all four projections live in `src/shared/providers/identity.ts`, a leaf module that the
+Gate-0 delta, confirmed set, source fold, quota ledger, and routing filter can all import:
 
 ```
 backendIdentity(model, service)   → "nim:z-ai/glm-5.2"            // the confirmation gate
 quotaPoolKey(ref, account)        → "nim#acct/z-ai/glm-5.2"       // the ledger
 transportRoute(ref)               → "claude-worker:z-ai/glm-5.2"  // what the routing filter drops
 ```
-
-The quota and route keys are still derived elsewhere (`buildProviderModelKey`,
-`backendExclusionPattern`); moving them here is stage 2 of the migration in `docs/backlog.md`.
 
 ## Normalization at the chokepoint
 

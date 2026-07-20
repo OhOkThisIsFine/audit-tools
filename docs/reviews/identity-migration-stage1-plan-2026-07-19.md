@@ -32,9 +32,9 @@ is sound.
 `src/shared/quota/apiPool.ts:43-63` reads:
 
 ```ts
-if (source.backend_provider) { return buildProviderModelKey(source.backend_provider, …); }
+if (source.backend_provider) { return quotaPoolKey(source.backend_provider, …); }
 if (source.id) return account ? `${source.id}#${account}` : source.id;
-return buildProviderModelKey(source.provider, …);
+return quotaPoolKey(source.provider, …);
 ```
 
 Once `service` is always populated, the first branch is **always taken** — so the explicit

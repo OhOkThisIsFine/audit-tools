@@ -3,7 +3,7 @@ import type { ResolvedProviderName, SessionConfig } from "../types/sessionConfig
 import type { HostConcurrencyLimit, QuotaStateEntry } from "./types.js";
 import type { QuotaSource } from "./quotaSource.js";
 import type { DiscoveredRateLimitsInput, HostModelRosterEntry } from "./scheduler.js";
-import { buildProviderModelKey } from "./scheduler.js";
+import { quotaPoolKey } from "../providers/identity.js";
 import { buildQuotaSource } from "./compositeQuotaSource.js";
 import {
   HostSessionQuotaSource,
@@ -154,7 +154,7 @@ export async function buildHostPoolPreamble(
   // model id (a key segment ONLY — never a window authority), else null → `provider/*`.
   // Per-roster-rank `model_id` overrides this per pool below.
   const quotaModelKeySegment = hostModel ?? input.hostModelId ?? null;
-  const quotaProviderKey = buildProviderModelKey(providerName, quotaModelKeySegment);
+  const quotaProviderKey = quotaPoolKey(providerName, quotaModelKeySegment);
 
   const roster = input.roster?.length ? sortRosterMostCapableFirst(input.roster) : null;
 
@@ -201,7 +201,7 @@ export async function buildHostPoolPreamble(
     roster,
     resolve: async (entry) => {
       const poolKey = entry?.model_id
-        ? buildProviderModelKey(providerName, entry.model_id)
+        ? quotaPoolKey(providerName, entry.model_id)
         : quotaProviderKey;
       // A roster rank reports its OWN window; the scalar/absent handshake falls back to
       // the single capability pair.

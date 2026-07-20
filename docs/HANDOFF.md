@@ -89,8 +89,15 @@
 `service = declared ?? transport` normalization, and the `id`-outranks-derivation precedence fix.
 Classification record: [`identity-migration-stage1-plan-2026-07-19.md`](reviews/identity-migration-stage1-plan-2026-07-19.md).
 
-**Next is stage 2** — co-locate the projections (`serviceIdentity` / `quotaPoolKey` / `transportRoute`
-in one module, each documented with the question it answers). Pure move, no behavior change.
+**Stage 2 shipped 2026-07-20** — all four projections now live in the leaf module
+`src/shared/providers/identity.ts` (a leaf, NOT `providerConfirmation.ts` as the spec said: that file
+reaches quota through `costRank`, so quota importing it would cycle). Pure move, arguments preserved.
+
+**Next is stage 3** (`Locus` discriminated union) — but note the backlog rates it lowest of the five
+and says it is justified BY stage 4, not independently. **Stage 4** (axis-explicit exclusion grammar)
+is the higher-value next build, and doc-review item DD-14 is waiting on it: `spec/backend-identity-axes.md`
+presents the `transport:`/`service:`/`host:` grammar in present tense while the live parser implements
+none of it, so an operator writing a `service:` rule today gets silence.
 
 ⚠ **Two things stage 1 learned that stage 2+ must carry:**
 - **Normalize in `collectDispatchableSources`, never the `gatherDispatchableSources` wrapper.** Both
