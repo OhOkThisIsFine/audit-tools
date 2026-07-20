@@ -82,13 +82,25 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**0. Backend-identity migration — design settled, stage 1 is the next build.** Design of record:
+**0. Backend-identity migration — STAGE 1 IS DONE; stage 2 is the next build.** Design of record:
 [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
-[`backlog.md`](backlog.md) → *Forward tracks*. The vocabulary stage (`provider` → `transport`,
-`backend_provider` → `service`, normalize `service` at the gather chokepoint) is the foundation the
-other four stages sit on. ~527 refs / 29 files, mechanical — **but** any site reading transport where
-it MEANS service is a behavior fix and belongs in its own commit, never smuggled into a rename. One
-such site is already confirmed and waiting in *Open bugs* (proxied lanes priced on the wrong vendor).
+[`backlog.md`](backlog.md) → *Forward tracks*. Stage 1 shipped 2026-07-19: the rename
+(`provider` → `transport`, `backend_provider` → `service`, 394 refs / 43 files), the
+`service = declared ?? transport` normalization, and the `id`-outranks-derivation precedence fix.
+Classification record: [`identity-migration-stage1-plan-2026-07-19.md`](reviews/identity-migration-stage1-plan-2026-07-19.md).
+
+**Next is stage 2** — co-locate the projections (`serviceIdentity` / `quotaPoolKey` / `transportRoute`
+in one module, each documented with the question it answers). Pure move, no behavior change.
+
+⚠ **Two things stage 1 learned that stage 2+ must carry:**
+- **Normalize in `collectDispatchableSources`, never the `gatherDispatchableSources` wrapper.** Both
+  are exported, so the wrapper leaves the inner function as a bypass of any invariant put there.
+- **An adversarial review reproduced two breaks that all local tests passed through.** Renaming a
+  field whose values are PERSISTED is not a rename: a pre-versioned `catalog-cache.json` still held
+  tool-stamped ids that silently re-split a proxied lane from its direct twin, and the repo's own
+  example declared `id` + `service` together and split identically. `PROXY_CATALOG_VERSION` now
+  degrades a stale-shape cache to absent. **Before any further identity change, enumerate what is on
+  DISK in the old shape, not just what is in the tree.**
 
 The design survived an adversarial review only in part: four claims were refuted and corrected in
 place, the ACCOUNT axis was missing entirely, and three preconditions now gate the grammar stage — in
