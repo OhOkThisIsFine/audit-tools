@@ -68,15 +68,20 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   assertion in it. Candidate mechanisms: a `tsconfig.test.json` wired into `verify:checks`, or
   `vitest --typecheck`.
 
-- **Mixed credential REFERENCES on one real key split the account (2026-07-19).** `deriveAccountKey`
-  compares `(endpoint, credential reference)`, so a source declaring
-  `api_key_env: "NVIDIA_API_KEY"` and a sibling pasting that same key inline as `api_key` are two
-  accounts and each meters its own allowance — a 2× over-admission of the same defect class as the
-  main N× bug. Deliberately not fixed by hashing the credential VALUE: that would change the account
-  identity on every credential rotation, orphaning ledger state and learned slopes for what is still
-  one account. **Property to hold:** two references naming one credential meter as one account,
-  without making identity depend on the secret's current value. Narrow today (inline `api_key` is
-  documented as discouraged).
+- **SPEC — delete inline `api_key` support; a credential must be named, never pasted.** Account identity
+  compares `(endpoint, credential REFERENCE)`, so a source naming its key through an env var and a
+  sibling pasting that same key inline resolve to two accounts and each meters a full allowance — a 2×
+  over-admission of the main metering defect's class. Hashing the credential VALUE to unify them is
+  refused on purpose: identity would then change on every key rotation, orphaning ledger state and
+  learned slopes for what is still one account. An explicit operator-declared `account` on both siblings
+  already overrides the derivation and unifies them, but that is a workaround the operator must know to
+  apply — the wrong thing stays possible.
+  **The resolution is to remove the second way of expressing a credential.** Inline `api_key` is already
+  documented as discouraged, there are no external consumers, and under the no-legacy rule a discouraged
+  duplicate path is simply deleted rather than defended. With one representation, two references to one
+  credential cannot disagree — the defect becomes unrepresentable rather than detected.
+  **Property to hold:** a credential is identified by reference only, and there is exactly one way to
+  declare one. Secrets also stop landing in declaration files as a side effect.
 
 - **`INV-shared-core-14` is machine/PATH-dependent, NOT a flake (2026-07-19).** Long characterized in
   handoffs as "pre-existing + env-sensitive". Actual cause, identified by independent review: provider
@@ -200,14 +205,19 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   proxy declaration. **Property to hold:** when several models share one budget, restricting the roster
   to the member that best serves the work is derived, not hand-declared.
 
-- **A stale proxy catalog cache is served silently, and an absent one deletes the lane (2026-07-19,
-  medium, friction: tool-should-decide).** `resolveAmbientSources` returned a `catalog-cache.json`
-  whose `fetched_at` was a day old, with a roster that no longer matched the running proxy — no
-  freshness check, no warning. Deleting the cache then dropped the whole proxy lane, and the
-  operator-facing reason names an internal FUNCTION (`populateProxyCatalog`) rather than any runnable
-  command — there is no CLI to populate it. **Property to hold:** the resolve path either revalidates
-  the cache against the live roster or states its age; and every drop reason names an action the
-  operator can actually take. Same family as the `dropped[]`-not-surfaced entry below.
+- **SPEC — the proxy catalog's freshness rule gates the WRITE but not the READ, and the lane has no
+  operator-runnable refresh.** A day-old cache whose roster no longer matched the running proxy was
+  served silently, and deleting the cache dropped the whole proxy lane with a reason naming an internal
+  FUNCTION rather than any command the operator could run. ⚠ Correcting this entry's earlier claim that
+  there is "no TTL": a 10-minute TTL DOES exist, but it only decides whether the populate step re-fetches.
+  The read path deliberately accepts cached data of any age. So the freshness concept is present and
+  applied on exactly the wrong side.
+  **Two properties to hold:** (a) the age rule applies where staleness does damage — the read path either
+  revalidates against the live roster or surfaces the cache's age rather than presenting stale data as
+  current; (b) every drop reason names an action the operator can actually take, which requires that such
+  an action EXIST — today no populate/refresh command is reachable from the CLI at all, so the reason has
+  nothing true to name. Fix the missing command first; the reason text is downstream of it.
+  Same family as the `dropped[]`-not-surfaced entry below.
 
 - **`top_k` truncates ALPHABETICALLY when nothing is ranked, silently dropping the frontier tier
   (2026-07-19, medium, now mitigable).** With all `score` undefined, `expandSources`
@@ -372,18 +382,21 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 - **Non-hermetic test: `tests/audit/quota-command.test.mjs` "nothing is written to disk" reads the box's real `.audit-tools/audit/session-config.json` (2026-07-18, low).** A leftover gitignored local artifact makes the test fail on a clean checkout of main; it presents as a regression from whatever diff is in flight. Property: the test must resolve repo-root state through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo path. Same box-dependence family as `INV-shared-core-14`.
 - **Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).** `src/shared/quota/apiPool.ts` (~370-371, ~497-498) and `src/shared/types/sessionConfig.ts` (~700-701) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the owner's no-legacy rule this fold should be deleted and the block treated as a plain source declaration.
 
-- **A transport-enforced JSON schema converts a LOUD offload failure into a SILENT empty one
-  (friction: tool-should-decide, medium).** Moving the free offload lane onto strict `json_schema`
-  response formatting fixed the old symptom — the backend used to drift off-schema and die with a parse
-  error on analytical prompts. But the underlying weakness is unchanged: handed a 94-line review record
-  and asked to enumerate open defects, the lane returned schema-VALID output whose every finding was the
-  literal placeholder `FAILED_TO_EXTRACT`. A caller checking only "did it parse" reads that as "no
-  findings." The old failure was loud and cost a retry; the new one is silent and costs a wrong
-  conclusion — strictly worse for exactly the analytical work the schema was supposed to unlock.
-  **Property to hold:** an offload result that conformed structurally but produced no content must be
-  detectable as a failure by its caller — schema conformance is not a success signal. Until then, the
-  free lane is for recon and extraction only; judgment work does not go there, and a suspiciously empty
-  result gets re-read before it is believed.
+- **A MISFITTING output schema silently degrades an offload to empty placeholders — and reads as model
+  weakness (friction: tool-should-decide, medium).** Asked to enumerate the open defects in a 94-line
+  review record under `strict: true` with a generic `{summary, findings[], open_questions[]}` shape, the
+  free lane returned schema-VALID output whose every finding was the literal string
+  `FAILED_TO_EXTRACT` — and the obvious reading was "this model can't do analytical work." That reading
+  was WRONG. The same model, same document, same lane, given a schema SHAPED TO THE TASK (an array of
+  defects with id / severity / kind / rationale) and `strict` off, produced a correct and well-reasoned
+  classification matching an independent hand analysis. The tell was there in the bad run: the summary
+  was accurate and it correctly named every defect id, so comprehension was never the problem — only the
+  container was. **Two properties to hold:** (a) an offload result that conformed structurally but
+  produced no content must be detectable as failure by its caller — schema conformance is not a success
+  signal, and a placeholder-filled response is a failure wearing a success shape; (b) the output schema
+  is part of the prompt, not packaging — a generic container applied to a specific task is a silent
+  quality cap. ⚠ Do not let this recur as a capability myth: the lane handles judgment work fine, and
+  `strict: true` should be treated as a quality risk to justify rather than a safe default.
 
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
@@ -440,7 +453,18 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 - **Friction walk (openai-compatible content-inlining ship lap, 2026-07-15):** (1) **process/self (medium):** an adversarial-review HIGH-fix ADDED a field to a widely-asserted contract (`DispatchPlanEntry.file_paths`) AFTER the full-suite run; only targeted tests were re-run, so `review-packets.test.mjs`'s exact `Object.keys(plan[0]).sort()` key-set assertion (shard 1/4) was missed → caught by release CI, one forward-bump. Lesson: any post-review change to a CONTRACT SHAPE (a new field on a persisted/asserted type) forces a full-suite rerun, not a targeted one — the blast radius is every exact-shape assertion, not just the changed module. (2) **tool-should-decide (low):** exact `Object.keys().sort()` shape assertions are additive-hostile by design (leak-guard) but give a cryptic `expected 6 to deeply equal 5` with no field name; a helper that diffs and names the unexpected/missing key would cut the diagnosis loop.
 - **A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).** After the design-review passes, the drain re-extracting 11 stale artifacts (repo_manifest/graph over 1250 components / 8466 edges, invalidated by a docs commit) exceeded a 2-minute command timeout with only a flood of identical `{"kind":"staleness",...}` lines and no heartbeat — forcing a blind retry at a longer timeout to see if it was wedged or working. Property to hold: a long deterministic drain should emit a progress/phase heartbeat (or the staleness spam should collapse to one line) so a caller can distinguish "working" from "wedged" without a retry. Minor; the retry succeeded.
 - **RESOLVED 2026-07-17 (with a corrected root cause): "Conversation-first dispatches HOST-ONLY".** The premise "resolved pools never fan into the wave" was REFUTED by the run's own artifacts — the pools WERE folded in and driven; the real chain was null `contextCapTokens` (fit gates silently no-op) → 413/429 → ANY-non-complete-drive settles ALL pools → frontier collapses onto the walled host → false "exhausted" wall. Fixed as unified-routing steps A–G (never-null windows, one fit predicate, per-pool reason-aware settle, honest wall, capability floor, packer/fit consistency) — 6 attested loop-core commits, records `docs/reviews/host-fanout-premise-refuted-2026-07-17.md` + `unified-dispatch-routing-design-2026-07-17.md`. ⬇ Live-run watch (fresh conversation-first self-audit): small pools take fitting packets; an oversized packet SKIPS (no 413); a 429 on pool A leaves pool B dispatchable; a zero-grant renders its honest cause. [[grep-the-writers-before-believing-inheritance]] [[repair-proxy-dispatch-unblocked-probe-fix]]
-- **Provider auto-detection misses NIM (openai-compatible) when `openai_compatible` config absent — needs session config to appear (2026-07-13 audit-gate review).** NIM does not auto-detect via PATH probe like CLI providers; it requires explicit `openai_compatible` or `sources[]` session config to appear in the pool. User expectation: NIM should appear even without config. [[nim-not-auto-detected]]
+- **SPEC — probe the local OpenAI-compatible ENDPOINT, the way CLI providers are probed on PATH.** The
+  original framing ("NIM should auto-detect like the CLI providers") has a false premise: CLI providers
+  are discovered by probing PATH for a binary, and a hosted API has no binary to find. An endpoint plus a
+  credential genuinely cannot be guessed, so "detect NIM with no configuration" is not a coherent goal
+  and should not be pursued as stated.
+  What IS discoverable is a **locally running proxy**. When an OpenAI-compatible endpoint is listening at
+  a well-known local address, its roster can be fetched and its liveness checked — exactly the evidence a
+  PATH probe provides for a CLI, obtained a different way. That makes the lane appear without the
+  operator hand-writing a declaration, which is the real want behind the original expectation.
+  **Property to hold:** a backend the tool can PROVE is reachable appears in the pool without hand
+  declaration, whatever the proof mechanism is for that backend class. A backend whose endpoint or
+  credential cannot be discovered stays operator-declared — that is correct, not a gap.
 - **Provider cost ordering's quota-demotion primitive is unwired — quota-blocked providers still appear first in practice (2026-07-13 audit-gate review, updated).** `suggestCostOrdering()` (`src/shared/dispatch/costRank.ts:216-256`) now has a stable quota-saturation demotion (`CostCandidate.saturated` + partition) — but no caller anywhere in `src/` ever sets `saturated: true`; `resolveFinalCostOrder` (`src/shared/providers/providerConfirmation.ts:289`) builds candidates with no quota query. Fix: wire a real quota-headroom check into the candidate-building call site. [[quota-before-cost-ordering]]
 - **Provider tiering is per-provider, not per-model/effort — wrong granularity for multi-model backends (2026-07-13 audit-gate review).** The `capabilityTier` is pegged to the provider type (e.g., all claude-code → frontier, all codex → capable). A provider offering both frontier and fast models (e.g., openai-compatible with multiple models) assigns all its models the same tier. Fix: tier per `(provider, model, effort)` tuple, sourced from models.dev or declared config. [[per-model-tiering]]
 - **agy quota may reuse the wrong credential store (unverified, live-check).** agy is aliased into AntigravityQuotaSource (`src/shared/quota/antigravityQuotaSource.ts`, `ANTIGRAVITY_PROVIDER_NAMES`) which reads the IDE's `state.vscdb`/`ANTIGRAVITY_ACCESS_TOKEN`. Unverified whether the agy CLI shares that IDE credential store; if not, agy quota reads silently return null (degrade). ⬇ Live-run watch (agy install): confirm agy quota reads are non-null off its real endpoint.
@@ -643,15 +667,19 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
     cold-start default. FAIL = crash/stall at the wall, discarded worktrees, or a resume that re-does or
     drops packets.
 
-- **Rolling-engine ledger-blocked retry spins at 50ms during a crash-orphan lease wedge (2026-07-10,
-  efficiency follow-up from the lease-TTL fix; adversarial-review finding).** With `DISPATCH_LEASE_TTL_MS`
-  (20 min, `src/shared/quota/reservationLedger.ts`), a crashed sibling's orphan lease can block an
-  in-process run's packet for up to the TTL — correct (waits, never double-grants), but the run loop's
-  pending retry tick (`rollingDispatch.ts` ~1348, 50ms) then hammers `admitAgainstLedger` →
-  `withFileLock` read-modify-write per pending packet (~24k lock cycles worst case). Fix direction:
-  backoff on ledger-blocked retries, or heartbeat-renewed short leases (the ClaimRegistry pattern,
-  `auditStep.ts:96`) restoring ~30s crash recovery. Efficiency-only; folds naturally into D-66/67 slice-3
-  (heartbeat-on-long-claims) if that opens.
+- **SPEC — a ledger-blocked retry must back off, reusing the ONE backoff the project already owns.** A
+  crashed sibling's orphan lease can block a packet for the full lease TTL (20 min). Waiting is CORRECT —
+  it never double-grants — but the run loop retries on a fixed interval throughout, hammering the ledger's
+  read-modify-write under a file lock once per pending packet (~24k lock cycles worst case). ⚠ Correcting
+  this entry's earlier attribution: the retry interval is a bare `50` literal in the dispatch loop, not
+  the named lease-TTL constant, so it is invisible to anyone grepping for a tuning knob.
+  **Property to hold:** a retry blocked on a resource nobody has released does not poll at a fixed rate.
+  Reuse the existing exponential backoff already single-sourced in the file-lock helper rather than
+  introducing a second backoff implementation — the project's rule is one core, not two mechanisms that
+  drift. Efficiency-only; never trade away the wait-rather-than-double-grant property to get it.
+  ⚠ Heartbeat-renewed short leases would also solve it and restore fast crash recovery, but that is the
+  long-claims heartbeat design, which carries its own unresolved question about who beats during an
+  out-of-process worker run. Do not couple this to it — backoff stands alone and is strictly simpler.
 
 
 - **Friction detection — M-QUOTA escalation chain: live validation env-bound.** The
