@@ -261,29 +261,41 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   [`docs/reviews/capability-evidence-implementation-review-2026-07-18.md`](reviews/capability-evidence-implementation-review-2026-07-18.md).
   ⚠ Because the branch is not an ancestor of main, every symbol it introduces is absent from HEAD —
   entries describing them as defects in shipped code are describing branch code.
-  **Properties that must hold before this lands:**
-  (1) the capability floor bands on real evidence on BOTH draws — remediate's `scheduleWave` path still
-  fails open, the exact defect the change exists to fix, and it is currently invisible to the suite;
-  (2) a promotion never DESTROYS a persisted operator decision — the headless branch wipes the whole
-  host model cost order, and a capability-only submission reverts the confirmed one;
-  (3) a host that writes the prompt's JSON verbatim produces a file the parser ACCEPTS — the capability
-  fragment omits its schema version, so following the prompt literally re-creates the infinite-re-prompt
-  livelock one layer up, and the canonical shape block never lists the capability order field;
-  (4) explicit removal stays representable — an empty host-model roster is indistinguishable from
-  omission, so carry-forward resurrects a roster the operator deleted;
-  (5) an operator can REPOSITION an already-ranked model without restating the entire roster. Anchored
-  insertion treats every previously-ranked id as a fixed anchor, so new models can be added anywhere but
-  a model already ranked can never be demoted — the likeliest follow-up action, since the point of
-  operator ranking is that judgment improves with use. Likely shape: distinguish a TOOL-OFFERED anchor
-  (a genuine fixed reference point) from any other previously-ranked model the operator chose to
-  mention; the latter gets the same interpolation new models get. Needs no new field;
-  (6) the delta computation whose failure mode is a LIVELOCK is reachable by a test. The model-less-pool
-  skip — the property preventing an unpinnable pool from wedging the first obligation forever — is
-  module-private in a CLI command and untested; the one test claiming to cover convergence is
-  tautological. It likely belongs in shared beside the other confirmation readers.
-  ⚠ The generalizable lesson: every round-2 issue except the prompt one is a SIBLING of a round-1 defect
-  on a branch the round-1 fix did not sweep. Fixing the named instance is not fixing the defect class —
-  especially for a fail-open mechanism, where an unwired site is indistinguishable from a working one.
+  **SPEC — the open defects are ONE defect, and must be fixed as one.** Every blocking issue is a
+  HAND-MAINTAINED ENUMERATION that drifted from its source of truth. The parser reconstructs the
+  confirmation field-by-field, so a field nobody listed is silently dropped — its own comment states
+  the hazard as if it were the mitigation ("any future field needs a line here"), which is precisely the
+  host-must-remember pattern this project forbids. The prompt's JSON example is authored separately from
+  the shape the parser accepts, so the two drift. A capability-rank parameter is optional, so the
+  compiler never enumerates its call sites and one draw silently fails open. Fixing the current CONTENTS
+  of these lists is what rounds 1–4 each did; each fix closed the named instance and its siblings
+  reappeared elsewhere.
+  **Fix by DERIVING each enumeration, so omission becomes impossible:**
+  (1) drive the parser from a single field-descriptor table (name + validator) rather than field-by-field
+  reconstruction, so adding a field to the type forces a table entry instead of relying on a comment;
+  (2) INVERT the write path — merge the submission into the persisted confirmation instead of rebuilding
+  the artifact from the submission. Then a field nobody enumerated is carried by construction, and
+  answering one question can no longer destroy the answer to a different one;
+  (3) GENERATE the prompt's JSON example from that same descriptor table, so it cannot omit a required
+  field or lack a field the operator is being asked to fill;
+  (4) make the capability-rank parameter REQUIRED at every wave-scheduling entry point, so the compiler
+  enumerates the sites. ⚠ Required-ness only sweeps production callers while the test tree is
+  untypechecked, so pair it with a runtime guard or the enforcement is half-real;
+  (5) an operator must be able to REPOSITION an already-ranked model without restating the entire roster.
+  Anchored insertion treats every previously-ranked id as a fixed anchor, so models can be added anywhere
+  but one already ranked can never be demoted — the likeliest follow-up action, since the point of
+  operator ranking is that judgment improves with use. Distinguish a TOOL-OFFERED anchor (a genuine fixed
+  reference point) from any other previously-ranked model the operator chose to mention; the latter gets
+  the same interpolation new models get. Needs no new field;
+  (6) the delta computation whose failure mode is a LIVELOCK must be reachable by a test. The
+  model-less-pool skip — the property preventing an unpinnable pool from wedging the first obligation
+  forever — is module-private in a CLI command and untested, and the one test claiming to cover
+  convergence is tautological. It belongs in shared beside the other confirmation readers.
+  ⚠ Verify the defect list against the branch before budgeting: the explicit-empty-roster case appears
+  already fixed there (an explicit empty roster survives the parser), so the record may overstate what
+  is open.
+  ⚠ The generalizable lesson: fixing the named instance is not fixing the defect class — especially for a
+  fail-open mechanism, where an unwired site is indistinguishable from a working one.
 
 - **Unranked + free compose badly: hard packets structurally prefer the least-known models
   (2026-07-18, medium-high, from the LiteLLM live-validation lap).** Retiring repair-proxy also retired
@@ -360,12 +372,24 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 - **Non-hermetic test: `tests/audit/quota-command.test.mjs` "nothing is written to disk" reads the box's real `.audit-tools/audit/session-config.json` (2026-07-18, low).** A leftover gitignored local artifact makes the test fail on a clean checkout of main; it presents as a regression from whatever diff is in flight. Property: the test must resolve repo-root state through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo path. Same box-dependence family as `INV-shared-core-14`.
 - **Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).** `src/shared/quota/apiPool.ts` (~370-371, ~497-498) and `src/shared/types/sessionConfig.ts` (~700-701) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the owner's no-legacy rule this fold should be deleted and the block treated as a plain source declaration.
 
+- **A transport-enforced JSON schema converts a LOUD offload failure into a SILENT empty one
+  (friction: tool-should-decide, medium).** Moving the free offload lane onto strict `json_schema`
+  response formatting fixed the old symptom — the backend used to drift off-schema and die with a parse
+  error on analytical prompts. But the underlying weakness is unchanged: handed a 94-line review record
+  and asked to enumerate open defects, the lane returned schema-VALID output whose every finding was the
+  literal placeholder `FAILED_TO_EXTRACT`. A caller checking only "did it parse" reads that as "no
+  findings." The old failure was loud and cost a retry; the new one is silent and costs a wrong
+  conclusion — strictly worse for exactly the analytical work the schema was supposed to unlock.
+  **Property to hold:** an offload result that conformed structurally but produced no content must be
+  detectable as a failure by its caller — schema conformance is not a success signal. Until then, the
+  free lane is for recon and extraction only; judgment work does not go there, and a suspiciously empty
+  result gets re-read before it is believed.
+
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
 > lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`
 > appears only where a durable memory concept was actually captured for that item — by design, not every
 > entry has one.
-')` on write) — same family as the release CRLF trap. (3) **inefficient-feeding (medium, recurrence):** a background full-area vitest run piped through `grep` clipped the failure NAMES (the ledger outcome gap's 4th billing, entry above) forcing a full re-run; and an adversarial reviewer observed the working tree MUTATING mid-review (parent kept editing while a tree-scoped review ran) — it stash/popped defensively and flagged a transient phantom type error. Process rule: freeze edits on files under active review, or hand the reviewer a pinned diff.
 - **Friction walk (H2+H4 collapse lap, 2026-07-18):** (1) **ambiguous-direction (medium):** my own plan doc asserted "the host-vs-source dedup already exists" from a docblock's phrasing — the adversarial plan review refuted it against the writers (dedup was source-vs-source only, the new rule was new code); and the reviewer's own proposed fix for the display filter was itself a gate-that-never-fires (relative floor can't refuse every pool) — caught only by re-deriving at implementation time. Both are the standing lesson: every causal claim, including a REVIEWER's fix, gets verified against source before building. [[gate-must-be-traced-not-designed]] (2) **tool-should-decide (low):** the pre-commit loop-core gate evaluates a CHAINED `attest && commit` command before the inner attest has run, so the legitimate one-shot form is blocked — attest must be its own Bash call first; either the hook could ignore commits preceded by an attest in the same chain, or document the split as the required shape. (3) **inefficient-feeding (medium, recurrences):** NIM `llm read` lane 503-saturated ("Worker local total request limit 163/32") after ONE call in its session — recon fell back to targeted greps; and a delegated implementer died mid-task on the Claude session limit, with its partial recon unrecoverable (clean tree, redone in-context). Both argue for the standing pattern: main context implements from subagent recon it can verify, not the reverse.
 - **Friction walk (proxy-swap lap, 2026-07-18):** (1) **ambiguous-direction (medium, 4 instances in one lap):** four delegated-agent claims with accurate file:line citations dissolved when the surrounding MECHANISM was traced — a "shipping-blocking" quota defect refuted by a `handlesProvider` gate two lines above the cited line; a "paradoxical asymmetry" in cost blend that was per-provider top-K truncation in the test fixture, not the blend; a "real regression" that was a leftover gitignored artifact; and an implementer self-reporting "zero repair_proxy references in src/" while 19 remained across 6 files. Property/lesson: cited line numbers make an interpretation look verified — the parent must trace the gate/caller around the citation, and must run its OWN completeness grep after any delegated sweep. [[gate-must-be-traced-not-designed]] [[grep-the-writers-before-believing-inheritance]] (2) **tool-should-decide (low, FIXED this lap):** the dev wrapper's `.audit-code-build.lock` in the repo root left the worktree dirty and tripped the release clean-tree guard; now gitignored (`bc6ca9cd`). (3) **inefficient-feeding (medium):** two delegated agents died mid-task on session/credit limits, losing partial work (one left no partial output at all); and heavy audit tests timed out en masse (22 across 9 files) purely from parallel-agent load on the box, costing an is-it-mine investigation that CI's green sharded run settled. Lesson: local full-suite results are unreliable while many agents run concurrently — CI is the arbiter.
 - **Remediate hybrid frontier still sizes with a FLAT per-node estimate (step-G remediate half, medium).** `HYBRID_NODE_TOKEN_ESTIMATE` (`src/remediate/steps/nextStep.ts:1441`) makes the claim-time fit gate blind for implement nodes (audit's half fixed 2026-07-17 with real `token_estimate`s). Property: derive per-node estimates from the node's `affected_files` sizes (`estimateTokensFromBytes`) so a chronically-413ing (node,pool) pair is pre-skipped, not re-claimed each cycle.
