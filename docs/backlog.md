@@ -86,7 +86,6 @@ followed" is otherwise indistinguishable from a bug.
 - **LEAD (not a verdict): the price snapshot reports ZERO cross-provider collisions, which is surprising (2026-07-19, low).** `model-statics.generated.json` has 2630 model entries and no `__by_provider` index, meaning the last generation run found no model id served by two vendors. Upstream models.dev carries `claude-*`/`gpt-*`-class ids on multiple vendors (native + bedrock + vertex, etc.), so zero collisions suggests either the collision detection in `flatten()` is not firing or models.dev's response shape changed under it. **Consequence if real:** the entire provider-scoped price path (`snapshot.byProvider`) is dead code, every price is the flat default, and the service-vs-transport axis fix above stays inert forever. Settle by re-running `scripts/shared/update-models.mjs` against live models.dev and inspecting the reported collision count before assuming either way.
   **The tell that this is the axis-confusion class, not a one-off:** ten lines apart in one file, `resolveSourceContextWindowTokens` calls the SAME helper correctly — `resolveModelStatics(source.model, source.backend_provider ?? source.provider)` (`src/shared/quota/apiPool.ts:96-98`). Same subsystem, same helper, two different answers to "which axis is this?". Found by the classification pass behind [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md).
   **Fix:** pass `backend_provider ?? provider` at the pricing site. **Still to audit (same class, not yet confirmed):** `costRank.ts` rungs at the `resolveModelPrice(input.model, input.provider)` / `(c.model, c.provider)` sites are generic — correctness depends on what each CALLER puts in `CostCandidate.provider` / `CostRankInput.provider`. Host candidates deliberately omit it (correct — the cheapest-collision default is intended). Audit the source-candidate construction before changing those two.
-  ⚠ Do NOT sweep `deriveLocalAccountId`'s `source.provider !== "openai-compatible"` check (`src/shared/quota/accountId.ts`) into this fix: it was flagged as the same class and does NOT survive mechanism review. It is really asking "is this a direct API source carrying its OWN credential?", which is transport-shaped — a proxied lane's `api_key_env` is the proxy master key, shared across every backend behind it, so declining to derive a per-vendor account there is correct.
 - **CLAUDE.md overstates the `admitSpawn` consent gate (2026-07-19).** *Own-vs-acquire analyzer
   engine* states every acquired-tool spawn "routes through the single `admitSpawn` chokepoint and
   requires the per-run `ExternalAcquisitionConfig.consent_token`." Verified against HEAD:
@@ -253,30 +252,6 @@ followed" is otherwise indistinguishable from a bug.
   who did not re-run serially. **Property to hold:** either test fixture dirs are per-invocation
   (`AUDIT_CODE_STATE_DIR`-style, per [[state-dir-env-override-hermeticity]]) or a second concurrent
   vitest refuses to start. Same family as the other three known full-suite-only failures.
-
-- **The COOLDOWN axis of account metering was never migrated — budget and cooldown now derive account
-  identity two different ways (HIGH, loop-core).** The budget axis is closed: account identity is
-  resolved once at pool construction and carried on the wire as a required field every consumer reads,
-  so pools sharing one credential share one budget. The cooldown fold did NOT move with it. Both fold
-  sites still gate on the older local derivation, which returns null unless the source is
-  `openai-compatible` **and** names its credential through an env var **and** carries no explicit
-  account override. So a 429 learned on one model still fails to throttle its siblings for exactly the
-  cases that motivated the original fix: a source pasting its credential inline, and any proxy-fronted
-  source (those are `claude-worker`, not `openai-compatible`). Verified by reading both fold sites and
-  the derivation, not inferred.
-  **Property to hold:** budget and cooldown partition an account the SAME way — one derivation, one
-  answer. Two mechanisms answering "which account is this?" differently is the defect, independent of
-  which answer is right.
-  ⚠ The in-flight-cap axis is deliberately NOT part of this: the concurrency cap is documented as a
-  per-ENDPOINT limit, and an earlier attempt to make it per-account was correctly reverted.
-  ⚠ Do not "fix" this by deleting the `openai-compatible` guard — an independent review caught that
-  doing so keys identity on the TRANSPORT, collapsing every backend behind one proxy into a single
-  cooldown account so a free-lane 429 stalls a paid lane. That is an over-merge worse than the bug, and
-  against the standing rule that the transport never enters the quota identity.
-  **The durable lesson from the five refused rounds:** every partition — window scope, account identity
-  — is decided by the PRODUCER that knows it and carried on the wire. Each refused round re-derived one
-  of them at the CONSUMER from pool identity, which is why each was a guess.
-  [[account-metering-closed-producer-decides-partition]] [[fix-the-defect-class-not-the-named-instance]]
 
 - **Nothing derives "collapse a shared-budget roster to its best member" (low).** The selection rule
   itself is settled and already falls out of the cost-first comparator: a free pool's costs all tie so

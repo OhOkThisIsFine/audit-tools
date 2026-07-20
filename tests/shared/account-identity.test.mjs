@@ -73,6 +73,29 @@ test("one vendor credential is ONE account partition, however the lane is reache
   expect(deriveAccountKey(proxied)).toBe("nim#work");
 });
 
+test("proxied siblings on ONE service behind ONE proxy share an account key", () => {
+  // Expanded claude-worker sources (proxyCatalog.expandSources) all carry the proxy's
+  // endpoint + api_key_env and differ only in `service`+`model`. Two nim models behind
+  // the proxy are ONE account — a 429 on one must gate the other. The old
+  // deriveLocalAccountId guard (transport === "openai-compatible") returned null here,
+  // so they never folded: the live under-merge bug.
+  const PROXY = "http://127.0.0.1:4000/v1";
+  const a = { transport: "claude-worker", service: "nim", endpoint: PROXY, api_key_env: "PROXY_KEY", model: "nano" };
+  const b = { transport: "claude-worker", service: "nim", endpoint: PROXY, api_key_env: "PROXY_KEY", model: "super" };
+  expect(deriveAccountKey(a)).toBe(deriveAccountKey(b));
+  expect(deriveAccountKey(a)).not.toBeNull();
+});
+
+test("different services behind ONE proxy stay DISTINCT (no cooldown over-merge)", () => {
+  // The over-merge the backlog forbids: every backend behind one proxy shares the proxy's
+  // (endpoint, api_key_env), so a service-less credential identity would collapse them and
+  // let a free nim 429 stall a paid anthropic lane. Service-namespacing keeps them apart.
+  const PROXY = "http://127.0.0.1:4000/v1";
+  const nim = { transport: "claude-worker", service: "nim", endpoint: PROXY, api_key_env: "PROXY_KEY", model: "m" };
+  const anthropic = { transport: "claude-worker", service: "anthropic", endpoint: PROXY, api_key_env: "PROXY_KEY", model: "m" };
+  expect(deriveAccountKey(nim)).not.toBe(deriveAccountKey(anthropic));
+});
+
 test("an unattributable source yields null so the caller meters it ALONE", () => {
   // No endpoint and no credential ⇒ we cannot prove it shares anyone's allowance.
   // Merging on a guess would over-throttle; the caller falls back to the pool key.

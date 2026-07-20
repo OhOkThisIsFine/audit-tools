@@ -15,7 +15,6 @@ import { buildAccountScopedQuotaSource } from "./compositeQuotaSource.js";
 import {
   accountKeyFromProviderShapedKey,
   deriveAccountKey,
-  deriveLocalAccountId,
   foldAccountCooldown,
 } from "./accountId.js";
 import { classifyQuotaCoverage, sourceCoversProvider } from "./coverage.js";
@@ -738,10 +737,12 @@ export function dedupHostAndSourcePools(params: {
 
 function foldAccountCooldownAcrossPools(pools: CapacityPool[]): CapacityPool[] {
   return pools.map((pool) => {
-    const accountId = pool.source ? deriveLocalAccountId(pool.source) : null;
-    if (!accountId) return pool;
+    // Group by the wire-carried account partition the PRODUCER decided
+    // (`CapacityPool.accountKey`, service-scoped via `deriveAccountKey`) — the SAME
+    // key the budget axis meters against. No consumer-side re-derivation: an
+    // unattributable pool's accountKey is its own unique pool id, so it folds alone.
     const siblingEntries = pools
-      .filter((p) => p !== pool && p.source && deriveLocalAccountId(p.source) === accountId)
+      .filter((p) => p !== pool && p.accountKey === pool.accountKey)
       .map((p) => p.quotaStateEntry ?? null);
     if (siblingEntries.length === 0) return pool;
     const folded = foldAccountCooldown(pool.quotaStateEntry ?? null, siblingEntries);

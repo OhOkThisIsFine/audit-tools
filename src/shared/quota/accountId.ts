@@ -58,15 +58,25 @@ export function deriveCredentialIdentity(source: {
  * falls back to a pool-scoped key — correct, because a source we cannot attribute to
  * a credential must not be merged with anyone else's allowance.
  *
- * ⚠ The explicit-account namespace is the SERVICE, never the transport. Account is only
- * meaningful WITHIN a service (`spec/backend-identity-axes.md`), so a proxied lane
- * (`transport: claude-worker`, `service: nim`) and a direct lane
- * (`transport: openai-compatible`, `service: nim`) both declaring `account: "work"` are
- * ONE real credential at one vendor and must yield ONE partition (`nim#work`). Keying on
- * the transport split them into two, double-booking the budget this key protects. Service
- * is normalized to `declared ?? transport` at the producer (`collectDispatchableSources`),
- * so the fallback here only fires for an un-normalized source and preserves the old
- * transport-namespaced key in that case.
+ * ⚠ The namespace is the SERVICE, never the transport — on BOTH branches. Account is only
+ * meaningful WITHIN a service (`spec/backend-identity-axes.md`), so the partition is
+ * `(service, account|credential)`. Two consequences the transport-keyed version got wrong:
+ *
+ *  - EXPLICIT account: a proxied lane (`transport: claude-worker`, `service: nim`) and a
+ *    direct lane (`transport: openai-compatible`, `service: nim`) both declaring
+ *    `account: "work"` are ONE credential at one vendor and must yield ONE partition
+ *    (`nim#work`) — keying on transport split them and double-booked the budget.
+ *  - DERIVED credential: every proxied `claude-worker` lane shares the PROXY's `endpoint`
+ *    and `api_key_env` (see `expandSources`), differing only in `service`. A service-less
+ *    credential identity therefore collapses every backend behind one proxy into one key —
+ *    so a 429 on the free `nim` lane would gate a paid `anthropic` lane. Namespacing the
+ *    credential by service (`nim#<endpoint>::env:<var>` vs `anthropic#…`) keeps same-service
+ *    siblings merged while holding distinct services apart. This is why the cooldown fold
+ *    can key on `CapacityPool.accountKey` directly and no longer needs a transport guard.
+ *
+ * Service is normalized to `declared ?? transport` at the producer
+ * (`collectDispatchableSources`), so the `?? transport` fallback only fires for an
+ * un-normalized source.
  */
 export function deriveAccountKey(source: {
   transport: string;
@@ -76,49 +86,10 @@ export function deriveAccountKey(source: {
   api_key?: string;
   account?: string | null;
 }): string | null {
-  if (source.account) return `${source.service ?? source.transport}#${source.account}`;
-  return deriveCredentialIdentity(source);
-}
-
-/**
- * Derive a LOCAL, credential-VALUE-free account id for a bare-API-key source
- * (`openai-compatible` — NIM/vLLM/LM Studio/...), from `(endpoint,
- * api_key_env)` — the only discriminator such a source exposes with no
- * whoami/network call. Two sources declaring the SAME normalized endpoint and
- * the SAME `api_key_env` NAME (never its value — the env var's contents are
- * never read here) resolve to the SAME account id, so a learned 429/cooldown
- * observed on one folds onto every sibling sharing that credential.
- *
- * Backlog HIGH, 2026-07-11: the primary `openai-compatible/*` source and the
- * explicitly-`id`'d `nim-nano`/`nim-super`/`nim-kimi` sources all authenticate
- * with the same `NVIDIA_API_KEY` against the same endpoint, but formed
- * separately-keyed quota pools (`dispatchableSourceId` — untouched by this
- * module, still subdivides BUDGETS per source/model) — so a learned cooldown
- * on the primary never gated the siblings. See {@link foldAccountCooldown}
- * for how the derived id is used.
- *
- * Deliberately NOT an extension of `BaseHttpQuotaSource.resolveAccountId`
- * (`httpQuotaSource.ts`) — that interface is a stub for a live network
- * handshake (Claude/Codex/Copilot/Antigravity each expose a whoami-shaped
- * endpoint); a bare API key has no such endpoint, so this is a pure, local,
- * no-I/O derivation instead.
- *
- * Returns null when: the source isn't `openai-compatible`; either half of the
- * discriminator is missing; or the source already carries an explicit
- * `account` override (`DispatchableSource.account` — the operator's own
- * account declaration always wins, and two explicitly-different declared
- * accounts on the same endpoint/key must NOT be silently re-merged here).
- */
-export function deriveLocalAccountId(source: {
-  transport: string;
-  endpoint?: string;
-  api_key_env?: string;
-  account?: string | null;
-}): string | null {
-  if (source.account) return null;
-  if (source.transport !== "openai-compatible") return null;
-  if (!source.api_key_env) return null;
-  return deriveCredentialIdentity(source);
+  const namespace = source.service ?? source.transport;
+  if (source.account) return `${namespace}#${source.account}`;
+  const credential = deriveCredentialIdentity(source);
+  return credential === null ? null : `${namespace}#${credential}`;
 }
 
 /**

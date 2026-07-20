@@ -12,6 +12,8 @@ const {
 
 const { setQuotaStateDir } = await import("../../src/shared/quota/state.ts");
 
+const { deriveAccountKey } = await import("../../src/shared/quota/accountId.ts");
+
 const { HostSessionQuotaSource } = await import(
   "../../src/shared/quota/hostSessionQuotaSource.ts"
 );
@@ -25,6 +27,11 @@ function makePacket(id, { estimatedTokens = 1000, complexity = 0.5, payload = {}
 }
 
 function makePool(id, overrides = {}) {
+  // Mirror buildSourcePool: the account partition is the wire-carried accountKey, derived
+  // from the source declaration (service-scoped), falling back to the unique pool id when
+  // unattributable. Fixtures that omit it would otherwise all share `undefined` and fold
+  // as one account — the exact over-gating the cooldown fold must not do.
+  const derivedAccountKey = overrides.source ? deriveAccountKey(overrides.source) : null;
   return {
     id,
     providerName: "claude-code",
@@ -33,6 +40,7 @@ function makePool(id, overrides = {}) {
     quotaStateEntry: null,
     discoveredLimits: null,
     quotaSourceSnapshot: null,
+    accountKey: derivedAccountKey ?? id,
     ...overrides,
   };
 }

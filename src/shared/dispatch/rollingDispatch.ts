@@ -77,7 +77,7 @@ import type { WorkerOutputChannel } from "../quota/errorParsing.js";
 import { detectRateLimitError, computeCooldownUntil } from "../quota/errorParsing.js";
 import type { ReservationLedger } from "../quota/reservationLedger.js";
 import { DISPATCH_LEASE_TTL_MS } from "../quota/reservationLedger.js";
-import { deriveLocalAccountId, foldAccountCooldown } from "../quota/accountId.js";
+import { foldAccountCooldown } from "../quota/accountId.js";
 import { tierRank } from "./tierRank.js";
 import { buildCapacityPoolCapabilityFloor } from "./admissionLoop.js";
 import type { DispatchModelTier } from "../types/stepContract.js";
@@ -688,29 +688,23 @@ export function selectProvider<TPacket>(
     // so a prior-run cooldown still drives proactive spill instead of waiting for the
     // reactive 429 floor. Both are keyed by pool.id, so they can never index apart.
     const ownQuotaStateEntry = quotaStateEntries[poolKey] ?? pool.quotaStateEntry ?? null;
-    // Account-axis fold (Bug 3 / Slice A3): a bare-API-key source (openai-compatible
-    // / NIM) carries no live account handshake, so its account is derived locally
-    // from (endpoint, api_key_env). When this pool has one, pull in the WORST
-    // cooldown/429 signal recorded under ANY sibling pool sharing that same
-    // account — reading each sibling's OWN live-or-frozen entry, exactly as this
-    // pool's own entry was just resolved above — so a cooldown learned on one
-    // source of the account gates every sibling, never just the pool whose own key
-    // happened to record the 429. Budget fields (tokens_per_pct/output_per_input)
-    // are untouched by the fold — see `foldAccountCooldown`.
-    const accountId = pool.source ? deriveLocalAccountId(pool.source) : null;
-    const quotaStateEntry = accountId
-      ? foldAccountCooldown(
-          ownQuotaStateEntry,
-          confirmedPools
-            .filter(
-              (sibling) =>
-                sibling.id !== pool.id &&
-                sibling.source &&
-                deriveLocalAccountId(sibling.source) === accountId,
-            )
-            .map((sibling) => quotaStateEntries[sibling.id] ?? sibling.quotaStateEntry ?? null),
-        )
-      : ownQuotaStateEntry;
+    // Account-axis fold (Bug 3 / Slice A3): pull in the WORST cooldown/429 signal
+    // recorded under ANY sibling pool sharing this pool's account partition, so a
+    // cooldown learned on one source of the account gates every sibling, never just the
+    // pool whose own key happened to record the 429. The partition is the wire-carried
+    // `CapacityPool.accountKey` the producer decided (service-scoped via
+    // `deriveAccountKey`) — the SAME key the budget axis meters against, never
+    // re-derived here from pool identity. Each sibling's OWN live-or-frozen entry is
+    // read exactly as this pool's own entry was just resolved above. An unattributable
+    // pool's accountKey is its own unique pool id, so it folds alone. Budget fields
+    // (tokens_per_pct/output_per_input) are untouched by the fold — see `foldAccountCooldown`.
+    const siblingEntries = confirmedPools
+      .filter((sibling) => sibling.id !== pool.id && sibling.accountKey === pool.accountKey)
+      .map((sibling) => quotaStateEntries[sibling.id] ?? sibling.quotaStateEntry ?? null);
+    const quotaStateEntry =
+      siblingEntries.length > 0
+        ? foldAccountCooldown(ownQuotaStateEntry, siblingEntries)
+        : ownQuotaStateEntry;
     const inFlightTokens = inFlightTracker.getInFlightTokens(pool.id);
     return scheduleWave({
       providerName: pool.providerName,
