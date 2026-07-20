@@ -824,6 +824,19 @@ test("C1: validateSessionConfig validates sources[] transport + quota", () => {
       (i) => i.path === "sources[0].transport" && /must be one of/i.test(i.message),
     )).toBeTruthy();
 
+  // A pre-rename source names the retired field EXPLICITLY rather than reporting a
+  // missing `transport` the operator never omitted. We accept the old name nowhere —
+  // a dual parser is the "two answers" disease the rename exists to end — so a loud,
+  // actionable error is the whole migration story for operator-authored files.
+  const legacyShape = validateSessionConfig({
+    sources: [{ provider: "openai-compatible", endpoint: "https://e/v1", model: "m" }],
+  });
+  expect(legacyShape.some(
+      (i) => i.path === "sources[0].transport" && /retired field `provider`/i.test(i.message),
+    )).toBeTruthy();
+  // ...and it does NOT also emit the generic must-be-one-of noise for the same source.
+  expect(legacyShape.some((i) => /must be one of/i.test(i.message))).toBeFalsy();
+
   // A bad per-source quota is caught at the source's path.
   const badQuota = validateSessionConfig({
     sources: [{ transport: "openai-compatible", quota: { output_tokens: -1 } }],

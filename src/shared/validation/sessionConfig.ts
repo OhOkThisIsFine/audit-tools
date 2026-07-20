@@ -162,6 +162,23 @@ function validateDispatchableSources(
       pushIssue(issues, path, "each source must be a JSON object.");
       return;
     }
+    // Legacy shape, named explicitly rather than left to fail as "transport missing".
+    // `provider`/`backend_provider` were renamed to `transport`/`service` because one
+    // word carried two unrelated concepts (the adapter that carries a request vs. the
+    // vendor that serves the model). We deliberately do NOT accept the old names — a
+    // dual parser is the "two answers" disease the rename exists to end — so the
+    // obligation is to fail LOUD and actionable instead of reporting a missing field
+    // the operator never omitted.
+    if (source.transport === undefined && typeof source.provider === "string") {
+      pushIssue(
+        issues,
+        `${path}.transport`,
+        "this source uses the retired field `provider`; rename it to `transport` " +
+          "(and `backend_provider` to `service`). `transport` is the adapter that carries " +
+          "the request; `service` is the vendor that serves the model.",
+      );
+      return;
+    }
     const transport = source.transport;
     if (
       typeof transport !== "string" ||
