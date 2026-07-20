@@ -1862,7 +1862,7 @@ test("AUDIT_CODE_STATE_DIR redirects the machine-global state dir for a spawned 
             sources: [
               {
                 id: "hermetic-fake-source",
-                provider: "codex",
+                transport: "codex",
                 endpoint: "audit-tools-hermeticity-missing-cmd",
               },
             ],

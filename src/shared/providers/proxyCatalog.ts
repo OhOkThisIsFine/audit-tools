@@ -299,7 +299,7 @@ async function discoverModelRoster(
  * Expand discovered models into `claude-worker` sources: per backend provider,
  * the top-K models by best-effort score (higher = better; unscored last).
  * Shape per the plan's identity section: the transport never enters the identity —
- * `backend_provider` + `model` (alias) key quota; `endpoint` is the proxy url the
+ * `service` + `model` (alias) key quota; `endpoint` is the proxy url the
  * launch transport fronts the spawn with; `worker_kind` is `agentic` by definition.
  *
  * Provider derivation: advert `provider` (from /model/info) > slash-prefix of alias
@@ -339,9 +339,9 @@ function expandSources(
       const cost = options.costPerMtok ?? model.costPerMtok;
       sources.push({
         id: `claude-worker:${provider}/${model.alias}`,
-        provider: "claude-worker",
+        transport: "claude-worker",
         endpoint: options.endpoint,
-        backend_provider: provider,
+        service: provider,
         model: model.alias, // Alias VERBATIM — the proxy's routing key
         worker_kind: "agentic",
         ...(options.apiKeyEnv !== undefined ? { api_key_env: options.apiKeyEnv } : {}),

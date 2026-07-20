@@ -64,7 +64,7 @@ describe("resolveSessionConfig", () => {
   test("sources[] becomes the effective dispatch pool (host driver, no flat reconstruction)", () => {
     const intent = { synthesis: { narrative: false } };
     const sources = [
-      { provider: "openai-compatible", endpoint: "https://nim/v1", model: "nim", api_key_env: "K" },
+      { transport: "openai-compatible", endpoint: "https://nim/v1", model: "nim", api_key_env: "K" },
     ];
     const eff = resolveSessionConfig(intent, { self: { provider: "claude-code" }, sources });
     expect(eff.sources).toEqual(sources);
@@ -77,7 +77,7 @@ describe("resolveSessionConfig", () => {
 
   test("a dispatchable DRIVER reconstructs its flat block from the matching source", () => {
     const sources = [
-      { provider: "openai-compatible", endpoint: "https://nim/v1", model: "nim", api_key_env: "K" },
+      { transport: "openai-compatible", endpoint: "https://nim/v1", model: "nim", api_key_env: "K" },
     ];
     const eff = resolveSessionConfig({}, { self: { provider: "openai-compatible" }, sources });
     // The primary provider's flat block is rebuilt so createFreshSessionProvider can build it.
@@ -96,7 +96,7 @@ describe("resolveSessionConfig", () => {
 
   test("intent is never mutated and no stored dispatch value can leak", () => {
     const intent = { synthesis: { narrative: true }, dispatch: { confirm_threshold: 5 } };
-    const eff = resolveSessionConfig(intent, { self: { provider: "codex" }, sources: [{ provider: "codex", endpoint: "codex" }] });
+    const eff = resolveSessionConfig(intent, { self: { provider: "codex" }, sources: [{ transport: "codex", endpoint: "codex" }] });
     // A fresh object, intent untouched.
     expect(eff).not.toBe(intent);
     expect(intent.provider).toBeUndefined();

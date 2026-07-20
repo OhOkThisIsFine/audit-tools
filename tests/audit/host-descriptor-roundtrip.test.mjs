@@ -78,8 +78,8 @@ describe("auditor descriptor round-trip", () => {
   // top-level `sources[]` (G2 reslice).
   test("a sources[] pool round-trips inside the descriptor", () => {
     const sources = [
-      { id: "s1", provider: "openai-compatible", endpoint: "https://e/v1", model: "m", api_key: "public", cost_per_mtok: 0 },
-      { provider: "codex", endpoint: "codex", model: "gpt-x" },
+      { id: "s1", transport: "openai-compatible", endpoint: "https://e/v1", model: "m", api_key: "public", cost_per_mtok: 0 },
+      { transport: "codex", endpoint: "codex", model: "gpt-x" },
     ];
     const argv = renderAuditorDescriptor({ self: { provider: "claude-code", can_dispatch_subagents: true }, sources });
     expect(argv).toContain("--auditor");
@@ -121,7 +121,7 @@ describe("auditor descriptor round-trip", () => {
     expect(() =>
       getAuditorDescriptor([
         "--auditor",
-        JSON.stringify({ sources: [{ provider: "codex", quota: { context_tokens: -1 } }] }),
+        JSON.stringify({ sources: [{ transport: "codex", quota: { context_tokens: -1 } }] }),
       ]),
     ).toThrow(/descriptor is invalid|context_tokens/);
     // A command-injection-shaped launch command in a host/IDE block fails too.
@@ -134,7 +134,7 @@ describe("auditor descriptor round-trip", () => {
     // A well-formed descriptor with sources + parallel_workers round-trips cleanly.
     const argv = renderAuditorDescriptor({
       self: { provider: "claude-code", parallel_workers: 2 },
-      sources: [{ provider: "openai-compatible", endpoint: "https://e/v1", model: "m", quota: { context_tokens: 128000, output_tokens: 8192 } }],
+      sources: [{ transport: "openai-compatible", endpoint: "https://e/v1", model: "m", quota: { context_tokens: 128000, output_tokens: 8192 } }],
     });
     const parsed = getAuditorDescriptor(argv);
     expect(parsed.self.parallel_workers).toBe(2);

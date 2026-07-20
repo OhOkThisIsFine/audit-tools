@@ -25,8 +25,8 @@ test("buildSourcePool: a source with NO declared context_tokens still carries a 
   // A claude-worker proxy source whose registry entry exposed no context field —
   // exactly the run that collapsed to host-only.
   const source = {
-    provider: "claude-worker",
-    backend_provider: "groq",
+    transport: "claude-worker",
+    service: "groq",
     model: "some-unlisted-model-xyz",
     endpoint: "http://127.0.0.1:8791",
   };
@@ -40,7 +40,7 @@ test("buildSourcePool: a source with NO declared context_tokens still carries a 
 
 test("resolveSourceContextWindowTokens: declared quota.context_tokens wins the fallback chain", () => {
   const window = resolveSourceContextWindowTokens({
-    provider: "openai-compatible",
+    transport: "openai-compatible",
     model: "m1",
     quota: { context_tokens: 128_000 },
   });
@@ -49,7 +49,7 @@ test("resolveSourceContextWindowTokens: declared quota.context_tokens wins the f
 
 test("resolveSourceContextWindowTokens: a non-positive declared value degrades to the default, not null", () => {
   const window = resolveSourceContextWindowTokens({
-    provider: "openai-compatible",
+    transport: "openai-compatible",
     model: "unlisted-model-xyz",
     quota: { context_tokens: 0 }, // "0 = unknown" convention must not become an always-fits null
   });
@@ -58,8 +58,8 @@ test("resolveSourceContextWindowTokens: a non-positive declared value degrades t
 
 test("resolveSourceContextWindowTokens: an unknown model with no declaration falls to DEFAULT_CONTEXT_TOKENS", () => {
   const window = resolveSourceContextWindowTokens({
-    provider: "claude-worker",
-    backend_provider: "groq",
+    transport: "claude-worker",
+    service: "groq",
     model: "definitely-not-a-real-model-id-000",
   });
   expect(window).toBe(DEFAULT_CONTEXT_TOKENS);
@@ -70,7 +70,7 @@ test("resolveSourceContextWindowTokens: middle rung — a known models.dev model
   // exercises fallback step 2 (models.dev) rather than the blind default. Locks the
   // middle rung so a regression that skipped straight to DEFAULT_CONTEXT_TOKENS is caught.
   const window = resolveSourceContextWindowTokens({
-    provider: "openai-compatible",
+    transport: "openai-compatible",
     model: "gpt-4o",
   });
   expect(window).toBeGreaterThan(DEFAULT_CONTEXT_TOKENS);

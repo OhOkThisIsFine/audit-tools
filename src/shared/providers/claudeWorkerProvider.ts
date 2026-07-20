@@ -64,12 +64,12 @@ function sanitizeForDirName(value: string): string {
 
 function requireNonEmpty(
   value: string | undefined,
-  field: "endpoint" | "backend_provider" | "model",
+  field: "endpoint" | "service" | "model",
 ): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(
       `claude-worker provider requires a non-empty ${field} — the source carries it ` +
-        `({endpoint: <proxy url>, backend_provider, model}); an isolated spawn ` +
+        `({endpoint: <proxy url>, service, model}); an isolated spawn ` +
         `with no proxy ${field === "endpoint" ? "endpoint" : "route"} must be impossible.`,
     );
   }
@@ -83,11 +83,11 @@ function requireNonEmpty(
  * api_key_env when set; sentinel when keyless), an isolated per-launch
  * `CLAUDE_CONFIG_DIR`, and `--model <alias>` — the proxy's routing alias,
  * passed verbatim to the endpoint (it never enters the quota identity, which
- * keys on `backend_provider`/`model` for pool dedup).
+ * keys on `service`/`model` for pool dedup).
  *
  * Deliberately NO nested-session guard: this class is NOT `claude-code` (the
  * conversation host) wearing a flag — isolation is its CONSTRUCTOR INVARIANT, not
- * a guard exception. Construction throws unless endpoint/backend_provider/model
+ * a guard exception. Construction throws unless endpoint/service/model
  * are present, so every spawn is proxy-fronted with a scrubbed parent env
  * (spawnLoggedCommand strips `CLAUDECODE`/`CLAUDE_CODE*`; `CLAUDE_CONFIG_DIR`
  * survives the scrub and is overlaid per launch) and can safely run from inside a
@@ -112,8 +112,8 @@ export class ClaudeWorkerProvider implements FreshSessionProvider {
     this.config = config;
     this.endpoint = requireNonEmpty(config.endpoint, "endpoint");
     this.backendProvider = requireNonEmpty(
-      config.backend_provider,
-      "backend_provider",
+      config.service,
+      "service",
     );
     this.model = requireNonEmpty(config.model, "model");
     this.launchCommand = launchCommand;
@@ -157,7 +157,7 @@ export class ClaudeWorkerProvider implements FreshSessionProvider {
       this.config.dangerously_skip_permissions ?? this.skipPermissionsDefault;
     // The prompt is delivered via stdin (mirrors ClaudeCodeProvider), so
     // `promptFlag` is a bare flag; `--model` carries the proxy's routing alias
-    // passed VERBATIM (not composed from backend_provider/model).
+    // passed VERBATIM (not composed from service/model).
     const args = [
       promptFlag,
       "--model",

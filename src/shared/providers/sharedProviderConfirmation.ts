@@ -154,7 +154,7 @@ export type DispatchExclusionPattern = string;
 
 /** A backend an exclusion rule can be evaluated against — structurally a `DispatchableSource`. */
 export interface ExcludableBackend {
-  provider: string;
+  transport: string;
   model?: string;
   endpoint?: string;
 }
@@ -327,7 +327,7 @@ export function buildProviderConfirmationRender(
   // all, so no tier is reflected for a source today.
   const ruledOut = (name: ResolvedProviderName): boolean =>
     operatorExcluded.excludes({
-      provider: name,
+      transport: name,
       model: representativeModelId(name, sessionConfig),
     });
 
@@ -487,7 +487,7 @@ const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.
  * new choice even though it introduces no new provider.
  *
  * The provider half is the **BACKEND ACTUALLY SERVING the model**
- * (`backend_provider ?? provider`), not the transport that reaches it — the same
+ * (`service ?? transport`), not the transport that reaches it — the same
  * rule `apiPool` already applies to the quota-ledger pool identity. This is what
  * makes the gate's two proxy cases come out right, and they pull in OPPOSITE
  * directions, so a transport-keyed identity cannot satisfy both:
@@ -501,7 +501,7 @@ const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.
  * collapses the second.
  *
  * ⚠ This is a keyspace of its own, deliberately distinct from BOTH:
- *   • the quota-ledger pool identity (`backend_provider[#account]/model`,
+ *   • the quota-ledger pool identity (`service[#account]/model`,
  *     `buildProviderModelKey`) — it shares this provider half, but an account is
  *     irrelevant to a rule about a backend; and
  *   • the dispatch COST-POSITION map (`readConfirmedCostPositions`), which is keyed
@@ -522,7 +522,7 @@ const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.
 /**
  * The pattern that rules out one backend at the finest granularity its model is
  * knowable at — keyed on the TRANSPORT provider, because that is the field
- * `ruleMatches` compares (`ExcludableBackend.provider`). A backend whose model
+ * `ruleMatches` compares (`ExcludableBackend.transport`). A backend whose model
  * arrives only at the dispatch handshake (a CLI) must be ruled out at the coarse
  * `provider` tier or the rule would never match.
  */
@@ -558,7 +558,7 @@ export function confirmedBackendKeys(
     keys.add(backendIdentity(entry.model_id, entry.name));
   }
   for (const entry of confirmation.source_pool_cost_order ?? []) {
-    keys.add(backendIdentity(entry.model_id, entry.backend_provider ?? entry.provider));
+    keys.add(backendIdentity(entry.model_id, entry.service ?? entry.transport));
   }
   for (const entry of confirmation.host_model_cost_order ?? []) {
     if (entry.provider === undefined) continue;
@@ -648,7 +648,7 @@ export function computeNewlyReachableBackends(
     record(representativeModelId(provider.name, sessionConfig), provider.name);
   }
   for (const source of sources) {
-    record(source.model, source.provider, source.backend_provider);
+    record(source.model, source.transport, source.service);
   }
   return [...reachNow.values()]
     .filter((backend) => !confirmed.has(backend.key))
@@ -670,7 +670,7 @@ export function computeNewlyReachableBackends(
  * ⇒ `codex`) — i.e. the conversation host itself. Applying them to HOST pools would
  * zero out dispatch entirely: the driver would exclude itself. It is harmless at
  * `buildSourcePools` only because a host can never BE a source — `claude-code` is
- * structurally absent from `DISPATCHABLE_SOURCE_PROVIDERS`, so in a Claude Code
+ * structurally absent from `DISPATCHABLE_TRANSPORTS`, so in a Claude Code
  * session the filter is a no-op. Honoring an operator exclusion of the host/primary
  * provider therefore is NOT a matter of passing these rules to the host-pool builder;
  * it needs a separate decision about what excluding your own driver should even mean.
@@ -742,13 +742,13 @@ function isResolvedProviderName(value: string): boolean {
 function ruleMatches(rule: ExclusionRule, backend: ExcludableBackend): boolean {
   switch (rule.kind) {
     case "provider":
-      return backend.provider === rule.provider;
+      return backend.transport === rule.provider;
     case "provider_model":
       // A model-granular rule matches ONLY that model. A backend of the same
       // provider carrying no model (a CLI whose model arrives at the dispatch
       // handshake) is NOT matched: the operator ruled out one model, not the
       // backend — the coarse `provider` tier is how they rule out the backend.
-      return backend.provider === rule.provider && backend.model === rule.model;
+      return backend.transport === rule.provider && backend.model === rule.model;
     case "endpoint":
       return endpointHosts(backend.endpoint).includes(rule.host);
   }
@@ -903,10 +903,10 @@ function isSourcePoolCostEntry(value: unknown): value is SourcePoolCostEntry {
   const obj = value as Record<string, unknown>;
   return (
     typeof obj.source_id === "string" &&
-    typeof obj.provider === "string" &&
+    typeof obj.transport === "string" &&
     // Optional, but guarded: `confirmedBackendKeys` builds a gate key from it.
-    (obj.backend_provider === undefined ||
-      typeof obj.backend_provider === "string") &&
+    (obj.service === undefined ||
+      typeof obj.service === "string") &&
     (obj.model_id === undefined || typeof obj.model_id === "string") &&
     (obj.blended_price_usd_per_mtok === null ||
       typeof obj.blended_price_usd_per_mtok === "number") &&

@@ -28,7 +28,7 @@ function pool(id, providerName, source) {
 
 test("D1 collision (host IS the primary backend): the SOURCE/engine pool survives, ONE pool total", () => {
   const host = pool("codex#acctA/gpt-5", "codex");
-  const source = pool("codex#acctA/gpt-5", "codex", { provider: "codex" });
+  const source = pool("codex#acctA/gpt-5", "codex", { transport: "codex" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [source] });
   // Self-drive preserved: the surviving pool is the SOURCE pool (engine-launchable —
   // it carries its `source`), and the host pool is gone (nothing to double-book).
@@ -41,7 +41,7 @@ test("D1 collision is provider+account, not model-granular (roster model vs sour
   // The host roster spells a model the folded source does not — same provider, same
   // account ⇒ still ONE meter ⇒ still a collision.
   const host = pool("codex#acctA/gpt-5-codex", "codex");
-  const source = pool("codex#acctA/*", "codex", { provider: "codex" });
+  const source = pool("codex#acctA/*", "codex", { transport: "codex" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [source] });
   expect(out.hostPools).toEqual([]);
   expect(out.sourcePools.length).toBe(1);
@@ -49,7 +49,7 @@ test("D1 collision is provider+account, not model-granular (roster model vs sour
 
 test("no collision across DIFFERENT accounts: both pools survive (a second-account source is a real extra pool)", () => {
   const host = pool("codex#acctA/gpt-5", "codex");
-  const source = pool("codex#acctB/gpt-5", "codex", { provider: "codex", account: "acctB" });
+  const source = pool("codex#acctB/gpt-5", "codex", { transport: "codex", account: "acctB" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [source] });
   expect(out.hostPools.length).toBe(1);
   expect(out.sourcePools.length).toBe(1);
@@ -57,7 +57,7 @@ test("no collision across DIFFERENT accounts: both pools survive (a second-accou
 
 test("an UNRESOLVED account degrades to provider-name collision (the retired guard's compare)", () => {
   const host = pool("codex/gpt-5", "codex");
-  const source = pool("codex/*", "codex", { provider: "codex" });
+  const source = pool("codex/*", "codex", { transport: "codex" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [source] });
   expect(out.hostPools).toEqual([]);
   expect(out.sourcePools.length).toBe(1);
@@ -65,26 +65,26 @@ test("an UNRESOLVED account degrades to provider-name collision (the retired gua
 
 test("no collision at all: different providers pass through untouched (host + backend + NIM fan-out)", () => {
   const host = pool("claude-code#orgA/opus", "claude-code");
-  const codex = pool("codex/gpt-5", "codex", { provider: "codex" });
-  const nim = pool("openai-compatible/m", "openai-compatible", { provider: "openai-compatible" });
+  const codex = pool("codex/gpt-5", "codex", { transport: "codex" });
+  const nim = pool("openai-compatible/m", "openai-compatible", { transport: "openai-compatible" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [codex, nim] });
   expect(out.hostPools.length).toBe(1);
   expect(out.sourcePools.length).toBe(2);
 });
 
 test("HOST survives against a colliding NON-in-process source (the 'otherwise' arm)", () => {
-  // A source whose provider is host-shaped (not an engine-drivable worker) colliding
+  // A source whose transport is host-shaped (not an engine-drivable worker) colliding
   // with the host identity: the host pool survives, the source drops.
   const host = pool("claude-code#orgA/opus", "claude-code");
-  const weird = pool("claude-code#orgA/opus", "claude-code", { provider: "claude-code" });
+  const weird = pool("claude-code#orgA/opus", "claude-code", { transport: "claude-code" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [weird] });
   expect(out.hostPools.length).toBe(1);
   expect(out.sourcePools).toEqual([]);
 });
 
 test("audit shape (host is NOT a member pool): hostProviderName drops only a colliding non-in-process source", () => {
-  const codex = pool("codex/gpt-5", "codex", { provider: "codex" });
-  const hostShaped = pool("claude-code/opus", "claude-code", { provider: "claude-code" });
+  const codex = pool("codex/gpt-5", "codex", { transport: "codex" });
+  const hostShaped = pool("claude-code/opus", "claude-code", { transport: "claude-code" });
   const out = dedupHostAndSourcePools({
     hostPools: [],
     sourcePools: [codex, hostShaped],
@@ -96,7 +96,7 @@ test("audit shape (host is NOT a member pool): hostProviderName drops only a col
 });
 
 test("audit shape, same-agent (host==codex): the in-process source SURVIVES (engine drives that account)", () => {
-  const codex = pool("codex/gpt-5", "codex", { provider: "codex" });
+  const codex = pool("codex/gpt-5", "codex", { transport: "codex" });
   const out = dedupHostAndSourcePools({
     hostPools: [],
     sourcePools: [codex],
@@ -106,7 +106,7 @@ test("audit shape, same-agent (host==codex): the in-process source SURVIVES (eng
 });
 
 test("no host identity at all (headless): pass-through", () => {
-  const codex = pool("codex/gpt-5", "codex", { provider: "codex" });
+  const codex = pool("codex/gpt-5", "codex", { transport: "codex" });
   const out = dedupHostAndSourcePools({ hostPools: [], sourcePools: [codex] });
   expect(out.sourcePools.length).toBe(1);
 });
@@ -116,7 +116,7 @@ test("MIXED accounts (h2c3 F3): an unresolved HOST account is never surrendered 
   // an explicit second account. Colliding here would silently drop the attended
   // host's own dispatch lane — the fail-closed-on-one-draw class.
   const host = pool("codex/gpt-5", "codex");
-  const source = pool("codex#acctB/gpt-5", "codex", { provider: "codex", account: "acctB" });
+  const source = pool("codex#acctB/gpt-5", "codex", { transport: "codex", account: "acctB" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [source] });
   expect(out.hostPools.length).toBe(1);
   expect(out.sourcePools.length).toBe(1);
@@ -124,7 +124,7 @@ test("MIXED accounts (h2c3 F3): an unresolved HOST account is never surrendered 
 
 test("ACCOUNTLESS source still collides on provider alone (the synthesized primary fold shares the host credential)", () => {
   const host = pool("codex#acctA/gpt-5", "codex");
-  const source = pool("codex/*", "codex", { provider: "codex" });
+  const source = pool("codex/*", "codex", { transport: "codex" });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [source] });
   expect(out.hostPools).toEqual([]);
   expect(out.sourcePools.length).toBe(1);
@@ -135,8 +135,8 @@ test("BACKEND identity outranks transport (h2c3 F5): a proxied lane onto the hos
   // meter even though its transport providerName differs from the host's.
   const host = pool("claude-code#orgA/opus", "claude-code");
   const proxied = pool("claude-code#orgA/opus", "claude-worker", {
-    provider: "claude-worker",
-    backend_provider: "claude-code",
+    transport: "claude-worker",
+    service: "claude-code",
   });
   const out = dedupHostAndSourcePools({ hostPools: [host], sourcePools: [proxied] });
   // claude-worker is an in-process worker: the engine lane survives, host drops.
@@ -146,7 +146,7 @@ test("BACKEND identity outranks transport (h2c3 F5): a proxied lane onto the hos
 
 test("survivor rule follows the DRAW's worker policy (h2c3 F9): a command-shaped collider survives only under commandWorkers", () => {
   const host = pool("worker-command/x", "worker-command");
-  const cmd = pool("worker-command/x", "worker-command", { provider: "worker-command" });
+  const cmd = pool("worker-command/x", "worker-command", { transport: "worker-command" });
   const remediate = dedupHostAndSourcePools({
     hostPools: [host],
     sourcePools: [cmd],

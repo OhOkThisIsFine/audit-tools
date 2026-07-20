@@ -154,8 +154,8 @@ export interface OpenCodeConfig {
 export interface ClaudeWorkerConfig {
   /** The proxy base url the spawn is fronted with (`ANTHROPIC_BASE_URL`). REQUIRED at construction. */
   endpoint?: string;
-  /** The backend provider the proxy routes to (used for quota/identity, not argv). REQUIRED at construction. */
-  backend_provider?: string;
+  /** The backend service the proxy routes to (used for quota/identity, not argv). REQUIRED at construction. */
+  service?: string;
   /** Proxy-facing model alias (`--model` argv). REQUIRED at construction. */
   model?: string;
   /** Env var holding the proxy's master key (resolved to `ANTHROPIC_AUTH_TOKEN` at launch; absent = sentinel). */
@@ -313,12 +313,12 @@ export const PROVIDER_SECTION_KEYS = {
  *
  * `claude-worker` is NOT the conversation host: it is the proxied, ISOLATED
  * Claude-harness worker class — a `claude -p` spawn fronted by a proxy transport
- * (`endpoint` = the proxy url, `--model <backend_provider>/<model>` composed at
+ * (`endpoint` = the proxy url, `--model <service>/<model>` composed at
  * launch). Every self-spawn / Gate-0 refusal layer keys on `claude-code` and never
  * sees this name, so the host guards stay byte-identical
  * (docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md).
  */
-export const DISPATCHABLE_SOURCE_PROVIDERS = [
+export const DISPATCHABLE_TRANSPORTS = [
   "openai-compatible",
   "codex",
   "opencode",
@@ -327,8 +327,8 @@ export const DISPATCHABLE_SOURCE_PROVIDERS = [
   "agy",
   "claude-worker",
 ] as const;
-export type DispatchableSourceProvider =
-  (typeof DISPATCHABLE_SOURCE_PROVIDERS)[number];
+export type DispatchableTransport =
+  (typeof DISPATCHABLE_TRANSPORTS)[number];
 
 /**
  * The worker-kind axis of the unified dispatch worker model
@@ -343,23 +343,23 @@ export type WorkerKind = (typeof WORKER_KINDS)[number];
 
 /**
  * Derive a source's {@link WorkerKind}. An explicit `worker_kind` on the source wins
- * (the declarable override for the genuinely-ambiguous case); otherwise the provider
+ * (the declarable override for the genuinely-ambiguous case); otherwise the transport
  * determines it — every harness-driving backend (claude-worker / codex / agy /
  * opencode / worker-command / subprocess-template) is `agentic`; `openai-compatible`
  * is the lone `single_shot` (one `/chat/completions` round-trip, no tools).
  */
 export function deriveWorkerKind(
-  source: Pick<DispatchableSource, "provider" | "worker_kind">,
+  source: Pick<DispatchableSource, "transport" | "worker_kind">,
 ): WorkerKind {
   if (source.worker_kind !== undefined) return source.worker_kind;
-  return source.provider === "openai-compatible" ? "single_shot" : "agentic";
+  return source.transport === "openai-compatible" ? "single_shot" : "agentic";
 }
 
 /**
  * A generic dispatchable backend source — the uniform shape the dispatch engine
  * spills work onto, applicable to ANY non-IDE source (an OpenAI-compatible API like
  * NIM / vLLM / LM Studio, a headless CLI like codex / opencode, a subprocess
- * template, …). A source is its `{provider, endpoint, parameters, quota}`, so the
+ * template, …). A source is its `{transport, endpoint, parameters, quota}`, so the
  * operator can configure MANY of them (two NIM endpoints, a local vLLM + a hosted
  * model, a CLI pool) and each becomes its own CapacityPool with its own rate limit.
  *
@@ -373,13 +373,13 @@ export function deriveWorkerKind(
 export interface DispatchableSource {
   /**
    * Stable id for this source — the CapacityPool id + the key learned quota is
-   * recorded under. Defaults to `${provider}:${model ?? endpoint}` when omitted, so
-   * two sources of the same provider stay distinct as long as their model/endpoint
+   * recorded under. Defaults to `${transport}:${model ?? endpoint}` when omitted, so
+   * two sources of the same transport stay distinct as long as their model/endpoint
    * differ (give them explicit ids otherwise).
    */
   id?: string;
   /** The non-IDE backend that runs this source. */
-  provider: DispatchableSourceProvider;
+  transport: DispatchableTransport;
   /** API base URL (`openai-compatible`) or launcher command (CLI providers). */
   endpoint?: string;
   /** Model id, where the backend takes one. Never defaulted (no hardcoded model identity). */
@@ -390,18 +390,18 @@ export interface DispatchableSource {
   api_key?: string;
   /**
    * Worker-kind override (see {@link WorkerKind} / {@link deriveWorkerKind}).
-   * Normally DERIVED from the provider — declare it only where genuinely ambiguous.
+   * Normally DERIVED from the transport — declare it only where genuinely ambiguous.
    */
   worker_kind?: WorkerKind;
   /**
-   * The BACKEND provider actually serving this source when a transport fronts it
+   * The BACKEND service actually serving this source when a transport fronts it
    * (`claude-worker`: the proxy transport routes to e.g. `"nim"`). The transport NEVER
    * enters the identity: the quota/ledger key stays
-   * `backend_provider[#account]/model`, so a proxied lane and a direct lane to the
+   * `service[#account]/model`, so a proxied lane and a direct lane to the
    * same backend dedup to ONE quota identity. The namespace string
-   * `<backend_provider>/<model>` is composed AT LAUNCH for argv only, never stored.
+   * `<service>/<model>` is composed AT LAUNCH for argv only, never stored.
    */
-  backend_provider?: string;
+  service?: string;
   /**
    * Backend-specific extra parameters, merged into the provider's config block:
    * `temperature` / `headers` / `max_output_tokens` / `response_format_json` /
@@ -431,8 +431,8 @@ export interface DispatchableSource {
    * different account than the host (e.g. a Claude CLI signed into a second
    * account: its own `.credentials.json`; a second Codex `auth.json`). The
    * source's quota probe + account id are read from here, so the source forms a
-   * pool keyed on its OWN `(provider, account)` — distinct budget from the host's
-   * same-provider pool (docs/quota-dispatch-design.md §5b). Omit when the source
+   * pool keyed on its OWN `(transport, account)` — distinct budget from the host's
+   * same-transport pool (docs/quota-dispatch-design.md §5b). Omit when the source
    * shares the host's account.
    */
   credentials_path?: string;
@@ -694,7 +694,7 @@ export interface SessionConfig {
   agy?: AgyConfig;
   /**
    * Additional dispatchable backend sources the engine spills onto, beyond the
-   * primary `provider`. Each is a generic `{provider, endpoint, parameters, quota}`
+   * primary `provider`. Each is a generic `{transport, endpoint, parameters, quota}`
    * (see {@link DispatchableSource}) and becomes its own CapacityPool — so any
    * non-IDE source (multiple NIM/vLLM endpoints, a CLI pool, …) is dispatchable
    * uniformly. A legacy `openai_compatible` block (when it isn't the primary

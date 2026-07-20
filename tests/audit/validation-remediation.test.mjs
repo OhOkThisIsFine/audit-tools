@@ -804,29 +804,29 @@ test("C1: validateSessionConfig validates openai_compatible.quota (operator-supp
     )).toBeTruthy();
 });
 
-test("C1: validateSessionConfig validates sources[] provider + quota", () => {
+test("C1: validateSessionConfig validates sources[] transport + quota", () => {
   // A valid explicit source with a quota block passes.
   expect(validateSessionConfig({
       sources: [
-        { provider: "openai-compatible", endpoint: "http://a/v1", model: "m", quota: { context_tokens: 64_000 } },
+        { transport: "openai-compatible", endpoint: "http://a/v1", model: "m", quota: { context_tokens: 64_000 } },
       ],
     })).toEqual([]);
 
   // sources is not an array → issue on 'sources'.
-  const notArray = validateSessionConfig({ sources: { provider: "codex" } });
+  const notArray = validateSessionConfig({ sources: { transport: "codex" } });
   expect(notArray.some(
       (i) => i.path === "sources" && /must be an array/i.test(i.message),
     )).toBeTruthy();
 
-  // An unknown provider is rejected.
-  const badProvider = validateSessionConfig({ sources: [{ provider: "made-up" }] });
-  expect(badProvider.some(
-      (i) => i.path === "sources[0].provider" && /must be one of/i.test(i.message),
+  // An unknown transport is rejected.
+  const badTransport = validateSessionConfig({ sources: [{ transport: "made-up" }] });
+  expect(badTransport.some(
+      (i) => i.path === "sources[0].transport" && /must be one of/i.test(i.message),
     )).toBeTruthy();
 
   // A bad per-source quota is caught at the source's path.
   const badQuota = validateSessionConfig({
-    sources: [{ provider: "openai-compatible", quota: { output_tokens: -1 } }],
+    sources: [{ transport: "openai-compatible", quota: { output_tokens: -1 } }],
   });
   expect(badQuota.some(
       (i) => i.path === "sources[0].quota.output_tokens" && /positive integer/i.test(i.message),

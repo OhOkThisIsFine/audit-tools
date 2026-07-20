@@ -107,7 +107,7 @@ describe("readConfirmedCostPositions — confirmation→dispatch link", () => {
     const root = await mkdtemp(join(tmpdir(), "audit-cost-conf-"));
     try {
       const sources = [
-        { id: "rp/nvidia", provider: "openai-compatible", model: "nvidia/llama-x", cost_per_mtok: 4, capability_rank: 7 },
+        { id: "rp/nvidia", transport: "openai-compatible", model: "nvidia/llama-x", cost_per_mtok: 4, capability_rank: 7 },
       ];
       const confirmation = buildSharedProviderConfirmation(
         NIM_CONFIG,
@@ -229,8 +229,8 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
   test("declared-free source sorts first and threads its position by model_id", () => {
     const sources = [
       // A declared-free arbitrage pool (cost 0 → routes first) and a declared-priced one.
-      { id: "opencode-free", provider: "opencode", model: "free/model-x", cost_per_mtok: 0 },
-      { id: "rp/paid", provider: "openai-compatible", model: "nvidia/paid-y", cost_per_mtok: 5 },
+      { id: "opencode-free", transport: "opencode", model: "free/model-x", cost_per_mtok: 0 },
+      { id: "rp/paid", transport: "openai-compatible", model: "nvidia/paid-y", cost_per_mtok: 5 },
     ];
     const { source_pool_cost_order } = annotateConfirmedPool(basePool, {}, undefined, sources);
     const byId = Object.fromEntries(source_pool_cost_order.map((e) => [e.source_id, e]));
@@ -242,8 +242,8 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
 
   test("capability_rank breaks a cost-equal tie among source pools (lower = first)", () => {
     const sources = [
-      { id: "rp/weak", provider: "openai-compatible", model: "prov/weak", cost_per_mtok: 3, capability_rank: 40 },
-      { id: "rp/strong", provider: "openai-compatible", model: "prov/strong", cost_per_mtok: 3, capability_rank: 2 },
+      { id: "rp/weak", transport: "openai-compatible", model: "prov/weak", cost_per_mtok: 3, capability_rank: 40 },
+      { id: "rp/strong", transport: "openai-compatible", model: "prov/strong", cost_per_mtok: 3, capability_rank: 2 },
     ];
     const { source_pool_cost_order } = annotateConfirmedPool(basePool, {}, undefined, sources);
     const byId = Object.fromEntries(source_pool_cost_order.map((e) => [e.source_id, e.cost_order]));
@@ -256,8 +256,8 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
     // prompt displays sources under their BARE id — so naming the displayed id
     // must match (display keyspace ≡ match keyspace).
     const sources = [
-      { id: "rp/cheap", provider: "openai-compatible", model: "prov/cheap", cost_per_mtok: 1 },
-      { id: "rp/pricey", provider: "openai-compatible", model: "prov/pricey", cost_per_mtok: 9 },
+      { id: "rp/cheap", transport: "openai-compatible", model: "prov/cheap", cost_per_mtok: 1 },
+      { id: "rp/pricey", transport: "openai-compatible", model: "prov/pricey", cost_per_mtok: 9 },
     ];
     const input = {
       schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
@@ -272,8 +272,8 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
 
   test("3c: the internal source::<id> form is still accepted (either keyspace matches)", () => {
     const sources = [
-      { id: "rp/cheap", provider: "openai-compatible", model: "prov/cheap", cost_per_mtok: 1 },
-      { id: "rp/pricey", provider: "openai-compatible", model: "prov/pricey", cost_per_mtok: 9 },
+      { id: "rp/cheap", transport: "openai-compatible", model: "prov/cheap", cost_per_mtok: 1 },
+      { id: "rp/pricey", transport: "openai-compatible", model: "prov/pricey", cost_per_mtok: 9 },
     ];
     const input = {
       schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
@@ -291,7 +291,7 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
     // exact keys as written: the bare token addresses the PROVIDER, the prefixed
     // form addresses the source.
     const sources = [
-      { id: "worker-command", provider: "openai-compatible", model: "prov/odd", cost_per_mtok: 9 },
+      { id: "worker-command", transport: "openai-compatible", model: "prov/odd", cost_per_mtok: 9 },
     ];
     const input = {
       schema_version: PROVIDER_CONFIRMATION_INPUT_VERSION,
@@ -325,8 +325,8 @@ describe("annotateConfirmedPool — source pool fold (Gate-0 source ordering)", 
     ];
     const repModel = NIM_CONFIG.openai_compatible.model;
     const sources = [
-      { id: "legacy-oac", provider: "openai-compatible", model: repModel, cost_per_mtok: 1 },
-      { id: "rp/distinct", provider: "openai-compatible", model: "nvidia/distinct-model", cost_per_mtok: 2 },
+      { id: "legacy-oac", transport: "openai-compatible", model: repModel, cost_per_mtok: 1 },
+      { id: "rp/distinct", transport: "openai-compatible", model: "nvidia/distinct-model", cost_per_mtok: 2 },
     ];
     const { source_pool_cost_order } = annotateConfirmedPool(poolWithOac, NIM_CONFIG, undefined, sources);
     const models = source_pool_cost_order.map((e) => e.model_id);

@@ -78,7 +78,7 @@ export function renderProviderConfirmationPrompt(opts: {
   };
   const sourceRows = sourcePools.map(
     (entry) =>
-      `| ${entry.id} | ${entry.provider} | ${entry.model ?? "—"} | ${sourcePriceCell(entry)} |`,
+      `| ${entry.id} | ${entry.transport} | ${entry.model ?? "—"} | ${sourcePriceCell(entry)} |`,
   );
 
   const hasLegacyOpenAiCompatible = sorted.some((e) => e.name === "openai-compatible");

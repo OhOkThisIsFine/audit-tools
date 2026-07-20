@@ -29,7 +29,7 @@ export const SOURCE_DECLARATION_FILENAME = "sources-declared.json";
 
 /** A declared source that did NOT survive the ambient-reach intersection. */
 export interface DroppedSource {
-  /** The source's declared id, or its derived `${provider}:${model ?? endpoint}` fallback. */
+  /** The source's declared id, or its derived `${transport}:${model ?? endpoint}` fallback. */
   id: string;
   /** Operator-facing explanation — always says what to fix. */
   reason: string;
@@ -147,7 +147,7 @@ function defaultProbeHttpReachable(url: string): boolean {
 
 /** The source's stable id, matching `DispatchableSource.id`'s documented default. */
 function sourceId(source: DispatchableSource): string {
-  return source.id ?? `${source.provider}:${source.model ?? source.endpoint ?? "?"}`;
+  return source.id ?? `${source.transport}:${source.model ?? source.endpoint ?? "?"}`;
 }
 
 /** Resolve the declaration file path for this machine (state dir via `io/stateDir.ts`). */
@@ -394,7 +394,7 @@ export function verifySourceReach(
     }
   }
 
-  switch (source.provider) {
+  switch (source.transport) {
     case "openai-compatible": {
       if (!source.endpoint?.trim()) {
         return { verified: false, reason: "openai-compatible source has no endpoint (base_url)." };
@@ -429,10 +429,10 @@ export function verifySourceReach(
           ? { verified: true }
           : { verified: false, reason: `launcher "${declared}" is not on PATH.` };
       }
-      const fallback = CLI_DEFAULT_COMMAND[source.provider];
+      const fallback = CLI_DEFAULT_COMMAND[source.transport];
       if (exists(fallback)) return { verified: true };
       // Gated for the 2026-07-18 sunset, mirroring agyProvider's own fallback.
-      if (source.provider === "agy" && exists(AGY_LEGACY_COMMAND)) {
+      if (source.transport === "agy" && exists(AGY_LEGACY_COMMAND)) {
         return { verified: true };
       }
       return { verified: false, reason: `launcher "${fallback}" is not on PATH.` };
@@ -602,7 +602,7 @@ function resolveProxyLane(
     });
     return;
   }
-  // Declared-wins dedup: an expanded lane whose (backend_provider, model)
+  // Declared-wins dedup: an expanded lane whose (service, model)
   // identity a DECLARED source already covers is skipped, so one pool identity
   // never maps to two sources (the launch bridge's pool→source map is 1:1 by
   // assumption — a duplicate would arbitrate the transport by silent map-order
@@ -610,10 +610,10 @@ function resolveProxyLane(
   // through the proxy for that model is still available by declaring the
   // claude-worker source explicitly.
   const declaredIdentities = new Set(
-    sources.map((s) => `${s.backend_provider ?? s.provider}/${s.model ?? ""}`),
+    sources.map((s) => `${s.service ?? s.transport}/${s.model ?? ""}`),
   );
   for (const expanded of catalog.sources) {
-    const identity = `${expanded.backend_provider ?? expanded.provider}/${expanded.model ?? ""}`;
+    const identity = `${expanded.service ?? expanded.transport}/${expanded.model ?? ""}`;
     if (declaredIdentities.has(identity)) {
       dropped.push({
         id: sourceId(expanded),

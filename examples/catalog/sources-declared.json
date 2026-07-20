@@ -2,7 +2,7 @@
   "sources": [
     {
       "id": "opencode-free",
-      "provider": "openai-compatible",
+      "transport": "openai-compatible",
       "endpoint": "https://opencode.ai/zen/v1",
       "model": "deepseek-v4-flash-free",
       "api_key_env": "OPENCODE_ZEN_API_KEY",
@@ -11,9 +11,9 @@
     },
     {
       "id": "proxied-glm",
-      "provider": "claude-worker",
+      "transport": "claude-worker",
       "endpoint": "http://127.0.0.1:8402",
-      "backend_provider": "nim",
+      "service": "nim",
       "model": "z-ai/glm-5.2",
       "cost_per_mtok": 0
     }

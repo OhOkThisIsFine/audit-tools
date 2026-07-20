@@ -129,12 +129,12 @@ await test("the executor persists from the EFFECTIVE config, not a disk re-read 
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify({
-        sources: [{ id: "repo-disk-src", provider: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+        sources: [{ id: "repo-disk-src", transport: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
       }),
     );
     // The per-auditor handshake inventory (effective config) reports a DIFFERENT source.
     const effectiveConfig = {
-      sources: [{ id: "handshake-src", provider: "openai-compatible", endpoint: "https://h/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+      sources: [{ id: "handshake-src", transport: "openai-compatible", endpoint: "https://h/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
     };
     await runProviderConfirmationAutoComplete({}, root, artifactsDir, effectiveConfig);
     const persisted = await readFile(sharedProviderConfirmationPath(root), "utf8");
@@ -158,7 +158,7 @@ await test("without an effective config the fallback is driver-self-only — rep
     await writeFile(
       join(artifactsDir, "session-config.json"),
       JSON.stringify({
-        sources: [{ id: "repo-disk-src", provider: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
+        sources: [{ id: "repo-disk-src", transport: "openai-compatible", endpoint: "https://d/v1", model: "m", api_key: "public", cost_per_mtok: 1 }],
       }),
     );
     await runProviderConfirmationAutoComplete({}, root, artifactsDir);
@@ -244,13 +244,13 @@ await test("G3: confirmed keys span provider_pool + source_pool_cost_order + hos
       { name: "openai-compatible", capability_tier: "capable", excluded: false, model_id: "cfg-model" },
     ],
     source_pool_cost_order: [
-      { source_id: "s1", provider: "codex", model_id: "src-model", blended_price_usd_per_mtok: null, cost_order: 0 },
+      { source_id: "s1", transport: "codex", model_id: "src-model", blended_price_usd_per_mtok: null, cost_order: 0 },
     ],
     host_model_cost_order: [
       { model_id: "host-model", provider: "claude-code", blended_price_usd_per_mtok: null, cost_order: 1 },
     ],
   });
-  // `(backend_provider ?? provider):model` where the model is knowable, else the
+  // `(service ?? transport):model` where the model is knowable, else the
   // coarse provider name.
   expect([...keys].sort()).toEqual(
     ["claude-code:host-model", "codex:src-model", "openai-compatible:cfg-model", "worker-command"],
@@ -289,7 +289,7 @@ await test("G3: a newly-reachable SOURCE appears in the delta, keyed by its mode
   const delta = computeNewlyReachableBackends(
     built,
     {},
-    [{ id: "new-nim", provider: "openai-compatible", endpoint: "https://x/v1", model: "brand-new-model" }],
+    [{ id: "new-nim", transport: "openai-compatible", endpoint: "https://x/v1", model: "brand-new-model" }],
     CLEAN_ENV,
   );
   // A″: the backend carries the exclusion PATTERN that rules out exactly it,
@@ -316,7 +316,7 @@ await test("G3/A″: a modelless backend deltas by provider and rules out at the
   const delta = computeNewlyReachableBackends(
     built,
     {},
-    [{ id: "cli", provider: "opencode" }],
+    [{ id: "cli", transport: "opencode" }],
     CLEAN_ENV,
   );
   expect(delta).toEqual([
@@ -333,7 +333,7 @@ await test("G3: a second model of an ALREADY-confirmed provider still deltas (mo
   const delta = computeNewlyReachableBackends(
     built,
     config,
-    [{ id: "second", provider: "openai-compatible", endpoint: "https://x/v1", model: "a-second-model" }],
+    [{ id: "second", transport: "openai-compatible", endpoint: "https://x/v1", model: "a-second-model" }],
     { K: "public" },
   );
   expect(delta.map((b) => b.key), "the new MODEL is the delta, not the provider").toEqual([
@@ -348,7 +348,7 @@ await test("G3: a CONFIRMED backend that is no longer reachable is silent (subse
   const withGhost = {
     ...built,
     source_pool_cost_order: [
-      { source_id: "ghost", provider: "codex", model_id: "vanished-model", blended_price_usd_per_mtok: null, cost_order: 0 },
+      { source_id: "ghost", transport: "codex", model_id: "vanished-model", blended_price_usd_per_mtok: null, cost_order: 0 },
     ],
   };
   const delta = computeNewlyReachableBackends(withGhost, {}, [], CLEAN_ENV);

@@ -1225,7 +1225,7 @@ test("selectProvider — a cooldown learned on one same-account source gates its
   // 2026-07-11). Only nim-nano's OWN key recorded the learned cooldown.
   const nimNano = makePool("nim-nano", {
     source: {
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://integrate.api.nvidia.com/v1",
       api_key_env: "NVIDIA_API_KEY",
       model: "nano",
@@ -1233,7 +1233,7 @@ test("selectProvider — a cooldown learned on one same-account source gates its
   });
   const nimSuper = makePool("nim-super", {
     source: {
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://integrate.api.nvidia.com/v1",
       api_key_env: "NVIDIA_API_KEY",
       model: "super",
@@ -1242,7 +1242,7 @@ test("selectProvider — a cooldown learned on one same-account source gates its
   // A pool on a genuinely different account — must stay eligible.
   const otherAccount = makePool("healthy-other-account", {
     source: {
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://other-endpoint.example/v1",
       api_key_env: "OTHER_KEY",
       model: "x",
@@ -1270,7 +1270,7 @@ test("selectProvider — sources with DIFFERENT api_key_env stay independent (no
   const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   const cooling = makePool("cooling-pool", {
     source: {
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://integrate.api.nvidia.com/v1",
       api_key_env: "NVIDIA_API_KEY_A",
       model: "m1",
@@ -1280,7 +1280,7 @@ test("selectProvider — sources with DIFFERENT api_key_env stay independent (no
   // must NOT be gated by the sibling's cooldown.
   const independent = makePool("independent-pool", {
     source: {
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://integrate.api.nvidia.com/v1",
       api_key_env: "NVIDIA_API_KEY_B",
       model: "m2",

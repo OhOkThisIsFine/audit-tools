@@ -8,7 +8,7 @@
   "sources": [
     {
       "id": "nim-primary",
-      "provider": "openai-compatible",
+      "transport": "openai-compatible",
       "endpoint": "https://integrate.api.nvidia.com/v1",
       "model": "openai/gpt-oss-120b",
       "api_key_env": "NVIDIA_API_KEY",
@@ -21,7 +21,7 @@
     },
     {
       "id": "codex-cli",
-      "provider": "codex",
+      "transport": "codex",
       "parameters": {
         "sandbox_mode": "workspace-write"
       }

@@ -2,7 +2,7 @@
  * 3b transport tests for `ClaudeWorkerProvider` — the proxied, ISOLATED,
  * per-packet-routed Claude-harness worker (the kind-1 launch transport,
  * docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md): constructor
- * invariants (endpoint/backend_provider/model), argv namespace-model composition,
+ * invariants (endpoint/service/model), argv namespace-model composition,
  * the REQUIRED env overlay (proxy base url + dummy key + isolated per-launch
  * CLAUDE_CONFIG_DIR), mechanical trust pre-seeding, best-effort config-dir
  * cleanup, the factory/launch-bridge branch, and the auto-resolution guard
@@ -37,7 +37,7 @@ const PROXY_URL = "http://127.0.0.1:8791";
 
 const WORKER_CONFIG = {
   endpoint: PROXY_URL,
-  backend_provider: "nim",
+  service: "nim",
   model: "z-ai/glm-5.2",
 };
 
@@ -87,10 +87,10 @@ describe("ClaudeWorkerProvider construction invariants", () => {
     }
   });
 
-  it("throws on a missing/empty backend_provider", () => {
+  it("throws on a missing/empty service", () => {
     assert.throws(
-      () => new ClaudeWorkerProvider({ ...WORKER_CONFIG, backend_provider: "" }),
-      /claude-worker provider requires a non-empty backend_provider/,
+      () => new ClaudeWorkerProvider({ ...WORKER_CONFIG, service: "" }),
+      /claude-worker provider requires a non-empty service/,
     );
   });
 
@@ -110,14 +110,14 @@ describe("ClaudeWorkerProvider construction invariants", () => {
 
 describe("ClaudeWorkerProvider.launch — argv composition", () => {
   it("REGRESSION PIN (i): passes --model <alias> VERBATIM to the proxy", async () => {
-    // PRE-SWAP: composed as `${backend_provider}/${model}` = "nim/z-ai/glm-5.2"
+    // PRE-SWAP: composed as `${service}/${model}` = "nim/z-ai/glm-5.2"
     // POST-SWAP: passes the alias verbatim = "z-ai/glm-5.2"
     const h = launchWorker();
     await h.promiseResult;
     const c = h.getCaptured();
     expect(c, "launchCommand was called").toBeTruthy();
     expect(c.command).toBe("claude");
-    // Model is the alias VERBATIM, NOT composed from backend_provider
+    // Model is the alias VERBATIM, NOT composed from service
     expect(c.args.slice(0, 3)).toEqual(["-p", "--model", "z-ai/glm-5.2"]);
     // Prompt is delivered via stdin, never as an argv positional.
     expect(c.input.stdinText).toBe("IMPLEMENT THIS NODE");
@@ -294,16 +294,16 @@ describe("factory / launch bridge", () => {
 
   it("sourceProviderConfig bridges a claude-worker source to the claude_worker block", () => {
     const cfg = sourceProviderConfig({
-      provider: "claude-worker",
+      transport: "claude-worker",
       endpoint: PROXY_URL,
-      backend_provider: "nim",
+      service: "nim",
       model: "z-ai/glm-5.2",
       parameters: { extra_args: ["--verbose"] },
     });
     expect(cfg).toEqual({
       claude_worker: {
         endpoint: PROXY_URL,
-        backend_provider: "nim",
+        service: "nim",
         model: "z-ai/glm-5.2",
         extra_args: ["--verbose"],
       },
@@ -312,9 +312,9 @@ describe("factory / launch bridge", () => {
 
   it("constructProvider builds the worker FROM the source via withSourceConfig", () => {
     const source = {
-      provider: "claude-worker",
+      transport: "claude-worker",
       endpoint: PROXY_URL,
-      backend_provider: "nim",
+      service: "nim",
       model: "z-ai/glm-5.2",
     };
     const cfg = withSourceConfig({}, source);

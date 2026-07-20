@@ -1,7 +1,7 @@
 /**
- * Generic dispatchable sources — the uniform `{provider, endpoint, parameters, quota}`
+ * Generic dispatchable sources — the uniform `{transport, endpoint, parameters, quota}`
  * shape any non-IDE backend (NIM/vLLM API, a CLI pool, …) is configured as. Asserts the
- * source→provider-config bridge, distinct ids (so two sources of the same provider stay
+ * source→provider-config bridge, distinct ids (so two sources of the same transport stay
  * separate), the legacy `openai_compatible` fold-in, the per-launch config overlay, and
  * the pool→source index.
  */
@@ -44,7 +44,7 @@ const STUB_QUOTA = { name: "stub", async queryCurrentUsage() { return null; } };
 
 test("sourceProviderConfig bridges a source to its provider's config block", () => {
   const oc = sourceProviderConfig({
-    provider: "openai-compatible",
+    transport: "openai-compatible",
     endpoint: "http://nim/v1",
     model: "m",
     api_key_env: "K",
@@ -56,7 +56,7 @@ test("sourceProviderConfig bridges a source to its provider's config block", () 
   expect(oc.openai_compatible.temperature).toBe(0.2);
 
   const cx = sourceProviderConfig({
-    provider: "codex",
+    transport: "codex",
     endpoint: "codex",
     model: "gpt-5",
     parameters: { sandbox_mode: "workspace-write" },
@@ -66,33 +66,33 @@ test("sourceProviderConfig bridges a source to its provider's config block", () 
   expect(cx.codex.sandbox_mode).toBe("workspace-write");
 
   // worker-command takes no construction config.
-  expect(sourceProviderConfig({ provider: "worker-command" })).toEqual({});
+  expect(sourceProviderConfig({ transport: "worker-command" })).toEqual({});
 });
 
-test("dispatchableSourceId: explicit id wins; else provider:model keeps two sources distinct", () => {
-  expect(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" })).toBe("nim-A");
-  const a = dispatchableSourceId({ provider: "openai-compatible", model: "m1" });
-  const b = dispatchableSourceId({ provider: "openai-compatible", model: "m2" });
+test("dispatchableSourceId: explicit id wins; else transport:model keeps two sources distinct", () => {
+  expect(dispatchableSourceId({ transport: "openai-compatible", id: "nim-A" })).toBe("nim-A");
+  const a = dispatchableSourceId({ transport: "openai-compatible", model: "m1" });
+  const b = dispatchableSourceId({ transport: "openai-compatible", model: "m2" });
   expect(a).not.toBe(b);
 });
 
 test("dispatchableSourceId folds the account segment into the pool id", () => {
-  expect(dispatchableSourceId({ provider: "claude-code", model: "m" }, "acctB")).toBe("claude-code#acctB/m");
-  expect(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" }, "k")).toBe("nim-A#k");
+  expect(dispatchableSourceId({ transport: "claude-code", model: "m" }, "acctB")).toBe("claude-code#acctB/m");
+  expect(dispatchableSourceId({ transport: "openai-compatible", id: "nim-A" }, "k")).toBe("nim-A#k");
   // No account → unchanged (legacy key, no migration).
-  expect(dispatchableSourceId({ provider: "claude-code", model: "m" }, null)).toBe("claude-code/m");
+  expect(dispatchableSourceId({ transport: "claude-code", model: "m" }, null)).toBe("claude-code/m");
 });
 
-test("buildSourcePool keys a same-provider source on the account read from its OWN credential (§5b)", async () => {
+test("buildSourcePool keys a same-transport source on the account read from its OWN credential (§5b)", async () => {
   // A Claude CLI dispatch source signed into account B (its own creds file) →
   // pool keyed (claude-code, orgB), distinct from a host pool on account A.
-  const source = { provider: "claude-code", credentials_path: writeClaudeCreds("orgB") };
+  const source = { transport: "claude-code", credentials_path: writeClaudeCreds("orgB") };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
   expect(pool.id).toBe("claude-code#orgB/*");
 });
 
 test("buildSourcePool: explicit source.account overrides the credential read", async () => {
-  const source = { provider: "claude-code", account: "declared-X", credentials_path: writeClaudeCreds("orgB") };
+  const source = { transport: "claude-code", account: "declared-X", credentials_path: writeClaudeCreds("orgB") };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
   expect(pool.id).toBe("claude-code#declared-X/*");
 });
@@ -101,7 +101,7 @@ test("buildSourcePool: source.quota.max_concurrent becomes the pool's concurrenc
   // C3 (NIM/Codex fix set): the endpoint-declared max-concurrency flows to the
   // pool's count cap. A source is otherwise built hostConcurrencyLimit:null.
   const capped = await buildSourcePool({
-    source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: 4 } },
+    source: { transport: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: 4 } },
     quotaSource: STUB_QUOTA,
     quotaEntries: {},
   });
@@ -109,7 +109,7 @@ test("buildSourcePool: source.quota.max_concurrent becomes the pool's concurrenc
   expect(capped.hostConcurrencyLimit, "the host subagent budget stays null for a source").toBe(null);
 
   const uncapped = await buildSourcePool({
-    source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k" },
+    source: { transport: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k" },
     quotaSource: STUB_QUOTA,
     quotaEntries: {},
   });
@@ -122,7 +122,7 @@ test("buildSourcePool: a non-positive/non-finite max_concurrent clamps to null (
   // and spin the rolling engine, and would violate the summary schema's min(1).
   for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 0.5]) {
     const pool = await buildSourcePool({
-      source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: bad } },
+      source: { transport: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: bad } },
       quotaSource: STUB_QUOTA,
       quotaEntries: {},
     });
@@ -130,7 +130,7 @@ test("buildSourcePool: a non-positive/non-finite max_concurrent clamps to null (
   }
   // A fractional > 1 floors to an integer (schema requires int).
   const frac = await buildSourcePool({
-    source: { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: 3.9 } },
+    source: { transport: "openai-compatible", endpoint: "http://nim/v1", model: "m", account: "k", quota: { max_concurrent: 3.9 } },
     quotaSource: STUB_QUOTA,
     quotaEntries: {},
   });
@@ -159,14 +159,14 @@ test("buildHostModelPools stamps the host account (from the host credential) int
 test("collectDispatchableSources: explicit sources + legacy openai_compatible folded in when not primary", () => {
   const got = collectDispatchableSources(
     {
-      sources: [{ provider: "codex", endpoint: "codex" }],
+      sources: [{ transport: "codex", endpoint: "codex" }],
       openai_compatible: { base_url: "http://nim/v1", model: "m" },
     },
     "claude-code",
   );
   expect(got.length).toBe(2);
-  expect(got.some((s) => s.provider === "codex")).toBeTruthy();
-  expect(got.some((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1")).toBeTruthy();
+  expect(got.some((s) => s.transport === "codex")).toBeTruthy();
+  expect(got.some((s) => s.transport === "openai-compatible" && s.endpoint === "http://nim/v1")).toBeTruthy();
 
   // When openai-compatible IS the primary, the unconditional primary fold (H2+H4
   // collapse) carries it as a source pool — the primary is just a source now.
@@ -175,15 +175,15 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
     "openai-compatible",
   );
   expect(primaryFold.length).toBe(1);
-  expect(primaryFold[0].provider).toBe("openai-compatible");
+  expect(primaryFold[0].transport).toBe("openai-compatible");
   expect(primaryFold[0].endpoint).toBe("x");
 
   // Two explicit NIM endpoints → two sources (distinct), no special-casing.
   const two = collectDispatchableSources(
     {
       sources: [
-        { provider: "openai-compatible", endpoint: "http://a/v1", model: "m1" },
-        { provider: "openai-compatible", endpoint: "http://b/v1", model: "m2" },
+        { transport: "openai-compatible", endpoint: "http://a/v1", model: "m1" },
+        { transport: "openai-compatible", endpoint: "http://b/v1", model: "m2" },
       ],
     },
     "claude-code",
@@ -192,36 +192,36 @@ test("collectDispatchableSources: explicit sources + legacy openai_compatible fo
   expect(dispatchableSourceId(two[0])).not.toBe(dispatchableSourceId(two[1]));
 });
 
-// ── Commit 3c: transport-agnostic quota identity (backend_provider keying) ──
+// ── Commit 3c: transport-agnostic quota identity (service keying) ──
 // Plan: docs/reviews/commit3-proxy-kind1-transport-plan-2026-07-16.md §"Identity &
 // quota keying" — the transport NEVER enters the ledger/pool identity; the key is
-// `backend_provider[#account]/model`.
+// `service[#account]/model`.
 
 test("3c red-green: proxied claude-worker lane + direct lane to the SAME backend dedup to ONE pool identity", async () => {
   // Direct lane: an operator-declared OpenAI-compatible endpoint that IS NIM. The
-  // operator asserts the backend identity via `backend_provider` — without it the
+  // operator asserts the backend identity via `service` — without it the
   // tool cannot know a generic openai-compatible endpoint is the same backend the
   // proxy routes to, and the two lanes legitimately stay distinct pools.
   const direct = {
-    provider: "openai-compatible",
+    transport: "openai-compatible",
     endpoint: "https://integrate.api.nvidia.com/v1",
     model: "z-ai/glm-5.2",
     api_key_env: "NVIDIA_API_KEY",
-    backend_provider: "nim",
+    service: "nim",
     account: "X",
   };
   // Proxied lane: the populate-cache expansion (claude-worker transport, carrying
   // the transport-shaped explicit id the cache stamps).
   const proxied = {
     id: "claude-worker:nim/z-ai/glm-5.2",
-    provider: "claude-worker",
+    transport: "claude-worker",
     endpoint: "http://127.0.0.1:8791",
-    backend_provider: "nim",
+    service: "nim",
     model: "z-ai/glm-5.2",
     worker_kind: "agentic",
     account: "X",
   };
-  // The ledger key is `backend_provider[#account]/model` for BOTH lanes.
+  // The ledger key is `service[#account]/model` for BOTH lanes.
   expect(dispatchableSourceId(direct, "X")).toBe("nim#X/z-ai/glm-5.2");
   expect(dispatchableSourceId(proxied, "X")).toBe("nim#X/z-ai/glm-5.2");
   // And the CapacityPool ids (the admission/ledger identity) collide to ONE.
@@ -234,9 +234,9 @@ test("3c red-green: proxied claude-worker lane + direct lane to the SAME backend
 test("3c: the transport never enters the identity — backend keying outranks the transport-shaped explicit id", () => {
   const proxied = {
     id: "claude-worker:nim/z-ai/glm-5.2",
-    provider: "claude-worker",
+    transport: "claude-worker",
     endpoint: "http://127.0.0.1:8791",
-    backend_provider: "nim",
+    service: "nim",
     model: "z-ai/glm-5.2",
   };
   // Honoring the populate-stamped id would re-split the identity the field merges.
@@ -247,9 +247,9 @@ test("3c: the transport never enters the identity — backend keying outranks th
   expect(dispatchableSourceId({ ...proxied, account: "X" })).toBe("nim#X/z-ai/glm-5.2");
 });
 
-test("3c: a source WITHOUT backend_provider keeps the existing id/provider keying (no behavior change)", () => {
-  expect(dispatchableSourceId({ provider: "openai-compatible", id: "nim-A" })).toBe("nim-A");
-  expect(dispatchableSourceId({ provider: "openai-compatible", model: "m1" })).toBe(
+test("3c: a source WITHOUT service keeps the existing id/transport keying (no behavior change)", () => {
+  expect(dispatchableSourceId({ transport: "openai-compatible", id: "nim-A" })).toBe("nim-A");
+  expect(dispatchableSourceId({ transport: "openai-compatible", model: "m1" })).toBe(
     "openai-compatible/m1",
   );
 });
@@ -261,7 +261,7 @@ test("primaryInProcessSource builds a source from the primary backend's own conf
     { codex: { command: "codex", model: "gpt-5", sandbox_mode: "workspace-write" } },
     "codex",
   );
-  expect(codex.provider).toBe("codex");
+  expect(codex.transport).toBe("codex");
   expect(codex.endpoint).toBe("codex");
   expect(codex.model).toBe("gpt-5");
   expect(codex.parameters.sandbox_mode).toBe("workspace-write");
@@ -270,7 +270,7 @@ test("primaryInProcessSource builds a source from the primary backend's own conf
     { openai_compatible: { base_url: "http://nim/v1", model: "m", api_key_env: "K" } },
     "openai-compatible",
   );
-  expect(oc.provider).toBe("openai-compatible");
+  expect(oc.transport).toBe("openai-compatible");
   expect(oc.endpoint).toBe("http://nim/v1");
 
   // Host-shaped primaries → null (the conversation host / IDE is never a source).
@@ -292,13 +292,13 @@ test("primaryInProcessSource: agy synthesizes from its config block (D4 — no s
     },
     "agy",
   );
-  expect(agy.provider).toBe("agy");
+  expect(agy.transport).toBe("agy");
   expect(agy.endpoint).toBe("agy");
   expect(agy.model).toBe("gemini-3-pro");
   expect(agy.parameters.extra_args).toEqual(["--foo"]);
   expect(agy.parameters.dangerously_skip_permissions).toBe(true);
   // An EMPTY agy block still folds (the CLI has PATH defaults, like codex).
-  expect(primaryInProcessSource({}, "agy").provider).toBe("agy");
+  expect(primaryInProcessSource({}, "agy").transport).toBe("agy");
 });
 
 test("primaryInProcessSource: command-shaped primaries fold ONLY under commandWorkers policy (D3)", () => {
@@ -310,16 +310,16 @@ test("primaryInProcessSource: command-shaped primaries fold ONLY under commandWo
   expect(primaryInProcessSource({}, "worker-command")).toBeNull();
   // Remediate policy (commandWorkers): subprocess-template from its block …
   const sub = primaryInProcessSource(cfg, "subprocess-template", { commandWorkers: true });
-  expect(sub.provider).toBe("subprocess-template");
+  expect(sub.transport).toBe("subprocess-template");
   expect(sub.parameters.command_template).toEqual(["run", "{prompt}"]);
   expect(sub.parameters.env).toEqual({ A: "1" });
   // … but an absent/empty template block is no pool (nothing to launch).
   expect(primaryInProcessSource({}, "subprocess-template", { commandWorkers: true })).toBeNull();
-  // worker-command has NO session-level block: a bare provider source (the command
+  // worker-command has NO session-level block: a bare transport source (the command
   // is per-node on the task, resolved at dispatch).
   expect(
     primaryInProcessSource({}, "worker-command", { commandWorkers: true }),
-  ).toEqual({ provider: "worker-command" });
+  ).toEqual({ transport: "worker-command" });
 });
 
 test("collectDispatchableSources: the codex primary ALWAYS folds in as a source (no flag)", () => {
@@ -328,7 +328,7 @@ test("collectDispatchableSources: the codex primary ALWAYS folds in as a source 
   // eligible set (the demote flag is retired — H4).
   const folded = collectDispatchableSources(cfg, "codex");
   expect(folded.length).toBe(1);
-  expect(folded[0].provider).toBe("codex");
+  expect(folded[0].transport).toBe("codex");
 });
 
 // ── C1: legacy openai_compatible block's quota converges onto the source pool ──
@@ -341,7 +341,7 @@ test("C1: a legacy openai_compatible.quota converges onto the folded source (leg
     "claude-code",
   );
   expect(folded.length).toBe(1);
-  expect(folded[0].provider).toBe("openai-compatible");
+  expect(folded[0].transport).toBe("openai-compatible");
   expect(folded[0].quota).toEqual(quota);
 
   // Primary-fold path (openai-compatible IS the primary).
@@ -384,14 +384,14 @@ test("C1: a legacy-derived source's quota reaches discoveredLimits + concurrency
 
 test("collectDispatchableSources: openai-compatible primary folds alongside a second explicit source", () => {
   const cfg = {
-    sources: [{ provider: "codex", endpoint: "codex" }],
+    sources: [{ transport: "codex", endpoint: "codex" }],
     openai_compatible: { base_url: "http://nim/v1", model: "m" },
   };
   const got = collectDispatchableSources(cfg, "openai-compatible");
   // The explicit codex source + the folded openai-compatible primary, deduped once.
-  expect(got.some((s) => s.provider === "codex")).toBeTruthy();
+  expect(got.some((s) => s.transport === "codex")).toBeTruthy();
   expect(
-    got.filter((s) => s.provider === "openai-compatible" && s.endpoint === "http://nim/v1").length,
+    got.filter((s) => s.transport === "openai-compatible" && s.endpoint === "http://nim/v1").length,
   ).toBe(1);
 });
 
@@ -400,13 +400,13 @@ test("collectDispatchableSources: the fold is a no-op for a host-shaped primary 
   // claude-code host + NIM source: the primary fold adds nothing; the legacy fold
   // already carries the NIM source (one, not duplicated).
   const got = collectDispatchableSources(cfg, "claude-code");
-  expect(got.filter((s) => s.provider === "openai-compatible").length).toBe(1);
+  expect(got.filter((s) => s.transport === "openai-compatible").length).toBe(1);
 });
 
 test("withSourceConfig overlays the source's provider block; no source = passthrough", () => {
   const base = { provider: "claude-code", timeout_ms: 5 };
   const merged = withSourceConfig(base, {
-    provider: "openai-compatible",
+    transport: "openai-compatible",
     endpoint: "http://nim/v1",
     model: "m",
   });
@@ -416,7 +416,7 @@ test("withSourceConfig overlays the source's provider block; no source = passthr
 });
 
 test("sourceByPoolId indexes only source-backed pools by id", () => {
-  const src = { provider: "openai-compatible", endpoint: "x", model: "m" };
+  const src = { transport: "openai-compatible", endpoint: "x", model: "m" };
   const map = sourceByPoolId([{ id: "p1", source: src }, { id: "p2" }]);
   expect(map.size).toBe(1);
   expect(map.get("p1")).toBe(src);

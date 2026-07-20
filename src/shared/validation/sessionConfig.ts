@@ -16,7 +16,7 @@
 import { readOptionalJsonFile } from "../io/json.js";
 import {
   ANALYZER_SETTINGS,
-  DISPATCHABLE_SOURCE_PROVIDERS,
+  DISPATCHABLE_TRANSPORTS,
   DISPATCH_INVENTORY_FIELDS,
   PROVIDER_NAMES,
   SESSION_UI_MODES,
@@ -37,8 +37,8 @@ import {
 const VALID_PROVIDERS = new Set<ProviderName>(PROVIDER_NAMES);
 const VALID_UI_MODES = new Set<SessionUiMode>(SESSION_UI_MODES);
 const VALID_ANALYZER_SETTINGS = new Set<AnalyzerSetting>(ANALYZER_SETTINGS);
-const VALID_DISPATCHABLE_SOURCE_PROVIDERS = new Set<string>(
-  DISPATCHABLE_SOURCE_PROVIDERS,
+const VALID_DISPATCHABLE_TRANSPORTS = new Set<string>(
+  DISPATCHABLE_TRANSPORTS,
 );
 
 /**
@@ -132,14 +132,14 @@ const DISPATCHABLE_SOURCE_STRING_FIELDS = [
   "api_key",
   "credentials_path",
   "account",
-  "backend_provider",
+  "service",
 ] as const;
 
 const VALID_WORKER_KINDS = new Set<string>(WORKER_KINDS);
 
 /**
  * Validate `sessionConfig.sources[]` — the explicit dispatchable-source pool
- * list. Shape-guards each entry's provider, its string fields, and (the C1 concern)
+ * list. Shape-guards each entry's transport, its string fields, and (the C1 concern)
  * its `quota`, which is now the single source of truth for a source pool's admission
  * budget.
  */
@@ -162,15 +162,15 @@ function validateDispatchableSources(
       pushIssue(issues, path, "each source must be a JSON object.");
       return;
     }
-    const provider = source.provider;
+    const transport = source.transport;
     if (
-      typeof provider !== "string" ||
-      !VALID_DISPATCHABLE_SOURCE_PROVIDERS.has(provider)
+      typeof transport !== "string" ||
+      !VALID_DISPATCHABLE_TRANSPORTS.has(transport)
     ) {
       pushIssue(
         issues,
-        `${path}.provider`,
-        `provider must be one of: ${Array.from(VALID_DISPATCHABLE_SOURCE_PROVIDERS).join(", ")}.`,
+        `${path}.transport`,
+        `transport must be one of: ${Array.from(VALID_DISPATCHABLE_TRANSPORTS).join(", ")}.`,
       );
     }
     // The string fields the ambient-reach probe and the launch path both READ. Left
@@ -183,16 +183,16 @@ function validateDispatchableSources(
         pushIssue(issues, `${path}.${field}`, `${field} must be a string.`);
       }
     }
-    // `backend_provider` is a quota-ledger KEY segment (`backend_provider[#account]/model`);
+    // `service` is a quota-ledger KEY segment (`service[#account]/model`);
     // an empty string would silently mint a nameless pool identity.
     if (
-      typeof source.backend_provider === "string" &&
-      source.backend_provider.trim().length === 0
+      typeof source.service === "string" &&
+      source.service.trim().length === 0
     ) {
       pushIssue(
         issues,
-        `${path}.backend_provider`,
-        "backend_provider must be a non-empty string when provided.",
+        `${path}.service`,
+        "service must be a non-empty string when provided.",
       );
     }
     if (
@@ -209,7 +209,7 @@ function validateDispatchableSources(
     // A claude-worker source IS the proxied spawn: without the proxy url there is
     // nothing to front the isolated `claude -p` (endpoint is a constructor invariant
     // in 3b), and without a model there is no namespace route to compose.
-    if (provider === "claude-worker") {
+    if (transport === "claude-worker") {
       for (const field of ["endpoint", "model"] as const) {
         const entry = source[field];
         if (typeof entry !== "string" || entry.trim().length === 0) {

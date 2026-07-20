@@ -59,13 +59,13 @@ export function deriveCredentialIdentity(source: {
  * a credential must not be merged with anyone else's allowance.
  */
 export function deriveAccountKey(source: {
-  provider: string;
+  transport: string;
   endpoint?: string;
   api_key_env?: string;
   api_key?: string;
   account?: string | null;
 }): string | null {
-  if (source.account) return `${source.provider}#${source.account}`;
+  if (source.account) return `${source.transport}#${source.account}`;
   return deriveCredentialIdentity(source);
 }
 
@@ -99,13 +99,13 @@ export function deriveAccountKey(source: {
  * accounts on the same endpoint/key must NOT be silently re-merged here).
  */
 export function deriveLocalAccountId(source: {
-  provider: string;
+  transport: string;
   endpoint?: string;
   api_key_env?: string;
   account?: string | null;
 }): string | null {
   if (source.account) return null;
-  if (source.provider !== "openai-compatible") return null;
+  if (source.transport !== "openai-compatible") return null;
   if (!source.api_key_env) return null;
   return deriveCredentialIdentity(source);
 }

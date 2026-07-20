@@ -59,7 +59,7 @@ describe("readValidatedRepoSessionIntent", () => {
     for (const bad of [
       { provider: "claude-code" },
       { host_provider: "codex" },
-      { sources: [{ provider: "codex", endpoint: "codex" }] },
+      { sources: [{ transport: "codex", endpoint: "codex" }] },
       { openai_compatible: { base_url: "https://nim/v1", model: "m" } },
       { codex: { command: "codex" } },
       { parallel_workers: 4 },
@@ -89,7 +89,7 @@ describe("validateRepoSessionIntent", () => {
   test("rejects every dispatch-inventory field with a 'cannot be persisted' error", () => {
     const issues = validateRepoSessionIntent({
       provider: "claude-code",
-      sources: [{ provider: "codex", endpoint: "codex" }],
+      sources: [{ transport: "codex", endpoint: "codex" }],
       dispatch: { rolling_engine: true, max_packets: 3 },
     });
     const errors = issues.filter((i) => i.severity === "error");

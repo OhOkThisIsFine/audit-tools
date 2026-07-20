@@ -28,9 +28,9 @@ const PROXY = "http://127.0.0.1:8791";
 /** An expanded claude-worker source as the populate cache stores it. */
 const EXPANDED = {
   id: "claude-worker:nim/z-ai/glm-5.2",
-  provider: "claude-worker",
+  transport: "claude-worker",
   endpoint: PROXY,
-  backend_provider: "nim",
+  service: "nim",
   model: "z-ai/glm-5.2",
   worker_kind: "agentic",
   cost_per_mtok: 0,
@@ -233,7 +233,7 @@ describe("resolveAmbientSources — the proxy lane", () => {
   it("the lane composes with declared sources[] (both halves resolve)", () => {
     const openai = {
       id: "openai-compat",
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "http://openai/v1",
       model: "gpt-4",
       api_key_env: "OPENAI_API_KEY",
@@ -363,11 +363,11 @@ describe("populateDeclaredProxyCatalog — the Gate-0 POPULATE trigger", () => {
     // top_k=1 caps the expansion to 1 model per backend provider.
     // Fixture has 2 providers (nim, meta) → 2 sources (1 per provider).
     expect(catalog?.sources).toHaveLength(2);
-    const nimSource = catalog?.sources.find((s) => s.backend_provider === "nim");
+    const nimSource = catalog?.sources.find((s) => s.service === "nim");
     expect(nimSource).toMatchObject({
-      provider: "claude-worker",
+      transport: "claude-worker",
       endpoint: PROXY,
-      backend_provider: "nim",
+      service: "nim",
       model: "z-ai/glm-5.2",
       cost_per_mtok: 0,
     });
@@ -377,17 +377,17 @@ describe("populateDeclaredProxyCatalog — the Gate-0 POPULATE trigger", () => {
 describe("verifySourceReach — claude-worker", () => {
   it("requires endpoint and model", () => {
     expect(
-      verifySourceReach({ provider: "claude-worker", model: "m" }, deps({})).reason,
+      verifySourceReach({ transport: "claude-worker", model: "m" }, deps({})).reason,
     ).toContain("endpoint");
     expect(
-      verifySourceReach({ provider: "claude-worker", endpoint: PROXY }, deps({}))
+      verifySourceReach({ transport: "claude-worker", endpoint: PROXY }, deps({}))
         .reason,
     ).toContain("model");
   });
 
   it("refuses an inline api_key — possession is not reach", () => {
     const result = verifySourceReach(
-      { provider: "claude-worker", endpoint: PROXY, model: "m", api_key: "k" },
+      { transport: "claude-worker", endpoint: PROXY, model: "m", api_key: "k" },
       deps({ probe: () => true }),
     );
     expect(result.verified).toBe(false);
@@ -395,14 +395,14 @@ describe("verifySourceReach — claude-worker", () => {
   });
 
   it("api_key_env must be set when declared", () => {
-    const source = { provider: "claude-worker", endpoint: PROXY, model: "m", api_key_env: "UNSET_VAR" };
+    const source = { transport: "claude-worker", endpoint: PROXY, model: "m", api_key_env: "UNSET_VAR" };
     const result = verifySourceReach(source, deps({ env: {} })); // UNSET_VAR not in env
     expect(result.verified).toBe(false);
     expect(result.reason).toContain("UNSET_VAR");
   });
 
   it("reach IS the proxy liveness probe", () => {
-    const source = { provider: "claude-worker", endpoint: `${PROXY}/`, model: "m" };
+    const source = { transport: "claude-worker", endpoint: `${PROXY}/`, model: "m" };
     const up = verifySourceReach(
       source,
       deps({ probe: (endpoint) => {
@@ -425,9 +425,9 @@ describe("declared-wins dedup + missing-only populate", () => {
     // Direct NIM lane declaring the same backend identity as the expansion.
     const direct = {
       id: "nim-direct",
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://integrate.api.nvidia.com/v1",
-      backend_provider: "nim",
+      service: "nim",
       model: "z-ai/glm-5.2",
       api_key_env: "NIM_KEY",
     };
@@ -450,9 +450,9 @@ describe("declared-wins dedup + missing-only populate", () => {
   it("an expanded lane with a DIFFERENT backend identity still folds alongside declared sources", () => {
     const direct = {
       id: "nim-direct",
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://integrate.api.nvidia.com/v1",
-      backend_provider: "nim",
+      service: "nim",
       model: "other/model",
       api_key_env: "NIM_KEY",
     };

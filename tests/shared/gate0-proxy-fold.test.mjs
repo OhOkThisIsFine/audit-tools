@@ -35,27 +35,27 @@ const PROXY = "http://127.0.0.1:8791";
 const EXPANDED = [
   {
     id: "claude-worker:nim/z-ai/glm-5.2",
-    provider: "claude-worker",
+    transport: "claude-worker",
     endpoint: PROXY,
-    backend_provider: "nim",
+    service: "nim",
     model: "z-ai/glm-5.2",
     worker_kind: "agentic",
     cost_per_mtok: 0,
   },
   {
     id: "claude-worker:nim/meta/llama-4",
-    provider: "claude-worker",
+    transport: "claude-worker",
     endpoint: PROXY,
-    backend_provider: "nim",
+    service: "nim",
     model: "meta/llama-4",
     worker_kind: "agentic",
     cost_per_mtok: 0,
   },
   {
     id: "claude-worker:openrouter/deep/seek-r2",
-    provider: "claude-worker",
+    transport: "claude-worker",
     endpoint: PROXY,
-    backend_provider: "openrouter",
+    service: "openrouter",
     model: "deep/seek-r2",
     worker_kind: "agentic",
     cost_per_mtok: 1.5,
@@ -121,7 +121,7 @@ describe("Gate-0 fold — expanded claude-worker sources reach the roster on the
       byId["claude-worker:openrouter/deep/seek-r2"].cost_order,
     );
     // Provider + model attributes thread through for the prompt table.
-    expect(byId["claude-worker:nim/meta/llama-4"].provider).toBe("claude-worker");
+    expect(byId["claude-worker:nim/meta/llama-4"].transport).toBe("claude-worker");
     expect(byId["claude-worker:nim/meta/llama-4"].model_id).toBe("meta/llama-4");
   });
 
@@ -130,7 +130,7 @@ describe("Gate-0 fold — expanded claude-worker sources reach the roster on the
     const display = deriveSourcePoolDisplayFromSources(gathered);
     expect(display.map((e) => e.id)).toEqual(EXPANDED.map((s) => s.id));
     expect(display[0].declared_cost_per_mtok).toBe(0);
-    expect(display[0].provider).toBe("claude-worker");
+    expect(display[0].transport).toBe("claude-worker");
   });
 
   it("the audit PER-TOOL seam stays source-less — the asymmetry is deliberate", () => {
@@ -169,7 +169,7 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     // Keyed by the BACKEND actually serving the model, not the `claude-worker`
     // transport they all share — otherwise every expanded lane would collide.
     expect(delta.map((b) => b.key).sort()).toEqual(
-      EXPANDED.map((s) => `${s.backend_provider}:${s.model}`).sort(),
+      EXPANDED.map((s) => `${s.service}:${s.model}`).sort(),
     );
     // Each exclusion pattern rules out exactly that model at the provider tier the
     // routing filter matches (`claude-worker:<model>`).
@@ -180,11 +180,11 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
 
   it("a proxied lane and a direct lane to the same backend model are ONE backend to the gate", () => {
     const direct = {
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://integrate.api.nvidia.com/v1",
       model: "z-ai/glm-5.2",
       api_key_env: "NVIDIA_API_KEY",
-      backend_provider: "nim",
+      service: "nim",
     };
     const delta = computeNewlyReachableBackends(
       emptyConfirmation,
@@ -193,7 +193,7 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
       {},
       noCli,
     );
-    // The compare key is `(backend_provider ?? provider):model` — both lanes resolve
+    // The compare key is `(service ?? transport):model` — both lanes resolve
     // to the SAME nim backend, so the gate sees ONE new backend, not two. This is the
     // half a transport-qualified key would get WRONG (it would split them).
     expect(delta).toHaveLength(1);
@@ -203,18 +203,18 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     expect(delta[0].exclusion_pattern).toBe("claude-worker:z-ai/glm-5.2");
   });
 
-  it("two DIFFERENT backend_providers sharing a model string are TWO backends (gate-bypass regression)", () => {
+  it("two DIFFERENT services sharing a model string are TWO backends (gate-bypass regression)", () => {
     // Was a pinned KNOWN collapse: the gate key used to be the bare model when
     // knowable, so these two collapsed to one entry and only one ever received an
     // exclusion pattern — and, worse, confirming either marked BOTH confirmed, so a
     // backend the operator never saw routed as approved. Fixed by keying the identity
-    // on `backend_provider ?? provider`. The deferral reason (a qualified key that
+    // on `service ?? transport`. The deferral reason (a qualified key that
     // `confirmedBackendKeys` cannot reproduce would livelock the PRIORITY[0]
-    // obligation) is answered by persisting `backend_provider` on the confirmed side —
+    // obligation) is answered by persisting `service` on the confirmed side —
     // see the gate-closure test below, which is what proves it does not livelock.
     const twoBackendsOneModel = [
       EXPANDED[0],
-      { ...EXPANDED[0], id: "claude-worker:openrouter/z-ai/glm-5.2", backend_provider: "openrouter" },
+      { ...EXPANDED[0], id: "claude-worker:openrouter/z-ai/glm-5.2", service: "openrouter" },
     ];
     const delta = computeNewlyReachableBackends(
       emptyConfirmation,
@@ -239,8 +239,8 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
       source_pool_cost_order: [
         {
           source_id: "claude-worker:nim/z-ai/glm-5.2",
-          provider: "claude-worker",
-          backend_provider: "nim",
+          transport: "claude-worker",
+          service: "nim",
           model_id: "z-ai/glm-5.2",
           blended_price_usd_per_mtok: null,
           price_declared: false,
@@ -253,7 +253,7 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
       {},
       [
         EXPANDED[0],
-        { ...EXPANDED[0], id: "claude-worker:openrouter/z-ai/glm-5.2", backend_provider: "openrouter" },
+        { ...EXPANDED[0], id: "claude-worker:openrouter/z-ai/glm-5.2", service: "openrouter" },
       ],
       {},
       noCli,
@@ -273,9 +273,9 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     const MODEL = "z-ai/glm-5.2";
     const source = {
       id: `claude-worker:nim/${MODEL}`,
-      provider: "claude-worker",
+      transport: "claude-worker",
       endpoint: PROXY,
-      backend_provider: "nim",
+      service: "nim",
       model: MODEL,
     };
     const annotated = annotateConfirmedPool(
@@ -287,7 +287,7 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     );
     // The colliding source survives the fold, carrying the service that identifies it.
     expect(annotated.source_pool_cost_order).toHaveLength(1);
-    expect(annotated.source_pool_cost_order[0].backend_provider).toBe("nim");
+    expect(annotated.source_pool_cost_order[0].service).toBe("nim");
 
     const delta = computeNewlyReachableBackends(
       {

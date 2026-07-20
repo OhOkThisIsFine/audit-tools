@@ -233,7 +233,7 @@ export async function queryProviderQuota(
 /**
  * **THE** identity of one backend: `service:model` where the model is knowable, else
  * the coarse service name — where "service" is the BACKEND ACTUALLY SERVING the model
- * (`backend_provider ?? provider`), never the transport that reaches it.
+ * (`service ?? transport`), never the transport that reaches it.
  *
  * Lives HERE, the lowest module both consumers can import, so the Gate-0 delta, the
  * confirmed set, and the source-fold dedup cannot answer "which backend is this?"
@@ -253,10 +253,10 @@ export function backendIdentity(
 
 /** The service a source is served BY — its declared backend, else its own transport. */
 export function sourceService(source: {
-  provider: string;
-  backend_provider?: string;
+  transport: string;
+  service?: string;
 }): string {
-  return source.backend_provider ?? source.provider;
+  return source.service ?? source.transport;
 }
 
 export function representativeModelId(
@@ -285,14 +285,14 @@ export interface AnnotatedConfirmation {
   /**
    * Dispatchable SOURCE pools (explicit `sources[]` + proxy expansion) with
    * their confirmed positions (Gate-0 source fold). Kept separate from `provider_pool`
-   * because a source is keyed by `(provider, model)`, not a single provider name.
+   * because a source is keyed by `(transport, model)`, not a single transport name.
    */
   source_pool_cost_order: SourcePoolCostEntry[];
 }
 
 /** Stable source id (matches `deriveSourcePoolDisplay` / the dispatch id convention). */
 function dispatchSourceKey(source: DispatchableSource): string {
-  return source.id ?? `${source.provider}:${source.model ?? source.endpoint ?? "default"}`;
+  return source.id ?? `${source.transport}:${source.model ?? source.endpoint ?? "default"}`;
 }
 
 /**
@@ -418,7 +418,7 @@ export function annotateConfirmedPool(
   );
   // Gate-0 source fold: every remaining dispatchable source pool (explicit sources[] +
   // proxy expansion) becomes a ranked candidate, keyed by its stable source id so a
-  // namespaced `provider/model` never collides with a provider-name key. Each carries its
+  // namespaced `transport/model` never collides with a provider-name key. Each carries its
   // declared cost (authoritative; 0 = free) and raw capability rank so the suggestion is
   // truthful and the capability tiebreak applies among cost-equal source pools.
   const sourceCandidates: CostCandidate[] = foldedSources.map((source) => ({
@@ -465,10 +465,10 @@ export function annotateConfirmedPool(
       declared ?? (source.model ? resolveModelPrice(source.model, sourceService(source)) ?? null : null);
     return {
       source_id: dispatchSourceKey(source),
-      provider: source.provider,
+      transport: source.transport,
       // Recorded so `confirmedBackendKeys` can reproduce the gate identity the delta
-      // computes for a proxied lane — see SourcePoolCostEntry.backend_provider.
-      ...(source.backend_provider ? { backend_provider: source.backend_provider } : {}),
+      // computes for a proxied lane — see SourcePoolCostEntry.service.
+      ...(source.service ? { service: source.service } : {}),
       ...(source.model ? { model_id: source.model } : {}),
       blended_price_usd_per_mtok: price,
       price_declared: declared !== undefined,
@@ -510,11 +510,11 @@ export function annotateConfirmedPoolCost(
 export interface SourcePoolDisplayEntry {
   /**
    * Same id convention the dispatch side uses (explicit `id`, else
-   * `${provider}:${model ?? endpoint ?? "default"}`) — display-only, not a
+   * `${transport}:${model ?? endpoint ?? "default"}`) — display-only, not a
    * guaranteed exact match of the dispatch-side pool key.
    */
   id: string;
-  provider: DispatchableSource["provider"];
+  transport: DispatchableSource["transport"];
   model?: string;
   /**
    * Operator-declared `cost_per_mtok` on this source. Authoritative over the
@@ -554,10 +554,10 @@ export function deriveSourcePoolDisplayFromSources(
 ): SourcePoolDisplayEntry[] {
   return sources.map((source) => {
     const id =
-      source.id ?? `${source.provider}:${source.model ?? source.endpoint ?? "default"}`;
+      source.id ?? `${source.transport}:${source.model ?? source.endpoint ?? "default"}`;
     const entry: SourcePoolDisplayEntry = {
       id,
-      provider: source.provider,
+      transport: source.transport,
       ...(source.model ? { model: source.model } : {}),
       ...(source.cost_per_mtok !== undefined
         ? { declared_cost_per_mtok: source.cost_per_mtok }

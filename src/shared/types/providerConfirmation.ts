@@ -135,19 +135,19 @@ export interface HostModelCostEntry {
  * source fold). Lives on the shared confirmation alongside `provider_pool` +
  * `host_model_cost_order`; merged into the model-keyed dispatch positions map by
  * `readConfirmedCostPositions` so a source pool (an explicit `sources[]` entry OR a
- * proxy-expanded `provider/model`) routes by its operator-confirmed order exactly
+ * proxy-expanded `transport/model`) routes by its operator-confirmed order exactly
  * like a configured provider pool or host tier. Kept as a separate list (not extra
- * `provider_pool` entries) because a source is keyed by `(provider, model)`, not by a
- * single provider name — many sources can share the `openai-compatible` provider.
+ * `provider_pool` entries) because a source is keyed by `(transport, model)`, not by a
+ * single transport name — many sources can share the `openai-compatible` transport.
  */
 export interface SourcePoolCostEntry {
-  /** Dispatchable source id (`id` or `provider:model`) — stable display + reorder key. */
+  /** Dispatchable source id (`id` or `transport:model`) — stable display + reorder key. */
   source_id: string;
-  /** The source's provider transport (e.g. `openai-compatible`). */
-  provider: string;
+  /** The source's transport (e.g. `openai-compatible`). */
+  transport: string;
   /**
    * The backend ACTUALLY SERVING the model when this source is a proxied lane
-   * (e.g. `nim` behind a `claude-worker` transport) — the provider half of the
+   * (e.g. `nim` behind a `claude-worker` transport) — the service half of the
    * gate's `backendIdentity`, and the same field `apiPool` keys the quota ledger on.
    *
    * Persisted because the CONFIRMED side must be able to reproduce the identity the
@@ -155,7 +155,7 @@ export interface SourcePoolCostEntry {
    * forever, which is exactly the livelock that deferred this fix before.
    * Absent for a direct source, where the transport IS the backend.
    */
-  backend_provider?: string;
+  service?: string;
   /**
    * The source's model id — the DISPATCH cost-position key (a proxy-sourced source's
    * namespaced `provider/model`, or a plain source model). Absent when the source

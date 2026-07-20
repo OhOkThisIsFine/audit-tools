@@ -19,42 +19,42 @@ const NIM = "https://integrate.api.nvidia.com/v1";
 test("explicitly-id'd siblings on ONE api_key_env share an account key", () => {
   // The real sources-declared.json shape: named ids, one credential. `dispatchableSourceId`
   // returns these ids VERBATIM, so nothing about the account is recoverable from the key.
-  const nano = { id: "nim-nano", provider: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "nano" };
-  const superb = { id: "nim-super", provider: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "super" };
+  const nano = { id: "nim-nano", transport: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "nano" };
+  const superb = { id: "nim-super", transport: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "super" };
   expect(deriveAccountKey(nano)).toBe(deriveAccountKey(superb));
   expect(deriveAccountKey(nano)).not.toBeNull();
 });
 
 test("explicitly-id'd siblings on ONE inline api_key share an account key", () => {
   // The shape claimed fixed three consecutive rounds while still broken.
-  const nano = { id: "nim-nano", provider: "openai-compatible", endpoint: NIM, api_key: "sk-secret", model: "nano" };
-  const superb = { id: "nim-super", provider: "openai-compatible", endpoint: NIM, api_key: "sk-secret", model: "super" };
+  const nano = { id: "nim-nano", transport: "openai-compatible", endpoint: NIM, api_key: "sk-secret", model: "nano" };
+  const superb = { id: "nim-super", transport: "openai-compatible", endpoint: NIM, api_key: "sk-secret", model: "super" };
   expect(deriveAccountKey(nano)).toBe(deriveAccountKey(superb));
 });
 
 test("the account key never contains a secret", () => {
-  const key = deriveAccountKey({ id: "x", provider: "openai-compatible", endpoint: NIM, api_key: "sk-super-secret-value" });
+  const key = deriveAccountKey({ id: "x", transport: "openai-compatible", endpoint: NIM, api_key: "sk-super-secret-value" });
   // This string is persisted into the reservation-ledger file and appears in artifacts.
   expect(key).not.toContain("sk-super-secret-value");
   expect(key).toMatch(/::inline:[0-9a-f]{16}$/);
 });
 
 test("DIFFERENT credentials on one endpoint stay distinct", () => {
-  const a = { provider: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY" };
-  const b = { provider: "openai-compatible", endpoint: NIM, api_key_env: "OTHER_KEY" };
+  const a = { transport: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY" };
+  const b = { transport: "openai-compatible", endpoint: NIM, api_key_env: "OTHER_KEY" };
   expect(deriveAccountKey(a)).not.toBe(deriveAccountKey(b));
 });
 
 test("different endpoints stay distinct even on the same env var name", () => {
-  const a = { provider: "openai-compatible", endpoint: NIM, api_key_env: "K" };
-  const b = { provider: "openai-compatible", endpoint: "http://localhost:8000/v1", api_key_env: "K" };
+  const a = { transport: "openai-compatible", endpoint: NIM, api_key_env: "K" };
+  const b = { transport: "openai-compatible", endpoint: "http://localhost:8000/v1", api_key_env: "K" };
   expect(deriveAccountKey(a)).not.toBe(deriveAccountKey(b));
 });
 
 test("an explicit operator account declaration wins and is never re-merged", () => {
   // Two declared accounts on one endpoint+credential must stay separate.
-  const a = { provider: "openai-compatible", endpoint: NIM, api_key_env: "K", account: "team-a" };
-  const b = { provider: "openai-compatible", endpoint: NIM, api_key_env: "K", account: "team-b" };
+  const a = { transport: "openai-compatible", endpoint: NIM, api_key_env: "K", account: "team-a" };
+  const b = { transport: "openai-compatible", endpoint: NIM, api_key_env: "K", account: "team-b" };
   expect(deriveAccountKey(a)).not.toBe(deriveAccountKey(b));
   expect(deriveAccountKey(a)).toBe("openai-compatible#team-a");
 });
@@ -62,13 +62,13 @@ test("an explicit operator account declaration wins and is never re-merged", () 
 test("an unattributable source yields null so the caller meters it ALONE", () => {
   // No endpoint and no credential ⇒ we cannot prove it shares anyone's allowance.
   // Merging on a guess would over-throttle; the caller falls back to the pool key.
-  expect(deriveAccountKey({ provider: "openai-compatible", model: "m" })).toBeNull();
+  expect(deriveAccountKey({ transport: "openai-compatible", model: "m" })).toBeNull();
   expect(deriveCredentialIdentity({ endpoint: NIM })).toBeNull();
 });
 
 test("endpoint normalization: trailing slash and case do not split an account", () => {
-  const a = { provider: "openai-compatible", endpoint: NIM, api_key_env: "K" };
-  const b = { provider: "openai-compatible", endpoint: `${NIM.toUpperCase()}/`, api_key_env: "K" };
+  const a = { transport: "openai-compatible", endpoint: NIM, api_key_env: "K" };
+  const b = { transport: "openai-compatible", endpoint: `${NIM.toUpperCase()}/`, api_key_env: "K" };
   expect(deriveAccountKey(a)).toBe(deriveAccountKey(b));
 });
 
@@ -86,8 +86,8 @@ test("the JOIN: siblings get DIFFERENT pool ids but the SAME account key", () =>
   // explicit id verbatim, so the two pool keys share no substring — any attempt to
   // recover the account from them splits the credential. Only the source declaration
   // knows they are one account.
-  const nano = { id: "nim-nano", provider: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "nano" };
-  const superb = { id: "nim-super", provider: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "super" };
+  const nano = { id: "nim-nano", transport: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "nano" };
+  const superb = { id: "nim-super", transport: "openai-compatible", endpoint: NIM, api_key_env: "NVIDIA_API_KEY", model: "super" };
 
   const nanoId = dispatchableSourceId(nano, null);
   const superId = dispatchableSourceId(superb, null);

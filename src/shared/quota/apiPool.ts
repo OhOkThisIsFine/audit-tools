@@ -30,20 +30,20 @@ import {
 
 /**
  * The stable id of a dispatchable source — its explicit `id`, or the quota-ledger
- * pool identity `provider[#account]/(model ?? endpoint ?? *)` ({@link buildProviderModelKey})
- * so two sources of the same provider stay distinct as long as their model/endpoint
+ * pool identity `transport[#account]/(model ?? endpoint ?? *)` ({@link buildProviderModelKey})
+ * so two sources of the same transport stay distinct as long as their model/endpoint
  * differ. This is the CapacityPool id and the key learned quota is recorded under.
  *
  * ⚠ Keyspace (1) of three, and NOT the `provider:model` operator exclusion grammar
  * (`DispatchExclusionPattern`) it superficially resembles — an account is load-bearing
  * here (the double-grant boundary) and irrelevant to a rule about a backend. Nor is it
- * the gate's `(backend_provider ?? provider):model` compare key — which shares this
+ * the gate's `(service ?? transport):model` compare key — which shares this
  * backend-qualified provider half but carries no account. Do not unify them.
  */
 export function dispatchableSourceId(source: DispatchableSource, account?: string | null): string {
   // Transport-fronted lane (3c): the transport NEVER enters the quota identity. A
-  // source declaring `backend_provider` keys on the BACKEND actually serving it —
-  // `backend_provider[#account]/model` — so a proxied `claude-worker` lane and a
+  // source declaring `service` keys on the BACKEND actually serving it —
+  // `service[#account]/model` — so a proxied `claude-worker` lane and a
   // direct lane to the same backend DEDUP to ONE CapacityPool / ledger entry (the
   // `(provider, account)` double-grant boundary). This deliberately outranks an
   // explicit `id`: the populate cache stamps transport-shaped ids
@@ -51,15 +51,15 @@ export function dispatchableSourceId(source: DispatchableSource, account?: strin
   // identity the field exists to merge. The declared `account` folds in even when
   // the caller resolves none, so two same-backend lanes on different accounts stay
   // distinct (the gather-time dedup path passes no account).
-  if (source.backend_provider) {
+  if (source.service) {
     return buildProviderModelKey(
-      source.backend_provider,
+      source.service,
       source.model ?? source.endpoint ?? null,
       account ?? source.account ?? null,
     );
   }
   if (source.id) return account ? `${source.id}#${account}` : source.id;
-  return buildProviderModelKey(source.provider, source.model ?? source.endpoint ?? null, account);
+  return buildProviderModelKey(source.transport, source.model ?? source.endpoint ?? null, account);
 }
 
 /**
@@ -82,7 +82,7 @@ function positiveIntCapOrNull(value: number | undefined): number | null {
  * 413'd instead of being skipped). Fallback chain:
  *   1. operator/registry-declared `quota.context_tokens` (the stamp populate sets),
  *   2. else the BACKEND model's models.dev window (`resolveModelStatics(model,
- *      backend_provider ?? provider)` — a synced, someone-else-maintained table),
+ *      service ?? transport)` — a synced, someone-else-maintained table),
  *   3. else the blind `DEFAULT_CONTEXT_TOKENS` floor.
  * Single-sourced (exported) as the one fit-window resolver. Only `buildSourcePool`
  * stamps it — host-model pools carry no `contextCapTokens` and gate (on the admission
@@ -95,7 +95,7 @@ export function resolveSourceContextWindowTokens(source: DispatchableSource): nu
   if (declared !== null) return declared;
   const statics = resolveModelStatics(
     source.model ?? null,
-    source.backend_provider ?? source.provider,
+    source.service ?? source.transport,
   );
   const fromCatalog = positiveIntCapOrNull(statics?.context_tokens);
   if (fromCatalog !== null) return fromCatalog;
@@ -133,7 +133,7 @@ function finiteRankOrNull(value: number | undefined): number | null {
  */
 export function sourceProviderConfig(source: DispatchableSource): Partial<SessionConfig> {
   const p = source.parameters ?? {};
-  switch (source.provider) {
+  switch (source.transport) {
     case "openai-compatible":
       return {
         openai_compatible: {
@@ -166,7 +166,7 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
       return {
         claude_worker: {
           endpoint: source.endpoint,
-          backend_provider: source.backend_provider,
+          service: source.service,
           model: source.model,
           ...(source.api_key_env !== undefined ? { api_key_env: source.api_key_env } : {}),
           ...p,
@@ -187,7 +187,7 @@ export function sourceProviderConfig(source: DispatchableSource): Partial<Sessio
  * Overlay a dispatchable source's per-provider config block onto the session config,
  * so `createFreshSessionProvider` builds the backend FROM that source — the launch
  * reads THIS source's `{endpoint, model, parameters}`, not the global block. This is
- * what lets two sources of the same provider (e.g. two NIM endpoints) launch
+ * what lets two sources of the same transport (e.g. two NIM endpoints) launch
  * distinctly. A node on the host's own pool (no source) passes the config through.
  */
 export function withSourceConfig(
@@ -305,7 +305,7 @@ export function sourceByPoolId(
 
 /**
  * Build one CapacityPool for a configured dispatchable backend source — generic over
- * the source's provider. An independent backend pool: it does not draw on the host
+ * the source's transport. An independent backend pool: it does not draw on the host
  * subagent budget (`hostConcurrencyLimit: null`); its rate limits come from the
  * source's own `quota` (RPM/TPM/context/output) plus learned 429 state; it carries
  * its real-time quota probe (degraded → the raw `quotaSignalDegraded` marker). The
@@ -319,7 +319,7 @@ export async function buildSourcePool(params: {
 }): Promise<CapacityPool> {
   const { source, quotaSource, quotaEntries } = params;
   // Scope the probe + account read to THIS source's own credential when it declares
-  // one, so a same-provider second-account source forms a distinct pool (§5b).
+  // one, so a same-transport second-account source forms a distinct pool (§5b).
   const scoped = buildAccountScopedQuotaSource(source, quotaSource);
   // Account: explicit override > read from the source's credential. A provider-shaped
   // key carries the provider for gating regardless of any explicit source.id.
@@ -327,7 +327,7 @@ export async function buildSourcePool(params: {
     source.account ??
     (await resolveAccountIdSafe(
       scoped,
-      buildProviderModelKey(source.provider, source.model ?? source.endpoint ?? null),
+      buildProviderModelKey(source.transport, source.model ?? source.endpoint ?? null),
     ));
   const poolKey = dispatchableSourceId(source, account);
   const probe = await probeQuotaSource(scoped, poolKey).catch(
@@ -342,7 +342,7 @@ export async function buildSourcePool(params: {
     // account nor a credential we can identify: an unattributable pool meters alone
     // rather than joining someone else's allowance.
     accountKey: deriveAccountKey({ ...source, account }) ?? poolKey,
-    providerName: source.provider,
+    providerName: source.transport,
     // Both the pool key (via dispatchableSourceId) and hostModel are derived from
     // THIS one source, so they cannot leak apart: for a provider-shaped key the model
     // segment is exactly `source.model ?? source.endpoint`; an explicit-`id` source is
@@ -379,7 +379,7 @@ export async function buildSourcePool(params: {
     discoveredLimits: source.quota ?? null,
     quotaSourceSnapshot: probe.snapshot,
     ...(probe.status === "degraded" ? { quotaSignalDegraded: true } : {}),
-    quotaCoverage: classifyQuotaCoverage(source.provider, sourceCoversProvider(scoped, source.provider)),
+    quotaCoverage: classifyQuotaCoverage(source.transport, sourceCoversProvider(scoped, source.transport)),
     source,
   };
 }
@@ -390,7 +390,7 @@ function openAiCompatibleSource(
   oc: NonNullable<SessionConfig["openai_compatible"]>,
 ): DispatchableSource {
   return {
-    provider: "openai-compatible",
+    transport: "openai-compatible",
     endpoint: oc.base_url,
     model: oc.model,
     api_key_env: oc.api_key_env,
@@ -444,7 +444,7 @@ export function primaryInProcessSource(
     case "codex": {
       const c = sessionConfig.codex ?? {};
       return {
-        provider: "codex",
+        transport: "codex",
         ...(c.command !== undefined ? { endpoint: c.command } : {}),
         ...(c.model !== undefined ? { model: c.model } : {}),
         parameters: {
@@ -456,7 +456,7 @@ export function primaryInProcessSource(
     case "opencode": {
       const o = sessionConfig.opencode ?? {};
       return {
-        provider: "opencode",
+        transport: "opencode",
         ...(o.command !== undefined ? { endpoint: o.command } : {}),
         parameters: {
           ...(o.extra_args !== undefined ? { extra_args: o.extra_args } : {}),
@@ -470,7 +470,7 @@ export function primaryInProcessSource(
     case "agy": {
       const a = sessionConfig.agy ?? {};
       return {
-        provider: "agy",
+        transport: "agy",
         ...(a.command !== undefined ? { endpoint: a.command } : {}),
         ...(a.model !== undefined ? { model: a.model } : {}),
         parameters: {
@@ -491,7 +491,7 @@ export function primaryInProcessSource(
       // (mirrors the unconfigured openai-compatible case).
       if (!s || s.command_template.length === 0) return null;
       return {
-        provider: "subprocess-template",
+        transport: "subprocess-template",
         parameters: {
           command_template: s.command_template,
           ...(s.env !== undefined ? { env: s.env } : {}),
@@ -502,7 +502,7 @@ export function primaryInProcessSource(
       // No session-level config block exists for worker-command: each node carries
       // its own `task.worker_command`, resolved at dispatch. A bare provider source
       // is the correct pool identity.
-      return { provider: "worker-command" };
+      return { transport: "worker-command" };
   }
   return null;
 }
@@ -631,7 +631,7 @@ export async function buildSourcePools(params: {
  * [[host-provider-misattribution-nim-codex]]).
  *
  * Collision = same provider identity on the same account axis. Provider identity is
- * the BACKEND when the source declares one (`backend_provider` — a proxied lane onto
+ * the BACKEND when the source declares one (`service` — a proxied lane onto
  * the host's own backend is exactly the double-grant this guards; review h2c3 F5),
  * else the pool's providerName. The account compare is DIRECTIONAL (review h2c3 F3):
  * a source with NO declared account collides on provider alone — the synthesized
@@ -669,7 +669,7 @@ export function dedupHostAndSourcePools(params: {
     // its backend, the same axis `dispatchableSourceId` keys such pools on. A
     // source with an explicit non-provider-shaped `id` parses to an arbitrary
     // head; providerName is the fallback routing identity.
-    return { provider: pool.source?.backend_provider ?? pool.providerName, account: parsed.account };
+    return { provider: pool.source?.service ?? pool.providerName, account: parsed.account };
   };
   const hostIdentities: Array<{ provider: string; account: string | null }> =
     params.hostPools.length > 0

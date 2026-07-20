@@ -145,18 +145,18 @@ export function buildQuotaSource(options: BuildQuotaSourceOptions = {}): QuotaSo
  * A quota source scoped to ONE dispatch source's own credential, for a source that
  * authenticates as a different account than the host (its `credentials_path`). The
  * returned source probes usage + resolves the account id from THAT file, so the
- * source forms a pool keyed on its own `(provider, account)` — a distinct budget
- * from the host's same-provider pool (docs/quota-dispatch-design.md §5b). Falls back
- * to the shared source when no per-source credential is declared, or the provider has
+ * source forms a pool keyed on its own `(transport, account)` — a distinct budget
+ * from the host's same-transport pool (docs/quota-dispatch-design.md §5b). Falls back
+ * to the shared source when no per-source credential is declared, or the transport has
  * no per-account proactive endpoint (only Claude/Codex expose one).
  */
 export function buildAccountScopedQuotaSource(
-  source: { provider: string; credentials_path?: string },
+  source: { transport: string; credentials_path?: string },
   fallback: QuotaSource,
 ): QuotaSource {
   const credentialsPath = source.credentials_path;
   if (!credentialsPath) return fallback;
-  switch (source.provider) {
+  switch (source.transport) {
     case "claude":
     case "claude-code":
       return new ClaudeOAuthQuotaSource({ credentialsPath });

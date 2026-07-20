@@ -65,7 +65,7 @@ test("buildHostModelPools: scalar/absent handshake (no roster) — null model ma
 });
 
 test("buildSourcePool: a provider-shaped source pool carries the model its key was derived from", async () => {
-  const source = { provider: "openai-compatible", endpoint: "http://nim/v1", model: "m1" };
+  const source = { transport: "openai-compatible", endpoint: "http://nim/v1", model: "m1" };
   const pool = await buildSourcePool({ source, quotaSource: STUB_QUOTA, quotaEntries: {} });
   expect(pool.hostModel).toBe("m1");
   assertModelMatchesKey(pool);
@@ -86,14 +86,14 @@ test("buildSourcePools: a cooldown recorded under one same-account source's key 
     sources: [
       {
         id: "nim-nano",
-        provider: "openai-compatible",
+        transport: "openai-compatible",
         endpoint: "https://integrate.api.nvidia.com/v1",
         api_key_env: "NVIDIA_API_KEY",
         model: "nano",
       },
       {
         id: "nim-super",
-        provider: "openai-compatible",
+        transport: "openai-compatible",
         endpoint: "https://integrate.api.nvidia.com/v1",
         api_key_env: "NVIDIA_API_KEY",
         model: "super",
@@ -131,14 +131,14 @@ test("buildSourcePools: sources with DIFFERENT api_key_env do not fold cooldowns
     sources: [
       {
         id: "source-a",
-        provider: "openai-compatible",
+        transport: "openai-compatible",
         endpoint: "https://integrate.api.nvidia.com/v1",
         api_key_env: "NVIDIA_API_KEY_A",
         model: "m1",
       },
       {
         id: "source-b",
-        provider: "openai-compatible",
+        transport: "openai-compatible",
         endpoint: "https://integrate.api.nvidia.com/v1",
         api_key_env: "NVIDIA_API_KEY_B",
         model: "m2",

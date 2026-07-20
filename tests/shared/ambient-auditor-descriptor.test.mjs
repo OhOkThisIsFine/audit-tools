@@ -43,14 +43,14 @@ const ambientDeps = () => ({
     JSON.stringify({
       sources: [
         {
-          provider: "openai-compatible",
+          transport: "openai-compatible",
           endpoint: "https://nim.example/v1",
           model: "reachable-model",
           api_key_env: "NIM_KEY",
         },
         {
           // Unreachable: its key env var is unset → dropped by `declared ∩ ambient`.
-          provider: "openai-compatible",
+          transport: "openai-compatible",
           endpoint: "https://nim.example/v1",
           model: "unreachable-model",
           api_key_env: "ABSENT_KEY",

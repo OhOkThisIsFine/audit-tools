@@ -23,7 +23,7 @@ function deps({ declaration, env = {}, onPath = [], readable = [] } = {}) {
 
 const NIM = {
   id: "nim",
-  provider: "openai-compatible",
+  transport: "openai-compatible",
   endpoint: "https://integrate.api.nvidia.com/v1",
   model: "openai/gpt-oss-120b",
   api_key_env: "NVIDIA_API_KEY",
@@ -55,7 +55,7 @@ describe("readSourceDeclaration — degrades, never throws", () => {
   });
 
   it("returns [] when a source fails the shared validator", () => {
-    const declaration = { sources: [{ ...NIM, provider: "not-a-provider" }] };
+    const declaration = { sources: [{ ...NIM, transport: "not-a-provider" }] };
     expect(readSourceDeclaration(deps({ declaration }))).toEqual([]);
   });
 
@@ -89,7 +89,7 @@ describe("verifySourceReach — declared ∩ ambient", () => {
   });
 
   it("refuses an inline api_key — possession is not reach", () => {
-    const inline = { id: "zen", provider: "openai-compatible", endpoint: "https://x/v1", model: "m", api_key: "public" };
+    const inline = { id: "zen", transport: "openai-compatible", endpoint: "https://x/v1", model: "m", api_key: "public" };
     const result = verifySourceReach(inline, deps({}));
     expect(result.verified).toBe(false);
     expect(result.reason).toContain("api_key_env");
@@ -101,30 +101,30 @@ describe("verifySourceReach — declared ∩ ambient", () => {
   });
 
   it("verifies a CLI source by its default launcher on PATH", () => {
-    expect(verifySourceReach({ provider: "codex" }, deps({ onPath: ["codex"] })).verified).toBe(true);
-    expect(verifySourceReach({ provider: "codex" }, deps({ onPath: [] })).verified).toBe(false);
+    expect(verifySourceReach({ transport: "codex" }, deps({ onPath: ["codex"] })).verified).toBe(true);
+    expect(verifySourceReach({ transport: "codex" }, deps({ onPath: [] })).verified).toBe(false);
   });
 
   it("probes a CLI source's endpoint override rather than the default", () => {
-    const source = { provider: "opencode", endpoint: "opencode-canary" };
+    const source = { transport: "opencode", endpoint: "opencode-canary" };
     expect(verifySourceReach(source, deps({ onPath: ["opencode-canary"] })).verified).toBe(true);
     // The default being present must NOT rescue a declared override that is absent.
     expect(verifySourceReach(source, deps({ onPath: ["opencode"] })).verified).toBe(false);
   });
 
   it("falls back to the legacy gemini binary for agy (2026-07-18 sunset gate)", () => {
-    expect(verifySourceReach({ provider: "agy" }, deps({ onPath: ["gemini"] })).verified).toBe(true);
+    expect(verifySourceReach({ transport: "agy" }, deps({ onPath: ["gemini"] })).verified).toBe(true);
   });
 
   it("probes subprocess-template's command_template[0]", () => {
-    const source = { provider: "subprocess-template", parameters: { command_template: ["pwsh", "-c", "x"] } };
+    const source = { transport: "subprocess-template", parameters: { command_template: ["pwsh", "-c", "x"] } };
     expect(verifySourceReach(source, deps({ onPath: ["pwsh"] })).verified).toBe(true);
     expect(verifySourceReach(source, deps({ onPath: [] })).verified).toBe(false);
-    expect(verifySourceReach({ provider: "subprocess-template" }, deps({})).verified).toBe(false);
+    expect(verifySourceReach({ transport: "subprocess-template" }, deps({})).verified).toBe(false);
   });
 
   it("refuses worker-command — its reach is per-task", () => {
-    const result = verifySourceReach({ provider: "worker-command" }, deps({}));
+    const result = verifySourceReach({ transport: "worker-command" }, deps({}));
     expect(result.verified).toBe(false);
     expect(result.reason).toContain("per-task");
   });
@@ -145,7 +145,7 @@ describe("verifySourceReach — declared ∩ ambient", () => {
 
 describe("resolveAmbientSources", () => {
   it("keeps reachable sources and drops the rest WITH a reason", () => {
-    const declaration = { sources: [NIM, { id: "cx", provider: "codex" }] };
+    const declaration = { sources: [NIM, { id: "cx", transport: "codex" }] };
     const result = resolveAmbientSources(
       deps({ declaration, env: { NVIDIA_API_KEY: "k" }, onPath: [] }),
     );
@@ -156,13 +156,13 @@ describe("resolveAmbientSources", () => {
   });
 
   it("never silently discards — every declared source is kept or explained", () => {
-    const declaration = { sources: [NIM, { id: "cx", provider: "codex" }, { id: "wc", provider: "worker-command" }] };
+    const declaration = { sources: [NIM, { id: "cx", transport: "codex" }, { id: "wc", transport: "worker-command" }] };
     const result = resolveAmbientSources(deps({ declaration }));
     expect(result.sources.length + result.dropped.length).toBe(3);
   });
 
   it("derives a drop id for a source that declared none", () => {
-    const declaration = { sources: [{ provider: "codex", model: "gpt-5-codex" }] };
+    const declaration = { sources: [{ transport: "codex", model: "gpt-5-codex" }] };
     const result = resolveAmbientSources(deps({ declaration, onPath: [] }));
     expect(result.dropped[0].id).toBe("codex:gpt-5-codex");
   });
@@ -206,7 +206,7 @@ describe("resolveSessionConfig — the G2.5 wiring", () => {
   });
 
   it("an explicit descriptor.sources still wins — the operator escape hatch", () => {
-    const forced = [{ id: "forced", provider: "codex" }];
+    const forced = [{ id: "forced", transport: "codex" }];
     const effective = resolveSessionConfig(
       intent,
       { self: {}, sources: forced },

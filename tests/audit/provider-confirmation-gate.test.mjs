@@ -93,7 +93,7 @@ describe("renderProviderConfirmationPrompt — sources[] pools + advisory notes 
       sources: [
         {
           id: "opencode-free",
-          provider: "opencode",
+          transport: "opencode",
           model: "free-model",
           cost_per_mtok: 0,
         },
@@ -157,7 +157,7 @@ describe("deriveSourcePoolDisplay (backlog a — data derivation)", () => {
 
   test("a declared cost_per_mtok is authoritative and skips the models.dev lookup", () => {
     const [entry] = deriveSourcePoolDisplay({
-      sources: [{ provider: "opencode", model: "free-model", cost_per_mtok: 0 }],
+      sources: [{ transport: "opencode", model: "free-model", cost_per_mtok: 0 }],
     });
     expect(entry.declared_cost_per_mtok).toBe(0);
     expect(entry.blended_price_usd_per_mtok).toBeUndefined();
@@ -166,7 +166,7 @@ describe("deriveSourcePoolDisplay (backlog a — data derivation)", () => {
 
   test("an explicit id wins over the derived default", () => {
     const [entry] = deriveSourcePoolDisplay({
-      sources: [{ id: "my-pool", provider: "codex", model: "gpt-5-codex" }],
+      sources: [{ id: "my-pool", transport: "codex", model: "gpt-5-codex" }],
     });
     expect(entry.id).toBe("my-pool");
   });

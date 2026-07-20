@@ -40,10 +40,10 @@ test("A8a: audit's fold policy — only explicit programmatic backends become so
     agy: { command: "agy" },
     subprocess_template: { command_template: ["run"] },
   };
-  expect(primaryInProcessSource(cfg, "openai-compatible")?.provider).toBe("openai-compatible");
-  expect(primaryInProcessSource(cfg, "codex")?.provider).toBe("codex");
-  expect(primaryInProcessSource(cfg, "opencode")?.provider).toBe("opencode");
-  expect(primaryInProcessSource(cfg, "agy")?.provider).toBe("agy");
+  expect(primaryInProcessSource(cfg, "openai-compatible")?.transport).toBe("openai-compatible");
+  expect(primaryInProcessSource(cfg, "codex")?.transport).toBe("codex");
+  expect(primaryInProcessSource(cfg, "opencode")?.transport).toBe("opencode");
+  expect(primaryInProcessSource(cfg, "agy")?.transport).toBe("agy");
   // The conversation host + IDE backends never fold (they are never engine pools).
   expect(primaryInProcessSource(cfg, "claude-code")).toBe(null);
   expect(primaryInProcessSource(cfg, "vscode-task")).toBe(null);

@@ -146,16 +146,16 @@ describe("populateProxyCatalog — discovery contract", () => {
       result.sources.map((s) => [s.model, s]),
     );
     expect(byAlias["gpt-4"]).toMatchObject({
-      provider: "claude-worker",
+      transport: "claude-worker",
       endpoint: PROXY,
-      backend_provider: "openai",
+      service: "openai",
       model: "gpt-4", // Alias VERBATIM (plan §e, regression pin i)
       worker_kind: "agentic",
       cost_per_mtok: (3e-05 + 6e-05) / 2, // cost blend = mean
       quota: { context_tokens: 8192 },
     });
     expect(byAlias["claude-sonnet-4-6"]).toMatchObject({
-      backend_provider: "anthropic",
+      service: "anthropic",
       capability_rank: 50, // advert custom key round-trips
     });
     // Roundtrip through the reader
@@ -184,7 +184,7 @@ describe("populateProxyCatalog — discovery contract", () => {
     // Without enrichment: provider derived from slash-prefix or "proxy"
     const xai = result.sources.find((s) => s.model === "xai/grok-2-1212");
     expect(xai).toMatchObject({
-      backend_provider: "xai", // prefix before first /
+      service: "xai", // prefix before first /
       model: "xai/grok-2-1212",
     });
     // Roster-only models have no enrichment fields
@@ -192,7 +192,7 @@ describe("populateProxyCatalog — discovery contract", () => {
     expect(xai.cost_per_mtok).toBeUndefined();
     const unslashed = result.sources.find((s) => s.model === "claude-sonnet-4-6");
     expect(unslashed).toMatchObject({
-      backend_provider: "proxy", // default shared bucket, owner decision
+      service: "proxy", // default shared bucket, owner decision
       model: "claude-sonnet-4-6",
     });
   });
@@ -546,7 +546,7 @@ describe("readProxyCatalog — degrades to null, never throws", () => {
         fetched_at: new Date().toISOString(),
         endpoint: PROXY,
         // claude-worker without endpoint/model — must not be admitted half-checked.
-        sources: [{ provider: "claude-worker", backend_provider: "nim" }],
+        sources: [{ transport: "claude-worker", service: "nim" }],
       }),
     );
     expect(readProxyCatalog({ homeDir })).toBeNull();
@@ -577,7 +577,7 @@ describe("readProxyCatalog — degrades to null, never throws", () => {
     expect(result.dropped).toEqual([]);
     const raw = JSON.parse(readFileSync(resolveProxyCatalogPath(homeDir), "utf8"));
     expect(raw.endpoint).toBe(PROXY);
-    expect(raw.sources[0].provider).toBe("claude-worker");
+    expect(raw.sources[0].transport).toBe("claude-worker");
   });
 });
 
@@ -712,7 +712,7 @@ describe("populateProxyCatalog — probe verification", () => {
 describe("REGRESSION PINS — neutral proxy contract", () => {
   describe("(i) argv passes the alias VERBATIM to --model", () => {
     it("the model field carries the roster alias, not composed provider/alias", async () => {
-      // PRE-SWAP: model was `${backend_provider}/${alias}` composition.
+      // PRE-SWAP: model was `${service}/${alias}` composition.
       // POST-SWAP: model is the alias verbatim (the proxy's routing key).
       const modelInfo = [
         {

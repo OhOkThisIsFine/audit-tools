@@ -235,7 +235,7 @@ test("audit pool assembly: an agy primary ALWAYS folds in as a source pool (D4 â
   });
   const agyPool = pools.find((p) => p.providerName === "agy");
   expect(agyPool).toBeTruthy();
-  expect(agyPool.source?.provider).toBe("agy");
+  expect(agyPool.source?.transport).toBe("agy");
   expect(isInProcessAuditPool(agyPool)).toBe(true);
 });
 

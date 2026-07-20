@@ -480,7 +480,7 @@ test("tied tightness breaks on the key, not on caller order", async () => {
   }
 });
 
-test("TWO ACCOUNTS on one backend_provider meter independently", async () => {
+test("TWO ACCOUNTS on one service meter independently", async () => {
   const nowRef = { t: 1000 };
   const { ledger, cleanup } = await tempLedger(nowRef, 60_000);
   try {
@@ -490,7 +490,7 @@ test("TWO ACCOUNTS on one backend_provider meter independently", async () => {
     // NOTE — this pins only the LEDGER half, which is nearly trivial: two distinct
     // map keys do not share a bucket. The substantive risk the design names is
     // whether account-key DERIVATION (`accountId.ts`) actually distinguishes two
-    // credentials on one backend_provider — that is what an earlier review round
+    // credentials on one service — that is what an earlier review round
     // was about, and it is NOT covered here. Tracked in docs/backlog.md.
     const acctA = "nim#acct-a::session";
     const acctB = "nim#acct-b::session";

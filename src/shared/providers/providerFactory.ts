@@ -466,7 +466,7 @@ function constructProvider(
     case "claude-worker":
       // The proxied isolated Claude-harness worker (commit 3b). The config block is
       // composed at launch by `sourceProviderConfig` from the claude-worker source
-      // itself; construction throws loudly when endpoint/backend_provider/model are
+      // itself; construction throws loudly when endpoint/service/model are
       // missing (isolation is the class's constructor invariant, not a guard).
       return deps.createClaudeWorkerProvider(sessionConfig.claude_worker);
     case "subprocess-template":

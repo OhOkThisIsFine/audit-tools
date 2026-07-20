@@ -28,7 +28,7 @@ const {
 } = await import("../../src/shared/providers/sharedProviderConfirmation.ts");
 
 /** The matcher's operand: a backend, not a name. */
-const backend = (provider, model, endpoint) => ({ provider, model, endpoint });
+const backend = (transport, model, endpoint) => ({ transport, model, endpoint });
 
 describe("the operator's explicit decision is persisted reach-free", () => {
   test("exclude/include round-trip onto `policy`", () => {
@@ -255,21 +255,21 @@ const MULTI_SOURCE_CONFIG = {
   sources: [
     {
       id: "nim-a",
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://example.invalid/v1/chat/completions",
       model: "model-a",
       api_key_env: "NIM_KEY_A",
     },
     {
       id: "nim-b",
-      provider: "openai-compatible",
+      transport: "openai-compatible",
       endpoint: "https://other.invalid/v1/chat/completions",
       model: "model-b",
       api_key_env: "NIM_KEY_B",
     },
     {
       id: "oc-a",
-      provider: "opencode",
+      transport: "opencode",
       model: "model-b",
     },
   ],
