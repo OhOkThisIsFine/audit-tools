@@ -150,6 +150,20 @@ followed" is otherwise indistinguishable from a bug.
   surfaces loudly — which needs a distinct error class that the degrade catches deliberately
   re-throw, not another assert call. Meanwhile `scheduleWave` still asserts (live path, throws) and
   `quotaSnapshotWindowPctMap` skips-and-warns (persisted path, must not throw).
+  **SPEC — a contract violation needs its own ERROR CLASS, not another assert at another site.** The
+  revert was correct and its lesson is that WHERE the check runs is not the problem: every production
+  caller wraps the probe in a catch that converts any throw into a degraded status, so an assert
+  anywhere inside that boundary is swallowed into a quiet degraded pool — the loudest possible bug
+  becomes the quietest possible symptom. Adding a third assert site repeats it.
+  The distinction the code cannot currently express is **"the remote is unreachable" versus "the
+  producer emitted something structurally invalid."** The first is expected and degrades; the second is
+  a bug and must surface. Introduce a distinct violation error, and have each degrade-catch deliberately
+  re-throw it rather than absorbing everything. Then producer validation can live wherever it is most
+  natural without being silently eaten, including on paths that bypass the probe entirely — which is why
+  "safe by construction at one boundary" was never achievable here.
+  **Property to hold:** a structurally invalid producer emission is always loud and never presents as a
+  network degrade. ⚠ The persisted read path must still skip-and-warn rather than throw — old artifacts
+  predate the field, and refusing to load them would turn a historical gap into an outage.
 
 - **`AdmissionGrant.resource_key` becomes partial under multi-constraint (2026-07-19).** Now that
   `reconcile(leaseId)` sweeps every key, this field has no reader — it is diagnostic provenance. Once
@@ -500,10 +514,35 @@ followed" is otherwise indistinguishable from a bug.
   because nothing needed it. This is the reader that justifies it, so settle the two together rather than
   adding a parallel identity channel beside a dormant one.
 - **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (claude-worker dogfood 2026-07-16, ambiguous-direction, low-medium).** The dispatch-blocking defect was found BY the run, and committing its fix changed the audited tree → staleness cascade correctly marked the whole planning chain stale → the 313-packet run regressed to charter_extraction, so every LLM planning step re-runs before dispatch is reattempted. Semantics are right (DAG is truth); the cost is structural to dogfooding-by-self-audit. Two tool slivers worth considering: (a) the resume emitted ~30 identical `{"kind":"staleness",...}` lines in one invocation (recompute spin — dedupe the log line per drain); (b) an active run whose frontier goes stale could say so explicitly ("run X invalidated by upstream staleness: <artifacts>") instead of silently re-planning from charter_extraction with run_id null.
+  **SPEC — keep the cascade, ANNOUNCE it. Do not narrow staleness to make dogfooding cheaper.** The
+  regression to first-planning-step is correct: the audited tree changed, so the planning derived from it
+  is genuinely invalid, and the dependency graph is the source of truth. Any mechanism that spares a
+  self-audit run from its own cascade would be special-casing the tool's convenience against the
+  correctness rule the whole design rests on.
+  What is actually wrong is that a large, expensive, correct action happens SILENTLY and looks like
+  malfunction. The run should state that it was invalidated, by which upstream artifacts, and what it is
+  therefore re-deriving — one message, at the moment it happens. The duplicated staleness log lines are
+  the same defect in miniature: repeated identical output in place of one clear statement.
+  **Property to hold:** an expensive automatic recovery explains itself at the moment it triggers. A user
+  who cannot tell a correct cascade from a wedge will eventually defeat the cascade.
 - **A stale prior-run shared confirmation suppresses the proxy populate trigger while Gate-0 still pends (claude-worker dogfood 2026-07-16, tool-should-decide, medium).** The 3c populate trigger (`nextStepCommand.ts:381`) keys on `readSharedProviderConfirmation(root) === null`, but the Gate-0 obligation keys on the per-tool seam — so a leftover `.audit-tools/provider-confirmation.json` from an ABANDONED prior run (yesterday's dogfood) silently skipped populate on a fresh run whose Gate-0 was still being emitted, and the lane dropped as "cache absent". Same split-artifact class as the reconciliation-gate entry below. Property to hold: the populate trigger and the Gate-0 obligation must key on the same confirmation artifact (or a fresh run must not inherit an abandoned run's confirmation). Diagnosis cost: the populate's `.catch(() => null)` is silent AND the skip-branch prints nothing, so "cache absent" pointed at the wrong half.
 - **INV-shared-core-14 fails on a box with `agy`/`gemini` on PATH — `deps.createAgyProvider is not a function` on clean HEAD (2026-07-17, tool-should-decide, low).** The state-dir hermeticity override (AUDIT_CODE_STATE_DIR, shipped 2026-07-17) closed the `~/.audit-code` leak class, but this test's auto-resolution still reads the BOX's real PATH: with an agy/gemini binary installed, `createFreshSessionProvider` resolves the agy branch and the test's injected deps lack `createAgyProvider`. Same box-dependence class, different vector (PATH probe, not state dir). Property to hold: the test must pin `commandExists` (and any env the resolver reads) so its resolution path is box-independent.
 - **claude-worker lane feedback-gap residuals (gaps (a)/(b)/(c) SHIPPED 2026-07-17 — plan `docs/reviews/claude-worker-feedback-gaps-plan-2026-07-17.md`; these are the accepted leftovers, each low).** (i) **CLI-internal retry hammering:** a worker retries 429s inside its own lifetime before dying (dogfood: 307 proxy-side vs 29 surfaced) — invisible to the parent; the terminal classification → cooldown now paces ACROSS workers, not within one. If the re-run still saturates free tiers, the follow-up is consuming declared `quota.max_concurrent` into a per-pool concurrency default for free tiers. (ii) **`AGENTIC_WORKER_HARNESS_OVERHEAD_TOKENS = 15_000` is an estimate** (single-sourced in `src/shared/quota/capacity.ts`) — measure against real `claude -p` request sizes when live data exists. (iii) **Registry context-window stamp coverage unknown:** populate stamps `quota.context_tokens` only when the proxy registry carries a context field — verify the live registry actually exposes one (else groq-class pools stay cap-less until declared by hand). ⬇ Live-run watch (resume `20260717T062404401Z_audit_tasks_completed_001`): 413s → `packet_too_large` re-queue (not raw error), 429s → `cooldown_until` set on the pool entry, kimi-k2.6 dropped at populate with a `dropped[]` reason, `hybrid_dispatch_node_never_fits` / `rolling_dispatch_stranded_no_fitting_pool` lines only when genuinely unplaceable. [[external-audit-catalogs-are-leads]]
 - **claude-worker lane residuals from the 3c adversarial review (2026-07-16, each low-medium, deferred deliberately).** (a) **Account axis:** the populate cache stamps no `account` and the `repair_proxy` declaration has no hook to add one — an operator declaring `account` on a direct lane only splits `nim#X/m` vs `nim/m` into two pools to one backend, reopening the double-grant boundary for that model (declared-wins dedup covers the same-model case; the split needs a per-backend account map on the declaration). Also inconsistent: `buildSourcePool` probes the quota-source account with the TRANSPORT key while the pool keys on the backend — benign only while no quota source handles `claude-worker`. (b) **No TTL / no refresh command:** `catalog-cache.json` is accepted arbitrarily stale (audit re-populates only while a repo has no shared confirmation; `populateProxyCatalogIfMissing` is missing-only), and the "explicit refresh" the plan names does not exist. Cross-repo: the cache is machine-global but audit's trigger is per-repo-confirmation-keyed, so starting repo B rewrites the expansion repo A resolves mid-run (additions gate-caught; removals silent-by-design). (c) **Intra-declaration duplicates:** `collectDispatchableSources` never dedups within `sources[]`, so an operator hand-declaring two sources with one backend identity still produces two same-id pools with map-clobber transport arbitration (the ambient path now dedups declared-vs-expanded; the operator-error case remains). Property to hold: one pool identity ⇒ exactly one launchable source, everywhere.
+  **SPEC — all three are one defect: identity is being decided somewhere other than where it is known.**
+  (a) the cache stamps no account and the declaration cannot supply one, so a backend that IS one account
+  splits into two pools; (b) the cache is machine-global while the trigger that rewrites it is keyed
+  per-repository, so a run in one repo can rewrite the roster another repo is resolving mid-run; (c)
+  sources are deduplicated across declared-vs-expanded but never WITHIN one declaration, so two entries
+  naming one backend produce two pools with the same identity and whichever writes last silently wins.
+  **Resolution:** the producer that knows an identity stamps it and it travels on the wire — the same rule
+  the account-metering work arrived at after five refused rounds. Concretely: the expansion stamps account
+  identity rather than leaving a hole for a later stage to guess; deduplication happens once, over the
+  full source set, keyed on resolved identity rather than on declaration origin; and a machine-global
+  cache is never rewritten out from under a run that is reading it — either the read is snapshotted for
+  the run's lifetime, or the rewrite is scoped so it cannot affect an in-flight resolve.
+  **Property to hold:** one pool identity ⇒ exactly one launchable source, everywhere, and no in-flight
+  run observes its own source set changing underneath it.
 - **Sharpened consequence of the model-keyed delta collapse (3c review F10, pre-existing class at new scale, low-medium).** `reachNow.set` last-wins per `model_id ?? provider` key, so a colliding direct+proxied pair yields ONE delta entry naming ONE lane's provider — autonomous fail-closed excludes that pattern and the OTHER lane routes unconfirmed. Registry expansion now manufactures colliding pairs at scale (bounded by declared-wins dedup + top-K). Fix requires `backendGateKey`/`confirmedBackendKeys`/exclusion-grammar to move together (provider-qualified keys) or PRIORITY[0] livelocks — the existing "delta collapses two providers" entry below is the same root.
 - **The vitest timing ledger records no pass/fail outcome, so a clipped console capture is unrecoverable (2026-07-16, tool-should-decide, low).** `.audit-tools-profile/vitest-latest.json` carries timing only (`fileCount`/`slowest`/…); twice in one session a full-suite run's summary was lost to a `| tail` clip and the ledger could not answer "did it pass, which files failed" — forcing a 4-minute rerun. Property to hold: the standing profile of a test run must record its OUTCOME (pass/fail counts + failed file names), not just its cost. One field in `vitest-timing-reporter.mjs`.
 - **A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low).** Mid-lap an `Edit` on `docs/backlog.md` failed with "String to replace not found" on a paragraph I had authored minutes earlier — a hook had normalized `vs` → `vs.` in it. The Edit tool's own hint ("tried swapping \uXXXX escapes") points at encoding, not at a hook rewrite, so the natural next move is re-reading the whole file to hunt an invisible character. Cost a re-read + a retry. Property to hold: a hook that rewrites a file the agent is mid-edit on should announce the rewrite (or the tool should re-anchor), rather than presenting as a mysterious mismatch. Cheap mitigation until then: after a "not found" on text you just wrote, suspect a normalizer and `grep` the anchor before re-reading the file.
@@ -525,6 +564,22 @@ followed" is otherwise indistinguishable from a bug.
 - **Two dispatch entry points disagree on fail-closed and on driver identity (owner question 2026-07-16, medium).** (a) `prepareDispatchCommand.ts:17-23` and `quotaCommand.ts:25` swallow an invalid session-config to `{}` ("using defaults") while `dispatch.ts:219-230` documents fail-closed as the invariant *precisely because* a permissive default builds dispatch against an attacker-influenced config. (b) `prepareDispatchCommand.ts:28` uses `resolveFreshSessionProviderName` where the host path (`semanticReviewStep.ts:117`) uses `resolveHostDispatchProviderName` — the exact founding-bug shape the latter exists to prevent (`provider: codex` would key the pool to codex, not the conversation host). Property to hold: every dispatch entry point carries the same guards, or there is only one entry point.
 - **Dead code: `src/audit/quota/headerExtraction.ts` + `headerExtractors/` have zero production consumers (owner question 2026-07-16, low).** Only the `index.ts` re-export + `tests/audit/header-extraction.test.mjs` reference them — the tested-but-unwired class that default-mode knip cannot catch. Delete symbol + orphaned tests per the periodic manual-audit recipe. [[knip-deadcode-gate-default-mode]]
 - **G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo, and it outranks the descriptor (found G4 premise-check 2026-07-16, corrected same-day during implementation, medium).** `resolveHostModel` (`limits.ts:56-71`) resolves `explicit ?? block_quota.host_model ?? env`; `hostPool.ts:156` then does `quotaModelKeySegment = hostModel ?? input.hostModelId` — so the repo's `block_quota.host_model` beats the descriptor's `self.model_id` and **auditor B keys its quota to auditor A's model**. Violates [[capability-is-per-auditor-not-per-audit]]. **⚠ The rest of the original claim is REFUTED: nothing writes `quota`/`block_quota`** — they are operator-authored, and `packetFilter.ts:259` documents `quota.models` as the operator's override mechanism. So `quota.models[<model>]` is keyed BY MODEL NAME (same window for every auditor) → inheriting it is CORRECT, and `limits.ts:115` beating discovery is the intended escape hatch, **not a bug — do not "fix" it** (it only misfires because `hostModel` was mis-resolved upstream; fix the identity and it's right). `quota.default_context_tokens`/`reserved_output_tokens` and `block_quota.context_tokens`/`reserved_output_tokens` (`plan.ts:47-51`) are policy → stay on intent. **Fix = move `block_quota.host_model` → `self.model_id` only**; narrow the `RepoSessionIntent` HALF-type note (`src/shared/types/sessionConfig.ts:772-779`) accordingly. Also stale: G4's "may fold into G2" — G2 shipped and did not fold it. Separately real (and still open): `resolveSessionConfig.ts:86-116` maps none of the `self.*` capability fields; they reach dispatch hand-threaded through three audit CLI commands (`nextStepCommand.ts:130-133`, `prepareDispatchCommand.ts:43-48`, `quotaCommand.ts:38`) — a parallel channel bypassing the one seam. **⚠ Correcting this entry's own earlier claim that the channel "MUST collapse in the same commit as any shared-assembly lift": that premise did NOT apply and the 2026-07-16 lift shipped without it.** The constraint assumed shared assembly would take the DESCRIPTOR and read the resolved config; `buildHostPoolPreamble` instead takes already-resolved scalars (`providerName` / `explicitHostModel` / `hostModelId` / `hostContextTokens` / …), so the channel now hand-threads into ONE function rather than two — strictly better, and not a correctness coupling. The collapse remains worth doing on its own merits (one seam, not two channels), but it does not gate the lift. **Also note the lift moved the `hostModel ?? hostModelId` precedence INTO shared (`hostPool.ts`), so if G4 IS a bug its blast radius is now both draws — which is an argument for settling the owner call, not for reverting.** Detail: `docs/reviews/g4-g5-g6-premise-check-2026-07-16.md`.
+  **SPEC — settled: it IS a bug, and the fix is to move the IDENTITY field only.** The distinction that
+  makes this decidable is what each field is keyed BY. A repo-committed host-model field is auditor
+  IDENTITY — it says which model is driving — so a second auditor working in the same repo inherits the
+  first one's identity and keys its quota to a window it does not own. That is the per-auditor rule
+  violated directly, and it now affects both draws.
+  The sibling field is different in kind and must NOT be touched: operator quota overrides are keyed BY
+  MODEL NAME, so every auditor using that model shares the window by design. Inheriting those is correct,
+  and the override beating discovery is the intended escape hatch. It only ever looked wrong because the
+  identity above it was resolved wrongly — fix the identity and the override behaves.
+  **Resolution:** the host-model identity moves onto the per-auditor descriptor and stops being readable
+  from repo-committed config; model-name-keyed operator overrides and the policy fields stay exactly
+  where they are. **Property to hold:** anything naming WHO is running belongs to the auditor and is
+  never persisted in the shared repo; anything keyed by a model name is shared config and is.
+  ⚠ Separately real and still open: the auditor descriptor's capability fields reach dispatch
+  hand-threaded through three CLI commands rather than through the one resolution seam — a parallel
+  channel worth collapsing on its own merits, but it does not gate this fix.
 - **G5's premise is 2/3 DEAD — narrow the spec before laying it out (found G4 premise-check 2026-07-16, low).** (a) `declared ∩ ambient-verifiable` SHIPPED as G2.5 (`resolveAmbientSources`). (b) The **auditor-id stamp is dead as specced** — `auditor_id`/`resolved_at` are parsed (`args.ts:348-349`) and read at exactly ONE site (`prompts.ts:61-62`) purely as an is-non-empty test: a write-only field ([[write-only-data-looks-authoritative]]). G2.5 established each IDE spawns its own process → own env → nothing shared to contaminate, and the spec's own Honest-residuals says the `(provider, account)` ledger — not auditor identity — is the load-bearing double-grant boundary. Before building a stamp, name the transient cross-auditor-shared run-state and re-derive whether an id is the fix. (c) Only the **lies-reachably quarantine** survives (`auditorSources.ts:147-148`); it is the sole catcher for G2.5's inline-`api_key` refusal. **G5 ≈ clause (c) alone.**
 - **A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression (re-measured G3 A′ lap 2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.mjs` fails in a full `vitest run` but passes alone (35s), and a **third failure rotates** between runs — observed as `tests/remediate/wave-scheduler.test.ts`, `tests/audit/next-step.test.mjs`, `tests/shared/quota-state.test.mjs` (all heavy, all pass alone). **Measured baseline: clean `main` fails the SAME 2 + 1 rotating** (`linux-cycle-regression` + `INV-shared-core-14` + one mover), so a branch showing this is at parity, not regressing. Also timed `linux-cycle-regression` mine-vs-main: 35s both. Per the test-failure protocol these are test bugs (timeout under worker contention / shared quota-state dirs), not code regressions. **The real cost is the is-it-mine investigation** — every dispatch-touching lap pays a full-suite baseline run on stashed main (~2×260s) to prove parity. Property to hold: a green branch must be distinguishable from a flaky one WITHOUT re-running the suite on main. Fix the hermeticity/timeouts, or quarantine the known-flaky set into a separate serial shard. (Distinct from `INV-shared-core-14`, which fails deterministically on main too — noted in `docs/HANDOFF.md` as pre-existing + env-sensitive.)
   **SPEC — persist the known-state baseline so parity is a LOOKUP, not a re-run.** The cost here is not the
@@ -643,6 +698,20 @@ followed" is otherwise indistinguishable from a bug.
   retry did not — livelock risk needs a repro to validate before building it. Also still open: a
   dispatch-boundary "no scope-less dispatch" guard (refuse to dispatch a node whose synth-derived scope
   is empty, rather than relying solely on the synth-side fix that derives scope from module `file_scope`).
+  **SPEC — retry only what is TRANSIENTLY undispatchable; terminate what is STRUCTURALLY undispatchable.**
+  The livelock fear is real but it applies to exactly one of two cases, and conflating them is why the
+  retry stalled. A node that was not dispatched because no pool had capacity *at that moment* is transient
+  — conditions change, and retrying is correct. A node that fits no pool at all (its context exceeds every
+  available window, or its scope is empty so there is nothing to dispatch) is structural — conditions will
+  never change, and retrying it forever is the livelock.
+  So the retry is safe once the two are distinguished at the point of non-dispatch: record WHY a node was
+  not dispatched, retry the transient class with a bounded attempt count, and terminate the structural
+  class immediately with a named reason rather than letting it silently block its subtree. A bounded count
+  on the transient class caps the worst case even if a reason is misclassified.
+  **Property to hold:** a node never blocks its downstream subtree without a recorded reason, and no node
+  is retried against a condition that cannot change. The scope-less guard belongs at the dispatch
+  boundary for the same reason — refusing an empty-scope node there makes the structural case impossible
+  to enqueue rather than merely detectable afterwards.
 - **`tests/shared/rollingDispatch.test.mjs` is a genuine timing flake (2026-07-12, tool-should-decide, medium).**
   "second dispatch should start after first completes: expected 1 to be 2" — a wall-clock/ordering assertion
   that flakes under full parallel load; passes in isolation. It flaked the v0.32.62 publish CI (shard 2/4;
@@ -655,6 +724,20 @@ followed" is otherwise indistinguishable from a bug.
   must manually relay every completion to the dispatcher — the exact per-node tracking the delegation was
   meant to remove. Either the prompt's model is wrong for hosts with this notification topology, or the
   worker prompts should instruct workers to message the dispatcher directly.
+  **SPEC — the prompt's model is wrong; drive fan-out from the session that OWNS the notifications.**
+  Completion notifications route to the top-level session, and that routing is host-harness behavior this
+  project does not control. So a delegated dispatcher is structurally the wrong shape: it idles between
+  events it will never receive, and every workaround reintroduces the manual per-node relay the delegation
+  existed to remove.
+  Resolution: the step prompt stops instructing a delegated dispatcher and describes flat fan-out driven by
+  the session that owns the notification channel. Delegation stays available for bounded units of WORK; it
+  is driving a completion-event loop that does not survive delegation. ⚠ Do not resolve it by having
+  workers message the dispatcher directly — that builds a second, parallel completion channel alongside
+  the harness's own, which then has to be kept correct in cases (crash, timeout, partial result) where the
+  harness channel already is.
+  **Property to hold:** the agent that awaits completions is the agent that receives them. Generalizes
+  beyond this prompt: any instruction to delegate an event loop across a boundary the events do not cross
+  is the same defect.
 - **NIM in-process worker: one packet failed with "empty completion (no choices[0].message.content)" (2026-07-11 live run, watch).**
   Hybrid partition (3 packets): 2 returned results inline, 1 errored empty. If it recurs on a specific
   model (ultra vs nano), demote that source or add a bounded same-packet retry on a sibling $0 pool.
@@ -702,6 +785,19 @@ followed" is otherwise indistinguishable from a bug.
   - Legitimate (1) DOES apply to ONE layer: selective-deepening tasks are derived from completed packets'
     findings (`+N deepening` per merge), so a merge must precede them — the barrier is correct for the
     deepening layer, artificial for the base frontier.
+  **SPEC — delete "wave" as a concept; express the one legitimate barrier as a DEPENDENCY.** The layer
+  that genuinely needs a merge first needs it because its work does not exist until earlier results land —
+  that is precisely a task unlock, which is already reason (1) on the owner's own list. Modelling it as a
+  global phase boundary is what forces every unrelated packet to wait for it, so the barrier and the
+  artificial latency are the same mechanism.
+  Once the deepening layer's prerequisite is a dependency edge rather than a phase, there is nothing left
+  for "wave" to mean: everything is gated by budget, rate, and dependency unlock, uniformly, and the
+  in-process engine's continuous slot-pull becomes the only model. **The host path converges onto that
+  engine rather than keeping a second scheduler** — the deviation is the host path, not the engine, and
+  maintaining both is the fork this project's one-core rule exists to prevent.
+  **Property to hold:** a packet is held for exactly three reasons — its dependencies are unmet, the pool
+  is rate-limited, or the budget will not admit it. No fourth reason exists, and "the previous phase has
+  not finished" is not one of them.
   - The calibration cap (below) is a FOURTH, illegitimate hold: it throttles on not-knowing-quota-in-tokens,
     which is neither budget, rate, nor unlock — and never resolves. Endpoint: host admission should grant the
     full budget-and-rate-fitting independent set at once (like the in-process engine), reserving merge-gated
@@ -1064,9 +1160,19 @@ followed" is otherwise indistinguishable from a bug.
     `withExecutionClaim` = `withClaimHeartbeat` + the merge-time `registry.heartbeat(token)` ownership-gate
     (which today exists ONLY inline on the short bundle-mutation mutex, `auditStep.ts`:219), applied to the
     LONG-lived claims (`task-claims.json` 20-min lease, remediate node-claims 30s) that currently hold a
-    lease with NO heartbeat. **Architectural gotcha:** the long claims are held across OUT-OF-PROCESS worker
-    runs where the parent isn't looping, so there is no natural beater — adding a heartbeat needs a beating
-    owner during the out-of-process span (non-trivial). This is a FOCUSED-LAP track — the most delicate
+    lease with NO heartbeat.     ⚠ **The stated architectural gotcha is REFUTED — verified against source.** It held that a long claim
+    spans an out-of-process worker run "where the parent isn't looping, so there is no natural beater."
+    But the heartbeat is driven by a TIMER, not by a loop: `withClaimHeartbeat` arms `setInterval` and
+    tears it down in a `finally`. A parent awaiting a spawned worker is still running its event loop, so
+    the timer fires normally for the whole span — awaiting a child does not block timers. **The beater is
+    the spawning process, and it already exists.**
+    **SPEC — wrap the long-lived claims in the existing heartbeat; no new beating mechanism is owed.** And
+    the failure mode this raises is the CORRECT one: if the spawning process dies, its heartbeat stops and
+    the claim is reclaimed quickly — which is exactly the behavior the slice wants, since a dead parent's
+    worker is orphaned anyway. What must be preserved is the ownership re-check before persist, so a claim
+    revoked mid-run cannot still land its result.
+    ⚠ Re-verify the timer behavior before building — this refutation is one reading of one function, and
+    a premise this load-bearing has already been wrong once here. This is a FOCUSED-LAP track — the most delicate
     machinery in the repo (pause/claim/quota), a genuine divergence to respect, and the owner's own
     "redesign before scheduled autonomy" caution applies; do NOT rush it as a tail-end change.
 
