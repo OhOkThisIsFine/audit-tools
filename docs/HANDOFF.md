@@ -8,8 +8,14 @@
 ## Live state
 
 - **Current version = `package.json`** (authoritative).
-- **Tree is green and published.** The dispatch/quota fix cluster, unified-routing collapse, and the
-  proxy-contract swap all shipped.
+- **Tree is green and published.** The dispatch/quota fix cluster, unified-routing collapse, the
+  proxy-contract swap, and the Gate-0 backend-identity fix all shipped.
+- **⚠ A local test failure can be an AMBIENT-PATH artifact, not a regression.** `INV-shared-core-14`
+  stubbed only two provider constructors while auto-resolution walks the real PATH — so it passed in CI
+  (no CLIs on the runner) and failed on any box with `agy`/`codex` installed, reading as a product
+  defect. Fixed, but the CLASS recurs: before believing a local red, check whether the test's fixture
+  depends on what happens to be installed ([[lap-green-must-match-ci-evidence]] cuts BOTH ways — CI
+  green over a local red is just as much a real signal as the reverse).
 - **⚠ Stale-worktree trap:** ALWAYS `git fetch audit-tools main && git log HEAD..audit-tools/main`
   before starting a lap — a worktree can branch behind main and must fast-forward + re-read
   HANDOFF/backlog first.
@@ -70,11 +76,20 @@
 ## ▶ IMMEDIATE NEXT
 
 **0. Pick any specced backlog item and build it.** The disambiguation pass left every open item with an
-agreed mechanism, so the next lap is implementation rather than design. The highest-value clusters, by
-blast radius: the **Gate-0 backend-identity single-sourcing** (a confirmed gate BYPASS — confirming one
-provider's model can mark a different provider's identically-named model as approved), and the
-**capability-evidence branch**, which is one defect class (hand-maintained enumerations drifted from
-their source) rather than the six-item punch list four review rounds treated it as.
+agreed mechanism, so the next lap is implementation rather than design. The highest-value remaining
+cluster by blast radius is the **capability-evidence branch**, which is one defect class
+(hand-maintained enumerations drifted from their source) rather than the six-item punch list four
+review rounds treated it as.
+
+⚠ **A specced mechanism is still a LEAD, not a work order — the Gate-0 identity lap proved it.** That
+item's SPEC said "one identity function consumed by the delta, the confirmed set, and the exclusion
+matcher alike." Building that literally would have shipped a regression: the exclusion matcher compares
+the TRANSPORT provider, so a unified backend-qualified rule matches nothing at dispatch (fail-open, and
+silent). The gate needed a backend-qualified IDENTITY and a transport-qualified RULE — two values, built
+adjacently, deliberately different for a proxied lane. The discriminating evidence was already in the
+repo: two adjacent tests in `gate0-proxy-fold.test.mjs` asserted opposite verdicts on the same
+mechanism, and `apiPool` already keyed the quota ledger the right way
+([[backlog-prose-decays-verify-against-head]]).
 
 **1. Account metering — the COOLDOWN axis was never migrated.** The budget axis is closed and verified
 by execution; the cooldown fold still uses the older per-source derivation, so budget and cooldown now
