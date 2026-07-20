@@ -489,6 +489,24 @@ followed" is otherwise indistinguishable from a bug.
   single fixed schema — the same two failure classes. The standing assumption that reasoning-heavy work
   cannot be offloaded here shaped routing decisions and is not currently supported by evidence.
 
+- **`docs/backlog.md` exceeds a single-read budget, so every pass navigates it blind (friction:
+  inefficient-feeding, medium).** At ~1,100–1,450 lines it cannot be read in one call (>25k tokens), so
+  working on it means paged reads plus grep-by-anchor, and line numbers shift under every edit. Two
+  concrete costs this session: a scripted delete keyed on line numbers orphaned a fragment (see the trap
+  below), and several edits needed a re-grep purely because earlier edits had moved everything. The file
+  is also the one document most likely to be scanned by an agent with no prior context.
+  **Property to hold:** the open-work record is navigable in bounded reads — most plausibly by splitting
+  along the section boundaries that already exist (open bugs / forward tracks / deferred / durable traps),
+  since those are already how it is read. ⚠ Do not solve it by pruning aggressively: the entries earn
+  their length, and the 2026-07-19 classification showed the risk runs the other way — stale entries
+  survive because nobody can hold the whole file at once.
+
+- **Durable trap — never delete from `docs/backlog.md` by LINE NUMBER.** Entries can span two physical
+  lines while being one logical bullet, because a hook may embed a literal newline inside a code span. A
+  line-keyed delete then removes half an entry and leaves an orphaned fragment that reads as corruption.
+  Bit this file during the 2026-07-19 classification pass. Delete by matching the entry's text, and after
+  any scripted edit scan for orphans — lines not starting with `-`, `>`, `#`, a space, `|`, or a backtick.
+
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
 > lives in git log / memory). Condense at write time, not in a later doc-review pass. The `[[memory-tag]]`
