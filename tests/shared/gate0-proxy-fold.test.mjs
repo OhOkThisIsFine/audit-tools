@@ -155,7 +155,7 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     provider_pool: [],
   };
 
-  it("K expanded models produce ≤K delta entries, keyed by model id", () => {
+  it("K expanded models produce ≤K delta entries, keyed by backend:model", () => {
     const delta = computeNewlyReachableBackends(
       emptyConfirmation,
       {},
@@ -166,8 +166,10 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
     // The populate top-K cap bounds the expansion, and the delta is at most one
     // entry per expanded source — never amplified.
     expect(delta.length).toBeLessThanOrEqual(EXPANDED.length);
+    // Keyed by the BACKEND actually serving the model, not the `claude-worker`
+    // transport they all share — otherwise every expanded lane would collide.
     expect(delta.map((b) => b.key).sort()).toEqual(
-      EXPANDED.map((s) => s.model).sort(),
+      EXPANDED.map((s) => `${s.backend_provider}:${s.model}`).sort(),
     );
     // Each exclusion pattern rules out exactly that model at the provider tier the
     // routing filter matches (`claude-worker:<model>`).
@@ -191,20 +193,25 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
       {},
       noCli,
     );
-    // The compare key is `model_id ?? provider` — both lanes share the model, so
-    // the gate sees ONE new backend, not two.
+    // The compare key is `(backend_provider ?? provider):model` — both lanes resolve
+    // to the SAME nim backend, so the gate sees ONE new backend, not two. This is the
+    // half a transport-qualified key would get WRONG (it would split them).
     expect(delta).toHaveLength(1);
-    expect(delta[0].key).toBe("z-ai/glm-5.2");
+    expect(delta[0].key).toBe("nim:z-ai/glm-5.2");
+    // ...and the RULE stays transport-qualified, because `ruleMatches` compares the
+    // transport provider — a `nim:` rule would match nothing at dispatch.
+    expect(delta[0].exclusion_pattern).toBe("claude-worker:z-ai/glm-5.2");
   });
 
-  it("KNOWN pre-existing collapse: two DIFFERENT backend_providers sharing a model string collapse to one delta entry", () => {
-    // Documented in docs/backlog.md ("The gate's delta collapses two providers that
-    // share a model id"): the gate key is the bare model when knowable, and fixing
-    // it for claude-worker means moving gate key + confirmedBackendKeys +
-    // the exclusion grammar together (a provider-qualified key that
-    // confirmedBackendKeys cannot reproduce livelocks the PRIORITY[0] obligation).
-    // NOT fixed in 3c — this pins the current behavior so the collapse is loud here
-    // rather than rediscovered in dispatch.
+  it("two DIFFERENT backend_providers sharing a model string are TWO backends (gate-bypass regression)", () => {
+    // Was a pinned KNOWN collapse: the gate key used to be the bare model when
+    // knowable, so these two collapsed to one entry and only one ever received an
+    // exclusion pattern — and, worse, confirming either marked BOTH confirmed, so a
+    // backend the operator never saw routed as approved. Fixed by keying the identity
+    // on `backend_provider ?? provider`. The deferral reason (a qualified key that
+    // `confirmedBackendKeys` cannot reproduce would livelock the PRIORITY[0]
+    // obligation) is answered by persisting `backend_provider` on the confirmed side —
+    // see the gate-closure test below, which is what proves it does not livelock.
     const twoBackendsOneModel = [
       EXPANDED[0],
       { ...EXPANDED[0], id: "claude-worker:openrouter/z-ai/glm-5.2", backend_provider: "openrouter" },
@@ -216,7 +223,42 @@ describe("reconciliation gate over the expanded lane (compare key + cap)", () =>
       {},
       noCli,
     );
-    expect(delta).toHaveLength(1);
+    expect(delta).toHaveLength(2);
+    expect(delta.map((b) => b.key).sort()).toEqual([
+      "nim:z-ai/glm-5.2",
+      "openrouter:z-ai/glm-5.2",
+    ]);
+  });
+
+  it("confirming ONE backend does not confirm a same-model backend on ANOTHER provider", () => {
+    // The bypass in its most direct form: the operator's decision covers the nim lane
+    // only. The openrouter lane must still surface — a confirmed set that matched it
+    // would be approving a backend the operator never saw.
+    const confirmedNimOnly = {
+      ...emptyConfirmation,
+      source_pool_cost_order: [
+        {
+          source_id: "claude-worker:nim/z-ai/glm-5.2",
+          provider: "claude-worker",
+          backend_provider: "nim",
+          model_id: "z-ai/glm-5.2",
+          blended_price_usd_per_mtok: null,
+          price_declared: false,
+          cost_order: 0,
+        },
+      ],
+    };
+    const delta = computeNewlyReachableBackends(
+      confirmedNimOnly,
+      {},
+      [
+        EXPANDED[0],
+        { ...EXPANDED[0], id: "claude-worker:openrouter/z-ai/glm-5.2", backend_provider: "openrouter" },
+      ],
+      {},
+      noCli,
+    );
+    expect(delta.map((b) => b.key)).toEqual(["openrouter:z-ai/glm-5.2"]);
   });
 
   it("promoting a confirmation built WITH the sources clears the delta (gate closure)", async () => {

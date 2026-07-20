@@ -37,7 +37,8 @@ import {
  * ⚠ Keyspace (1) of three, and NOT the `provider:model` operator exclusion grammar
  * (`DispatchExclusionPattern`) it superficially resembles — an account is load-bearing
  * here (the double-grant boundary) and irrelevant to a rule about a backend. Nor is it
- * the gate's `model_id ?? provider` compare key. Do not unify them.
+ * the gate's `(backend_provider ?? provider):model` compare key — which shares this
+ * backend-qualified provider half but carries no account. Do not unify them.
  */
 export function dispatchableSourceId(source: DispatchableSource, account?: string | null): string {
   // Transport-fronted lane (3c): the transport NEVER enters the quota identity. A

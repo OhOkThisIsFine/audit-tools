@@ -109,6 +109,21 @@ export interface ProviderConfirmationInput {
 export interface HostModelCostEntry {
   /** Host model id — the dispatch cost-position key. */
   model_id: string;
+  /**
+   * The conversation host this tier belongs to — the provider half of the gate's
+   * `backendIdentity`, stamped at write time from `resolveConversationHostProvider`.
+   *
+   * RECORDED rather than re-derived at read time on purpose: a confirmation written
+   * under one host may be read under another, and re-deriving would then qualify the
+   * tier with the *reading* host — silently attributing the operator's decision to a
+   * backend they never confirmed.
+   *
+   * Optional ONLY so a confirmation written before this field existed still parses.
+   * Absent ⇒ the tier contributes no gate key at all (`confirmedBackendKeys`), which
+   * is fail-SAFE: the gate re-asks, and the answer records the provider. Falling back
+   * to the bare `model_id` instead would be the bypass this field exists to close.
+   */
+  provider?: ResolvedProviderName;
   /** Blended $/Mtok from models.dev, or `null` when unpriceable. Advisory. */
   blended_price_usd_per_mtok: number | null;
   /** Operator-confirmed 0-based cost position (rung 1 of costRank). */
@@ -130,6 +145,17 @@ export interface SourcePoolCostEntry {
   source_id: string;
   /** The source's provider transport (e.g. `openai-compatible`). */
   provider: string;
+  /**
+   * The backend ACTUALLY SERVING the model when this source is a proxied lane
+   * (e.g. `nim` behind a `claude-worker` transport) — the provider half of the
+   * gate's `backendIdentity`, and the same field `apiPool` keys the quota ledger on.
+   *
+   * Persisted because the CONFIRMED side must be able to reproduce the identity the
+   * DELTA computes; without it a proxied lane the operator confirmed would re-delta
+   * forever, which is exactly the livelock that deferred this fix before.
+   * Absent for a direct source, where the transport IS the backend.
+   */
+  backend_provider?: string;
   /**
    * The source's model id — the DISPATCH cost-position key (a proxy-sourced source's
    * namespaced `provider/model`, or a plain source model). Absent when the source
@@ -170,7 +196,11 @@ export interface SourcePoolCostEntry {
  * fields regardless of intent. Unrepresentable, not guarded.
  */
 export interface PersistedPoolEntry {
-  /** Canonical provider name. Half of the gate's `model_id ?? name` compare key. */
+  /**
+   * Canonical provider name. The provider half of the gate's `backendIdentity`
+   * compare key — a configured provider is its own backend, with no proxy
+   * indirection to unwrap.
+   */
   name: ResolvedProviderName;
   /**
    * The reach half, branded `never` so it is genuinely UNREPRESENTABLE here.

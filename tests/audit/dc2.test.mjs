@@ -247,13 +247,32 @@ await test("G3: confirmed keys span provider_pool + source_pool_cost_order + hos
       { source_id: "s1", provider: "codex", model_id: "src-model", blended_price_usd_per_mtok: null, cost_order: 0 },
     ],
     host_model_cost_order: [
-      { model_id: "host-model", blended_price_usd_per_mtok: null, cost_order: 1 },
+      { model_id: "host-model", provider: "claude-code", blended_price_usd_per_mtok: null, cost_order: 1 },
     ],
   });
-  // model where knowable, else the coarse provider name.
+  // `(backend_provider ?? provider):model` where the model is knowable, else the
+  // coarse provider name.
   expect([...keys].sort()).toEqual(
-    ["cfg-model", "host-model", "src-model", "worker-command"],
+    ["claude-code:host-model", "codex:src-model", "openai-compatible:cfg-model", "worker-command"],
   );
+});
+
+// The fail-SAFE half of the host-tier rule: a confirmation written before
+// HostModelCostEntry carried a provider cannot say WHICH backend the operator
+// confirmed, so it contributes no key at all. Falling back to the bare model id is
+// precisely the bypass — it would approve any identically-named model on any
+// provider. Contributing nothing can only make the gate ASK again.
+await test("G3: a host tier with no recorded provider contributes NO confirmed key", () => {
+  const keys = confirmedBackendKeys({
+    schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
+    session_level: true,
+    confirmed_at: new Date().toISOString(),
+    provider_pool: [],
+    host_model_cost_order: [
+      { model_id: "legacy-host-model", blended_price_usd_per_mtok: null, cost_order: 0 },
+    ],
+  });
+  expect([...keys]).toEqual([]);
 });
 
 await test("G3: a backend the operator confirmed produces an EMPTY delta (no phantom re-prompt)", () => {
@@ -280,7 +299,7 @@ await test("G3: a newly-reachable SOURCE appears in the delta, keyed by its mode
   // sibling models (the A′ intermediate state).
   expect(delta).toEqual([
     {
-      key: "brand-new-model",
+      key: "openai-compatible:brand-new-model",
       provider: "openai-compatible",
       exclusion_pattern: "openai-compatible:brand-new-model",
     },
@@ -318,7 +337,7 @@ await test("G3: a second model of an ALREADY-confirmed provider still deltas (mo
     { K: "public" },
   );
   expect(delta.map((b) => b.key), "the new MODEL is the delta, not the provider").toEqual([
-    "a-second-model",
+    "openai-compatible:a-second-model",
   ]);
 });
 

@@ -8,7 +8,11 @@ import {
   hasConfiguredOpenAiCompatible,
   hasConfiguredOpenCode,
 } from "./providerFactory.js";
-import { commandExists, isSelfSpawnBlocked } from "./providerPathGuard.js";
+import {
+  commandExists,
+  isSelfSpawnBlocked,
+  resolveConversationHostProvider,
+} from "./providerPathGuard.js";
 import { suggestCostOrdering, resolveModelPrice, type CostCandidate } from "../dispatch/costRank.js";
 import type {
   ConfirmedPoolEntry,
@@ -337,6 +341,7 @@ export function annotateConfirmedPool(
   sessionConfig: SessionConfig,
   input?: ProviderConfirmationInput,
   sources: DispatchableSource[] = [],
+  env: NodeJS.ProcessEnv = process.env,
 ): AnnotatedConfirmation {
   const hostModels = input?.host_models ?? [];
   const providerCandidates: CostCandidate[] = pool.map((entry) => ({
@@ -391,8 +396,14 @@ export function annotateConfirmedPool(
       ...(order !== undefined ? { cost_order: order } : {}),
     };
   });
+  // The host roster is by definition the CONVERSATION HOST's own models, so the
+  // provider half of each tier's gate identity is the resolved host — recorded here,
+  // at the only point it is known for certain, rather than re-derived by a later
+  // reader running under a possibly different host.
+  const hostProvider = resolveConversationHostProvider({ sessionConfig, env });
   const host_model_cost_order: HostModelCostEntry[] = hostModels.map((m) => ({
     model_id: m.model_id,
+    provider: hostProvider,
     blended_price_usd_per_mtok: resolveModelPrice(m.model_id) ?? null,
     cost_order: positions.get(m.model_id) ?? 0,
   }));
@@ -407,6 +418,9 @@ export function annotateConfirmedPool(
     return {
       source_id: dispatchSourceKey(source),
       provider: source.provider,
+      // Recorded so `confirmedBackendKeys` can reproduce the gate identity the delta
+      // computes for a proxied lane — see SourcePoolCostEntry.backend_provider.
+      ...(source.backend_provider ? { backend_provider: source.backend_provider } : {}),
       ...(source.model ? { model_id: source.model } : {}),
       blended_price_usd_per_mtok: price,
       price_declared: declared !== undefined,

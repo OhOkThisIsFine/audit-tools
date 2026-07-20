@@ -359,7 +359,11 @@ export function buildProviderConfirmationRender(
   // Cost-first routing: annotate with representative model price + cost_order,
   // read at dispatch as rung 1 of costRank (spec/cost-first-routing.md). When an
   // operator input is present its ordering wins and its host roster is priced.
-  const annotated = annotateConfirmedPool(pool, sessionConfig, input, sources);
+  // `env` is threaded rather than left to `process.env`: host-provider resolution
+  // falls through to env detection when `host_provider` is unset, and an injected-env
+  // caller must not derive provider DISCOVERY and HOST IDENTITY from two different
+  // environments.
+  const annotated = annotateConfirmedPool(pool, sessionConfig, input, sources, env);
   return {
     schema_version: SHARED_PROVIDER_CONFIRMATION_VERSION,
     session_level: true,
@@ -448,31 +452,86 @@ const RESOLVED_PROVIDER_NAMES: readonly ResolvedProviderName[] = PROVIDER_NAMES.
 // ---------------------------------------------------------------------------
 
 /**
- * The gate's comparison key for one backend: **the model where it is knowable,
- * else the coarse provider name.**
+ * **THE** identity of one backend: `provider:model` where the model is knowable,
+ * else the coarse `provider` name. ONE function, consumed by all three halves of
+ * the gate — the reachability delta, the confirmed set, and the exclusion pattern
+ * it hands the routing filter — so those three cannot answer "which backend is
+ * this?" differently. They are *required* to agree; a second copy would be a
+ * second chance to disagree.
  *
- * This is the operator-facing exclusion grammar's own provision (`provider:model`,
- * with `provider` as the coarser pattern — spec/unified-dispatch-worker-model.md).
+ * It is **provider-qualified**, and that is load-bearing rather than cosmetic. The
+ * earlier `model_id ?? provider` form dropped the provider whenever a model was
+ * known, which was a gate BYPASS in two directions: two backends from DIFFERENT
+ * providers advertising the SAME model string collapsed into one delta entry (only
+ * one of them got an exclusion pattern), and — worse — confirming one provider's
+ * model marked a different provider's identically-named model as confirmed, so a
+ * backend the operator never saw routed as though approved. Proxy expansion makes
+ * the collision ordinary, not exotic: several sources behind one transport can
+ * serve the same model string.
+ *
+ * The fallback to the bare provider name is equally load-bearing and is why this is
+ * NOT a plain `provider:model`: `representativeModelId` knows a model only for
+ * `openai-compatible` and `codex` — for claude-code / agy / opencode /
+ * worker-command a CLI backend's model arrives only at the dispatch handshake. A
+ * model-only identity would let such a backend contribute NO key, so installing
+ * `agy` on PATH would leave the delta empty and the gate would silently dispatch it
+ * — re-opening the exact PATH-appearance case the gate exists to catch, blind
+ * rather than loud. It is also why a `provider:model` *rule* must degrade to the
+ * coarse `provider` tier for those backends: a `provider:model` rule only matches
+ * when the routing filter can see that exact model.
+ *
  * Model granularity is the POINT, not a refinement: the operator confirms *model*
  * choices, so a second model under an already-confirmed `openai-compatible` is a
  * new choice even though it introduces no new provider.
  *
- * But a bare-`model_id` key would be worse than useless: `representativeModelId`
- * knows a model only for `openai-compatible` and `codex` — for claude-code / agy /
- * opencode / worker-command a CLI backend's model arrives only at the dispatch
- * handshake. Such a backend would contribute NO key, so installing `agy` on PATH
- * would leave the delta empty and the gate would silently dispatch it — re-opening
- * the exact PATH-appearance case the gate exists to catch, blind rather than loud.
+ * The provider half is the **BACKEND ACTUALLY SERVING the model**
+ * (`backend_provider ?? provider`), not the transport that reaches it — the same
+ * rule `apiPool` already applies to the quota-ledger pool identity. This is what
+ * makes the gate's two proxy cases come out right, and they pull in OPPOSITE
+ * directions, so a transport-keyed identity cannot satisfy both:
+ *   • a proxied `claude-worker` lane and a direct `openai-compatible` lane onto the
+ *     SAME `nim` backend+model are genuinely ONE backend reached two ways — the
+ *     operator confirms it once, and it must not delta twice; while
+ *   • two lanes over the SAME transport onto DIFFERENT backends (`nim` vs
+ *     `openrouter`) sharing a model string are genuinely TWO backends — and
+ *     collapsing them was the bypass.
+ * Transport-qualifying would invert both: it splits the first pair and still
+ * collapses the second.
  *
- * ⚠ This is a THIRD keyspace, deliberately distinct from the quota-ledger pool
- * identity (`provider[#account]/model`, `buildProviderModelKey`) — an account is
- * irrelevant to a rule about a backend. Do not unify them.
+ * ⚠ This is a keyspace of its own, deliberately distinct from BOTH:
+ *   • the quota-ledger pool identity (`backend_provider[#account]/model`,
+ *     `buildProviderModelKey`) — it shares this provider half, but an account is
+ *     irrelevant to a rule about a backend; and
+ *   • the dispatch COST-POSITION map (`readConfirmedCostPositions`), which is keyed
+ *     by bare `model_id` because `costRank` looks positions up with no provider in
+ *     hand at the lookup site.
+ * Do not unify this with either.
+ *
+ * ⚠ NOT the same value as {@link backendExclusionPattern}. The identity answers "is
+ * this the backend the operator already saw?"; the pattern answers "what must the
+ * routing filter match to drop it?" — and `ruleMatches` matches on the TRANSPORT
+ * provider, so a rule built from this identity would silently match nothing for a
+ * proxied lane. They were unified once; that is why they are documented apart now.
  */
-function backendGateKey(
+function backendIdentity(
   modelId: string | undefined,
-  providerName: string,
+  backendProvider: string,
 ): string {
-  return modelId ?? providerName;
+  return modelId ? `${backendProvider}:${modelId}` : backendProvider;
+}
+
+/**
+ * The pattern that rules out one backend at the finest granularity its model is
+ * knowable at — keyed on the TRANSPORT provider, because that is the field
+ * `ruleMatches` compares (`ExcludableBackend.provider`). A backend whose model
+ * arrives only at the dispatch handshake (a CLI) must be ruled out at the coarse
+ * `provider` tier or the rule would never match.
+ */
+function backendExclusionPattern(
+  modelId: string | undefined,
+  transportProvider: string,
+): DispatchExclusionPattern {
+  return modelId ? `${transportProvider}:${modelId}` : transportProvider;
 }
 
 /**
@@ -483,50 +542,52 @@ function backendGateKey(
  * source can be represented ONLY by `provider_pool[].model_id`; and a host tier
  * appears only in `host_model_cost_order`. Reading fewer than all three would
  * manufacture a phantom delta for an already-confirmed backend.
+ *
+ * A host tier with no `provider` contributes NOTHING, and that is the deliberate
+ * fail-SAFE degradation for a confirmation written before the field existed. The
+ * alternative — falling back to the bare `model_id` — is precisely the bypass this
+ * identity exists to close: a confirmed *host* model would silently approve an
+ * identically-named model on some other provider. Contributing no key can only ever
+ * cause the gate to ASK about a backend again (loud, and the operator's answer then
+ * records the provider); it can never approve one unseen.
  */
 export function confirmedBackendKeys(
   confirmation: SharedProviderConfirmation,
 ): Set<string> {
   const keys = new Set<string>();
   for (const entry of confirmation.provider_pool) {
-    keys.add(backendGateKey(entry.model_id, entry.name));
+    keys.add(backendIdentity(entry.model_id, entry.name));
   }
   for (const entry of confirmation.source_pool_cost_order ?? []) {
-    keys.add(backendGateKey(entry.model_id, entry.provider));
+    keys.add(backendIdentity(entry.model_id, entry.backend_provider ?? entry.provider));
   }
   for (const entry of confirmation.host_model_cost_order ?? []) {
-    keys.add(entry.model_id);
+    if (entry.provider === undefined) continue;
+    keys.add(backendIdentity(entry.model_id, entry.provider));
   }
   return keys;
 }
 
 /** One backend in the gate's delta: reachable now, absent from the decision. */
 export interface NewlyReachableBackend {
-  /** The gate key — `model_id ?? provider name`. Stable, operator-facing. */
+  /**
+   * The gate key — {@link backendIdentity}. Stable, operator-facing, and
+   * provider-qualified.
+   */
   key: string;
   /** The backend's provider name. Display only — the prompt names it beside `key`. */
   provider: ResolvedProviderName;
   /**
-   * The {@link DispatchExclusionPattern} that rules out **exactly this backend** —
-   * `provider:model` where the model is knowable, else the coarse `provider` tier.
-   * Built HERE rather than re-derived by the autonomous fail-closed write, so the
-   * rule the gate persists cannot drift from the key the gate compared.
+   * The {@link DispatchExclusionPattern} that rules out **exactly this backend**,
+   * built HERE beside the key it was compared on so the rule the gate persists
+   * cannot drift from the identity the gate diffed.
+   *
+   * DELIBERATELY not the same string as {@link key} for a proxied lane: the key is
+   * backend-qualified (`nim:model`) and this is transport-qualified
+   * (`claude-worker:model`), because those are the two different questions named on
+   * {@link backendIdentity}. A rule carrying the backend name would match nothing.
    */
   exclusion_pattern: DispatchExclusionPattern;
-}
-
-/**
- * The pattern that rules out one backend at the finest granularity its model is
- * knowable at. The inverse of {@link backendGateKey}, and deliberately adjacent to
- * it: a `provider:model` rule matches only when the routing filter sees that exact
- * model, so a backend whose model arrives at the dispatch handshake (a CLI) must be
- * ruled out at the coarse `provider` tier or the rule would never match.
- */
-function backendExclusionPattern(
-  modelId: string | undefined,
-  providerName: string,
-): DispatchExclusionPattern {
-  return modelId ? `${providerName}:${modelId}` : providerName;
 }
 
 /**
@@ -563,21 +624,32 @@ export function computeNewlyReachableBackends(
 ): NewlyReachableBackend[] {
   const confirmed = confirmedBackendKeys(confirmation);
   const reachNow = new Map<string, NewlyReachableBackend>();
+  // `provider` is the TRANSPORT (what spawns / what the routing filter matches);
+  // `backendProvider` is the BACKEND ACTUALLY SERVING the model, and only a proxied
+  // source distinguishes them. The identity keys on the backend, the rule on the
+  // transport — see `backendIdentity`.
   const record = (
     modelId: string | undefined,
     provider: ResolvedProviderName,
+    backendProvider?: string,
   ): void => {
-    reachNow.set(backendGateKey(modelId, provider), {
-      key: backendGateKey(modelId, provider),
+    const identity = backendIdentity(modelId, backendProvider ?? provider);
+    // First writer wins: when a proxied lane and a direct lane resolve to the SAME
+    // backend identity, they are one backend reached two ways, and the rule kept is
+    // the one that rules out the lane already recorded.
+    if (reachNow.has(identity)) return;
+    reachNow.set(identity, {
+      key: identity,
       provider,
       exclusion_pattern: backendExclusionPattern(modelId, provider),
     });
   };
   for (const provider of discoverProviders(sessionConfig, env, detectCommand)) {
+    // A discovered provider IS its own backend — no proxy indirection to unwrap.
     record(representativeModelId(provider.name, sessionConfig), provider.name);
   }
   for (const source of sources) {
-    record(source.model, source.provider);
+    record(source.model, source.provider, source.backend_provider);
   }
   return [...reachNow.values()]
     .filter((backend) => !confirmed.has(backend.key))
@@ -814,6 +886,11 @@ function isHostModelCostEntry(value: unknown): value is HostModelCostEntry {
   const obj = value as Record<string, unknown>;
   return (
     typeof obj.model_id === "string" &&
+    // Optional (pre-field confirmations parse), but when present it must be a real
+    // provider name — `confirmedBackendKeys` builds a gate key from it, and the
+    // validator guards every field its callers read.
+    (obj.provider === undefined ||
+      (typeof obj.provider === "string" && isResolvedProviderName(obj.provider))) &&
     (obj.blended_price_usd_per_mtok === null ||
       typeof obj.blended_price_usd_per_mtok === "number") &&
     typeof obj.cost_order === "number"
@@ -828,6 +905,9 @@ function isSourcePoolCostEntry(value: unknown): value is SourcePoolCostEntry {
   return (
     typeof obj.source_id === "string" &&
     typeof obj.provider === "string" &&
+    // Optional, but guarded: `confirmedBackendKeys` builds a gate key from it.
+    (obj.backend_provider === undefined ||
+      typeof obj.backend_provider === "string") &&
     (obj.model_id === undefined || typeof obj.model_id === "string") &&
     (obj.blended_price_usd_per_mtok === null ||
       typeof obj.blended_price_usd_per_mtok === "number") &&

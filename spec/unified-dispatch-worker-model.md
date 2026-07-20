@@ -256,13 +256,27 @@ granularity is the point: excluding one model of a multi-model backend must leav
 
 | Keyspace | Shape | Account is | Used for |
 |---|---|---|---|
-| quota-ledger pool identity | `provider[#account]/model` | **load-bearing** (the double-grant boundary) | pool ids, learned quota |
-| operator exclusion pattern | `provider:model` (open, 3 tiers) | irrelevant | route decisions |
-| gate compare key | `model_id ?? provider` | irrelevant | delta detection |
+| quota-ledger pool identity | `backend_provider[#account]/model` | **load-bearing** (the double-grant boundary) | pool ids, learned quota |
+| operator exclusion pattern | `provider:model` (open, 3 tiers), **transport**-qualified | irrelevant | route decisions |
+| gate compare key | `(backend_provider ?? provider):model`, **backend**-qualified | irrelevant | delta detection |
 
-The gate keys on `model_id ?? provider-name` rather than a bare `model_id` because a representative
-model id is known for only some providers — a bare-`model_id` key is blind to a CLI backend appearing
-on PATH.
+The gate key falls back to the bare provider name rather than being a plain `provider:model` because a
+representative model id is known for only some providers — a model-only key is blind to a CLI backend
+appearing on PATH.
+
+The gate key and the exclusion pattern are built beside each other but are **not the same string**, and
+the difference is only visible for a proxied lane. The key qualifies on the BACKEND actually serving the
+model, because that is what "is this the backend the operator already saw?" means: a proxied
+`claude-worker` lane and a direct `openai-compatible` lane onto one `nim` backend are ONE backend
+reached two ways, while two lanes over one transport onto `nim` and `openrouter` are TWO. The rule
+qualifies on the TRANSPORT, because that is the field `ruleMatches` compares — a rule naming the backend
+would match nothing at dispatch. Keying the gate on the transport inverts both cases at once, which is
+why it was a gate BYPASS: confirming one backend marked an identically-named model on another as
+approved.
+
+⚠ **Known residue:** one backend reachable through SEVERAL transports yields one delta entry carrying
+one transport's pattern, so an autonomous fail-closed exclusion drops only that route. Tracked in
+`docs/backlog.md`.
 
 ## Honest residuals — loud reactive degrade, NOT guarantees
 
