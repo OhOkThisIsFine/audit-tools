@@ -424,7 +424,11 @@ export function annotateConfirmedPool(
   const sourceCandidates: CostCandidate[] = foldedSources.map((source) => ({
     key: sourceCandidateKey(source),
     model: source.model ?? null,
-    provider: source.provider,
+    // Price binds to the SERVICE, never the transport: `resolveModelStatics` falls
+    // through to the cheapest-collision default entry for a provider string the price
+    // table has never heard of, so passing a transport here (`claude-worker`) silently
+    // prices a proxied lane at some other vendor's rate.
+    provider: sourceService(source),
     ...(source.cost_per_mtok !== undefined ? { declaredCost: source.cost_per_mtok } : {}),
     ...(source.capability_rank != null ? { capabilityRank: source.capability_rank } : {}),
   }));
@@ -457,7 +461,8 @@ export function annotateConfirmedPool(
         ? source.cost_per_mtok
         : undefined;
     const price =
-      declared ?? (source.model ? resolveModelPrice(source.model, source.provider) ?? null : null);
+      // Service, not transport — see the CostCandidate note above.
+      declared ?? (source.model ? resolveModelPrice(source.model, sourceService(source)) ?? null : null);
     return {
       source_id: dispatchSourceKey(source),
       provider: source.provider,
