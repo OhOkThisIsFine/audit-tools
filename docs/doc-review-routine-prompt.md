@@ -93,10 +93,9 @@ CLASSIFICATION
 
 AUTO-APPLY (only the safe class)
 9. Apply final stale-factual-fixes to docs on `main`, EXCEPT instruction files:
-   CLAUDE.md, AGENTS.md, AGENTS.audit.md, AGENTS.remediate.md are ESCALATE-ONLY —
-   never auto-edit them.
+   CLAUDE.md, AGENTS*.md are ESCALATE-ONLY — never auto-edit them.
 10. Before pushing `main`, run the green gate and require zero errors:
-    env -u CLAUDECODE npm run build && env -u CLAUDECODE npm run check.
+    env -u CLAUDECODE npm run build && env -u CLAUDECODE npm run check && env -u CLAUDECODE npm test.
     If it fails, do not push; escalate instead.
 11. Each applied change is ONE discrete, revertible commit titled
     `doc-review: <summary>`. Then push `main`.

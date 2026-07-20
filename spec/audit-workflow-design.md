@@ -276,9 +276,10 @@ packet list). Nodes = tasks (unit × lens), each carrying a deterministic
 byte-based **token estimate** and a **risk estimate** (lens sensitivity,
 critical-flow membership, analyzer signal, blast radius), both frozen after one
 always-on LLM estimate review. Edges = soft, weighted **affinity** (`kind` +
-`weight`: shared file → same unit → same directory → critical-flow/call adjacency
-→ cross-lens-same-file → same lens), deterministically derived (LLM-tunable),
-never frozen — they are the flexibility each provider uses to cut its own packets.
+`weight`, descending: shared file → cross-lens-same-file → critical-flow (same
+flow) → same unit → call adjacency → same directory, plus an additive same-lens
+bonus), deterministically derived (LLM-tunable), never frozen — they are the
+flexibility each provider uses to cut its own packets.
 Kept distinct from `graph_bundle.json` (code structure). Packets do not exist at
 plan time, and the plan encodes no provider/model/concurrency decision — so a run
 resumes across providers/IDEs mid-flight with no replanning (this is the

@@ -39,8 +39,8 @@ shipped-vs-open status.
   `awaitNextCompletion` hands the raw result to O3.
 - **provider capability (F3↔F4):** descriptor discovered once on the provider contract (F3); F4 surfaces
   it at the dispatch site (reads, doesn't compute).
-- **friction sink (O1↔O3/O2/F4/F5):** ONE `captureFrictionEvent` under `src/shared/friction` wrapping
-  `frictionCapture.ts`; all mechanical seams call it; appends ride O2's `withFileLock`.
+- **friction sink (O1↔O3/O2/F4/F5):** ONE `captureFrictionEvent` function in
+  `src/shared/friction/captureFrictionEvent.ts`; all mechanical seams call it; appends ride O2's `withFileLock`.
 - **git_history registration (F6↔F1):** F1 registers `git_history.json` in the DAG + `dep-map.md`
   atomically with F6.
 - **own-vs-acquire (F5↔F6):** git-history mining is owned (F6); secret-scanning is acquired through

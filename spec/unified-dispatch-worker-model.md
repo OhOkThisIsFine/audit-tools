@@ -26,8 +26,8 @@ cost-ranks. Dispatch inventory is resolved **per-auditor at dispatch time**, ext
 | Kind | Reaches a model via | Tools / file access | Backend diversity via | repair-proxy |
 |---|---|---|---|---|
 | **Claude-harness agentic** — the host and its `claude` subagents (host fan-out); `claude -p` when headless, shipped as the `claude-worker` provider (`CLAUDE_WORKER_PROVIDER_NAME`) | the Anthropic `/v1/messages` wire protocol, redirectable by `ANTHROPIC_BASE_URL` | full (Read/Edit/Bash) | pointing the harness at a proxy → backend | ✅ **its lane** |
-| **CLI agentic** — codex, agy (spawned subprocess harnesses) | the CLI's own model provider (OpenAI / Gemini), its own config | full | *being a different agent* | ❌ own harness/backend |
-| **Single-shot API** — NIM / opencode / vLLM direct | a direct `POST /chat/completions`, one shot | **none** (no tool loop) | *is* the backend | ❌ nothing to repair |
+| **CLI agentic** — codex, agy, opencode (spawned subprocess harnesses) | the CLI's own model provider (OpenAI / Gemini), its own config | full | *being a different agent* | ❌ own harness/backend |
+| **Single-shot API** — NIM / vLLM direct | a direct `POST /chat/completions`, one shot | **none** (no tool loop) | *is* the backend | ❌ nothing to repair |
 
 The kinds are not interchangeable per node: a node needing file access (all of remediate implement;
 any audit review packet whose granted files exceed the inline caps) requires an **agentic** worker

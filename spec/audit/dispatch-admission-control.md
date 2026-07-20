@@ -234,7 +234,7 @@ ledger is layered on top of it, never in place of it.
    hard guarantee.
 3. **Legibility — the dispatch-quota artifact explains every admission.** Each
    admission records `{ packet_id, pool_id, resource_key, admitted, reason
-   (admitted|no_capable_pool|budget_exhausted|cap_reached), headroom_before,
+   (admitted|no_capable_pool|budget_exhausted|cap_reached|packet_oversized|window_uncalibrated), headroom_before,
    outstanding_before, cost }` so the emergent fan-out width is reconstructable
    after the fact.
 4. **Cold-start — probe-then-widen only when unknown.** When the `resourceKey` has
