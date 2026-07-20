@@ -74,6 +74,25 @@ followed" is otherwise indistinguishable from a bug.
 
 ## Open bugs / frictions — fix in tooling (never "host remembers")
 
+- **CLAUDE.md overstates the `admitSpawn` consent gate (2026-07-19).** *Own-vs-acquire analyzer
+  engine* states every acquired-tool spawn "routes through the single `admitSpawn` chokepoint and
+  requires the per-run `ExternalAcquisitionConfig.consent_token`." Verified against HEAD:
+  `defaultRun` **bypasses** the token requirement — only non-default tools require it
+  (`src/audit/extractors/analyzers/acquisitionEngine.ts:216-224`); `admitSpawn` is at `:304,:478`.
+  SPEC: decide which is the intended invariant, then make doc and code agree — either the curated
+  default set is legitimately exempt (say so explicitly in CLAUDE.md, since "every spawn requires the
+  token" is currently false) or `defaultRun` must also pass through the token check. Surfaced by the
+  memory-consolidation verification pass, `docs/reviews/memory-consolidation-2026-07-19.md`.
+
+- **Memory/doc claims of "open item" decay exactly like backlog prose (2026-07-19).** The memory
+  consolidation found a memory listing 4 open items of which 3 were long done (audit's symmetric
+  `runRollingDispatch` wiring, INV-QD-14 spill, `rate_limited` handling). Same class as
+  [[backlog-prose-decays-verify-against-head]] but in the memory store, where nothing ever forces a
+  re-read. SPEC: treat any "open"/"remaining"/"TODO" claim in a memory or spec as a LEAD requiring a
+  HEAD check before it becomes work — never as a work order. No tooling fix proposed yet; if this
+  recurs, the mechanical form is a lint that greps memory/spec for open-item phrasing and reports
+  the ones whose named symbols now exist.
+
 - **The TEST TREE IS NOT TYPECHECKED AT ALL — `.ts` tests included (2026-07-19).** `tsconfig.json`
   is `include: ["src"]` and vitest has no `typecheck` configured, so no test file is typechecked.
   This keeps defeating "make the field required so `tsc` enumerates the sites": that guarantee is
@@ -1248,6 +1267,23 @@ followed" is otherwise indistinguishable from a bug.
   dated `*-plan-of-record.md` in the tracked tree (the gate now rejects the latter).
 
 ## Durable traps (environment / tooling reference)
+
+- **`codex exec` hangs forever waiting on stdin — always redirect `< /dev/null`.** A backgrounded
+  `codex exec --sandbox read-only "<prompt>"` printed `Reading additional input from stdin...` and
+  sat at 39 bytes of output indefinitely, looking exactly like a slow model. It is not: codex reads
+  stdin even when the prompt is a positional arg. **Use:** `codex exec … "<prompt>" < /dev/null`.
+  Cost a full wasted background run during the 2026-07-19 memory pass.
+
+- **The LiteLLM/NIM offload lane rate-limits hard above ~2 concurrent requests per model.** A 10-batch
+  fan-out at concurrency 10 (and again at 3) returned
+  `litellm.RateLimitError … Error code: 429` on nearly every batch, and NIM has no fallback group
+  configured. **Use for any bulk pass:** concurrency ≤2, rotate the `model` across the roster
+  (`glm-5.2`, `deepseek-v4-pro`, `minimax-m3`, `qwen3.5-397b`, `nemotron-3-ultra-550b`) per batch AND
+  per retry, escalating backoff. Also make the driver **resumable** (skip already-processed items,
+  merge into the output file) — a long fan-out will lose batches, and two concurrent writers to one
+  output file will clobber each other's progress. Distinct from
+  [[offload-lane-failures-are-usually-the-caller]]: this one really is the endpoint, and
+  `finish_reason` is `undefined` (not `length`) because the body is an error, not a completion.
 
 - **`git checkout -- <file>` silently destroys unstaged work when a review round is staged.** Common
   during review-driven rework: you `git add -A` to give reviewers a stable diff, keep editing in the

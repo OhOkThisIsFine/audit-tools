@@ -26,6 +26,12 @@
   code rather than its own prose; ~21% were closable and several load-bearing claims were false. Items
   now carry an explicit **SPEC** paragraph stating the agreed mechanism. Treat an entry without one as
   still raw ([[backlog-prose-decays-verify-against-head]]).
+- **Project memory was consolidated 2026-07-19** (149 → 135 files; record:
+  [`memory-consolidation-2026-07-19.md`](reviews/memory-consolidation-2026-07-19.md)). The single-package
+  collapse had left **17 memories citing dead paths**, concentrated in the trap/recovery files whose
+  procedures were runnable and wrong; three more described *reverted* directions as the current goal.
+  All fixed. ⚠ Carried-forward caveat: an "open item" claim inside a memory is a LEAD, not a work order —
+  one listed 4 opens of which 3 were long done ([[refactor-must-sweep-memory-not-just-code]]).
 
 ## Cadence & standing rules (don't re-derive)
 
