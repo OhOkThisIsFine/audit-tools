@@ -18,7 +18,13 @@ narrow, code-anchored stale-factual fixes; escalate everything requiring
 judgment.
 
 SETUP
-1. git fetch origin. Review against `main`'s HEAD content.
+1. Fetch the remote that hosts this repo, then review against `main`'s HEAD
+   content. Do NOT assume the remote is named `origin` — a fresh clone names it
+   that, but an existing checkout may not (this repo's is named `audit-tools`).
+   Resolve it rather than hardcoding it (`git remote`, or main's upstream via
+   `git rev-parse --abbrev-ref main@{upstream}`). ABORT LOUDLY if the fetch
+   fails: silently reviewing a stale tree means applying "fixes" against code
+   that has already moved.
 2. Keep YOUR state on a dedicated `doc-review` branch (findings + ledger only).
    If it doesn't exist, create it as an orphan branch holding just
    doc-review-findings.md and doc-review-ledger.json. Never put state files on `main`.
@@ -66,12 +72,15 @@ THREE-AGENT GATE (the safety surface — do not shortcut it)
 7. JUDGE: for every CONTESTED item (reviewer and adversary disagree), spawn a
    third independent subagent to decide final disposition AND the apply-vs-escalate
    call. It DEFAULTS TO ESCALATE on any uncertainty.
-8. NO AUTO-APPLY RESTS ON AN OFFLOADED VERDICT ALONE. Before writing ANY edit,
-   re-verify its code anchor yourself against HEAD — the named file, symbol,
-   command, path or count. An offloaded agent can be fluent, confident and wrong
-   about a mechanism. Offload finds candidates; you confirm them. This is what
-   lets the bulk work move off the primary quota without moving the safety with
-   it.
+8. NO AUTO-APPLY RESTS ON THE VERDICT OF A SINGLE REVIEWER — yours included.
+   Every applied edit must have survived a second independent examination, and
+   its code anchor must be re-verified against HEAD (the named file, symbol,
+   command, path or count) before it is written. WHICH agent produced a verdict
+   is irrelevant to its weight: an offloaded lane catches things you missed as
+   often as the reverse, and any single agent — you, an adversary, a lane — can
+   be fluent, confident and wrong about a mechanism. The lone verdict is the
+   risk, not its author. This is what lets the bulk work move off the primary
+   quota without moving the safety with it.
 
 CLASSIFICATION
 - stale-factual-fix = a factual claim the code contradicts (a named
@@ -114,6 +123,6 @@ findings file beyond the ledger and emit no notification.
 
 INVARIANTS: verify from code never prose; no code anchor -> a question for Ethan,
 never a silent deletion; instruction files never auto-edited; no auto-apply rests
-on an offloaded agent's verdict alone; green gate passes before any `main` push;
+on the verdict of a single reviewer; green gate passes before any `main` push;
 `main` only ever receives reviewed, green-gated doc edits.
 ```
