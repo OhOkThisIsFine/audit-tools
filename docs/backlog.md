@@ -124,8 +124,19 @@ followed" is otherwise indistinguishable from a bug.
   which is the whole point of the round — so the two goals are in tension and the fix is not "reuse
   the agent". **Property to hold:** a review round receives the verified call-site map as INPUT
   (cheap, mechanical, produced once) and spends its budget on judgment, not rediscovery — while still
-  reaching its own verdict. Candidate: a recon step that emits a map artifact each round refreshes
-  rather than rebuilds.
+  reaching its own verdict.
+  **SPEC — the tension is false: it conflates independence of VERDICT with independence of INPUT.** What
+  a review round must not do is judge work it authored. Being handed a factual call-site map it did not
+  produce does not compromise that — the agent is still fresh and the verdict is still its own. Re-deriving
+  the map from scratch was never carrying independence; it was carrying redundant derivation, and paying
+  ~135k tokens per round for it.
+  **Resolution:** the verified map is a read-only, provenanced input artifact. Each round receives it
+  labelled as prior verified recon it did not author, and cannot write back to it — updates go through a
+  separate recon step, so the map cannot silently absorb a reviewer's assumptions and then be handed to
+  the next reviewer as fact. Rounds spend their budget on judgment.
+  **Property to hold:** no review round re-derives a mechanical fact another round already established,
+  and no round judges anything it authored. ⚠ Sharing an agent SESSION across rounds is the wrong version
+  of this and forfeits exactly what the round is for.
 
 - **Window-scope validation at the PRODUCER boundary — designed for step 2, deferred with reason
   (2026-07-19).** The design of record (Residual 1) says to validate scope once where a snapshot is
@@ -261,7 +272,17 @@ followed" is otherwise indistinguishable from a bug.
   shape** — the right control law is not derivable from a guess. ⚠ An earlier version of this entry
   claimed the measurement half had shipped, naming two functions that do not exist; throughput is
   derived from concurrency alone today, so what "observed progress" would even read from is itself
-  undecided. Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
+  undecided.
+  **SPEC — instrument now, derive the control law later, never guess it.** Three states are possible and
+  only one is acceptable. A manual deadline knob is a bug signal. A guessed controller wired into the dial
+  is WORSE than the knob — it hunts and overshoots under live pressure with no dataset to debug against.
+  The right intermediate is neither: ship a passive observer recording elapsed time, measured throughput,
+  and progress-to-completion per run, and let a deadline act only as a hard stop with a persisted trace.
+  The dial stays open-loop. Once real traces exist, fit the law offline, validate it against held-out
+  runs, and only then close the loop.
+  **Property to hold:** no control law reaches the dial before it has been fitted to measured runs and
+  validated — and the absence of a law is never filled by an operator knob in the meantime.
+  Adjacent, same family: [[quota-before-cost-ordering]] (Gate-0 suggests cost order on
   $/Mtok alone, never demoting a quota-saturated pool).
 
 - **The loop-core attestation gate cannot tell a human reviewer from the committing agent
@@ -486,6 +507,17 @@ followed" is otherwise indistinguishable from a bug.
 - **Sharpened consequence of the model-keyed delta collapse (3c review F10, pre-existing class at new scale, low-medium).** `reachNow.set` last-wins per `model_id ?? provider` key, so a colliding direct+proxied pair yields ONE delta entry naming ONE lane's provider — autonomous fail-closed excludes that pattern and the OTHER lane routes unconfirmed. Registry expansion now manufactures colliding pairs at scale (bounded by declared-wins dedup + top-K). Fix requires `backendGateKey`/`confirmedBackendKeys`/exclusion-grammar to move together (provider-qualified keys) or PRIORITY[0] livelocks — the existing "delta collapses two providers" entry below is the same root.
 - **The vitest timing ledger records no pass/fail outcome, so a clipped console capture is unrecoverable (2026-07-16, tool-should-decide, low).** `.audit-tools-profile/vitest-latest.json` carries timing only (`fileCount`/`slowest`/…); twice in one session a full-suite run's summary was lost to a `| tail` clip and the ledger could not answer "did it pass, which files failed" — forcing a 4-minute rerun. Property to hold: the standing profile of a test run must record its OUTCOME (pass/fail counts + failed file names), not just its cost. One field in `vitest-timing-reporter.mjs`.
 - **A doc-lint hook rewrites prose between Read and Edit, so exact-match edits fail on text the agent never wrote (2026-07-16, inefficient-feeding, low).** Mid-lap an `Edit` on `docs/backlog.md` failed with "String to replace not found" on a paragraph I had authored minutes earlier — a hook had normalized `vs` → `vs.` in it. The Edit tool's own hint ("tried swapping \uXXXX escapes") points at encoding, not at a hook rewrite, so the natural next move is re-reading the whole file to hunt an invisible character. Cost a re-read + a retry. Property to hold: a hook that rewrites a file the agent is mid-edit on should announce the rewrite (or the tool should re-anchor), rather than presenting as a mysterious mismatch. Cheap mitigation until then: after a "not found" on text you just wrote, suspect a normalizer and `grep` the anchor before re-reading the file.
+  **SPEC — a hook that rewrites a file must announce the rewrite; the editing tool is not ours to change.**
+  Recurred again this session, on this very entry: an exact-match edit failed while a full re-read showed
+  byte-identical text, so the mismatch was invisible and the only escape was shrinking the anchor until it
+  matched. The cost is never the retry — it is that the failure impersonates an encoding problem, and the
+  tool's own hint points at character escapes, sending the agent hunting for something that is not there.
+  The fix belongs in the hook, which we own: when it rewrites a file, it says so, so the next mismatch is
+  self-explaining. ⚠ Do not pursue lint-aware patch semantics inside the editor — that is someone else's
+  tool and a large mechanism to avoid a one-line announcement. ⚠ And do not "fix" it by disabling the hook
+  during agent edits: suppressing enforcement to make editing convenient is the wrong direction and
+  teaches the same workaround on every other surface.
+  **Property to hold:** a file mutated underneath an agent mid-edit is announced, never silent.
 - **Release gate: add `check:doc-manifest` to the pre-commit hook (open remainder, medium).** The durable lesson — a lap cannot report green on evidence weaker than what CI runs; end a lap by checking CI on `main` (the per-workflow runs endpoint is the reliable one), and run `npm run verify:release` before any "this is shippable" claim — is homed in `docs/HANDOFF.md` → "Release gate — the durable lesson" + [[lap-green-must-match-ci-evidence]]. Sole open action: `.claude/hooks/pre-commit-gate.mjs` gates `npm run check` (always) plus `test:doc-contract` and loop-core attestation (each conditionally, when staged files touch the relevant paths) — but never `check:doc-manifest`, so consider adding it (~2s, and it is the check that fired on EVERY push). [[enforce-robustness-in-tooling-not-host-discretion]] **Billed once, 2026-07-18** (a new dated plan doc committed fine locally and blocked `verify:release` afterwards).
 - **Neither new test guards the WIRING — only the mechanism and the loader (2026-07-16, low).** `tests/remediate/session-config-load.test.ts` red-greens `loadRemediateSessionConfig`, and every remediate site routes through it today, but a FUTURE call site that inlines `resolveSessionConfig(intent, null)` instead of using the loader fails no test (verified by experiment: reverting a call site to `null` left both files green). Same for audit's two ambient sites. The loader makes the right thing the easy thing; it does not make the wrong thing impossible. Property to hold: a production caller cannot resolve a session config without a descriptor — e.g. make the descriptor a required parameter and give the two legitimate "resolve no pool" callers an explicit `noPoolDescriptor()`, so `null` stops being the path of least resistance.
 - **A post-worker LANDING stage is misfiled as dispatch — 3,470 of 5,326 lines under `src/remediate/steps/dispatch/` (owner question 2026-07-16, medium).** worktree / accept / writeScope / verifyCommands are not dispatch: `executeNodeInWorktree` (`acceptNode.ts:749`) is called by the **driver** (`nextStep.ts:1190`), NOT by `prepareImplementDispatch`, which ends at `marshal.ts:427` having written plan + quota and never touching a worktree. They live under `dispatch/` only because the barrel (`dispatch.ts:49-134`) aggregated them; `acceptNode.ts:332` even takes a base-branch lock — pure serialization, zero dispatch content. Symmetrically on the audit side, `prepareDispatchArtifacts` both *decides* and *renders the prompt* (anchor extraction reads source files, `packetPrompt.ts:123-161`; lens defs `dispatch.ts:231-232`; knip indices `dispatch.ts:443-458`). **Property to hold: dispatch is three stages — select/pack, size/admit, launch/land — and the name covers only the middle. Each stage is separately nameable and testable.** Re-home; do NOT bundle into the assembly-unification lap.
@@ -495,6 +527,20 @@ followed" is otherwise indistinguishable from a bug.
 - **G4 reduces to ONE narrow bug: `block_quota.host_model` is auditor IDENTITY persisted in the repo, and it outranks the descriptor (found G4 premise-check 2026-07-16, corrected same-day during implementation, medium).** `resolveHostModel` (`limits.ts:56-71`) resolves `explicit ?? block_quota.host_model ?? env`; `hostPool.ts:156` then does `quotaModelKeySegment = hostModel ?? input.hostModelId` — so the repo's `block_quota.host_model` beats the descriptor's `self.model_id` and **auditor B keys its quota to auditor A's model**. Violates [[capability-is-per-auditor-not-per-audit]]. **⚠ The rest of the original claim is REFUTED: nothing writes `quota`/`block_quota`** — they are operator-authored, and `packetFilter.ts:259` documents `quota.models` as the operator's override mechanism. So `quota.models[<model>]` is keyed BY MODEL NAME (same window for every auditor) → inheriting it is CORRECT, and `limits.ts:115` beating discovery is the intended escape hatch, **not a bug — do not "fix" it** (it only misfires because `hostModel` was mis-resolved upstream; fix the identity and it's right). `quota.default_context_tokens`/`reserved_output_tokens` and `block_quota.context_tokens`/`reserved_output_tokens` (`plan.ts:47-51`) are policy → stay on intent. **Fix = move `block_quota.host_model` → `self.model_id` only**; narrow the `RepoSessionIntent` HALF-type note (`src/shared/types/sessionConfig.ts:772-779`) accordingly. Also stale: G4's "may fold into G2" — G2 shipped and did not fold it. Separately real (and still open): `resolveSessionConfig.ts:86-116` maps none of the `self.*` capability fields; they reach dispatch hand-threaded through three audit CLI commands (`nextStepCommand.ts:130-133`, `prepareDispatchCommand.ts:43-48`, `quotaCommand.ts:38`) — a parallel channel bypassing the one seam. **⚠ Correcting this entry's own earlier claim that the channel "MUST collapse in the same commit as any shared-assembly lift": that premise did NOT apply and the 2026-07-16 lift shipped without it.** The constraint assumed shared assembly would take the DESCRIPTOR and read the resolved config; `buildHostPoolPreamble` instead takes already-resolved scalars (`providerName` / `explicitHostModel` / `hostModelId` / `hostContextTokens` / …), so the channel now hand-threads into ONE function rather than two — strictly better, and not a correctness coupling. The collapse remains worth doing on its own merits (one seam, not two channels), but it does not gate the lift. **Also note the lift moved the `hostModel ?? hostModelId` precedence INTO shared (`hostPool.ts`), so if G4 IS a bug its blast radius is now both draws — which is an argument for settling the owner call, not for reverting.** Detail: `docs/reviews/g4-g5-g6-premise-check-2026-07-16.md`.
 - **G5's premise is 2/3 DEAD — narrow the spec before laying it out (found G4 premise-check 2026-07-16, low).** (a) `declared ∩ ambient-verifiable` SHIPPED as G2.5 (`resolveAmbientSources`). (b) The **auditor-id stamp is dead as specced** — `auditor_id`/`resolved_at` are parsed (`args.ts:348-349`) and read at exactly ONE site (`prompts.ts:61-62`) purely as an is-non-empty test: a write-only field ([[write-only-data-looks-authoritative]]). G2.5 established each IDE spawns its own process → own env → nothing shared to contaminate, and the spec's own Honest-residuals says the `(provider, account)` ledger — not auditor identity — is the load-bearing double-grant boundary. Before building a stamp, name the transient cross-auditor-shared run-state and re-derive whether an id is the fix. (c) Only the **lies-reachably quarantine** survives (`auditorSources.ts:147-148`); it is the sole catcher for G2.5's inline-`api_key` refusal. **G5 ≈ clause (c) alone.**
 - **A ROTATING set of heavy suite tests fails only under parallel load — hermeticity, not regression (re-measured G3 A′ lap 2026-07-16, tool-should-decide, low-medium).** `tests/audit/linux-cycle-regression.test.mjs` fails in a full `vitest run` but passes alone (35s), and a **third failure rotates** between runs — observed as `tests/remediate/wave-scheduler.test.ts`, `tests/audit/next-step.test.mjs`, `tests/shared/quota-state.test.mjs` (all heavy, all pass alone). **Measured baseline: clean `main` fails the SAME 2 + 1 rotating** (`linux-cycle-regression` + `INV-shared-core-14` + one mover), so a branch showing this is at parity, not regressing. Also timed `linux-cycle-regression` mine-vs-main: 35s both. Per the test-failure protocol these are test bugs (timeout under worker contention / shared quota-state dirs), not code regressions. **The real cost is the is-it-mine investigation** — every dispatch-touching lap pays a full-suite baseline run on stashed main (~2×260s) to prove parity. Property to hold: a green branch must be distinguishable from a flaky one WITHOUT re-running the suite on main. Fix the hermeticity/timeouts, or quarantine the known-flaky set into a separate serial shard. (Distinct from `INV-shared-core-14`, which fails deterministically on main too — noted in `docs/HANDOFF.md` as pre-existing + env-sensitive.)
+  **SPEC — persist the known-state baseline so parity is a LOOKUP, not a re-run.** The cost here is not the
+  flakes, it is that every dispatch-touching lap re-derives the same baseline by stashing and running the
+  full suite on main to prove innocence. The missing thing is a recorded answer to "what does main do under
+  these conditions": store, at green baseline, each test's deterministic-or-parallel-flaky status annotated
+  with the environment it was measured in (parallelism, OS, core count), since the whole phenomenon is
+  load-dependent and a status measured under different concurrency means nothing.
+  A branch failure then classifies against that record: a test that passes alone, fails under load, and is
+  recorded parallel-flaky on main for the same environment is reported as parity with an annotation rather
+  than as red. **Unrecognized failures stay red** — the classifier may only downgrade a failure it has a
+  matching record for, never wave through one it does not recognize.
+  **Property to hold:** a green branch is distinguishable from a flaky one without re-running the suite on
+  main. ⚠ Not to be confused with an ignore-list: suppressing these tests everywhere destroys the signal
+  permanently, and the hermeticity defects remain worth fixing on their own merits — this removes the
+  investigation tax, it does not make the flakes acceptable.
 - **No read-only surface shows the built dispatch pools — an exclusion rule is unverifiable until a live dispatch (G3 A″ lap 2026-07-16, tool-should-decide, medium).** Verifying "operator excludes one NIM model ⇒ siblings still route" end-to-end, I could observe the operator half at the real CLI (Gate-0 prompt → persisted `policy`) but **not the routing half**: `buildSourcePools` is reachable only from a live dispatch wave. Checked every read-only surface — `audit-code quota` reports only the host pool (`claude-code/*`) and reports the SAME with no exclusion at all, so it never builds source pools; `validate` surfaces none either. So an operator authors a rule and cannot see which pools resulted, and a typo'd rule (`openai-compatible:model-typo`) persists happily and matches nothing, silently. The grammar is OPEN by design so it can't be validated at parse time — but nothing reports "this rule matched zero backends". Property to hold: the operator can see the resolved dispatch pool set (and any zero-match rule) WITHOUT committing to a dispatch. Would also give the A″ routing filter a runtime surface to verify at, which it currently lacks.
 - **Gate-0 display never reflects an exclusion for a SOURCE — no status column, and the endpoint tier can't mark a provider entry (G3 A″ lap 2026-07-16, tool-should-decide, low).** Two halves of one gap, both display-only (routing is correct — `buildSourcePools` honors every tier): (a) the Gate-0 **sources table** (`providerConfirmationStep.ts`, `| id | provider | model | $/Mtok |`) carries **no status column at all**, so NO exclusion tier is ever shown for a source — pre-existing for provider-name rules, but total for A″'s model/endpoint tiers, which can only ever match sources; (b) `provider_pool` is provider-granular and its entries carry no endpoint, so an **endpoint-host rule can never mark one** (`ruledOut` in `sharedProviderConfirmation.ts` evaluates `{provider, model}` only) — the Gate-0 table renders the backend "included" while dispatch correctly drops it. Property to hold: what the operator is shown as excluded is exactly what dispatch drops, at EVERY grammar tier. Direction is fail-safe (under-reports, never over-routes), which is why it is low. NOTE: `excluded` leaves the persisted shape in **B+D**, so fix the RENDER path, not the artifact field.
 - **The per-tool seam artifact marks `excluded` at provider granularity only — inert today (G3 A″ lap 2026-07-16, low).** `confirmProviders` (`src/audit/orchestrator/providerConfirmation.ts`) still does `excludeSet.has(provider.name)` on what is now a **pattern** list, so a `provider:model` rule marks nothing in the per-tool `provider_confirmation.json`. Verified inert: the only reader of `.excluded` anywhere is the Gate-0 renderer, which reads the SHARED artifact. Cleanup, not a defect — but it is a latent trap the moment anything reads the seam's `excluded`.
@@ -753,6 +799,15 @@ followed" is otherwise indistinguishable from a bug.
     are fresh-process pipeline runs — cutting them cuts coverage, so this needs a real design (e.g. an
     in-process multi-step driver for the smoke, or packing once and sharing the tarball across both smokes
     since they build the identical `audit-tools` package), not a quick trim.
+    **SPEC — build the tarball ONCE, assert many. Do not build an in-process smoke driver.** The two
+    candidates are not equivalent: an in-process driver consolidates ORCHESTRATION, but the duplicated
+    work is the REBUILD, so it optimizes the wrong axis and additionally weakens the smoke — the entire
+    point is exercising the real packaged/global-install path, which nothing else catches, and running it
+    in-process erodes exactly that. Meanwhile both smokes pack the identical package.
+    Resolution: one build phase produces the tarball, and every packaged smoke installs from that same
+    artifact into its own fresh sandbox and runs its own assertions. Smoke semantics are unchanged and
+    coverage is untouched — only the redundant rebuild is removed. ⚠ The next-step round-trips are NOT a
+    target: they are fresh-process pipeline runs and cutting them cuts real coverage.
   - **Full vitest suite = 307s wall (452 files), `collect≈211s`** (confirms the old ~186s estimate), run
     time dominated by audit integration tests that spawn real subprocesses: `audit-code-completion` 285s,
     `audit-code-wrapper` 237s, `next-step` 165s, `cli-remediation` 111s. area:audit ≈ 1905s summed across
@@ -1038,9 +1093,18 @@ followed" is otherwise indistinguishable from a bug.
   (or extend `host-validation.md`). Folds into the A7 release-time GUI checklist work.
 - **Gated live e2es** skip without creds: `RUN_PROVIDER_MATRIX_E2E=1`, `RUN_NIM_E2E=1`,
   `AUDIT_TOOLS_LIVE_QUOTA=1`, `RUN_AUTONOMY_E2E=1`.
-- **Narrow staleness on prose-heavy artifacts via bounded semantic judgment.** Prose-heavy fields feed
-  downstream LLM prompts; a cosmetic edit forces wasteful re-emit. The narrowing = bounded judgment on
-  meaning change, fail-safe to re-derive. Efficiency-only; defer until re-emit churn is measured.
+- **SPEC — measure the churn before building anything; the deferral condition IS the next action.**
+  Prose-heavy artifact fields feed downstream LLM prompts, and content-hash staleness means a cosmetic
+  reword cascades an expensive re-emit. The proposed narrowing is bounded semantic judgment on whether
+  meaning changed, fail-safe to re-derive. It has been deferred "until the churn is measured" — but
+  nothing measures it, so the deferral is self-perpetuating and the question is currently being settled by
+  guesswork either way.
+  **The next action is instrumentation, not the classifier.** Record, per dependency edge that triggers a
+  refresh, the size and nature of the source change and the downstream token cost it caused. That yields
+  the number the decision needs. Build the classifier only if the measured cascade cost justifies it.
+  **Property to hold:** an efficiency mechanism is justified by a measured cost, never by an estimate of
+  one. ⚠ Building the bounded classifier now would replace a hash threshold with a judgment threshold that
+  is itself a guess — a manual flag wearing research clothing.
 
 ## Doc-set hygiene (enforced)
 
