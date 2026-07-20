@@ -1,4 +1,4 @@
-# Backend identity — the three axes
+# Backend identity — the axes
 
 > Durable concept doc. What a "backend" IS, the axes that identify one, and which axis each
 > downstream question binds to. The recurring defect class this closes: a consumer picking the
@@ -10,7 +10,14 @@ One word — `provider` — carried two unrelated concepts, and a third field (`
 unrelated shapes. Every downstream keyspace then had to independently rediscover which concept it
 needed. They did not all get it right:
 
-- the **quota ledger** correctly keyed on the serving vendor (`backend_provider ?? provider`);
+- the **quota ledger** keys on the serving vendor in ONE branch of `dispatchableSourceId` — and
+  only there. An earlier draft of this document claimed quota "already keys on service"; that is
+  **materially overstated** and was refuted. When no `backend_provider` is declared it returns an
+  arbitrary explicit `source.id`, or keys on the transport; host quota pools, the `quota` CLI, and
+  the remediate host-session keys all key on host/transport identity; and `buildProviderModelKey`
+  normalizes nothing — it embeds whatever string its caller supplies. The accurate statement is:
+  *some* source pools key on the declared service; fallback source pools and every host pool still
+  key on transport or host identity. The inconsistency is wider than the defect that exposed it;
 - the **Gate-0 confirmation gate** keyed on `model_id ?? provider`, dropping the vendor entirely —
   a confirmation BYPASS (confirming one vendor's model approved another vendor's identically-named
   model), fixed in v0.33.11;
@@ -21,16 +28,39 @@ Three consumers, three answers, one of them a security defect. The cause is not 
 that the domain has **more than one identity**, the type system expressed none of them, and the
 naming actively pointed the wrong way.
 
-## The three axes
+## The axes
 
-A dispatchable backend is identified by three ORTHOGONAL axes plus the model. They are orthogonal in
-the strict sense: fixing any two leaves the third genuinely free.
+A dispatchable backend is identified by four axes plus the model. They are *largely* independent —
+fixing three usually leaves the fourth free — but the claim of strict orthogonality was challenged and
+is not defended here: `transport` and `locus` are correlated (a CLI transport implies a command target),
+and `account` is only meaningful within a `service`. What matters is not orthogonality but that each is
+separately observable, and that no two can be substituted for one another.
 
 | Axis | Answers | Namespace | Examples |
 |---|---|---|---|
 | **transport** | *How* we talk to it — the adapter / code path | **CLOSED** (~10) | `openai-compatible`, `codex`, `claude-worker` |
 | **service** | *Who* serves the model — whose capacity, account, rate limit, bill | **OPEN** | `nim`, `openrouter`, `anthropic` |
-| **locus** | *Where* it is — the concrete address dialed or command spawned | open, two SHAPES | `https://…/v1`, `claude` |
+| **account** | *Whose* credential/tenant within a service — the double-grant boundary | open | `nim#work`, `nim#personal` |
+| **locus** | *Where* it is — the address dialed and/or the command spawned | open, MULTI-shape | `https://…/v1`, `claude` |
+
+`account` is a first-class axis, not a parenthetical under `service`. Two sources can agree on
+transport, service, locus AND model while drawing on independent budgets — and the canonical quota key
+is already `(provider, account, model)`. Any model that treats account as a detail of service will
+mis-key quota the moment one vendor is used under two credentials.
+
+⚠ `locus` is **not** a two-arm `url | command` union. That was proposed and refuted: a `claude-worker`
+lane has a proxy URL *and* a launcher command simultaneously; `subprocess-template` carries a command
+ARRAY; `worker-command` carries a per-node command. Any honest model needs a *network target* and a
+*launch target* as separate optional facets, not one discriminated union. Until that is designed, the
+current single field stands — see the caveat below.
+
+Two things sit OUTSIDE the axes and must not be smuggled into them:
+
+- **`source.id` — an operator OVERRIDE, not an axis.** A declared id becomes the capacity/learned-quota
+  key verbatim, even when it is not shaped like any axis. It outranks derivation by design.
+- **`worker_kind`** (agentic harness vs. single-shot HTTP) — a dispatch CAPABILITY that changes how
+  packets and context overhead are handled, and is overridable independently of transport. It
+  identifies nothing.
 
 `transport` is emphatically **not** "vendor". There is no `nim` transport, because NIM ships no
 bespoke protocol — it speaks OpenAI-compatible, so it is reached *through* the `openai-compatible`
@@ -95,28 +125,26 @@ identity `openai-compatible:model` while its proxied twin got `nim:model` — so
 folding**, and the operator was re-asked about a backend they had already approved. The fold must not
 depend on whether a declaration happened to include an optional field.
 
-## `locus` is a discriminated union, not a string
+## `locus`: known-wrong, deliberately unresolved
 
-The old `endpoint` field held *either* a URL (API transports) *or* a launcher command (CLI
-transports), typed as one `string`. A reader cannot tell which without already knowing the transport.
+The old `endpoint` field holds *either* a URL (API transports) *or* a launcher command (CLI
+transports) in one `string`. A reader cannot tell which without already knowing the transport.
 
-Two honest notes on the strength of this argument, because an earlier draft of this document
-overstated it. There is **no live parsing bug**: `endpointHosts` guards on `includes("//")` and falls
-through to a raw-literal match, so hostname parsing never runs over a launcher command. What is
-actually wrong is a CONFLATION — the tier called "host" silently doubles as a raw command matcher, so
-its name is a lie for CLI sources. That conflation is tolerable while the tier is inferred and
-undocumented; it becomes untenable the moment the grammar names its axes out loud, because an
-operator writing `host:` on a CLI source is then being told something false about what they matched.
+Two claims made for fixing it did NOT survive review, and are recorded so they are not re-made:
 
-So the union is justified BY the grammar redesign rather than independently of it, and on its own it
-would be a lower-priority cleanup.
+1. **There is no live hostname-parsing bug.** `endpointHosts` guards on `//` and otherwise returns the
+   raw lowercased literal, so URL parsing never runs over a launcher command.
+2. **Literal command matching is deliberate, supported, and tested** — a rule naming
+   `C:	ools\codex.cmd` matches exactly that command. A `url | command` union would REMOVE a working
+   feature.
 
-```ts
-type Locus = { kind: "url"; url: string } | { kind: "command"; command: string };
-```
+And the union is not an honest model anyway: `claude-worker` has a proxy URL and a launcher command at
+once, `subprocess-template` has a command array, `worker-command` has a per-node command. The real
+shape is a *network target* and a *launch target* as separate optional facets.
 
-Host-tier rules apply only to `kind: "url"`. A command is not a host and must be unrepresentable as
-one.
+**So this is deliberately left alone.** It is the weakest item in this document; the honest status is
+"the type is a lie, the proposed fix was worse, a richer launch/network-target model may be worth it
+later." Do not implement the two-arm union.
 
 ## The exclusion grammar: axis-explicit
 
@@ -149,6 +177,28 @@ Three properties follow, and each retires a known defect:
 
 The autonomous fail-closed write emits the **service** axis, because that is the axis that does not
 decay.
+
+### Three conditions this change must satisfy — it is NOT "strictly better" without them
+
+An earlier draft called the axis-explicit grammar strictly better. That was refuted, and the objections
+are real preconditions rather than reasons to abandon it:
+
+- **It is a breaking migration, not an additive one.** Persisted operator policy, the Gate-0 prompt
+  template that teaches operators the syntax, and several test fixtures all encode the bare forms.
+  Ship a one-shot migration of persisted patterns together with the parser and the prompt text, in one
+  atomic change. Do NOT leave a dual parser standing — that reintroduces exactly the "two answers"
+  disease this document exists to end.
+- **A `model:` axis is DANGEROUS and is deliberately excluded.** A model-only rule matches one model
+  string across every service — which recombines precisely the identities the gate exists to keep
+  apart, and contradicts the Gate-0 promise that a rendered rule excludes *that* backend and not its
+  siblings. If a cross-service model rule is ever genuinely wanted, it needs its own explicit,
+  loudly-labeled affordance. It is not an axis.
+- **`service:` rules can zero out dispatch capacity, and nothing currently notices.** A single
+  `service:nim` can remove every reachable lane; `buildSourcePools` filters and returns `[]` without
+  complaint, the headless remediate path has no host fallback, and the autonomous writer persists
+  exclusions without ever building the resulting capacity set. The run only strands later, reported
+  generically as `partial_reason: "empty_pool"`. **A capacity guard at the point of authorship — "this
+  rule removes all dispatch capacity" — is a prerequisite of the service axis, not a follow-up.**
 
 ## What this deliberately does NOT do
 
