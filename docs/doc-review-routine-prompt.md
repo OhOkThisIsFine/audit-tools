@@ -89,41 +89,26 @@ CLASSIFICATION
 - A policy is NEVER obsolete merely because no code "uses" it. Code-absence is
   the policy working.
 
-MEMORY REVIEW (project memory store, NOT in the repo)
-9. Store: ~/.claude/projects/C--Code-audit-tools/memory/*.md plus its MEMORY.md
-   index. In scope every run, with the SAME two dispositions.
-   ⚠ CRITICAL DIFFERENCE: this store is NOT version-controlled. A bad doc edit on
-   `main` is one revertible commit; a bad memory edit is UNRECOVERABLE. So the
-   auto-apply class is NARROWER here, and:
-   - DELETING a memory file is ESCALATE-ONLY, always. Several files carry an
-     explicit "RETIRED — keep this file for the durable lessons" note; a
-     tidy-minded deletion destroys exactly what they preserve.
-   - Rewriting a memory's substance is ESCALATE-ONLY. Auto-apply covers a stale
-     path/symbol/command citation inside an otherwise-correct memory, nothing more.
-10. Auto-applicable memory checks (mechanical, deterministic — good NIM/script work):
-   - every MEMORY.md line points at a file that EXISTS;
-   - every memory file appears in MEMORY.md EXACTLY ONCE (duplicate index lines
-     have been introduced by hand before);
-   - every [[wikilink]] resolves to a real memory `name:` (an unresolved link is
-     a LEAD, not an error — flag, never delete);
-   - frontmatter present and well-formed (name / description / metadata.type);
-   - MEMORY.md stays under 140 lines (a 200-line read cap truncates it, which
-     silently degrades every future session). Over 140 -> ESCALATE a consolidation
-     proposal naming which files to merge; never merge them autonomously.
-11. Escalate-worthy memory smells (judgment — never auto-apply):
-   - a memory citing paths/symbols that no longer exist (a package/layout refactor
-     once left 17 memories with dead paths, worst in the trap files whose
-     procedures were runnable and WRONG);
-   - a memory describing a REVERTED or superseded direction as the current goal;
-   - an "open item" claim inside a memory — that is a LEAD, not a work order; one
-     listed four opens of which three were long done. Verify against HEAD before
-     surfacing it as work;
-   - two memories that now say the same thing (propose a merge, don't perform it).
+MEMORY STORE — PRESENCE CHECK ONLY (this routine does NOT review it)
+9. The project memory store lives OUTSIDE the repo, on the workstation, at
+   ~/.claude/projects/<project-key>/memory/. It is not version-controlled and has
+   no remote, so a cloud runner cannot reach it. Memory review is therefore a
+   SEPARATE, LOCAL routine — see "Companion routine" below.
+   Do exactly one thing here: check whether that directory exists and is non-empty.
+   - ABSENT or empty (the expected cloud case) -> record ONE FYI line: "memory
+     store not reachable from this runner; not reviewed." Then move on.
+   - PRESENT -> do NOT review it either; record an FYI line saying it was found
+     and skipped, and flag that this runner may be local.
+   ⚠ NEVER report memory as clean, and never count it toward coverage. A review
+   that passes because it looked at an empty directory is worse than no review —
+   it manufactures false confidence in exactly the store nobody else is checking.
+   The project key is derived from the repo's absolute path, so it differs per
+   machine: an unreachable store is the DEFAULT, not an anomaly.
 
 AUTO-APPLY (only the safe class)
 12. Apply final stale-factual-fixes to docs on `main`, EXCEPT instruction files:
    CLAUDE.md, AGENTS.md, AGENTS.audit.md, AGENTS.remediate.md are ESCALATE-ONLY —
-   never auto-edit them. Memory auto-applies are limited to steps 9-10.
+   never auto-edit them. This routine writes NOTHING to the memory store.
 13. Before pushing `main`, run the green gate and require zero errors:
    env -u CLAUDECODE npm run build && env -u CLAUDECODE npm run check.
    If it fails, do not push; escalate instead. (The green gate covers the repo
@@ -165,6 +150,67 @@ only ever receives reviewed, green-gated doc edits.
 
 ---
 
+## Part 1b — the LOCAL memory-review companion
+
+**Why separate.** The memory store is not in the repo, is not a git repo, and has no remote — it
+exists only on the workstation, under a project key derived from the repo's absolute path. A cloud
+runner cannot see it, and silently reviewing an empty directory would report "clean" for the one
+store nothing else checks. So memory review runs **where the store is**.
+
+Run this locally — as its own scheduled task, or folded into the end-of-sprint pass (`CLAUDE.md`
+already makes "sync memory + its index" a standing step, so the obligation exists; this makes it
+mechanical). The `consolidate-memory` skill covers the heavier merge pass.
+
+```text
+Review the project memory store for this repo. Working dir: the repo root.
+
+STORE: ~/.claude/projects/<project-key>/memory/*.md + its MEMORY.md index, where
+<project-key> is the repo's absolute path with separators replaced (e.g.
+C:\Code\audit-tools -> C--Code-audit-tools). RESOLVE IT AND CONFIRM IT EXISTS
+FIRST. If it is absent or empty, STOP and say so plainly — never report clean.
+
+⚠ THIS STORE HAS NO VERSION CONTROL. A bad doc edit on `main` is one revertible
+commit; a bad memory edit is UNRECOVERABLE. Auto-apply is therefore narrow, and
+deletion/rewrite/merge are ALWAYS proposal-only.
+
+AUTO-APPLY (mechanical, deterministic — verify each yourself before writing):
+- every MEMORY.md line points at a file that EXISTS;
+- every memory file appears in MEMORY.md EXACTLY ONCE (a duplicate index line has
+  been introduced by hand before);
+- frontmatter present and well-formed (name / description / metadata.type);
+- a stale path/symbol/command citation inside an otherwise-correct memory, where
+  the correct replacement is unambiguous from HEAD.
+
+PROPOSE ONLY — never perform:
+- DELETING any memory file. Several carry an explicit "RETIRED — keep this file
+  for the durable lessons" note: their component details are obsolete while their
+  lessons are not, and a tidy-minded deletion destroys the part worth keeping.
+- Rewriting a memory's substance, or merging two memories.
+- MEMORY.md over 140 lines (a 200-line read cap truncates it, silently degrading
+  every future session) -> propose which files to merge; do not merge them.
+
+FLAG (judgment, verify against HEAD before surfacing):
+- a memory citing paths/symbols that no longer exist — a package/layout refactor
+  once left 17 memories with dead paths, worst in the trap files whose procedures
+  were runnable and WRONG;
+- a memory describing a REVERTED or superseded direction as the current goal;
+- an "open item" claim inside a memory: that is a LEAD, not a work order. One
+  listed four opens of which three were long done;
+- an unresolved [[wikilink]] — a lead toward a memory worth writing, never an
+  error and never a reason to delete the link;
+- two memories that now say the same thing.
+
+OFFLOAD: the same lanes apply (codex for the adversarial re-check, NIM for bulk
+classification over a packet you assemble — one NIM call at a time, task-shaped
+schema, strict:false, explicit max_tokens, check finish_reason). Their output is
+ADVISORY: re-verify every code anchor yourself before writing anything.
+
+OUTPUT: apply the mechanical fixes; present everything else as a numbered
+proposal list for approval. Say explicitly "nothing pending" or list each item.
+```
+
+---
+
 ## Part 2 — the guidelines delta this prompt requires
 
 The prompt above defers to `docs/doc-review-guidelines.md`, whose *Scope* section currently
@@ -175,7 +221,7 @@ Add to *Scope — every doc, routed by type*, as a new row:
 
 | Type | Files | Check | Auto-apply? |
 |---|---|---|---|
-| **project memory (external store)** | `~/.claude/projects/C--Code-audit-tools/memory/*.md` + its `MEMORY.md` index | Index integrity (every line resolves to a file; every file listed exactly once; `[[wikilinks]]` resolve; frontmatter well-formed; index under 140 lines). Content: stale path/symbol citations, memories describing a REVERTED direction as current, "open item" claims that are already done, near-duplicate memories. | **Index-integrity + stale citations only.** Deletion, substantive rewrite, and merges are **escalate-only** — the store is NOT version-controlled, so an auto-applied mistake is unrecoverable. |
+| **project memory (external store)** | `~/.claude/projects/<project-key>/memory/*.md` + its `MEMORY.md` index | **Not reviewed by the nightly routine** — the store is workstation-local, has no VCS and no remote, and its project key derives from the repo's absolute path, so a cloud runner cannot reach it. The nightly run does a PRESENCE CHECK only and records an FYI; it must never report memory clean. Reviewed instead by the local companion routine (`docs/doc-review-routine-prompt.md` Part 1b): index integrity, stale citations, reverted-direction and stale-"open item" smells. | **Nightly: none.** Local companion: index-integrity + unambiguous stale citations only; deletion, rewrite and merges are proposal-only, because an auto-applied mistake there is unrecoverable. |
 
 And add to *Hard invariants*:
 
@@ -188,6 +234,11 @@ And add to *Hard invariants*:
 > **No auto-apply rests on an offloaded verdict alone.** Offload lanes (codex, NIM) find
 > candidates; the reviewer re-verifies each code anchor against HEAD before writing. A lane has
 > produced a fluent, confident and wrong mechanism conclusion here before.
+
+> **An unreachable store is never a clean store.** If a review target cannot be read from the
+> current runner, that is reported as unreviewed — never as passing, and never counted toward
+> coverage. This is what stops a cloud routine from "reviewing" a workstation-local memory store
+> by finding an empty directory and reporting success.
 
 The manifest gate (`scripts/check-doc-manifest.mjs`) reconciles `docs/**/*.md` only, so the
 memory row adds no gate obligation — but the row is what puts memory in scope at all.
