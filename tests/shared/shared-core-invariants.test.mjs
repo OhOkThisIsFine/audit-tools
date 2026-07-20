@@ -564,6 +564,14 @@ test("INV-shared-core-14: createFreshSessionProvider emits provider_launch RunLo
       orchestratorName: "test-orch",
       createClaudeCodeProvider: (_config) => ({ name: "claude-code", launch: async () => ({ accepted: false }) }),
       createOpenCodeProvider: (_config) => ({ name: "opencode", launch: async () => ({ accepted: false }) }),
+      // Every auto-resolvable CLI constructor is stubbed, not just the two this
+      // assertion is about: auto-resolution walks the roster against the AMBIENT
+      // PATH, so on a box with `agy` or `codex` installed it reaches a branch whose
+      // stub is missing and dies with `deps.createX is not a function`. That made the
+      // test pass in CI (no CLIs) and fail locally — an ambient-PATH hermeticity leak,
+      // not a product defect.
+      createCodexProvider: (_config) => ({ name: "codex", launch: async () => ({ accepted: false }) }),
+      createAgyProvider: (_config) => ({ name: "agy", launch: async () => ({ accepted: false }) }),
       runLogger,
     };
 
@@ -598,6 +606,14 @@ test("INV-shared-core-14: createFreshSessionProvider does NOT emit RunLogger eve
       orchestratorName: "test-orch",
       createClaudeCodeProvider: (_config) => ({ name: "claude-code", launch: async () => ({ accepted: false }) }),
       createOpenCodeProvider: (_config) => ({ name: "opencode", launch: async () => ({ accepted: false }) }),
+      // Every auto-resolvable CLI constructor is stubbed, not just the two this
+      // assertion is about: auto-resolution walks the roster against the AMBIENT
+      // PATH, so on a box with `agy` or `codex` installed it reaches a branch whose
+      // stub is missing and dies with `deps.createX is not a function`. That made the
+      // test pass in CI (no CLIs) and fail locally — an ambient-PATH hermeticity leak,
+      // not a product defect.
+      createCodexProvider: (_config) => ({ name: "codex", launch: async () => ({ accepted: false }) }),
+      createAgyProvider: (_config) => ({ name: "agy", launch: async () => ({ accepted: false }) }),
       runLogger,
     };
 
