@@ -157,10 +157,15 @@ followed" is otherwise indistinguishable from a bug.
   becomes the quietest possible symptom. Adding a third assert site repeats it.
   The distinction the code cannot currently express is **"the remote is unreachable" versus "the
   producer emitted something structurally invalid."** The first is expected and degrades; the second is
-  a bug and must surface. Introduce a distinct violation error, and have each degrade-catch deliberately
-  re-throw it rather than absorbing everything. Then producer validation can live wherever it is most
-  natural without being silently eaten, including on paths that bypass the probe entirely — which is why
-  "safe by construction at one boundary" was never achievable here.
+  a bug and must surface.
+  **Return the violation IN-BAND as a typed failure result rather than throwing.** A distinct error class
+  that every degrade-catch agrees to re-throw would also work, but it stays vulnerable to the same defect
+  one refactor later — it relies on each catch site continuing to make an exception for it, which is the
+  remember-to-be-careful shape this project rejects. A typed result cannot be swallowed by a catch at all,
+  because it never travels as an exception: a caller must handle the variant to compile, and a scope
+  violation stops being confusable with a network degrade by construction rather than by convention.
+  Producer validation can then live wherever is most natural, including on paths that bypass the probe
+  entirely — which is why "safe by construction at one boundary" was never achievable here.
   **Property to hold:** a structurally invalid producer emission is always loud and never presents as a
   network degrade. ⚠ The persisted read path must still skip-and-warn rather than throw — old artifacts
   predate the field, and refusing to load them would turn a historical gap into an outage.
