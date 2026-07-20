@@ -1,6 +1,6 @@
 {
   "name": "audit-tools",
-  "version": "0.33.12",
+  "version": "0.34.0",
   "private": false,
   "license": "ISC",
   "description": "Portable hybrid code auditing + remediation orchestrators for arbitrary repositories.",
