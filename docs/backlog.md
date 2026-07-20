@@ -38,11 +38,37 @@ a real audit wave (packets validated only to the completion boundary), and quota
 at the proxy — both fold into the re-dogfood step this validation unblocks.
 Original scope follows. Deployment/configuration work, not audit-tools code changes. Stand up a local LiteLLM proxy (`litellm --config config.yaml`, default port 4000, optional master_key for auth). Configure it with an openai-compatible backend (NVIDIA NIM, vLLM, LM Studio, etc.) and model roster. Point the generic `proxy` block in `~/.audit-code/sources-declared.json` at it: `{endpoint, api_key_env, top_k?, cost_per_mtok?}` (env note: `NVIDIA_API_KEY` and `LLM_BACKEND_BASE_URL` are already set on the box). Then run `/audit-code` and validate the full chain end-to-end: (a) `/v1/models` roster is discovered and merged into Gate-0 confirmed pool, (b) `/model/info` enrichment parses cost + context caps when available (graceful degrades when absent), (c) liveness via `/health/liveliness` (fallback `/v1/models` if missing), (d) auth: master_key threaded correctly + loud drop if `api_key_env` names an unset var, (e) workers receive `--model <alias>` verbatim and dispatch honors the order. Deployment guidance → `examples/`, never as code concept. ⬇ Closes the "swap never run against a live proxy" gap.
 
-**Track 2 — Ranker contract (separate project, owner decision on where it lives).**
-This is NOT audit-tools code. Owner decision: model ranking is a distinct project/repo outside audit-tools. Deliverable is the CONTRACT first — what shape the ranker PRODUCES and where audit-tools READS it. Natural home: alongside `~/.audit-code/sources-declared.json`, a machine-level file (JSON recommended for symmetry, path + name open) carrying model ranks keyed by pool identity (`backend_provider[#account]/model`), with fields like `rank: number` and optional `tier: string` per model. audit-tools reads it IFF present; zero audit-tools code changes if the ranker doesn't exist or is swapped. Note what audit-tools already CONSUMES today so the contract joins to it rather than inventing parallel channels: `resolveModelPrice()` in `src/shared/dispatch/costRank.ts` (reads `models.dev` catalog), `capability_rank` on `DispatchableSource`, `capabilityScore` in admission loop, and the existing fail-open floor (a model with no rank must stay dispatchable). **Property to hold: audit-tools stays agnostic — swapping, starting, or removing the ranker changes zero audit-tools source code.**
+**Track 2 — Ranker contract. ⚠ The "design a contract" framing is SUPERSEDED — the contract already
+exists and is in use.** The original deliverable was a new machine-level ranks file for audit-tools to
+read. That is no longer the right shape: the ranker writes capability ranks into the local proxy's
+per-model metadata, and audit-tools already ingests that metadata and rides it to the capability floor.
+So the join is done, it needed **zero audit-tools code change**, and adding a separate ranks artifact now
+would be a second channel carrying the same fact — the parallel-channel mistake the original entry
+explicitly warned against.
+**The property held and still holds:** audit-tools stays agnostic — starting, stopping, or swapping the
+ranker changes zero audit-tools source, because the tool consumes a general metadata field rather than
+anything ranker-specific.
+**What is actually open is smaller: the ranker is a hand-run generation step, not a refreshed pipeline.**
+Ranks are produced once by hand and then age silently — the same staleness shape as the proxy catalog
+cache, and it should be resolved the same way rather than invented separately. Ranking itself remains a
+distinct project outside this repo; only its freshness touches audit-tools, and only through the cache
+whose read path already needs an age rule.
 
 **Track 3 — Gate-0 operator-confirmed priority order fallback (UX enhancement when no ranks exist).**
-Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists to `SharedProviderConfirmation.provider_pool[].cost_order` + host/source pools; dispatch reads it back via `readConfirmedCostPositions()` and applies it as rung-1 of costRank. What's MISSING is prompt clarity + fallback when no external ranks exist. (a) Gate-0 should explicitly surface that `cost_order` is the operator's **DISPATCH PRIORITY ORDER** — distinct from `exclude[]`/`include[]` (binary gating). (b) When no ranker has populated prices, Gate-0 should default-suggest an ordering by tier (`frontier > capable > fast > unknown`). (c) Operator can accept, reorder manually, or exclude pools — all decisions persist to shared confirmation. (d) Dispatch routing must be explicit: operator priority order is rung 1 of costRank, below capability floor ∧ available ∧ quota headroom. Design questions: (i) does the suggested fallback order include *every* pool or only `capable+` tiers? (ii) how does operator-confirmed order compose with λ (cost-speed bias)? Name as owner calls if genuinely open; don't decide unilaterally.
+Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists to `SharedProviderConfirmation.provider_pool[].cost_order` + host/source pools; dispatch reads it back via `readConfirmedCostPositions()` and applies it as rung-1 of costRank. What's MISSING is prompt clarity + fallback when no external ranks exist. (a) Gate-0 should explicitly surface that `cost_order` is the operator's **DISPATCH PRIORITY ORDER** — distinct from `exclude[]`/`include[]` (binary gating). (b) When no ranker has populated prices, Gate-0 should default-suggest an ordering by tier (`frontier > capable > fast > unknown`). (c) Operator can accept, reorder manually, or exclude pools — all decisions persist to shared confirmation. (d) Dispatch routing must be explicit: operator priority order is rung 1 of costRank, below capability floor ∧ available ∧ quota headroom. 
+**Both design questions resolved.**
+**(i) The suggested order lists EVERY pool.** Restricting the suggestion to the stronger tiers would
+reintroduce the exact confusion (a) exists to remove: an order is DISPATCH PRIORITY, not inclusion.
+A pool missing from the suggested ordering reads as excluded, so a suggestion that silently omits the
+weak tiers teaches the operator the wrong model of what the field means. Weak pools belong at the
+bottom of the order, not absent from it — and if the operator wants one gone, exclusion is the separate
+control that says so.
+**(ii) Operator order is authoritative WITHIN the cost axis; λ decides how much the cost axis weighs.**
+These do not conflict and no reconciliation mechanism is owed. The operator's ordering already sits as
+the first rung of cost ranking, and λ trades the cost axis against throughput — so a throughput-biased
+operating point can legitimately outrank the operator's cost preference, exactly as it outranks price.
+What IS owed is that this be stated where the operator sets the order, since "my priority order was not
+followed" is otherwise indistinguishable from a bug.
 
 ---
 
@@ -399,21 +425,29 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 - **Non-hermetic test: `tests/audit/quota-command.test.mjs` "nothing is written to disk" reads the box's real `.audit-tools/audit/session-config.json` (2026-07-18, low).** A leftover gitignored local artifact makes the test fail on a clean checkout of main; it presents as a regression from whatever diff is in flight. Property: the test must resolve repo-root state through the `AUDIT_CODE_STATE_DIR` hermeticity override like its neighbours, never the real repo path. Same box-dependence family as `INV-shared-core-14`.
 - **Pre-existing back-compat fold survives, now against standing policy (2026-07-18, low).** `src/shared/quota/apiPool.ts` (~370-371, ~497-498) and `src/shared/types/sessionConfig.ts` (~700-701) fold in a "legacy `openai_compatible` block ... for back-compat". Deliberately kept OUT of the swap commit to preserve the atomic replace. Property: under the owner's no-legacy rule this fold should be deleted and the block treated as a plain source declaration.
 
-- **A MISFITTING output schema silently degrades an offload to empty placeholders — and reads as model
-  weakness (friction: tool-should-decide, medium).** Asked to enumerate the open defects in a 94-line
-  review record under `strict: true` with a generic `{summary, findings[], open_questions[]}` shape, the
-  free lane returned schema-VALID output whose every finding was the literal string
-  `FAILED_TO_EXTRACT` — and the obvious reading was "this model can't do analytical work." That reading
-  was WRONG. The same model, same document, same lane, given a schema SHAPED TO THE TASK (an array of
-  defects with id / severity / kind / rationale) and `strict` off, produced a correct and well-reasoned
-  classification matching an independent hand analysis. The tell was there in the bad run: the summary
-  was accurate and it correctly named every defect id, so comprehension was never the problem — only the
-  container was. **Two properties to hold:** (a) an offload result that conformed structurally but
-  produced no content must be detectable as failure by its caller — schema conformance is not a success
-  signal, and a placeholder-filled response is a failure wearing a success shape; (b) the output schema
-  is part of the prompt, not packaging — a generic container applied to a specific task is a silent
-  quality cap. ⚠ Do not let this recur as a capability myth: the lane handles judgment work fine, and
-  `strict: true` should be treated as a quality risk to justify rather than a safe default.
+- **"The free model can't handle reasoning work" is a MYTH built from unset request parameters — check
+  `finish_reason` before diagnosing a model (friction: tool-should-decide, medium-high).** Two apparent
+  capability failures in one session, both traced to the caller:
+  (a) asked to enumerate defects in a 94-line review record under `strict: true` with a generic
+  `{summary, findings[], open_questions[]}` shape, the lane returned schema-VALID output whose every
+  finding was the literal string `FAILED_TO_EXTRACT`. Cause: constrained decoding into a container that
+  cannot hold the answer. The same model, same document, given a schema shaped to the task (an array of
+  typed defect records) with `strict` off, produced a correct classification matching an independent hand
+  analysis. The tell was present in the bad run — the summary was accurate and every defect id was named,
+  so comprehension was never in question, only the container;
+  (b) a 12-item batch returned 5 items with the last one degenerating into nonsense tokens, which read as
+  the model falling apart under load. Measured cause: `finish_reason=length`, `completion_tokens=1024` —
+  **no `max_tokens` was ever set**, so a default cap truncated the array mid-flight and the "gibberish"
+  was the model closing valid JSON against the wall.
+  **Properties to hold:** (i) an offload caller sets `max_tokens` deliberately and treats
+  `finish_reason !== "stop"` as a failure, not a result — neither of these misdiagnoses survives one line
+  of response inspection; (ii) the output schema is part of the prompt, not packaging, and `strict: true`
+  is a quality risk to justify rather than a safe default; (iii) a structurally-conformant response with
+  placeholder or missing content is a failure wearing a success shape and must be detectable as such.
+  ⚠ **Re-examine the inherited belief before acting on it.** Earlier records of this lane "timing out past
+  120s" and "not matching its own read schema" came from a retired wrapper with a hardcoded timeout and a
+  single fixed schema — the same two failure classes. The standing assumption that reasoning-heavy work
+  cannot be offloaded here shaped routing decisions and is not currently supported by evidence.
 
 > **Friction-walk entry template:** one line per friction — a bold title + the `[[memory-tag]]` for the
 > durable lesson + only the still-OPEN tool sliver(s). No shipped-work narrative or changelog prose (that
@@ -792,6 +826,19 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
 ## Forward tracks
 
 - **One repo intent, three filenames — the audit/remediate intent split is a `one core, two draws` smell (surfaced by G3 recon 2026-07-16).** Audit's intent is `<root>/.audit-tools/audit/session-config.json` (`src/audit/supervisor/sessionConfig.ts:16` + `auditArtifactsDir`); remediate's is `<root>/.remediation-artifacts/session-config.json ?? <root>/session-config.json` (`src/remediate/steps/sessionConfigLoad.ts:63-67`, called from `nextStep.ts:1779-1783`); a stale guard-message in `claudeCodeProvider.ts:15`/`agyProvider.ts:9` still points operators at a third path, `.audit-tools/remediation/session-config.json`, that nothing reads — the wrapper itself no longer seeds it (`wrapper/remediate-code-wrapper-install-hosts.mjs:665-667` deliberately creates the config empty on demand). They are DISJOINT — audit never writes a file remediate reads as intent — which is precisely why the root-scoped `provider-confirmation.json` exists as the only cross-tool decision channel (`sharedProviderConfirmation.ts:4-9`). Two draws of one concept with three homes and no shared store. Unifying the path is a prerequisite for ever collapsing the Gate-0 artifact into the intent (a G3 draft proposed exactly that and was refuted on this). Too large to ride G3.
+  **SPEC — one canonical intent path for both draws, and make the migration LOUD rather than silent.**
+  The intent is one concept and belongs in one place; two draws reading different files is the fork this
+  project's "one core, two draws" rule exists to prevent, and the third path is already dead — nothing
+  reads it, so it is deleted outright along with the guard messages still advertising it.
+  **The reason this was never done is the real constraint, and it is about MIGRATION, not design:**
+  silently changing which file a run reads would change behavior for any existing checkout without
+  telling anyone, and a run that quietly picks up a different config is far worse than one that stops.
+  So the unification refuses to guess. Both draws read the canonical path; if a legacy path still holds
+  a config, the tool fails loudly and names the file to move rather than falling back to it or merging
+  the two. A one-time explicit operator action is the correct cost, and it is bounded — nobody has more
+  than a handful of checkouts.
+  **Property to hold:** one concept, one path, both draws; and no code path ever silently resolves an
+  intent from a location the operator was not told about.
 - **Generate the executor↔artifact mapping from the registries (anti-drift).** `executor-catalog.md` +
   `dependency-map.md` both render the executor→artifact relation, hand-maintained over `EXECUTOR_REGISTRY`
   (`src/audit/orchestrator/executors.ts`) + `ARTIFACT_DEFINITIONS` (`src/audit/io/artifacts.ts`) — it drifted
@@ -820,8 +867,21 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
   token-security surface (multi-account refresh tokens; encrypted/never-logged/atomic — recall the Antigravity
   leak). **Phase 0 first slice (recommended, ~zero ban/security risk):** `opencode-free` (`Bearer public`) +
   `vertex-trial` (operator's own GCP $300 SA) as free source pools reusing `OpenAiCompatibleProvider` → priced
-  ~0 by `deriveCostRank`, routed first, spill already handled. Then Phase 1 multi-account OAuth store
-  (Claude/Codex/Copilot). Design of record + full phased plan in memory [[arbitrage-dispatch-tier-design]];
+  ~0 by `deriveCostRank`, routed first, spill already handled.
+  **SPEC — Phase 0 is the whole track. Phase 1 is RULED OUT, not deferred.** The multi-account
+  subscription-OAuth store is dropped on terms-of-service grounds: it works by impersonating official
+  CLIs, which is the same reasoning that already ruled out driving a Codex subscription off its CLI, and
+  that ruling is standing. Carrying it as "later, opt-in, never default-on" keeps a design alive that
+  will not be built and invites a future lap to re-litigate it — so it is closed, and the multi-account
+  credential store it needs is not built either, which also retires the token-security surface (multiple
+  refresh tokens at rest) that was the track's other named risk.
+  **What remains is genuinely valuable and carries no ban or security risk:** registering every
+  genuinely-free backend as its own source pool. That needs no new engine — pool identity, cost-first
+  admission with spill, and per-key backoff already do the rotation — so this is configuration and
+  validation, not a build.
+  **Property to hold:** free capacity is saturated before any metered pool, and no dispatch path ever
+  authenticates as a client it is not. Design of record + phased plan in memory
+  [[arbitrage-dispatch-tier-design]] (⚠ its Phase 1 is superseded by this ruling);
   a coverage diff (2026-07-07) confirmed 9router's price table adds nothing over models.dev, so skip it.
   Relates [[quota-dispatch-vision]] / [[dispatch-admission-control-design]] / [[cross-provider-quota-matrix]] /
   [[openai-compatible-provider]] / [[model-provider-ide-agnostic]].
@@ -833,11 +893,19 @@ Gate-0 ALREADY has the full machinery: operator-submitted `cost_order` persists 
     **vertex-trial → deferred** (needs operator's GCP $300-trial SA JSON). **Remaining = live validation only**
     (no more code): a real opencode-free run confirming declared-free routing + a live lapsed-free demotion +
     the `declared_cost_drift` friction event end-to-end.
-- **Should QUALITY become tradeable against cost — a true 2D dial? (owner call.)** Today the dispatch
-  dial is 1D: λ ∈ [0,1] trades cost against throughput, with capability a hard FLOOR rather than a
-  tradeable axis. Making quality tradeable would require a per-task "what is better output worth here"
-  weighting, which does not exist and is not obviously derivable. **Default recorded = keep 1D
-  cost↔speed with a capability floor.** Design of record
+- **RESOLVED — quality stays a FLOOR, not a tradeable axis. Keep the 1D dial.** The dispatch dial trades
+  cost against throughput; capability gates eligibility. Making quality a second tradeable axis was
+  considered and is declined, on the shape of the quantity rather than on effort: **capability does not
+  degrade smoothly.** A model above the floor produces usable output; one below it does not produce
+  cheaper, slightly-worse output — it produces output that fails review and costs a full retry plus the
+  wasted first attempt. A tradeable axis presumes a continuum that buys you something at the low end, and
+  here the low end has negative value. That is exactly what a floor encodes, so the floor is not a
+  simplification of a 2D model, it is the correct shape.
+  It would also require a per-task "what is better output worth here" weighting that does not exist, is
+  not derivable from anything currently measured, and would land as an operator knob — which the project
+  treats as a bug signal.
+  **Property to hold:** capability gates eligibility and is never traded away for price or speed.
+  Design of record
   [`spec/dispatch-cost-speed-dial.md`](../spec/dispatch-cost-speed-dial.md); extends
   [[cost-first-routing-design]].
 
