@@ -7,7 +7,7 @@ against HEAD (`e9be0ba0`) rather than against the memory's own prose.
 **Backup before mutation:** `…/scratchpad/memory-backup-e9be0ba0/` (150 files). The memory dir is not
 a git repo — deletions there are otherwise irreversible.
 
-**Result:** 149 → 135 files. 14 deleted, 21 corrected or compressed, index rebuilt to zero dangling
+**Result:** 149 → 136 files. 14 deleted, 1 added, 28 corrected or compressed, index rebuilt to zero dangling
 entries and zero unindexed files.
 
 ## The headline finding: a structural refactor silently invalidated 17 memories
@@ -89,21 +89,38 @@ CLAUDE.md's *Own-vs-acquire analyzer engine* says every acquired-tool spawn "rou
 Verification found `defaultRun` **bypasses** the token requirement — only non-default tools require it
 (`src/audit/extractors/analyzers/acquisitionEngine.ts:216-224`). Logged to backlog; not fixed here.
 
-## Compression pass (13 files)
+## Compression pass — 29 drafted, 20 applied, 7 rejected as lossy
 
 The dominant defect across surviving memories was a durable kernel buried in dated shipment narrative
 ("SHIPPED v0.32.x", commit hashes, "Phase A/B/C DONE") — the changelog creep
-`docs/documentation-philosophy.md` forbids. 13 files were compressed on the offload lane to 72–104% of
-original, keeping decisions/invariants/traps/refuted premises and dropping shipment stamps.
+`docs/documentation-philosophy.md` forbids. The offload lane drafted 29 compressions keeping
+decisions/invariants/traps/refuted premises and dropping shipment stamps.
 
 Two files grew slightly; both were quality improvements rather than padding — e.g.
 `artifact-token-ordering-derivation` had an `UPDATE` section contradicting its own opening premise, and
 the rewrite marks the superseded premise inline instead.
 
+### Aggressive compression is lossy — gate it mechanically, not by eye
+
+The most aggressive draft (`meta-audit-friction-must-be-tool-enforced`, 46% of original) silently
+dropped **7 symbol names and a wikilink** — `captureFrictionEvent`, `buildFrictionTriageBlock`,
+`free_form_notes`, `validate-artifact`, `[[concurrent-nextstep-staleness-cascade-wipe]]` — despite the
+prompt explicitly instructing that symbol names and file paths be kept. Compression ratio turned out to
+be a good proxy for content loss, but eyeballing 29 diffs is exactly the host-discretion check that
+`enforce-robustness-in-tooling-not-host-discretion` says to replace with a mechanism.
+
+**The gate used:** diff the set of backticked symbol tokens (excluding commit hashes) and the set of
+`[[wikilinks]]` between original and draft; reject any draft that drops a member of either set. That
+split 29 drafts cleanly into 20 lossless (applied) and 7 lossy (rejected, originals kept uncompressed).
+Verbosity is a cosmetic problem; a missing symbol pointer is a broken memory — so the gate fails toward
+keeping the original.
+
+Reusable for any future memory/doc compression pass.
+
 **Caveat carried forward:** compression preserves the *content* faithfully, including its staleness.
 The `conversation-first-subagent-dispatch-first-class` open-items list was faithfully preserved and was
-stale. Other compressed files may carry similar stale "open" claims not covered by the 33 verified
-claims. Treat any "open item" in a memory as a lead requiring a HEAD check
+stale (3 of 4 items long done). Other compressed files may carry similar stale "open" claims not covered
+by the 33 verified claims. Treat any "open item" in a memory as a lead requiring a HEAD check
 (`backlog-prose-decays-verify-against-head` applies to memory too).
 
 ## Verdicts rejected
