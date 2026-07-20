@@ -16,9 +16,16 @@
 - **Local env:** npm 12 blocks dependency install scripts by default and can emit object-shaped
   `npm pack --json`. Smokes are fixed, but read `docs/backlog.md` → *Durable traps* before any manual
   `npm install -g` / packaged-install work.
-- **Offload lane changed:** `llm-worker-tools` (`llm read`/`llm write`) is RETIRED. Bulk recon goes
-  direct to the local LiteLLM proxy — see `~/.claude/CLAUDE.md` → *Offload lane*. The proxy must be
-  running; there is no standalone fallback.
+- **Offload lane changed:** `llm-worker-tools` (`llm read`/`llm write`) is RETIRED. Bulk work goes direct
+  to the local LiteLLM proxy — see `~/.claude/CLAUDE.md` → *Offload lane*. The proxy must be running;
+  there is no standalone fallback. ⚠ **The lane handles judgment work, not just recon.** The standing
+  belief that it could not was traced to unset request parameters (no `max_tokens`; a misfitting schema
+  under strict decoding) — properly configured it produced review-grade analysis. Check `finish_reason`
+  before concluding anything about a model ([[offload-lane-failures-are-usually-the-caller]]).
+- **The backlog was fully classified and disambiguated 2026-07-19.** Every open item was verified against
+  code rather than its own prose; ~21% were closable and several load-bearing claims were false. Items
+  now carry an explicit **SPEC** paragraph stating the agreed mechanism. Treat an entry without one as
+  still raw ([[backlog-prose-decays-verify-against-head]]).
 
 ## Cadence & standing rules (don't re-derive)
 
@@ -49,6 +56,13 @@
 ---
 
 ## ▶ IMMEDIATE NEXT
+
+**0. Pick any specced backlog item and build it.** The disambiguation pass left every open item with an
+agreed mechanism, so the next lap is implementation rather than design. The highest-value clusters, by
+blast radius: the **Gate-0 backend-identity single-sourcing** (a confirmed gate BYPASS — confirming one
+provider's model can mark a different provider's identically-named model as approved), and the
+**capability-evidence branch**, which is one defect class (hand-maintained enumerations drifted from
+their source) rather than the six-item punch list four review rounds treated it as.
 
 **1. Account metering — the COOLDOWN axis was never migrated.** The budget axis is closed and verified
 by execution; the cooldown fold still uses the older per-source derivation, so budget and cooldown now
