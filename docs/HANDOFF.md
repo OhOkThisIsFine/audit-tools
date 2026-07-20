@@ -10,6 +10,12 @@
 - **Current version = `package.json`** (authoritative).
 - **Tree is green and published.** The dispatch/quota fix cluster, unified-routing collapse, the
   proxy-contract swap, and the Gate-0 backend-identity fix all shipped.
+- **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
+  transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
+  Both now key on ONE service-scoped `CapacityPool.accountKey`; `deriveLocalAccountId` is deleted.
+  ⚠ The move that unified cooldown without the proxy over-merge was to service-scope
+  `deriveAccountKey`'s CREDENTIAL-DERIVED branch too (not just explicit-account) — proxied lanes share
+  one proxy credential and must stay split by service. [[account-metering-closed-producer-decides-partition]].
 - **⚠ Changing an identity means auditing every FILTER that feeds it, not just every consumer.**
   v0.33.11 service-qualified the Gate-0 key and was verified against its consumers — but the source
   fold UPSTREAM still deduped on the bare model id, so a source colliding with a host tier on another
@@ -130,14 +136,7 @@ repo: two adjacent tests in `gate0-proxy-fold.test.mjs` asserted opposite verdic
 mechanism, and `apiPool` already keyed the quota ledger the right way
 ([[backlog-prose-decays-verify-against-head]]).
 
-**1. Account metering — the COOLDOWN axis was never migrated.** The budget axis is closed and verified
-by execution; the cooldown fold still uses the older per-source derivation, so budget and cooldown now
-answer "which account is this?" two different ways. A 429 on one model still fails to throttle its
-siblings for the motivating cases (inline-credential sources, proxy-fronted sources). Detail +
-the two traps that make the obvious fix wrong: `docs/backlog.md` → *Open bugs*, and
-[[account-metering-closed-producer-decides-partition]]. **Do not reopen the budget half.**
-
-**2. `wip/capability-evidence` — decide its fate.** Review-blocked across four rounds, pushed, NOT on
+**1. `wip/capability-evidence` — decide its fate.** Review-blocked across four rounds, pushed, NOT on
 main, and now the source of stale-looking backlog entries because every symbol it introduces is absent
 from HEAD. Green was never the blocker. Six properties must hold before it lands (backlog entry has
 them). Read the review before touching it, and do not re-implement from the plan:
@@ -147,11 +146,12 @@ the host pool is not a special case; headless unrankable models go to an LLM ran
 fail-open), with LLM provenance kept out of the operator's raw capability order; an active cooldown
 grants one.
 
-**3. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the two above plus
+**2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the above plus
 the proxy track's leftovers (dispatch under a real wave, quota behavior at the proxy). Launch recipe
-below.
+below. This now ALSO exercises the just-closed account metering under a real wave — a proxy-fronted
+429 should throttle its same-service siblings but not a different service behind the same proxy.
 
-**4. Gate-0 priority-order UX** (Track 3) — two named owner calls, see backlog.
+**3. Gate-0 priority-order UX** (Track 3) — two named owner calls, see backlog.
 
 ---
 
