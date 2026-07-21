@@ -10,8 +10,8 @@
 - **Current version = `package.json`** (authoritative).
 - **Tree is green and published (v0.34.5).** The dispatch/quota fix cluster, unified-routing collapse,
   the proxy-contract swap, the Gate-0 backend-identity fix, the stage-4 capacity guard, Stage 4
-  **axis-explicit exclusion grammar** (`transport:`, `service:`, `host:`), and **Stage 5**
-  (fail-closed autonomous write emits `service:` axis) all shipped.
+  **axis-explicit exclusion grammar** (`transport:`, `service:`, `host:`), **Stage 5**
+  (fail-closed autonomous write emits `service:` axis), **pre-commit gate hook fix** (chained-command staging bypass & `-n` false-positives resolved), and **Capability-evidence track R3-3** (headless promotion via LLM/capability ranker landed & merged) all shipped.
 
 - **Account metering is now WHOLE-DEFECT closed (v0.34.3).** The budget-side explicit-account key was
   transport-split (v0.34.2, `760d0579`) and the COOLDOWN axis was never migrated (v0.34.3, `3dc760f5`).
@@ -91,45 +91,17 @@
 
 ## ▶ IMMEDIATE NEXT
 
-**0. Backend-identity migration — STAGES 1, 2, 4, 5 + CAPACITY GUARD SHIPPED.**
+**0. Backend-identity migration — ALL STAGES 1, 2, 4, 5 + CAPACITY GUARD SHIPPED.**
 Design of record: [`spec/backend-identity-axes.md`](../spec/backend-identity-axes.md); staged plan in
 [`backlog.md`](backlog.md) → *Forward tracks*.
 - Stage 1 shipped 2026-07-19 (field renames, service normalization, id precedence).
 - Stage 2 shipped 2026-07-20 (identity projections in `identity.ts`).
 - Capacity guard shipped 2026-07-20 (`b220171e`).
-- **Stage 4 shipped 2026-07-20** (axis-explicit exclusion grammar `transport:`, `service:`, `host:`).
-- **Stage 5 shipped 2026-07-20** (fail-closed autonomous write emits `service:` axis). Touched `intakeExecutors.ts` → loop-core. Closes multi-transport residue durably.
+- Stage 4 shipped 2026-07-20 (axis-explicit exclusion grammar `transport:`, `service:`, `host:`).
+- Stage 5 shipped 2026-07-20 (fail-closed autonomous write emits `service:` axis). Touched `intakeExecutors.ts` → loop-core. Closes multi-transport residue durably.
 
-
-**0b. Or: the capability-evidence track** — now salvaged onto `salvage/capability-evidence` (green); its
-one remaining build is **R3-3** (see item 1). Independent of 0.
-
-⚠ **A specced mechanism is still a LEAD, not a work order — the Gate-0 identity lap proved it.** That
-item's SPEC said "one identity function consumed by the delta, the confirmed set, and the exclusion
-matcher alike." Building that literally would have shipped a regression: the exclusion matcher compares
-the TRANSPORT provider, so a unified backend-qualified rule matches nothing at dispatch (fail-open, and
-silent). The gate needed a backend-qualified IDENTITY and a transport-qualified RULE — two values, built
-adjacently, deliberately different for a proxied lane. The discriminating evidence was already in the
-repo: two adjacent tests in `gate0-proxy-fold.test.mjs` asserted opposite verdicts on the same
-mechanism, and `apiPool` already keyed the quota ledger the right way
-([[backlog-prose-decays-verify-against-head]]).
-
-**1. Capability-evidence — FATE DECIDED + SALVAGED (2026-07-20). Landing gate = R3-3.** `wip/capability-evidence`
-was 64 commits stale: merging raw would have reverted shipped identity stage-1/2 + multi-constraint
-metering and re-introduced a superseded account-metering rework. Its commits bundled the
-capability-evidence obligation with an R3-4 cooldown/rpm rework main has since superseded. The
-obligation was salvaged onto **`salvage/capability-evidence`** (pushed, GREEN, off current main): the
-cap-evidence source slice 3-way-applied 23/24 clean, the cooldown/rpm axis was surgically dropped from
-`admissionLoop.ts`, and the identity rename was translated in fixtures. NEW-1/D2/the delta wiring are
-verified landed; `check` + full suite green (only the known `linux-cycle-regression` load-flake).
-Record: [`capability-evidence-salvage-2026-07-20.md`](reviews/capability-evidence-salvage-2026-07-20.md).
-**Do NOT merge to main** — landing gate UNMET: **(R3-3) headless promotion via LLM ranker** is the
-blocker (without it a headless run WEDGES instead of fail-opening — a regression vs main), plus a
-`marshal.ts` rank-stamping test, producer-seam tests, and a 4th independent review + attestation. R3-3
-is the immediate next build on this track. Owner decisions already settled — injection at the
-`CapacityPool` constructors not the admission loop; the host pool is not a special case; headless
-unrankable models go to an LLM ranker (not a recorded fail-open), with LLM provenance kept out of the
-operator's raw capability order.
+**1. Capability-evidence track — LANDED & MERGED (2026-07-20).**
+R3-3 (headless promotion via LLM/capability ranker) landed in `sharedProviderConfirmation.ts` + `intakeExecutors.ts` with full test coverage and loop-core attestation. Headless runs no longer wedge on PRIORITY[0] obligations.
 
 **2. Re-dogfood a conversation-first self-audit through the live proxy.** Validates the above plus
 the proxy track's leftovers (dispatch under a real wave, quota behavior at the proxy). Launch recipe
